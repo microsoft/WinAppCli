@@ -866,14 +866,14 @@ supported via the CLI with Ctrl+C or piped stdin. The npm wrapper has no mechani
 an unbounded spawn, so passing durationSec == 0 or omitting it will throw a clear error.
 
 ```typescript
-function uiRecord(options?: UiRecordOptions): Promise<WinappResult>
+function uiRecord(options: UiRecordOptions): Promise<WinappResult>
 ```
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `options` | `UiRecordOptions` | No |  |
+| `options` | `UiRecordOptions` | Yes |  |
 
 ---
 
@@ -1154,6 +1154,16 @@ Re-exported from Node.js for convenience. See [Node.js docs](https://nodejs.org/
 | `addonPath` | `string` | Yes |  |
 | `needsTerminalRestart` | `boolean` | Yes |  |
 | `files` | `string[]` | Yes |  |
+
+### `UiRecordOptions`
+
+Stricter version of `UiRecordOptions` where `durationSec` is **required** (not optional).
+This type is the public surface of `uiRecord`; the generated type has it optional.
+Survives regeneration because it is defined here in the hand-written guard module.
+
+```typescript
+type UiRecordOptions = Omit<GeneratedUiRecordOptions, "durationSec"> & { durationSec: number; }
+```
 
 ### `IfExists`
 
@@ -1516,23 +1526,6 @@ type ManifestTemplates = "packaged" | "sparse"
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `showHidden` | `boolean \| undefined` | No | Include untitled zero-size windows that are hidden by default |
-| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
-| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
-| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-
-### `UiRecordOptions`
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
-| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
-| `captureScreen` | `boolean \| undefined` | No | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). |
-| `durationSec` | `number \| undefined` | No | Recording duration in seconds. Default 0 records until stopped — Ctrl+C, or (for programmatic callers) a newline or EOF on stdin. A valid MP4 is always finalized on graceful stop. |
-| `fps` | `number \| undefined` | No | Frames per second to capture |
-| `json` | `boolean \| undefined` | No | Format output as JSON |
-| `maxEdge` | `number \| undefined` | No | Downscale so the longest edge is at most this many pixels (0 = no downscale) |
-| `output` | `string \| undefined` | No | Save output to this file path. |
-| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

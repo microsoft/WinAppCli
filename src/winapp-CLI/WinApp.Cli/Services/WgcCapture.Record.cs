@@ -76,6 +76,10 @@ internal static partial class WgcCapture
         private int _latestWidth;
         private int _latestHeight;
         private bool _disposed;
+        // Track the pool's current creation size so we can detect window resizes.
+        private Windows.Graphics.SizeInt32 _poolSize;
+        // Set to true when the captured item closes mid-recording.
+        private volatile bool _isClosed;
 
         // Throttle: track when we last did the expensive GPU→CPU copy so arrivals faster than
         // the target FPS are discarded without copying. A residual TOCTOU race means at most
@@ -100,12 +104,31 @@ internal static partial class WgcCapture
             _session = session;
             _item = item;
             _logger = logger;
+            _poolSize = item.Size;
             // fps == 0 disables throttling (used when fps is unknown or caller handles timing).
             _minIntervalMs = fps > 0 ? 1000 / fps : 0;
             _lastSampleMs = 0; // treat as "very old" so the first frame is always captured
             _pool.FrameArrived += OnFrameArrived;
+            _item.Closed += OnItemClosed;
             _session.StartCapture();
         }
+
+        /// <summary>
+        /// Fires when the captured window or item is closed/destroyed mid-recording.
+        /// Sets <see cref="IsClosed"/> so the recording loop can stop gracefully.
+        /// </summary>
+        private void OnItemClosed(GraphicsCaptureItem sender, object args)
+        {
+            _isClosed = true;
+            _logger.LogDebug("WGC capture item closed mid-recording.");
+        }
+
+        /// <summary>
+        /// Returns <see langword="true"/> when the captured window/item has been closed.
+        /// The recording loop should stop and finalize any frames already captured
+        /// rather than padding with stale data to the duration deadline.
+        /// </summary>
+        public bool IsClosed => _isClosed;
 
         private void OnFrameArrived(Direct3D11CaptureFramePool sender, object args)
         {
@@ -116,6 +139,28 @@ internal static partial class WgcCapture
                 if (frame is null)
                 {
                     return;
+                }
+
+                // Detect window resize: if the frame's reported content size differs from the
+                // pool's creation size, recreate the pool at the new size so subsequent frames
+                // match. The ENCODER output dimensions remain fixed; ProcessFrame letterboxes/scales.
+                var contentSize = frame.ContentSize;
+                if (contentSize.Width > 0 && contentSize.Height > 0
+                    && (contentSize.Width != _poolSize.Width || contentSize.Height != _poolSize.Height))
+                {
+                    _logger.LogDebug("WGC: window resized {Old}→{New}; recreating frame pool",
+                        $"{_poolSize.Width}x{_poolSize.Height}", $"{contentSize.Width}x{contentSize.Height}");
+                    try
+                    {
+                        var winrtDevice = CreateDirect3DDevice(_device);
+                        _pool.Recreate(winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, numberOfBuffers: 2, contentSize);
+                        _poolSize = contentSize;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "WGC frame pool Recreate failed; continuing with old size");
+                    }
+                    return; // Skip copying the first frame at the new size — wait for next arrival
                 }
 
                 // Throttle BEFORE the expensive GPU→CPU readback: skip arrivals that are faster
@@ -186,6 +231,7 @@ internal static partial class WgcCapture
             _disposed = true;
 
             _pool.FrameArrived -= OnFrameArrived;
+            _item.Closed -= OnItemClosed;
             _session.Dispose();
             _pool.Dispose();
             (_context as IDisposable)?.Dispose();

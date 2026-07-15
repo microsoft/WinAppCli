@@ -39,6 +39,10 @@ internal class UiRecordCommand : Command, IShortDescription
         IAnsiConsole ansiConsole,
         ILogger<UiRecordCommand> logger) : AsynchronousCommandLineAction
     {
+        // Test seams: override Console.IsInputRedirected and Console.In without process-level side effects.
+        internal static Func<bool>? s_isInputRedirectedOverride;
+        internal static TextReader? s_stdinOverride;
+
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
@@ -124,9 +128,11 @@ internal class UiRecordCommand : Command, IShortDescription
                 // Start the stdin monitor BEFORE recording so a pre-buffered stop signal (e.g. an
                 // empty pipe that immediately delivers EOF) is caught immediately and then latched
                 // until the encoder is ready. Do NOT start for interactive consoles — humans use Ctrl+C.
-                if (durationSec == 0 && Console.IsInputRedirected)
+                var isStdinRedirected = s_isInputRedirectedOverride?.Invoke() ?? Console.IsInputRedirected;
+                if (isStdinRedirected)
                 {
-                    StdinStopMonitor.Start(Console.In, readyTcs.Task, () => linkedCts.Cancel());
+                    var stdinReader = s_stdinOverride ?? Console.In;
+                    StdinStopMonitor.Start(stdinReader, readyTcs.Task, () => linkedCts.Cancel());
                 }
 
                 // Readiness callback: invoked by RecordAsync after the encoder is initialized and the
@@ -187,6 +193,11 @@ internal class UiRecordCommand : Command, IShortDescription
                     "Recorded {Frames} frames ({Width}x{Height}, h264) to {Path} ({Size}KB)",
                     result.Frames, result.Width, result.Height, filePath, result.FileSize / 1024);
                 return 0;
+            }
+            catch (UiAmbiguousSelectorException ambiguousEx)
+            {
+                UiErrors.AmbiguousSelector(logger, ambiguousEx.Message, json);
+                return 1;
             }
             catch (UiElementNotFoundException notFoundEx)
             {

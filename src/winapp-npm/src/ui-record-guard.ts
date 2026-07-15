@@ -17,10 +17,45 @@
  */
 
 import { callWinappCliCapture } from './winapp-cli-utils';
-import type { CallWinappCliCaptureOptions } from './winapp-cli-utils';
-import type { UiRecordOptions, WinappResult } from './winapp-commands';
+import type { CallWinappCliCaptureOptions, CallWinappCliCaptureResult } from './winapp-cli-utils';
+import type { UiRecordOptions as GeneratedUiRecordOptions, WinappResult } from './winapp-commands';
 
-export type { UiRecordOptions };
+/**
+ * Stricter version of `UiRecordOptions` where `durationSec` is **required** (not optional).
+ * This type is the public surface of `uiRecord`; the generated type has it optional.
+ * Survives regeneration because it is defined here in the hand-written guard module.
+ */
+export type UiRecordOptions = Omit<GeneratedUiRecordOptions, 'durationSec'> & { durationSec: number };
+
+/**
+ * Builds the CLI argument list for `ui record` from a validated options object.
+ * Named options are placed before the positional selector, and the selector is
+ * placed after a `--` terminator so option-shaped selectors (e.g. `--capture-screen`)
+ * are never misinterpreted as CLI flags.
+ *
+ * Exported for unit testing — do not use externally.
+ * @internal
+ */
+export function buildUiRecordArgs(options: UiRecordOptions): string[] {
+  const args: string[] = ['ui', 'record'];
+  if (options.app) args.push('--app', options.app);
+  if (options.captureScreen) args.push('--capture-screen');
+  // durationSec is always set and > 0 (guarded by callers)
+  args.push('--duration-sec', options.durationSec.toString());
+  if (options.fps !== undefined) args.push('--fps', options.fps.toString());
+  if (options.json) args.push('--json');
+  if (options.maxEdge !== undefined) args.push('--max-edge', options.maxEdge.toString());
+  if (options.output) args.push('--output', options.output);
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  if (options.quiet) args.push('--quiet');
+  if (options.verbose) args.push('--verbose');
+  // Place the positional selector AFTER '--' so a selector like '--capture-screen' is
+  // not misinterpreted as a CLI flag.
+  if (options.selector) {
+    args.push('--', options.selector);
+  }
+  return args;
+}
 
 /**
  * Record a window or element region to an H.264 MP4.
@@ -31,8 +66,9 @@ export type { UiRecordOptions };
  *
  * @throws {Error} if `options.durationSec` is not provided or is ≤ 0.
  */
-export async function uiRecord(options: UiRecordOptions = {}): Promise<WinappResult> {
-  if (!options.durationSec || options.durationSec <= 0) {
+export async function uiRecord(options: UiRecordOptions): Promise<WinappResult> {
+  // Runtime guard for JS callers who may pass undefined despite the TypeScript type.
+  if (typeof options.durationSec !== 'number' || options.durationSec <= 0) {
     throw new Error(
       'uiRecord requires a positive durationSec ' +
         '(unbounded recording is only supported via the CLI with Ctrl+C or piped stdin). ' +
@@ -40,22 +76,30 @@ export async function uiRecord(options: UiRecordOptions = {}): Promise<WinappRes
     );
   }
 
-  // Build args mirroring the generated _uiRecordGenerated (kept in sync with the CLI schema).
-  const args: string[] = ['ui', 'record'];
-  if (options.selector) args.push(options.selector);
-  if (options.app) args.push('--app', options.app);
-  if (options.captureScreen) args.push('--capture-screen');
-  // durationSec is always set and > 0 (guarded above)
-  args.push('--duration-sec', options.durationSec.toString());
-  if (options.fps !== undefined) args.push('--fps', options.fps.toString());
-  if (options.json) args.push('--json');
-  if (options.maxEdge !== undefined) args.push('--max-edge', options.maxEdge.toString());
-  if (options.output) args.push('--output', options.output);
-  if (options.window !== undefined) args.push('--window', options.window.toString());
-  if (options.quiet) args.push('--quiet');
-  if (options.verbose) args.push('--verbose');
-
+  const args = buildUiRecordArgs(options);
   const captureOpts: CallWinappCliCaptureOptions = options.cwd ? { cwd: options.cwd } : {};
   const result = await callWinappCliCapture(args, captureOpts);
+  return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+}
+
+/**
+ * Internal implementation that accepts an injectable capture function — used by tests
+ * to verify the full success path without spawning a real process.
+ * @internal
+ */
+export async function _uiRecordWithCapture(
+  options: UiRecordOptions,
+  capture: (args: string[], opts: CallWinappCliCaptureOptions) => Promise<CallWinappCliCaptureResult>
+): Promise<WinappResult> {
+  if (typeof options.durationSec !== 'number' || options.durationSec <= 0) {
+    throw new Error(
+      'uiRecord requires a positive durationSec ' +
+        '(unbounded recording is only supported via the CLI with Ctrl+C or piped stdin). ' +
+        'Pass options.durationSec > 0.'
+    );
+  }
+  const args = buildUiRecordArgs(options);
+  const captureOpts: CallWinappCliCaptureOptions = options.cwd ? { cwd: options.cwd } : {};
+  const result = await capture(args, captureOpts);
   return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
 }

@@ -166,6 +166,14 @@ internal sealed partial class UiAutomationService
                     break;
                 }
 
+                // Stop immediately if the captured window closed mid-recording rather than
+                // re-encoding stale frames. Finalize whatever was captured so far.
+                if (useWgc && grabber!.IsClosed)
+                {
+                    _logger.LogDebug("WGC capture item closed mid-recording; finalizing {Frames} frames captured so far", frameIndex);
+                    break;
+                }
+
                 byte[]? source;
                 int sw, sh;
                 if (useWgc)
@@ -261,14 +269,36 @@ internal sealed partial class UiAutomationService
         var longest = Math.Max(width, height);
         if (maxEdge > 0 && longest > maxEdge)
         {
+            // Scale so the longest DISPLAY edge does not EXCEED maxEdge.
+            // EvenRound (nearest-even) can round up past the limit, so we compute the exact
+            // ratio here and clamp the scaled long edge to the greatest even number ≤ maxEdge.
             scale = (double)maxEdge / longest;
         }
 
-        // Round to the NEAREST even integer (not floor) to minimise aspect-ratio distortion.
-        // Flooring odd-scaled dimensions (e.g. 300×10 → 100×2) can introduce large aspect-ratio
-        // error; rounding to nearest-even keeps the error ≤ one half-pixel per side.
-        var displayW = EvenRound(width * scale);
-        var displayH = EvenRound(height * scale);
+        // Round the short edge to nearest-even to minimise aspect-ratio distortion.
+        // Round the long edge DOWN to the greatest even number ≤ maxEdge (when capped) so
+        // "at most N pixels" is honoured — nearest-even could round UP past the cap.
+        int displayW, displayH;
+        if (maxEdge > 0 && longest > maxEdge)
+        {
+            if (width >= height)
+            {
+                // width is the long edge — clamp it down to even ≤ maxEdge
+                displayW = EvenFloor(maxEdge);
+                displayH = EvenRound(height * scale);
+            }
+            else
+            {
+                // height is the long edge — clamp it down to even ≤ maxEdge
+                displayH = EvenFloor(maxEdge);
+                displayW = EvenRound(width * scale);
+            }
+        }
+        else
+        {
+            displayW = EvenRound(width * scale);
+            displayH = EvenRound(height * scale);
+        }
 
         // Pad up to the encoder minimum while preserving even dimensions.
         var encoderW = Math.Max(displayW, MfH264MinWidth);
@@ -279,6 +309,10 @@ internal sealed partial class UiAutomationService
         // Round a scaled double to the nearest even integer ≥ 2.
         static int EvenRound(double v)
             => Math.Max(2, (int)(Math.Round(v / 2.0, MidpointRounding.AwayFromZero) * 2));
+
+        // Floor to the greatest even integer ≤ v (and ≥ 2).
+        static int EvenFloor(int v)
+            => Math.Max(2, v % 2 == 0 ? v : v - 1);
     }
 
     /// <summary>

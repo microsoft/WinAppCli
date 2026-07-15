@@ -31,7 +31,9 @@ export * from './winapp-commands';
 
 // Export the public, guarded uiRecord wrapper (overrides the internal _uiRecordGenerated).
 // Importing from this module gives the safe version that enforces durationSec > 0.
-export { uiRecord } from './ui-record-guard';
+// Also re-export the stricter UiRecordOptions type (durationSec: number, required),
+// which shadows the generated optional durationSec version from winapp-commands.
+export { uiRecord, type UiRecordOptions } from './ui-record-guard';
 
 // Re-export functions
 export {

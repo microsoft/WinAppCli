@@ -271,7 +271,7 @@ winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups
 
 **Stop mechanisms:**
 - Interactive: **Ctrl+C** (any platform).
-- Programmatic / agent: write a **newline** (`""`) or close stdin (EOF). A grace window ignores an instant EOF that arrives because no stdin pipe is attached — the recording continues. EOF after the grace window always stops.
+- Programmatic / agent: write a **newline** (`""`) or close stdin (EOF). The stop is applied as soon as the encoder is ready (first frame captured); any stop signal that arrives before the first frame is latched and applied immediately at readiness — there is no grace window and no wall-clock delay.
 
 **Capture modes** (reported in the JSON `mode` field):
 - `wgc` — Windows Graphics Capture (default; works while the window is occluded).

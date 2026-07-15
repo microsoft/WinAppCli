@@ -13,3 +13,13 @@ internal sealed class UiElementNotFoundException(string selector)
 {
     public string Selector { get; } = selector;
 }
+
+/// <summary>
+/// Thrown when a plain-text selector matches multiple elements in the UIA tree.
+/// Distinct from <see cref="UiElementNotFoundException"/> (zero matches).
+/// Carries the human-readable listing of matching elements with slug suggestions.
+/// </summary>
+internal sealed class UiAmbiguousSelectorException(string message)
+    : Exception(message)
+{
+}
