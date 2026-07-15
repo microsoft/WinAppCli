@@ -291,4 +291,32 @@ public partial class UiCommandTests
         Assert.AreEqual(0, _fakeForeground.Calls.Count, "post-message does not consult the foreground guard");
     }
 
+    [TestMethod]
+    public async Task SendKeys_ComException_ReturnsStaleErrorWithoutSending()
+    {
+        // A COMException surfacing from session/element resolution is a stale-element signal: the command
+        // maps it to the stale error envelope and never reaches the keyboard transport.
+        _fakeSession.ResolveThrow = FakeComException;
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["enter", "-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task SendKeys_GenericException_ReturnsErrorWithoutSending()
+    {
+        // Any non-COM failure inside the send pipeline is reported via the generic error envelope and
+        // aborts before injecting keys.
+        _fakeSession.ResolveThrow = FakeGenericException;
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["enter", "-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count);
+    }
+
 }

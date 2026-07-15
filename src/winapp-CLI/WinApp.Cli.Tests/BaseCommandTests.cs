@@ -97,6 +97,18 @@ public abstract class BaseCommandTests(bool configPaths = true, LogLevel logLeve
         return await parseResult.InvokeAsync(parseResult.InvocationConfiguration, cancellationToken: TestContext.CancellationToken);
     }
 
+    /// <summary>
+    /// Overload that invokes with a caller-supplied cancellation token (e.g. a pre-cancelled one) so
+    /// tests can exercise a command's <see cref="OperationCanceledException"/> handling deterministically.
+    /// </summary>
+    protected async Task<int> ParseAndInvokeWithCaptureAsync(Command command, string[] manifestArgs, CancellationToken cancellationToken)
+    {
+        var parseResult = command.Parse(manifestArgs);
+        parseResult.InvocationConfiguration.Output = TestAnsiConsole.Profile.Out.Writer;
+        parseResult.InvocationConfiguration.Error = ConsoleStdErr;
+        return await parseResult.InvokeAsync(parseResult.InvocationConfiguration, cancellationToken: cancellationToken);
+    }
+
     protected virtual IServiceCollection ConfigureServices(IServiceCollection services)
     {
         return services;

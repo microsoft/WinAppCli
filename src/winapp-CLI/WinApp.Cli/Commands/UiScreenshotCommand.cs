@@ -36,6 +36,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
     public class Handler(
         IUiSessionService sessionService,
         IUiAutomationService uiAutomation,
+        IOwnedWindowFinder ownedWindowFinder,
         IAnsiConsole ansiConsole,
         ILogger<UiScreenshotCommand> logger) : AsynchronousCommandLineAction
     {
@@ -81,7 +82,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
                 if (selector is null)
                 {
                     var sessionHwnd = (nint)singleSession.WindowHandle;
-                    var ownedWindows = FindOwnedWindows([(sessionHwnd, singleSession.ProcessId, singleSession.WindowTitle ?? "")]);
+                    var ownedWindows = ownedWindowFinder.FindOwnedWindows([(sessionHwnd, singleSession.ProcessId, singleSession.WindowTitle ?? "")]);
                     if (ownedWindows.Count > 0)
                     {
                         var allWindows = new List<(nint Hwnd, int Pid, string Title)>
@@ -330,6 +331,10 @@ internal class UiScreenshotCommand : Command, IShortDescription
                 }
                 if (pid == 0) { return null; }
 
+                // Native ceiling: the following GetWindowText read only runs for a *valid* live HWND
+                // (GetWindowThreadProcessId returned a non-zero PID). Tests can only supply invalid
+                // handles (which return pid==0 above and bail), so these lines are intentionally left
+                // uncovered rather than excluded — exercising them requires a real on-screen window.
                 // Get title for this window
                 var titleChars = new char[512];
                 string title;
@@ -375,50 +380,10 @@ internal class UiScreenshotCommand : Command, IShortDescription
             }
 
             // Also find cross-process owned windows
-            var ownedWindows = FindOwnedWindows(appWindows);
+            var ownedWindows = ownedWindowFinder.FindOwnedWindows(appWindows);
             appWindows.AddRange(ownedWindows);
 
             return appWindows.Count > 1 ? appWindows : null;
-        }
-
-        private static List<(nint Hwnd, int Pid, string Title)> FindOwnedWindows(List<(nint Hwnd, int Pid, string Title)> appWindows)
-        {
-            var appHwnds = new HashSet<nint>(appWindows.Select(w => w.Hwnd));
-            var owned = new List<(nint Hwnd, int Pid, string Title)>();
-
-            // Enumerate all visible windows and check ownership
-            var hwnd = Windows.Win32.Foundation.HWND.Null;
-            while (true)
-            {
-                hwnd = Windows.Win32.PInvoke.FindWindowEx(
-                    Windows.Win32.Foundation.HWND.Null, hwnd, null, (string?)null);
-                if (hwnd.IsNull) { break; }
-                if (!Windows.Win32.PInvoke.IsWindowVisible(hwnd)) { continue; }
-
-                // Skip windows already in the list
-                if (appHwnds.Contains((nint)hwnd)) { continue; }
-
-                // Check if this window is owned by one of our app windows
-                var owner = Windows.Win32.PInvoke.GetWindow(hwnd,
-                    Windows.Win32.UI.WindowsAndMessaging.GET_WINDOW_CMD.GW_OWNER);
-                if (!owner.IsNull && appHwnds.Contains((nint)owner))
-                {
-                    unsafe
-                    {
-                        uint pid = 0;
-                        Windows.Win32.PInvoke.GetWindowThreadProcessId(hwnd, &pid);
-                        var titleChars = new char[512];
-                        fixed (char* buffer = titleChars)
-                        {
-                            var len = Windows.Win32.PInvoke.GetWindowText(hwnd, buffer, 512);
-                            var title = len > 0 ? new string(buffer, 0, len) : "";
-                            owned.Add(((nint)hwnd, (int)pid, title));
-                        }
-                    }
-                }
-            }
-
-            return owned;
         }
 
         private static byte[] EncodePng(byte[] bgraPixels, int width, int height)

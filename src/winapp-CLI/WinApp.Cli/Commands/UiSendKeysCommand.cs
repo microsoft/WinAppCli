@@ -185,6 +185,9 @@ internal class UiSendKeysCommand : Command, IShortDescription
                 // pipeline, so typed literal text silently no-ops there. Warn — but only when the target
                 // actually looks like a XAML window — rather than false-alarming on Win32/WPF/Electron
                 // apps that do consume WM_CHAR. (Named keys/combos still post KeyDown regardless.)
+                // Honest ceiling: firing this warning requires FrameworkHint.IsLikelyXaml to read a real
+                // XAML window's class name off a live HWND, which only happens against an on-screen XAML
+                // app (covered by the real-UIA suite); the fakes-only path here always reports non-XAML.
                 if (ShouldWarnPostMessageTextDropped(
                         transport == KeyTransport.PostMessage,
                         actions.Any(a => a is TextInput),

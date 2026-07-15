@@ -55,7 +55,9 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IMouseInput, RealMouseInput>()
             .AddSingleton<IKeyboardInput, RealKeyboardInput>()
             .AddSingleton<IForegroundGuard, RealForegroundGuard>()
+            .AddSingleton<IOwnedWindowFinder, RealOwnedWindowFinder>()
             .AddSingleton<ISelectorService, SelectorService>()
+            .AddSingleton<ISystemUiQuery, SystemUiQuery>()
             .AddSingleton<IUiSessionService, UiSessionService>()
             .AddSingleton<IUiAutomationService, UiAutomationService>();
     }
