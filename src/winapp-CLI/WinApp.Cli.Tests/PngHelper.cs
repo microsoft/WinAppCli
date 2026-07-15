@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Drawing;
+using System.Drawing.Imaging;
 
 namespace WinApp.Cli.Tests;
 
@@ -33,6 +34,23 @@ internal static class PngHelper
             </svg>
             """;
         File.WriteAllText(path, svgContent);
+    }
+
+    /// <summary>
+    /// Renders a real raster PNG of the given dimensions and fill color via GDI+.
+    /// Unlike <see cref="CreateTestImage"/> (fixed 1x1 bytes), this produces an arbitrarily
+    /// sized, non-square image so aspect-ratio / scaling branches can be exercised.
+    /// GDI+ encoder lookup is not thread-safe, so callers must be serialized (see [DoNotParallelize]).
+    /// </summary>
+    internal static string CreateRasterPng(string path, int width, int height, Color? fill = null)
+    {
+        using var bmp = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.Clear(fill ?? Color.CornflowerBlue);
+        }
+        bmp.Save(path, ImageFormat.Png);
+        return path;
     }
 
     /// <summary>
