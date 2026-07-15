@@ -257,6 +257,69 @@ public class ProgramJsonBridgeTests : BaseCommandTests
     }
 
     // -------------------------------------------------------------------------
+    // M1 (round 12) — reject a non-boolean '='-attached value on a global bool flag
+    // (e.g. --json=bogus) with a single clean error instead of emitting both the
+    // human ❌ log line and the machine-readable JSON envelope.
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task JsonBridge_JsonEqualsBogus_MissingApp_EmitsInvalidArguments_NotMissingApp()
+    {
+        // System.CommandLine coerces --json=bogus to true (no parse error) while the value-aware
+        // pre-scan reads it as false. Previously that mismatch printed BOTH the human ❌ logger line
+        // and the missing_app JSON envelope on stderr, corrupting --json output. The invalid attached
+        // value must now be rejected up front, so the command never runs and neither the ❌ line nor
+        // a missing_app envelope is produced — only a single invalid_arguments error.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--at", "100,100", "--app", "__no_such_app__", "--json=bogus"]);
+
+        Assert.AreEqual(1, exitCode, "Invalid --json value must exit 1");
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"Expected a JSON error envelope; got stderr: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            $"--json=bogus must be rejected as invalid_arguments; got stderr: {stderr}");
+        Assert.IsFalse(stderr.Contains(UiJsonError.CodeMissingApp),
+            $"Command must not run, so no missing_app envelope should appear; got stderr: {stderr}");
+        Assert.IsFalse(stderr.Contains("No running app found"),
+            $"The human ❌ logger line must not leak alongside the JSON error; got stderr: {stderr}");
+    }
+
+    [TestMethod]
+    public async Task JsonBridge_VerboseEqualsBogus_RejectedAsInvalidArguments_PlainText()
+    {
+        // The same invalid-attached-boolean guard applies to the other global bool flags. With no
+        // --json in play, --verbose=bogus must be rejected with a plain-text invalid-argument message
+        // rather than silently ignoring the bad value and running the command.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--at", "100,100", "--app", "__no_such_app__", "--verbose=bogus"]);
+
+        Assert.AreEqual(1, exitCode, "Invalid --verbose value must exit 1");
+        Assert.IsTrue(stderr.Contains("for option '--verbose'"),
+            $"Expected a plain-text invalid-argument message for --verbose; got stderr: {stderr}");
+        Assert.IsFalse(stderr.Contains("\"error\":"),
+            $"A non-json flag must not emit a JSON envelope; got stderr: {stderr}");
+        Assert.IsFalse(stderr.Contains("No running app found"),
+            $"Command must not run; got stderr: {stderr}");
+    }
+
+    [TestMethod]
+    public async Task JsonBridge_JsonEqualsFalse_NotRejectedAsInvalid()
+    {
+        // Guard: the invalid-attached-boolean rejection must NOT fire for the valid --json=false
+        // spelling. The command should proceed to its normal missing_app runtime path, not an
+        // invalid_arguments error.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--at", "100,100", "--app", "__no_such_app__", "--json=false"]);
+
+        Assert.AreEqual(1, exitCode, "Missing app must exit 1");
+        Assert.IsFalse(stderr.Contains(UiJsonError.CodeInvalidArguments),
+            $"--json=false is valid and must not be rejected as invalid_arguments; got stderr: {stderr}");
+    }
+
+    // -------------------------------------------------------------------------
     // M3 — bridge is scoped to ui descendants only
     // -------------------------------------------------------------------------
 

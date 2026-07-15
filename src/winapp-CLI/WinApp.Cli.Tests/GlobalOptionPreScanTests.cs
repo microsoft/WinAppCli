@@ -145,4 +145,78 @@ public class GlobalOptionPreScanTests
         Assert.IsFalse(GlobalOptionPreScan.GetBooleanFlagValue(
             ["run", ".", "--", "--json"], "--json", []));
     }
+
+    // -------------------------------------------------------------------------
+    // TryFindInvalidBooleanValue — detect a non-boolean '='-attached value
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public void TryFindInvalidBooleanValue_EqualsBogus_ReturnsTrueWithValue()
+    {
+        Assert.IsTrue(GlobalOptionPreScan.TryFindInvalidBooleanValue(
+            ["ui", "pen", "--json=bogus"], "--json", [], out var bad));
+        Assert.AreEqual("bogus", bad);
+    }
+
+    [TestMethod]
+    public void TryFindInvalidBooleanValue_EqualsTrue_ReturnsFalse()
+    {
+        Assert.IsFalse(GlobalOptionPreScan.TryFindInvalidBooleanValue(
+            ["ui", "pen", "--json=true"], "--json", [], out _));
+    }
+
+    [TestMethod]
+    public void TryFindInvalidBooleanValue_EqualsFalseMixedCase_ReturnsFalse()
+    {
+        Assert.IsFalse(GlobalOptionPreScan.TryFindInvalidBooleanValue(
+            ["ui", "pen", "--json=False"], "--json", [], out _));
+    }
+
+    [TestMethod]
+    public void TryFindInvalidBooleanValue_BareFlag_ReturnsFalse()
+    {
+        // The bare flag has no attached value, so it is not an invalid value.
+        Assert.IsFalse(GlobalOptionPreScan.TryFindInvalidBooleanValue(
+            ["ui", "pen", "--json"], "--json", [], out _));
+    }
+
+    [TestMethod]
+    public void TryFindInvalidBooleanValue_SpaceSeparated_ReturnsFalse()
+    {
+        // Space-separated forms are handled by the parser / GetBooleanFlagValue, not here.
+        Assert.IsFalse(GlobalOptionPreScan.TryFindInvalidBooleanValue(
+            ["ui", "pen", "--json", "bogus"], "--json", [], out _));
+    }
+
+    [TestMethod]
+    public void TryFindInvalidBooleanValue_EmptyValue_ReturnsTrue()
+    {
+        // "--json=" has an attached value that is not a valid boolean.
+        Assert.IsTrue(GlobalOptionPreScan.TryFindInvalidBooleanValue(
+            ["ui", "pen", "--json="], "--json", [], out var bad));
+        Assert.AreEqual(string.Empty, bad);
+    }
+
+    [TestMethod]
+    public void TryFindInvalidBooleanValue_Alias_ReturnsTrue()
+    {
+        Assert.IsTrue(GlobalOptionPreScan.TryFindInvalidBooleanValue(
+            ["ui", "pen", "-v=bogus"], "--verbose", ["-v"], out var bad));
+        Assert.AreEqual("bogus", bad);
+    }
+
+    [TestMethod]
+    public void TryFindInvalidBooleanValue_AfterDoubleDash_ReturnsFalse()
+    {
+        // A '--json=bogus' passthrough after '--' must be ignored, not rejected.
+        Assert.IsFalse(GlobalOptionPreScan.TryFindInvalidBooleanValue(
+            ["run", ".", "--", "--json=bogus"], "--json", [], out _));
+    }
+
+    [TestMethod]
+    public void TryFindInvalidBooleanValue_Absent_ReturnsFalse()
+    {
+        Assert.IsFalse(GlobalOptionPreScan.TryFindInvalidBooleanValue(
+            ["ui", "pen"], "--json", [], out _));
+    }
 }

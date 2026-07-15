@@ -149,6 +149,37 @@ internal static class Program
         // Reading the parsed bool works even when a different option (e.g. --pressure) failed parse.
         bool effectiveJson = ResolveEffectiveJson(parsedArgs);
 
+        // Reject a global boolean flag given a non-boolean '='-attached value (e.g. --json=bogus).
+        // System.CommandLine silently coerces such a value to true (no parse error) while the value-
+        // aware pre-scan reads it as false. That disagreement means the human ❌ log line (emitted
+        // because the pre-scan left logging un-suppressed) and the machine-readable JSON envelope
+        // (emitted because the parsed --json is true) would BOTH reach stderr, corrupting --json
+        // output. Fail fast with a single clean invalid_arguments error before the command runs,
+        // mirroring how the parser already rejects other malformed option values (e.g. --pressure
+        // nope). The command never executes, so no logger line can leak alongside the error. (M1)
+        foreach (var boolOption in new[]
+                 {
+                     WinAppRootCommand.JsonOption,
+                     WinAppRootCommand.VerboseOption,
+                     WinAppRootCommand.QuietOption,
+                 })
+        {
+            if (GlobalOptionPreScan.TryFindInvalidBooleanValue(args, boolOption.Name, boolOption.Aliases, out var badValue))
+            {
+                var message =
+                    $"Cannot parse argument '{badValue}' for option '{boolOption.Name}' as expected type 'System.Boolean'.";
+                if (effectiveJson && IsUiDescendant(parsedArgs))
+                {
+                    UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments, message);
+                }
+                else
+                {
+                    Console.Error.WriteLine(message);
+                }
+                return 1;
+            }
+        }
+
         // Catch single-dash typos like "-app" before invocation so the user gets a clear
         // "Did you mean --app?" message instead of System.CommandLine's confusing
         // "Unrecognized command or argument" pointing at the wrong token (issue #467).

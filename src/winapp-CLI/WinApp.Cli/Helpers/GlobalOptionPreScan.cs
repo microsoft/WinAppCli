@@ -113,4 +113,54 @@ internal static class GlobalOptionPreScan
 
         return false; // absent = false
     }
+
+    /// <summary>
+    /// Detects a boolean option supplied with an <c>=</c>-attached value that is not a valid
+    /// boolean (e.g. <c>--json=bogus</c>) before the first standalone <c>--</c> separator.
+    /// </summary>
+    /// <remarks>
+    /// System.CommandLine silently coerces such an attached value to <see langword="true"/>
+    /// (no parse error), while <see cref="GetBooleanFlagValue"/> reads it as <see langword="false"/>.
+    /// That disagreement means the human-readable log line (emitted because the pre-scan left
+    /// logging un-suppressed) and the machine-readable JSON envelope (emitted because the parsed
+    /// option is <see langword="true"/>) would both reach stderr, corrupting <c>--json</c> output.
+    /// Callers use this to fail fast with a single clean <c>invalid_arguments</c> error instead,
+    /// mirroring how the parser rejects other malformed option values (e.g. <c>--pressure nope</c>).
+    /// The bare form, valid <c>--json=true</c>/<c>--json=false</c> spellings, and space-separated
+    /// values are not considered invalid here.
+    /// </remarks>
+    /// <returns>
+    /// <see langword="true"/> and sets <paramref name="invalidValue"/> when an invalid attached
+    /// value is found; otherwise <see langword="false"/>.
+    /// </returns>
+    public static bool TryFindInvalidBooleanValue(string[] args, string name, IEnumerable<string> aliases, out string invalidValue)
+    {
+        invalidValue = string.Empty;
+        var aliasSet = aliases as ICollection<string> ?? aliases.ToList();
+
+        foreach (var token in args)
+        {
+            if (token == "--")
+            {
+                return false;
+            }
+
+            foreach (var n in new[] { name }.Concat(aliasSet))
+            {
+                var prefix = n + "=";
+                if (token.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    var val = token[prefix.Length..];
+                    if (!bool.TryParse(val, out _))
+                    {
+                        invalidValue = val;
+                        return true;
+                    }
+                    return false; // valid boolean attached value
+                }
+            }
+        }
+
+        return false;
+    }
 }
