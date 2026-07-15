@@ -25,6 +25,22 @@ internal sealed class FakePackageInstallationService : IPackageInstallationServi
     /// <summary>Result returned by <see cref="EnsurePackageAsync"/>.</summary>
     public bool EnsurePackageResult { get; set; } = true;
 
+    /// <summary>
+    /// When true, <see cref="InstallPackagesAsync"/> returns <c>null</c> to exercise the
+    /// "package install failed" error branch in <see cref="WorkspaceSetupService"/>.
+    /// </summary>
+    public bool ReturnNull { get; set; }
+
+    /// <summary>
+    /// Explicit version map returned from <see cref="InstallPackagesAsync"/> when non-empty
+    /// (and <see cref="InstalledVersions"/> is unset). Lets the native-path setup tests seed the
+    /// exact SDK/runtime versions that the rest of the workspace-setup flow then consumes.
+    /// </summary>
+    public Dictionary<string, string> InstallResult { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Package names passed to the most recent <see cref="InstallPackagesAsync"/> call.</summary>
+    public string[] LastRequestedPackages { get; private set; } = [];
+
     public void InitializeWorkspace(DirectoryInfo rootDirectory)
     {
         InitializeWorkspaceCalls.Add(rootDirectory);
@@ -39,8 +55,15 @@ internal sealed class FakePackageInstallationService : IPackageInstallationServi
         CancellationToken cancellationToken = default)
     {
         var packageArray = packages.ToArray();
+        LastRequestedPackages = packageArray;
         InstallPackagesCalls.Add((rootDirectory, packageArray, ignoreConfig));
-        var result = InstalledVersions ?? packageArray.ToDictionary(p => p, _ => "1.0.0");
+        if (ReturnNull)
+        {
+            return Task.FromResult<Dictionary<string, string>>(null!);
+        }
+
+        var result = InstalledVersions
+            ?? (InstallResult.Count > 0 ? InstallResult : packageArray.ToDictionary(p => p, _ => "1.0.0"));
         return Task.FromResult(result);
     }
 

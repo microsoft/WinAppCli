@@ -50,6 +50,21 @@ public class WinmdServiceTests : BaseCommandTests
     /// </summary>
     private static void CreateTestWinmd(string path, string[] activatableClassNames, string[] nonActivatableClassNames)
     {
+        CreateTestWinmd(path, activatableClassNames, nonActivatableClassNames, nonPublicActivatableClassNames: []);
+    }
+
+    /// <summary>
+    /// Creates a minimal valid .winmd. In addition to public activatable and plain
+    /// non-activatable classes, <paramref name="nonPublicActivatableClassNames"/> get the
+    /// [ActivatableAttribute] but are emitted with non-public visibility, so
+    /// GetActivatableClasses should filter them out.
+    /// </summary>
+    private static void CreateTestWinmd(
+        string path,
+        string[] activatableClassNames,
+        string[] nonActivatableClassNames,
+        string[] nonPublicActivatableClassNames)
+    {
         var metadata = new MetadataBuilder();
 
         // Module and assembly boilerplate
@@ -143,7 +158,24 @@ public class WinmdServiceTests : BaseCommandTests
                 MetadataTokens.MethodDefinitionHandle(1));
         }
 
-        // Build PE
+        // Add non-public activatable classes: they carry [ActivatableAttribute] but are
+        // NOT public, so GetActivatableClasses must skip them (visibility filter).
+        foreach (var fullName in nonPublicActivatableClassNames)
+        {
+            var lastDot = fullName.LastIndexOf('.');
+            var ns = lastDot > 0 ? fullName[..lastDot] : "";
+            var name = lastDot > 0 ? fullName[(lastDot + 1)..] : fullName;
+
+            var typeDefHandle = metadata.AddTypeDefinition(
+                TypeAttributes.Class, // no Public bit => NotPublic
+                metadata.GetOrAddString(ns),
+                metadata.GetOrAddString(name),
+                objectTypeRef,
+                MetadataTokens.FieldDefinitionHandle(1),
+                MetadataTokens.MethodDefinitionHandle(1));
+
+            metadata.AddCustomAttribute(typeDefHandle, activatableAttrCtor, metadata.GetOrAddBlob(attrValueBlob));
+        }
         var peHeaderBuilder = new PEHeaderBuilder(imageCharacteristics: Characteristics.Dll);
         var peBuilder = new ManagedPEBuilder(peHeaderBuilder, new MetadataRootBuilder(metadata), ilStream: new BlobBuilder());
         var blobBuilder = new BlobBuilder();
@@ -269,6 +301,40 @@ public class WinmdServiceTests : BaseCommandTests
         {
             Assert.IsFalse(classes.Contains(excluded), $"Should NOT contain non-activatable class {excluded}");
         }
+    }
+
+    [TestMethod]
+    public void GetActivatableClasses_ActivatableClassWithEmptyNamespace_IsSkipped()
+    {
+        // Arrange: an activatable class with no namespace (name has no dot => empty namespace)
+        var winmdPath = Path.Combine(_tempDir.FullName, "EmptyNs.winmd");
+        CreateTestWinmd(winmdPath, "NoNamespaceClass");
+
+        // Act
+        var classes = _winmdService.GetActivatableClasses(new FileInfo(winmdPath));
+
+        // Assert: classes with an empty namespace are filtered out
+        Assert.IsNotNull(classes);
+        Assert.IsEmpty(classes);
+    }
+
+    [TestMethod]
+    public void GetActivatableClasses_NonPublicActivatableClass_IsSkipped()
+    {
+        // Arrange: an activatable class that is not public should be excluded
+        var winmdPath = Path.Combine(_tempDir.FullName, "NonPublic.winmd");
+        CreateTestWinmd(
+            winmdPath,
+            activatableClassNames: [],
+            nonActivatableClassNames: [],
+            nonPublicActivatableClassNames: ["MyNamespace.InternalOnly"]);
+
+        // Act
+        var classes = _winmdService.GetActivatableClasses(new FileInfo(winmdPath));
+
+        // Assert: the non-public activatable class must not be reported
+        Assert.IsNotNull(classes);
+        Assert.IsEmpty(classes);
     }
 
     #endregion
@@ -424,6 +490,79 @@ public class WinmdServiceTests : BaseCommandTests
         // Assert
         Assert.IsNotNull(components);
         Assert.IsEmpty(components, "Should not discover component when no matching DLL exists");
+    }
+
+    [TestMethod]
+    public void DiscoverWinRTComponents_MetadataAndReferencesLayouts_FindWinmds()
+    {
+        // Beyond lib/, FindWinmdsInPackage also probes metadata/, metadata/10.0.18362.0/,
+        // and References/. Place a winmd in each with a matching native DLL so every
+        // discovery branch is exercised and each winmd surfaces as a component.
+        var packageName = "Fake.Layout.Component";
+        var version = "1.0.0";
+        var pkgRoot = Path.Combine(_tempDir.FullName, packageName.ToLowerInvariant(), version);
+
+        CreateTestWinmd(Path.Combine(pkgRoot, "metadata", "Fake.Meta.winmd"), "Fake.Meta.Thing");
+        CreateTestWinmd(Path.Combine(pkgRoot, "metadata", "10.0.18362.0", "Fake.Versioned.winmd"), "Fake.Versioned.Thing");
+        CreateTestWinmd(Path.Combine(pkgRoot, "References", "Fake.Ref.winmd"), "Fake.Ref.Thing");
+
+        // A native DLL matching each winmd stem so they are all treated as components.
+        var nativeDir = Path.Combine(pkgRoot, "runtimes", "win-x64", "native");
+        Directory.CreateDirectory(nativeDir);
+        foreach (var stem in new[] { "Fake.Meta", "Fake.Versioned", "Fake.Ref" })
+        {
+            File.WriteAllBytes(Path.Combine(nativeDir, $"{stem}.dll"), [0]);
+        }
+
+        var packages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { packageName, version }
+        };
+
+        var components = _winmdService.DiscoverWinRTComponents(_tempDir, packages, "x64");
+
+        var dlls = components.Select(c => c.ImplementationDll).ToList();
+        CollectionAssert.Contains(dlls, "Fake.Meta.dll", "Winmd under metadata/ should be discovered.");
+        CollectionAssert.Contains(dlls, "Fake.Versioned.dll", "Winmd under metadata/10.0.18362.0/ should be discovered.");
+        CollectionAssert.Contains(dlls, "Fake.Ref.dll", "Winmd under References/ should be discovered.");
+    }
+
+    [TestMethod]
+    public void DiscoverWinRTComponents_PackageDirMissing_SkipsPackage()
+    {
+        // A package listed in used-versions but absent from the cache is silently skipped.
+        var packages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "Not.Restored.Package", "9.9.9" }
+        };
+
+        var components = _winmdService.DiscoverWinRTComponents(_tempDir, packages, "x64");
+
+        Assert.IsEmpty(components, "A package with no directory on disk must be skipped.");
+    }
+
+    [TestMethod]
+    public void DiscoverWinRTComponents_AppxFragmentPackage_IsSkipped()
+    {
+        // Packages carrying runtimes-framework/package.appxfragment are handled by the
+        // existing WinApp SDK fragment path and must be skipped here.
+        var packageName = "Fake.Framework.Package";
+        var version = "1.0.0";
+        var pkgRoot = Path.Combine(_tempDir.FullName, packageName.ToLowerInvariant(), version);
+
+        CreateTestWinmd(Path.Combine(pkgRoot, "lib", $"{packageName}.winmd"), "Fake.Framework.Thing");
+        var fragmentDir = Path.Combine(pkgRoot, "runtimes-framework");
+        Directory.CreateDirectory(fragmentDir);
+        File.WriteAllText(Path.Combine(fragmentDir, "package.appxfragment"), "<fragment/>");
+
+        var packages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { packageName, version }
+        };
+
+        var components = _winmdService.DiscoverWinRTComponents(_tempDir, packages, "x64");
+
+        Assert.IsEmpty(components, "Packages with an appxfragment must be skipped.");
     }
 
     #endregion
