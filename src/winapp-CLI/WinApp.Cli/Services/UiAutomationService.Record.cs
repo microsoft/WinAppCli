@@ -153,25 +153,26 @@ internal sealed partial class UiAutomationService
                     ref captureOriginLeft, ref captureOriginTop,
                     ref srcWidth, ref srcHeight);
 
-                // H1 geometry-derived retarget: the UIA main-tree path stamps WindowHandle =
-                // session.WindowHandle on every resolved element, so windowed popups reachable
-                // via the main tree bypass the stamped-handle path above.  Derive the true
-                // top-level window from the element's on-screen center and retarget when the
-                // derived window belongs to the same process and is not the session window.
+                // H2 fix (r12): the UIA main-tree resolution path stamps WindowHandle =
+                // session.WindowHandle on every resolved element, so a windowed popup/dialog
+                // reachable via the main tree has WindowHandle == sessionHwnd and bypasses the
+                // stamped-handle retarget above. Derive the element's TRUE top-level window from
+                // its UIA native-window ancestor (authoritative — it follows the real UIA parent
+                // chain, unlike z-order hit testing which can pick an unrelated same-process
+                // window that merely overlaps the element's center) and retarget to it.
                 if (captureTargetHwnd == (nint)hwnd)
                 {
-                    var cx = (int)(selectorElement.X + selectorElement.Width / 2.0);
-                    var cy = (int)(selectorElement.Y + selectorElement.Height / 2.0);
-                    var geometryHwnd = DeriveGeometryCaptureHwnd(
-                        cx, cy, (nint)hwnd, session.ProcessId,
+                    var derivedHwnd = DeriveElementCaptureHwnd(
+                        (nint)hwnd,
                         ref captureOriginLeft, ref captureOriginTop,
-                        ref srcWidth, ref srcHeight);
-                    if (geometryHwnd != (nint)hwnd)
+                        ref srcWidth, ref srcHeight,
+                        getElementTopLevelHwnd: () => ResolveElementTopLevelHwnd(session, selectorElement));
+                    if (derivedHwnd != (nint)hwnd)
                     {
-                        captureTargetHwnd = geometryHwnd;
+                        captureTargetHwnd = derivedHwnd;
                         _logger.LogDebug(
-                            "Selector '{Sel}' main-tree element center ({Cx},{Cy}) resolved to popup window HWND 0x{Hwnd:X}; retargeting capture",
-                            elementId, cx, cy, captureTargetHwnd);
+                            "Selector '{Sel}' element resolved to top-level window HWND 0x{Hwnd:X} via UIA ancestor walk; retargeting capture",
+                            elementId, captureTargetHwnd);
                     }
                 }
 
@@ -635,116 +636,93 @@ internal sealed partial class UiAutomationService
     }
 
     /// <summary>
-    /// Derives the authoritative capture window from the element's on-screen geometry rather
-    /// than the (possibly wrong) stamped <c>WindowHandle</c>.  The UIA main-tree path stamps
-    /// every resolved element with the session HWND, so a windowed popup reachable via the
-    /// main tree has <c>WindowHandle == sessionHwnd</c> and would otherwise bypass retarget.
-    /// This helper derives the true top-level window from <c>WindowFromPoint(center)</c> and
-    /// retargets when the derived window is in the same process and is not the session window.
+    /// Resolves the element's TRUE top-level native window by re-resolving the live UIA element
+    /// (<see cref="ResolveComElement"/>) and walking up the control view to the nearest ancestor
+    /// that owns a native window handle, then to that handle's <c>GA_ROOT</c> top-level window.
+    ///
+    /// This is authoritative because it follows the actual UIA parent chain, so it is immune to
+    /// the z-order pitfall of hit testing (<c>WindowFromPoint</c>), which can return an unrelated
+    /// window that merely overlaps the element's on-screen center — even one in the same process.
+    /// Returns 0 when the element cannot be re-resolved or has no native-window ancestor, in which
+    /// case the caller leaves capture on the session window (no retarget).
     /// </summary>
-    /// <param name="cx">Screen x-coordinate of the element's center.</param>
-    /// <param name="cy">Screen y-coordinate of the element's center.</param>
+    private nint ResolveElementTopLevelHwnd(UiSessionInfo session, UiElement selectorElement)
+    {
+        try
+        {
+            var comElement = ResolveComElement(session, selectorElement);
+            if (comElement is null)
+            {
+                return 0;
+            }
+
+            // Walk up the control view to the nearest element that owns a native HWND, then
+            // resolve that handle's top-level (GA_ROOT) window. Bounded to avoid pathological loops.
+            var walker = _automation.get_ControlViewWalker();
+            var current = comElement;
+            var maxWalk = 40;
+            while (current is not null && maxWalk-- > 0)
+            {
+                var native = current.get_CurrentNativeWindowHandle();
+                if (!native.IsNull)
+                {
+                    var root = Windows.Win32.PInvoke.GetAncestor(
+                        native, Windows.Win32.UI.WindowsAndMessaging.GET_ANCESTOR_FLAGS.GA_ROOT);
+                    return root.IsNull ? (nint)native : (nint)root;
+                }
+                current = walker.GetParentElement(current);
+            }
+
+            return 0;
+        }
+        catch (System.Runtime.InteropServices.COMException ex)
+        {
+            _logger.LogDebug(ex, "Deriving element top-level HWND failed; leaving capture on the session window");
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// Decides whether to retarget the capture surface to the element's derived top-level window
+    /// and, when so, updates the capture origin/size to that window's rect. The authoritative HWND
+    /// is supplied by <paramref name="getElementTopLevelHwnd"/> (production: the UIA native-window
+    /// ancestor of the resolved element via <see cref="ResolveElementTopLevelHwnd"/>; tests: an
+    /// injected value). Retargets only when the derived window is non-zero and differs from the
+    /// session window; otherwise returns <paramref name="sessionHwnd"/> and leaves the rect intact.
+    /// </summary>
     /// <param name="sessionHwnd">The session's main window HWND.</param>
-    /// <param name="sessionProcessId">The session's process ID for the same-process gate.</param>
-    /// <param name="captureOriginLeft">In/out: updated to the popup window's screen-left when retargeting.</param>
-    /// <param name="captureOriginTop">In/out: updated to the popup window's screen-top when retargeting.</param>
-    /// <param name="srcWidth">In/out: updated to the popup window's pixel width when retargeting.</param>
-    /// <param name="srcHeight">In/out: updated to the popup window's pixel height when retargeting.</param>
-    /// <param name="windowFromPoint">
-    /// Optional injectable for <c>WindowFromPoint(cx, cy)</c>.  Returns 0 when no window is found.
-    /// When <see langword="null"/>, the real <c>Windows.Win32.PInvoke.WindowFromPoint</c> is called.
-    /// </param>
-    /// <param name="getAncestorRoot">
-    /// Optional injectable for <c>GetAncestor(hwnd, GA_ROOT)</c>.  Returns 0 when not found.
-    /// When <see langword="null"/>, the real <c>Windows.Win32.PInvoke.GetAncestor</c> is called.
-    /// </param>
-    /// <param name="getWindowProcessId">
-    /// Optional injectable for <c>GetWindowThreadProcessId</c> (process-ID part).
-    /// When <see langword="null"/>, the real <c>Windows.Win32.PInvoke.GetWindowThreadProcessId</c> is called.
+    /// <param name="captureOriginLeft">In/out: updated to the derived window's screen-left when retargeting.</param>
+    /// <param name="captureOriginTop">In/out: updated to the derived window's screen-top when retargeting.</param>
+    /// <param name="srcWidth">In/out: updated to the derived window's pixel width when retargeting.</param>
+    /// <param name="srcHeight">In/out: updated to the derived window's pixel height when retargeting.</param>
+    /// <param name="getElementTopLevelHwnd">
+    /// Supplies the element's authoritative top-level HWND (0 when it cannot be derived).
     /// </param>
     /// <param name="getWindowRect">
-    /// Optional injectable for <c>GetWindowRect</c>.  Returns <c>(left, top, right, bottom)</c>.
+    /// Optional injectable for <c>GetWindowRect</c>. Returns <c>(left, top, right, bottom)</c>.
     /// When <see langword="null"/>, the real <c>Windows.Win32.PInvoke.GetWindowRect</c> is called.
     /// </param>
     /// <returns>
-    /// The derived top-level HWND when a same-process popup is detected, otherwise
-    /// <paramref name="sessionHwnd"/> (no retarget).
+    /// The derived top-level HWND when a retarget is warranted, otherwise <paramref name="sessionHwnd"/>.
     /// </returns>
-    internal static nint DeriveGeometryCaptureHwnd(
-        int cx, int cy,
+    internal static nint DeriveElementCaptureHwnd(
         nint sessionHwnd,
-        int sessionProcessId,
         ref int captureOriginLeft, ref int captureOriginTop,
         ref int srcWidth, ref int srcHeight,
-        Func<(int x, int y), nint>? windowFromPoint = null,
-        Func<nint, nint>? getAncestorRoot = null,
-        Func<nint, uint>? getWindowProcessId = null,
+        Func<nint> getElementTopLevelHwnd,
         Func<nint, (int left, int top, int right, int bottom)>? getWindowRect = null)
     {
-        // 1. Find the window directly under the element center.
-        nint hitHwnd;
-        if (windowFromPoint is not null)
-        {
-            hitHwnd = windowFromPoint((cx, cy));
-        }
-        else
-        {
-            var hit = Windows.Win32.PInvoke.WindowFromPoint(new System.Drawing.Point(cx, cy));
-            hitHwnd = hit.IsNull ? 0 : (nint)hit;
-        }
+        var derived = getElementTopLevelHwnd();
 
-        if (hitHwnd == 0)
-        {
-            return sessionHwnd;
-        }
-
-        // 2. Walk up to GA_ROOT so child HWNDs (hosted control islands, etc.) resolve to
-        //    the containing top-level window — same as ResolvePopupCaptureHwnd does.
-        nint derived;
-        if (getAncestorRoot is not null)
-        {
-            var root = getAncestorRoot(hitHwnd);
-            derived = root != 0 ? root : hitHwnd;
-        }
-        else
-        {
-            var rootHwnd = Windows.Win32.PInvoke.GetAncestor(
-                new Windows.Win32.Foundation.HWND(hitHwnd),
-                Windows.Win32.UI.WindowsAndMessaging.GET_ANCESTOR_FLAGS.GA_ROOT);
-            derived = rootHwnd.IsNull ? hitHwnd : (nint)rootHwnd;
-        }
-
-        // No retarget if the derived root is the session window itself.
+        // No retarget when the element has no derivable top-level window, or it is the session
+        // window itself (genuine in-window element). The overlap case that broke the previous
+        // geometry approach cannot occur here: an overlapping window is never a UIA ancestor.
         if (derived == 0 || derived == sessionHwnd)
         {
             return sessionHwnd;
         }
 
-        // 3. Same-process gate: only retarget when the popup belongs to the same process
-        //    as the session.  This prevents retargeting to an unrelated overlapping window
-        //    from another app if the element center happens to be occluded.
-        uint derivedPid;
-        if (getWindowProcessId is not null)
-        {
-            derivedPid = getWindowProcessId(derived);
-        }
-        else
-        {
-            unsafe
-            {
-                uint pid = 0;
-                Windows.Win32.PInvoke.GetWindowThreadProcessId(
-                    new Windows.Win32.Foundation.HWND(derived), &pid);
-                derivedPid = pid;
-            }
-        }
-
-        if ((int)derivedPid != sessionProcessId)
-        {
-            return sessionHwnd;
-        }
-
-        // 4. Update capture origin and dimensions to the derived popup window.
+        // Update capture origin and dimensions to the derived top-level window.
         if (getWindowRect is not null)
         {
             var (l, t, r, b) = getWindowRect(derived);
@@ -756,11 +734,11 @@ internal sealed partial class UiAutomationService
         else
         {
             Windows.Win32.PInvoke.GetWindowRect(
-                new Windows.Win32.Foundation.HWND(derived), out var popupRect);
-            captureOriginLeft = popupRect.left;
-            captureOriginTop = popupRect.top;
-            srcWidth = Math.Max(1, popupRect.right - popupRect.left);
-            srcHeight = Math.Max(1, popupRect.bottom - popupRect.top);
+                new Windows.Win32.Foundation.HWND(derived), out var derivedRect);
+            captureOriginLeft = derivedRect.left;
+            captureOriginTop = derivedRect.top;
+            srcWidth = Math.Max(1, derivedRect.right - derivedRect.left);
+            srcHeight = Math.Max(1, derivedRect.bottom - derivedRect.top);
         }
 
         return derived;

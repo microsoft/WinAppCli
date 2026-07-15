@@ -143,7 +143,14 @@ internal class UiRecordCommand : Command, IShortDescription
                 // Start the stdin monitor BEFORE recording so a pre-buffered stop signal (e.g. an
                 // empty pipe that immediately delivers EOF) is caught immediately and then latched
                 // until the encoder is ready. Do NOT start for interactive consoles — humans use Ctrl+C.
-                if (isStdinRedirected)
+                //
+                // H1 (r12): only arm the stdin EOF/newline monitor for UNBOUNDED recordings
+                // (durationSec == 0), where stdin is the programmatic stop signal. A TIMED recording
+                // (durationSec > 0) has its own wall-clock deadline and must not be truncated by a
+                // closed/redirected stdin delivering EOF — e.g. `--duration-sec 2 <nul` (the common
+                // non-interactive invocation) would otherwise stop after the first frame. Timed runs
+                // stop on their deadline (or Ctrl+C via cancellationToken).
+                if (isStdinRedirected && durationSec == 0)
                 {
                     var stdinReader = s_stdinOverride ?? Console.In;
                     StdinStopMonitor.Start(stdinReader, readyTcs.Task, () =>

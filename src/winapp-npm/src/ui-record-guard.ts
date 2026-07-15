@@ -68,7 +68,7 @@ export function buildUiRecordArgs(options: UiRecordOptions): string[] {
  */
 export async function uiRecord(options: UiRecordOptions): Promise<WinappResult> {
   // Runtime guard for JS callers who may pass undefined/null despite the TypeScript type.
-  if (options == null || typeof options !== 'object') {
+  if (options === null || typeof options !== 'object') {
     throw new Error(
       `uiRecord: options must be an object with durationSec as a finite integer in [1, 86400]. ` +
         'Got: null or undefined options. Pass options.durationSec > 0.'
@@ -107,7 +107,7 @@ export async function _uiRecordWithCapture(
   capture: (args: string[], opts: CallWinappCliCaptureOptions) => Promise<CallWinappCliCaptureResult>
 ): Promise<WinappResult> {
   // Runtime guard for JS callers who may pass undefined/null despite the TypeScript type.
-  if (options == null || typeof options !== 'object') {
+  if (options === null || typeof options !== 'object') {
     throw new Error(
       `uiRecord: options must be an object with durationSec as a finite integer in [1, 86400]. ` +
         'Got: null or undefined options. Pass options.durationSec > 0.'
