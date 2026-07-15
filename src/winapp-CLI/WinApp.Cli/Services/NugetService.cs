@@ -453,14 +453,17 @@ internal class NugetService : INugetService
 
     /// <summary>
     /// Resolves a dependency's declared <see cref="VersionRange"/> to a single concrete version to install by
-    /// selecting the lowest listed version that satisfies the range on the configured sources — matching
+    /// selecting the lowest available version that satisfies the range on the configured sources — matching
     /// NuGet's lowest-applicable resolution. The declared lower bound is never assumed to exist: a range such
-    /// as <c>[1.2.3, )</c> is satisfied by 1.2.3 only if a source actually lists it, otherwise the next higher
-    /// listed version is selected (a mirror may carry 1.3.0 but not 1.2.3). This also honors floating ranges.
-    /// Returns null when the range constrains nothing (a version-less dependency) or when no listed version
-    /// satisfies it. Throws when no listed version satisfied the range only because a source that could have
-    /// satisfied it failed to answer, so callers can distinguish "no satisfying version" from "source query
-    /// failed" (the graph path surfaces it; the install path catches it and warns).
+    /// as <c>[1.2.3, )</c> is satisfied by 1.2.3 only if a source actually offers it, otherwise the next higher
+    /// available version is selected (a mirror may carry 1.3.0 but not 1.2.3). This also honors floating ranges.
+    /// The candidate set includes UNLISTED versions, because a package legitimately pins an exact dependency
+    /// version that the publisher has unlisted (e.g. Windows App SDK experimental builds unlist their
+    /// <c>.Runtime</c>/<c>.Foundation</c> sub-packages) and such a pin must still resolve. Returns null when the
+    /// range constrains nothing (a version-less dependency) or when no available version satisfies it. Throws
+    /// when no available version satisfied the range only because a source that could have satisfied it failed
+    /// to answer, so callers can distinguish "no satisfying version" from "source query failed" (the graph path
+    /// surfaces it; the install path catches it and warns).
     /// </summary>
     private async Task<string?> ResolveDependencyVersionAsync(string packageId, VersionRange? range, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
@@ -476,47 +479,49 @@ internal class NugetService : INugetService
             return null;
         }
 
-        // Resolve every bounded/floating range against the versions the sources actually list and pick the
+        // Resolve every bounded/floating range against the versions the sources actually offer and pick the
         // lowest one that satisfies it (NuGet's lowest-applicable rule). Never shortcut to the declared lower
         // bound: it may be excluded by the range (an exclusive bound) or simply absent from the source.
-        var listed = await GetListedVersionsForRangeAsync(packageId, cacheContext, cancellationToken);
-        var best = range.FindBestMatch(listed.Versions);
+        var candidates = await GetCandidateVersionsForRangeAsync(packageId, cacheContext, cancellationToken);
+        var best = range.FindBestMatch(candidates.Versions);
         if (best is not null)
         {
             return best.ToNormalizedString();
         }
 
-        // Nothing satisfied the range. Distinguish a genuine "no listed version satisfies it" (skip the
+        // Nothing satisfied the range. Distinguish a genuine "no available version satisfies it" (skip the
         // dependency) from "a source that could have satisfied it could not be queried" — in the latter case
         // surface the error rather than silently returning null, so the graph path fails loudly and the
         // install path can report its non-fatal dependency warning instead of dropping a package unnoticed.
-        if (listed.Error is not null)
+        if (candidates.Error is not null)
         {
             throw new InvalidOperationException(
-                $"Could not resolve a version for dependency '{packageId}' satisfying '{range}': source '{listed.ErrorSource}' could not be queried: {listed.Error.Message}",
-                listed.Error);
+                $"Could not resolve a version for dependency '{packageId}' satisfying '{range}': source '{candidates.ErrorSource}' could not be queried: {candidates.Error.Message}",
+                candidates.Error);
         }
 
         return null;
     }
 
     /// <summary>
-    /// The listed versions of a package collected across eligible sources, plus the last source failure (if
-    /// any) so the caller can tell "no listed version satisfies the range" apart from "a source could not be
-    /// queried".
+    /// The candidate versions of a package collected across eligible sources, plus the last source failure (if
+    /// any) so the caller can tell "no version satisfies the range" apart from "a source could not be queried".
     /// </summary>
-    private readonly record struct ListedVersionsResult(IReadOnlyList<NuGetVersion> Versions, Exception? Error, string? ErrorSource);
+    private readonly record struct CandidateVersionsResult(IReadOnlyList<NuGetVersion> Versions, Exception? Error, string? ErrorSource);
 
     /// <summary>
-    /// Collects the listed (non-unlisted) versions of a package across every eligible source, for resolving a
-    /// dependency's version range to a concrete version. Unlike <see cref="GetListedVersionsAsync"/> — which
-    /// feeds a "latest" MAX decision and therefore fails closed if any source errors — this tolerates a
-    /// per-source failure and moves on, matching the source-by-source failover the dependency paths already
-    /// use: another eligible source may still list a version that satisfies the range. The last such failure
-    /// is still reported back so the caller can surface it when NO listed version satisfies the range (rather
-    /// than masking a feed/authentication error as a silent skip).
+    /// Collects the candidate versions of a package across every eligible source, for resolving a dependency's
+    /// declared version range to a concrete version. Includes UNLISTED versions: a package legitimately pins an
+    /// exact dependency version that its publisher has unlisted (e.g. Windows App SDK experimental builds unlist
+    /// their <c>.Runtime</c>/<c>.Foundation</c> sub-packages), and such a pinned dependency must still resolve —
+    /// unlike a "latest version" decision, which excludes unlisted versions on purpose. Unlike
+    /// <see cref="GetListedVersionsAsync"/> — which feeds a "latest" MAX decision and therefore fails closed if
+    /// any source errors — this tolerates a per-source failure and moves on, matching the source-by-source
+    /// failover the dependency paths already use: another eligible source may still offer a version that
+    /// satisfies the range. The last such failure is still reported back so the caller can surface it when NO
+    /// candidate satisfies the range (rather than masking a feed/authentication error as a silent skip).
     /// </summary>
-    private async Task<ListedVersionsResult> GetListedVersionsForRangeAsync(string packageId, SourceCacheContext cacheContext, CancellationToken cancellationToken)
+    private async Task<CandidateVersionsResult> GetCandidateVersionsForRangeAsync(string packageId, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         var versions = new HashSet<NuGetVersion>();
         Exception? lastError = null;
@@ -537,7 +542,10 @@ internal class NugetService : INugetService
                 var metadata = await metadataResource.GetMetadataAsync(
                     packageId,
                     includePrerelease: true,
-                    includeUnlisted: false,
+                    // Include unlisted versions: a dependency can pin an exact version its publisher has
+                    // unlisted (e.g. Windows App SDK experimental .Runtime/.Foundation sub-packages), and that
+                    // pin must still resolve. Unlisted only means "hidden from search/latest", not unavailable.
+                    includeUnlisted: true,
                     cacheContext,
                     Logger,
                     cancellationToken);
@@ -563,7 +571,7 @@ internal class NugetService : INugetService
             }
         }
 
-        return new ListedVersionsResult([.. versions], lastError, lastErrorSource);
+        return new CandidateVersionsResult([.. versions], lastError, lastErrorSource);
     }
 
     /// <inheritdoc />

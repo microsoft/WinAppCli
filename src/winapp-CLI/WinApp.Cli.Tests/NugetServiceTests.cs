@@ -141,6 +141,36 @@ public class NugetServiceTests : BaseCommandTests
             "Should contain direct dependency Microsoft.Extensions.Logging.Abstractions");
     }
 
+    [TestMethod]
+    public async Task GetPackageDependenciesAsync_DependencyPinnedToUnlistedVersion_StillResolves()
+    {
+        // Regression: a package can pin an exact dependency version whose publisher has UNLISTED it. The
+        // Windows App SDK experimental meta-package pins its .Runtime/.Foundation sub-packages to exact
+        // versions that are published unlisted on nuget.org. Resolving a declared dependency range must
+        // therefore consider unlisted versions (unlike a "latest version" decision, which excludes them on
+        // purpose); otherwise the pinned dependency is silently dropped and, downstream, the Windows App
+        // Runtime PackageDependency is never injected into the packaged manifest.
+        var packageName = "Microsoft.WindowsAppSDK";
+        var version = "2.0.250930001-experimental1";
+        var pinnedDependencyId = "Microsoft.WindowsAppSDK.Runtime";
+
+        // Act
+        var result = await _nugetService.GetPackageDependenciesAsync(packageName, version, TestContext.CancellationToken);
+
+        // Assert - the exact-pinned dependency is resolved, not dropped
+        Assert.IsNotNull(result);
+        Assert.IsTrue(result.TryGetValue(pinnedDependencyId, out var resolvedRuntimeVersion),
+            $"The exact-pinned dependency {pinnedDependencyId} must be resolved, not silently skipped.");
+        Assert.IsFalse(string.IsNullOrWhiteSpace(resolvedRuntimeVersion));
+
+        // Assert the premise: the resolved version really is unlisted on NuGet, so this test would fail if
+        // range resolution excluded unlisted candidate versions.
+        var isListed = await IsVersionListedAsync(pinnedDependencyId, resolvedRuntimeVersion!, TestContext.CancellationToken);
+        Assert.IsFalse(isListed,
+            $"Test premise: {pinnedDependencyId} {resolvedRuntimeVersion} is expected to be unlisted on NuGet; " +
+            "if it became listed, pick another experimental version to keep this regression meaningful.");
+    }
+
     #endregion
 
     #region GetLatestVersionAsync Integration Tests
