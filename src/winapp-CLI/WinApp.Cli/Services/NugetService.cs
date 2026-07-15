@@ -183,8 +183,15 @@ internal partial class NugetService : INugetService
 
         var packageDir = GetNuGetPackageDir(package, normalizedVersion);
 
-        // Already installed on disk?
-        if (packageDir.Exists)
+        // Already fully installed on disk? NuGet writes the ".nupkg.metadata" marker into the version folder
+        // only after extraction completes, and it is the same signal NuGet itself uses to treat a package as
+        // installed. The directory existing is NOT that signal: an interrupted extraction can leave a partial
+        // folder (missing nuspec / lib files) with no marker. Short-circuiting on the bare directory would
+        // accept that corrupt entry — ReadDependenciesFromNuspec returns an empty dependency set when the
+        // nuspec is absent, so restore could report success for a root package with a truncated graph. Require
+        // the marker; when it is missing, fall through so the downloader (GlobalPackagesFolderUtility) re-
+        // extracts and completes the entry.
+        if (packageDir.Exists && File.Exists(Path.Combine(packageDir.FullName, ".nupkg.metadata")))
         {
             taskContext.AddDebugMessage($"{UiSymbols.Skip} {package} {normalizedVersion} already present");
             installed[package] = normalizedVersion;
@@ -226,8 +233,22 @@ internal partial class NugetService : INugetService
 
         foreach (var (depName, depVersionRange) in deps)
         {
-            if (installed.ContainsKey(depName))
+            if (installed.TryGetValue(depName, out var installedDepVersion))
             {
+                // The dependency id was already installed earlier in this operation. A package-id match alone
+                // is not enough: in a diamond graph two branches can require disjoint ranges (e.g. C [1,2) via
+                // one path and C [2,3) via another), and the first path to run fixes the installed version.
+                // Verify the already-installed version also satisfies THIS branch's range; if it cannot, the
+                // graph has an unsatisfiable version conflict that must fail the operation instead of being
+                // silently accepted as a complete install with an invalid graph.
+                if (!(NuGetVersion.TryParse(installedDepVersion, out var installedNuGetVersion)
+                        && depVersionRange.Satisfies(installedNuGetVersion)))
+                {
+                    var rangeText = depVersionRange.OriginalString ?? depVersionRange.ToNormalizedString();
+                    var conflict = $"{depName} {installedDepVersion} (already selected) does not satisfy '{rangeText}' required by {package} {version}";
+                    taskContext.AddStatusMessage($"{UiSymbols.Warning} Dependency version conflict: {conflict}");
+                    dependencyFailures.Add(conflict);
+                }
                 continue;
             }
 

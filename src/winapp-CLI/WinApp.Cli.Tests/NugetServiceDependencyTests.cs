@@ -449,4 +449,38 @@ public class NugetServiceDependencyTests : BaseCommandTests
             TryDelete(root);
         }
     }
+
+    [TestMethod]
+    public async Task GetPackageDependenciesAsync_CyclicGraph_ThrowsActionableErrorInsteadOfStackOverflow()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            feed.Create();
+            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+
+            // A cyclic graph: Cycle.A depends on Cycle.B, which depends back on Cycle.A. A cache entry is only
+            // published after a package's whole subtree resolves, so without explicit cycle detection Cycle.A
+            // would re-enter resolution before it is cached and recurse until the stack overflows. Resolution
+            // must instead fail fast with an actionable error that names the offending chain.
+            WriteNupkgToFeed(feed, "Cycle.A", "1.0.0", ("Cycle.B", "[1.0.0, )"));
+            WriteNupkgToFeed(feed, "Cycle.B", "1.0.0", ("Cycle.A", "[1.0.0, )"));
+
+            WriteLocalFeedConfig(root, feed, packages);
+
+            var service = CreateServiceRootedAt(root);
+
+            var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                async () => await service.GetPackageDependenciesAsync("Cycle.A", "1.0.0", TestContext.CancellationToken));
+
+            // The message must call out the cycle and name the chain (A -> B -> A) so it is actionable.
+            StringAssert.Contains(ex.Message, "Circular package dependency", StringComparison.Ordinal);
+            StringAssert.Contains(ex.Message, "Cycle.A -> Cycle.B -> Cycle.A", StringComparison.Ordinal);
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
 }

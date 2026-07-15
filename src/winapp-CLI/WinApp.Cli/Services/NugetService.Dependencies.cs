@@ -406,7 +406,10 @@ internal partial class NugetService
     }
 
     /// <inheritdoc />
-    public async Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, CancellationToken cancellationToken = default)
+    public Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, CancellationToken cancellationToken = default)
+        => GetPackageDependenciesAsync(packageName, version, [], cancellationToken);
+
+    private async Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, List<string> resolutionPath, CancellationToken cancellationToken)
     {
         // Scope the process-wide cache to the effective configuration (feeds/global folder/mapping), not just
         // package/version: dependency results depend on the configured sources, so a bare package/version key
@@ -418,23 +421,44 @@ internal partial class NugetService
             return new Dictionary<string, string>(cached, StringComparer.OrdinalIgnoreCase);
         }
 
+        // Reject a cyclic graph (A -> B -> A) up front. A cache entry is only published after its whole
+        // subtree resolves, so a package that reappears in the active resolution chain would re-enter before
+        // it is cached and recurse until the stack overflows. NuGet dependency graphs are required to be
+        // acyclic, so surface an actionable error naming the chain instead of crashing.
+        if (resolutionPath.Contains(packageName, StringComparer.OrdinalIgnoreCase))
+        {
+            var cycle = string.Join(" -> ", resolutionPath.Append(packageName));
+            throw new InvalidOperationException(
+                $"Circular package dependency detected: {cycle}. NuGet dependency graphs must be acyclic.");
+        }
+
         NugetSourceProvider.EnsureCredentialService();
         using var cacheContext = new SourceCacheContext();
         var directDeps = await FetchDirectDependenciesAsync(packageName, version, cacheContext, cancellationToken);
 
-        // Recursively resolve transitive dependencies
-        var allDeps = new Dictionary<string, string>(directDeps, StringComparer.OrdinalIgnoreCase);
-        foreach (var (depId, depVersion) in directDeps)
+        // Recursively resolve transitive dependencies, tracking this package on the active resolution path so
+        // a cycle deeper in the graph is detected. Removing it on the way back out keeps unrelated branches
+        // that legitimately share a package (a diamond) from being misread as a cycle.
+        resolutionPath.Add(packageName);
+        try
         {
-            var transitiveDeps = await GetPackageDependenciesAsync(depId, depVersion, cancellationToken);
-            foreach (var (transitiveId, transitiveVersion) in transitiveDeps)
+            var allDeps = new Dictionary<string, string>(directDeps, StringComparer.OrdinalIgnoreCase);
+            foreach (var (depId, depVersion) in directDeps)
             {
-                allDeps.TryAdd(transitiveId, transitiveVersion);
+                var transitiveDeps = await GetPackageDependenciesAsync(depId, depVersion, resolutionPath, cancellationToken);
+                foreach (var (transitiveId, transitiveVersion) in transitiveDeps)
+                {
+                    allDeps.TryAdd(transitiveId, transitiveVersion);
+                }
             }
-        }
 
-        DependencyCache[cacheKey] = allDeps;
-        return new Dictionary<string, string>(allDeps, StringComparer.OrdinalIgnoreCase);
+            DependencyCache[cacheKey] = allDeps;
+            return new Dictionary<string, string>(allDeps, StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            resolutionPath.RemoveAt(resolutionPath.Count - 1);
+        }
     }
 
     private async Task<Dictionary<string, string>> FetchDirectDependenciesAsync(string packageName, string version, SourceCacheContext cacheContext, CancellationToken cancellationToken)
