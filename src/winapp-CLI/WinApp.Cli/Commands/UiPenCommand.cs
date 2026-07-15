@@ -15,6 +15,8 @@ namespace WinApp.Cli.Commands;
 
 internal class UiPenCommand : Command, IShortDescription
 {
+    private const int MaxDelayMs = 60_000;
+
     public string ShortDescription => "Inject synthetic pen/stylus input (taps and ink strokes with pressure and tilt)";
 
     public static Option<string?> AtOption { get; } = new("--at")
@@ -98,6 +100,9 @@ internal class UiPenCommand : Command, IShortDescription
             var tiltY = parseResult.GetValue(TiltYOption);
             var eraser = parseResult.GetValue(EraserOption);
             var durationMs = parseResult.GetValue(DurationOption);
+            bool atWasSupplied = (parseResult.GetResult(AtOption)?.Tokens.Count ?? 0) > 0;
+            bool pathWasSupplied = (parseResult.GetResult(PathOption)?.Tokens.Count ?? 0) > 0;
+            bool durationWasSupplied = (parseResult.GetResult(DurationOption)?.Tokens.Count ?? 0) > 0;
 
             // Semantic validation runs BEFORE the missing-app check so a malformed value
             // produces invalid_arguments rather than missing_app (M5 root-cause fix).
@@ -115,6 +120,11 @@ internal class UiPenCommand : Command, IShortDescription
                 logger.LogError("{Symbol} --duration-ms must be zero or positive.", UiSymbols.Error);
                 UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--duration-ms must be zero or positive.");
                 return 1;
+            }
+
+            if (durationMs > MaxDelayMs)
+            {
+                return RejectInvalidArguments($"--duration-ms must be {MaxDelayMs} ms or less (60 seconds). Got '{durationMs}'.");
             }
 
             if (tiltX < -90 || tiltX > 90 || tiltY < -90 || tiltY > 90)
@@ -135,6 +145,16 @@ internal class UiPenCommand : Command, IShortDescription
                     UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, $"--path must be whitespace-separated x,y pairs (e.g. \"10,10 20,30\"). Got '{pathStr}'.", pathStr);
                     return 1;
                 }
+            }
+
+            if (pathWasSupplied && atWasSupplied)
+            {
+                return RejectInvalidArguments("--at is only valid for pen taps and cannot be combined with --path.");
+            }
+
+            if (durationWasSupplied && path is null)
+            {
+                return RejectInvalidArguments("--duration-ms is only valid with --path (got a pen tap).");
             }
 
             PointerPoint? at = null;
@@ -346,6 +366,14 @@ internal class UiPenCommand : Command, IShortDescription
             catch (Exception ex)
             {
                 UiErrors.GenericError(logger, ex, json);
+                return 1;
+            }
+
+            int RejectInvalidArguments(string message)
+            {
+                logger.LogError("{Symbol} {Message}", UiSymbols.Error, message);
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, message,
+                    errorOut: parseResult.InvocationConfiguration.Error);
                 return 1;
             }
         }

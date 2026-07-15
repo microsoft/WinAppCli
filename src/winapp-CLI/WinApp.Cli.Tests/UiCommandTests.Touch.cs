@@ -244,6 +244,102 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
+    [DataRow("--hold-ms")]
+    [DataRow("--duration-ms")]
+    public async Task Touch_DelayAboveMax_RejectedWithInvalidArguments(string option)
+    {
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "100,100", option, "60001", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.TouchCalls.Count);
+        AssertJsonErrorCode(UiJsonError.CodeInvalidArguments);
+        StringAssert.Contains(ConsoleStdErr.ToString(), option);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "60000");
+    }
+
+    [TestMethod]
+    [DataRow("tap", "--to-point", "200,200")]
+    [DataRow("double-tap", "--to-point", "200,200")]
+    [DataRow("long-press", "--to-point", "200,200")]
+    [DataRow("pinch", "--to-point", "200,200")]
+    [DataRow("stretch", "--to-point", "200,200")]
+    [DataRow("tap", "--direction", "left")]
+    [DataRow("double-tap", "--direction", "left")]
+    [DataRow("long-press", "--direction", "left")]
+    [DataRow("pinch", "--direction", "left")]
+    [DataRow("stretch", "--direction", "left")]
+    [DataRow("tap", "--distance", "50")]
+    [DataRow("double-tap", "--distance", "50")]
+    [DataRow("long-press", "--distance", "50")]
+    [DataRow("tap", "--duration-ms", "50")]
+    [DataRow("double-tap", "--duration-ms", "50")]
+    [DataRow("long-press", "--duration-ms", "50")]
+    [DataRow("pinch", "--fingers", "3")]
+    [DataRow("stretch", "--fingers", "3")]
+    public async Task Touch_IncompatibleExplicitGestureOption_RejectedWithInvalidArguments(
+        string gesture, string option, string value)
+    {
+        var args = new List<string>
+        {
+            "-a", "TestApp",
+            "--gesture", gesture,
+            "--at", "100,100",
+            option, value,
+            "--json"
+        };
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [.. args]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.TouchCalls.Count);
+        AssertJsonErrorCode(UiJsonError.CodeInvalidArguments);
+        var stderr = ConsoleStdErr.ToString();
+        StringAssert.Contains(stderr, option);
+        StringAssert.Contains(stderr, gesture);
+    }
+
+    [TestMethod]
+    public async Task Touch_Swipe_ExplicitMovingOptions_Succeeds()
+    {
+        _fakeSession.SessionResult.WindowHandle = 5163;
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--gesture", "swipe", "--at", "100,100",
+             "--direction", "right", "--distance", "50", "--duration-ms", "250",
+             "--fingers", "3", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakePointer.TouchCalls.Count);
+        var call = _fakePointer.TouchCalls[0];
+        Assert.AreEqual(TouchGesture.Swipe, call.Gesture);
+        Assert.AreEqual(3, call.ContactPaths.Count);
+        Assert.AreEqual(250, call.DurationMs);
+        Assert.AreEqual(new PointerPoint(150, 100), call.ContactPaths[0][^1]);
+    }
+
+    [TestMethod]
+    public async Task Touch_Pinch_ExplicitTwoFingers_Succeeds()
+    {
+        _fakeSession.SessionResult.WindowHandle = 5164;
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--gesture", "pinch", "--at", "100,100",
+             "--distance", "80", "--fingers", "2", "--duration-ms", "250", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakePointer.TouchCalls.Count);
+        var call = _fakePointer.TouchCalls[0];
+        Assert.AreEqual(TouchGesture.Pinch, call.Gesture);
+        Assert.AreEqual(2, call.ContactPaths.Count);
+        Assert.AreEqual(250, call.DurationMs);
+    }
+
+    [TestMethod]
     public async Task Touch_ExplicitPointOutsideWindow_Rejected_NoInjection()
     {
         _fakeSession.SessionResult.WindowHandle = 7000;

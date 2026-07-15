@@ -18,6 +18,16 @@ public partial class UiCommandTests : BaseCommandTests
     private FakeForegroundGuard _fakeForeground = null!;
     private FakePointerInput _fakePointer = null!;
 
+    private void AssertJsonErrorCode(string expectedCode)
+    {
+        var stderr = ConsoleStdErr.ToString();
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain a JSON error object; got: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(expectedCode, error.GetProperty("error").GetProperty("code").GetString());
+    }
+
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
     {
         _fakeUia = new FakeUiAutomationService();

@@ -15,6 +15,8 @@ namespace WinApp.Cli.Commands;
 
 internal class UiTouchCommand : Command, IShortDescription
 {
+    private const int MaxDelayMs = 60_000;
+
     public string ShortDescription => "Inject synthetic touch gestures (tap, swipe, pinch, stretch, long-press)";
 
     private static readonly Dictionary<string, TouchGesture> Gestures = new(StringComparer.OrdinalIgnoreCase)
@@ -118,6 +120,11 @@ internal class UiTouchCommand : Command, IShortDescription
             var holdMs = parseResult.GetValue(HoldOption);
             var durationMs = parseResult.GetValue(DurationOption);
             var fingers = parseResult.GetValue(FingersOption);
+            bool toPointWasSupplied = (parseResult.GetResult(ToPointOption)?.Tokens.Count ?? 0) > 0;
+            bool distanceWasSupplied = (parseResult.GetResult(DistanceOption)?.Tokens.Count ?? 0) > 0;
+            bool directionWasSupplied = (parseResult.GetResult(DirectionOption)?.Tokens.Count ?? 0) > 0;
+            bool durationWasSupplied = (parseResult.GetResult(DurationOption)?.Tokens.Count ?? 0) > 0;
+            bool fingersWasSupplied = (parseResult.GetResult(FingersOption)?.Tokens.Count ?? 0) > 0;
 
             // All app-independent semantic validation runs BEFORE the missing-app check so that
             // malformed argument values return invalid_arguments, not missing_app (M4 root-cause fix).
@@ -139,6 +146,16 @@ internal class UiTouchCommand : Command, IShortDescription
                 return 1;
             }
 
+            if (holdMs > MaxDelayMs)
+            {
+                return RejectInvalidArguments($"--hold-ms must be {MaxDelayMs} ms or less (60 seconds). Got '{holdMs}'.");
+            }
+
+            if (durationMs > MaxDelayMs)
+            {
+                return RejectInvalidArguments($"--duration-ms must be {MaxDelayMs} ms or less (60 seconds). Got '{durationMs}'.");
+            }
+
             // Validate --direction value up front.
             var validDirections = new[] { "right", "left", "up", "down" };
             if (!string.IsNullOrEmpty(direction) && !validDirections.Contains(direction.ToLowerInvariant()))
@@ -147,6 +164,29 @@ internal class UiTouchCommand : Command, IShortDescription
                 UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
                     $"--direction must be one of: right, left, up, down. Got '{direction}'.");
                 return 1;
+            }
+
+            var isSwipe = gesture is TouchGesture.Swipe;
+            var isStationaryGesture = gesture is TouchGesture.Tap or TouchGesture.DoubleTap or TouchGesture.LongPress;
+
+            if (toPointWasSupplied && !isSwipe)
+            {
+                return RejectInvalidArguments($"--to-point is only valid with --gesture swipe (got {gestureStr}).");
+            }
+
+            if (directionWasSupplied && !isSwipe)
+            {
+                return RejectInvalidArguments($"--direction is only valid with --gesture swipe (got {gestureStr}).");
+            }
+
+            if (distanceWasSupplied && isStationaryGesture)
+            {
+                return RejectInvalidArguments($"--distance is only valid with --gesture swipe, pinch, or stretch (got {gestureStr}).");
+            }
+
+            if (durationWasSupplied && isStationaryGesture)
+            {
+                return RejectInvalidArguments($"--duration-ms is only valid with moving gestures: swipe, pinch, or stretch (got {gestureStr}).");
             }
 
             // Long-press with no explicit --hold-ms defaults to 500 ms (a real long-press).
@@ -176,6 +216,11 @@ internal class UiTouchCommand : Command, IShortDescription
                 UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
                     $"--fingers must be between 1 and {PointerGesturePlanner.MaxContacts} (the touch-injection contact limit).");
                 return 1;
+            }
+
+            if (fingersWasSupplied && gesture is TouchGesture.Pinch or TouchGesture.Stretch && fingers != 2)
+            {
+                return RejectInvalidArguments($"--fingers must be 2 with --gesture {gestureStr}; pinch/stretch always use 2 contacts.");
             }
 
             // Parse an explicit start point up front (mutually independent of selector resolution).
@@ -401,6 +446,14 @@ internal class UiTouchCommand : Command, IShortDescription
             catch (Exception ex)
             {
                 UiErrors.GenericError(logger, ex, json);
+                return 1;
+            }
+
+            int RejectInvalidArguments(string message)
+            {
+                logger.LogError("{Symbol} {Message}", UiSymbols.Error, message);
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, message,
+                    errorOut: parseResult.InvocationConfiguration.Error);
                 return 1;
             }
         }

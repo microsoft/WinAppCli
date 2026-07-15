@@ -93,6 +93,50 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
+    public async Task Pen_DurationMsAboveMax_RejectedWithInvalidArguments()
+    {
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--path", "10,10 20,20", "--duration-ms", "60001", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.PenCalls.Count);
+        AssertJsonErrorCode(UiJsonError.CodeInvalidArguments);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "--duration-ms");
+        StringAssert.Contains(ConsoleStdErr.ToString(), "60000");
+    }
+
+    [TestMethod]
+    public async Task Pen_PathWithAt_RejectedWithInvalidArguments()
+    {
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--path", "10,10 20,20", "--at", "15,15", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.PenCalls.Count);
+        AssertJsonErrorCode(UiJsonError.CodeInvalidArguments);
+        var stderr = ConsoleStdErr.ToString();
+        StringAssert.Contains(stderr, "--at");
+        StringAssert.Contains(stderr, "--path");
+    }
+
+    [TestMethod]
+    public async Task Pen_DurationMsWithoutPath_RejectedWithInvalidArguments()
+    {
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "50,50", "--duration-ms", "250", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.PenCalls.Count);
+        AssertJsonErrorCode(UiJsonError.CodeInvalidArguments);
+        var stderr = ConsoleStdErr.ToString();
+        StringAssert.Contains(stderr, "--duration-ms");
+        StringAssert.Contains(stderr, "--path");
+    }
+
+    [TestMethod]
     public async Task Pen_PressureNaN_Rejected_NoInjection()
     {
         // NaN passes `float.TryParse` but is caught by the !float.IsFinite guard in the handler.
