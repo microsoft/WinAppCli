@@ -74,6 +74,11 @@ internal sealed class NugetPackageDownloader(NugetSourceProvider sourceProvider)
                     }
                     catch (FatalProtocolException ex)
                     {
+                        // A canceled request can be surfaced as a FatalProtocolException once the final
+                        // HTTP attempt is exhausted; preserve cancellation instead of recording it as a
+                        // source failure and later throwing a misleading "download failed" error.
+                        cancellationToken.ThrowIfCancellationRequested();
+
                         // Source unreachable/unauthorized or does not have this package; remember why
                         // (e.g. 401/403/network) and try the next source.
                         lastError = ex;
@@ -84,6 +89,11 @@ internal sealed class NugetPackageDownloader(NugetSourceProvider sourceProvider)
 
                 if (!copied)
                 {
+                    // A canceled download can surface as a logged-and-returned false rather than a thrown
+                    // OperationCanceledException; keep Ctrl+C as cancellation instead of misreporting it
+                    // as a feed failure below.
+                    cancellationToken.ThrowIfCancellationRequested();
+
                     // A false return covers both "this source doesn't have the package" (normal failover)
                     // and a content-endpoint failure (e.g. 401/403) that was retried and logged rather than
                     // thrown. Preserve any captured error so an auth/network failure isn't later reported as

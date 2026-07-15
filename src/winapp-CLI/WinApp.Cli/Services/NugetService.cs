@@ -495,6 +495,12 @@ internal class NugetService : INugetService
             }
             catch (FatalProtocolException ex)
             {
+                // A canceled nuspec fetch can be surfaced as a PackageNotFoundProtocolException (a
+                // FatalProtocolException) once retries are exhausted; preserve cancellation instead of
+                // recording it as a source failure and later throwing InvalidOperationException. This
+                // matches the contract enforced in GetListedVersionsAsync.
+                cancellationToken.ThrowIfCancellationRequested();
+
                 // Source unreachable/unauthorized; remember why and try the next one.
                 lastError = ex;
                 lastErrorSource = repo.PackageSource.Name;

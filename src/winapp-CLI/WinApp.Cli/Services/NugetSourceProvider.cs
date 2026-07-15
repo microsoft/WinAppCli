@@ -6,12 +6,15 @@ using NuGet.Configuration;
 using NuGet.Credentials;
 using NuGet.Protocol;
 using NuGet.Protocol.Core.Types;
+using System.Diagnostics.CodeAnalysis;
 
 namespace WinApp.Cli.Services;
 
 /// <summary>
 /// Resolves NuGet package sources, credentials and <c>&lt;packageSourceMapping&gt;</c> from the user's
-/// <c>nuget.config</c> hierarchy (rooted at the current working directory). Owns the source/configuration
+/// <c>nuget.config</c> hierarchy. The hierarchy is rooted at the process working directory by default, or
+/// at the explicit project/config directory supplied via <see cref="SetConfigRoot"/> (e.g. by
+/// <c>init &lt;dir&gt;</c> / <c>restore --config-dir &lt;dir&gt;</c>). Owns the source/configuration
 /// concern for <see cref="NugetService"/> so private/custom feeds and mirrors are honored when restoring
 /// SDK packages, and so this logic can be tested independently of package download/version resolution.
 /// </summary>
@@ -33,23 +36,51 @@ internal sealed class NugetSourceProvider
         return true;
     });
 
+    private readonly ICurrentDirectoryProvider _currentDirectoryProvider;
+
+    // The directory the nuget.config hierarchy is resolved from. Null means "use the process working
+    // directory"; SetConfigRoot overrides it for commands that select an explicit project/config dir.
+    private DirectoryInfo? _configRoot;
+
     // All three caches are Lazy (default ExecutionAndPublication mode: thread-safe, initialized exactly
     // once) rather than plain '??=' fields. NugetSourceProvider is a DI singleton and WorkspaceSetupService
     // resolves versions for many packages concurrently (Task.WhenAll over GetLatestVersionAsync), so a
     // bare '??=' could race two threads into building duplicate providers/mappings or observing a
-    // half-initialized cache.
-    private readonly Lazy<ISettings> _settings;
-    private readonly Lazy<SourceRepositoryProvider> _sourceRepositoryProvider;
-    private readonly Lazy<PackageSourceMapping> _packageSourceMapping;
+    // half-initialized cache. They are re-created by SetConfigRoot (before any concurrent work begins).
+    private Lazy<ISettings> _settings;
+    private Lazy<SourceRepositoryProvider> _sourceRepositoryProvider;
+    private Lazy<PackageSourceMapping> _packageSourceMapping;
 
     public NugetSourceProvider(ICurrentDirectoryProvider currentDirectoryProvider)
     {
+        _currentDirectoryProvider = currentDirectoryProvider;
+        InitializeCaches();
+    }
+
+    [MemberNotNull(nameof(_settings), nameof(_sourceRepositoryProvider), nameof(_packageSourceMapping))]
+    private void InitializeCaches()
+    {
         _settings = new Lazy<ISettings>(() =>
-            NuGet.Configuration.Settings.LoadDefaultSettings(root: currentDirectoryProvider.GetCurrentDirectory()));
+            NuGet.Configuration.Settings.LoadDefaultSettings(
+                root: _configRoot?.FullName ?? _currentDirectoryProvider.GetCurrentDirectory()));
         _sourceRepositoryProvider = new Lazy<SourceRepositoryProvider>(() =>
             new SourceRepositoryProvider(new PackageSourceProvider(Settings), Repository.Provider.GetCoreV3()));
         _packageSourceMapping = new Lazy<PackageSourceMapping>(() =>
             NuGet.Configuration.PackageSourceMapping.GetPackageSourceMapping(Settings));
+    }
+
+    /// <summary>
+    /// Overrides the directory the nuget.config hierarchy is resolved from. Commands that accept an
+    /// explicit project/config directory (e.g. <c>init &lt;dir&gt;</c>, <c>restore --config-dir &lt;dir&gt;</c>)
+    /// call this so the user's project-level nuget.config — private feeds, credentials and
+    /// <c>globalPackagesFolder</c> — is honored even when the process working directory differs. It is
+    /// invoked synchronously at the start of a workspace setup, before any concurrent version/download
+    /// work begins, so re-creating the (not-yet-evaluated) caches here is safe.
+    /// </summary>
+    internal void SetConfigRoot(DirectoryInfo configRoot)
+    {
+        _configRoot = configRoot;
+        InitializeCaches();
     }
 
     /// <summary>
