@@ -63,5 +63,7 @@
     "distribution"
   ],
   "agents": "agents/",
-  "skills": "skills/winapp-cli/"
+  "skills": [
+    "skills/"
+  ]
 }

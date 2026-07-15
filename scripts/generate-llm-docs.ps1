@@ -5,14 +5,14 @@
 .DESCRIPTION
     This script generates docs/cli-schema.json and SKILL.md files
     from the CLI's --cli-schema output. Run after building the CLI to keep documentation in sync.
-    Also mirrors the regenerated .github/plugin/ tree to .claude/ for Claude Code compatibility
-    via scripts/sync-claude-plugin.ps1.
+    Skills are written into the single shared plugin at plugins/winapp/, which is consumed by
+    both GitHub Copilot and Claude Code via their per-host plugin manifests and marketplaces.
 .PARAMETER CliPath
     Path to the winapp.exe CLI binary (default: artifacts/cli/win-x64/winapp.exe)
 .PARAMETER DocsPath
     Path to the docs folder (default: docs)
 .PARAMETER SkillsPath
-    Path to the skills output folder (default: .github/plugin/skills/winapp-cli)
+    Path to the skills output folder (default: plugins/winapp/skills)
 .EXAMPLE
     .\scripts\generate-llm-docs.ps1
 .EXAMPLE
@@ -40,7 +40,7 @@ if (-not $DocsPath) {
 }
 
 if (-not $SkillsPath) {
-    $SkillsPath = Join-Path $ProjectRoot ".github\plugin\skills\winapp-cli"
+    $SkillsPath = Join-Path $ProjectRoot "plugins\winapp\skills"
 }
 
 $SchemaOutputPath = Join-Path $DocsPath "cli-schema.json"
@@ -289,8 +289,9 @@ version: $CliVersion
     $skillContent = $skillContent -replace "`r`n", "`n"
     $skillContent = $skillContent.TrimEnd() + "`n"
     
-    # Write to output directory
-    $skillDir = Join-Path $SkillsDir $skillName
+    # Write to output directory. The directory name matches the skill's frontmatter name
+    # (winapp-<name>) so both Copilot and Claude Code load it without a rename step.
+    $skillDir = Join-Path $SkillsDir "winapp-$skillName"
     if (-not (Test-Path $skillDir)) {
         New-Item -ItemType Directory -Path $skillDir -Force | Out-Null
     }
@@ -300,42 +301,36 @@ version: $CliVersion
     Write-Host "[SKILLS]   $skillName - generated" -ForegroundColor Gray
 }
 
-# Mirror the regenerated Copilot plugin to .claude/ so Claude Code consumers
-# (and the cc-community plugin marketplace) stay in sync. Source of truth
-# remains .github/plugin/; .claude/ is a generated output of this script.
-# Only sync when writing to the default plugin path — custom -SkillsDir runs
-# should not mutate the canonical .claude/ tree.
-$DefaultSkillsPath = Join-Path $ProjectRoot ".github\plugin\skills\winapp-cli"
-$syncScript = Join-Path $PSScriptRoot 'sync-claude-plugin.ps1'
-if ($SkillsDir -eq $DefaultSkillsPath -and (Test-Path $syncScript)) {
-    Write-Host "`n[CLAUDE]   syncing .claude/ from .github/plugin/" -ForegroundColor Gray
-    try {
-        & $syncScript
-    }
-    catch {
-        Write-Error "sync-claude-plugin.ps1 failed: $_"
-        exit 1
-    }
-}
-
-
-# Update plugin.json version to match CLI version (only when outputting to the default skills path)
+# Keep every plugin/marketplace manifest version in sync with the CLI version.
+# Only run when writing to the default skills path — custom -SkillsPath runs
+# (e.g. validate-llm-docs.ps1 generating into a temp dir) must not mutate committed files.
+$DefaultSkillsPath = Join-Path $ProjectRoot "plugins\winapp\skills"
 if ($SkillsDir -eq $DefaultSkillsPath) {
-    $PluginJsonPath = Join-Path $ProjectRoot ".github\plugin\plugin.json"
-    if (Test-Path $PluginJsonPath) {
-        $pluginJson = [System.IO.File]::ReadAllText($PluginJsonPath, [System.Text.UTF8Encoding]::new($false)) | ConvertFrom-Json
-        $pluginJson.version = $CliVersion
-        $pluginJsonContent = $pluginJson | ConvertTo-Json -Depth 10
-        # Normalize line endings
-        $pluginJsonContent = $pluginJsonContent -replace "`r`n", "`n"
-        $pluginJsonContent = $pluginJsonContent.TrimEnd() + "`n"
-        [System.IO.File]::WriteAllText($PluginJsonPath, $pluginJsonContent, [System.Text.UTF8Encoding]::new($false))
-        Write-Host "[SKILLS] Updated plugin.json version to $CliVersion" -ForegroundColor Gray
+    # Surgical version-string replacement preserves the hand-authored formatting of these
+    # manifests (unlike a ConvertFrom-Json/ConvertTo-Json round-trip). Every "version" field
+    # in these files is the plugin/marketplace version, so a per-file global replace is safe.
+    $ManifestPaths = @(
+        (Join-Path $ProjectRoot "plugin.json"),                                # repo-root shim (repo-as-plugin install + awesome-copilot)
+        (Join-Path $ProjectRoot "plugins\winapp\plugin.json"),                 # Copilot plugin manifest
+        (Join-Path $ProjectRoot "plugins\winapp\.claude-plugin\plugin.json"),  # Claude plugin manifest
+        (Join-Path $ProjectRoot ".github\plugin\marketplace.json"),            # Copilot marketplace
+        (Join-Path $ProjectRoot ".claude-plugin\marketplace.json")             # Claude marketplace
+    )
+    foreach ($manifestPath in $ManifestPaths) {
+        if (-not (Test-Path $manifestPath)) {
+            Write-Warning "Manifest not found (skipping version sync): $manifestPath"
+            continue
+        }
+        $manifestText = [System.IO.File]::ReadAllText($manifestPath, [System.Text.UTF8Encoding]::new($false))
+        $manifestText = [regex]::Replace($manifestText, '("version"\s*:\s*")[^"]*(")', "`${1}$CliVersion`${2}")
+        $manifestText = ($manifestText -replace "`r`n", "`n").TrimEnd() + "`n"
+        [System.IO.File]::WriteAllText($manifestPath, $manifestText, [System.Text.UTF8Encoding]::new($false))
     }
+    Write-Host "[SKILLS] Synced plugin/marketplace manifest versions to $CliVersion" -ForegroundColor Gray
 }
 
 Write-Host "[SKILLS] Generated $($SkillNames.Count) skills in:" -ForegroundColor Green
-Write-Host "  .github/plugin/skills/winapp-cli/" -ForegroundColor Gray
+Write-Host "  plugins/winapp/skills/" -ForegroundColor Gray
 
 Write-Host ""
 Write-Host "[DOCS] All documentation and skills generated successfully!" -ForegroundColor Green

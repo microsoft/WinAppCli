@@ -112,7 +112,7 @@ buckets in this repo:
 | `src/winapp-npm/` | packaging, CLI UX (npm wrapper) |
 | `src/winapp-NuGet/` | packaging |
 | `docs/`, `README.md`, `samples/` | docs-and-samples |
-| `docs/fragments/skills/`, `.github/plugin/` | docs-and-samples (shipped Copilot plugin) |
+| `docs/fragments/skills/`, `plugins/winapp/` | docs-and-samples (shipped plugin) |
 | `scripts/` | packaging |
 | `version.json`, `*.csproj`, `Directory.Build.*` | packaging |
 
@@ -372,7 +372,7 @@ Findings
   M2  src/winapp-CLI/.../Commands/CreateExternalCatalogCommand.cs:18-25  cli-ux          --catalog-name has no default; breaks scripted use
   M3  src/winapp-CLI/.../Commands/CreateExternalCatalogCommand.cs:1-60   necessity-simplicity  New top-level verb overlaps `package`; could be a `--external-catalog` flag
   M4  docs/usage.md (missing)                               docs-and-samples  New command not documented
-  L1  .github/plugin/agents/winapp.agent.md:189            docs-and-samples  Command list out of order
+  L1  plugins/winapp/agents/winapp.agent.md:189            docs-and-samples  Command list out of order
 
 Details
 ## H1  src/winapp-CLI/WinApp.Cli/Services/SparsePackageService.cs:142-160

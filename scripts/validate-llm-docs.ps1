@@ -163,7 +163,7 @@ New-Item -ItemType Directory -Path $TempDocsPath -Force | Out-Null
 try {
     # Generate to temp location (docs + skills)
     $GenerateScript = Join-Path $PSScriptRoot "generate-llm-docs.ps1"
-    $TempSkills = Join-Path $TempDocsPath "skills\winapp-cli"
+    $TempSkills = Join-Path $TempDocsPath "plugins\winapp\skills"
     & $GenerateScript -CliPath $CliPath -DocsPath $TempDocsPath -SkillsPath $TempSkills | Out-Null
     
     # Fix up the version in the freshly generated skill files.
@@ -187,8 +187,8 @@ try {
     $SkillsDrift = $false
     
     foreach ($skillName in $SkillNames) {
-        $FreshSkill = Join-Path $TempDocsPath "skills\winapp-cli\$skillName\SKILL.md"
-        $CommittedSkill = Join-Path $ProjectRoot ".github\plugin\skills\winapp-cli\$skillName\SKILL.md"
+        $FreshSkill = Join-Path $TempSkills "winapp-$skillName\SKILL.md"
+        $CommittedSkill = Join-Path $ProjectRoot "plugins\winapp\skills\winapp-$skillName\SKILL.md"
         
         if (-not (Test-Path $CommittedSkill)) {
             Write-Host "::error::skill '$skillName' not found at $CommittedSkill" -ForegroundColor Red
