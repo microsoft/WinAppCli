@@ -107,33 +107,60 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
-    public async Task Screenshot_WindowZero_NonJson_CapturesSingle()
+    public async Task Screenshot_SingleWindow_NoSelector_NoDialog_WritesFile()
     {
-        // --window 0 clears the missing-app guard (window is not null) but DiscoverAllWindows returns
-        // null (0 is not > 0 and no app), so the single-window path runs.
+        // No selector and no owned dialog: DiscoverAllWindows finds nothing to composite (returns null),
+        // ResolveSessionAsync yields the single session, and the plain single-window capture runs
+        // (non-JSON → LogInformation, writes the PNG). This is the common "screenshot an app by name"
+        // path that the two invalid-handle tests below no longer reach.
         _fakeUia.ScreenshotResult = (new byte[4], 1, 1);
+        var path = ShotPath();
+
+        var command = GetRequiredService<UiScreenshotCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "-o", path]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.IsTrue(File.Exists(path), "expected a PNG to be written for a single-window capture");
+    }
+
+    [TestMethod]
+    public async Task Screenshot_WindowZero_NoApp_ReturnsErrorWithoutCapturing()
+    {
+        // --window 0 with no --app: the missing-app guard passes (window is not null) and
+        // DiscoverAllWindows returns null (0 is not > 0, no app). Production then rejects it at
+        // ResolveSessionAsync — hwnd is not > 0 and --app is blank, so UiSessionService throws
+        // "Specify --app..." (proven directly by UiSessionServiceTests.ResolveSession_WhitespaceApp_
+        // ZeroHwnd_Throws). The command maps that to exit 1 and writes NO screenshot. The fake models
+        // the same throw so the assertion reflects real behavior instead of the fake accepting hwnd 0.
+        _fakeSession.ResolveThrow = new InvalidOperationException(
+            "Specify --app (process name, title, or PID) or --window (HWND).");
         var path = ShotPath();
 
         var command = GetRequiredService<UiScreenshotCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-w", "0", "-o", path]);
 
-        Assert.AreEqual(0, exitCode);
-        Assert.IsTrue(File.Exists(path));
+        Assert.AreEqual(1, exitCode);
+        Assert.IsFalse(File.Exists(path), "no screenshot should be written when the target is rejected");
     }
 
     [TestMethod]
-    public async Task Screenshot_WindowInvalidHandle_CapturesSingle()
+    public async Task Screenshot_WindowInvalidHandle_ReturnsErrorWithoutCapturing()
     {
-        // --window <invalid hwnd> → GetWindowThreadProcessId yields pid 0 → DiscoverAllWindows bails →
-        // single-window path (exercises the direct-HWND discovery branch up to the pid==0 guard).
-        _fakeUia.ScreenshotResult = (new byte[4], 1, 1);
+        // --window <dead hwnd>: DiscoverAllWindows calls GetProcessIdForWindow, which yields 0 for an
+        // invalid handle (fake default) → the pid==0 guard bails → single-window path. Production then
+        // rejects it at ResolveByHwnd because the PID is still 0, throwing "Window HWND ... not found or
+        // not accessible" (proven by UiSessionServiceTests.ResolveByHwnd_WindowNotFound_Throws). The
+        // command maps that to exit 1 and writes NO screenshot. The fake models the same throw so the
+        // test asserts real rejection rather than the fake accepting any handle.
+        _fakeSession.ResolveThrow = new InvalidOperationException(
+            "Window HWND 999999 not found or not accessible.");
         var path = ShotPath();
 
         var command = GetRequiredService<UiScreenshotCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-w", "999999", "-o", path]);
 
-        Assert.AreEqual(0, exitCode);
-        Assert.IsTrue(File.Exists(path));
+        Assert.AreEqual(1, exitCode);
+        Assert.IsFalse(File.Exists(path), "no screenshot should be written for an invalid window handle");
     }
 
     [TestMethod]

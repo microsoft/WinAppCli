@@ -104,7 +104,9 @@ internal sealed class SystemUiQuery : ISystemUiQuery
         try
         {
             var handle = new Windows.Win32.Foundation.HWND((nint)hwnd);
-            var buffer = new char[256];
+            // 512 chars matches the prior inline direct-HWND path this seam replaced; a smaller
+            // buffer would silently truncate long window titles (256–511 chars).
+            var buffer = new char[512];
             int len;
             unsafe
             {
