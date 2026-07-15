@@ -717,6 +717,42 @@ public partial class UiCommandTests
             "error must mention --capture-screen so users know how to opt in to screen capture");
     }
 
+
+    [TestMethod]
+    public void Record_ProcessFrame_MismatchedCropAspect_LetterboxesInsteadOfStretching()
+    {
+        const int srcW = 100, srcH = 50;
+        const int encW = 100, encH = 100;
+        const int dispW = 100, dispH = 100;
+        var source = MakeSolidFrame(srcW, srcH, b: 0, g: 200, r: 0); // green content
+
+        var output = UiAutomationService.ProcessFrame(
+            source, srcW, srcH,
+            cropX: 0, cropY: 0, cropW: srcW, cropH: srcH,
+            encoderWidth: encW, encoderHeight: encH,
+            displayWidth: dispW, displayHeight: dispH);
+
+        Assert.AreEqual(encW * encH * 4, output.Length);
+
+        var topBar = GetPixel(output, encW, encW / 2, 24);
+        Assert.AreEqual((byte)0, topBar.B, "top letterbox bar must remain black");
+        Assert.AreEqual((byte)0, topBar.G, "top letterbox bar must remain black");
+        Assert.AreEqual((byte)0, topBar.R, "top letterbox bar must remain black");
+
+        var bottomBar = GetPixel(output, encW, encW / 2, 75);
+        Assert.AreEqual((byte)0, bottomBar.B, "bottom letterbox bar must remain black");
+        Assert.AreEqual((byte)0, bottomBar.G, "bottom letterbox bar must remain black");
+        Assert.AreEqual((byte)0, bottomBar.R, "bottom letterbox bar must remain black");
+
+        var center = GetPixel(output, encW, encW / 2, encH / 2);
+        Assert.IsTrue(center.G > 128, $"center content band should contain the green source; got B={center.B} G={center.G} R={center.R}");
+
+        var leftEdge = GetPixel(output, encW, 0, encH / 2);
+        var rightEdge = GetPixel(output, encW, encW - 1, encH / 2);
+        Assert.IsTrue(leftEdge.G > 128, "content band should span the full fitted width");
+        Assert.IsTrue(rightEdge.G > 128, "content band should span the full fitted width");
+    }
+
     // -----------------------------------------------------------------------
     // M4 (round-7) — --max-edge below encoder minimum must be rejected
     // -----------------------------------------------------------------------

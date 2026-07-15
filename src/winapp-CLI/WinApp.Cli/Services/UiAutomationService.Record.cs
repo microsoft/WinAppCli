@@ -620,12 +620,14 @@ internal sealed partial class UiAutomationService
             // Black letterbox background (covers padding regions when encoderW > displayW or encoderH > displayH).
             canvas.Clear(SKColors.Black);
 
-            // Center the display content within the encoder canvas.
-            var offsetX = (encoderWidth - displayWidth) / 2;
-            var offsetY = (encoderHeight - displayHeight) / 2;
+            var scale = Math.Min(displayWidth / (double)cropW, displayHeight / (double)cropH);
+            var fitW = Math.Clamp((int)Math.Round(cropW * scale), 1, displayWidth);
+            var fitH = Math.Clamp((int)Math.Round(cropH * scale), 1, displayHeight);
+            var offsetX = (encoderWidth - fitW) / 2;
+            var offsetY = (encoderHeight - fitH) / 2;
 
             var srcRect = SKRect.Create(cropX, cropY, cropW, cropH);
-            var dstRect = SKRect.Create(offsetX, offsetY, displayWidth, displayHeight);
+            var dstRect = SKRect.Create(offsetX, offsetY, fitW, fitH);
             using var paint = new SKPaint { FilterQuality = SKFilterQuality.Medium, IsAntialias = false };
             canvas.DrawBitmap(srcBitmap, srcRect, dstRect, paint);
         }
