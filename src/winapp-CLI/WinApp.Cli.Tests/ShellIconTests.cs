@@ -27,11 +27,13 @@ public class ShellIconTests
     }
 
     [TestMethod]
-    public void GetJumboIcon_RealExecutable_ReturnsIconOrNullWithoutThrowing()
+    public void GetJumboIcon_RealExecutable_ReturnsUsableIconOrIsInconclusive()
     {
-        // Exercises the full shell image-list path against a real, icon-bearing executable. The
-        // result depends on the host's shell availability, so we only require that it never throws
-        // and that any returned icon is a usable, disposable handle.
+        // Exercises the full public shell image-list path against a real, icon-bearing executable.
+        // Deterministic branch coverage of the resolve/short-circuit/failure arms comes from the
+        // GetJumboIconCore seam tests below; here we require that when the shell host DOES produce an
+        // icon it is a usable, positively-sized handle, and otherwise mark the test inconclusive
+        // rather than passing silently on a null (which would not prove the success path ran).
         var exe = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "notepad.exe");
         if (!File.Exists(exe))
         {
@@ -41,10 +43,14 @@ public class ShellIconTests
         Icon? icon = ShellIcon.GetJumboIcon(exe);
         try
         {
-            if (icon is not null)
+            if (icon is null)
             {
-                Assert.IsTrue(icon.Width > 0 && icon.Height > 0, "A resolved icon must have positive dimensions.");
+                Assert.Inconclusive(
+                    "The shell host did not produce a jumbo icon for a real executable; the native " +
+                    "success path is not verifiable in this environment.");
             }
+
+            Assert.IsTrue(icon.Width > 0 && icon.Height > 0, "A resolved icon must have positive dimensions.");
         }
         finally
         {

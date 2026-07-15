@@ -212,12 +212,59 @@ public class LongPathHelperTests
     }
 
     [TestMethod]
-    public void IsSystemLongPathEnabled_ReturnsWithoutThrowing()
+    public void IsSystemLongPathEnabled_ValueIsOne_ReturnsTrue()
     {
-        // Exercises the registry-read happy path; result depends on machine config, so we only
-        // assert it completes and yields a bool.
-        var enabled = LongPathHelper.IsSystemLongPathEnabled();
-        Assert.IsTrue(enabled == true || enabled == false);
+        Assert.IsTrue(LongPathHelper.IsSystemLongPathEnabled(() => 1),
+            "A LongPathsEnabled value of integer 1 means long paths are enabled.");
+    }
+
+    [TestMethod]
+    public void IsSystemLongPathEnabled_ValueIsZero_ReturnsFalse()
+    {
+        Assert.IsFalse(LongPathHelper.IsSystemLongPathEnabled(() => 0),
+            "A LongPathsEnabled value of 0 means long paths are disabled.");
+    }
+
+    [TestMethod]
+    public void IsSystemLongPathEnabled_ValueIsOtherInt_ReturnsFalse()
+    {
+        Assert.IsFalse(LongPathHelper.IsSystemLongPathEnabled(() => 2),
+            "Only the exact integer 1 enables long paths; any other int is treated as disabled.");
+    }
+
+    [TestMethod]
+    public void IsSystemLongPathEnabled_ValueMissing_ReturnsFalse()
+    {
+        // A null value models an absent FileSystem key or a missing LongPathsEnabled value.
+        Assert.IsFalse(LongPathHelper.IsSystemLongPathEnabled(() => null),
+            "An absent registry value must be treated as long paths disabled.");
+    }
+
+    [TestMethod]
+    public void IsSystemLongPathEnabled_ValueWrongType_ReturnsFalse()
+    {
+        // A REG_SZ or REG_QWORD surfaces as a non-int; only a boxed int 1 counts as enabled.
+        Assert.IsFalse(LongPathHelper.IsSystemLongPathEnabled(() => "1"));
+        Assert.IsFalse(LongPathHelper.IsSystemLongPathEnabled(() => 1L));
+    }
+
+    [TestMethod]
+    public void IsSystemLongPathEnabled_ReaderThrows_ReturnsFalse()
+    {
+        // Registry access can throw (security/IO); the helper must swallow it and report "disabled".
+        Assert.IsFalse(LongPathHelper.IsSystemLongPathEnabled(
+            () => throw new UnauthorizedAccessException("registry access denied")));
+    }
+
+    [TestMethod]
+    public void IsSystemLongPathEnabled_RealRegistry_IsDeterministicAndDoesNotThrow()
+    {
+        // Covers the no-arg production overload and the real HKLM reader. Contract: never throws, and
+        // two consecutive reads of an unchanged machine state must agree (rules out a nondeterministic
+        // or exception-leaking implementation).
+        var first = LongPathHelper.IsSystemLongPathEnabled();
+        var second = LongPathHelper.IsSystemLongPathEnabled();
+        Assert.AreEqual(first, second);
     }
 
     #endregion

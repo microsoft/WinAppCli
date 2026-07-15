@@ -99,12 +99,6 @@ public class ProgramMainTests
     private string? _savedUpdateCheck;
     private string? _savedCaller;
 
-    private static readonly string[] CiVarNames =
-    [
-        "CI", "GITHUB_ACTIONS", "TF_BUILD", "APPVEYOR", "TRAVIS", "CIRCLECI",
-        "TEAMCITY_VERSION", "JB_SPACE_API_URL",
-        "CODEBUILD_BUILD_ID", "AWS_REGION", "BUILD_ID", "BUILD_URL", "PROJECT_ID"
-    ];
     private Dictionary<string, string?> _savedCiVars = [];
 
     [TestInitialize]
@@ -118,12 +112,12 @@ public class ProgramMainTests
         _savedCacheDir = Environment.GetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY");
         _savedUpdateCheck = Environment.GetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK");
         _savedCaller = Environment.GetEnvironmentVariable("WINAPP_CLI_CALLER");
-        _savedCiVars = CiVarNames.ToDictionary(name => name, name => Environment.GetEnvironmentVariable(name));
+        _savedCiVars = ProgramMainTestHarness.CiVarNames.ToDictionary(name => name, name => Environment.GetEnvironmentVariable(name));
 
         Environment.SetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY", _tempCacheDir);
         Environment.SetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK", "0");
         Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", null);
-        foreach (var name in CiVarNames)
+        foreach (var name in ProgramMainTestHarness.CiVarNames)
         {
             Environment.SetEnvironmentVariable(name, null);
         }
@@ -143,36 +137,10 @@ public class ProgramMainTests
         try { Directory.Delete(_tempCacheDir, recursive: true); } catch { /* best effort */ }
     }
 
-    private static async Task<(string Stdout, string Stderr, int ExitCode)> InvokeProgramAsync(string[] args)
-    {
-        var originalOut = Console.Out;
-        var originalErr = Console.Error;
-
-        // Writers are intentionally not disposed: Spectre.Console's static AnsiConsole may reference
-        // them after Main returns.
-        var stdoutWriter = new StringWriter();
-        var stderrWriter = new StringWriter();
-
-        try
-        {
-            Console.SetOut(stdoutWriter);
-            Console.SetError(stderrWriter);
-
-            var exitCode = await Program.Main(args);
-
-            return (stdoutWriter.ToString(), stderrWriter.ToString(), exitCode);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalErr);
-        }
-    }
-
     [TestMethod]
     public async Task Main_NoArguments_ShowsBannerAndHelp_ReturnsZero()
     {
-        var (stdout, _, exitCode) = await InvokeProgramAsync([]);
+        var (stdout, _, exitCode) = await ProgramMainTestHarness.InvokeProgramAsync([]);
 
         Assert.AreEqual(0, exitCode);
         Assert.IsTrue(stdout.Contains("Windows App Development CLI", StringComparison.Ordinal),
@@ -182,7 +150,7 @@ public class ProgramMainTests
     [TestMethod]
     public async Task Main_SingleDashLongOptionTypo_PrintsSuggestion_ReturnsOne()
     {
-        var (_, stderr, exitCode) = await InvokeProgramAsync(["ui", "inspect", "-app", "some-app"]);
+        var (_, stderr, exitCode) = await ProgramMainTestHarness.InvokeProgramAsync(["ui", "inspect", "-app", "some-app"]);
 
         Assert.AreEqual(1, exitCode);
         Assert.IsTrue(stderr.Contains("Did you mean", StringComparison.Ordinal),
@@ -193,7 +161,7 @@ public class ProgramMainTests
     [TestMethod]
     public async Task Main_ConflictingLoggingFlags_PrintsError_ReturnsOne()
     {
-        var (_, stderr, exitCode) = await InvokeProgramAsync(["--quiet", "--verbose"]);
+        var (_, stderr, exitCode) = await ProgramMainTestHarness.InvokeProgramAsync(["--quiet", "--verbose"]);
 
         Assert.AreEqual(1, exitCode);
         Assert.IsTrue(stderr.Contains("Cannot specify both --quiet and --verbose options together.", StringComparison.Ordinal),
@@ -203,7 +171,7 @@ public class ProgramMainTests
     [TestMethod]
     public async Task Main_CliSchemaWithCaller_SetsCallerEnvVarAndReturnsZero()
     {
-        var (stdout, _, exitCode) = await InvokeProgramAsync(["--cli-schema", "--caller", "test-caller"]);
+        var (stdout, _, exitCode) = await ProgramMainTestHarness.InvokeProgramAsync(["--cli-schema", "--caller", "test-caller"]);
 
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual("test-caller", Environment.GetEnvironmentVariable("WINAPP_CLI_CALLER"),
@@ -217,7 +185,7 @@ public class ProgramMainTests
     {
         // A bare unknown command produces parse errors but is not a single-dash typo, so the typo
         // shortcut is skipped and the parsed args flow into the normal invocation path.
-        var (_, stderr, exitCode) = await InvokeProgramAsync(["this-is-not-a-real-command"]);
+        var (_, stderr, exitCode) = await ProgramMainTestHarness.InvokeProgramAsync(["this-is-not-a-real-command"]);
 
         Assert.AreNotEqual(0, exitCode, "An unknown command must not succeed.");
         Assert.IsFalse(stderr.Contains("Did you mean", StringComparison.Ordinal),

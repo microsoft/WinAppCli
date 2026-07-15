@@ -19,18 +19,38 @@ internal static class LongPathHelper
     /// Checks whether the system-level long path support is enabled via the
     /// <c>HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled</c> registry key.
     /// </summary>
-    internal static bool IsSystemLongPathEnabled()
+    internal static bool IsSystemLongPathEnabled() => IsSystemLongPathEnabled(ReadLongPathsEnabledValue);
+
+    /// <summary>
+    /// Core of <see cref="IsSystemLongPathEnabled()"/> with the registry read injected as
+    /// <paramref name="readLongPathsEnabledValue"/> (returning the raw <c>LongPathsEnabled</c> value,
+    /// or <c>null</c> when the key or value is absent). Long path support counts as enabled only when
+    /// the value is the integer <c>1</c>; any other value, an absent value, or a read failure yields
+    /// <c>false</c>. The seam lets unit tests drive every branch without depending on the machine's
+    /// registry state.
+    /// </summary>
+    internal static bool IsSystemLongPathEnabled(Func<object?> readLongPathsEnabledValue)
     {
         try
         {
-            using var hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
-            using var key = hklm.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\FileSystem");
-            return key?.GetValue("LongPathsEnabled") is int value && value == 1;
+            return readLongPathsEnabledValue() is int value && value == 1;
         }
         catch
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Reads the raw <c>LongPathsEnabled</c> value from HKLM, or returns <c>null</c> when the
+    /// <c>FileSystem</c> key or the value is absent. This is the production reader injected into
+    /// <see cref="IsSystemLongPathEnabled(Func{object})"/>.
+    /// </summary>
+    private static object? ReadLongPathsEnabledValue()
+    {
+        using var hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+        using var key = hklm.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\FileSystem");
+        return key?.GetValue("LongPathsEnabled");
     }
 
     /// <summary>
@@ -225,6 +245,9 @@ internal static class LongPathHelper
             fixed (char* pBuffer = buffer)
             {
                 var result = PInvoke.GetShortPathName(pInput, new Windows.Win32.Foundation.PWSTR(pBuffer), bufferSize);
+                // Honest-uncovered native guard: the fill call only fails here if GetShortPathName
+                // succeeded sizing (non-zero buffer) but then returned 0 — an inconsistent native
+                // failure not deterministically reproducible from a unit test. Kept for safety.
                 if (result == 0)
                 {
                     return null;
