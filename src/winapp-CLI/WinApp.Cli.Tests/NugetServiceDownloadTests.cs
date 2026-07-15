@@ -4,6 +4,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using NuGet.Versioning;
 using WinApp.Cli.Services;
 using static WinApp.Cli.Tests.NugetFeedTestHelpers;
 
@@ -393,12 +394,76 @@ public class NugetServiceDownloadTests : BaseCommandTests
         }
     }
 
+    [TestMethod]
+    public async Task GetLatestVersionAsync_RegistrationVersionedOnlyFeed_ExcludesUnlistedFromLatest()
+    {
+        // A private v3 feed can advertise its registration resource under ONLY the
+        // RegistrationsBaseUrl/Versioned service type (the FIRST entry in NuGet's
+        // ServiceTypes.RegistrationsBaseUrl). Such a feed IS registration-backed, so "latest" resolution must
+        // go through the registration/metadata resource and EXCLUDE unlisted versions — not fall back to the
+        // flat container (which carries no listed flag and would pick the unlisted 2.0.0 as latest). This
+        // guards against classifying a Versioned-only registration feed as flat-container-only.
+        NugetSourceProvider.EnsureCredentialService();
+
+        // 2.0.0 is UNLISTED; 1.0.0 is listed. The registration path must pick 1.0.0 as latest.
+        using var feed = new BasicAuthNuGetFeed(
+            "winapp-user",
+            "s3cret-token!",
+            advertiseRegistration: true,
+            ("Reg.Pkg", "1.0.0", true),
+            ("Reg.Pkg", "2.0.0", false));
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            WriteNuGetConfig(root, $"""
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                  <packageSources>
+                    <clear />
+                    <add key="private" value="{feed.IndexUrl}" />
+                  </packageSources>
+                  <disabledPackageSources>
+                    <clear />
+                  </disabledPackageSources>
+                  <packageSourceCredentials>
+                    <private>
+                      <add key="Username" value="{feed.Username}" />
+                      <add key="ClearTextPassword" value="{feed.Password}" />
+                    </private>
+                  </packageSourceCredentials>
+                  <packageSourceMapping>
+                    <clear />
+                    <packageSource key="private">
+                      <package pattern="*" />
+                    </packageSource>
+                  </packageSourceMapping>
+                </configuration>
+                """);
+
+            var service = CreateServiceRootedAt(root);
+
+            var latest = await service.GetLatestVersionAsync("Reg.Pkg", SdkInstallMode.Stable, TestContext.CancellationToken);
+
+            Assert.AreEqual("1.0.0", latest, "A RegistrationsBaseUrl/Versioned feed must resolve latest via the registration/metadata resource and exclude the unlisted 2.0.0 — not fall back to the flat container.");
+            Assert.IsTrue(feed.ReceivedAuthenticatedRequest, "The registration feed should have served the request carrying the configured credentials.");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
     /// <summary>
-    /// A minimal in-process NuGet v3 flat-container feed that requires HTTP Basic authentication. It serves
-    /// only what <see cref="NugetPackageDownloader"/> needs to download a leaf package — the service index,
-    /// the flat-container versions list, and the .nupkg content — answering any unauthenticated request
-    /// with <c>401</c> + <c>WWW-Authenticate: Basic</c> so the standard 401→retry-with-credentials flow is
-    /// exercised. Bound to <c>127.0.0.1</c> on an ephemeral port; no admin URL ACL is required.
+    /// A minimal in-process NuGet v3 feed that requires HTTP Basic authentication. By default it advertises
+    /// only a flat container (<c>PackageBaseAddress/3.0.0</c>) and serves what
+    /// <see cref="NugetPackageDownloader"/> needs to download a leaf package — the service index, the
+    /// flat-container versions list, and the .nupkg content. When constructed with
+    /// <c>advertiseRegistration: true</c> it ALSO advertises a <c>RegistrationsBaseUrl/Versioned</c> resource
+    /// and serves a registration index that honors each version's listed flag, so a test can verify that a feed
+    /// whose only registration service type is <c>.../Versioned</c> is treated as registration-backed (and its
+    /// unlisted versions excluded from "latest"). Any unauthenticated request is answered with <c>401</c> +
+    /// <c>WWW-Authenticate: Basic</c> so the standard 401→retry-with-credentials flow is exercised. Bound to
+    /// <c>127.0.0.1</c> on an ephemeral port; no admin URL ACL is required.
     /// </summary>
     private sealed class BasicAuthNuGetFeed : IDisposable
     {
@@ -408,6 +473,8 @@ public class NugetServiceDownloadTests : BaseCommandTests
         private readonly string _expectedAuthorization;
         private readonly Dictionary<string, byte[]> _nupkgsByPath = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, string[]> _versionsById = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, bool> _listedByPath = new(StringComparer.OrdinalIgnoreCase);
+        private readonly bool _advertiseRegistration;
 
         public string Username { get; }
 
@@ -422,12 +489,22 @@ public class NugetServiceDownloadTests : BaseCommandTests
         public bool ReceivedAuthenticatedRequest { get; private set; }
 
         public BasicAuthNuGetFeed(string username, string password, params (string Id, string Version)[] packages)
+            : this(username, password, advertiseRegistration: false, [.. packages.Select(p => (p.Id, p.Version, Listed: true))])
+        {
+        }
+
+        // Extended shape: optionally advertise a RegistrationsBaseUrl/Versioned resource and honor a per-version
+        // listed flag, so a test can exercise a registration-backed feed whose ONLY registration service type is
+        // ".../Versioned" (the first entry in NuGet's ServiceTypes.RegistrationsBaseUrl) and verify unlisted
+        // versions are excluded from "latest" resolution.
+        public BasicAuthNuGetFeed(string username, string password, bool advertiseRegistration, params (string Id, string Version, bool Listed)[] packages)
         {
             Username = username;
             Password = password;
+            _advertiseRegistration = advertiseRegistration;
             _expectedAuthorization = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username}:{password}"));
 
-            foreach (var (id, version) in packages)
+            foreach (var (id, version, listed) in packages)
             {
                 var lowerId = id.ToLowerInvariant();
                 var lowerVersion = version.ToLowerInvariant();
@@ -435,6 +512,7 @@ public class NugetServiceDownloadTests : BaseCommandTests
                 _versionsById[lowerId] = _versionsById.TryGetValue(lowerId, out var existing)
                     ? [.. existing, version]
                     : [version];
+                _listedByPath[$"{lowerId}/{lowerVersion}"] = listed;
             }
 
             (_listener, BaseUrl) = StartListener();
@@ -536,8 +614,49 @@ public class NugetServiceDownloadTests : BaseCommandTests
         {
             if (path == "v3/index.json")
             {
-                var json = $$"""{"version":"3.0.0","resources":[{"@id":"{{BaseUrl}}flat/","@type":"PackageBaseAddress/3.0.0"}]}""";
+                var resources = new List<string>
+                {
+                    $$"""{"@id":"{{BaseUrl}}flat/","@type":"PackageBaseAddress/3.0.0"}""",
+                };
+
+                // Optionally advertise a registration resource whose ONLY service type is
+                // RegistrationsBaseUrl/Versioned — the first entry in NuGet's ServiceTypes.RegistrationsBaseUrl
+                // and the one a hand-maintained subset is most likely to omit.
+                if (_advertiseRegistration)
+                {
+                    resources.Add($$"""{"@id":"{{BaseUrl}}reg/","@type":"RegistrationsBaseUrl/Versioned"}""");
+                }
+
+                var json = $$"""{"version":"3.0.0","resources":[{{string.Join(",", resources)}}]}""";
                 return (Encoding.UTF8.GetBytes(json), "application/json");
+            }
+
+            if (_advertiseRegistration
+                && path.StartsWith("reg/", StringComparison.Ordinal)
+                && path.EndsWith("/index.json", StringComparison.Ordinal))
+            {
+                var regId = path["reg/".Length..^"/index.json".Length];
+                if (_versionsById.TryGetValue(regId, out var regVersions))
+                {
+                    // Serve a single inline registration page (so no separate page fetch is needed) with one
+                    // leaf per version, each carrying the listed flag the registration API exposes.
+                    var ordered = regVersions.OrderBy(NuGetVersion.Parse).ToArray();
+                    var leaves = ordered.Select(v =>
+                    {
+                        var listed = !_listedByPath.TryGetValue($"{regId}/{v.ToLowerInvariant()}", out var l) || l;
+                        // NuGet treats a registration entry as unlisted when its published year is <= 1900 (the
+                        // canonical sentinel); set the explicit "listed" flag too so the filter fires regardless
+                        // of which signal the client honors.
+                        var published = listed ? "2020-01-01T00:00:00+00:00" : "1900-01-01T00:00:00+00:00";
+                        // $$$ raw string (triple-brace interpolation) so the two trailing literal '}}' that close
+                        // catalogEntry + leaf are unambiguous.
+                        return $$$"""
+                            {"@id":"{{{BaseUrl}}}reg/{{{regId}}}/{{{v}}}.json","packageContent":"{{{BaseUrl}}}flat/{{{regId}}}/{{{v}}}/{{{regId}}}.{{{v}}}.nupkg","catalogEntry":{"@id":"{{{BaseUrl}}}catalog/{{{regId}}}/{{{v}}}.json","id":"{{{regId}}}","version":"{{{v}}}","listed":{{{(listed ? "true" : "false")}}},"published":"{{{published}}}"}}
+                            """;
+                    });
+                    var json = $$"""{"count":1,"items":[{"@id":"{{BaseUrl}}reg/{{regId}}/page.json","count":{{ordered.Length}},"lower":"{{ordered[0]}}","upper":"{{ordered[^1]}}","items":[{{string.Join(",", leaves)}}]}]}""";
+                    return (Encoding.UTF8.GetBytes(json), "application/json");
+                }
             }
 
             if (!path.StartsWith("flat/", StringComparison.Ordinal))

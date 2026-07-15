@@ -577,21 +577,6 @@ internal class NugetService : INugetService
     }
 
     /// <summary>
-    /// The v3 service-index resource types that expose a package registration (metadata) endpoint. A source
-    /// that advertises none of these has no registration resource, so its <see cref="PackageMetadataResource"/>
-    /// is non-functional (it throws on query) and versions must be read from the flat container instead. This
-    /// mirrors NuGet's own (internal) registration service-type list.
-    /// </summary>
-    private static readonly string[] RegistrationServiceTypes =
-    [
-        "RegistrationsBaseUrl/3.6.0",
-        "RegistrationsBaseUrl/3.4.0",
-        "RegistrationsBaseUrl/3.0.0-rc",
-        "RegistrationsBaseUrl/3.0.0-beta",
-        "RegistrationsBaseUrl",
-    ];
-
-    /// <summary>
     /// Enumerates a single source's versions of a package. Prefers the registration-backed
     /// <see cref="PackageMetadataResource"/> so <paramref name="includeUnlisted"/> is honored (the "latest"
     /// path relies on excluding unlisted versions, the dependency-range path on including them). A v3 HTTP
@@ -615,9 +600,13 @@ internal class NugetService : INugetService
         // Only a v3 HTTP source has a service index; when it advertises no registration resource its
         // PackageMetadataResource is non-functional (GetMetadataAsync throws), so route it to the flat
         // container. A null service index means a local/v2 feed, whose metadata resource works — keep it.
+        // Probe with NuGet's own public, ordered registration service-type list so every registration shape —
+        // including RegistrationsBaseUrl/Versioned and any future types NuGet adds — is recognized. A
+        // hand-maintained subset could omit an advertised type (e.g. .../Versioned), misclassify a
+        // registration-backed feed as flat-container-only, and let an unlisted version be picked as latest.
         var serviceIndex = await repo.GetResourceAsync<ServiceIndexResourceV3>(cancellationToken);
         var registrationUnavailable = serviceIndex is not null
-            && serviceIndex.GetServiceEntryUri(RegistrationServiceTypes) is null;
+            && serviceIndex.GetServiceEntryUri(ServiceTypes.RegistrationsBaseUrl) is null;
 
         if (!registrationUnavailable)
         {
