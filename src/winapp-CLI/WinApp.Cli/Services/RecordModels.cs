@@ -30,6 +30,6 @@ internal sealed class RecordCaptureResult
     public int Height { get; init; }
     public long FileSize { get; init; }
 
-    /// <summary>Capture mode actually used: "wgc", "screen", "screen-fallback" (WGC init failed, silently fell back to screen DC), or "printwindow".</summary>
+    /// <summary>Capture mode actually used: "wgc" (Windows Graphics Capture), "screen" (explicit --capture-screen), or "printwindow".</summary>
     public string Mode { get; init; } = "wgc";
 }
