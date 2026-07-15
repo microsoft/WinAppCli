@@ -465,6 +465,24 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
+    public void ScreenRecord_MaxEdge_UsesDownscaledCaptureAllocation()
+    {
+        var (encW, encH, dispW, dispH) = UiAutomationService.ComputeTargetSize(7680, 2160, 1280);
+        var (_, _, fitW, fitH) = UiAutomationService.ComputeFittedContentRect(
+            cropW: 7680,
+            cropH: 2160,
+            encoderWidth: encW,
+            encoderHeight: encH,
+            displayWidth: dispW,
+            displayHeight: dispH);
+
+        Assert.IsTrue(fitW <= 1280, "screen capture readback width must honor --max-edge before allocating pixels");
+        Assert.IsTrue(fitH <= 1280, "screen capture readback height must honor --max-edge before allocating pixels");
+        Assert.IsTrue(fitW * fitH < 7680 * 2160,
+            "screen capture readback must be bounded by the downscaled frame rather than the native desktop frame");
+    }
+
+    [TestMethod]
     public void ComputeTargetSize_EvenDimensions_Always()
     {
         // Odd input values must always yield even encoder and display dimensions.

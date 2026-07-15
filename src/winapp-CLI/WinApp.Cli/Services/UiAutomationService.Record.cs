@@ -301,8 +301,7 @@ internal sealed partial class UiAutomationService
                     break;
                 }
 
-                byte[]? source;
-                int sw, sh;
+                byte[] frame;
                 long sourceVersion = -1;
                 if (useWgc)
                 {
@@ -312,31 +311,38 @@ internal sealed partial class UiAutomationService
                         await Task.Delay(5, ct).ConfigureAwait(false);
                         continue;
                     }
-                    (source, sw, sh, sourceVersion) = latest.Value;
+                    var (source, sw, sh, version) = latest.Value;
+                    sourceVersion = version;
+                    frame = ProcessFrame(source, sw, sh, cropX, cropY,
+                        // H2: for whole-window WGC, use the CURRENT frame's dimensions as the crop source
+                        // so that a resized window delivers its full content rather than the stale initial
+                        // sub-rect. Element-crop captures use the fixed cropW/cropH (element position).
+                        isWholeWindowWgc ? sw : cropW,
+                        isWholeWindowWgc ? sh : cropH,
+                        encoderW, encoderH, displayW, displayH);
                 }
                 else if (useScreen)
                 {
-                    source = CaptureFromScreen(captureOriginLeft, captureOriginTop, srcWidth, srcHeight);
-                    sw = srcWidth;
-                    sh = srcHeight;
+                    frame = CaptureScreenFrame(
+                        captureOriginLeft + cropX,
+                        captureOriginTop + cropY,
+                        cropW,
+                        cropH,
+                        encoderW,
+                        encoderH,
+                        displayW,
+                        displayH);
                 }
                 else
                 {
                     // PrintWindow fallback (WGC unsupported, not --capture-screen): render the window
                     // into an offscreen DC. Unlike BitBlt-from-screen this excludes occluding windows,
                     // matching `ui screenshot`. captureOrigin is the window's top-left so crop math holds.
-                    source = CaptureFromWindowWithBlankRetry(hwnd, srcWidth, srcHeight);
-                    sw = srcWidth;
-                    sh = srcHeight;
+                    var source = CaptureFromWindowWithBlankRetry(hwnd, srcWidth, srcHeight);
+                    frame = ProcessFrame(source, srcWidth, srcHeight, cropX, cropY, cropW, cropH,
+                        encoderW, encoderH, displayW, displayH);
                 }
 
-                var frame = ProcessFrame(source, sw, sh, cropX, cropY,
-                    // H2: for whole-window WGC, use the CURRENT frame's dimensions as the crop source
-                    // so that a resized window delivers its full content rather than the stale initial
-                    // sub-rect. Element-crop captures use the fixed cropW/cropH (element position).
-                    isWholeWindowWgc ? sw : cropW,
-                    isWholeWindowWgc ? sh : cropH,
-                    encoderW, encoderH, displayW, displayH);
                 encoder.WriteFrame(frame, frameIndex * frameDurationHns, frameDurationHns);
                 if (useWgc)
                 {
@@ -632,11 +638,8 @@ internal sealed partial class UiAutomationService
             // Black letterbox background (covers padding regions when encoderW > displayW or encoderH > displayH).
             canvas.Clear(SKColors.Black);
 
-            var scale = Math.Min(displayWidth / (double)cropW, displayHeight / (double)cropH);
-            var fitW = Math.Clamp((int)Math.Round(cropW * scale), 1, displayWidth);
-            var fitH = Math.Clamp((int)Math.Round(cropH * scale), 1, displayHeight);
-            var offsetX = (encoderWidth - fitW) / 2;
-            var offsetY = (encoderHeight - fitH) / 2;
+            var (offsetX, offsetY, fitW, fitH) = ComputeFittedContentRect(
+                cropW, cropH, encoderWidth, encoderHeight, displayWidth, displayHeight);
 
             var srcRect = SKRect.Create(cropX, cropY, cropW, cropH);
             var dstRect = SKRect.Create(offsetX, offsetY, fitW, fitH);
@@ -647,6 +650,17 @@ internal sealed partial class UiAutomationService
         var output = new byte[dstInfo.BytesSize];
         Marshal.Copy(dstBitmap.GetPixels(), output, 0, output.Length);
         return output;
+    }
+
+    internal static (int OffsetX, int OffsetY, int FitW, int FitH) ComputeFittedContentRect(
+        int cropW, int cropH, int encoderWidth, int encoderHeight, int displayWidth, int displayHeight)
+    {
+        var scale = Math.Min(displayWidth / (double)cropW, displayHeight / (double)cropH);
+        var fitW = Math.Clamp((int)Math.Round(cropW * scale), 1, displayWidth);
+        var fitH = Math.Clamp((int)Math.Round(cropH * scale), 1, displayHeight);
+        var offsetX = (encoderWidth - fitW) / 2;
+        var offsetY = (encoderHeight - fitH) / 2;
+        return (offsetX, offsetY, fitW, fitH);
     }
 
     /// <summary>

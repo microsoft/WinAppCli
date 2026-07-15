@@ -65,6 +65,8 @@ GetForegroundWindow
 GetWindowRect
 PrintWindow
 BitBlt
+StretchBlt
+SetStretchBltMode
 GetDC
 ReleaseDC
 CreateCompatibleDC
