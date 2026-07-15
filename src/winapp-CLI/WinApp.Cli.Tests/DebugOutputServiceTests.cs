@@ -1,7 +1,9 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Runtime.InteropServices;
 using WinApp.Cli.Services;
+using Windows.Win32.System.Diagnostics.Debug;
 
 namespace WinApp.Cli.Tests;
 
@@ -133,5 +135,56 @@ public sealed class DebugOutputServiceTests
     {
         // A .dll trace whose module is not in the framework allow-list is treated as app output.
         Assert.IsFalse(DebugOutputService.IsFrameworkDllTrace("Contoso.Widgets.dll!DoWork"));
+    }
+
+    // ---- M2: pure decisions previously declared uncoverable ----
+
+    [TestMethod]
+    public void GetContextFlags_MapsArchitectureToContextFlags()
+    {
+        // Both arms of the CONTEXT-flags switch are pure decisions, coverable off-host (the Arm64 arm is
+        // unreachable at runtime on this x64 host but the mapping itself is not architecture-gated).
+        Assert.AreEqual(CONTEXT_FLAGS.CONTEXT_FULL_ARM64, DebugOutputService.GetContextFlags(Architecture.Arm64));
+        Assert.AreEqual(CONTEXT_FLAGS.CONTEXT_FULL_AMD64, DebugOutputService.GetContextFlags(Architecture.X64));
+        Assert.AreEqual(CONTEXT_FLAGS.CONTEXT_FULL_AMD64, DebugOutputService.GetContextFlags(Architecture.X86));
+        Assert.AreEqual(CONTEXT_FLAGS.CONTEXT_FULL_AMD64, DebugOutputService.GetContextFlags((Architecture)999));
+    }
+
+    [TestMethod]
+    public void ReadExceptionParameters_ZeroParameters_ReturnsNull()
+    {
+        // NumberParameters == 0 -> the early-return null path (no allocation).
+        var record = new EXCEPTION_RECORD { NumberParameters = 0 };
+        Assert.IsNull(DebugOutputService.ReadExceptionParameters(record));
+    }
+
+    [TestMethod]
+    public void ReadExceptionParameters_CopiesDefinedParameters()
+    {
+        // NumberParameters > 0 -> the defined leading elements are copied verbatim (e.g. a stowed
+        // exception's array pointer + count), capped at the ExceptionInformation length.
+        var record = new EXCEPTION_RECORD { NumberParameters = 2 };
+        record.ExceptionInformation._0 = (nuint)0x1111;
+        record.ExceptionInformation._1 = (nuint)0x2222;
+
+        var result = DebugOutputService.ReadExceptionParameters(record);
+
+        Assert.IsNotNull(result);
+        Assert.AreEqual(2, result!.Length);
+        Assert.AreEqual((nuint)0x1111, result[0]);
+        Assert.AreEqual((nuint)0x2222, result[1]);
+    }
+
+    [TestMethod]
+    public void ReadExceptionParameters_CountClampedToInformationLength()
+    {
+        // A bogus NumberParameters larger than the fixed ExceptionInformation buffer must be clamped to
+        // the buffer length (15) rather than reading out of bounds.
+        var record = new EXCEPTION_RECORD { NumberParameters = 99 };
+
+        var result = DebugOutputService.ReadExceptionParameters(record);
+
+        Assert.IsNotNull(result);
+        Assert.AreEqual(15, result!.Length);
     }
 }

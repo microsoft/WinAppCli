@@ -12,6 +12,20 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
 
+/// <remarks>
+/// <para><b>Documented coverage ceiling (~97% Debug line coverage).</b> The acquisition orchestration
+/// (<c>TryAcquireCoreAsync</c>: range-read, MSIX extraction, signature + engine-compatibility verification,
+/// ret/failure paths) is covered hermetically via the injected reader and verifier seams. Two residual
+/// lines are pure OS/network boundaries left honestly uncovered rather than exercised against real
+/// infrastructure:</para>
+/// <list type="bullet">
+///   <item>50 — the <c>HostArchitectureProvider</c> seam's default lambda
+///   (<c>() =&gt; RuntimeInformation.ProcessArchitecture</c>): the OS boundary, overridden in every test.</item>
+///   <item>68-70 — the real <c>HttpClient</c> / <c>HttpRangeReader</c> wiring in the public
+///   <c>TryAcquireAsync</c> wrapper: the live-network entry point that constructs the reader passed into the
+///   fully-tested <c>TryAcquireCoreAsync</c>.</item>
+/// </list>
+/// </remarks>
 [TestClass]
 [DoNotParallelize] // mutates static verification/architecture seams on WinDbgJsProviderAcquirer
 public class WinDbgJsProviderAcquirerTests

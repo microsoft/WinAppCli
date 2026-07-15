@@ -15,20 +15,16 @@ namespace WinApp.Cli.Tests;
 /// Marked <c>[DoNotParallelize]</c> because it redirects the process-wide console streams.
 /// </summary>
 /// <remarks>
-/// <para><b>Documented coverage ceiling (~80% Debug line coverage).</b> The <c>Run</c> argument parser is
-/// fully covered; the remaining uncovered lines live inside <c>RunDbgEngExtension</c> and are only
-/// reachable with a successfully-initialized engine plus either a live symbol server or a specific engine
-/// HRESULT failure, so per policy they are left honestly uncovered rather than forced with flaky tests or
-/// excluded. Current uncovered ranges and why:</para>
+/// <para><b>Documented coverage ceiling (~97% Debug line coverage).</b> The <c>Run</c> argument parser, the
+/// entire DbgEng command sequence (<c>RunTriageSequence</c> — symbol-server configuration, exception-context
+/// switch, provider load, script load, and the <c>!xamlstowed</c>/<c>!xamltriage</c> commands, including the
+/// provider-load-failure early-return), and the <c>RunDbgEngExtension</c> engine boundary
+/// (<c>IDebugClient.Create</c>/<c>OpenDumpFile</c> + output-holder wiring, driven by the real-dump tests) are
+/// all covered. The only residual uncovered lines are:</para>
 /// <list type="bullet">
-///   <item>24, 96, 101-106 — the <c>useSymbols</c> block (symbol-path setup and <c>.reload</c> against the
-///   live <c>msdl.microsoft.com</c> symbol server): every deterministic test passes <c>useSymbols:false</c>
-///   to stay offline, so this network branch never runs (excluded by policy).</item>
-///   <item>86-87 — <c>WaitForEvent</c> returning a non-success HRESULT: a defensive engine guard.</item>
-///   <item>117-119 — the <c>.load</c>-failure branch: DbgEng reports success for <c>.load</c> even against a
-///   bogus provider path on this host, so the failure return is not deterministically drivable (the
-///   <c>RunDbgEngExtension_InvalidJsProviderFile_ReportsLoadFailure</c> test goes Inconclusive rather than
-///   fabricating the failure).</item>
+///   <item>86-87 — <c>WaitForEvent</c> returning a non-success HRESULT: a defensive engine guard that cannot
+///   be provoked once <c>OpenDumpFile</c> has succeeded, without corrupting the engine state
+///   (TOCTOU/flaky). Left honestly uncovered per policy rather than forced or excluded.</item>
 /// </list>
 /// </remarks>
 [TestClass]
@@ -293,5 +289,85 @@ public sealed class XamlTriageRunnerTests
         {
             try { File.Delete(dump); } catch { /* best effort */ }
         }
+    }
+
+    // ---- M1: RunTriageSequence — the DbgEng command sequence, unit-testable without a live engine ----
+    // The command emission, ordering, symbol-configuration block, and provider-load-failure early-return
+    // are pure decisions over the injected execute/getOutput delegates, so they are covered here offline.
+
+    [TestMethod]
+    public void RunTriageSequence_NoSymbols_EmitsCoreCommandSequenceInOrder()
+    {
+        var commands = new List<string>();
+        var result = XamlTriageRunner.RunTriageSequence(
+            jsProviderPath: @"C:\bin\JsProvider.dll",
+            extPath: @"C:\bin\ext.js",
+            useSymbols: false,
+            execute: cmd => { commands.Add(cmd); return 0; },
+            getOutput: () => "ENGINE-OUTPUT");
+
+        // useSymbols:false emits no symbol-server configuration (stays offline).
+        Assert.IsFalse(commands.Any(c => c.StartsWith(".sympath", StringComparison.Ordinal)));
+        Assert.IsFalse(commands.Any(c => c.StartsWith(".reload", StringComparison.Ordinal)));
+
+        // The exact command set, in order, with backslashes normalized to forward slashes for the parser.
+        var expected = new[]
+        {
+            ".ecxr",
+            ".load \"C:/bin/JsProvider.dll\"",
+            ".scriptload \"C:/bin/ext.js\"",
+            "!xamlstowed",
+            "!xamltriage",
+        };
+        CollectionAssert.AreEqual(expected, commands);
+        Assert.AreEqual("ENGINE-OUTPUT", result);
+    }
+
+    [TestMethod]
+    public void RunTriageSequence_WithSymbols_EmitsSymbolConfigurationBeforeContextSwitch()
+    {
+        var commands = new List<string>();
+        var result = XamlTriageRunner.RunTriageSequence(
+            @"C:\bin\JsProvider.dll",
+            @"C:\bin\ext.js",
+            useSymbols: true,
+            execute: cmd => { commands.Add(cmd); return 0; },
+            getOutput: () => "OUT");
+
+        Assert.IsTrue(commands[0].StartsWith(".sympath srv*", StringComparison.Ordinal));
+        StringAssert.Contains(commands[0], "https://msdl.microsoft.com/download/symbols");
+        Assert.AreEqual(".reload /f combase.dll", commands[1]);
+        Assert.AreEqual(".reload /f Microsoft.UI.Xaml.dll", commands[2]);
+        // Symbol configuration must precede the exception-context switch and provider load.
+        Assert.IsTrue(
+            commands.IndexOf(".ecxr") > commands.FindIndex(c => c.StartsWith(".sympath", StringComparison.Ordinal)),
+            "Symbol path/reload must be configured before .ecxr.");
+        Assert.AreEqual("OUT", result);
+    }
+
+    [TestMethod]
+    public void RunTriageSequence_LoadProviderFails_ReturnsFailureMessageAndStops()
+    {
+        var commands = new List<string>();
+        var result = XamlTriageRunner.RunTriageSequence(
+            @"C:\bin\JsProvider.dll",
+            @"C:\bin\ext.js",
+            useSymbols: false,
+            execute: cmd =>
+            {
+                commands.Add(cmd);
+                // Fail specifically on the provider .load, as a live engine would for an unloadable DLL.
+                return cmd.StartsWith(".load ", StringComparison.Ordinal) ? unchecked((int)0x80004005) : 0;
+            },
+            getOutput: () => "PARTIAL-OUTPUT");
+
+        StringAssert.Contains(result, "could not load the JavaScript provider");
+        StringAssert.Contains(result, @"C:\bin\JsProvider.dll"); // original (un-slashed) path in the message
+        StringAssert.Contains(result, "0x80004005");
+        StringAssert.Contains(result, "PARTIAL-OUTPUT"); // captured engine output is prepended
+        // The triage commands after the failed .load must NOT run.
+        Assert.IsFalse(commands.Any(c => c.StartsWith(".scriptload", StringComparison.Ordinal)));
+        Assert.IsFalse(commands.Contains("!xamlstowed"));
+        Assert.IsFalse(commands.Contains("!xamltriage"));
     }
 }

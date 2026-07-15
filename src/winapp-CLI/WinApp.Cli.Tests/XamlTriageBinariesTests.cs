@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Runtime.InteropServices;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -14,21 +15,19 @@ namespace WinApp.Cli.Tests;
 /// <see cref="XamlTriageBinaries.EnvOverride"/> environment variable.
 /// </summary>
 /// <remarks>
-/// <para><b>Documented coverage ceiling (~94% Debug line coverage across the file).</b> The remaining
+/// <para><b>Documented coverage ceiling (~96% Debug line coverage across the file).</b> The remaining
 /// uncovered lines require a foreign CPU architecture, real network I/O, or a faulting file handle, none
 /// of which can be produced deterministically here; per policy they are left honestly uncovered rather
 /// than excluded. Current uncovered ranges and why:</para>
 /// <list type="bullet">
 ///   <item>69 — the <c>HttpGetAsync</c> seam's default body (the real <c>HttpClient.GetAsync</c>): the OS
 ///   network boundary, replaced by a stub in every test.</item>
-///   <item>107-109, 116-118 — the <c>Arm64</c>/<c>X86</c>/fallback arms of the <c>KitsArch</c> and
-///   <c>NuGetArch</c> switches: host-architecture paths, unreachable on an x64 host.</item>
-///   <item>285-287, 310-312 — the <c>TryGetProductVersion</c> and <c>IsUsablePeFile</c> catch blocks:
+///   <item>291-293, 316-318 — the <c>TryGetProductVersion</c> and <c>IsUsablePeFile</c> catch blocks:
 ///   reached only if reading an existing file throws (e.g. a locked handle); defensive, and forcing it
 ///   would be a TOCTOU/flaky test.</item>
-///   <item>392-394 — the successful <c>.nupkg</c> download-and-verify tail: needs a real package whose
+///   <item>398-400 — the successful <c>.nupkg</c> download-and-verify tail: needs a real package whose
 ///   bytes hash to the compiled-in pinned SHA-512, i.e. real network content.</item>
-///   <item>469-471 — the "downloaded version != pinned version" refusal in
+///   <item>475-477 — the "downloaded version != pinned version" refusal in
 ///   <c>TryMaterializePackageAsync</c>: a deliberate defense-in-depth security guard.
 ///   <c>ResolveDownloadVersionAsync</c> only ever returns the pinned version or <c>null</c>, so no caller
 ///   can currently trigger it; it is kept (not deleted) because it guards native code loaded into the
@@ -223,6 +222,29 @@ public class XamlTriageBinariesTests
     {
         Assert.IsFalse(string.IsNullOrWhiteSpace(XamlTriageBinaries.KitsArch));
         Assert.IsFalse(string.IsNullOrWhiteSpace(XamlTriageBinaries.NuGetArch));
+    }
+
+    [TestMethod]
+    [DataRow(Architecture.X64, "x64")]
+    [DataRow(Architecture.Arm64, "arm64")]
+    [DataRow(Architecture.X86, "x86")]
+    [DataRow((Architecture)999, "x64", DisplayName = "Unknown arch falls back to x64")]
+    public void KitsArchFor_MapsEveryArchitecture(Architecture arch, string expected)
+    {
+        // M3: the Windows Kits Debuggers folder-token switch is a pure decision, coverable off-host for
+        // every arm (including the Arm64/X86/fallback arms unreachable on this x64 host at runtime).
+        Assert.AreEqual(expected, XamlTriageBinaries.KitsArchFor(arch));
+    }
+
+    [TestMethod]
+    [DataRow(Architecture.X64, "amd64")]
+    [DataRow(Architecture.Arm64, "arm64")]
+    [DataRow(Architecture.X86, "x86")]
+    [DataRow((Architecture)999, "amd64", DisplayName = "Unknown arch falls back to amd64")]
+    public void NuGetArchFor_MapsEveryArchitecture(Architecture arch, string expected)
+    {
+        // M3: the NuGet debugging-package folder-token switch, covered for every arm off-host.
+        Assert.AreEqual(expected, XamlTriageBinaries.NuGetArchFor(arch));
     }
 
     [TestMethod]

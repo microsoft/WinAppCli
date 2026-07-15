@@ -478,10 +478,12 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
 
             if (deepest != null && deepestFrames != null && deepestFrames.Count > 100)
             {
-                var frameInfos = deepestFrames
-                    .Select(f => (Name: $"{f.Method!.Type?.Name}.{f.Method!.Name}", Source: pdbResolver.GetSourceLocation(f)))
-                    .ToList();
-                AppendStackOverflowSummary(deepest.OSThreadId, frameInfos, summary);
+                AppendStackOverflowSummary(
+                    deepest.OSThreadId,
+                    deepestFrames,
+                    f => $"{f.Method!.Type?.Name}.{f.Method!.Name}",
+                    f => pdbResolver.GetSourceLocation(f),
+                    summary);
             }
         }
 
@@ -520,11 +522,20 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
     }
 
     /// <summary>
-    /// Formats the "stack overflow (deep recursion)" summary from a thread's materialized frames,
-    /// collapsing runs of identical frames and capping the displayed count at 15. Behavior-preserving
-    /// extraction of the in-situ formatting so it is unit-testable without a live stack-overflow dump.
+    /// Formats the "stack overflow (deep recursion)" summary from a thread's frames, collapsing runs of
+    /// identical frames and capping the displayed count at 15. The frame name and source location are
+    /// resolved lazily — via <paramref name="nameSelector"/> and <paramref name="sourceResolver"/> — as
+    /// each frame is visited, so resolution stops once the 15-frame cap is reached rather than eagerly
+    /// resolving every frame of a (potentially many-thousand-frame) overflow. This matches the original
+    /// in-situ loop and keeps a corrupt frame beyond the cap from ever being touched. Generic over the
+    /// frame type so it is unit-testable without a live stack-overflow dump.
     /// </summary>
-    internal static void AppendStackOverflowSummary(ulong osThreadId, IReadOnlyList<(string Name, string? Source)> frames, StringBuilder summary)
+    internal static void AppendStackOverflowSummary<TFrame>(
+        ulong osThreadId,
+        IReadOnlyList<TFrame> frames,
+        Func<TFrame, string> nameSelector,
+        Func<TFrame, string?> sourceResolver,
+        StringBuilder summary)
     {
         summary.AppendLine("Exception: Stack Overflow (deep recursion detected)");
         summary.AppendLine($"Thread: {osThreadId} ({frames.Count} managed frames)");
@@ -534,14 +545,16 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
         var repeatCount = 0;
         var displayed = 0;
 
-        foreach (var (name, source) in frames)
+        foreach (var frame in frames)
         {
             if (displayed >= 15)
             {
                 break;
             }
 
-            var displayName = source != null ? $"{name} in {source}" : name;
+            var name = nameSelector(frame);
+            var sourceInfo = sourceResolver(frame);
+            var displayName = sourceInfo != null ? $"{name} in {sourceInfo}" : name;
 
             if (name == lastFrame)
             {
@@ -759,29 +772,52 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
     {
         // Extract unique module names from stack (e.g., "Microsoft_UI_Xaml" from "Microsoft_UI_Xaml+0x3e503")
         var modules = ParseStackModuleNames(stackOutput);
+        return DownloadSymbolsForModules(modules, name => GetModuleImagePath(name, control, client), cachePath);
+    }
 
+    /// <summary>
+    /// Asks the live DbgEng engine (<c>lmvm</c>) for a module's on-disk image path. This is the
+    /// native-engine boundary, kept separate from the offline-testable download/PE-parse core in
+    /// <see cref="DownloadSymbolsForModules"/>.
+    /// </summary>
+    private static string? GetModuleImagePath(string moduleName, IDebugControl control, IDebugClient client)
+    {
+        // Get module file path from DbgEng
+        var modOutput = new StringBuilder();
+        using (var holder = new DbgEngOutputHolder(client, DEBUG_OUTPUT.ALL))
+        {
+            holder.OutputReceived += (text, _) => modOutput.Append(text);
+            control.Execute(DEBUG_OUTCTL.THIS_CLIENT, $"lmvm {moduleName}", DEBUG_EXECUTE.DEFAULT);
+        }
+
+        // Parse "Image path: C:\...\Module.dll" from lmvm output
+        return ExtractImagePath(modOutput.ToString());
+    }
+
+    /// <summary>
+    /// Downloads PDB symbols for the given modules. For each module the on-disk DLL path is obtained via
+    /// <paramref name="imagePathProvider"/> (the DbgEng <c>lmvm</c> boundary in production, a stub in
+    /// tests), the CodeView PDB signature is read from the DLL's PE header, and the matching PDB is fetched
+    /// from the Microsoft Symbol Server (via the <see cref="SymbolFileDownloader"/> seam) unless already
+    /// cached. Behavior-preserving extraction of the per-module body so the empty / missing-DLL / cached /
+    /// not-found / download-and-write branches are unit-testable offline. Returns the number of modules
+    /// whose PDB is present after the pass.
+    /// </summary>
+    internal static int DownloadSymbolsForModules(ICollection<string> modules, Func<string, string?> imagePathProvider, string cachePath)
+    {
         if (modules.Count == 0)
         {
             return 0;
         }
 
-        // For each module, get its DLL path via DbgEng, then read PE header from disk
+        // For each module, get its DLL path, then read PE header from disk
         var downloaded = 0;
 
         foreach (var moduleName in modules)
         {
             try
             {
-                // Get module file path from DbgEng
-                var modOutput = new StringBuilder();
-                using (var holder = new DbgEngOutputHolder(client, DEBUG_OUTPUT.ALL))
-                {
-                    holder.OutputReceived += (text, _) => modOutput.Append(text);
-                    control.Execute(DEBUG_OUTCTL.THIS_CLIENT, $"lmvm {moduleName}", DEBUG_EXECUTE.DEFAULT);
-                }
-
-                // Parse "Image path: C:\...\Module.dll" from lmvm output
-                var dllPath = ExtractImagePath(modOutput.ToString());
+                var dllPath = imagePathProvider(moduleName);
                 if (dllPath == null || !File.Exists(dllPath))
                 {
                     continue;

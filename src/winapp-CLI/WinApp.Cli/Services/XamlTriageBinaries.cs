@@ -101,7 +101,10 @@ internal static class XamlTriageBinaries
         NuGetComponents.Select(c => (c.Package, c.Version, c.Sha512)).ToList();
 
     /// <summary>Folder token used by the Windows Kits Debuggers layout for the host arch.</summary>
-    public static string KitsArch => RuntimeInformation.ProcessArchitecture switch
+    public static string KitsArch => KitsArchFor(RuntimeInformation.ProcessArchitecture);
+
+    /// <summary>Maps a CPU architecture to its Windows Kits Debuggers folder token. Pure and testable.</summary>
+    internal static string KitsArchFor(Architecture architecture) => architecture switch
     {
         Architecture.X64 => "x64",
         Architecture.Arm64 => "arm64",
@@ -110,7 +113,10 @@ internal static class XamlTriageBinaries
     };
 
     /// <summary>Folder token used by the NuGet debugging packages for the host arch.</summary>
-    public static string NuGetArch => RuntimeInformation.ProcessArchitecture switch
+    public static string NuGetArch => NuGetArchFor(RuntimeInformation.ProcessArchitecture);
+
+    /// <summary>Maps a CPU architecture to its NuGet debugging-package folder token. Pure and testable.</summary>
+    internal static string NuGetArchFor(Architecture architecture) => architecture switch
     {
         Architecture.X64 => "amd64",
         Architecture.Arm64 => "arm64",

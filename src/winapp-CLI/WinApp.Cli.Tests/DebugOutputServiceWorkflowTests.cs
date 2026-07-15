@@ -6,6 +6,8 @@ using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
 using Spectre.Console.Testing;
 using WinApp.Cli.Services;
+using Windows.Win32.Foundation;
+using Windows.Win32.System.Diagnostics.Debug;
 
 namespace WinApp.Cli.Tests;
 
@@ -19,23 +21,21 @@ namespace WinApp.Cli.Tests;
 /// may only be attached to one debugger at a time and the loop mutates global debug state.
 /// </summary>
 /// <remarks>
-/// <para><b>Documented coverage ceiling (~92% Debug line coverage).</b> The uncovered lines require Win32
-/// fault injection, a non-x64 host, or a specific never-observed debug event, none of which can be forced
-/// deterministically; per policy they are left honestly uncovered rather than tested flakily or excluded.
-/// Current uncovered ranges and why:</para>
+/// <para><b>Documented coverage ceiling.</b> The decision branches previously listed here — single-step /
+/// thread-rename noise suppression, the zero-parameter <c>ReadExceptionParameters</c> early-return, the
+/// <c>Arm64</c> CONTEXT-flags arm, and the <c>OpenThread</c>-failure guard — are now covered directly (the
+/// noise/first-chance branches via fabricated debug events in this file; the arch/parameter helpers via the
+/// pure unit tests in <see cref="DebugOutputServiceTests"/>). The only lines left uncovered require Win32
+/// fault injection or a real debugger event the controlled child never emits, so per policy they are left
+/// honestly uncovered rather than tested flakily or excluded:</para>
 /// <list type="bullet">
-///   <item>166-167 — <c>OutputDebugString</c> event with a zero-length payload: a real debugger event the
-///   controlled child never emits.</item>
-///   <item>174-175, 181-182 — <c>OpenProcess</c> / <c>ReadProcessMemory</c> on the debuggee failing while
-///   the debugger is attached: cannot be provoked without corrupting the OS call (would be TOCTOU/flaky).</item>
-///   <item>228-230 — single-step / thread-rename noise-event handling: nondeterministic event types not
-///   raised by the controlled child.</item>
-///   <item>317-318 — <c>ReadExceptionParameters</c> for an exception record with zero parameters:
-///   defensive; the faults driven here always carry parameters.</item>
-///   <item>341-344, 373-376 — <c>OpenThread</c> / <c>GetThreadContext</c> failing on the faulting thread:
-///   Win32 fault injection, undrivable without flakiness.</item>
-///   <item>355 — the <c>Arm64</c> arm of the CONTEXT-flags switch: host-architecture path, unreachable on
-///   an x64 host.</item>
+///   <item>166-167 — the <c>OutputDebugString</c> event with a zero-length payload: a real debugger event
+///   the controlled child never emits.</item>
+///   <item>174-175, 181-182 — the <c>OpenProcess</c> / <c>ReadProcessMemory</c> failure guards while reading
+///   the debuggee's <c>OutputDebugString</c> buffer: cannot be provoked without corrupting the OS call
+///   (TOCTOU/flaky).</item>
+///   <item>380-383 — the <c>GetThreadContext</c>-failure guard: reached only when <c>OpenThread</c> succeeds
+///   but the subsequent context read fails — genuine Win32 fault injection, undrivable without flakiness.</item>
 /// </list>
 /// </remarks>
 [TestClass]
@@ -402,5 +402,78 @@ public sealed class DebugOutputServiceWorkflowTests
         {
             child.Dispose();
         }
+    }
+
+    // ---- M2: HandleException decision branches driven with fabricated debug events ----
+    // These cover the noise-suppression and first-chance branches that the real controlled child cannot
+    // deterministically raise (single-step, the attach breakpoint, a first-chance stack overflow) plus the
+    // OpenThread-failure guard (via a thread id that never exists — deterministic bad input, not flakiness).
+    // No real process is attached; every assertion checks a real observable outcome (continue status,
+    // console output, or the faked crash-dump boundary being invoked).
+
+    private static DEBUG_EVENT MakeExceptionEvent(uint code, bool firstChance, uint threadId = 0xFFFFFFF0, uint processId = 4321)
+    {
+        var de = new DEBUG_EVENT { dwProcessId = processId, dwThreadId = threadId };
+        de.u.Exception.dwFirstChance = firstChance ? 1u : 0u;
+        de.u.Exception.ExceptionRecord.ExceptionCode = (NTSTATUS)unchecked((int)code);
+        return de;
+    }
+
+    [TestMethod]
+    public void HandleException_SingleStepNoise_IsContinuedWithoutDumpOrConsole()
+    {
+        var de = MakeExceptionEvent(0x80000004, firstChance: true); // STATUS_SINGLE_STEP
+        var initialBreakpointSeen = true;
+        var continueStatus = NTSTATUS.DBG_EXCEPTION_NOT_HANDLED;
+
+        _service.HandleException(de, ref initialBreakpointSeen, ref continueStatus);
+
+        Assert.AreEqual(NTSTATUS.DBG_CONTINUE, continueStatus, "Single-step noise must be continued, not surfaced.");
+        Assert.AreEqual(0, _crashDump.WriteCalls.Count, "Noise events must not capture a dump.");
+        Assert.IsFalse(_console.Output.Contains("exception", StringComparison.OrdinalIgnoreCase),
+            "Noise events must not surface anything to the console.");
+    }
+
+    [TestMethod]
+    public void HandleException_InitialBreakpoint_IsSuppressedOnce()
+    {
+        var de = MakeExceptionEvent(0x80000003, firstChance: true); // STATUS_BREAKPOINT
+        var initialBreakpointSeen = false;
+        var continueStatus = NTSTATUS.DBG_EXCEPTION_NOT_HANDLED;
+
+        _service.HandleException(de, ref initialBreakpointSeen, ref continueStatus);
+
+        Assert.IsTrue(initialBreakpointSeen, "The attach breakpoint must set the seen flag.");
+        Assert.AreEqual(NTSTATUS.DBG_CONTINUE, continueStatus);
+        Assert.AreEqual(0, _crashDump.WriteCalls.Count);
+    }
+
+    [TestMethod]
+    public void HandleException_FirstChanceAccessViolation_UnknownThread_SurfacesWithoutDump()
+    {
+        var de = MakeExceptionEvent(0xC0000005, firstChance: true); // STATUS_ACCESS_VIOLATION
+        var initialBreakpointSeen = true;
+        var continueStatus = NTSTATUS.DBG_CONTINUE;
+
+        _service.HandleException(de, ref initialBreakpointSeen, ref continueStatus);
+
+        Assert.AreEqual(NTSTATUS.DBG_EXCEPTION_NOT_HANDLED, continueStatus,
+            "A real exception must be passed through to the target's own handlers.");
+        StringAssert.Contains(_console.Output, "Access Violation");
+        Assert.AreEqual(0, _crashDump.WriteCalls.Count, "An AV does not capture a dump at first-chance.");
+    }
+
+    [TestMethod]
+    public void HandleException_FirstChanceStackOverflow_CapturesDumpImmediately()
+    {
+        _crashDump.FakeDumpPath = Path.Combine(Path.GetTempPath(), "winapp-test-so.dmp");
+        var de = MakeExceptionEvent(0xC00000FD, firstChance: true); // STATUS_STACK_OVERFLOW
+        var initialBreakpointSeen = true;
+        var continueStatus = NTSTATUS.DBG_CONTINUE;
+
+        _service.HandleException(de, ref initialBreakpointSeen, ref continueStatus);
+
+        Assert.AreEqual(1, _crashDump.WriteCalls.Count, "Stack overflow must capture a dump at first-chance.");
+        StringAssert.Contains(_console.Output, "Stack Overflow");
     }
 }

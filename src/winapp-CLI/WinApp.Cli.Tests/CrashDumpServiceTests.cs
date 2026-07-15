@@ -350,7 +350,7 @@ public class CrashDumpServiceTests
         };
         var sb = new StringBuilder();
 
-        CrashDumpService.AppendStackOverflowSummary(1234, frames, sb);
+        CrashDumpService.AppendStackOverflowSummary(1234, frames, f => f.Item1, f => f.Item2, sb);
 
         var text = sb.ToString();
         StringAssert.Contains(text, "Stack Overflow (deep recursion detected)");
@@ -367,7 +367,7 @@ public class CrashDumpServiceTests
         var frames = new List<(string, string?)> { ("A.B", "file.cs:42") };
         var sb = new StringBuilder();
 
-        CrashDumpService.AppendStackOverflowSummary(7, frames, sb);
+        CrashDumpService.AppendStackOverflowSummary(7, frames, f => f.Item1, f => f.Item2, sb);
 
         StringAssert.Contains(sb.ToString(), "A.B in file.cs:42");
     }
@@ -379,7 +379,7 @@ public class CrashDumpServiceTests
         var frames = Enumerable.Range(0, 30).Select(i => ($"Frame.M{i}", (string?)null)).ToList();
         var sb = new StringBuilder();
 
-        CrashDumpService.AppendStackOverflowSummary(9, frames, sb);
+        CrashDumpService.AppendStackOverflowSummary(9, frames, f => f.Item1, f => f.Item2, sb);
 
         var text = sb.ToString();
         StringAssert.Contains(text, "Frame.M14");
@@ -398,7 +398,7 @@ public class CrashDumpServiceTests
         };
         var sb = new StringBuilder();
 
-        CrashDumpService.AppendStackOverflowSummary(55, frames, sb);
+        CrashDumpService.AppendStackOverflowSummary(55, frames, f => f.Item1, f => f.Item2, sb);
 
         var text = sb.ToString();
         StringAssert.Contains(text, "Rec.Head");
@@ -424,7 +424,7 @@ public class CrashDumpServiceTests
 
         var sb = new StringBuilder();
 
-        CrashDumpService.AppendStackOverflowSummary(77, frames, sb);
+        CrashDumpService.AppendStackOverflowSummary(77, frames, f => f.Item1, f => f.Item2, sb);
 
         var text = sb.ToString();
         StringAssert.Contains(text, "Fr.M13");
@@ -593,5 +593,42 @@ public class CrashDumpServiceTests
         }
 
         Assert.IsTrue(CrashDumpService.ValidatePdbMatchesDll(dll, Path.Combine(_tempDir, "missing.pdb")));
+    }
+
+    [TestMethod]
+    public void AppendStackOverflowSummary_ResolvesSourceLazily_AndStopsAtDisplayCap()
+    {
+        // Regression guard (H1): source resolution must stay lazy — resolved per frame as the loop
+        // visits it and stopped the moment the 15-frame display cap is reached — never eagerly resolving
+        // every frame of a deep (potentially many-thousand-frame) overflow. A poison frame far beyond the
+        // cap throws if it is ever touched, proving frames past #15 are never resolved.
+        var frames = Enumerable.Range(0, 50).Select(i => $"Frame.M{i}").ToList();
+        var resolveCount = 0;
+        var summary = new StringBuilder();
+
+        CrashDumpService.AppendStackOverflowSummary(
+            osThreadId: 42,
+            frames,
+            nameSelector: f => f,
+            sourceResolver: f =>
+            {
+                resolveCount++;
+                if (f == "Frame.M30")
+                {
+                    throw new InvalidOperationException(
+                        "source must never be resolved for frames beyond the 15-frame display cap");
+                }
+
+                return null;
+            },
+            summary);
+
+        Assert.AreEqual(15, resolveCount,
+            "With distinct frames the loop must resolve source for exactly the 15 displayed frames, then stop.");
+        var text = summary.ToString();
+        StringAssert.Contains(text, "Frame.M14");
+        Assert.IsFalse(text.Contains("Frame.M15", StringComparison.Ordinal),
+            "Frames beyond the 15-frame display cap must never be resolved or displayed.");
+        StringAssert.Contains(text, "42 (50 managed frames)");
     }
 }
