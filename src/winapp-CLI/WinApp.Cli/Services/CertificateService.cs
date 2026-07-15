@@ -18,6 +18,21 @@ internal partial class CertificateService(
 {
     public const string DefaultCertFileName = "devcert.pfx";
 
+    // Test seams for OS/certificate-store boundaries. Each defaults to the real
+    // production implementation; tests inject fakes to exercise success/error paths
+    // that require administrator privileges or a matching machine-store certificate.
+    internal Func<X509Certificate2, bool> IsCertificateInstalledImpl { get; set; } = DefaultIsCertificateInstalled;
+    internal Action<X509Certificate2> AddCertificateToStoreImpl { get; set; } = DefaultAddCertificateToStore;
+    internal Func<int, CancellationToken, Task<string?>> ReadAppxPackagingSignErrorAsync { get; set; } = DefaultReadAppxPackagingSignErrorAsync;
+
+    // Key-storage flags used when loading the PFX for the machine-store install. Defaults to the
+    // real production combination: MachineKeySet|PersistKeySet persists the private key in the
+    // machine key container so the installed certificate stays usable after the process exits.
+    // Seamed so unit tests load with EphemeralKeySet (in-memory only) and never leave a persisted
+    // key container behind on the host; production always uses the persisting default.
+    internal X509KeyStorageFlags InstallKeyStorageFlags { get; set; } =
+        X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.PersistKeySet;
+
     public record CertificateResult(
         FileInfo CertificatePath,
         string Password,
@@ -136,15 +151,7 @@ internal partial class CertificateService(
                         X509KeyStorageFlags.Exportable);
 
                     // Check if this certificate is already in the TrustedPeople store
-                    using var store = new X509Store(StoreName.TrustedPeople, StoreLocation.LocalMachine);
-                    store.Open(OpenFlags.ReadOnly);
-
-                    var existingCerts = store.Certificates.Find(
-                        X509FindType.FindByThumbprint,
-                        certToCheck.Thumbprint,
-                        validOnly: false);
-
-                    if (existingCerts.Count > 0)
+                    if (IsCertificateInstalledImpl(certToCheck))
                     {
                         taskContext.AddDebugMessage("Certificate appears to already be installed");
                         return false;
@@ -158,18 +165,18 @@ internal partial class CertificateService(
             }
 
             // Install to TrustedPeople store (required for MSIX sideloading)
-            // Load the certificate from the PFX file
+            // Load the certificate from the PFX file. The key-storage flags are seamed so unit
+            // tests load with EphemeralKeySet (no persisted key container); production uses the
+            // default MachineKeySet|PersistKeySet so the installed certificate stays usable.
             using var cert = X509CertificateLoader.LoadPkcs12FromFile(
                 certPath.FullName,
                 password,
-                X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.PersistKeySet);
+                InstallKeyStorageFlags);
 
             // Install to LocalMachine\TrustedPeople store (requires elevation)
             try
             {
-                using var store = new X509Store(StoreName.TrustedPeople, StoreLocation.LocalMachine);
-                store.Open(OpenFlags.ReadWrite);
-                store.Add(cert);
+                AddCertificateToStoreImpl(cert);
             }
             catch (CryptographicException ex) when (ex.Message.Contains("Access is denied"))
             {
@@ -231,35 +238,17 @@ internal partial class CertificateService(
         catch (BuildToolsService.InvalidBuildToolException ex)
             when (ex.Stdout.Contains("0x800"))
         {
-            var query = new EventLogQuery(
-                "Microsoft-Windows-AppxPackaging/Operational",
-                PathType.LogName,
-                $"*[System[Level=2 and Execution[@ProcessID={ex.ProcessId}]]]");
+            var description = await ReadAppxPackagingSignErrorAsync(ex.ProcessId, cancellationToken);
 
-            EventRecord? record = null;
-            var timeout = TimeSpan.FromSeconds(5);
-            var pollingInterval = TimeSpan.FromMilliseconds(500);
-            var startTime = DateTime.UtcNow;
-
-            while (record == null && (DateTime.UtcNow - startTime) < timeout && !cancellationToken.IsCancellationRequested)
+            if (description != null)
             {
-                using var reader = new EventLogReader(query);
-                record = reader.ReadEvent();
-
-                if (record != null)
+                // Keep raw error code in verbose mode; simplify for non-verbose output.
+                if (!taskContext.IsVerboseEnabled)
                 {
-                    var description = record.FormatDescription() ?? string.Empty;
-
-                    // Keep raw error code in verbose mode; simplify for non-verbose output.
-                    if (!taskContext.IsVerboseEnabled)
-                    {
-                        description = EventLogHexErrorRegex().Replace(description, "");
-                    }
-
-                    throw new InvalidOperationException($"Failed to sign file: {description}", ex);
+                    description = EventLogHexErrorRegex().Replace(description, "");
                 }
 
-                await Task.Delay(pollingInterval, cancellationToken);
+                throw new InvalidOperationException($"Failed to sign file: {description}", ex);
             }
 
             throw;
@@ -512,6 +501,66 @@ internal partial class CertificateService(
         // 4. Use default publisher
         taskContext.AddStatusMessage($"No manifest found, using default publisher: {defaultPublisher}");
         return defaultPublisher;
+    }
+
+    /// <summary>
+    /// Default production implementation of the "is this certificate already installed" check.
+    /// Opens the LocalMachine TrustedPeople store read-only and looks for a matching thumbprint.
+    /// </summary>
+    private static bool DefaultIsCertificateInstalled(X509Certificate2 certToCheck)
+    {
+        using var store = new X509Store(StoreName.TrustedPeople, StoreLocation.LocalMachine);
+        store.Open(OpenFlags.ReadOnly);
+
+        var existingCerts = store.Certificates.Find(
+            X509FindType.FindByThumbprint,
+            certToCheck.Thumbprint,
+            validOnly: false);
+
+        return existingCerts.Count > 0;
+    }
+
+    /// <summary>
+    /// Default production implementation that installs a certificate into the LocalMachine
+    /// TrustedPeople store. Requires administrator privileges.
+    /// </summary>
+    private static void DefaultAddCertificateToStore(X509Certificate2 cert)
+    {
+        using var store = new X509Store(StoreName.TrustedPeople, StoreLocation.LocalMachine);
+        store.Open(OpenFlags.ReadWrite);
+        store.Add(cert);
+    }
+
+    /// <summary>
+    /// Default production implementation that polls the AppxPackaging operational event log for a
+    /// signing error emitted by the given signtool process, returning its formatted description
+    /// (or null if none is found within the timeout).
+    /// </summary>
+    private static async Task<string?> DefaultReadAppxPackagingSignErrorAsync(int processId, CancellationToken cancellationToken)
+    {
+        var query = new EventLogQuery(
+            "Microsoft-Windows-AppxPackaging/Operational",
+            PathType.LogName,
+            $"*[System[Level=2 and Execution[@ProcessID={processId}]]]");
+
+        var timeout = TimeSpan.FromSeconds(5);
+        var pollingInterval = TimeSpan.FromMilliseconds(500);
+        var startTime = DateTime.UtcNow;
+
+        while ((DateTime.UtcNow - startTime) < timeout && !cancellationToken.IsCancellationRequested)
+        {
+            using var reader = new EventLogReader(query);
+            var record = reader.ReadEvent();
+
+            if (record != null)
+            {
+                return record.FormatDescription() ?? string.Empty;
+            }
+
+            await Task.Delay(pollingInterval, cancellationToken);
+        }
+
+        return null;
     }
 
     [GeneratedRegex(@"^error\s+0x[0-9A-Fa-f]+:\s*", RegexOptions.IgnoreCase, "en-US")]

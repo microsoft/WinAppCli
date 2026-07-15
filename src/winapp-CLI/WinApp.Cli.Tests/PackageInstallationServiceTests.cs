@@ -12,7 +12,10 @@ namespace WinApp.Cli.Tests;
 /// <summary>
 /// Tests for <see cref="PackageInstallationService"/>. A controllable in-memory NuGet fake (backed by a
 /// real temp cache directory so the "already present" checks behave realistically) and a fake config
-/// service drive the version-resolution, transitive-dependency and version-merge logic without any network.
+/// service drive the version-resolution and version-merge logic without any network. Transitive-graph
+/// resolution now lives inside the real NuGet client (<see cref="INugetService.InstallPackageAsync"/>
+/// returns the full installed set), so this suite exercises the service's own resolve/normalize/merge
+/// orchestration over that returned set — the graph walk itself is covered by the NugetService tests.
 /// </summary>
 [TestClass]
 public class PackageInstallationServiceTests
@@ -49,8 +52,8 @@ public class PackageInstallationServiceTests
         }
     }
 
-    /// <summary>Creates the on-disk package directory so <c>packageDir.Exists</c> is true (simulates a cached package).</summary>
-    private void MarkPresent(string name, string version) => _nuget.GetNuGetPackageDir(name, version).Create();
+    /// <summary>Marks a package as a complete, already-extracted cache entry (directory + ".nupkg.metadata" completion marker) so the product's <c>IsPackageInstalled</c> gate treats it as present.</summary>
+    private void MarkPresent(string name, string version) => _nuget.MarkInstalled(name, version);
 
     #region InitializeWorkspace
 
@@ -179,7 +182,7 @@ public class PackageInstallationServiceTests
 
     #endregion
 
-    #region InstallPackagesAsync — merge / transitive dependencies
+    #region InstallPackagesAsync — version merge
 
     [TestMethod]
     public async Task InstallPackagesAsync_MergesInstalledVersions_HigherWins()
@@ -196,101 +199,19 @@ public class PackageInstallationServiceTests
     }
 
     [TestMethod]
-    public async Task InstallPackagesAsync_AlreadyPresent_InstallsMissingTransitiveDependency()
+    public async Task InstallPackagesAsync_MergesInstalledVersions_LowerDoesNotDowngrade()
     {
-        MarkPresent("Pkg.Main", "1.6.0");
-        _nuget.Dependencies["Pkg.Main"] = new() { ["Common"] = "[1.0.0, )" };
-
-        var result = await _service.InstallPackagesAsync(_rootDir, ["Pkg.Main"], _taskContext);
-
-        Assert.AreEqual("1.6.0", result["Pkg.Main"]);
-        Assert.AreEqual("1.0.0", result["Common"]);
-        CollectionAssert.Contains(_nuget.InstalledPackages, ("Common", "1.0.0"));
-    }
-
-    [TestMethod]
-    public async Task InstallPackagesAsync_AlreadyPresent_TransitiveDependencyOnDisk_NotReinstalled()
-    {
-        MarkPresent("Pkg.Main", "1.6.0");
-        MarkPresent("Common", "1.0.0");
-        _nuget.Dependencies["Pkg.Main"] = new() { ["Common"] = "1.0.0" };
-
-        var result = await _service.InstallPackagesAsync(_rootDir, ["Pkg.Main"], _taskContext);
-
-        Assert.AreEqual("1.0.0", result["Common"]);
-        CollectionAssert.DoesNotContain(_nuget.InstalledPackages, ("Common", "1.0.0"));
-    }
-
-    [TestMethod]
-    public async Task InstallPackagesAsync_AlreadyPresent_TransitiveDependenciesOnDisk_HigherVersionWins()
-    {
-        // Two present packages both depend on an on-disk 'Shared' at different versions.
-        MarkPresent("Pkg.A", "1.6.0");
-        MarkPresent("Pkg.B", "1.6.0");
-        MarkPresent("Shared", "1.0.0");
-        MarkPresent("Shared", "2.0.0");
-        _nuget.Dependencies["Pkg.A"] = new() { ["Shared"] = "1.0.0" };
-        _nuget.Dependencies["Pkg.B"] = new() { ["Shared"] = "2.0.0" };
+        // The shared package is surfaced at the HIGHER version by the first install and a LOWER version by
+        // the second. The merge must keep the higher one — exercises the compare-not-greater branch (the
+        // second occurrence is not greater than the tracked one, so the existing value is retained).
+        _nuget.InstallReturns["Pkg.A"] = new() { ["Pkg.A"] = "1.6.0", ["Shared"] = "2.0.0" };
+        _nuget.InstallReturns["Pkg.B"] = new() { ["Pkg.B"] = "1.6.0", ["Shared"] = "1.0.0" };
 
         var result = await _service.InstallPackagesAsync(_rootDir, ["Pkg.A", "Pkg.B"], _taskContext);
 
-        Assert.AreEqual("2.0.0", result["Shared"], "The higher on-disk transitive version should win.");
-    }
-
-    [TestMethod]
-    public async Task InstallPackagesAsync_AlreadyPresent_EmptyDependencyRange_Ignored()
-    {
-        MarkPresent("Pkg.Main", "1.6.0");
-        // Whitespace/empty range parses to empty and must be skipped without error.
-        _nuget.Dependencies["Pkg.Main"] = new() { ["Weird"] = "   " };
-
-        var result = await _service.InstallPackagesAsync(_rootDir, ["Pkg.Main"], _taskContext);
-
-        Assert.IsFalse(result.ContainsKey("Weird"));
-        Assert.AreEqual("1.6.0", result["Pkg.Main"]);
-    }
-
-    [TestMethod]
-    public async Task InstallPackagesAsync_AlreadyPresent_DependencyLookupThrowsKeyNotFound_Ignored()
-    {
-        MarkPresent("Pkg.Main", "1.6.0");
-        _nuget.ThrowKeyNotFoundFor.Add("Pkg.Main");
-
-        var result = await _service.InstallPackagesAsync(_rootDir, ["Pkg.Main"], _taskContext);
-
-        // The main package still resolves even though dependency resolution failed.
-        Assert.AreEqual("1.6.0", result["Pkg.Main"]);
-    }
-
-    [TestMethod]
-    public async Task InstallPackagesAsync_MissingTransitiveInstall_SurfacesHigherVersionOfTracked_Upgrades()
-    {
-        // Pkg.Main is already on disk (tracked at 1.6.0). Its transitive dependency 'Common' is missing,
-        // so Common gets installed — and that install surfaces a NEWER Pkg.Main (2.0.0). The higher-wins
-        // merge over the freshly-installed dependency set must upgrade the tracked Pkg.Main version.
-        MarkPresent("Pkg.Main", "1.6.0");
-        _nuget.Dependencies["Pkg.Main"] = new() { ["Common"] = "1.0.0" };
-        _nuget.InstallReturns["Common"] = new() { ["Common"] = "1.0.0", ["Pkg.Main"] = "2.0.0" };
-
-        var result = await _service.InstallPackagesAsync(_rootDir, ["Pkg.Main"], _taskContext);
-
-        Assert.AreEqual("2.0.0", result["Pkg.Main"], "Newer version surfaced by the transitive install should win.");
-        Assert.AreEqual("1.0.0", result["Common"]);
-        CollectionAssert.Contains(_nuget.InstalledPackages, ("Common", "1.0.0"));
-    }
-
-    [TestMethod]
-    public async Task InstallPackagesAsync_MissingTransitiveInstall_SurfacesLowerVersionOfTracked_KeepsExisting()
-    {
-        // Same shape, but the transitive install surfaces an OLDER Pkg.Main (1.0.0) than the tracked 1.6.0.
-        // The merge must keep the existing higher version (exercises the compare-not-greater branch).
-        MarkPresent("Pkg.Main", "1.6.0");
-        _nuget.Dependencies["Pkg.Main"] = new() { ["Common"] = "1.0.0" };
-        _nuget.InstallReturns["Common"] = new() { ["Common"] = "1.0.0", ["Pkg.Main"] = "1.0.0" };
-
-        var result = await _service.InstallPackagesAsync(_rootDir, ["Pkg.Main"], _taskContext);
-
-        Assert.AreEqual("1.6.0", result["Pkg.Main"], "Existing higher version must be kept over the lower surfaced one.");
+        Assert.AreEqual("2.0.0", result["Shared"], "A lower version surfaced by a later install must not downgrade the merged result.");
+        Assert.AreEqual("1.6.0", result["Pkg.A"]);
+        Assert.AreEqual("1.6.0", result["Pkg.B"]);
     }
 
     #endregion

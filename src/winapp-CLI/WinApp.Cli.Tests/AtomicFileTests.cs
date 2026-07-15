@@ -83,4 +83,20 @@ public class AtomicFileTests
         Assert.IsFalse(File.Exists(staged), "The staged temp file must be deleted.");
         Assert.IsFalse(File.Exists(dest), "The destination must never have been created.");
     }
+
+    [TestMethod]
+    public async Task DiscardStaged_WhenDeleteFails_SwallowsErrorAndDoesNotThrow()
+    {
+        var dest = Path.Combine(_tempDir, "locked.bin");
+        var staged = await AtomicFile.WriteStagedAsync(dest, [1, 2, 3], CancellationToken.None);
+
+        // Hold the staged file open with no sharing so File.Delete raises a sharing violation,
+        // exercising the best-effort catch inside TryDeleteLeftoverTemp.
+        using (new FileStream(staged, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            AtomicFile.DiscardStaged(staged); // must not throw
+            Assert.IsTrue(File.Exists(staged),
+                "The locked file could not be deleted, confirming the swallowed-error path ran.");
+        }
+    }
 }

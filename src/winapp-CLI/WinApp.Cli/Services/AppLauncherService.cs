@@ -21,6 +21,18 @@ internal class AppLauncherService(ILogger<AppLauncherService> logger) : IAppLaun
     [SupportedOSPlatform("windows8.0")]
     public uint LaunchByAumid(string aumid, string? arguments = null)
     {
+        return ActivateApplicationImpl(aumid, arguments);
+    }
+
+    /// <summary>
+    /// COM activation seam. Defaults to the real <see cref="IApplicationActivationManager"/>;
+    /// overridable in tests so the public contract can be verified without launching an app.
+    /// </summary>
+    internal Func<string, string?, uint> ActivateApplicationImpl { get; set; } = DefaultActivateApplication;
+
+    [SupportedOSPlatform("windows8.0")]
+    private static uint DefaultActivateApplication(string aumid, string? arguments)
+    {
         var aam = ApplicationActivationManager.CreateInstance<IApplicationActivationManager>();
         aam.ActivateApplication(aumid, arguments ?? string.Empty, ACTIVATEOPTIONS.AO_NONE, out uint pid);
         return pid;
@@ -40,14 +52,25 @@ internal class AppLauncherService(ILogger<AppLauncherService> logger) : IAppLaun
     {
         try
         {
-            var pm = new PackageManager();
-            var packages = pm.FindPackages(packageFamilyName);
-            return packages.FirstOrDefault()?.Id.FullName;
+            return FindPackageFullNameImpl(packageFamilyName);
         }
         catch
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Package-manager lookup seam. Defaults to the real <see cref="PackageManager"/> query;
+    /// overridable in tests to exercise the not-found and error fallbacks.
+    /// </summary>
+    internal Func<string, string?> FindPackageFullNameImpl { get; set; } = DefaultFindPackageFullName;
+
+    private static string? DefaultFindPackageFullName(string packageFamilyName)
+    {
+        var pm = new PackageManager();
+        var packages = pm.FindPackages(packageFamilyName);
+        return packages.FirstOrDefault()?.Id.FullName;
     }
 
     /// <summary>
@@ -116,8 +139,7 @@ internal class AppLauncherService(ILogger<AppLauncherService> logger) : IAppLaun
         {
             try
             {
-                var debugSettings = PackageDebugSettings.CreateInstance<IPackageDebugSettings>();
-                debugSettings.TerminateAllProcesses(packageFullName);
+                TerminateAllProcessesImpl(packageFullName);
                 logger.LogDebug("Terminated all processes for package {PackageFullName}.", packageFullName);
                 return;
             }
@@ -135,8 +157,7 @@ internal class AppLauncherService(ILogger<AppLauncherService> logger) : IAppLaun
 
         try
         {
-            using var process = Process.GetProcessById(unchecked((int)processId));
-            process.Kill(entireProcessTree: true);
+            KillProcessTreeByPidImpl(processId);
             logger.LogDebug("Terminated process tree for PID {PID}.", processId);
         }
         catch (ArgumentException)
@@ -147,5 +168,31 @@ internal class AppLauncherService(ILogger<AppLauncherService> logger) : IAppLaun
         {
             // Process already exited.
         }
+    }
+
+    /// <summary>
+    /// PID-kill seam. Defaults to the real <see cref="Process.Kill(bool)"/>; overridable in
+    /// tests to exercise the already-exited fallbacks (<see cref="ArgumentException"/> /
+    /// <see cref="InvalidOperationException"/>) deterministically without a TOCTOU race.
+    /// </summary>
+    internal Action<uint> KillProcessTreeByPidImpl { get; set; } = DefaultKillProcessTreeByPid;
+
+    private static void DefaultKillProcessTreeByPid(uint processId)
+    {
+        using var process = Process.GetProcessById(unchecked((int)processId));
+        process.Kill(entireProcessTree: true);
+    }
+
+    /// <summary>
+    /// COM package-termination seam. Defaults to the real <see cref="IPackageDebugSettings"/>;
+    /// overridable in tests to exercise both the success and failure-fallback branches.
+    /// </summary>
+    internal Action<string> TerminateAllProcessesImpl { get; set; } = DefaultTerminateAllProcesses;
+
+    [SupportedOSPlatform("windows8.0")]
+    private static void DefaultTerminateAllProcesses(string packageFullName)
+    {
+        var debugSettings = PackageDebugSettings.CreateInstance<IPackageDebugSettings>();
+        debugSettings.TerminateAllProcesses(packageFullName);
     }
 }

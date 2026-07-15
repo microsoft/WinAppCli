@@ -2,10 +2,38 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Runtime.InteropServices;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
 
+/// <summary>
+/// Unit tests for <see cref="XamlTriageBinaries"/> debugger-layout resolution, engine/provider
+/// compatibility, and global-cache copy logic. All probing is satisfied from local disk; the download
+/// core is covered separately (offline) in <see cref="XamlTriageBinariesDownloadTests"/> via the
+/// <c>HttpGetAsync</c> seam. Marked <c>[DoNotParallelize]</c> because it mutates the process-wide
+/// <see cref="XamlTriageBinaries.EnvOverride"/> environment variable.
+/// </summary>
+/// <remarks>
+/// <para><b>Documented coverage ceiling (~96% Debug line coverage across the file).</b> The remaining
+/// uncovered lines require a foreign CPU architecture, real network I/O, or a faulting file handle, none
+/// of which can be produced deterministically here; per policy they are left honestly uncovered rather
+/// than excluded. Current uncovered ranges and why:</para>
+/// <list type="bullet">
+///   <item>69 — the <c>HttpGetAsync</c> seam's default body (the real <c>HttpClient.GetAsync</c>): the OS
+///   network boundary, replaced by a stub in every test.</item>
+///   <item>291-293, 316-318 — the <c>TryGetProductVersion</c> and <c>IsUsablePeFile</c> catch blocks:
+///   reached only if reading an existing file throws (e.g. a locked handle); defensive, and forcing it
+///   would be a TOCTOU/flaky test.</item>
+///   <item>398-400 — the successful <c>.nupkg</c> download-and-verify tail: needs a real package whose
+///   bytes hash to the compiled-in pinned SHA-512, i.e. real network content.</item>
+///   <item>475-477 — the "downloaded version != pinned version" refusal in
+///   <c>TryMaterializePackageAsync</c>: a deliberate defense-in-depth security guard.
+///   <c>ResolveDownloadVersionAsync</c> only ever returns the pinned version or <c>null</c>, so no caller
+///   can currently trigger it; it is kept (not deleted) because it guards native code loaded into the
+///   debugger against a future change to the version-resolution contract.</item>
+/// </list>
+/// </remarks>
 [TestClass]
 [DoNotParallelize]
 public class XamlTriageBinariesTests
@@ -197,6 +225,29 @@ public class XamlTriageBinariesTests
     }
 
     [TestMethod]
+    [DataRow(Architecture.X64, "x64")]
+    [DataRow(Architecture.Arm64, "arm64")]
+    [DataRow(Architecture.X86, "x86")]
+    [DataRow((Architecture)999, "x64", DisplayName = "Unknown arch falls back to x64")]
+    public void KitsArchFor_MapsEveryArchitecture(Architecture arch, string expected)
+    {
+        // M3: the Windows Kits Debuggers folder-token switch is a pure decision, coverable off-host for
+        // every arm (including the Arm64/X86/fallback arms unreachable on this x64 host at runtime).
+        Assert.AreEqual(expected, XamlTriageBinaries.KitsArchFor(arch));
+    }
+
+    [TestMethod]
+    [DataRow(Architecture.X64, "amd64")]
+    [DataRow(Architecture.Arm64, "arm64")]
+    [DataRow(Architecture.X86, "x86")]
+    [DataRow((Architecture)999, "amd64", DisplayName = "Unknown arch falls back to amd64")]
+    public void NuGetArchFor_MapsEveryArchitecture(Architecture arch, string expected)
+    {
+        // M3: the NuGet debugging-package folder-token switch, covered for every arm off-host.
+        Assert.AreEqual(expected, XamlTriageBinaries.NuGetArchFor(arch));
+    }
+
+    [TestMethod]
     [DataRow("10.0.29547.1002", "10.0.29547.1002", true, DisplayName = "Identical")]
     [DataRow("10.0.29547.1002 (WinBuild.160101.0800)", "10.0.29547.1002", true, DisplayName = "Trailing FileVersion decoration ignored")]
     [DataRow("10.0.29547.1002", "10.0.29617.1000", false, DisplayName = "Different build")]
@@ -362,6 +413,142 @@ public class XamlTriageBinariesTests
         var archDir = Path.Combine(cache.FullName, package.ToLowerInvariant(), version, "content", XamlTriageBinaries.NuGetArch);
         Directory.CreateDirectory(archDir);
         File.WriteAllText(Path.Combine(archDir, file), content);
+    }
+
+    [TestMethod]
+    public void ResolveExisting_NoOverride_RejectsInstalledRootsThenFallsBackToCache()
+    {
+        // No override: CandidateDirectories enumerates the installed Debugging-Tools roots
+        // (Program Files\Windows Kits\10\Debuggers\<arch>) and finally the download-on-first-use
+        // cache. A validator that only accepts the seeded cache forces the full traversal — each
+        // installed root that resolves is rejected (or is absent) before the cache fallback resolves.
+        Environment.SetEnvironmentVariable(XamlTriageBinaries.EnvOverride, null);
+        var cache = new DirectoryInfo(Path.Combine(_tempDir, "cache-bin"));
+        cache.Create();
+        File.WriteAllText(Path.Combine(cache.FullName, "dbgeng.dll"), "");
+        File.WriteAllText(Path.Combine(cache.FullName, "JsProvider.dll"), "");
+
+        Func<ResolvedTriageBinaries, bool> onlyCache =
+            r => r.JsProviderPath.StartsWith(cache.FullName, StringComparison.OrdinalIgnoreCase);
+
+        var resolved = XamlTriageBinaries.ResolveExisting(cache, NullLogger.Instance, onlyCache);
+
+        Assert.IsNotNull(resolved,
+            "After rejecting/exhausting the installed roots, the candidate walk must fall back to the seeded cache.");
+        StringAssert.StartsWith(resolved.JsProviderPath, cache.FullName);
+        StringAssert.EndsWith(resolved.JsProviderPath, "JsProvider.dll");
+    }
+
+    [TestMethod]
+    public void ResolveExisting_OverrideToNonexistentDir_ReturnsNull()
+    {
+        // An explicit override is authoritative and the only candidate considered. When it points at a
+        // path that does not exist, TryDirectory short-circuits on the Directory.Exists check and nothing
+        // resolves (covers the missing-directory branch deterministically, without env-var mutation).
+        var missing = Path.Combine(_tempDir, "no-such-dir");
+        Environment.SetEnvironmentVariable(XamlTriageBinaries.EnvOverride, missing);
+
+        var resolved = XamlTriageBinaries.ResolveExisting(new DirectoryInfo(_tempDir), NullLogger.Instance, AcceptAny);
+
+        Assert.IsNull(resolved, "A non-existent override directory must resolve to null.");
+    }
+
+    [TestMethod]
+    public void ResolveExisting_NoOverride_EveryCandidateRejected_ReturnsNull()
+    {
+        // No debugger anywhere the walk trusts: with no override and a reject-everything validator, the
+        // candidate walk must enumerate every installed root and the cache, reject each, and return null
+        // (the "nothing usable found" workflow — the caller then falls back to the download path).
+        Environment.SetEnvironmentVariable(XamlTriageBinaries.EnvOverride, null);
+        var cache = new DirectoryInfo(Path.Combine(_tempDir, "empty-cache"));
+        cache.Create();
+
+        var resolved = XamlTriageBinaries.ResolveExisting(cache, NullLogger.Instance, _ => false);
+
+        Assert.IsNull(resolved, "When every candidate is rejected, resolution must return null.");
+    }
+
+    [TestMethod]
+    public void ResolveExisting_PublicOverload_UnsignedProvider_IsRejected()
+    {
+        // The public overload wires the real Authenticode + engine-version validator. A full but
+        // unsigned dummy layout must fail IsTrustedMicrosoftSigned and be rejected, so nothing resolves.
+        var dir = Path.Combine(_tempDir, "unsigned-full");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "dbgeng.dll"), "");
+        File.WriteAllText(Path.Combine(dir, "JsProvider.dll"), "");
+        Environment.SetEnvironmentVariable(XamlTriageBinaries.EnvOverride, dir);
+
+        var resolved = XamlTriageBinaries.ResolveExisting(new DirectoryInfo(_tempDir), NullLogger.Instance);
+
+        Assert.IsNull(resolved,
+            "An unsigned JsProvider.dll must fail the real signature validator and not resolve.");
+    }
+
+    [TestMethod]
+    public void IsProviderCompatibleWithEngine_MatchingProductVersion_ReturnsTrue()
+    {
+        // Two copies of the same real, versioned system DLL stand in for an engine/provider pair
+        // built from the same source: their product versions match, so the pair is compatible.
+        var binDir = Path.Combine(_tempDir, "compat-match");
+        Directory.CreateDirectory(binDir);
+        var versionedDll = Path.Combine(Environment.SystemDirectory, "kernel32.dll");
+        var provider = Path.Combine(binDir, "JsProvider.dll");
+        File.Copy(versionedDll, Path.Combine(binDir, "dbgeng.dll"), overwrite: true);
+        File.Copy(versionedDll, provider, overwrite: true);
+
+        Assert.IsTrue(
+            XamlTriageBinaries.IsProviderCompatibleWithEngine(binDir, provider, NullLogger.Instance),
+            "An engine and provider reporting the same product version must be treated as compatible.");
+    }
+
+    [TestMethod]
+    public void IsProviderCompatibleWithEngine_UnreadableVersions_ReturnsFalse()
+    {
+        // Neither dummy file carries a version resource, so both product versions read back as null.
+        // A pair whose build cannot be confirmed to match must be rejected (a mismatch crashes triage).
+        var binDir = Path.Combine(_tempDir, "compat-unreadable");
+        Directory.CreateDirectory(binDir);
+        File.WriteAllText(Path.Combine(binDir, "dbgeng.dll"), "not a real pe image");
+        var provider = Path.Combine(binDir, "JsProvider.dll");
+        File.WriteAllText(provider, "not a real pe image");
+
+        Assert.IsFalse(
+            XamlTriageBinaries.IsProviderCompatibleWithEngine(binDir, provider, NullLogger.Instance),
+            "When neither file exposes a readable product version, the provider must be treated as incompatible.");
+    }
+
+    [TestMethod]
+    public void TryCopyFromGlobalCache_PackageDirAbsent_ReturnsFalse()
+    {
+        // The package id has no directory in the global cache at all -> nothing to copy.
+        var cache = new DirectoryInfo(Path.Combine(_tempDir, "empty-cache"));
+        cache.Create();
+        var binDir = new DirectoryInfo(Path.Combine(_tempDir, "bin"));
+        binDir.Create();
+
+        var ok = XamlTriageBinaries.TryCopyFromGlobalCache(
+            "Absent.Package", "1.0.0", ["engine.dll"], cache, binDir, NullLogger.Instance);
+
+        Assert.IsFalse(ok, "A package absent from the global cache must not report a successful copy.");
+    }
+
+    [TestMethod]
+    public void TryCopyFromGlobalCache_VersionPresentButArchFilesMissing_ReturnsFalse()
+    {
+        // A version directory exists but has no content/<arch> payload, so the candidate is skipped and
+        // (with no other version to fall back to) the copy fails.
+        const string package = "Test.Package.Bits";
+        const string pinned = "3.1.4";
+        var cache = new DirectoryInfo(Path.Combine(_tempDir, "cache"));
+        Directory.CreateDirectory(Path.Combine(cache.FullName, package.ToLowerInvariant(), pinned));
+        var binDir = new DirectoryInfo(Path.Combine(_tempDir, "bin"));
+        binDir.Create();
+
+        var ok = XamlTriageBinaries.TryCopyFromGlobalCache(
+            package, pinned, ["engine.dll"], cache, binDir, NullLogger.Instance);
+
+        Assert.IsFalse(ok, "A version directory lacking the arch payload must be skipped, yielding no copy.");
     }
 
     private static string? FindUpwards(string fileName, Func<string, bool> predicate)
