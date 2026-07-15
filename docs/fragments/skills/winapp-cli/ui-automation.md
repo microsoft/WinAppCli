@@ -165,7 +165,7 @@ winapp ui touch -a myapp --at 100,300 --gesture swipe --to-point 400,300
 winapp ui touch img-map-9f8e -a myapp --gesture pinch --distance 200
 winapp ui touch img-map-9f8e -a myapp --gesture stretch --distance 200
 ```
-- Gestures: `tap` (default), `double-tap`, `long-press`, `swipe`, `pinch`, `stretch`. `--fingers` 1–10 (pinch/stretch always 2). Refuses without a non-zero foregrounded target (`no_target`/`foreground_not_target`/`no_interactive_desktop`); every coordinate is bounds-checked against the target window and rejected with `invalid_arguments` if outside. If injected touch is unsupported on the device, the command surfaces the real Win32 error rather than a false success.
+- Gestures: `tap` (default), `double-tap`, `long-press`, `swipe`, `pinch`, `stretch`. `--fingers` 1–10 (pinch/stretch always 2). Refuses without a non-zero foregrounded target (`no_target`/`foreground_not_target`/`no_interactive_desktop`); every coordinate is bounds-checked against the target window and rejected with `invalid_arguments` if outside. If injected touch is unsupported on the device, the command surfaces the real Win32 error rather than a false success. In a Remote Desktop/VM session delivery isn't guaranteed even on exit 0 — the command appends a delivery-uncertainty warning (`warnings[]` in `--json`); verify the effect with a screenshot.
 
 ### Pen / stylus (taps and ink strokes)
 Inject synthetic pen input (Windows 10 1809+). Target an element center, an explicit `--at`, or a full `--path` ink stroke, with pressure/tilt/eraser control.
@@ -178,7 +178,7 @@ winapp ui pen -a myapp --at 320,240 --pressure 0.8
 winapp ui pen -a myapp --path "100,100 150,120 210,140 260,120"
 winapp ui pen -a myapp --path "100,100 260,100" --eraser
 ```
-- `--pressure` 0.0–1.0, `--tilt-x`/`--tilt-y` ±90°, `--eraser` for the eraser end. Same injection safety as `touch`: requires a non-zero foregrounded target window and bounds-checks every ink point (out-of-bounds → `invalid_arguments`, nothing injected).
+- `--pressure` 0.0–1.0, `--tilt-x`/`--tilt-y` ±90°, `--eraser` for the eraser end. Same injection safety as `touch`: requires a non-zero foregrounded target window and bounds-checks every ink point (out-of-bounds → `invalid_arguments`, nothing injected). Pen routing is especially unreliable over Remote Desktop — exit 0 can mean the call succeeded but no pen reached the app; the command appends a delivery-uncertainty warning (`warnings[]` in `--json`). Validate pen flows on a local interactive desktop.
 
 ### Read element state
 ```powershell

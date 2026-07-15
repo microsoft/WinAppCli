@@ -309,6 +309,8 @@ winapp ui touch img-map-9f8e -a myapp --gesture stretch --distance 200  # stretc
 > **Injection safety.** `touch` refuses to inject unless a **non-zero target window handle** resolves and that window holds the foreground — it fails with **`no_target`** when no window can be resolved, **`foreground_not_target`** if focus couldn't be transferred, or **`no_interactive_desktop`** on a locked/secure desktop. Every coordinate (element center, explicit `--at`/`--to-point`, and generated waypoints) is **bounds-checked against the target window rectangle**; a point outside the window is rejected with **`invalid_arguments`** and nothing is injected. `--fingers` above 10 is rejected up front.
 >
 > **Hardware note.** Touch prefers the modern synthetic-pointer device (`CreateSyntheticPointerDevice(PT_TOUCH)`) and falls back to the legacy `InitializeTouchInjection`/`InjectTouchInput` API. If injection is unsupported on the current device/session, the command surfaces the **actual Win32 error code** (e.g. "unsupported") rather than reporting a false success — treat a non-zero exit as "touch not delivered".
+>
+> **Remote Desktop / VM sessions.** In a Remote Desktop (RDP) or some VM sessions the OS may accept synthetic touch (exit 0) without it actually reaching the target app. When a remote session is detected, `touch` appends a **delivery-uncertainty warning** — a `warnings[]` entry in `--json`, or a warning line in text mode. A ✅/exit 0 then means the injection *call* succeeded, **not** that the app received the input; confirm the effect with `ui screenshot`/`ui inspect` when it matters.
 
 ### pen
 Inject synthetic **pen/stylus** input — taps and ink strokes — using the Windows synthetic-pointer API (`CreateSyntheticPointerDevice(PT_PEN)`; Windows 10 1809+). Target an element center, an explicit `--at` point, or a full `--path` ink stroke.
@@ -329,6 +331,8 @@ winapp ui pen -a myapp --at 200,200 --tilt-x 30 --tilt-y -15           # tilted 
 - `--duration-ms <ms>` — Total stroke travel time in milliseconds distributed as interpolated UPDATE frames across the path (default: ~10 ms per waypoint). Use this to control how fast the pen visibly moves from start to end.
 
 > **Injection safety.** Like `touch`, `pen` refuses to inject without a **non-zero, foregrounded target window** (`no_target` / `foreground_not_target` / `no_interactive_desktop`) and **bounds-checks every ink point** against the target window rectangle, rejecting out-of-bounds coordinates with **`invalid_arguments`** before any input is injected. Invalid `--pressure` (outside 0.0–1.0) or tilt (outside ±90°) are rejected up front.
+>
+> **Remote Desktop / VM sessions.** Pen routing is **especially unreliable over Remote Desktop**: the injection call can report success (exit 0) while **no pen input reaches the app**. When a remote session is detected, `pen` appends a **delivery-uncertainty warning** (`warnings[]` in `--json`, or a warning line in text mode) so a ✅ is not mistaken for confirmed delivery. Validate pen-dependent flows on a **local, interactive desktop**.
 
 ### hover
 Move the mouse to an element's center to trigger hover effects (tooltips, flyouts, visual states). Uses `SendInput` for realistic mouse movement with a small wiggle, then waits for a configurable dwell time.
