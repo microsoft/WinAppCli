@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using Spectre.Console.Testing;
 using System.CommandLine;
+using WinApp.Cli.Commands;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
@@ -94,6 +95,18 @@ public abstract class BaseCommandTests(bool configPaths = true, LogLevel logLeve
         var parseResult = command.Parse(manifestArgs);
         parseResult.InvocationConfiguration.Output = TestAnsiConsole.Profile.Out.Writer;
         parseResult.InvocationConfiguration.Error = ConsoleStdErr;
+
+        // Mirror the parse-error → JSON bridge from Program.cs: when --json is present and SCL
+        // failed to parse a typed option (e.g. --pressure nope, --tilt-x nope), emit a structured
+        // invalid_arguments envelope instead of the default help-banner (M1/M2 root-cause fix).
+        if (parseResult.Errors.Count > 0 &&
+            GlobalOptionPreScan.IsFlagPresent(manifestArgs, WinAppRootCommand.JsonOption.Name, WinAppRootCommand.JsonOption.Aliases))
+        {
+            var errorMsg = string.Join("; ", parseResult.Errors.Select(e => e.Message));
+            UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments, errorMsg, errorOut: ConsoleStdErr);
+            return 1;
+        }
+
         return await parseResult.InvokeAsync(parseResult.InvocationConfiguration, cancellationToken: TestContext.CancellationToken);
     }
 

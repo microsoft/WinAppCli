@@ -255,12 +255,14 @@ public class PointerGesturePlannerTests
     }
 
     [TestMethod]
-    public void InjectTouchStroke_TwiceForDoubleTap_ProducesTwoDownUpCycles()
+    public void RunTouchGesture_DoubleTap_ProducesTwoDownUpCycles_WithInterTapDelay()
     {
-        // RunTouchGesture (private) calls InjectTouchStroke twice for DoubleTap. This test verifies
-        // the per-stroke frame contract: calling InjectTouchStroke twice produces 2 DOWN frames and
-        // 2 UP frames in total — one DOWN+UP cycle per tap.
+        // M4: the old test manually called InjectTouchStroke twice, bypassing the production
+        // repetition path. This test invokes RunTouchGesture directly with DoubleTap so the
+        // real repeats branch is exercised. An injectable sleepInter captures the inter-tap gap.
         var allFlags = new List<Windows.Win32.UI.Input.Pointer.POINTER_FLAGS>();
+        var interTapSleeps = new List<int>();
+
         PointerInput.TouchSender recorder = contacts =>
         {
             foreach (var c in contacts)
@@ -274,14 +276,19 @@ public class PointerGesturePlannerTests
             new List<PointerPoint> { new PointerPoint(100, 200) }
         };
 
-        // Simulate what RunTouchGesture does for DoubleTap: two calls to InjectTouchStroke.
-        PointerInput.InjectTouchStroke(paths, holdMs: 0, durationMs: 0, recorder);
-        PointerInput.InjectTouchStroke(paths, holdMs: 0, durationMs: 0, recorder);
+        PointerInput.RunTouchGesture(TouchGesture.DoubleTap, paths, holdMs: 0, durationMs: 0, recorder,
+            sleepInter: ms => interTapSleeps.Add(ms));
 
         int downCount = allFlags.Count(f => f.HasFlag(Windows.Win32.UI.Input.Pointer.POINTER_FLAGS.POINTER_FLAG_DOWN));
         int upCount   = allFlags.Count(f => f.HasFlag(Windows.Win32.UI.Input.Pointer.POINTER_FLAGS.POINTER_FLAG_UP));
 
-        Assert.AreEqual(2, downCount, "Two InjectTouchStroke calls must produce exactly 2 DOWN frames");
-        Assert.AreEqual(2, upCount,   "Two InjectTouchStroke calls must produce exactly 2 UP frames");
+        Assert.AreEqual(2, downCount, "DoubleTap must produce exactly 2 DOWN frames");
+        Assert.AreEqual(2, upCount,   "DoubleTap must produce exactly 2 UP frames");
+
+        // Exactly one inter-tap sleep must have been requested, at the expected 60ms gap.
+        Assert.AreEqual(1, interTapSleeps.Count,
+            "RunTouchGesture must sleep exactly once between the two taps of a double-tap");
+        Assert.AreEqual(60, interTapSleeps[0],
+            "Inter-tap sleep must be 60ms");
     }
 }

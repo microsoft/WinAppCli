@@ -141,20 +141,69 @@ internal static class PointerInput
         RunTouchGesture(gesture, contactPaths, holdMs, durationMs, SendLegacyTouch);
     }
 
-    private static void RunTouchGesture(
+    /// <summary>
+    /// Win32 error code 21 (ERROR_NOT_READY): the touch-injection subsystem is temporarily
+    /// busy processing a previous frame. Calls less than ~0.1ms apart can return this code
+    /// and must retry the identical frame rather than treating it as permanent failure.
+    /// </summary>
+    private const int ErrorNotReady = 21;
+
+    /// <summary>Maximum number of ERROR_NOT_READY retries per frame before giving up.</summary>
+    internal const int MaxErrorNotReadyRetries = 10;
+
+    /// <summary>
+    /// Submits one touch frame, retrying up to <see cref="MaxErrorNotReadyRetries"/> times when
+    /// Win32 error 21 (ERROR_NOT_READY) is returned. Any other error propagates immediately.
+    /// The final attempt is unguarded so the exception surfaces after all retries are exhausted.
+    /// </summary>
+    private static void SendFrameWithRetry(TouchSender send, POINTER_TOUCH_INFO[] contacts)
+    {
+        for (int attempt = 0; attempt < MaxErrorNotReadyRetries; attempt++)
+        {
+            try
+            {
+                send(contacts);
+                return;
+            }
+            catch (InvalidOperationException ex) when (IsWin32ErrorNotReady(ex))
+            {
+                Thread.Sleep(1);
+            }
+        }
+        send(contacts); // final attempt — let any exception propagate
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when <paramref name="ex"/> was thrown because the
+    /// touch-injection API returned Win32 error 21 (ERROR_NOT_READY). The message format
+    /// produced by <see cref="SendLegacyTouch"/> and <see cref="SendSyntheticTouch"/> includes
+    /// <c>"Win32 error 21:"</c>.
+    /// </summary>
+    internal static bool IsWin32ErrorNotReady(InvalidOperationException ex)
+        => ex.Message.Contains("Win32 error 21:", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Runs the touch gesture loop (handles double-tap repetition) against the given
+    /// <paramref name="send"/> delegate. Exposed internally so tests can inject a recording
+    /// sender and an injectable inter-tap sleep to assert the repetition contract.
+    /// </summary>
+    internal static void RunTouchGesture(
         TouchGesture gesture,
         IReadOnlyList<IReadOnlyList<PointerPoint>> contactPaths,
         int holdMs,
         int durationMs,
-        TouchSender send)
+        TouchSender send,
+        Action<int>? sleepInter = null)
     {
+        var sleepFn = sleepInter ?? Thread.Sleep;
         int repeats = gesture == TouchGesture.DoubleTap ? 2 : 1;
         for (int r = 0; r < repeats; r++)
         {
-            InjectTouchStroke(contactPaths, holdMs, durationMs, send);
+            InjectTouchStroke(contactPaths, holdMs, durationMs,
+                (contacts) => SendFrameWithRetry(send, contacts));
             if (r + 1 < repeats)
             {
-                Thread.Sleep(60); // inter-tap gap for double-tap
+                sleepFn(60); // inter-tap gap for double-tap
             }
         }
     }

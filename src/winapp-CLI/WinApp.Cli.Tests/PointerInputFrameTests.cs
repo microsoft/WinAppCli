@@ -713,4 +713,88 @@ public class PointerInputFrameTests
         Assert.AreSame(glideEx, caught,
             "The glide exception must propagate; the UP exception in the finally must be swallowed");
     }
+
+    // -------------------------------------------------------------------------
+    // M3 — Legacy touch ERROR_NOT_READY (Win32 21) retry logic
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public void RunTouchGesture_ErrorNotReady_TransientFailures_RetriesAndSucceeds()
+    {
+        // A sender that simulates Win32 ERROR_NOT_READY (error 21) for the first N calls then
+        // succeeds. RunTouchGesture wraps each frame with SendFrameWithRetry, so the stroke
+        // must complete normally despite the transient injector failures.
+        const int failFirst = 3;
+        int callCount = 0;
+        var recordedFlags = new List<POINTER_FLAGS>();
+
+        PointerInput.TouchSender sender = contacts =>
+        {
+            callCount++;
+            if (callCount <= failFirst)
+            {
+                throw new InvalidOperationException(
+                    "InjectTouchInput failed (Win32 error 21: The device is not ready.) — touch injection...");
+            }
+            foreach (var c in contacts)
+            {
+                recordedFlags.Add(c.pointerInfo.pointerFlags);
+            }
+        };
+
+        var paths = new List<IReadOnlyList<PointerPoint>>
+        {
+            new List<PointerPoint> { new PointerPoint(100, 200) }
+        };
+
+        // Use RunTouchGesture (applies SendFrameWithRetry); sleepInter is a no-op to keep the test fast.
+        PointerInput.RunTouchGesture(TouchGesture.Tap, paths, holdMs: 0, durationMs: 0, sender,
+            sleepInter: _ => { });
+
+        // After failFirst retries, the DOWN frame succeeded (call failFirst+1) followed by UP.
+        Assert.IsTrue(callCount > failFirst,
+            $"Must have made more than {failFirst} calls (retry attempts + successful frames); got {callCount}");
+        Assert.AreEqual(2, recordedFlags.Count,
+            "Tap must produce exactly DOWN + UP frames after retries succeed");
+        Assert.IsTrue(recordedFlags[0].HasFlag(POINTER_FLAGS.POINTER_FLAG_DOWN),
+            "First successfully recorded frame must be DOWN");
+        Assert.IsTrue(recordedFlags[1].HasFlag(POINTER_FLAGS.POINTER_FLAG_UP),
+            "Second successfully recorded frame must be UP");
+    }
+
+    [TestMethod]
+    public void RunTouchGesture_ErrorNotReady_AlwaysFails_SurfacesExceptionAfterAllRetries()
+    {
+        // A sender that always throws Win32 ERROR_NOT_READY. After MaxErrorNotReadyRetries+1
+        // attempts the exception must propagate rather than being swallowed indefinitely.
+        int callCount = 0;
+
+        PointerInput.TouchSender sender = contacts =>
+        {
+            callCount++;
+            throw new InvalidOperationException(
+                "InjectTouchInput failed (Win32 error 21: The device is not ready.) — touch injection...");
+        };
+
+        var paths = new List<IReadOnlyList<PointerPoint>>
+        {
+            new List<PointerPoint> { new PointerPoint(100, 200) }
+        };
+
+        InvalidOperationException? caught = null;
+        try
+        {
+            PointerInput.RunTouchGesture(TouchGesture.Tap, paths, holdMs: 0, durationMs: 0, sender,
+                sleepInter: _ => { });
+            Assert.Fail("Expected InvalidOperationException was not thrown after all retries");
+        }
+        catch (InvalidOperationException ex) { caught = ex; }
+
+        Assert.IsNotNull(caught, "Exception must be surfaced after retries are exhausted");
+        Assert.IsTrue(PointerInput.IsWin32ErrorNotReady(caught),
+            "Surfaced exception must still be the Win32 error 21 that was never resolved");
+        // Must have attempted exactly MaxErrorNotReadyRetries + 1 times (10 retries + 1 final).
+        Assert.AreEqual(PointerInput.MaxErrorNotReadyRetries + 1, callCount,
+            $"Must retry MaxErrorNotReadyRetries ({PointerInput.MaxErrorNotReadyRetries}) times then make one final attempt; got {callCount} total calls");
+    }
 }

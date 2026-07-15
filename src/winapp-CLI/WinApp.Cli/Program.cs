@@ -167,6 +167,17 @@ internal static class Program
                 CommandInvokedEvent.Log(parsedArgs.CommandResult);
             }
 
+            // Parse-error → JSON bridge: when --json is present and SCL failed to parse a typed
+            // option (e.g. --pressure nope, --tilt-x nope), emit a structured invalid_arguments
+            // envelope to stderr instead of the default help-banner + plain text (M1, M2 fix).
+            // The non-JSON path is unchanged (help banner + exit 1 via normal SCL pipeline).
+            if (json && parsedArgs.Errors.Count > 0)
+            {
+                var errorMsg = string.Join("; ", parsedArgs.Errors.Select(e => e.Message));
+                UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments, errorMsg);
+                return 1;
+            }
+
             var returnCode = await parsedArgs.InvokeAsync();
 
             if (!isCompleteMode)

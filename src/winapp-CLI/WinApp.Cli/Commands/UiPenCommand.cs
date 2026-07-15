@@ -28,12 +28,10 @@ internal class UiPenCommand : Command, IShortDescription
         Description = "Ink stroke path as a whitespace-separated list of x,y pairs, e.g. \"10,10 20,30 40,50\"."
     };
 
-    // Option<string?> so --pressure nope --json reaches the handler and produces a structured
-    // invalid_arguments JSON error instead of SCL's plain-text parse-failure message (M4).
-    public static Option<string?> PressureOption { get; } = new("--pressure")
+    public static Option<float> PressureOption { get; } = new("--pressure")
     {
         Description = "Pen pressure from 0.0 to 1.0 (default: 0.5).",
-        DefaultValueFactory = _ => "0.5"
+        DefaultValueFactory = _ => 0.5f
     };
 
     public static Option<int> TiltXOption { get; } = new("--tilt-x")
@@ -95,25 +93,19 @@ internal class UiPenCommand : Command, IShortDescription
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
             var atStr = parseResult.GetValue(AtOption);
             var pathStr = parseResult.GetValue(PathOption);
-            var pressureStr = parseResult.GetValue(PressureOption) ?? "0.5";
+            var pressure = parseResult.GetValue(PressureOption);
             var tiltX = parseResult.GetValue(TiltXOption);
             var tiltY = parseResult.GetValue(TiltYOption);
             var eraser = parseResult.GetValue(EraserOption);
             var durationMs = parseResult.GetValue(DurationOption);
 
-            if (string.IsNullOrWhiteSpace(app) && window is null)
+            // Semantic validation runs BEFORE the missing-app check so a malformed value
+            // produces invalid_arguments rather than missing_app (M1 root-cause fix).
+            if (!float.IsFinite(pressure) || pressure < 0f || pressure > 1f)
             {
-                UiErrors.MissingApp(logger, json);
-                return 1;
-            }
-
-            if (!float.TryParse(pressureStr, System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture, out float pressure)
-                || !float.IsFinite(pressure) || pressure < 0f || pressure > 1f)
-            {
-                logger.LogError("{Symbol} --pressure must be a finite number between 0.0 and 1.0. Got '{Pressure}'.", UiSymbols.Error, pressureStr);
+                logger.LogError("{Symbol} --pressure must be a finite number between 0.0 and 1.0. Got '{Pressure}'.", UiSymbols.Error, pressure);
                 UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
-                    $"--pressure must be a finite number between 0.0 and 1.0. Got '{pressureStr}'.",
+                    $"--pressure must be a finite number between 0.0 and 1.0. Got '{pressure}'.",
                     errorOut: parseResult.InvocationConfiguration.Error);
                 return 1;
             }
@@ -129,6 +121,12 @@ internal class UiPenCommand : Command, IShortDescription
             {
                 logger.LogError("{Symbol} --tilt-x and --tilt-y must be between -90 and 90 degrees.", UiSymbols.Error);
                 UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--tilt-x and --tilt-y must be between -90 and 90 degrees.");
+                return 1;
+            }
+
+            if (string.IsNullOrWhiteSpace(app) && window is null)
+            {
+                UiErrors.MissingApp(logger, json);
                 return 1;
             }
 

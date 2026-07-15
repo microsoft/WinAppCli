@@ -95,14 +95,15 @@ public partial class UiCommandTests
     [TestMethod]
     public async Task Pen_PressureNaN_Rejected_NoInjection()
     {
-        // NaN passes the old `< 0 || > 1` range check (both comparisons false for NaN) but must
-        // be caught by the new !float.IsFinite guard before any injection is attempted.
+        // NaN passes `float.TryParse` but is caught by the !float.IsFinite guard in the handler.
         var command = GetRequiredService<UiPenCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["-a", "TestApp", "--at", "100,100", "--pressure", "NaN", "--json"]);
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakePointer.PenCalls.Count, "Pen must not be injected for NaN pressure");
-
+        // Stdout must be empty.
+        Assert.AreEqual(string.Empty, TestAnsiConsole.Output.Trim(),
+            "Stdout must be empty — no success envelope for invalid pressure");
         // The structured JSON error written to stderr must carry code == "invalid_arguments".
         var stderr = ConsoleStdErr.ToString();
         int jsonStart = stderr.IndexOf('{');
@@ -117,14 +118,16 @@ public partial class UiCommandTests
     [TestMethod]
     public async Task Pen_PressureInfinity_Rejected_NoInjection()
     {
-        // With --pressure as Option<string?>, "Infinity" now reaches the handler (float.TryParse
-        // succeeds returning PositiveInfinity, then !float.IsFinite rejects it). The handler emits
-        // a structured JSON invalid_arguments error to stderr — no longer a raw SCL parse-failure.
+        // float.TryParse succeeds returning PositiveInfinity; the !float.IsFinite guard in the
+        // handler rejects it with a structured JSON invalid_arguments error to stderr.
         var command = GetRequiredService<UiPenCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["-a", "TestApp", "--at", "100,100", "--pressure", "Infinity", "--json"]);
         Assert.AreEqual(1, exitCode, "Non-finite --pressure Infinity must fail with exit code 1");
         Assert.AreEqual(0, _fakePointer.PenCalls.Count, "Pen must not be injected for Infinity pressure");
+        // Stdout must be empty.
+        Assert.AreEqual(string.Empty, TestAnsiConsole.Output.Trim(),
+            "Stdout must be empty — no success envelope for invalid pressure");
         var stderr = ConsoleStdErr.ToString();
         int jsonStart = stderr.IndexOf('{');
         Assert.IsTrue(jsonStart >= 0, $"stderr must contain a JSON error object; got: {stderr}");
@@ -138,8 +141,8 @@ public partial class UiCommandTests
     [TestMethod]
     public async Task Pen_TiltXNonInteger_Rejected_NoInjection()
     {
-        // --tilt-x is Option<int>; a non-integer value (e.g. "NaN") is rejected at parse time
-        // by System.CommandLine — the handler is never called, so no injection occurs.
+        // --tilt-x is Option<int>; a non-integer value is rejected at SCL parse time — the handler
+        // is never called, so no injection occurs. Non-JSON path: help banner + exit 1 (unchanged).
         var command = GetRequiredService<UiPenCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["-a", "TestApp", "--at", "100,100", "--tilt-x", "NaN"]);
@@ -193,15 +196,18 @@ public partial class UiCommandTests
     [TestMethod]
     public async Task Pen_PressureTypo_Json_EmitsStructuredInvalidArgumentsError()
     {
-        // M4: --pressure nope --json used to bypass the handler (SCL parse failure) and emit plain
-        // text + help. With --pressure as Option<string?> the handler now runs and must emit a
-        // structured JSON invalid_arguments error to stderr and exit 1.
+        // With --pressure as Option<float>, "nope" is rejected at SCL parse time (before the handler
+        // runs). The parse-error → JSON bridge intercepts this and emits a structured
+        // invalid_arguments error to stderr — the help banner is suppressed and no injection occurs.
         var command = GetRequiredService<UiPenCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["-a", "TestApp", "--at", "100,100", "--pressure", "nope", "--json"]);
 
         Assert.AreEqual(1, exitCode, "Bad --pressure must fail with exit code 1");
         Assert.AreEqual(0, _fakePointer.PenCalls.Count, "Pen must not be injected for invalid pressure");
+        // Stdout must be empty — no success envelope must be emitted.
+        Assert.AreEqual(string.Empty, TestAnsiConsole.Output.Trim(),
+            "Stdout must be empty — no success envelope for a parse error");
         // Must emit structured JSON error to stderr.
         var stderr = ConsoleStdErr.ToString();
         int jsonStart = stderr.IndexOf('{');
@@ -211,6 +217,78 @@ public partial class UiCommandTests
         Assert.AreEqual(UiJsonError.CodeInvalidArguments,
             error.GetProperty("error").GetProperty("code").GetString(),
             "JSON error.code must be 'invalid_arguments' for bad --pressure");
+    }
+
+    [TestMethod]
+    public async Task Pen_PressureTypo_NoApp_Json_EmitsInvalidArguments_NotMissingApp()
+    {
+        // M1 root-cause fix: parse errors are intercepted BEFORE the missing-app check, so a bad
+        // --pressure value without -a returns invalid_arguments, not missing_app.
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["--at", "100,100", "--pressure", "nope", "--json"]); // no -a
+
+        Assert.AreEqual(1, exitCode, "Bad --pressure must fail with exit code 1");
+        Assert.AreEqual(0, _fakePointer.PenCalls.Count, "Pen must not be injected");
+        // Stdout must be empty.
+        Assert.AreEqual(string.Empty, TestAnsiConsole.Output.Trim(),
+            "Stdout must be empty — no success envelope for a parse error");
+        var stderr = ConsoleStdErr.ToString();
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain a JSON error object; got: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        var code = error.GetProperty("error").GetProperty("code").GetString();
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments, code,
+            "Must return invalid_arguments (not missing_app) when --pressure is unparseable");
+    }
+
+    [TestMethod]
+    public async Task Pen_TiltXTypo_Json_EmitsStructuredInvalidArgumentsError()
+    {
+        // M2 root-cause fix: --tilt-x nope is rejected at SCL parse time (Option<int>). The
+        // parse-error → JSON bridge emits invalid_arguments instead of a help banner.
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "100,100", "--tilt-x", "nope", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "Bad --tilt-x must fail with exit code 1");
+        Assert.AreEqual(0, _fakePointer.PenCalls.Count, "Pen must not be injected for bad --tilt-x");
+        // Stdout must be empty.
+        Assert.AreEqual(string.Empty, TestAnsiConsole.Output.Trim(),
+            "Stdout must be empty — no success envelope for a parse error");
+        var stderr = ConsoleStdErr.ToString();
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain a JSON error object; got: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            "JSON error.code must be 'invalid_arguments' for bad --tilt-x");
+    }
+
+    [TestMethod]
+    public async Task Pen_TiltYTypo_Json_EmitsStructuredInvalidArgumentsError()
+    {
+        // M2 root-cause fix: --tilt-y nope is rejected at SCL parse time (Option<int>). The
+        // parse-error → JSON bridge emits invalid_arguments instead of a help banner.
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "100,100", "--tilt-y", "nope", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "Bad --tilt-y must fail with exit code 1");
+        Assert.AreEqual(0, _fakePointer.PenCalls.Count, "Pen must not be injected for bad --tilt-y");
+        // Stdout must be empty.
+        Assert.AreEqual(string.Empty, TestAnsiConsole.Output.Trim(),
+            "Stdout must be empty — no success envelope for a parse error");
+        var stderr = ConsoleStdErr.ToString();
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain a JSON error object; got: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            "JSON error.code must be 'invalid_arguments' for bad --tilt-y");
     }
 
     [TestMethod]
