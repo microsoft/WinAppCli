@@ -16,6 +16,9 @@ internal sealed class FakePackageInstallationService : IPackageInstallationServi
     public List<(DirectoryInfo Root, string[] Packages, bool IgnoreConfig)> InstallPackagesCalls { get; } = [];
     public List<(DirectoryInfo Root, string PackageName, string? Version)> EnsurePackageCalls { get; } = [];
 
+    /// <summary>Flattened names of every package passed to <see cref="InstallPackagesAsync"/>, for convenient assertions.</summary>
+    public List<string> InstalledPackages => InstallPackagesCalls.SelectMany(c => c.Packages).ToList();
+
     /// <summary>Version map returned by <see cref="InstallPackagesAsync"/>. When null, echoes the requested packages.</summary>
     public Dictionary<string, string>? InstalledVersions { get; set; }
 

@@ -15,6 +15,14 @@ namespace WinApp.Cli.Tests;
 /// installation, build-tool acquisition, runtime install) are faked so the command's control
 /// flow — config handling, per-package update decisions, build-tools gating, and the runtime
 /// step — is exercised deterministically without network or machine state.
+///
+/// The version-decision gate (<c>CompareVersions(latest, current) &gt; 0</c>) is pinned down
+/// explicitly: only a strictly-greater "latest" rewrites winapp.yaml and triggers a reinstall,
+/// while a normalized-equal or lower "latest" leaves both the persisted version and the installed
+/// set untouched. The failure paths are pinned too: a latest-version lookup that throws must exit
+/// non-zero and preserve the pin rather than report a false "up to date", and a cancellation
+/// (Ctrl+C) mid-lookup must abort the whole command instead of being recorded as an ordinary
+/// lookup failure that lets the loop keep running.
 /// </summary>
 [TestClass]
 public class UpdateCommandTests : BaseCommandTests
@@ -38,6 +46,8 @@ public class UpdateCommandTests : BaseCommandTests
             .AddSingleton<IBuildToolsService>(_fakeBuildTools);
     }
 
+    private const string PackageName = "Test.Pkg";
+
     private DirectoryInfo CreateBuildToolsDir()
         => _tempDirectory.CreateSubdirectory("buildtools");
 
@@ -49,6 +59,15 @@ public class UpdateCommandTests : BaseCommandTests
             config.SetVersion(name, version);
         }
         _configService.Save(config);
+    }
+
+    private void SaveConfigWith(string pinnedVersion)
+        => WriteConfig((PackageName, pinnedVersion));
+
+    private async Task<int> RunUpdateAsync()
+    {
+        var command = GetRequiredService<UpdateCommand>();
+        return await ParseAndInvokeWithCaptureAsync(command, []);
     }
 
     // ── No / empty config ───────────────────────────────────────────────
@@ -115,22 +134,111 @@ public class UpdateCommandTests : BaseCommandTests
         Assert.AreEqual("1.6.0", reloaded.GetVersion("Microsoft.WindowsAppSDK"));
     }
 
+    // ── Version-decision gate: CompareVersions(latest, current) > 0 ──────
+
     [TestMethod]
-    public async Task Update_NuGetFailsForPackage_KeepsCurrentVersionAndSkipsInstall()
+    public async Task Update_LatestIsHigher_RewritesYamlAndReinstalls()
     {
-        _fakeNuget.DefaultVersion = "1.6.0";
-        _fakeNuget.PackagesToThrow.Add("Broken.Package");
-        WriteConfig(("Broken.Package", "1.0.0"));
+        // Pinned 1.0.0, feed reports 2.0.0 → strictly greater → the persisted version advances and the
+        // updated package is reinstalled.
+        SaveConfigWith("1.0.0");
+        _fakeNuget.DefaultVersion = "2.0.0";
+
+        var exitCode = await RunUpdateAsync();
+
+        Assert.AreEqual(0, exitCode);
+        var persisted = _configService.Load().Packages.Single(p => p.Name == PackageName).Version;
+        Assert.AreEqual("2.0.0", persisted, "A strictly-greater latest version must be written to winapp.yaml.");
+        CollectionAssert.Contains(_fakeInstall.InstalledPackages, PackageName, "An update must reinstall the updated package.");
+    }
+
+    [TestMethod]
+    public async Task Update_LatestIsNormalizedEqual_LeavesYamlAndSkipsInstall()
+    {
+        // Pinned 1.0.0, feed reports the normalized-equal "1.0" → CompareVersions == 0 → no update. The
+        // persisted version stays exactly as written and nothing is reinstalled.
+        SaveConfigWith("1.0.0");
+        _fakeNuget.DefaultVersion = "1.0";
+
+        var exitCode = await RunUpdateAsync();
+
+        Assert.AreEqual(0, exitCode);
+        var persisted = _configService.Load().Packages.Single(p => p.Name == PackageName).Version;
+        Assert.AreEqual("1.0.0", persisted, "A normalized-equal latest version must not rewrite the pinned version.");
+        Assert.IsEmpty(_fakeInstall.InstalledPackages, "A no-op update must not reinstall packages.");
+    }
+
+    [TestMethod]
+    public async Task Update_LatestIsLower_LeavesYamlAndSkipsInstall()
+    {
+        // Pinned 2.0.0, feed reports a lower 1.5.0 → CompareVersions < 0 → no update, no silent downgrade.
+        SaveConfigWith("2.0.0");
+        _fakeNuget.DefaultVersion = "1.5.0";
+
+        var exitCode = await RunUpdateAsync();
+
+        Assert.AreEqual(0, exitCode);
+        var persisted = _configService.Load().Packages.Single(p => p.Name == PackageName).Version;
+        Assert.AreEqual("2.0.0", persisted, "A lower latest version must never downgrade the pinned version.");
+        Assert.IsEmpty(_fakeInstall.InstalledPackages, "A lower latest version must not trigger a reinstall.");
+    }
+
+    [TestMethod]
+    public async Task Update_PreviewSdks_ReinstallsWithPreviewMode()
+    {
+        _fakeNuget.DefaultVersion = "2.0.0-preview";
+        WriteConfig(("Microsoft.WindowsAppSDK", "1.0.0"));
         var command = GetRequiredService<UpdateCommand>();
 
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, []);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--setup-sdks", "preview"]);
 
-        Assert.AreEqual(0, exitCode, "A transient NuGet failure is not fatal");
-        CollectionAssert.Contains(_fakeNuget.QueriedPackages, "Broken.Package");
-        Assert.IsEmpty(_fakeInstall.InstallPackagesCalls, "No update detected, so nothing is reinstalled");
+        Assert.AreEqual(0, exitCode);
+        Assert.HasCount(1, _fakeInstall.InstallPackagesCalls);
+    }
 
-        var reloaded = _configService.Load();
-        Assert.AreEqual("1.0.0", reloaded.GetVersion("Broken.Package"), "Current version is preserved on error");
+    // ── Lookup / cancellation failure paths ─────────────────────────────
+
+    [TestMethod]
+    public async Task Update_LatestVersionLookupFails_ExitsNonZeroAndPreservesPin()
+    {
+        // A latest-version lookup that fails closed (a feed outage or auth failure) must NOT be reported as an
+        // authoritative "up to date" result. GetLatestVersionAsync throws; the handler must keep the pinned
+        // version in winapp.yaml untouched, skip the reinstall, and exit non-zero so callers (and CI) surface
+        // the failure instead of a false success that silently freezes the pin.
+        SaveConfigWith("1.0.0");
+        _fakeNuget.PackagesToThrow.Add(PackageName);
+
+        var exitCode = await RunUpdateAsync();
+
+        Assert.AreEqual(1, exitCode, "A failed latest-version lookup must fail the command, not report success.");
+        var persisted = _configService.Load().Packages.Single(p => p.Name == PackageName).Version;
+        Assert.AreEqual("1.0.0", persisted, "A failed lookup must leave the pinned version unchanged.");
+        Assert.IsEmpty(_fakeInstall.InstalledPackages, "A failed lookup must not trigger a reinstall.");
+    }
+
+    [TestMethod]
+    public async Task Update_CancelledDuringLookup_AbortsWithoutCheckingRemainingPackages()
+    {
+        // Ctrl+C during a latest-version lookup must abort the whole command — cancellation must NOT be
+        // swallowed by the ordinary lookup-failure handler, which would let the loop keep checking the
+        // remaining packages and then proceed to install / build-tool work. The fake cancels the flow token
+        // while checking the first package and throws; the handler must rethrow that cancellation, so the
+        // second package is never queried and nothing is installed. Contrast with the fail-closed test above,
+        // where an ordinary lookup failure lets the loop continue.
+        WriteConfig(("First.Pkg", "1.0.0"), ("Second.Pkg", "1.0.0"));
+
+        using var cts = new CancellationTokenSource();
+        _fakeNuget.CancelOnQuery = cts;
+        _fakeNuget.CancelOnQueryPackage = "First.Pkg";
+
+        var command = GetRequiredService<UpdateCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [], cts.Token);
+
+        Assert.AreNotEqual(0, exitCode, "A cancelled update must not report success.");
+        CollectionAssert.Contains(_fakeNuget.QueriedPackages, "First.Pkg", "The first package triggers the cancellation.");
+        CollectionAssert.DoesNotContain(_fakeNuget.QueriedPackages, "Second.Pkg",
+            "Cancellation must abort the loop, so the second package is never queried.");
+        Assert.IsEmpty(_fakeInstall.InstalledPackages, "A cancelled update must not reinstall packages.");
     }
 
     // ── Build tools gating ──────────────────────────────────────────────
@@ -185,19 +293,6 @@ public class UpdateCommandTests : BaseCommandTests
 
         Assert.AreEqual(1, exitCode);
         StringAssert.Contains(ConsoleStdErr.ToString(), "Update command failed");
-    }
-
-    [TestMethod]
-    public async Task Update_PreviewSdks_ReinstallsWithPreviewMode()
-    {
-        _fakeNuget.DefaultVersion = "2.0.0-preview";
-        WriteConfig(("Microsoft.WindowsAppSDK", "1.0.0"));
-        var command = GetRequiredService<UpdateCommand>();
-
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--setup-sdks", "preview"]);
-
-        Assert.AreEqual(0, exitCode);
-        Assert.HasCount(1, _fakeInstall.InstallPackagesCalls);
     }
 
     /// <summary>
