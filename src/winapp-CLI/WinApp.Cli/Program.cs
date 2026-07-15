@@ -192,8 +192,16 @@ internal static class Program
                 {
                     // Gate on IsUiDescendant so that non-ui commands (e.g. cert info) fall through
                     // to default error handling instead of receiving the nested UI schema (M2).
+                    if (!isCompleteMode)
+                    {
+                        CommandInvokedEvent.Log(parsedArgs.CommandResult);
+                    }
                     UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments,
                         $"Unknown option '{typo}'. Did you mean '{suggested}'?");
+                    if (!isCompleteMode)
+                    {
+                        CommandCompletedEvent.Log(parsedArgs.CommandResult, 1);
+                    }
                 }
                 else
                 {

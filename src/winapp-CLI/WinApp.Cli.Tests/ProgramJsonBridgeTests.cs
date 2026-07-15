@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Text.Json;
+using System.Diagnostics.Tracing;
 using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Tests;
@@ -644,6 +645,26 @@ public class ProgramJsonBridgeTests : BaseCommandTests
             "ui pen single-dash typo must return invalid_arguments in nested schema");
     }
 
+    [TestMethod]
+    public async Task JsonBridge_SingleDashTypo_UiCommand_LogsCommandTelemetryContext()
+    {
+        using var telemetry = new TelemetryCaptureListener();
+
+        var (_, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "-pressure", "0.5", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "Single-dash typo must exit 1");
+        Assert.IsTrue(stderr.Contains(UiJsonError.CodeInvalidArguments),
+            $"single-dash typo must still emit the JSON invalid_arguments envelope; got stderr: {stderr}");
+
+        Assert.IsTrue(telemetry.ContainsCommandEvent(
+                "CommandInvoked_Event", "WinApp.Cli.Commands.UiPenCommand"),
+            "Single-dash parse errors must log the same invoked command context as the normal parse-error bridge.");
+        Assert.IsTrue(telemetry.ContainsCommandEvent(
+                "CommandCompleted_Event", "WinApp.Cli.Commands.UiPenCommand", expectedExitCode: 1),
+            "Single-dash parse errors must log command completion telemetry with exit code 1.");
+    }
+
     // -------------------------------------------------------------------------
     // M2 (round-11) — boolean pre-scan: --json=<invalid> must NOT be coerced
     // to true and must NOT trigger the --json/--verbose conflict check.
@@ -840,5 +861,50 @@ public class ProgramJsonBridgeTests : BaseCommandTests
             "WINAPP_CLI_CACHE_DIRECTORY must be restored after InvokeProgramAsync");
         Assert.AreEqual(beforeUpdate, Environment.GetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK"),
             "WINAPP_CLI_UPDATE_CHECK must be restored after InvokeProgramAsync");
+    }
+
+    private sealed class TelemetryCaptureListener : EventListener
+    {
+        private const string ProviderName = "Microsoft.Windows.WinAppDevCLI";
+        private readonly List<(string EventName, Dictionary<string, object?> Payload)> events = [];
+        private readonly Lock gate = new();
+
+        protected override void OnEventSourceCreated(EventSource eventSource)
+        {
+            if (eventSource.Name == ProviderName)
+            {
+                EnableEvents(eventSource, EventLevel.LogAlways, EventKeywords.All);
+            }
+        }
+
+        protected override void OnEventWritten(EventWrittenEventArgs eventData)
+        {
+            var payload = new Dictionary<string, object?>(StringComparer.Ordinal);
+            for (int i = 0; i < eventData.PayloadNames?.Count; i++)
+            {
+                payload[eventData.PayloadNames[i]] = eventData.Payload is null || i >= eventData.Payload.Count
+                    ? null
+                    : eventData.Payload[i];
+            }
+
+            lock (gate)
+            {
+                events.Add((eventData.EventName ?? string.Empty, payload));
+            }
+        }
+
+        public bool ContainsCommandEvent(string eventName, string commandName, int? expectedExitCode = null)
+        {
+            lock (gate)
+            {
+                return events.Any(e =>
+                    e.EventName == eventName
+                    && e.Payload.TryGetValue("CommandName", out var actualCommand)
+                    && string.Equals(actualCommand?.ToString(), commandName, StringComparison.Ordinal)
+                    && (expectedExitCode is null
+                        || (e.Payload.TryGetValue("ExitCode", out var actualExitCode)
+                            && string.Equals(actualExitCode?.ToString(), expectedExitCode.Value.ToString(), StringComparison.Ordinal))));
+            }
+        }
     }
 }
