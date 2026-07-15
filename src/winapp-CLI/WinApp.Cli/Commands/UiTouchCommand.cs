@@ -281,99 +281,28 @@ internal class UiTouchCommand : Command, IShortDescription
             {
                 var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
 
-                long targetHwnd = session.WindowHandle;
-                PointerPoint start;
-                // L1: report the effective target — the --at value when explicit coordinates were given,
-                // or the selector when the selector resolved the contact point.
-                var targetLabel = at is not null ? atStr : selectorStr;
+                var target = await PointerCommandSupport.ResolvePointAsync(
+                    uiAutomation, selectorService, session, selectorStr, at, atStr,
+                    "touch", "touch point", logger, json, cancellationToken);
+                if (!target.Ok)
+                {
+                    return 1;
+                }
+
+                var targetHwnd = target.TargetHwnd;
+                var start = target.Point;
+                var targetLabel = target.TargetLabel;
 
                 if (at is not null)
                 {
-                    start = at.Value;
-                }
-                else
-                {
-                    // Resolve the selector's element center and re-resolve just before injection.
-                    var selector = selectorService.Parse(selectorStr!);
-                    var element = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken);
-                    if (element is null)
-                    {
-                        UiErrors.ElementNotFound(logger, selectorStr!, json);
-                        return 1;
-                    }
-
-                    if (element.Width == 0 || element.Height == 0)
-                    {
-                        logger.LogError("{Symbol} Element has zero size — cannot use its center as a touch point.", UiSymbols.Error);
-                        UiJsonError.Emit(json, UiJsonError.CodeZeroSize, "Element has zero size — cannot use its center as a touch point.", selectorStr);
-                        return 1;
-                    }
-
-                    targetHwnd = element.WindowHandle ?? session.WindowHandle;
-
-                    if (targetHwnd != 0)
-                    {
-                        Windows.Win32.PInvoke.SetForegroundWindow(new Windows.Win32.Foundation.HWND((nint)targetHwnd));
-                        await Task.Delay(100, cancellationToken);
-                    }
-
-                    var stable = await GestureTargeting.ResolveStableAsync(
-                        uiAutomation, session, selector, element,
-                        GestureTargeting.DefaultMaxReads, GestureTargeting.DefaultReadDelayMs, null, cancellationToken);
-                    if (!GestureTargeting.TryReport(stable, logger, json, selectorStr!, "touch"))
-                    {
-                        return 1;
-                    }
-                    start = new PointerPoint(stable.CenterX, stable.CenterY);
-                }
-
-                if (at is not null && targetHwnd != 0)
-                {
-                    Windows.Win32.PInvoke.SetForegroundWindow(new Windows.Win32.Foundation.HWND((nint)targetHwnd));
-                    await Task.Delay(100, cancellationToken);
-                }
-
-                // Refuse to inject without a resolved target window (F1): with hwnd 0 the foreground
-                // guard cannot verify the injection lands on the intended window, and the OS-wide touch
-                // would hit whatever is foreground. Fail closed instead.
-                if (targetHwnd == 0)
-                {
-                    logger.LogError("{Symbol} No target window could be resolved — refusing to inject touch (it could hit the wrong window).", UiSymbols.Error);
-                    UiJsonError.Emit(json, UiJsonError.CodeNoTarget,
-                        "No target window could be resolved — refusing to inject touch. Target an app window (via --app/--window) whose element resolves to a window handle.");
-                    return 1;
-                }
-
-                // Resolve the target window rect to bounds-check every coordinate before injecting.
-                if (!uiAutomation.TryGetWindowRect(targetHwnd, out var windowRect))
-                {
-                    logger.LogError("{Symbol} Could not read the target window rectangle — refusing to inject touch.", UiSymbols.Error);
-                    UiJsonError.Emit(json, UiJsonError.CodeNoTarget,
-                        "Could not read the target window rectangle — refusing to inject touch.");
-                    return 1;
+                    await PointerCommandSupport.SetForegroundAsync(targetHwnd, cancellationToken);
                 }
 
                 var (contactPaths, points, effectiveFingers) =
                     PointerGesturePlanner.PlanTouch(gesture, start, to, distance, fingers, direction);
 
-                // Every planned point (selector center, explicit --at/--to-point, and generated
-                // waypoints) must fall inside the target window — reject out-of-bounds coordinates
-                // and inject nothing.
-                var outOfBounds = PointerGesturePlanner.FirstOutOfBounds(windowRect, points);
-                if (outOfBounds is not null)
-                {
-                    logger.LogError(
-                        "{Symbol} Point ({X}, {Y}) is outside the target window ({Left},{Top})-({Right},{Bottom}) — refusing to inject touch.",
-                        UiSymbols.Error, outOfBounds.Value.X, outOfBounds.Value.Y,
-                        windowRect.Left, windowRect.Top, windowRect.Right, windowRect.Bottom);
-                    UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
-                        $"Point ({outOfBounds.Value.X},{outOfBounds.Value.Y}) is outside the target window " +
-                        $"({windowRect.Left},{windowRect.Top})-({windowRect.Right},{windowRect.Bottom}) — no input injected.");
-                    return 1;
-                }
-
-                // Final foreground gate before the OS-wide injection (matches click/drag/hover).
-                if (!foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, "touch"))
+                if (!PointerCommandSupport.TryPrepareInjection(
+                    uiAutomation, foregroundGuard, targetHwnd, points, "touch", "touch", logger, json))
                 {
                     return 1;
                 }
@@ -381,23 +310,17 @@ internal class UiTouchCommand : Command, IShortDescription
                 // M8: narrow the injection_unsupported catch to only the actual injection call so that
                 // pre-injection failures (element not found, etc.) are NOT mis-classified as
                 // injection_unsupported. Session resolution failures surface as missing_app (outer catch).
-                try
+                if (!PointerCommandSupport.TryInject(
+                    () => pointerInput.Touch(gesture, contactPaths, holdMs, durationMs),
+                    logger, json, parseResult.InvocationConfiguration.Error))
                 {
-                    pointerInput.Touch(gesture, contactPaths, holdMs, durationMs);
-                }
-                catch (InvalidOperationException injectEx)
-                {
-                    logger.LogError("{Symbol} {Message}", UiSymbols.Error, injectEx.Message);
-                    UiJsonError.Emit(json, UiJsonError.CodeInjectionUnsupported, injectEx.Message,
-                        errorOut: parseResult.InvocationConfiguration.Error);
                     return 1;
                 }
 
                 // id27/id28: synthetic touch injection can report success without actually reaching the
                 // target in a remote session (RDP). Attach an honest delivery-uncertainty advisory so a
                 // ✅ / exit 0 is not mistaken for confirmed delivery.
-                var deliveryWarning = ForegroundGuard.RemoteInjectionWarning(
-                    foregroundGuard.IsRemoteSession(), "touch");
+                var deliveryWarning = PointerCommandSupport.RemoteInjectionWarning(foregroundGuard, "touch");
 
                 if (json)
                 {

@@ -201,95 +201,28 @@ internal class UiPenCommand : Command, IShortDescription
                 // Build the ink path: explicit --path wins; else --at; else the selector's center.
                 if (path is null)
                 {
-                    PointerPoint contact;
-                    if (at is not null)
+                    var target = await PointerCommandSupport.ResolvePointAsync(
+                        uiAutomation, selectorService, session, selectorStr, at, atStr,
+                        "pen", "pen point", logger, json, cancellationToken);
+                    if (!target.Ok)
                     {
-                        contact = at.Value;
-                    }
-                    else
-                    {
-                        var selector = selectorService.Parse(selectorStr!);
-                        var element = await uiAutomation.FindSingleElementAsync(session, selector, cancellationToken);
-                        if (element is null)
-                        {
-                            UiErrors.ElementNotFound(logger, selectorStr!, json);
-                            return 1;
-                        }
-
-                        if (element.Width == 0 || element.Height == 0)
-                        {
-                            logger.LogError("{Symbol} Element has zero size — cannot use its center as a pen point.", UiSymbols.Error);
-                            UiJsonError.Emit(json, UiJsonError.CodeZeroSize, "Element has zero size — cannot use its center as a pen point.", selectorStr);
-                            return 1;
-                        }
-
-                        targetHwnd = element.WindowHandle ?? session.WindowHandle;
-
-                        if (targetHwnd != 0)
-                        {
-                            Windows.Win32.PInvoke.SetForegroundWindow(new Windows.Win32.Foundation.HWND((nint)targetHwnd));
-                            await Task.Delay(100, cancellationToken);
-                        }
-
-                        var stable = await GestureTargeting.ResolveStableAsync(
-                            uiAutomation, session, selector, element,
-                            GestureTargeting.DefaultMaxReads, GestureTargeting.DefaultReadDelayMs, null, cancellationToken);
-                        if (!GestureTargeting.TryReport(stable, logger, json, selectorStr!, "pen"))
-                        {
-                            return 1;
-                        }
-                        contact = new PointerPoint(stable.CenterX, stable.CenterY);
+                        return 1;
                     }
 
-                    path = [contact];
+                    targetHwnd = target.TargetHwnd;
+                    path = [target.Point];
                 }
 
                 // M7: SetForeground only when the selector branch did not already do it.
                 // The selector branch (no --path and no --at) calls SetForeground during stable-resolve;
                 // the --at and --path branches do not, so they need it here before injection.
-                if ((pathFromOption || at is not null) && targetHwnd != 0)
+                if (pathFromOption || at is not null)
                 {
-                    Windows.Win32.PInvoke.SetForegroundWindow(new Windows.Win32.Foundation.HWND((nint)targetHwnd));
-                    await Task.Delay(100, cancellationToken);
+                    await PointerCommandSupport.SetForegroundAsync(targetHwnd, cancellationToken);
                 }
 
-                // Refuse to inject without a resolved target window (F1): with hwnd 0 the foreground
-                // guard cannot verify the injection lands on the intended window, and the OS-wide pen
-                // input would hit whatever is foreground. Fail closed instead.
-                if (targetHwnd == 0)
-                {
-                    logger.LogError("{Symbol} No target window could be resolved — refusing to inject pen input (it could hit the wrong window).", UiSymbols.Error);
-                    UiJsonError.Emit(json, UiJsonError.CodeNoTarget,
-                        "No target window could be resolved — refusing to inject pen input. Target an app window (via --app/--window) whose element resolves to a window handle.");
-                    return 1;
-                }
-
-                // Resolve the target window rect to bounds-check every ink point before injecting.
-                if (!uiAutomation.TryGetWindowRect(targetHwnd, out var windowRect))
-                {
-                    logger.LogError("{Symbol} Could not read the target window rectangle — refusing to inject pen input.", UiSymbols.Error);
-                    UiJsonError.Emit(json, UiJsonError.CodeNoTarget,
-                        "Could not read the target window rectangle — refusing to inject pen input.");
-                    return 1;
-                }
-
-                // Every ink point (selector center, explicit --at, or --path waypoint) must fall inside
-                // the target window — reject out-of-bounds coordinates and inject nothing.
-                var outOfBounds = PointerGesturePlanner.FirstOutOfBounds(windowRect, path);
-                if (outOfBounds is not null)
-                {
-                    logger.LogError(
-                        "{Symbol} Point ({X}, {Y}) is outside the target window ({Left},{Top})-({Right},{Bottom}) — refusing to inject pen input.",
-                        UiSymbols.Error, outOfBounds.Value.X, outOfBounds.Value.Y,
-                        windowRect.Left, windowRect.Top, windowRect.Right, windowRect.Bottom);
-                    UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
-                        $"Point ({outOfBounds.Value.X},{outOfBounds.Value.Y}) is outside the target window " +
-                        $"({windowRect.Left},{windowRect.Top})-({windowRect.Right},{windowRect.Bottom}) — no input injected.");
-                    return 1;
-                }
-
-                // Final foreground gate before the OS-wide injection (matches click/drag/hover).
-                if (!foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, "pen"))
+                if (!PointerCommandSupport.TryPrepareInjection(
+                    uiAutomation, foregroundGuard, targetHwnd, path, "pen", "pen input", logger, json))
                 {
                     return 1;
                 }
@@ -297,15 +230,10 @@ internal class UiPenCommand : Command, IShortDescription
                 // M6: narrow the injection_unsupported catch to only the actual injection call so that
                 // pre-injection failures (element not found, etc.) are NOT mis-classified as
                 // injection_unsupported. Session resolution failures surface as missing_app (outer catch).
-                try
+                if (!PointerCommandSupport.TryInject(
+                    () => pointerInput.Pen(path, pressure, tiltX, tiltY, eraser, durationMs),
+                    logger, json, parseResult.InvocationConfiguration.Error))
                 {
-                    pointerInput.Pen(path, pressure, tiltX, tiltY, eraser, durationMs);
-                }
-                catch (InvalidOperationException injectEx)
-                {
-                    logger.LogError("{Symbol} {Message}", UiSymbols.Error, injectEx.Message);
-                    UiJsonError.Emit(json, UiJsonError.CodeInjectionUnsupported, injectEx.Message,
-                        errorOut: parseResult.InvocationConfiguration.Error);
                     return 1;
                 }
 
@@ -315,8 +243,7 @@ internal class UiPenCommand : Command, IShortDescription
                 // target in a remote session (RDP) — pen routing especially does not survive Remote
                 // Desktop. Attach an honest delivery-uncertainty advisory so a ✅ / exit 0 is not
                 // mistaken for confirmed delivery.
-                var deliveryWarning = ForegroundGuard.RemoteInjectionWarning(
-                    foregroundGuard.IsRemoteSession(), "pen");
+                var deliveryWarning = PointerCommandSupport.RemoteInjectionWarning(foregroundGuard, "pen");
 
                 if (json)
                 {
