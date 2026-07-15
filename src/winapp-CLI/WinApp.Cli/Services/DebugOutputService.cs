@@ -381,7 +381,7 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
         }
     }
 
-    private static string GetExceptionName(uint code) => code switch
+    internal static string GetExceptionName(uint code) => code switch
     {
         0xC0000005 => "Access Violation",
         0xC00000FD => "Stack Overflow",
@@ -403,7 +403,7 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
     /// Returns true if the debug message is internal OS/framework noise
     /// rather than an app-specific debug message worth showing on the console.
     /// </summary>
-    private static bool IsFrameworkNoise(string message)
+    internal static bool IsFrameworkNoise(string message)
     {
         // Windows OS source paths (onecore, onecoreuap, minkernel, etc.)
         if (message.StartsWith("onecore\\", StringComparison.OrdinalIgnoreCase) ||
@@ -449,7 +449,7 @@ internal sealed class DebugOutputService(IAnsiConsole console, ICrashDumpService
     /// Returns true if the message looks like a framework DLL debug trace
     /// (e.g., "Microsoft.UI.Xaml.dll!0x..." or "twinapi.appcore.dll!SomeFunc").
     /// </summary>
-    private static bool IsFrameworkDllTrace(string message)
+    internal static bool IsFrameworkDllTrace(string message)
     {
         var bangIndex = message.IndexOf('!');
         if (bangIndex < 5)

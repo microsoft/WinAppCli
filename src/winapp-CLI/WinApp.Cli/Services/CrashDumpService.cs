@@ -29,6 +29,18 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
 {
     private static readonly string DumpDirectory = Path.Combine(Path.GetTempPath(), "winapp-dumps");
 
+    // For testing only — overrides the ClrMD analysis boundary so the AnalyzeDumpAsync orchestration
+    // (managed vs native fallback, WinUI-triage branch, error handling) can be exercised without a
+    // real dump. Null means use the real ClrMD analyzer.
+    internal Func<string, IReadOnlyList<string>?, (string Summary, string Details, bool IsWinUi)>? ClrMdAnalyzerOverride { get; set; }
+
+    // For testing only — overrides the DbgEng native-fallback boundary. Null means use the real engine.
+    internal Func<string, bool, (string Summary, string Details)>? DbgEngAnalyzerOverride { get; set; }
+
+    // For testing only — the symbol-file download boundary used by DownloadSymbolsForStack.
+    // Defaults to a real HTTPS GET from the Microsoft Symbol Server.
+    internal static Func<string, byte[]?> SymbolFileDownloader { get; set; } = DefaultDownloadSymbolFile;
+
     /// <inheritdoc/>
     public unsafe string? WriteMiniDump(uint processId,
         byte[]? savedContext, uint savedThreadId,
@@ -188,7 +200,7 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
 
         try
         {
-            var (summary, details, isWinUi) = await Task.Run(() => AnalyzeWithClrMD(dumpPath, symbolSearchPaths));
+            var (summary, details, isWinUi) = await Task.Run(() => (ClrMdAnalyzerOverride ?? AnalyzeWithClrMD)(dumpPath, symbolSearchPaths));
 
             // WinUI triage pass — auto-enabled when Microsoft.UI.Xaml.dll is in the dump's
             // module list. Recovers the stowed exception (0xC000027B) and the XAML dispatch
@@ -244,7 +256,7 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
                 console.MarkupLine("[dim]Downloading symbols (first run may take a few minutes)...[/]");
             }
 
-            var (nativeSummary, nativeDetails) = await Task.Run(() => AnalyzeWithDbgEng(dumpPath, useSymbols));
+            var (nativeSummary, nativeDetails) = await Task.Run(() => (DbgEngAnalyzerOverride ?? AnalyzeWithDbgEng)(dumpPath, useSymbols));
 
             var allDetails = new StringBuilder();
             if (!string.IsNullOrWhiteSpace(details))
@@ -466,52 +478,10 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
 
             if (deepest != null && deepestFrames != null && deepestFrames.Count > 100)
             {
-                summary.AppendLine("Exception: Stack Overflow (deep recursion detected)");
-                summary.AppendLine($"Thread: {deepest.OSThreadId} ({deepestFrames.Count} managed frames)");
-                summary.AppendLine();
-                summary.AppendLine("Stack:");
-                string? lastFrame = null;
-                var repeatCount = 0;
-                var displayed = 0;
-
-                foreach (var frame in deepestFrames)
-                {
-                    if (displayed >= 15)
-                    {
-                        break;
-                    }
-
-                    var name = $"{frame.Method!.Type?.Name}.{frame.Method!.Name}";
-                    var sourceInfo = pdbResolver.GetSourceLocation(frame);
-                    var displayName = sourceInfo != null ? $"{name} in {sourceInfo}" : name;
-
-                    if (name == lastFrame)
-                    {
-                        repeatCount++;
-                        continue;
-                    }
-
-                    if (repeatCount > 0)
-                    {
-                        summary.AppendLine($"  ... (repeated {repeatCount} more times)");
-                        displayed++;
-                    }
-
-                    if (displayed >= 15)
-                    {
-                        break;
-                    }
-
-                    summary.AppendLine($"  {displayName}");
-                    displayed++;
-                    repeatCount = 0;
-                    lastFrame = name;
-                }
-
-                if (repeatCount > 0 && displayed < 15)
-                {
-                    summary.AppendLine($"  ... (repeated {repeatCount} more times)");
-                }
+                var frameInfos = deepestFrames
+                    .Select(f => (Name: $"{f.Method!.Type?.Name}.{f.Method!.Name}", Source: pdbResolver.GetSourceLocation(f)))
+                    .ToList();
+                AppendStackOverflowSummary(deepest.OSThreadId, frameInfos, summary);
             }
         }
 
@@ -550,6 +520,59 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
     }
 
     /// <summary>
+    /// Formats the "stack overflow (deep recursion)" summary from a thread's materialized frames,
+    /// collapsing runs of identical frames and capping the displayed count at 15. Behavior-preserving
+    /// extraction of the in-situ formatting so it is unit-testable without a live stack-overflow dump.
+    /// </summary>
+    internal static void AppendStackOverflowSummary(ulong osThreadId, IReadOnlyList<(string Name, string? Source)> frames, StringBuilder summary)
+    {
+        summary.AppendLine("Exception: Stack Overflow (deep recursion detected)");
+        summary.AppendLine($"Thread: {osThreadId} ({frames.Count} managed frames)");
+        summary.AppendLine();
+        summary.AppendLine("Stack:");
+        string? lastFrame = null;
+        var repeatCount = 0;
+        var displayed = 0;
+
+        foreach (var (name, source) in frames)
+        {
+            if (displayed >= 15)
+            {
+                break;
+            }
+
+            var displayName = source != null ? $"{name} in {source}" : name;
+
+            if (name == lastFrame)
+            {
+                repeatCount++;
+                continue;
+            }
+
+            if (repeatCount > 0)
+            {
+                summary.AppendLine($"  ... (repeated {repeatCount} more times)");
+                displayed++;
+            }
+
+            if (displayed >= 15)
+            {
+                break;
+            }
+
+            summary.AppendLine($"  {displayName}");
+            displayed++;
+            repeatCount = 0;
+            lastFrame = name;
+        }
+
+        if (repeatCount > 0 && displayed < 15)
+        {
+            summary.AppendLine($"  ... (repeated {repeatCount} more times)");
+        }
+    }
+
+    /// <summary>
     /// Returns true when the dump's loaded module list contains Microsoft.UI.Xaml.dll,
     /// indicating a WinUI (Windows App SDK) app whose crashes benefit from the triage pass.
     /// </summary>
@@ -557,18 +580,29 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
     {
         try
         {
-            foreach (var module in dt.EnumerateModules())
-            {
-                var fileName = Path.GetFileName(module.FileName);
-                if (string.Equals(fileName, "Microsoft.UI.Xaml.dll", StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
+            return EnumerateHasWinUiModule(dt.EnumerateModules().Select(m => m.FileName));
         }
         catch (Exception)
         {
             // Module enumeration is best-effort; absence simply disables the triage pass.
+        }
+
+        return false;
+    }
+
+    /// <summary>Returns true if the file name is Microsoft.UI.Xaml.dll (case-insensitive).</summary>
+    internal static bool IsWinUiModuleFileName(string? fileName) =>
+        string.Equals(Path.GetFileName(fileName), "Microsoft.UI.Xaml.dll", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Returns true when any module file name in the sequence is Microsoft.UI.Xaml.dll.</summary>
+    internal static bool EnumerateHasWinUiModule(IEnumerable<string?> moduleFileNames)
+    {
+        foreach (var fileName in moduleFileNames)
+        {
+            if (IsWinUiModuleFileName(fileName))
+            {
+                return true;
+            }
         }
 
         return false;
@@ -647,7 +681,7 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
         }
     }
 
-    private static (string Summary, string Details) AnalyzeWithDbgEng(string dumpPath, bool useSymbols)
+    internal static (string Summary, string Details) AnalyzeWithDbgEng(string dumpPath, bool useSymbols)
     {
         // Use system32's dbgeng.dll — available on every Windows machine.
         var dbgengPath = Environment.GetFolderPath(Environment.SpecialFolder.System);
@@ -724,30 +758,7 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
     private static int DownloadSymbolsForStack(string stackOutput, IDebugControl control, IDebugClient client, string cachePath)
     {
         // Extract unique module names from stack (e.g., "Microsoft_UI_Xaml" from "Microsoft_UI_Xaml+0x3e503")
-        var modules = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var line in stackOutput.Split('\n'))
-        {
-            var trimmed = line.Trim();
-            var bangIdx = trimmed.IndexOf('!');
-            var plusIdx = trimmed.IndexOf('+');
-
-            // "Module!Function+0x..." or "Module+0x..."
-            if (plusIdx > 0)
-            {
-                var start = trimmed.LastIndexOf(' ', bangIdx > 0 ? bangIdx : plusIdx) + 1;
-                var end = bangIdx > 0 ? bangIdx : plusIdx;
-                if (end > start)
-                {
-                    var name = trimmed[start..end];
-                    // Skip addresses (hex strings) and empty names
-                    if (name.Length > 0 && !name.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
-                                        && !name.Contains('`'))
-                    {
-                        modules.Add(name);
-                    }
-                }
-            }
-        }
+        var modules = ParseStackModuleNames(stackOutput);
 
         if (modules.Count == 0)
         {
@@ -756,7 +767,6 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
 
         // For each module, get its DLL path via DbgEng, then read PE header from disk
         var downloaded = 0;
-        using var http = new HttpClient();
 
         foreach (var moduleName in modules)
         {
@@ -801,18 +811,15 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
                         break;
                     }
 
-                    // Download from Microsoft Symbol Server
-                    var url = $"https://msdl.microsoft.com/download/symbols/{pdbName}/{sig}/{pdbName}";
-                    using var response = http.Send(new HttpRequestMessage(HttpMethod.Get, url));
-                    if (!response.IsSuccessStatusCode)
+                    // Download from Microsoft Symbol Server (seamed for tests)
+                    var pdbBytes = SymbolFileDownloader($"https://msdl.microsoft.com/download/symbols/{pdbName}/{sig}/{pdbName}");
+                    if (pdbBytes == null)
                     {
                         break;
                     }
 
                     Directory.CreateDirectory(Path.GetDirectoryName(localPdb)!);
-                    using var pdbStream = response.Content.ReadAsStream();
-                    using var fileStream = File.Create(localPdb);
-                    pdbStream.CopyTo(fileStream);
+                    File.WriteAllBytes(localPdb, pdbBytes);
                     downloaded++;
                     break;
                 }
@@ -826,7 +833,62 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
         return downloaded;
     }
 
-    private static string? ExtractImagePath(string lmvmOutput)
+    /// <summary>
+    /// Parses unique module names from DbgEng <c>kp</c> stack output. A frame such as
+    /// <c>Module!Function+0x1a</c> or <c>Module+0x1a</c> yields <c>Module</c>; hex addresses and
+    /// mangled (backtick-containing) names are skipped. Behavior-preserving extraction for testing.
+    /// </summary>
+    internal static ISet<string> ParseStackModuleNames(string stackOutput)
+    {
+        var modules = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var line in stackOutput.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            var bangIdx = trimmed.IndexOf('!');
+            var plusIdx = trimmed.IndexOf('+');
+
+            // "Module!Function+0x..." or "Module+0x..."
+            if (plusIdx > 0)
+            {
+                var start = trimmed.LastIndexOf(' ', bangIdx > 0 ? bangIdx : plusIdx) + 1;
+                var end = bangIdx > 0 ? bangIdx : plusIdx;
+                if (end > start)
+                {
+                    var name = trimmed[start..end];
+                    // Skip addresses (hex strings) and empty names
+                    if (name.Length > 0 && !name.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                                        && !name.Contains('`'))
+                    {
+                        modules.Add(name);
+                    }
+                }
+            }
+        }
+
+        return modules;
+    }
+
+    /// <summary>
+    /// Real symbol-file download boundary: HTTPS GET from the Microsoft Symbol Server.
+    /// Returns the PDB bytes, or null when the file is unavailable. Seamed via
+    /// <see cref="SymbolFileDownloader"/> so tests never hit the network.
+    /// </summary>
+    private static byte[]? DefaultDownloadSymbolFile(string url)
+    {
+        using var http = new HttpClient();
+        using var response = http.Send(new HttpRequestMessage(HttpMethod.Get, url));
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        using var pdbStream = response.Content.ReadAsStream();
+        using var ms = new MemoryStream();
+        pdbStream.CopyTo(ms);
+        return ms.ToArray();
+    }
+
+    internal static string? ExtractImagePath(string lmvmOutput)
     {
         foreach (var line in lmvmOutput.Split('\n'))
         {
@@ -843,7 +905,7 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
     /// <summary>
     /// Extracts a concise stack summary from DbgEng kp output for terminal display.
     /// </summary>
-    private static string ExtractNativeStackSummary(string output)
+    internal static string ExtractNativeStackSummary(string output)
     {
         var result = new StringBuilder();
         var lines = output.Split('\n');
@@ -905,6 +967,52 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
         }
 
         return result.ToString().Trim();
+    }
+
+    /// <summary>
+    /// Validates that the PDB matches the DLL by comparing the CodeView debug directory GUID.
+    /// Returns true if the PDB matches or if validation cannot be performed (e.g., file missing/locked,
+    /// no CodeView entry). Extracted to the outer class so it can be unit-tested directly.
+    /// </summary>
+    internal static bool ValidatePdbMatchesDll(string dllPath, string pdbPath)
+    {
+        try
+        {
+            if (!File.Exists(dllPath))
+            {
+                return true; // Can't validate, accept by name
+            }
+
+            using var dllStream = File.OpenRead(dllPath);
+            using var peReader = new PEReader(dllStream);
+            var debugEntries = peReader.ReadDebugDirectory();
+
+            Guid? peGuid = null;
+            foreach (var entry in debugEntries)
+            {
+                if (entry.Type == DebugDirectoryEntryType.CodeView)
+                {
+                    peGuid = peReader.ReadCodeViewDebugDirectoryData(entry).Guid;
+                    break;
+                }
+            }
+
+            if (peGuid == null)
+            {
+                return true; // No CodeView entry, accept by name
+            }
+
+            using var pdbStream = File.OpenRead(pdbPath);
+            using var pdbProvider = MetadataReaderProvider.FromPortablePdbStream(pdbStream, MetadataStreamOptions.LeaveOpen);
+            var pdbReader = pdbProvider.GetMetadataReader();
+            var pdbId = new BlobContentId(pdbReader.DebugMetadataHeader!.Id);
+
+            return pdbId.Guid == peGuid.Value;
+        }
+        catch
+        {
+            return true; // Can't validate, accept by name
+        }
     }
 
     /// <summary>
@@ -1079,51 +1187,6 @@ internal sealed class CrashDumpService(IAnsiConsole console, ILogger<CrashDumpSe
             }
 
             return null;
-        }
-
-        /// <summary>
-        /// Validates that the PDB matches the DLL by comparing the CodeView debug directory GUID.
-        /// Returns true if the PDB matches or if validation cannot be performed (e.g., file locked).
-        /// </summary>
-        private static bool ValidatePdbMatchesDll(string dllPath, string pdbPath)
-        {
-            try
-            {
-                if (!File.Exists(dllPath))
-                {
-                    return true; // Can't validate, accept by name
-                }
-
-                using var dllStream = File.OpenRead(dllPath);
-                using var peReader = new PEReader(dllStream);
-                var debugEntries = peReader.ReadDebugDirectory();
-
-                Guid? peGuid = null;
-                foreach (var entry in debugEntries)
-                {
-                    if (entry.Type == DebugDirectoryEntryType.CodeView)
-                    {
-                        peGuid = peReader.ReadCodeViewDebugDirectoryData(entry).Guid;
-                        break;
-                    }
-                }
-
-                if (peGuid == null)
-                {
-                    return true; // No CodeView entry, accept by name
-                }
-
-                using var pdbStream = File.OpenRead(pdbPath);
-                using var pdbProvider = MetadataReaderProvider.FromPortablePdbStream(pdbStream, MetadataStreamOptions.LeaveOpen);
-                var pdbReader = pdbProvider.GetMetadataReader();
-                var pdbId = new BlobContentId(pdbReader.DebugMetadataHeader!.Id);
-
-                return pdbId.Guid == peGuid.Value;
-            }
-            catch
-            {
-                return true; // Can't validate, accept by name
-            }
         }
 
         public void Dispose()

@@ -60,6 +60,15 @@ internal static class XamlTriageBinaries
     private const string FlatContainer = "https://api.nuget.org/v3-flatcontainer";
 
     /// <summary>
+    /// Seam for the two flat-container HTTP GETs (<c>index.json</c> and the pinned <c>.nupkg</c>).
+    /// Defaults to a real <see cref="HttpClient.GetAsync(string?, CancellationToken)"/>; tests replace
+    /// it with canned responses so the download-orchestration, integrity-verification, and archive
+    /// extraction logic can be exercised offline. Only the default delegate performs network I/O.
+    /// </summary>
+    internal static Func<HttpClient, string, CancellationToken, Task<HttpResponseMessage>> HttpGetAsync { get; set; }
+        = static (http, url, cancellationToken) => http.GetAsync(url, cancellationToken);
+
+    /// <summary>
     /// Pinned native-debugger package version. Must stay in sync with the
     /// <c>Microsoft.Debugging.Platform.*</c> entries in <c>Directory.Packages.props</c>; a unit test
     /// asserts they match so runtime acquisition uses the same version that <c>dotnet restore</c> pins.
@@ -443,7 +452,7 @@ internal static class XamlTriageBinaries
         return false;
     }
 
-    private static async Task<bool> TryMaterializePackageAsync(
+    internal static async Task<bool> TryMaterializePackageAsync(
         HttpClient http, string package, string pinnedVersion, string expectedSha512, string[] files, DirectoryInfo cacheBinDir, ILogger logger, CancellationToken cancellationToken)
     {
         var id = package.ToLowerInvariant();
@@ -464,7 +473,7 @@ internal static class XamlTriageBinaries
 
         // Download the whole .nupkg into memory so its hash can be verified before anything is extracted.
         var nupkgUrl = $"{FlatContainer}/{id}/{version}/{id}.{version}.nupkg";
-        using var nupkgResponse = await http.GetAsync(nupkgUrl, cancellationToken);
+        using var nupkgResponse = await HttpGetAsync(http, nupkgUrl, cancellationToken);
         if (!nupkgResponse.IsSuccessStatusCode)
         {
             return false;
@@ -519,7 +528,7 @@ internal static class XamlTriageBinaries
     private static async Task<string?> ResolveDownloadVersionAsync(
         HttpClient http, string id, string pinnedVersion, ILogger logger, CancellationToken cancellationToken)
     {
-        using var indexResponse = await http.GetAsync($"{FlatContainer}/{id}/index.json", cancellationToken);
+        using var indexResponse = await HttpGetAsync(http, $"{FlatContainer}/{id}/index.json", cancellationToken);
         if (!indexResponse.IsSuccessStatusCode)
         {
             return null;
