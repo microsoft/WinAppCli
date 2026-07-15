@@ -307,4 +307,70 @@ public class PathSafetyTests
         var stray = Directory.GetFiles(_tempDir.FullName, "*.tmp-*", SearchOption.AllDirectories);
         Assert.AreEqual(0, stray.Length, "no .tmp sibling should be left behind on failure");
     }
+
+    [TestMethod]
+    public void HasReparsePointOnPath_InvalidPathCharacters_ReturnsTrue()
+    {
+        // An embedded NUL makes Path.GetFullPath throw; the fail-closed catch biases to "unsafe".
+        bool unsafePath = PathSafety.HasReparsePointOnPath("bad\0path", _tempDir.FullName);
+        Assert.IsTrue(unsafePath, "a path that cannot be normalised must be refused");
+    }
+
+    [TestMethod]
+    public void IsNetworkPath_EmptyString_ReturnsFalse()
+    {
+        Assert.IsFalse(PathSafety.IsNetworkPath(string.Empty));
+    }
+
+    [TestMethod]
+    public void IsNetworkPath_Null_ReturnsFalse()
+    {
+        Assert.IsFalse(PathSafety.IsNetworkPath(null!));
+    }
+
+    [TestMethod]
+    public async Task AtomicWriteAllTextAsync_BareFilename_WritesToCurrentDirectory()
+    {
+        // A path with no directory component defaults to the current working directory.
+        var name = "psafe_" + Guid.NewGuid().ToString("N") + ".txt";
+        var cwd = Directory.GetCurrentDirectory();
+        try
+        {
+            await PathSafety.AtomicWriteAllTextAsync(name, "hello cwd", System.Text.Encoding.UTF8);
+
+            var written = Path.Combine(cwd, name);
+            Assert.IsTrue(File.Exists(written), "bare filename must be written under the current directory");
+            Assert.AreEqual("hello cwd", File.ReadAllText(written));
+        }
+        finally
+        {
+            foreach (var f in Directory.GetFiles(cwd, name + "*"))
+            {
+                try { File.Delete(f); } catch { /* best effort */ }
+            }
+        }
+    }
+
+    [TestMethod]
+    public async Task AtomicWriteAllTextAsync_DestinationIsExistingDirectory_ThrowsAndDeletesTemp()
+    {
+        // The temp write succeeds, but the final move onto an existing *directory* fails; the
+        // catch must delete the staged temp file and rethrow.
+        var target = Path.Combine(_tempDir.FullName, "iam-a-directory");
+        Directory.CreateDirectory(target);
+
+        Exception? caught = null;
+        try
+        {
+            await PathSafety.AtomicWriteAllTextAsync(target, "x", System.Text.Encoding.UTF8);
+        }
+        catch (Exception ex)
+        {
+            caught = ex;
+        }
+
+        Assert.IsNotNull(caught, "moving a file onto an existing directory must throw");
+        var stray = Directory.GetFiles(_tempDir.FullName, "iam-a-directory.tmp-*");
+        Assert.AreEqual(0, stray.Length, "the staged .tmp file must be deleted when the move fails");
+    }
 }

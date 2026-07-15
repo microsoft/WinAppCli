@@ -90,11 +90,14 @@ public abstract class BaseCommandTests(bool configPaths = true, LogLevel logLeve
     }
 
     protected async Task<int> ParseAndInvokeWithCaptureAsync(Command command, string[] manifestArgs)
+        => await ParseAndInvokeWithCaptureAsync(command, manifestArgs, TestContext.CancellationToken);
+
+    protected async Task<int> ParseAndInvokeWithCaptureAsync(Command command, string[] manifestArgs, CancellationToken cancellationToken)
     {
         var parseResult = command.Parse(manifestArgs);
         parseResult.InvocationConfiguration.Output = TestAnsiConsole.Profile.Out.Writer;
         parseResult.InvocationConfiguration.Error = ConsoleStdErr;
-        return await parseResult.InvokeAsync(parseResult.InvocationConfiguration, cancellationToken: TestContext.CancellationToken);
+        return await parseResult.InvokeAsync(parseResult.InvocationConfiguration, cancellationToken: cancellationToken);
     }
 
     protected virtual IServiceCollection ConfigureServices(IServiceCollection services)

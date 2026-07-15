@@ -88,45 +88,70 @@ internal static class XamlTriageRunner
         }
 
         var output = new StringBuilder();
+        string result;
         using (var holder = new DbgEngOutputHolder(client, DEBUG_OUTPUT.ALL))
         {
             holder.OutputReceived += (text, _) => output.Append(text);
-
-            if (useSymbols)
-            {
-                // Configure the public symbol server (symsrv.dll is co-located with the engine) and
-                // force-download the modules the extension dereferences: combase.dll provides the
-                // _STOWED_EXCEPTION_INFORMATION_* types !xamlstowed needs, and the WinUI module
-                // provides the XAML error-context types. Forcing avoids lazy-load gaps mid-script.
-                control.Execute(DEBUG_OUTCTL.THIS_CLIENT,
-                    $".sympath srv*{SymbolCachePath}*https://msdl.microsoft.com/download/symbols",
-                    DEBUG_EXECUTE.DEFAULT);
-                control.Execute(DEBUG_OUTCTL.THIS_CLIENT, ".reload /f combase.dll", DEBUG_EXECUTE.DEFAULT);
-                control.Execute(DEBUG_OUTCTL.THIS_CLIENT, ".reload /f Microsoft.UI.Xaml.dll", DEBUG_EXECUTE.DEFAULT);
-            }
-
-            // Switch to the recorded exception context so the extension analyzes the faulting thread
-            // (the stowed-exception raise site) rather than whichever thread the dump opened on.
-            control.Execute(DEBUG_OUTCTL.THIS_CLIENT, ".ecxr", DEBUG_EXECUTE.DEFAULT);
-
-            // Register the JavaScript script provider (ships as JsProvider.dll alongside the engine).
-            // Without this, '.scriptload <file>.js' fails with "No script provider ... for '.js'".
-            var jsProvider = jsProviderPath.Replace('\\', '/');
-            var loadHr = control.Execute(DEBUG_OUTCTL.THIS_CLIENT, $".load \"{jsProvider}\"", DEBUG_EXECUTE.DEFAULT);
-            if (loadHr < 0)
-            {
-                return output + $"\nWinUI triage could not load the JavaScript provider " +
-                    $"({jsProviderPath}): HRESULT 0x{(uint)loadHr:X8}";
-            }
-
-            // Load the JS extension, then run the stowed-exception + triage commands.
-            // Forward slashes avoid escaping issues in the DbgEng command parser.
-            var scriptPath = extPath.Replace('\\', '/');
-            control.Execute(DEBUG_OUTCTL.THIS_CLIENT, $".scriptload \"{scriptPath}\"", DEBUG_EXECUTE.DEFAULT);
-            control.Execute(DEBUG_OUTCTL.THIS_CLIENT, "!xamlstowed", DEBUG_EXECUTE.DEFAULT);
-            control.Execute(DEBUG_OUTCTL.THIS_CLIENT, "!xamltriage", DEBUG_EXECUTE.DEFAULT);
+            result = RunTriageSequence(
+                jsProviderPath,
+                extPath,
+                useSymbols,
+                command => control.Execute(DEBUG_OUTCTL.THIS_CLIENT, command, DEBUG_EXECUTE.DEFAULT),
+                () => output.ToString());
         }
 
-        return output.ToString();
+        return result;
+    }
+
+    /// <summary>
+    /// Emits the DbgEng command sequence for WinUI triage — optional symbol-server configuration, the
+    /// exception-context switch, the JavaScript-provider load, the script load, and the
+    /// <c>!xamlstowed</c>/<c>!xamltriage</c> commands — through the supplied <paramref name="execute"/>
+    /// delegate (which returns each command's HRESULT), returning the engine output captured by
+    /// <paramref name="getOutput"/>. Extracted from <see cref="RunDbgEngExtension"/> so the symbol path,
+    /// the provider-load-failure path, and the happy path are unit-testable without a live engine, dump,
+    /// or symbol server. Behavior-preserving: the commands, their order, and the failure message match the
+    /// original in-situ sequence exactly.
+    /// </summary>
+    internal static string RunTriageSequence(
+        string jsProviderPath,
+        string extPath,
+        bool useSymbols,
+        Func<string, int> execute,
+        Func<string> getOutput)
+    {
+        if (useSymbols)
+        {
+            // Configure the public symbol server (symsrv.dll is co-located with the engine) and
+            // force-download the modules the extension dereferences: combase.dll provides the
+            // _STOWED_EXCEPTION_INFORMATION_* types !xamlstowed needs, and the WinUI module
+            // provides the XAML error-context types. Forcing avoids lazy-load gaps mid-script.
+            execute($".sympath srv*{SymbolCachePath}*https://msdl.microsoft.com/download/symbols");
+            execute(".reload /f combase.dll");
+            execute(".reload /f Microsoft.UI.Xaml.dll");
+        }
+
+        // Switch to the recorded exception context so the extension analyzes the faulting thread
+        // (the stowed-exception raise site) rather than whichever thread the dump opened on.
+        execute(".ecxr");
+
+        // Register the JavaScript script provider (ships as JsProvider.dll alongside the engine).
+        // Without this, '.scriptload <file>.js' fails with "No script provider ... for '.js'".
+        var jsProvider = jsProviderPath.Replace('\\', '/');
+        var loadHr = execute($".load \"{jsProvider}\"");
+        if (loadHr < 0)
+        {
+            return getOutput() + $"\nWinUI triage could not load the JavaScript provider " +
+                $"({jsProviderPath}): HRESULT 0x{(uint)loadHr:X8}";
+        }
+
+        // Load the JS extension, then run the stowed-exception + triage commands.
+        // Forward slashes avoid escaping issues in the DbgEng command parser.
+        var scriptPath = extPath.Replace('\\', '/');
+        execute($".scriptload \"{scriptPath}\"");
+        execute("!xamlstowed");
+        execute("!xamltriage");
+
+        return getOutput();
     }
 }
