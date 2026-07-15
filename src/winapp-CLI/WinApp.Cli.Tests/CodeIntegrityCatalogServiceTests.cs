@@ -8,6 +8,35 @@ using Windows.Win32;
 
 namespace WinApp.Cli.Tests;
 
+/// <summary>
+/// Tests for <see cref="CodeIntegrityCatalogService"/>. The full-catalog tests below invoke the
+/// REAL native CryptCATCDF* APIs against real system executables, so the happy-path native flow is
+/// genuinely exercised (not faked).
+/// </summary>
+/// <remarks>
+/// Residual uncovered lines in CodeIntegrityCatalogService.cs (~93% line coverage in Debug) are the
+/// native-failure paths, each of which needs a genuine native fault a unit test cannot deterministically
+/// induce without contriving a flaky fault or adding a product seam. Named precisely:
+/// <list type="bullet">
+///   <item>ParseErrorCallback body (~47-55): an <c>[UnmanagedCallersOnly]</c> stdcall callback that ONLY
+///     the native CryptCATCDF* parser invokes, and only on a CDF parse/member error. Its mapping logic
+///     IS unit-tested directly via <see cref="CodeIntegrityCatalogService.DescribeCatalogErrorArea"/> /
+///     <see cref="CodeIntegrityCatalogService.DescribeCatalogLocalError"/>; only the ~3-line native shell
+///     (read the PWSTR line + LogError) is native-invoked.</item>
+///   <item>Line ~276 <c>throw new Win32Exception</c>: reached only when CryptCATCDFOpen returns null (a real
+///     native open/parse failure). These tests feed valid CDFs built from real system exes, so open succeeds.</item>
+///   <item>Lines ~290-293 (outer <c>catch (Exception)</c>): the only thrower inside the guarded try is the
+///     line ~276 Win32Exception (native-gated); the Enumerate* helpers only throw on a native enum fault, so
+///     entering this catch likewise requires a real native failure.</item>
+///   <item>Line ~304 (empty <c>catch { }</c> around <c>File.Delete(cdfPath)</c>): runs only if deleting the
+///     temp CDF itself throws (e.g. the file is locked); not exercised.</item>
+/// </list>
+/// These are deferred to the wave-2 real-runtime integration test (a genuine malformed-CDF fault on CI).
+/// NOT native-only and already covered: the finally <c>if (cdfOutputPath == null) File.Delete</c> cleanup
+/// branch (~298-302) via the no-ref overload (seeds cdfOutputPath = null), and the
+/// <c>else { cdfOutputPath = cdfPath; }</c> branch (~306-308) via the ref-based tests that seed
+/// <c>cdfPath = string.Empty</c> (non-null).
+/// </remarks>
 [TestClass]
 public class CodeIntegrityCatalogServiceTests : BaseCommandTests
 {

@@ -377,7 +377,8 @@ internal partial class MsixService
             }
             else
             {
-                CopyDirectoryRecursive(inputFolder, stagingDir);
+                var excludedDirectories = BuildStagingExclusions(inputFolder, taskContext);
+                CopyDirectoryRecursive(inputFolder, stagingDir, excludedDirectories);
             }
 
             // Write finalized manifest into staging

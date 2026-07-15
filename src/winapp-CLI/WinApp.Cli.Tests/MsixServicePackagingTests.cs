@@ -3,6 +3,7 @@
 
 using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
+using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
@@ -109,7 +110,7 @@ public class MsixServicePackagingTests : BaseCommandTests
     }
 
     [TestMethod]
-    public void CopyManifestReferencedFiles_CopiesMissingFiles_SkipsPresentMissingAndEscapes()
+    public void CopyManifestReferencedFiles_CopiesFromRoots_SkipsPresentAndMissing()
     {
         var manifestDir = _tempDirectory.CreateSubdirectory("manifest-dir");
         var inputFolder = _tempDirectory.CreateSubdirectory("input-dir");
@@ -129,7 +130,6 @@ public class MsixServicePackagingTests : BaseCommandTests
             "from-input.txt",
             "already-staged.txt",
             "missing-everywhere.txt",
-            Path.Combine("..", "escape.txt"),
         };
 
         CopyManifestReferencedFilesMethod.Invoke(null,
@@ -148,8 +148,49 @@ public class MsixServicePackagingTests : BaseCommandTests
             "Files already present in staging must not be overwritten");
         Assert.IsFalse(File.Exists(Path.Combine(stagingDir.FullName, "missing-everywhere.txt")),
             "Files missing from all roots are skipped");
-        Assert.IsFalse(File.Exists(Path.Combine(_tempDirectory.FullName, "escape.txt")),
-            "Path-escaping references must not be copied outside staging");
+    }
+
+    [TestMethod]
+    public void CopyManifestReferencedFiles_PathEscapingReferenceWithRealSource_IsBlockedByGuardWithWarning()
+    {
+        // Staging is nested one level deeper than the manifest dir so the escaping DESTINATION
+        // (stage\pwned.txt) is DISTINCT from the real SOURCE the reference resolves to
+        // (temp\pwned.txt). That models a manifest referencing an out-of-tree path that actually
+        // exists: absent the destination-escape guard the method would try to copy a real file to a
+        // location OUTSIDE stagingDir.
+        var manifestDir = _tempDirectory.CreateSubdirectory("mani");
+        var inputFolder = _tempDirectory.CreateSubdirectory("inp");
+        var stagingParent = _tempDirectory.CreateSubdirectory("stage");
+        var stagingDir = stagingParent.CreateSubdirectory("inner");
+
+        var escapingRef = Path.Combine("..", "pwned.txt");
+        // manifestDir\..\pwned.txt == _tempDirectory\pwned.txt — a real, populated source file.
+        var realSource = Path.Combine(_tempDirectory.FullName, "pwned.txt");
+        File.WriteAllText(realSource, "sensitive");
+        // stagingDir\..\pwned.txt == stage\pwned.txt — the escaping destination that must never be written.
+        var escapedDestination = Path.Combine(stagingParent.FullName, "pwned.txt");
+
+        var referencedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { escapingRef };
+
+        CopyManifestReferencedFilesMethod.Invoke(null,
+        [
+            referencedFiles,
+            manifestDir,
+            inputFolder,
+            stagingDir,
+            TestTaskContext,
+            CancellationToken.None,
+        ]);
+
+        // The destination-escape guard runs BEFORE the source lookup and skips with a distinct
+        // "path escape" warning. (A separate source-containment guard is a backstop, so proving THIS
+        // guard fired requires asserting its specific message, not merely that no file escaped.)
+        var messages = TestTask.SubTasks.OfType<StatusMessageTask>().Select(t => t.CompletedMessage ?? string.Empty).ToList();
+        Assert.IsTrue(
+            messages.Any(m => m.Contains("path escape", StringComparison.OrdinalIgnoreCase) && m.Contains("pwned.txt", StringComparison.OrdinalIgnoreCase)),
+            $"The path-escape guard should warn about the escaping reference. Messages:\n{string.Join("\n", messages)}");
+        Assert.IsFalse(File.Exists(escapedDestination), "A path-escaping reference must never be written outside the staging directory");
+        Assert.AreEqual("sensitive", File.ReadAllText(realSource), "The real source file must be left untouched");
     }
 
     // ---- FetchDotNetPackageListAsync ----------------------------------------------

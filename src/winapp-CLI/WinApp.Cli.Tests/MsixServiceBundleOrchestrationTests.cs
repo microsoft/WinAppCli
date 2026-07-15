@@ -61,11 +61,29 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
     private FakeBundleValidationService _fakeBundleValidationService = null!;
     private FakeBuildToolsService _fakeBuildToolsService = null!;
 
+    /// <summary>
+    /// Relative file paths ('/'-separated) captured from the makeappx <c>/d</c> staging directory at
+    /// pack time — snapshotted before the SUT deletes the staging dir — so tests can assert exactly
+    /// what was staged for packing.
+    /// </summary>
+    private readonly List<string> _makeAppxStagedFiles = [];
+
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
     {
         _fakeBundleService = new FakeBundleService();
         _fakeBundleValidationService = new FakeBundleValidationService();
-        _fakeBuildToolsService = new FakeBuildToolsService { Handler = FakeBuildToolsService.EmulateSdkToolOutput };
+        _fakeBuildToolsService = new FakeBuildToolsService
+        {
+            Handler = (tool, arguments) =>
+            {
+                if (tool.ExecutableName.Contains("makeappx", StringComparison.OrdinalIgnoreCase))
+                {
+                    CaptureMakeAppxStaging(arguments);
+                }
+
+                return FakeBuildToolsService.EmulateSdkToolOutput(tool, arguments);
+            }
+        };
 
         return services
             .AddSingleton<IBundleService>(_fakeBundleService)
@@ -123,18 +141,21 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
     [TestMethod]
     public async Task CreateMsixBundleAsync_RuntimeToolExeIsSkippedInAutoDetection_UsesRealExe()
     {
-        // Arrange - folder with createdump.exe (runtime tool) and the real app exe
+        // Arrange - a folder whose manifest references an ABSENT exe, which forces the "last resort"
+        // folder scan in ResolveExecutableForFolder. That scan must skip the runtime tool
+        // (createdump.exe) and pick the real app exe. To make the choice observable, give the two
+        // exes DIFFERENT architectures: if the runtime-tool filter were removed, createdump.exe would
+        // be selected and the detected slice arch would be arm64 instead of x64.
         var folder = _tempDirectory.CreateSubdirectory("runtime-tool-folder");
-        // Put createdump.exe first alphabetically (c < t) to verify it's skipped
-        File.WriteAllBytes(Path.Combine(folder.FullName, "createdump.exe"), BuildMinimalNativePe(0x8664));
-        File.WriteAllBytes(Path.Combine(folder.FullName, "TestApp.exe"), BuildMinimalNativePe(0x8664));
+        File.WriteAllBytes(Path.Combine(folder.FullName, "createdump.exe"), BuildMinimalNativePe(0xAA64)); // arm64 runtime tool
+        File.WriteAllBytes(Path.Combine(folder.FullName, "TestApp.exe"), BuildMinimalNativePe(0x8664));   // x64 real app
         File.WriteAllBytes(Path.Combine(folder.FullName, "logo.png"), []);
-        File.WriteAllText(Path.Combine(folder.FullName, "Package.appxmanifest"), CreateManifestContent("x64"));
+        // Manifest references a non-existent exe, so manifest-based resolution fails and the scan runs.
+        File.WriteAllText(Path.Combine(folder.FullName, "Package.appxmanifest"), CreateManifestContent("x64", executableName: "MissingApp.exe"));
 
         var arm64Folder = CreateSliceFolder("slice-arm64", 0xAA64, "arm64");
 
-        // Act - should succeed because manifest specifies executable, so runtime tool filter 
-        // only affects the "last resort" fallback
+        // Act
         var result = await _msixService.CreateMsixBundleAsync(
             [folder, arm64Folder],
             outputPath: null,
@@ -142,9 +163,13 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
             skipPri: true,
             cancellationToken: TestContext.CancellationToken);
 
-        // Assert
+        // Assert - the scan skipped createdump.exe (arm64) and selected TestApp.exe (x64), so the
+        // slice's detected architecture is x64. This would be arm64 if the runtime-tool filter were gone.
         Assert.IsNotNull(result);
         Assert.AreEqual(2, result.Slices.Count);
+        var scannedSlice = result.Slices.Single(s => s.InputFolder.Name == "runtime-tool-folder");
+        Assert.AreEqual("x64", scannedSlice.Architecture,
+            "The runtime-tool filter must skip createdump.exe (arm64) so the real app exe (x64) drives arch detection");
     }
 
     [TestMethod]
@@ -357,6 +382,49 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
         return folder;
     }
 
+    /// <summary>
+    /// Snapshots the relative contents of the makeappx <c>/d</c> staging directory into
+    /// <see cref="_makeAppxStagedFiles"/>. Invoked from the fake build-tools handler at pack time,
+    /// before the SUT deletes the staging directory, so tests can assert what was actually staged.
+    /// </summary>
+    private void CaptureMakeAppxStaging(string arguments)
+    {
+        var stagingDir = ExtractQuotedFlagValue(arguments, "/d");
+        if (stagingDir == null || !Directory.Exists(stagingDir))
+        {
+            return;
+        }
+
+        foreach (var file in Directory.EnumerateFiles(stagingDir, "*", SearchOption.AllDirectories))
+        {
+            _makeAppxStagedFiles.Add(Path.GetRelativePath(stagingDir, file).Replace('\\', '/'));
+        }
+    }
+
+    /// <summary>
+    /// Extracts the quoted value following a command-line flag (e.g. the path in <c>/d "value"</c>),
+    /// stripping any <c>\\?\</c> extended-length prefix. Returns null when the flag or value is absent.
+    /// </summary>
+    private static string? ExtractQuotedFlagValue(string arguments, string flag)
+    {
+        var token = flag + " \"";
+        var start = arguments.IndexOf(token, StringComparison.OrdinalIgnoreCase);
+        if (start < 0)
+        {
+            return null;
+        }
+
+        start += token.Length;
+        var end = arguments.IndexOf('"', start);
+        if (end < 0)
+        {
+            return null;
+        }
+
+        var value = arguments[start..end];
+        return value.StartsWith(@"\\?\", StringComparison.Ordinal) ? value[4..] : value;
+    }
+
     [TestMethod]
     public async Task CreateMsixBundleAsync_NeutralArchWithSelfContained_ThrowsWithClearError()
     {
@@ -463,20 +531,24 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
     [TestMethod]
     public async Task CreateMsixBundleAsync_WithExplicitExecutableOption_ResolvesViaOption()
     {
-        var x64Folder = CreateSliceFolder("opt-x64", 0x8664, "x64");
-        var arm64Folder = CreateSliceFolder("opt-arm64", 0xAA64, "arm64");
+        // The folder's manifest declares TestApp.exe (x64). Add a SECOND exe with a DIFFERENT
+        // architecture and pass it via --executable. If the option is honored, arch detection uses
+        // AltApp.exe (arm64); if the option were ignored, the manifest's TestApp.exe (x64) would win.
+        var folder = CreateSliceFolder("opt-folder", 0x8664, "x64");
+        File.WriteAllBytes(Path.Combine(folder.FullName, "AltApp.exe"), BuildMinimalNativePe(0xAA64)); // arm64
 
-        // --executable forces the option-based resolution branch in ResolveExecutableForFolder.
         var result = await _msixService.CreateMsixBundleAsync(
-            [x64Folder, arm64Folder],
+            [folder],
             outputPath: null,
             TestTaskContext,
             skipPri: true,
-            executable: "TestApp.exe",
+            executable: "AltApp.exe",
             cancellationToken: TestContext.CancellationToken);
 
         Assert.IsNotNull(result);
-        Assert.AreEqual(2, result.Slices.Count);
+        Assert.AreEqual(1, result.Slices.Count);
+        Assert.AreEqual("arm64", result.Slices[0].Architecture,
+            "--executable must drive arch detection: AltApp.exe (arm64) overrides the manifest's default TestApp.exe (x64)");
     }
 
     [TestMethod]
@@ -540,6 +612,12 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
         Assert.IsNotNull(result);
         Assert.IsTrue(result.BundlePath.Exists);
         Assert.IsTrue(outputDir.Exists, "Output directory should have been created");
+
+        // The external asset must have been genuinely staged for packing (not merely discovered):
+        // the capturing handler snapshotted the makeappx /d staging directory before it was cleaned up.
+        Assert.IsTrue(
+            _makeAppxStagedFiles.Any(f => string.Equals(Path.GetFileName(f), "logo.png", StringComparison.OrdinalIgnoreCase)),
+            $"The manifest-referenced external asset 'logo.png' should have been copied into the makeappx staging dir. Staged: [{string.Join(", ", _makeAppxStagedFiles)}]");
     }
 
     [TestMethod]
@@ -564,7 +642,7 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
 
     #endregion
 
-    private static string CreateManifestContent(string processorArchitecture)
+    private static string CreateManifestContent(string processorArchitecture, string executableName = "TestApp.exe")
     {
         return $$"""
             <?xml version="1.0" encoding="utf-8"?>
@@ -578,7 +656,7 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
                 <Capability Name="internetClient" />
               </Capabilities>
               <Applications>
-                <Application Id="App" Executable="TestApp.exe" EntryPoint="Windows.FullTrustApplication">
+                <Application Id="App" Executable="{{executableName}}" EntryPoint="Windows.FullTrustApplication">
                   <uap:VisualElements DisplayName="TestApp" Description="Test" Square150x150Logo="logo.png" Square44x44Logo="logo.png" BackgroundColor="transparent" />
                 </Application>
               </Applications>

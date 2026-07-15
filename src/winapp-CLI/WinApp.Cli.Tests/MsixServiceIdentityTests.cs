@@ -840,6 +840,10 @@ public class MsixServiceIdentityTests : BaseCommandTests
         await InvokeEnsureWindowsAppRuntimeInstalledAsync(WinAppSdkPackageList());
 
         Assert.HasCount(1, _fakeWorkspaceSetup.InstallCalls);
+        var messages = TestTask.SubTasks.OfType<StatusMessageTask>().Select(t => t.CompletedMessage ?? string.Empty).ToList();
+        Assert.IsTrue(
+            messages.Any(m => m.Contains("Installed 3 Windows App Runtime package(s)", StringComparison.OrdinalIgnoreCase)),
+            $"Expected a success message naming the 3 installed packages. Messages:\n{string.Join("\n", messages)}");
     }
 
     [TestMethod]
@@ -851,6 +855,10 @@ public class MsixServiceIdentityTests : BaseCommandTests
         await InvokeEnsureWindowsAppRuntimeInstalledAsync(WinAppSdkPackageList());
 
         Assert.HasCount(1, _fakeWorkspaceSetup.InstallCalls);
+        var messages = TestTask.SubTasks.OfType<StatusMessageTask>().Select(t => t.CompletedMessage ?? string.Empty).ToList();
+        Assert.IsTrue(
+            messages.Any(m => m.Contains("2 runtime package(s) failed to install", StringComparison.OrdinalIgnoreCase)),
+            $"Expected a warning naming the 2 failed installs. Messages:\n{string.Join("\n", messages)}");
     }
 
     [TestMethod]

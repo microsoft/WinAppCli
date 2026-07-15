@@ -1859,6 +1859,18 @@ public class PackageCommandTests : BaseCommandTests
         Assert.IsTrue(
             statusMessages.Any(m => m.Contains("AppX", StringComparison.Ordinal) && m.Contains("excluded", StringComparison.OrdinalIgnoreCase)),
             $"Should warn that the AppX directory is excluded. Messages:\n{string.Join("\n", statusMessages)}");
+
+        // Prove the warning is real: the build-artifact AppX directory (and its leftover.txt)
+        // must be genuinely absent from the produced package, not merely warned about.
+        using var archive = ZipFile.OpenRead(result.MsixPath.FullName);
+        var appxEntries = archive.Entries
+            .Where(e => e.FullName.Replace('\\', '/').StartsWith("AppX/", StringComparison.OrdinalIgnoreCase))
+            .Select(e => e.FullName)
+            .ToList();
+        Assert.AreEqual(
+            0,
+            appxEntries.Count,
+            $"The build-artifact 'AppX' directory must be excluded from the package. Present entries:\n{string.Join("\n", appxEntries)}");
     }
 
     [TestMethod]

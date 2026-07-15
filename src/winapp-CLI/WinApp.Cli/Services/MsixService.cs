@@ -288,15 +288,9 @@ internal partial class MsixService(
             }
         }
 
-        // Check for an AppX subdirectory, which is a build artifact that should not be
-        // included in the package. Exclude it from staging and warn the user.
-        var excludedDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var appxDir = new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
-        if (appxDir.Exists)
-        {
-            excludedDirectories.Add("AppX");
-            taskContext.AddStatusMessage($"{UiSymbols.Warning} Found 'AppX' directory in input folder. It will be excluded from the package.");
-        }
+        // Check for build-artifact subdirectories (e.g. 'AppX') that must not be included in the
+        // package. Any found are excluded from staging and the user is warned.
+        var excludedDirectories = BuildStagingExclusions(inputFolder, taskContext);
 
         // Determine manifest path based on priority:
         // 1. Use provided manifestPath parameter
@@ -449,7 +443,7 @@ internal partial class MsixService(
             else
             {
                 // No recipe available — copy the entire input folder to staging
-                CopyDirectoryRecursive(inputFolder, stagingDir);
+                CopyDirectoryRecursive(inputFolder, stagingDir, excludedDirectories);
                 taskContext.AddDebugMessage($"{UiSymbols.Files} Copied input folder to staging directory");
             }
 
@@ -668,6 +662,26 @@ internal partial class MsixService(
         {
             // Ignore cleanup failures
         }
+    }
+
+    /// <summary>
+    /// Builds the set of top-level build-artifact directory names that must be excluded from the
+    /// staged package (currently the MSBuild-generated 'AppX' output folder). When such a directory
+    /// is found the user is warned. Shared by the single-package (<see cref="CreateMsixPackageAsync"/>)
+    /// and per-slice bundle (<c>PackSingleFolderToMsixAsync</c>) staging paths so both exclude
+    /// build artifacts consistently.
+    /// </summary>
+    private static HashSet<string> BuildStagingExclusions(DirectoryInfo inputFolder, TaskContext taskContext)
+    {
+        var excludedDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var appxDir = new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
+        if (appxDir.Exists)
+        {
+            excludedDirectories.Add("AppX");
+            taskContext.AddStatusMessage($"{UiSymbols.Warning} Found 'AppX' directory in input folder. It will be excluded from the package.");
+        }
+
+        return excludedDirectories;
     }
 
     /// <summary>
