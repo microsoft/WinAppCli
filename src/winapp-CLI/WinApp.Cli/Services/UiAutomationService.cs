@@ -48,12 +48,18 @@ internal sealed partial class UiAutomationService : IUiAutomationService
 
         try
         {
+            var target = new Windows.Win32.Foundation.HWND((nint)hwnd);
+            // Touch/pen bounds checks may pass a child/control HWND from UIA; use its top-level
+            // root so the safety gate matches the foreground guard and the documented contract.
+            var root = Windows.Win32.PInvoke.GetAncestor(
+                target, Windows.Win32.UI.WindowsAndMessaging.GET_ANCESTOR_FLAGS.GA_ROOT);
+            var rectHwnd = root.IsNull ? target : root;
+
             Windows.Win32.Foundation.RECT r;
             bool ok;
             unsafe
             {
-                ok = Windows.Win32.PInvoke.GetWindowRect(
-                    new Windows.Win32.Foundation.HWND((nint)hwnd), &r);
+                ok = Windows.Win32.PInvoke.GetWindowRect(rectHwnd, &r);
             }
 
             if (!ok)
