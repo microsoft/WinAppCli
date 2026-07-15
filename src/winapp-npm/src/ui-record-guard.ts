@@ -68,10 +68,19 @@ export function buildUiRecordArgs(options: UiRecordOptions): string[] {
  */
 export async function uiRecord(options: UiRecordOptions): Promise<WinappResult> {
   // Runtime guard for JS callers who may pass undefined despite the TypeScript type.
-  if (typeof options.durationSec !== 'number' || options.durationSec <= 0) {
+  // durationSec must be a finite integer in [1, 86400]: reject NaN, ±Infinity, non-integers,
+  // values < 1, and values > 86400 (CLI upper bound). durationSec == 0 (unbounded) is only
+  // supported via the CLI with Ctrl+C or piped stdin — the npm wrapper has no way to stop it.
+  if (
+    typeof options.durationSec !== 'number' ||
+    !Number.isFinite(options.durationSec) ||
+    !Number.isInteger(options.durationSec) ||
+    options.durationSec < 1 ||
+    options.durationSec > 86400
+  ) {
     throw new Error(
-      'uiRecord requires a positive durationSec ' +
-        '(unbounded recording is only supported via the CLI with Ctrl+C or piped stdin). ' +
+      `uiRecord: durationSec must be a finite integer in [1, 86400]. Got: ${options.durationSec}. ` +
+        'Unbounded recording (durationSec == 0) is only supported via the CLI with Ctrl+C or piped stdin. ' +
         'Pass options.durationSec > 0.'
     );
   }
@@ -91,10 +100,16 @@ export async function _uiRecordWithCapture(
   options: UiRecordOptions,
   capture: (args: string[], opts: CallWinappCliCaptureOptions) => Promise<CallWinappCliCaptureResult>
 ): Promise<WinappResult> {
-  if (typeof options.durationSec !== 'number' || options.durationSec <= 0) {
+  if (
+    typeof options.durationSec !== 'number' ||
+    !Number.isFinite(options.durationSec) ||
+    !Number.isInteger(options.durationSec) ||
+    options.durationSec < 1 ||
+    options.durationSec > 86400
+  ) {
     throw new Error(
-      'uiRecord requires a positive durationSec ' +
-        '(unbounded recording is only supported via the CLI with Ctrl+C or piped stdin). ' +
+      `uiRecord: durationSec must be a finite integer in [1, 86400]. Got: ${options.durationSec}. ` +
+        'Unbounded recording (durationSec == 0) is only supported via the CLI with Ctrl+C or piped stdin. ' +
         'Pass options.durationSec > 0.'
     );
   }

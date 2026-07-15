@@ -51,6 +51,7 @@ internal class UiRecordCommand : Command, IShortDescription
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
+            var quiet = parseResult.GetValue(WinAppRootCommand.QuietOption);
             var selector = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
@@ -85,10 +86,10 @@ internal class UiRecordCommand : Command, IShortDescription
                 logger.LogError("{Symbol} --fps must be at least 1.", UiSymbols.Error);
                 return 1;
             }
-            if (maxEdge < 0)
+            if (maxEdge != 0 && maxEdge < 64)
             {
-                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--max-edge must be 0 or greater.");
-                logger.LogError("{Symbol} --max-edge must be 0 or greater.", UiSymbols.Error);
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--max-edge must be 0 (unbounded) or >= 64 (encoder minimum).");
+                logger.LogError("{Symbol} --max-edge must be 0 (unbounded) or >= 64 (encoder minimum).", UiSymbols.Error);
                 return 1;
             }
 
@@ -119,11 +120,17 @@ internal class UiRecordCommand : Command, IShortDescription
 
                 var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
 
-                if (!json)
+                // Compute isStdinRedirected once so both the status message (L1) and the
+                // stdin monitor use the same value without re-evaluating the override.
+                var isStdinRedirected = s_isInputRedirectedOverride?.Invoke() ?? Console.IsInputRedirected;
+
+                if (!json && !quiet)
                 {
+                    // L1: interactive callers (non-redirected stdin) use Ctrl+C only; piped/redirected
+                    // callers can also stop via newline/EOF on stdin.
                     var until = durationSec > 0
                         ? $"{durationSec}s"
-                        : "Ctrl+C (or newline/EOF on stdin)";
+                        : isStdinRedirected ? "Ctrl+C, newline/EOF on stdin" : "Ctrl+C";
                     ansiConsole.MarkupLine($"[grey]Recording \"{Markup.Escape(session.WindowTitle ?? "")}\" (PID {session.ProcessId}) to {Markup.Escape(filePath)} — until {until}, {fps} fps…[/]");
                 }
 
@@ -135,7 +142,6 @@ internal class UiRecordCommand : Command, IShortDescription
                 // Start the stdin monitor BEFORE recording so a pre-buffered stop signal (e.g. an
                 // empty pipe that immediately delivers EOF) is caught immediately and then latched
                 // until the encoder is ready. Do NOT start for interactive consoles — humans use Ctrl+C.
-                var isStdinRedirected = s_isInputRedirectedOverride?.Invoke() ?? Console.IsInputRedirected;
                 if (isStdinRedirected)
                 {
                     var stdinReader = s_stdinOverride ?? Console.In;

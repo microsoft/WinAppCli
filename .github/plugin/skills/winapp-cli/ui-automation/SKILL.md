@@ -294,6 +294,7 @@ Full schemas with examples: `references/ui-json-envelope.md`.
 | "No UIA window found" | UIA can't see the window | Use `list-windows` to find HWND, then `-w` |
 | Popup not in screenshot | Default capture path doesn't include unowned overlays | Use `--capture-screen` flag |
 | `element_not_found` during record | Selector given but element not in tree | Re-run `inspect` or `search` to get a fresh selector |
+| `ambiguous_selector` during record | Plain-text selector matched multiple elements | Use a slug from the suggestions in the error message, or from `inspect` output |
 | Record `mode: "screen-fallback"` | WGC capture init failed; fell back to screen DC | Check GPU/driver; use `--capture-screen` explicitly if screen DC is preferred |
 
 

@@ -64,7 +64,7 @@ public partial class UiCommandTests
         var command = GetRequiredService<UiRecordCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--max-edge=-1", "--json"]);
         Assert.AreEqual(1, exitCode);
-        StringAssert.Contains(ConsoleStdErr.ToString(), "--max-edge must be 0 or greater");
+        StringAssert.Contains(ConsoleStdErr.ToString(), "--max-edge must be 0");
     }
 
     [TestMethod]
@@ -603,6 +603,189 @@ public partial class UiCommandTests
         Assert.IsFalse(File.Exists(tempFile), "temp file must be deleted after a failed move");
         Assert.IsTrue(File.Exists(finalPath), "pre-existing final file must be untouched");
         Assert.AreEqual("pre-existing-sentinel", File.ReadAllText(finalPath), "pre-existing file content must be unchanged");
+    }
+
+    // -----------------------------------------------------------------------
+    // H1 (round-7) — WGC fallback decision: non-consented fallback must fail fast
+    // -----------------------------------------------------------------------
+
+    [TestMethod]
+    public void WgcFallback_WithoutCaptureScreen_Throws()
+    {
+        // Without --capture-screen, a WGC init failure must throw rather than silently
+        // falling back to screen capture (which would leak unrelated windows).
+        var inner = new InvalidOperationException("Simulated WGC init failure");
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<UiAutomationService>.Instance;
+        var thrown = false;
+        try
+        {
+            UiAutomationService.EnsureWgcFallbackConsented(inner, captureScreenRequested: false, logger);
+        }
+        catch (InvalidOperationException)
+        {
+            thrown = true;
+        }
+        Assert.IsTrue(thrown, "EnsureWgcFallbackConsented without --capture-screen must throw InvalidOperationException");
+    }
+
+    [TestMethod]
+    public void WgcFallback_WithCaptureScreen_DoesNotThrow()
+    {
+        // With --capture-screen, the user consented to screen-DC capture, so the fallback is allowed.
+        var inner = new InvalidOperationException("Simulated WGC init failure");
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<UiAutomationService>.Instance;
+        // Must not throw — screen capture was explicitly requested.
+        UiAutomationService.EnsureWgcFallbackConsented(inner, captureScreenRequested: true, logger);
+    }
+
+    [TestMethod]
+    public void WgcFallback_ThrowMessage_MentionsCaptureScreenOption()
+    {
+        // The error thrown without --capture-screen must mention the --capture-screen option
+        // so the user knows how to proceed.
+        var inner = new InvalidOperationException("Simulated WGC init failure");
+        var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<UiAutomationService>.Instance;
+        Exception? caught = null;
+        try
+        {
+            UiAutomationService.EnsureWgcFallbackConsented(inner, captureScreenRequested: false, logger);
+        }
+        catch (InvalidOperationException ex)
+        {
+            caught = ex;
+        }
+        Assert.IsNotNull(caught, "must throw when captureScreenRequested is false");
+        StringAssert.Contains(caught!.Message, "--capture-screen",
+            "error must mention --capture-screen so users know how to opt in to screen capture");
+    }
+
+    // -----------------------------------------------------------------------
+    // M4 (round-7) — --max-edge below encoder minimum must be rejected
+    // -----------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task Record_MaxEdgeOne_ReturnsInvalidArguments()
+    {
+        // --max-edge 1 is non-zero and below the 64px encoder minimum — must be rejected.
+        var command = GetRequiredService<UiRecordCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--max-edge", "1", "--json"]);
+        Assert.AreEqual(1, exitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "--max-edge must be 0");
+        StringAssert.Contains(ConsoleStdErr.ToString(), "64");
+    }
+
+    [TestMethod]
+    public async Task Record_MaxEdge64_IsValid()
+    {
+        // --max-edge 64 equals the encoder minimum and must be accepted.
+        var outputPath = Path.Combine(_tempDirectory.FullName, "maxedge64.mp4");
+        var command = GetRequiredService<UiRecordCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["-a", "TestApp", "--max-edge", "64", "--duration-sec", "1", "-o", outputPath, "--json"]);
+        Assert.AreEqual(0, exitCode, "--max-edge 64 (encoder minimum) must be accepted");
+    }
+
+    [TestMethod]
+    public async Task Record_MaxEdgeZero_IsUnbounded()
+    {
+        // --max-edge 0 means no downscale (unbounded) and must be accepted.
+        var outputPath = Path.Combine(_tempDirectory.FullName, "maxedge0.mp4");
+        var command = GetRequiredService<UiRecordCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["-a", "TestApp", "--max-edge", "0", "--duration-sec", "1", "-o", outputPath, "--json"]);
+        Assert.AreEqual(0, exitCode, "--max-edge 0 (unbounded) must be accepted");
+    }
+
+    // -----------------------------------------------------------------------
+    // M5 (round-7) — --quiet suppresses "Recording…" progress text
+    // -----------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task Record_Quiet_SuppressesRecordingProgress()
+    {
+        // --quiet must suppress the "Recording..." progress line emitted to the console.
+        var outputPath = Path.Combine(_tempDirectory.FullName, "quiet-suppress.mp4");
+        var command = GetRequiredService<UiRecordCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["-a", "TestApp", "--quiet", "--duration-sec", "1", "-o", outputPath]);
+
+        Assert.AreEqual(0, exitCode, "--quiet must still exit 0");
+        var stdout = TestAnsiConsole.Output;
+        Assert.IsFalse(stdout.Contains("Recording"),
+            $"--quiet must suppress 'Recording' progress text; got stdout: {stdout}");
+    }
+
+    [TestMethod]
+    public async Task Record_Quiet_ExitsZeroAndProducesFile()
+    {
+        // --quiet must produce the output file normally; only progress chatter is suppressed.
+        var outputPath = Path.Combine(_tempDirectory.FullName, "quiet-file.mp4");
+        var command = GetRequiredService<UiRecordCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["-a", "TestApp", "--quiet", "--duration-sec", "1", "-o", outputPath]);
+
+        Assert.AreEqual(0, exitCode, "--quiet must exit 0 (recording proceeds normally)");
+        Assert.IsTrue(File.Exists(outputPath), "--quiet must still produce the output file");
+    }
+
+    // -----------------------------------------------------------------------
+    // L1 (round-7) — Interactive status text shows only Ctrl+C when stdin not redirected
+    // -----------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task Record_NonRedirectedStdin_StatusTextCtrlCOnly()
+    {
+        // L1: when stdin is NOT redirected, the status line must say "Ctrl+C" only,
+        // not mention newline/EOF (since the stdin monitor is not started).
+        var outputPath = Path.Combine(_tempDirectory.FullName, "l1-noredirect.mp4");
+        var command = GetRequiredService<UiRecordCommand>();
+
+        UiRecordCommand.Handler.s_isInputRedirectedOverride = () => false;
+        try
+        {
+            var exitCode = await ParseAndInvokeWithCaptureAsync(
+                command, ["-a", "TestApp", "--duration-sec", "1", "-o", outputPath]);
+
+            Assert.AreEqual(0, exitCode);
+            var stdout = TestAnsiConsole.Output;
+            Assert.IsFalse(stdout.Contains("EOF") || stdout.Contains("newline"),
+                $"Non-redirected stdin status must not mention EOF/newline; got: {stdout}");
+        }
+        finally
+        {
+            UiRecordCommand.Handler.s_isInputRedirectedOverride = null;
+        }
+    }
+
+    [TestMethod]
+    public async Task Record_RedirectedStdin_StatusTextMentionsEof()
+    {
+        // L1: when stdin IS redirected and durationSec==0 (unbounded), the status line must mention newline/EOF.
+        var outputPath = Path.Combine(_tempDirectory.FullName, "l1-redirect.mp4");
+        var command = GetRequiredService<UiRecordCommand>();
+
+        UiRecordCommand.Handler.s_isInputRedirectedOverride = () => true;
+        UiRecordCommand.Handler.s_stdinOverride = new StringReader("stop");
+        try
+        {
+            _fakeUia.RecordResult = new RecordCaptureResult { Frames = 1, Width = 64, Height = 64, Mode = "wgc" };
+            _fakeUia.RecordShouldWaitForCancellation = true;
+            var exitCode = await ParseAndInvokeWithCaptureAsync(
+                command, ["-a", "TestApp", "--duration-sec", "0", "-o", outputPath]);
+
+            Assert.AreEqual(0, exitCode);
+            var stdout = TestAnsiConsole.Output;
+            Assert.IsTrue(stdout.Contains("EOF") || stdout.Contains("stdin"),
+                $"Redirected stdin status must mention EOF or stdin; got: {stdout}");
+        }
+        finally
+        {
+            UiRecordCommand.Handler.s_isInputRedirectedOverride = null;
+            UiRecordCommand.Handler.s_stdinOverride = null;
+            _fakeUia.RecordShouldWaitForCancellation = false;
+        }
     }
 
     /// <summary>Test shim that exercises the Mp4SinkWriterEncoder Dispose cleanup path without

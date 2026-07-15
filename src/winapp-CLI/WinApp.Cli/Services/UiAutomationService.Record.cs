@@ -94,9 +94,13 @@ internal sealed partial class UiAutomationService
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    _logger.LogDebug(ex, "WGC recorder init failed; falling back to screen-DC capture");
+                    _logger.LogDebug(ex, "WGC recorder init failed; checking if screen-DC fallback is consented");
                     grabber?.Dispose();
                     grabber = null;
+                    // H1 privacy guard: do not silently fall back to screen capture unless the user
+                    // explicitly consented by passing --capture-screen. Screen-DC capture includes any
+                    // window overlapping the target on screen, which can leak unrelated content.
+                    EnsureWgcFallbackConsented(ex, options.CaptureScreen, _logger);
                     useScreen = true;
                     useWgc = false;
                     mode = "screen-fallback";
@@ -274,6 +278,30 @@ internal sealed partial class UiAutomationService
         {
             grabber?.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Called when Windows Graphics Capture fails to initialize. If the user did NOT explicitly
+    /// pass <c>--capture-screen</c>, this throws an <see cref="InvalidOperationException"/> with a
+    /// clear, actionable message — screen-DC capture is NOT a silent privacy-safe fallback.
+    /// If <paramref name="captureScreenRequested"/> is <see langword="true"/>, a warning is emitted
+    /// and the caller proceeds with the screen-DC path that the user consented to.
+    /// </summary>
+    /// <param name="inner">The original WGC init exception (used as inner exception).</param>
+    /// <param name="captureScreenRequested">Whether the user passed <c>--capture-screen</c>.</param>
+    /// <param name="logger">Logger for the consent-granted warning.</param>
+    internal static void EnsureWgcFallbackConsented(Exception inner, bool captureScreenRequested, ILogger logger)
+    {
+        if (!captureScreenRequested)
+        {
+            throw new InvalidOperationException(
+                "Windows Graphics Capture is unavailable on this system/session. " +
+                "Re-run with --capture-screen to record via screen capture " +
+                "(note: this may include other windows overlapping the target).", inner);
+        }
+        logger.LogWarning(
+            "WGC init failed; falling back to screen-DC capture as requested by --capture-screen. " +
+            "Overlapping windows may be captured.");
     }
 
     // Minimum dimensions accepted by the Windows MF H.264 encoder.

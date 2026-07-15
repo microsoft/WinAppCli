@@ -255,7 +255,7 @@ winapp ui record -a myapp --max-edge 1280 --output capture.mp4
 # Programmatic stop (agent/script): pipe a newline; the recorder stops and writes a valid MP4
 "" | winapp ui record -a myapp --json --output capture.mp4
 
-# Record a single element's region (fails with element_not_found if selector is missing)
+# Record a single element's region (fails with element_not_found if the selector doesn't match)
 winapp ui record itm-chart-9f8e -a myapp --output chart.mp4
 
 # Include screen overlays / popups (captures from screen DC; brings window to foreground)

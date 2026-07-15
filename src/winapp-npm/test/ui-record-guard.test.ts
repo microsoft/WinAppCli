@@ -71,7 +71,7 @@ test('uiRecord error message explains why and how to fix it', async () => {
   assert.ok(caught, 'should have thrown');
   const msg = caught.message;
   assert.ok(
-    msg.includes('durationSec > 0') || msg.includes('positive durationSec'),
+    msg.includes('durationSec > 0') || msg.includes('positive durationSec') || msg.includes('[1, 86400]'),
     `error message should describe the fix: "${msg}"`
   );
 });
@@ -212,5 +212,67 @@ test('buildUiRecordArgs: leading-dash selector does not appear before --', () =>
   const jsonBeforeTerm = args.slice(0, termIdx).includes('--json');
   assert.ok(!jsonBeforeTerm, '--json selector must not appear as a flag before the -- terminator');
   assert.equal(args[termIdx + 1], '--json', 'selector must be the arg after --');
+});
+
+// ---------------------------------------------------------------------------
+// L3 (round-7) — guard rejects NaN, Infinity, fractional, and out-of-range durations
+// ---------------------------------------------------------------------------
+
+test('uiRecord with NaN durationSec throws', async () => {
+  await assert.rejects(
+    () => uiRecord({ durationSec: NaN }),
+    (err: unknown) => {
+      assert.ok(err instanceof Error, 'should throw an Error');
+      assert.ok(err.message.includes('durationSec'), `message must mention durationSec: "${err.message}"`);
+      return true;
+    }
+  );
+});
+
+test('uiRecord with Infinity durationSec throws', async () => {
+  await assert.rejects(
+    () => uiRecord({ durationSec: Infinity }),
+    (err: unknown) => {
+      assert.ok(err instanceof Error, 'should throw an Error');
+      assert.ok(err.message.includes('durationSec'), `message must mention durationSec: "${err.message}"`);
+      return true;
+    }
+  );
+});
+
+test('uiRecord with -Infinity durationSec throws', async () => {
+  await assert.rejects(
+    () => uiRecord({ durationSec: -Infinity }),
+    (err: unknown) => {
+      assert.ok(err instanceof Error, 'should throw an Error');
+      assert.ok(err.message.includes('durationSec'), `message must mention durationSec: "${err.message}"`);
+      return true;
+    }
+  );
+});
+
+test('uiRecord with fractional durationSec (1.5) throws', async () => {
+  await assert.rejects(
+    () => uiRecord({ durationSec: 1.5 }),
+    (err: unknown) => {
+      assert.ok(err instanceof Error, 'should throw an Error');
+      assert.ok(err.message.includes('durationSec'), `message must mention durationSec: "${err.message}"`);
+      return true;
+    }
+  );
+});
+
+test('uiRecord with durationSec = 1 (minimum valid) proceeds to capture', async () => {
+  // durationSec = 1 is the minimum valid value — guard must NOT throw.
+  let captureCalledWith: string[][] = [];
+  async function mockCapture(args: string[]) {
+    captureCalledWith.push(args);
+    return { exitCode: 0, stdout: '', stderr: '' };
+  }
+  await _uiRecordWithCapture(
+    { durationSec: 1 },
+    mockCapture as Parameters<typeof _uiRecordWithCapture>[1]
+  );
+  assert.equal(captureCalledWith.length, 1, 'capture must be called exactly once for valid durationSec=1');
 });
 
