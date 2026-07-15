@@ -71,6 +71,7 @@ internal static partial class WgcCapture
         private readonly GraphicsCaptureSession _session;
         private readonly GraphicsCaptureItem _item;
         private readonly ILogger _logger;
+        private readonly Lock _callbackLock = new();
         private readonly Lock _lock = new();
         private byte[]? _latestPixels;
         private int _latestWidth;
@@ -133,71 +134,79 @@ internal static partial class WgcCapture
 
         private void OnFrameArrived(Direct3D11CaptureFramePool sender, object args)
         {
-            Direct3D11CaptureFrame? frame = null;
-            try
+            lock (_callbackLock)
             {
-                frame = sender.TryGetNextFrame();
-                if (frame is null)
+                if (_disposed)
                 {
                     return;
                 }
 
-                // Detect window resize: if the frame's reported content size differs from the
-                // pool's creation size, recreate the pool at the new size so subsequent frames
-                // match. The ENCODER output dimensions remain fixed; ProcessFrame letterboxes/scales.
-                var contentSize = frame.ContentSize;
-                if (contentSize.Width > 0 && contentSize.Height > 0
-                    && (contentSize.Width != _poolSize.Width || contentSize.Height != _poolSize.Height))
+                Direct3D11CaptureFrame? frame = null;
+                try
                 {
-                    _logger.LogDebug("WGC: window resized {Old}→{New}; recreating frame pool",
-                        $"{_poolSize.Width}x{_poolSize.Height}", $"{contentSize.Width}x{contentSize.Height}");
-                    // M10: dispose the triggering frame BEFORE recreating the pool so no frame
-                    // from the old pool is alive during recreation. Set frame=null to prevent
-                    // double-dispose in the outer finally.
-                    frame.Dispose();
-                    frame = null;
-                    try
+                    frame = sender.TryGetNextFrame();
+                    if (frame is null)
                     {
-                        var winrtDevice = CreateDirect3DDevice(_device);
-                        _pool.Recreate(winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, numberOfBuffers: 2, contentSize);
-                        _poolSize = contentSize;
+                        return;
                     }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug(ex, "WGC frame pool Recreate failed; continuing with old size");
-                    }
-                    return; // Skip copying the first frame at the new size — wait for next arrival
-                }
 
-                // Throttle BEFORE the expensive GPU→CPU readback: skip arrivals that are faster
-                // than the target sampling interval. At 4K this can prevent gigabytes/sec of
-                // unnecessary memory allocation and copy when the display refresh rate exceeds fps.
-                if (_minIntervalMs > 0)
-                {
-                    var nowMs = Environment.TickCount64;
-                    if (nowMs - Interlocked.Read(ref _lastSampleMs) < _minIntervalMs)
+                    // Detect window resize: if the frame's reported content size differs from the
+                    // pool's creation size, recreate the pool at the new size so subsequent frames
+                    // match. The ENCODER output dimensions remain fixed; ProcessFrame letterboxes/scales.
+                    var contentSize = frame.ContentSize;
+                    if (contentSize.Width > 0 && contentSize.Height > 0
+                        && (contentSize.Width != _poolSize.Width || contentSize.Height != _poolSize.Height))
                     {
-                        return; // too soon — discard without copying
+                        _logger.LogDebug("WGC: window resized {Old}→{New}; recreating frame pool",
+                            $"{_poolSize.Width}x{_poolSize.Height}", $"{contentSize.Width}x{contentSize.Height}");
+                        // M10: dispose the triggering frame BEFORE recreating the pool so no frame
+                        // from the old pool is alive during recreation. Set frame=null to prevent
+                        // double-dispose in the outer finally.
+                        frame.Dispose();
+                        frame = null;
+                        try
+                        {
+                            var winrtDevice = CreateDirect3DDevice(_device);
+                            _pool.Recreate(winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, numberOfBuffers: 2, contentSize);
+                            _poolSize = contentSize;
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "WGC frame pool Recreate failed; continuing with old size");
+                        }
+                        return; // Skip copying the first frame at the new size — wait for next arrival
                     }
-                    Interlocked.Exchange(ref _lastSampleMs, nowMs);
-                }
 
-                var (pixels, width, height) = CopyFrame(_device, _context, frame);
-                lock (_lock)
-                {
-                    _latestPixels = pixels;
-                    _latestWidth = width;
-                    _latestHeight = height;
-                    _version++;
+                    // Throttle BEFORE the expensive GPU→CPU readback: skip arrivals that are faster
+                    // than the target sampling interval. At 4K this can prevent gigabytes/sec of
+                    // unnecessary memory allocation and copy when the display refresh rate exceeds fps.
+                    if (_minIntervalMs > 0)
+                    {
+                        var nowMs = Environment.TickCount64;
+                        if (nowMs - Interlocked.Read(ref _lastSampleMs) < _minIntervalMs)
+                        {
+                            return; // too soon — discard without copying
+                        }
+                        Interlocked.Exchange(ref _lastSampleMs, nowMs);
+                    }
+
+                    var (pixels, width, height) = CopyFrame(_device, _context, frame);
+                    lock (_lock)
+                    {
+                        _latestPixels = pixels;
+                        _latestWidth = width;
+                        _latestHeight = height;
+                        _version++;
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "WGC frame copy failed during recording");
-            }
-            finally
-            {
-                frame?.Dispose();
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "WGC frame copy failed during recording");
+                }
+                finally
+                {
+                    frame?.Dispose();
+                }
             }
         }
 
@@ -231,18 +240,23 @@ internal static partial class WgcCapture
 
         public void Dispose()
         {
-            if (_disposed)
+            lock (_callbackLock)
             {
-                return;
-            }
-            _disposed = true;
+                if (_disposed)
+                {
+                    return;
+                }
+                _disposed = true;
 
-            _pool.FrameArrived -= OnFrameArrived;
-            _item.Closed -= OnItemClosed;
-            _session.Dispose();
-            _pool.Dispose();
-            (_context as IDisposable)?.Dispose();
-            (_device as IDisposable)?.Dispose();
+                // Drain any in-flight free-threaded callback before releasing D3D resources; after
+                // handlers are removed, pool disposal cannot re-enter this callback path.
+                _pool.FrameArrived -= OnFrameArrived;
+                _item.Closed -= OnItemClosed;
+                _session.Dispose();
+                _pool.Dispose();
+                (_context as IDisposable)?.Dispose();
+                (_device as IDisposable)?.Dispose();
+            }
         }
     }
 }
