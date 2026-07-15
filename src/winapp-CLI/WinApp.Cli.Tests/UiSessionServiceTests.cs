@@ -179,13 +179,16 @@ public class UiSessionServiceTests
         sys.ProcessesById[701] = new UiProcessInfo(701, "app7b", 0, null);
         uia.WindowsByPidResult = [((nint)0x111, 701, "AA"), ((nint)0x222, 701, "BB")];
         sys.ForegroundWindowResult = 0; // no foreground → "largest" heuristic
+        // Distinct areas so "largest" has a single correct answer: 0x222 (300×300) dwarfs 0x111 (100×100).
+        sys.WindowSizeByHwnd[0x111] = (100, 100);
+        sys.WindowSizeByHwnd[0x222] = (300, 300);
 
         var session = await service.ResolveSessionAsync(app: "701", hwnd: null, CancellationToken.None);
 
         Assert.AreEqual(701, session.ProcessId);
         Assert.AreEqual("app7b", session.ProcessName);
-        Assert.IsTrue(session.WindowHandle is 0x111 or 0x222,
-            "The auto-selected window must be one of the candidate handles.");
+        Assert.AreEqual(0x222L, session.WindowHandle,
+            "Auto-select must pick the largest-area window (0x222), not just any candidate.");
     }
 
     // ---- Exact process-name resolution ----------------------------------
@@ -363,12 +366,16 @@ public class UiSessionServiceTests
         uia.WindowsByTitleResult = [((nint)0xC1, 910, "G1"), ((nint)0xC2, 910, "G2")];
         sys.ForegroundWindowResult = 0; // → largest heuristic
         sys.DefaultProcessById = new UiProcessInfo(0, "multi", 0, null);
+        // 0xC1 (400×400) is unambiguously larger than 0xC2 (50×50) → it must win.
+        sys.WindowSizeByHwnd[0xC1] = (400, 400);
+        sys.WindowSizeByHwnd[0xC2] = (50, 50);
 
         var session = await service.ResolveSessionAsync(app: "ghosts", hwnd: null, CancellationToken.None);
 
         Assert.AreEqual(910, session.ProcessId);
         Assert.AreEqual("multi", session.ProcessName);
-        Assert.IsTrue(session.WindowHandle is 0xC1 or 0xC2);
+        Assert.AreEqual(0xC1L, session.WindowHandle,
+            "Auto-select must pick the largest-area window (0xC1).");
     }
 
     // ---- ClassifyWindow (pure) ------------------------------------------

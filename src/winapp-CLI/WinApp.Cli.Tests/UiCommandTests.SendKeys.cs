@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using Spectre.Console;
+using Spectre.Console.Testing;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Models;
 
@@ -306,10 +308,10 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
-    public async Task SendKeys_GenericException_ReturnsErrorWithoutSending()
+    public async Task SendKeys_GenericException_ReturnsGenericErrorWithoutSending()
     {
-        // Any non-COM failure inside the send pipeline is reported via the generic error envelope and
-        // aborts before injecting keys.
+        // A non-COM exception during resolution falls through to the catch-all → generic-error envelope,
+        // and no keys are sent (mirrors the COMException stale-element path above).
         _fakeSession.ResolveThrow = FakeGenericException;
 
         var command = GetRequiredService<UiSendKeysCommand>();
@@ -317,6 +319,67 @@ public partial class UiCommandTests
 
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count);
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // temporarily swaps the process-wide ambient AnsiConsole to capture logger warnings
+    public async Task SendKeys_PostMessageLiteralText_XamlWindow_WarnsTextMayNotBeDelivered()
+    {
+        // Literal text via post-message to a XAML (WinUI 3) window: the class name — read through
+        // ISystemUiQuery — classifies as XAML, so the command warns that a posted WM_CHAR may be dropped
+        // by the XAML input pipeline. The warning is advisory: the keys are still posted. Non-error
+        // logger output routes through the static ambient AnsiConsole (TextWriterLogger), so we swap it
+        // to a capturing console for the invoke; [DoNotParallelize] keeps that global swap isolated.
+        _fakeSession.SessionResult.WindowHandle = 0xABC;
+        _fakeSystemQuery.WindowClassNameByHwnd[0xABC] = "WinUIDesktopWin32WindowClass";
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var previousAmbient = AnsiConsole.Console;
+        var ambient = new TestConsole();
+        AnsiConsole.Console = ambient;
+        int exitCode;
+        try
+        {
+            exitCode = await ParseAndInvokeWithCaptureAsync(command, ["hello", "-a", "TestApp", "--via", "post-message"]);
+        }
+        finally
+        {
+            AnsiConsole.Console = previousAmbient;
+        }
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count, "the warning is advisory — the literal text is still posted");
+        StringAssert.Contains(ambient.Output, "WM_CHAR", "a XAML target must trigger the dropped-WM_CHAR warning");
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // temporarily swaps the process-wide ambient AnsiConsole to capture logger warnings
+    public async Task SendKeys_PostMessageLiteralText_NonXamlWindow_DoesNotWarn()
+    {
+        // Same literal-text-via-post-message shape, but a Win32 window (non-XAML class) consumes WM_CHAR,
+        // so the XAML warning must NOT fire — it is scoped to XAML to avoid false-alarming other stacks.
+        // We capture the ambient console the same way so the negative assertion is real, not vacuous.
+        _fakeSession.SessionResult.WindowHandle = 0xABC;
+        _fakeSystemQuery.WindowClassNameByHwnd[0xABC] = "Notepad";
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var previousAmbient = AnsiConsole.Console;
+        var ambient = new TestConsole();
+        AnsiConsole.Console = ambient;
+        int exitCode;
+        try
+        {
+            exitCode = await ParseAndInvokeWithCaptureAsync(command, ["hello", "-a", "TestApp", "--via", "post-message"]);
+        }
+        finally
+        {
+            AnsiConsole.Console = previousAmbient;
+        }
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+        Assert.IsFalse(ambient.Output.Contains("WM_CHAR", StringComparison.Ordinal),
+            "a non-XAML window class must not trigger the XAML dropped-WM_CHAR warning");
     }
 
 }

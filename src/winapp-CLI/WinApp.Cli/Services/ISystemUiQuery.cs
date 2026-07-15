@@ -36,4 +36,13 @@ internal interface ISystemUiQuery
 
     /// <summary>The title text of <paramref name="hwnd"/>, or <c>null</c> when empty/unavailable.</summary>
     string? GetWindowText(long hwnd);
+
+    /// <summary>The window class name of <paramref name="hwnd"/>, or <c>null</c> when empty/unavailable.</summary>
+    string? GetWindowClassName(long hwnd);
+
+    /// <summary>The outer size (width, height) of <paramref name="hwnd"/> in pixels; (0, 0) when unavailable.</summary>
+    (int Width, int Height) GetWindowSize(long hwnd);
+
+    /// <summary>The owner window handle of <paramref name="hwnd"/> (0 when it has no owner).</summary>
+    nint GetWindowOwner(long hwnd);
 }

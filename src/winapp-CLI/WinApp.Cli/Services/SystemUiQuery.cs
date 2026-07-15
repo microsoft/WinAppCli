@@ -121,4 +121,54 @@ internal sealed class SystemUiQuery : ISystemUiQuery
             return null;
         }
     }
+
+    public string? GetWindowClassName(long hwnd)
+    {
+        try
+        {
+            var buffer = new char[256];
+            int len;
+            unsafe
+            {
+                fixed (char* pClass = buffer)
+                {
+                    len = Windows.Win32.PInvoke.GetClassName(
+                        new Windows.Win32.Foundation.HWND((nint)hwnd), pClass, 256);
+                }
+            }
+            return len > 0 ? new string(buffer, 0, len) : null;
+        }
+        // Native guard: GetClassName does not throw for invalid handles, so this catch is an
+        // honest ceiling — only a genuine marshalling failure would reach it.
+        catch { return null; }
+    }
+
+    public (int Width, int Height) GetWindowSize(long hwnd)
+    {
+        try
+        {
+            Windows.Win32.Foundation.RECT rect;
+            unsafe
+            {
+                Windows.Win32.PInvoke.GetWindowRect(
+                    new Windows.Win32.Foundation.HWND((nint)hwnd), &rect);
+            }
+            return (rect.right - rect.left, rect.bottom - rect.top);
+        }
+        // Native guard: GetWindowRect does not throw for invalid handles — honest ceiling.
+        catch { return (0, 0); }
+    }
+
+    public nint GetWindowOwner(long hwnd)
+    {
+        try
+        {
+            var owner = Windows.Win32.PInvoke.GetWindow(
+                new Windows.Win32.Foundation.HWND((nint)hwnd),
+                Windows.Win32.UI.WindowsAndMessaging.GET_WINDOW_CMD.GW_OWNER);
+            return (nint)owner;
+        }
+        // Native guard: GetWindow does not throw for invalid handles — honest ceiling.
+        catch { return 0; }
+    }
 }

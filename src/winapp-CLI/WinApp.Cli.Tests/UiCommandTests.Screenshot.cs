@@ -148,13 +148,56 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
-    public async Task Screenshot_GenericError_ReturnsError()
+    public async Task Screenshot_GenericException_ReturnsGenericError()
     {
-        _fakeSession.ResolveThrow = FakeGenericException;
+        // A non-COM exception from the single-window capture falls through to the catch-all, which maps
+        // it to the generic-error envelope (mirrors the COMException stale-element path above).
+        _fakeUia.ScreenshotThrow = FakeGenericException;
 
         var command = GetRequiredService<UiScreenshotCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["e1", "-a", "TestApp"]);
 
         Assert.AreEqual(1, exitCode);
+    }
+
+    [TestMethod]
+    public async Task Screenshot_WindowHandleValid_WithOwnedDialog_CompositesThroughSeam()
+    {
+        // Valid --window <hwnd>: ISystemUiQuery resolves a non-zero PID + title (what a live handle
+        // yields on a real desktop) and a cross-process owned dialog exists → DiscoverAllWindows
+        // returns two windows through the seam → multi-window composite. Exercises the direct-HWND
+        // GetProcessIdForWindow / GetWindowText reads that were previously a native ceiling.
+        _fakeSystemQuery.ProcessIdForWindowResult = 4321;
+        _fakeSystemQuery.WindowTextResult = "Main Window";
+        _fakeWindowFinder.OwnedWindowsResult = [((nint)0xD1A, 4321, "Owned Dialog")];
+        _fakeUia.ScreenshotResult = (new byte[4], 1, 1);
+        var path = ShotPath();
+
+        var command = GetRequiredService<UiScreenshotCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-w", "2748", "--json", "-o", path]);
+
+        Assert.AreEqual(0, exitCode);
+        StringAssert.Contains(TestAnsiConsole.Output, "\"windows\":");
+        StringAssert.Contains(TestAnsiConsole.Output, "Main Window");   // title read through GetWindowText seam
+        StringAssert.Contains(TestAnsiConsole.Output, "Owned Dialog");  // the second, owned window
+        Assert.IsTrue(File.Exists(path));
+    }
+
+    [TestMethod]
+    public async Task Screenshot_WindowHandleValid_NoOwnedDialog_CapturesSingle()
+    {
+        // Valid --window <hwnd> but no owned windows → DiscoverAllWindows finds a single window and
+        // returns null (Count is not > 1), so the single-window capture path runs. Still exercises the
+        // seam's GetProcessIdForWindow / GetWindowText reads before the single-window fall-through.
+        _fakeSystemQuery.ProcessIdForWindowResult = 4321;
+        _fakeSystemQuery.WindowTextResult = "Solo Window";
+        _fakeUia.ScreenshotResult = (new byte[4], 1, 1);
+        var path = ShotPath();
+
+        var command = GetRequiredService<UiScreenshotCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-w", "2748", "--json", "-o", path]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.IsTrue(File.Exists(path));
     }
 }

@@ -44,10 +44,20 @@ internal class FakeUiAutomationService : IUiAutomationService
     /// the "no value" branches of get-value / wait-for. Defaults to a non-null sample.</summary>
     public string? GetTextResult { get; set; } = "fake text content";
 
+    /// <summary>Per-call text sequence for <see cref="GetTextAsync"/>: each read dequeues the next entry,
+    /// so a wait-for --value poll can see the value change across polls (e.g. "old" then "target"). Once
+    /// drained, falls back to <see cref="GetTextResult"/>. Empty by default = use the single result.</summary>
+    public Queue<string?> GetTextResults { get; } = new();
+
     // ---- Additive throw knobs (default null = no-op, so existing tests are unaffected) --------------
     // Each method throws the configured exception at its start, letting a test drive a command's
     // COMException (stale-element) or generic error branches without touching real UIA.
     public Exception? FindSingleThrow { get; set; }
+
+    /// <summary>When &gt; 0, the next N <see cref="FindSingleElementAsync"/> calls throw a transient error
+    /// (then decrement), simulating an element that isn't ready on the first poll(s). Drives wait-for's
+    /// per-poll catch → keep-polling continuation deterministically. Default 0 = no transient failures.</summary>
+    public int FindSingleThrowCount { get; set; }
     public Exception? InspectThrow { get; set; }
     public Exception? SearchThrow { get; set; }
     public Exception? PropertiesThrow { get; set; }
@@ -99,6 +109,11 @@ internal class FakeUiAutomationService : IUiAutomationService
     public Task<UiElement?> FindSingleElementAsync(UiSessionInfo session, SelectorExpression selector, CancellationToken ct)
     {
         if (FindSingleThrow is not null) { throw FindSingleThrow; }
+        if (FindSingleThrowCount > 0)
+        {
+            FindSingleThrowCount--;
+            throw new InvalidOperationException("Transient element lookup failure (test).");
+        }
         var key = selector.Slug ?? selector.Query ?? string.Empty;
 
         // Per-selector movement sequence (N5 stability tests): advance each read, last value sticks.
@@ -184,6 +199,7 @@ internal class FakeUiAutomationService : IUiAutomationService
     public Task<string?> GetTextAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
     {
         if (GetTextThrow is not null) { throw GetTextThrow; }
+        if (GetTextResults.Count > 0) { return Task.FromResult(GetTextResults.Dequeue()); }
         return Task.FromResult(GetTextResult);
     }
 }
@@ -333,6 +349,16 @@ internal sealed class FakeSystemUiQuery : ISystemUiQuery
     /// <summary>Title returned by <see cref="GetWindowText"/>. Default null = "no/empty title".</summary>
     public string? WindowTextResult { get; set; }
 
+    /// <summary>Per-HWND window sizes for <see cref="GetWindowSize"/>. Unmapped handles report (0, 0),
+    /// matching a headless box; seed distinct areas to drive the "largest window" auto-select heuristic.</summary>
+    public Dictionary<long, (int Width, int Height)> WindowSizeByHwnd { get; } = [];
+
+    /// <summary>Per-HWND class names for <see cref="GetWindowClassName"/>. Unmapped handles report null.</summary>
+    public Dictionary<long, string?> WindowClassNameByHwnd { get; } = [];
+
+    /// <summary>Per-HWND owner handles for <see cref="GetWindowOwner"/>. Unmapped handles report 0 (no owner).</summary>
+    public Dictionary<long, nint> WindowOwnerByHwnd { get; } = [];
+
     public UiProcessInfo? GetProcessById(int pid)
     {
         if (ProcessesById.TryGetValue(pid, out var info)) { return info; }
@@ -349,5 +375,32 @@ internal sealed class FakeSystemUiQuery : ISystemUiQuery
     public uint GetProcessIdForWindow(long hwnd) => ProcessIdForWindowResult;
 
     public string? GetWindowText(long hwnd) => WindowTextResult;
+
+    public (int Width, int Height) GetWindowSize(long hwnd)
+        => WindowSizeByHwnd.TryGetValue(hwnd, out var size) ? size : (0, 0);
+
+    public string? GetWindowClassName(long hwnd)
+        => WindowClassNameByHwnd.TryGetValue(hwnd, out var name) ? name : null;
+
+    public nint GetWindowOwner(long hwnd)
+        => WindowOwnerByHwnd.TryGetValue(hwnd, out var owner) ? owner : 0;
 }
+
+/// <summary>
+/// Fake <see cref="WinApp.Cli.Helpers.IPollDelay"/> — replaces wait-for's inter-poll wall-clock wait so
+/// the retry-loop continuations run deterministically. Uses a 1ms yield (not a busy no-op) to keep poll
+/// counts bounded without depending on real 100ms sleeps. Records how many times it was awaited.
+/// </summary>
+internal sealed class FakePollDelay : WinApp.Cli.Helpers.IPollDelay
+{
+    /// <summary>Number of inter-poll delays awaited — one per "condition not met, keep polling" iteration.</summary>
+    public int CallCount { get; private set; }
+
+    public Task DelayAsync(int milliseconds, CancellationToken ct)
+    {
+        CallCount++;
+        return Task.Delay(1, ct);
+    }
+}
+
 

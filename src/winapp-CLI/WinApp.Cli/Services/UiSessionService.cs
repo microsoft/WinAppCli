@@ -11,6 +11,12 @@ internal sealed class UiSessionService(
     ISystemUiQuery systemQuery,
     ILogger<UiSessionService> logger) : IUiSessionService
 {
+    // The window-metadata reads live on ISystemUiQuery so the resolver's selection logic is unit-
+    // testable. GetWindowInfo/GetWindowClassName must stay static (they're called statically by
+    // UiListWindowsCommand, UiScreenshotCommand, and UiAutomationService), so those shims route
+    // through this shared real implementation while instance callers use the injected seam. Both
+    // point at the same OS boundary; tests inject a fake for the instance path.
+    private static readonly SystemUiQuery s_sharedQuery = new();
 
     public Task<UiSessionInfo> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct)
     {
@@ -83,19 +89,16 @@ internal sealed class UiSessionService(
         return CreateSession(selected.Pid, selected.Hwnd, selected.Title);
     }
 
-    /// <summary>Pick the window with the largest area.</summary>
-    private static (nint Hwnd, int Pid, string Title) PickLargestWindow(List<(nint Hwnd, int Pid, string Title)> windows)
+    /// <summary>Pick the window with the largest area (queried through the OS-boundary seam).</summary>
+    private (nint Hwnd, int Pid, string Title) PickLargestWindow(List<(nint Hwnd, int Pid, string Title)> windows)
     {
         var best = windows[0];
         long bestArea = 0;
 
         foreach (var w in windows)
         {
-            var info = GetWindowInfo(w.Hwnd);
-            var area = (long)info.Width * info.Height;
-            // Honest ceiling: choosing the larger window only fires when GetWindowInfo reports
-            // differing positive areas, which requires real on-screen windows (covered by the
-            // real-UIA suite). With synthetic handles every area is 0, so this branch stays flat.
+            var (width, height) = systemQuery.GetWindowSize((long)w.Hwnd);
+            var area = (long)width * height;
             if (area > bestArea)
             {
                 bestArea = area;
@@ -111,8 +114,8 @@ internal sealed class UiSessionService(
     {
         var className = GetWindowClassName(hwnd);
         var label = ClassifyWindow(className);
-        var (width, height) = GetWindowSize(hwnd);
-        var ownerHwnd = GetWindowOwner(hwnd);
+        var (width, height) = s_sharedQuery.GetWindowSize((long)hwnd);
+        var ownerHwnd = s_sharedQuery.GetWindowOwner((long)hwnd);
 
         return new WindowMetadata
         {
@@ -124,26 +127,7 @@ internal sealed class UiSessionService(
         };
     }
 
-    internal static string? GetWindowClassName(nint hwnd)
-    {
-        try
-        {
-            var buffer = new char[256];
-            int len;
-            unsafe
-            {
-                fixed (char* pClass = buffer)
-                {
-                    len = Windows.Win32.PInvoke.GetClassName(
-                        new Windows.Win32.Foundation.HWND(hwnd), pClass, 256);
-                }
-            }
-            return len > 0 ? new string(buffer, 0, len) : null;
-        }
-        // Native guard: GetClassName does not throw for invalid handles, so this catch is an
-        // honest ceiling — only a genuine marshalling failure would reach it.
-        catch { return null; }
-    }
+    internal static string? GetWindowClassName(nint hwnd) => s_sharedQuery.GetWindowClassName((long)hwnd);
 
     internal static string ClassifyWindow(string? className)
     {
@@ -151,35 +135,6 @@ internal sealed class UiSessionService(
         if (className.Contains("Popup", StringComparison.OrdinalIgnoreCase)) { return "popup"; }
         if (className == "#32770") { return "dialog"; }
         return "window";
-    }
-
-    private static (int Width, int Height) GetWindowSize(nint hwnd)
-    {
-        try
-        {
-            Windows.Win32.Foundation.RECT rect;
-            unsafe
-            {
-                Windows.Win32.PInvoke.GetWindowRect(
-                    new Windows.Win32.Foundation.HWND(hwnd), &rect);
-            }
-            return (rect.right - rect.left, rect.bottom - rect.top);
-        }
-        // Native guard: GetWindowRect does not throw for invalid handles — honest ceiling.
-        catch { return (0, 0); }
-    }
-
-    private static nint GetWindowOwner(nint hwnd)
-    {
-        try
-        {
-            var owner = Windows.Win32.PInvoke.GetWindow(
-                new Windows.Win32.Foundation.HWND(hwnd),
-                Windows.Win32.UI.WindowsAndMessaging.GET_WINDOW_CMD.GW_OWNER);
-            return (nint)owner;
-        }
-        // Native guard: GetWindow does not throw for invalid handles — honest ceiling.
-        catch { return 0; }
     }
 
     internal record WindowMetadata

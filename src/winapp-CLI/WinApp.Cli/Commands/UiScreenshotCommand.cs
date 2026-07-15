@@ -37,6 +37,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
         IUiSessionService sessionService,
         IUiAutomationService uiAutomation,
         IOwnedWindowFinder ownedWindowFinder,
+        ISystemUiQuery systemQuery,
         IAnsiConsole ansiConsole,
         ILogger<UiScreenshotCommand> logger) : AsynchronousCommandLineAction
     {
@@ -321,33 +322,14 @@ internal class UiScreenshotCommand : Command, IShortDescription
 
             if (window is not null and > 0)
             {
-                // Direct HWND — only find windows owned by THIS window (not all process windows)
+                // Direct HWND — only find windows owned by THIS window (not all process windows).
+                // The PID/title reads route through ISystemUiQuery so a valid live handle can be
+                // supplied by a fake (real handles resolve identically through the seam).
                 var hwndVal = (nint)window.Value;
-                uint pid = 0;
-                unsafe
-                {
-                    Windows.Win32.PInvoke.GetWindowThreadProcessId(
-                        new Windows.Win32.Foundation.HWND(hwndVal), &pid);
-                }
+                uint pid = systemQuery.GetProcessIdForWindow(window.Value);
                 if (pid == 0) { return null; }
 
-                // Native ceiling: the following GetWindowText read only runs for a *valid* live HWND
-                // (GetWindowThreadProcessId returned a non-zero PID). Tests can only supply invalid
-                // handles (which return pid==0 above and bail), so these lines are intentionally left
-                // uncovered rather than excluded — exercising them requires a real on-screen window.
-                // Get title for this window
-                var titleChars = new char[512];
-                string title;
-                unsafe
-                {
-                    fixed (char* buffer = titleChars)
-                    {
-                        var len = Windows.Win32.PInvoke.GetWindowText(
-                            new Windows.Win32.Foundation.HWND(hwndVal), buffer, 512);
-                        title = len > 0 ? new string(buffer, 0, len) : "";
-                    }
-                }
-
+                var title = systemQuery.GetWindowText(window.Value) ?? "";
                 appWindows = [(hwndVal, (int)pid, title)];
             }
             else if (!string.IsNullOrWhiteSpace(app))
