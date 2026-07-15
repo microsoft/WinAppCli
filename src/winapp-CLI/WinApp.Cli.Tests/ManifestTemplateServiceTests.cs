@@ -57,6 +57,7 @@ public class ManifestTemplateServiceTests
     [DataRow("com.my-app", "com.my.app", DisplayName = "dash becomes a dot separator")]
     [DataRow("123abc", "A123abc", DisplayName = "segment starting with digit gets A prefix")]
     [DataRow("Contoso.App_2024!", "Contoso.App.A2024", DisplayName = "invalid chars split, digit segment prefixed")]
+    [DataRow("...", "Default", DisplayName = "all-separator input -> Default fallback")]
     public void FixAsciiWindowsId_SanitizesToValidIdentifier(string input, string expected)
     {
         Assert.AreEqual(expected, ManifestTemplateService.FixAsciiWindowsId(input));
