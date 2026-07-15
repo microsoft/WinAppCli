@@ -29,6 +29,9 @@ public class CertificateServiceTests : BaseCommandTests
         var gi = new FakeGitignoreService();
         var dir = cwd ?? _tempDirectory.FullName;
         var svc = new CertificateService(bt, gi, new CurrentDirectoryProvider(dir));
+        // Load the install PFX in-memory only so no test ever persists a machine key container.
+        // Production keeps the default MachineKeySet|PersistKeySet (see InstallKeyStorageFlags).
+        svc.InstallKeyStorageFlags = X509KeyStorageFlags.EphemeralKeySet;
         return (svc, bt, gi);
     }
 

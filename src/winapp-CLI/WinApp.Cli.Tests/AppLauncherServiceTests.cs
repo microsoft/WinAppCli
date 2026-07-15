@@ -207,17 +207,22 @@ public class AppLauncherServiceTests
     }
 
     [TestMethod]
-    public void TerminatePackageProcesses_DeadPid_SwallowsArgumentException()
+    public void TerminatePackageProcesses_PidKillThrowsArgument_IsSwallowed()
     {
-        var proc = StartLongRunningProcess();
-        var pid = (uint)proc.Id;
-        proc.Kill(entireProcessTree: true);
-        proc.WaitForExit(15000);
-        proc.Dispose();
+        // Process.GetProcessById throws ArgumentException when the PID is not a running
+        // process (already exited). Relying on a real dead PID is flaky — the OS can reuse
+        // the id for an unrelated process — so drive the already-exited path through the
+        // kill seam: the guard must swallow ArgumentException and complete without throwing.
+        var invoked = false;
+        _service.KillProcessTreeByPidImpl = _ =>
+        {
+            invoked = true;
+            throw new ArgumentException("process is not running");
+        };
 
-        // The PID is now guaranteed dead → GetProcessById throws ArgumentException,
-        // which must be swallowed.
-        _service.TerminatePackageProcesses(null, pid);
+        _service.TerminatePackageProcesses(null, 4242);
+
+        Assert.IsTrue(invoked, "The PID fallback should have invoked the kill seam before swallowing ArgumentException.");
     }
 
     [TestMethod]

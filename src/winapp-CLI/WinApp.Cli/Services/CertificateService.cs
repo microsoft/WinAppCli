@@ -25,6 +25,14 @@ internal partial class CertificateService(
     internal Action<X509Certificate2> AddCertificateToStoreImpl { get; set; } = DefaultAddCertificateToStore;
     internal Func<int, CancellationToken, Task<string?>> ReadAppxPackagingSignErrorAsync { get; set; } = DefaultReadAppxPackagingSignErrorAsync;
 
+    // Key-storage flags used when loading the PFX for the machine-store install. Defaults to the
+    // real production combination: MachineKeySet|PersistKeySet persists the private key in the
+    // machine key container so the installed certificate stays usable after the process exits.
+    // Seamed so unit tests load with EphemeralKeySet (in-memory only) and never leave a persisted
+    // key container behind on the host; production always uses the persisting default.
+    internal X509KeyStorageFlags InstallKeyStorageFlags { get; set; } =
+        X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.PersistKeySet;
+
     public record CertificateResult(
         FileInfo CertificatePath,
         string Password,
@@ -157,11 +165,13 @@ internal partial class CertificateService(
             }
 
             // Install to TrustedPeople store (required for MSIX sideloading)
-            // Load the certificate from the PFX file
+            // Load the certificate from the PFX file. The key-storage flags are seamed so unit
+            // tests load with EphemeralKeySet (no persisted key container); production uses the
+            // default MachineKeySet|PersistKeySet so the installed certificate stays usable.
             using var cert = X509CertificateLoader.LoadPkcs12FromFile(
                 certPath.FullName,
                 password,
-                X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.PersistKeySet);
+                InstallKeyStorageFlags);
 
             // Install to LocalMachine\TrustedPeople store (requires elevation)
             try
