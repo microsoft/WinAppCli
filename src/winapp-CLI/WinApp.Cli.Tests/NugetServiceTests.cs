@@ -1014,5 +1014,37 @@ public class NugetServiceTests : BaseCommandTests
         }
     }
 
+    [TestMethod]
+    public async Task GetPackageDependenciesAsync_InvalidVersion_ReportsActionableError()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            // An unparseable version must fail with a message that names the package and the offending
+            // value, not a raw NuGetVersion.Parse ArgumentException. The version is validated before any
+            // source is contacted, so no feed is required for this to throw.
+            WriteNuGetConfig(root, """
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                  <packageSources>
+                    <clear />
+                    <add key="alpha" value="alpha-feed" />
+                  </packageSources>
+                </configuration>
+                """);
+
+            var service = CreateServiceRootedAt(root);
+
+            var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                async () => await service.GetPackageDependenciesAsync("Winapp.TestA", "not-a-version", TestContext.CancellationToken));
+
+            StringAssert.Contains(ex.Message, "'not-a-version' is not a valid NuGet version for package 'Winapp.TestA'", StringComparison.Ordinal);
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
     #endregion
 }

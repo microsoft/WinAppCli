@@ -22,9 +22,7 @@ namespace WinApp.Cli.Services;
 /// from the user's <c>nuget.config</c> hierarchy (rooted at the current working directory), so
 /// private/custom feeds and mirrors are honored when restoring SDK packages.
 /// </summary>
-internal class NugetService(
-    IWinappDirectoryService winappDirectoryService,
-    ICurrentDirectoryProvider currentDirectoryProvider) : INugetService
+internal class NugetService : INugetService
 {
     private static readonly ILogger Logger = NullLogger.Instance;
     private static readonly ConcurrentDictionary<string, Dictionary<string, string>> DependencyCache = new(StringComparer.OrdinalIgnoreCase);
@@ -43,24 +41,36 @@ internal class NugetService(
         return true;
     });
 
-    private readonly Lazy<ISettings> _settings = new(() =>
-        NuGet.Configuration.Settings.LoadDefaultSettings(root: currentDirectoryProvider.GetCurrentDirectory()));
+    private readonly IWinappDirectoryService _winappDirectoryService;
 
-    private SourceRepositoryProvider? _cachedSourceRepositoryProvider;
-    private PackageSourceMapping? _cachedPackageSourceMapping;
+    // All three caches are Lazy (default ExecutionAndPublication mode: thread-safe, initialized exactly
+    // once) rather than plain '??=' fields. NugetService is a DI singleton and WorkspaceSetupService
+    // resolves versions for many packages concurrently (Task.WhenAll over GetLatestVersionAsync), so a
+    // bare '??=' could race two threads into building duplicate providers/mappings or observing a
+    // half-initialized cache.
+    private readonly Lazy<ISettings> _settings;
+    private readonly Lazy<SourceRepositoryProvider> _sourceRepositoryProvider;
+    private readonly Lazy<PackageSourceMapping> _packageSourceMapping;
+
+    public NugetService(
+        IWinappDirectoryService winappDirectoryService,
+        ICurrentDirectoryProvider currentDirectoryProvider)
+    {
+        _winappDirectoryService = winappDirectoryService;
+        _settings = new Lazy<ISettings>(() =>
+            NuGet.Configuration.Settings.LoadDefaultSettings(root: currentDirectoryProvider.GetCurrentDirectory()));
+        _sourceRepositoryProvider = new Lazy<SourceRepositoryProvider>(() =>
+            new SourceRepositoryProvider(new PackageSourceProvider(Settings), Repository.Provider.GetCoreV3()));
+        _packageSourceMapping = new Lazy<PackageSourceMapping>(() =>
+            NuGet.Configuration.PackageSourceMapping.GetPackageSourceMapping(Settings));
+    }
 
     private ISettings Settings => _settings.Value;
 
-    private IReadOnlyList<SourceRepository> GetRepositories()
-    {
-        _cachedSourceRepositoryProvider ??= new SourceRepositoryProvider(
-            new PackageSourceProvider(Settings),
-            Repository.Provider.GetCoreV3());
-        return [.. _cachedSourceRepositoryProvider.GetRepositories()];
-    }
+    private IReadOnlyList<SourceRepository> GetRepositories() =>
+        [.. _sourceRepositoryProvider.Value.GetRepositories()];
 
-    private PackageSourceMapping PackageSourceMapping =>
-        _cachedPackageSourceMapping ??= PackageSourceMapping.GetPackageSourceMapping(Settings);
+    private PackageSourceMapping PackageSourceMapping => _packageSourceMapping.Value;
 
     /// <summary>
     /// Returns the configured package sources eligible to serve <paramref name="packageId"/>, honoring
@@ -147,7 +157,7 @@ internal class NugetService(
     public DirectoryInfo GetNuGetGlobalPackagesDir()
     {
         // In test mode (cache override set), use a "packages" subdir of the override directory
-        var globalDir = winappDirectoryService.GetGlobalWinappDirectory();
+        var globalDir = _winappDirectoryService.GetGlobalWinappDirectory();
         if (IsTestOverride(globalDir))
         {
             var overrideDir = new DirectoryInfo(Path.Combine(globalDir.FullName, "packages"));
@@ -191,6 +201,23 @@ internal class NugetService(
     /// </summary>
     internal static string NormalizeVersion(string version) =>
         NuGetVersion.TryParse(version, out var parsed) ? parsed.ToNormalizedString() : version;
+
+    /// <summary>
+    /// Parses a version string into a <see cref="NuGetVersion"/>, throwing an
+    /// <see cref="InvalidOperationException"/> that names the package and the offending value when it is
+    /// not a valid NuGet version. <see cref="NuGetVersion.Parse(string)"/> would otherwise surface a raw
+    /// <see cref="ArgumentException"/> with a message less actionable than the rest of this service.
+    /// </summary>
+    private static NuGetVersion ParseVersion(string packageId, string version)
+    {
+        if (!NuGetVersion.TryParse(version, out var parsed))
+        {
+            throw new InvalidOperationException(
+                $"'{version}' is not a valid NuGet version for package '{packageId}'. Specify a valid NuGet version such as 1.2.3 or 1.2.3-preview.");
+        }
+
+        return parsed;
+    }
 
     /// <summary>
     /// Detects whether the global winapp directory is a test override (not the real user profile .winapp).
@@ -260,7 +287,7 @@ internal class NugetService(
     /// </summary>
     private async Task DownloadPackageAsync(string package, string version, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
-        var identity = new PackageIdentity(package, NuGetVersion.Parse(version));
+        var identity = new PackageIdentity(package, ParseVersion(package, version));
         var globalPackagesFolder = GetNuGetGlobalPackagesDir().FullName;
         var clientPolicyContext = ClientPolicyContext.GetClientPolicy(Settings, Logger);
 
@@ -273,7 +300,10 @@ internal class NugetService(
             cancellationToken.ThrowIfCancellationRequested();
 
             // Buffer to a temp file rather than memory: SDK packages (e.g. Windows App SDK) are large.
-            var tempFile = Path.GetTempFileName();
+            // Use a random temp path instead of Path.GetTempFileName(): the latter eagerly creates an
+            // empty file (which File.Create below immediately overwrites) and throws once ~65,535 temp
+            // files already exist in the directory.
+            var tempFile = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             try
             {
                 bool copied;
@@ -583,9 +613,10 @@ internal class NugetService(
             }
             catch (Exception ex)
             {
-                // A single unreachable/unauthorized source should not prevent other sources from
-                // resolving the package. Remember the error (and which source) in case no source
-                // yields a version.
+                // Record why this source failed (and which one). Because "latest" is a MAX across sources,
+                // any eligible-source failure is treated as fatal after the loop (fail-closed) rather than
+                // trusting a partial result: a source we could not reach/authenticate could hide a newer
+                // version and cause a downgrade or a missed update.
                 lastError = ex;
                 lastErrorSource = repo.PackageSource.Name;
             }
@@ -645,7 +676,7 @@ internal class NugetService(
     private async Task<Dictionary<string, string>> FetchDirectDependenciesAsync(string packageName, string version, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         var dependencies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var nugetVersion = NuGetVersion.Parse(version);
+        var nugetVersion = ParseVersion(packageName, version);
         var repos = GetRepositoriesForPackage(packageName);
         Exception? lastError = null;
         string? lastErrorSource = null;
