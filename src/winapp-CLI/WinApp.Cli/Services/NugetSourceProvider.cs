@@ -76,11 +76,14 @@ internal sealed class NugetSourceProvider
         _configScopeKey = new Lazy<string>(() =>
         {
             var globalFolder = SettingsUtility.GetGlobalPackagesFolder(Settings);
+            // Preserve source ORDER: dependency resolution returns the graph from the FIRST eligible source
+            // that has the package (see NugetService.FetchDirectDependenciesAsync), so two configs with the
+            // same feeds listed in a different order can resolve DIFFERENT dependency graphs and must not
+            // share the cache. Sorting here would collapse them to one key and serve the wrong graph.
             var sources = string.Join(
                 ";",
                 new PackageSourceProvider(Settings).LoadPackageSources()
                     .Where(s => s.IsEnabled)
-                    .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
                     .Select(s => $"{s.Name}|{s.Source}"));
             // Record the complete mapping entries (source key -> ordered patterns), not just whether mapping
             // is enabled: two configs with identical sources/global folder but different package-to-source
@@ -115,11 +118,12 @@ internal sealed class NugetSourceProvider
     internal ISettings Settings => _settings.Value;
 
     /// <summary>
-    /// A stable fingerprint of the effective configuration (global packages folder, enabled sources and the
-    /// full <c>&lt;packageSourceMapping&gt;</c> entries). Consumers that maintain a process-wide, static
-    /// cache keyed only by package identity use this to additionally scope entries to the current config
-    /// root/feed set, so a cache populated under one <c>nuget.config</c> is never reused under another after
-    /// <see cref="SetConfigRoot"/> switches it. Recomputed whenever the caches are re-created.
+    /// A stable fingerprint of the effective configuration (global packages folder, enabled sources in their
+    /// configured order and the full <c>&lt;packageSourceMapping&gt;</c> entries). Consumers that maintain a
+    /// process-wide, static cache keyed only by package identity use this to additionally scope entries to the
+    /// current config root/feed set, so a cache populated under one <c>nuget.config</c> is never reused under
+    /// another after <see cref="SetConfigRoot"/> switches it. Source order is part of the fingerprint because
+    /// dependency resolution is first-source-wins. Recomputed whenever the caches are re-created.
     /// </summary>
     internal string ConfigScopeKey => _configScopeKey.Value;
 

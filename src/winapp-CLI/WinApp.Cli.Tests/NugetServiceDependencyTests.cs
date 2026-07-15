@@ -11,9 +11,9 @@ namespace WinApp.Cli.Tests;
 /// resolving a dependency's declared <c>VersionRange</c> to the lowest listed satisfying version (inclusive
 /// / exclusive lower bounds, upper-bound-only and unlisted lower bounds), surfacing a source-query failure
 /// instead of silently dropping a dependency, and scoping the process-wide dependency cache to the effective
-/// configuration (feeds, global folder and packageSourceMapping). Source-eligibility / version-selection
-/// tests live in <see cref="NugetServiceFeedTests"/>; the shared feed-authoring helpers live in
-/// <see cref="NugetFeedTestHelpers"/> (imported via <c>using static</c>).
+/// configuration (feeds, their configured order, global folder and packageSourceMapping). Source-eligibility
+/// / version-selection tests live in <see cref="NugetServiceFeedTests"/>; the shared feed-authoring helpers
+/// live in <see cref="NugetFeedTestHelpers"/> (imported via <c>using static</c>).
 /// </summary>
 [TestClass]
 public class NugetServiceDependencyTests : BaseCommandTests
@@ -266,6 +266,84 @@ public class NugetServiceDependencyTests : BaseCommandTests
             Assert.IsFalse(depsA.ContainsKey("Map.ChildY"), "Root A must not see feed Y's dependency.");
             Assert.IsTrue(depsB.ContainsKey("Map.ChildY"), "Root B maps '*' to feed Y and must resolve feed Y's dependency, not A's cached result.");
             Assert.IsFalse(depsB.ContainsKey("Map.ChildX"), "Root B must not receive root A's cached dependency despite identical sources/global folder.");
+        }
+        finally
+        {
+            TryDelete(shared);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetPackageDependenciesAsync_SameSourcesReversedOrder_DoNotShareCache()
+    {
+        // Both config roots reference the SAME two feeds (identical names + URLs), the SAME global packages
+        // folder and the SAME packageSourceMapping (both feeds mapped to '*'); they differ ONLY in the ORDER
+        // the sources are listed. Dependency resolution is first-source-wins (FetchDirectDependenciesAsync
+        // returns the graph from the first eligible source that has the package), so the two orders resolve
+        // DIFFERENT graphs and must not share the process-wide dependency cache. If ConfigScopeKey sorted the
+        // sources by name, both roots would collapse to one cache key and root B would receive root A's
+        // cached graph — the regression this test guards against.
+        var shared = CreateFeedTestDirectory();
+        var rootA = new DirectoryInfo(Path.Combine(shared.FullName, "rootA"));
+        var rootB = new DirectoryInfo(Path.Combine(shared.FullName, "rootB"));
+        rootA.Create();
+        rootB.Create();
+        try
+        {
+            var feedX = new DirectoryInfo(Path.Combine(shared.FullName, "feedX"));
+            var feedY = new DirectoryInfo(Path.Combine(shared.FullName, "feedY"));
+            feedX.Create();
+            feedY.Create();
+            var packages = new DirectoryInfo(Path.Combine(shared.FullName, "packages"));
+
+            // Same package id/version in both feeds, each declaring a DIFFERENT dependency, so the resolved
+            // graph reveals which source "won".
+            WriteNupkgToFeed(feedX, "Order.Root", "1.0.0", ("Order.ChildX", "1.0.0"));
+            WriteNupkgToFeed(feedX, "Order.ChildX", "1.0.0");
+            WriteNupkgToFeed(feedY, "Order.Root", "1.0.0", ("Order.ChildY", "1.0.0"));
+            WriteNupkgToFeed(feedY, "Order.ChildY", "1.0.0");
+
+            var feedByKey = new Dictionary<string, string>
+            {
+                ["x"] = feedX.FullName,
+                ["y"] = feedY.FullName,
+            };
+
+            // Identical sources (same names/URLs), global folder and mapping (both feeds mapped to '*', so
+            // both are eligible and first-source-wins decides); only the <add> ORDER differs between the two.
+            string Config(string firstKey, string secondKey) => $"""
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                  <config>
+                    <add key="globalPackagesFolder" value="{packages.FullName}" />
+                  </config>
+                  <packageSources>
+                    <clear />
+                    <add key="{firstKey}" value="{feedByKey[firstKey]}" />
+                    <add key="{secondKey}" value="{feedByKey[secondKey]}" />
+                  </packageSources>
+                  <packageSourceMapping>
+                    <clear />
+                    <packageSource key="x">
+                      <package pattern="*" />
+                    </packageSource>
+                    <packageSource key="y">
+                      <package pattern="*" />
+                    </packageSource>
+                  </packageSourceMapping>
+                </configuration>
+                """;
+
+            WriteNuGetConfig(rootA, Config("x", "y"));
+            WriteNuGetConfig(rootB, Config("y", "x"));
+
+            var depsA = await CreateServiceRootedAt(rootA).GetPackageDependenciesAsync("Order.Root", "1.0.0", TestContext.CancellationToken);
+            var depsB = await CreateServiceRootedAt(rootB).GetPackageDependenciesAsync("Order.Root", "1.0.0", TestContext.CancellationToken);
+
+            Assert.IsTrue(depsA.ContainsKey("Order.ChildX"), "Root A lists feed X first, so first-source-wins must resolve feed X's dependency.");
+            Assert.IsFalse(depsA.ContainsKey("Order.ChildY"), "Root A must not see feed Y's dependency.");
+            Assert.IsTrue(depsB.ContainsKey("Order.ChildY"), "Root B lists feed Y first, so it must resolve feed Y's dependency, not root A's cached result.");
+            Assert.IsFalse(depsB.ContainsKey("Order.ChildX"), "Root B must not receive root A's cached dependency despite identical sources (only their order differs).");
         }
         finally
         {

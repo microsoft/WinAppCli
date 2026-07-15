@@ -375,7 +375,10 @@ internal class NugetService : INugetService
     /// (honoring <c>&lt;packageSourceMapping&gt;</c>). Unlisted versions are excluded so they are never
     /// selected as "latest". Because the result feeds a MAX ("latest") decision, a source that cannot be
     /// queried is treated as fatal rather than silently skipped: a partial result could otherwise make a
-    /// caller select an older version (e.g. <c>update</c> could downgrade a pinned package).
+    /// caller select an older version (e.g. <c>update</c> could downgrade a pinned package). A source that
+    /// exposes only <c>PackageBaseAddress</c> (no registration resource) is enumerated via its flat container
+    /// through <see cref="GetSourceVersionsAsync"/> rather than skipped, so private feeds of that shape still
+    /// contribute versions.
     /// </summary>
     private async Task<List<string>> GetListedVersionsAsync(string packageName, CancellationToken cancellationToken)
     {
@@ -393,23 +396,12 @@ internal class NugetService : INugetService
 
             try
             {
-                var metadataResource = await repo.GetResourceAsync<PackageMetadataResource>(cancellationToken);
-                if (metadataResource is null)
+                // Exclude unlisted versions so an unlisted build is never selected as "latest". A source that
+                // exposes only PackageBaseAddress (no registration resource) is enumerated via its flat
+                // container instead of being skipped, so latest resolution still works against such feeds.
+                foreach (var version in await GetSourceVersionsAsync(repo, packageName, includeUnlisted: false, cacheContext, cancellationToken))
                 {
-                    continue;
-                }
-
-                var metadata = await metadataResource.GetMetadataAsync(
-                    packageName,
-                    includePrerelease: true,
-                    includeUnlisted: false,
-                    cacheContext,
-                    Logger,
-                    cancellationToken);
-
-                foreach (var package in metadata)
-                {
-                    versions.Add(package.Identity.Version.ToNormalizedString());
+                    versions.Add(version.ToNormalizedString());
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -533,26 +525,14 @@ internal class NugetService : INugetService
 
             try
             {
-                var metadataResource = await repo.GetResourceAsync<PackageMetadataResource>(cancellationToken);
-                if (metadataResource is null)
+                // Include unlisted versions: a dependency can pin an exact version its publisher has unlisted
+                // (e.g. Windows App SDK experimental .Runtime/.Foundation sub-packages), and that pin must
+                // still resolve. Unlisted only means "hidden from search/latest", not unavailable. A source
+                // that exposes only PackageBaseAddress (no registration resource) is enumerated via its flat
+                // container rather than skipped, so ranges still resolve against such feeds.
+                foreach (var version in await GetSourceVersionsAsync(repo, packageId, includeUnlisted: true, cacheContext, cancellationToken))
                 {
-                    continue;
-                }
-
-                var metadata = await metadataResource.GetMetadataAsync(
-                    packageId,
-                    includePrerelease: true,
-                    // Include unlisted versions: a dependency can pin an exact version its publisher has
-                    // unlisted (e.g. Windows App SDK experimental .Runtime/.Foundation sub-packages), and that
-                    // pin must still resolve. Unlisted only means "hidden from search/latest", not unavailable.
-                    includeUnlisted: true,
-                    cacheContext,
-                    Logger,
-                    cancellationToken);
-
-                foreach (var package in metadata)
-                {
-                    versions.Add(package.Identity.Version);
+                    versions.Add(version);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -572,6 +552,78 @@ internal class NugetService : INugetService
         }
 
         return new CandidateVersionsResult([.. versions], lastError, lastErrorSource);
+    }
+
+    /// <summary>
+    /// The v3 service-index resource types that expose a package registration (metadata) endpoint. A source
+    /// that advertises none of these has no registration resource, so its <see cref="PackageMetadataResource"/>
+    /// is non-functional (it throws on query) and versions must be read from the flat container instead. This
+    /// mirrors NuGet's own (internal) registration service-type list.
+    /// </summary>
+    private static readonly string[] RegistrationServiceTypes =
+    [
+        "RegistrationsBaseUrl/3.6.0",
+        "RegistrationsBaseUrl/3.4.0",
+        "RegistrationsBaseUrl/3.0.0-rc",
+        "RegistrationsBaseUrl/3.0.0-beta",
+        "RegistrationsBaseUrl",
+    ];
+
+    /// <summary>
+    /// Enumerates a single source's versions of a package. Prefers the registration-backed
+    /// <see cref="PackageMetadataResource"/> so <paramref name="includeUnlisted"/> is honored (the "latest"
+    /// path relies on excluding unlisted versions, the dependency-range path on including them). A v3 HTTP
+    /// feed that exposes only <c>PackageBaseAddress</c> advertises no registration resource, yet still hands
+    /// back a non-functional <see cref="PackageMetadataResource"/> whose query throws — so this probes the
+    /// service index first and, when no registration resource is advertised, reads versions from the
+    /// flat-container <see cref="FindPackageByIdResource"/> instead, which every v3 source must support. That
+    /// keeps latest/range resolution working against such private feeds (they can already restore pinned
+    /// packages). Local/v2 feeds have no service index but a working metadata resource, so they keep using it.
+    /// The flat container carries no listed flag, so the fallback cannot filter unlisted versions — acceptable
+    /// because a feed without registration exposes no listed/unlisted signal at all. Cancellation is
+    /// propagated; any other source failure is left to the caller's fail-closed / best-effort handling.
+    /// </summary>
+    private static async Task<IReadOnlyList<NuGetVersion>> GetSourceVersionsAsync(
+        SourceRepository repo,
+        string packageId,
+        bool includeUnlisted,
+        SourceCacheContext cacheContext,
+        CancellationToken cancellationToken)
+    {
+        // Only a v3 HTTP source has a service index; when it advertises no registration resource its
+        // PackageMetadataResource is non-functional (GetMetadataAsync throws), so route it to the flat
+        // container. A null service index means a local/v2 feed, whose metadata resource works — keep it.
+        var serviceIndex = await repo.GetResourceAsync<ServiceIndexResourceV3>(cancellationToken);
+        var registrationUnavailable = serviceIndex is not null
+            && serviceIndex.GetServiceEntryUri(RegistrationServiceTypes) is null;
+
+        if (!registrationUnavailable)
+        {
+            var metadataResource = await repo.GetResourceAsync<PackageMetadataResource>(cancellationToken);
+            if (metadataResource is not null)
+            {
+                var metadata = await metadataResource.GetMetadataAsync(
+                    packageId,
+                    includePrerelease: true,
+                    includeUnlisted,
+                    cacheContext,
+                    Logger,
+                    cancellationToken);
+                return [.. metadata.Select(m => m.Identity.Version)];
+            }
+        }
+
+        // No registration resource (a PackageBaseAddress-only feed): enumerate versions from the flat
+        // container, which every v3 source exposes, so such a feed still resolves latest/range versions
+        // instead of contributing nothing.
+        var byIdResource = await repo.GetResourceAsync<FindPackageByIdResource>(cancellationToken);
+        if (byIdResource is null)
+        {
+            return [];
+        }
+
+        var allVersions = await byIdResource.GetAllVersionsAsync(packageId, cacheContext, Logger, cancellationToken);
+        return allVersions is null ? [] : [.. allVersions];
     }
 
     /// <inheritdoc />

@@ -12,9 +12,10 @@ namespace WinApp.Cli.Tests;
 /// <summary>
 /// NuGet.Client-backed download/install/authentication tests: real download + extract from local folder
 /// feeds (including transitive dependencies), multi-source download failover, and authenticated private
-/// feeds via an in-process HTTP Basic-auth feed (<see cref="BasicAuthNuGetFeed"/>). Source/configuration
-/// and version-selection behavior lives in <see cref="NugetServiceFeedTests"/>; the shared feed-authoring
-/// helpers live in <see cref="NugetFeedTestHelpers"/> (imported via <c>using static</c>).
+/// feeds via an in-process HTTP Basic-auth feed (<see cref="BasicAuthNuGetFeed"/>) — including resolving the
+/// latest version against a feed that exposes only <c>PackageBaseAddress</c> (no registration resource).
+/// Source/configuration and version-selection behavior lives in <see cref="NugetServiceFeedTests"/>; the
+/// shared feed-authoring helpers live in <see cref="NugetFeedTestHelpers"/> (imported via <c>using static</c>).
 /// </summary>
 [TestClass]
 public class NugetServiceDownloadTests : BaseCommandTests
@@ -329,6 +330,62 @@ public class NugetServiceDownloadTests : BaseCommandTests
             // request reached the feed and was rejected (not masked as a plain "package not found").
             StringAssert.Contains(ex.Message, "Auth.Pkg", StringComparison.Ordinal);
             StringAssert.Contains(ex.Message, "private", StringComparison.Ordinal);
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetLatestVersionAsync_FlatContainerOnlyFeed_ResolvesViaFindPackageById()
+    {
+        // A private v3 feed can advertise ONLY a PackageBaseAddress (flat container) resource and no
+        // registration resource — BasicAuthNuGetFeed is exactly that shape (its service index lists only
+        // PackageBaseAddress/3.0.0). Such a feed can still restore packages, so latest-version resolution
+        // must work against it too: with no PackageMetadataResource available, NugetService falls back to
+        // FindPackageByIdResource.GetAllVersionsAsync (the flat container) instead of skipping the source and
+        // reporting "no versions found". This does not download, so no NUGET_PACKAGES guard is needed.
+        NugetSourceProvider.EnsureCredentialService();
+
+        // Three versions of one package; the highest stable (2.0.0) must be selected as "latest".
+        using var feed = new BasicAuthNuGetFeed(
+            "winapp-user",
+            "s3cret-token!",
+            ("Flat.Pkg", "1.0.0"),
+            ("Flat.Pkg", "2.0.0"),
+            ("Flat.Pkg", "1.5.0"));
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            WriteNuGetConfig(root, $"""
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                  <packageSources>
+                    <clear />
+                    <add key="private" value="{feed.IndexUrl}" />
+                  </packageSources>
+                  <packageSourceCredentials>
+                    <private>
+                      <add key="Username" value="{feed.Username}" />
+                      <add key="ClearTextPassword" value="{feed.Password}" />
+                    </private>
+                  </packageSourceCredentials>
+                  <packageSourceMapping>
+                    <clear />
+                    <packageSource key="private">
+                      <package pattern="*" />
+                    </packageSource>
+                  </packageSourceMapping>
+                </configuration>
+                """);
+
+            var service = CreateServiceRootedAt(root);
+
+            var latest = await service.GetLatestVersionAsync("Flat.Pkg", SdkInstallMode.Stable, TestContext.CancellationToken);
+
+            Assert.AreEqual("2.0.0", latest, "Latest resolution against a PackageBaseAddress-only feed must enumerate versions via the flat container and pick the highest.");
+            Assert.IsTrue(feed.ReceivedAuthenticatedRequest, "The flat-container feed should have served the versions request carrying the configured credentials.");
         }
         finally
         {
