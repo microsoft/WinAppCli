@@ -105,7 +105,12 @@ internal class UiRecordCommand : Command, IShortDescription
                 string filePath;
                 try
                 {
-                    filePath = Path.GetFullPath(output ?? $"recording-{DateTime.Now:yyyyMMdd-HHmmss}.mp4");
+                    // Default name carries a random suffix so two concurrent recordings that both
+                    // omit -o do not resolve to the same second-precision path and clobber each
+                    // other (the encoder opens the file exclusively; the loser would otherwise fail
+                    // with UnauthorizedAccessException).
+                    filePath = Path.GetFullPath(
+                        output ?? $"recording-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.mp4");
                     var dir = Path.GetDirectoryName(filePath);
                     if (dir is not null)
                     {

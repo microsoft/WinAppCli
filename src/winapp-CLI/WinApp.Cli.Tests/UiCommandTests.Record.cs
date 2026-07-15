@@ -888,39 +888,48 @@ public partial class UiCommandTests
     }
 
     // -----------------------------------------------------------------------
-    // H1 — Nonzero duration must still arm the stdin stop-monitor when stdin
-    //       is redirected (regression fix: the durationSec == 0 gate was wrong).
+    // H1 (r12) — A TIMED recording (durationSec > 0) must NOT arm the stdin
+    //   stop-monitor: a closed/redirected stdin delivering EOF must not cancel
+    //   it. Timed runs stop on their own wall-clock deadline (or Ctrl+C). Only
+    //   UNBOUNDED recordings (durationSec == 0) use stdin as the stop signal —
+    //   that path is covered by Record_RedirectedStdin_StatusTextMentionsEof.
     // -----------------------------------------------------------------------
 
     [TestMethod]
-    public async Task Record_NonZeroDuration_WithRedirectedStdinEof_StopsEarlyAndExitsZero()
+    public async Task Record_NonZeroDuration_WithRedirectedStdin_NeverReadsStdinAndExitsZero()
     {
-        // H1 regression test: --duration-sec N AND a redirected stdin that delivers EOF
-        // must stop the recording EARLY (well before the N-second cap) and exit 0 with a
-        // valid file. Previously the stdin monitor was only armed when durationSec == 0.
-        _fakeUia.RecordResult = new RecordCaptureResult { Frames = 2, Width = 640, Height = 480, Mode = "wgc" };
-        _fakeUia.RecordShouldWaitForCancellation = true; // block until cancelled
+        // H1 regression guard (r12): with --duration-sec N (> 0) AND a redirected stdin that
+        // would deliver EOF, the recording must complete via its own duration deadline (simulated
+        // here by the fake returning normally) and must NEVER read stdin. The pre-r12 bug armed the
+        // monitor unconditionally, so EOF from `<nul` canceled the recording after the first frame
+        // and truncated the MP4.
+        _fakeUia.RecordResult = new RecordCaptureResult { Frames = 20, Width = 640, Height = 480, Mode = "wgc" };
+        _fakeUia.RecordShouldWaitForCancellation = false; // fake returns when its own deadline elapses
 
-        var outputPath = Path.Combine(_tempDirectory.FullName, "h1-early-stop.mp4");
+        var outputPath = Path.Combine(_tempDirectory.FullName, "h1-timed-ignores-stdin.mp4");
         var command = GetRequiredService<UiRecordCommand>();
 
-        // Inject seams: simulate redirected stdin with immediate EOF.
+        // Inject seams: a redirected stdin whose ReadLine (if ever invoked) trips the flag below.
+        // A timed recording must not arm the monitor, so ReadLine must never be called.
+        var stdinWasRead = false;
         UiRecordCommand.Handler.s_isInputRedirectedOverride = () => true;
-        UiRecordCommand.Handler.s_stdinOverride = new StringReader(""); // EOF on first ReadLine
+        UiRecordCommand.Handler.s_stdinOverride = new SignalingEofReader(() => stdinWasRead = true);
         try
         {
-            // --duration-sec 120 is the safety cap; the stdin EOF must fire first.
             var exitCode = await ParseAndInvokeWithCaptureAsync(
                 command, ["-a", "TestApp", "--duration-sec", "120", "-o", outputPath, "--json"]);
 
-            Assert.AreEqual(0, exitCode, "stdin EOF must produce graceful exit 0 even with nonzero --duration-sec");
+            // Give any (erroneously-armed) background stdin monitor time to read before asserting.
+            await Task.Delay(100);
+
+            Assert.AreEqual(0, exitCode, "a timed recording must complete via its duration deadline and exit 0");
             Assert.IsTrue(File.Exists(outputPath), "a valid output file must be produced");
+            Assert.IsFalse(stdinWasRead, "a timed recording must never arm the stdin monitor or read redirected stdin");
         }
         finally
         {
             UiRecordCommand.Handler.s_isInputRedirectedOverride = null;
             UiRecordCommand.Handler.s_stdinOverride = null;
-            _fakeUia.RecordShouldWaitForCancellation = false;
         }
     }
 
