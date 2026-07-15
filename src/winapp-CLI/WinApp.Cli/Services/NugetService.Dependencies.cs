@@ -254,7 +254,12 @@ internal partial class NugetService
         // bound: it may be excluded by the range (an exclusive bound) or simply absent from the source.
         var candidates = await GetCandidateVersionsForRangeAsync(packageId, cacheContext, cancellationToken);
         var best = range.FindBestMatch(candidates.Versions);
-        if (best is not null)
+
+        // FindBestMatch treats a float as a preference, not a hard constraint: for 1.* with only 2.0.0 available
+        // it returns 2.0.0, which is outside the floated band. Re-check the selection with the float-aware
+        // predicate so an out-of-band transitive version is never installed; a rejected match falls through to
+        // the "no satisfying version" diagnostics below.
+        if (best is not null && RangeSatisfiesWithFloat(range, best))
         {
             return best.ToNormalizedString();
         }

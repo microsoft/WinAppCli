@@ -244,9 +244,13 @@ internal partial class NugetService : INugetService
         }
         catch (Exception ex)
         {
-            // The .nuspec is best-effort metadata; a malformed/unreadable manifest should not fail the
-            // install of the package that was already downloaded, but surface it so the gap is visible.
+            // The package was downloaded, but its .nuspec cannot be read so its dependency graph is unknown.
+            // This is different from a package that simply declares no dependencies (that reads back as an
+            // empty set without throwing): an unreadable manifest means required transitive packages may be
+            // silently missing. Record it as a failure — like the dependency resolution/install errors below —
+            // so the overall install fails loudly instead of reporting success with an incomplete graph.
             taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not read dependencies for {package} {version}: {ex.Message}");
+            dependencyFailures.Add($"{package} {version}: dependency manifest could not be read: {ex.Message}");
             return;
         }
 
@@ -326,11 +330,15 @@ internal partial class NugetService : INugetService
     }
 
     /// <summary>
-    /// Like <see cref="VersionRange.Satisfies(NuGetVersion)"/> but also enforces a floating range's implied
-    /// ceiling. <c>VersionRange.Satisfies</c> only checks the declared min/max bounds and a float declares no
-    /// upper bound, so <c>1.*</c> reports satisfying <c>2.0.0</c>. Without this, a diamond where one branch
-    /// already fixed the shared dependency to a version outside a later branch's float (e.g. the 2.* branch
-    /// installs 2.0.0 first, then the 1.* branch is checked) would be silently accepted as satisfied.
+    /// Like <see cref="VersionRange.Satisfies(NuGetVersion)"/> but also applies a floating range's full
+    /// semantics. <c>VersionRange.Satisfies</c> only checks the declared min/max bounds, and a float declares no
+    /// upper bound and carries prerelease/prefix eligibility that the bounds don't express — so a stable
+    /// <c>1.*</c> reports satisfying <c>2.0.0</c> (above the band) and <c>1.5.0-preview</c> (a prerelease the
+    /// stable float excludes). <see cref="FloatRange.Satisfies(NuGetVersion)"/> is the authoritative predicate
+    /// for that (ceiling, prerelease eligibility, and prefix), so defer to it for floating ranges. Without this,
+    /// a diamond where one branch already fixed the shared dependency to a version outside a later branch's
+    /// float (e.g. the 2.* branch installs 2.0.0 first, then the 1.* branch is checked) would be silently
+    /// accepted as satisfied.
     /// </summary>
     internal static bool RangeSatisfiesWithFloat(VersionRange range, NuGetVersion version)
     {
@@ -341,132 +349,49 @@ internal partial class NugetService : INugetService
 
         if (range.IsFloating && range.Float is { } floatRange)
         {
-            var ceiling = TryGetFloatUpperBound(floatRange);
-            if (ceiling is not null && version.CompareTo(ceiling) >= 0)
-            {
-                return false;
-            }
+            return floatRange.Satisfies(version);
         }
 
         return true;
     }
 
     /// <summary>
-    /// Returns true when at least one version could satisfy ALL of <paramref name="ranges"/> simultaneously —
-    /// i.e. their intersection interval is non-empty. Used to tell a genuinely unsatisfiable set of diamond
-    /// constraints (e.g. [1.0,2.0) and [2.0,3.0), which must fail the install) apart from constraints that
-    /// merely differ in their lower bound (e.g. [1.0,) and [2.0,), where a higher version satisfies both and
-    /// keeping winapp's first-selected version is a documented limitation, not a conflict). The check is
-    /// deliberately conservative: when a bound is genuinely unbounded (e.g. [2.0,) or the unrestricted float *)
-    /// it treats the interval as open in that direction so real, common differing-minimum diamonds are never
-    /// falsely reported as conflicts. Floating ranges (1.*, 1.2.*) are confined to their floated band via
-    /// <see cref="GetEffectiveBounds"/> so two disjoint floats (1.* and 2.*) are correctly reported as a
-    /// conflict rather than silently accepted.
+    /// Returns true when at least one version could satisfy ALL of <paramref name="ranges"/> simultaneously.
+    /// Used to tell a genuinely unsatisfiable set of diamond constraints (e.g. [1.0,2.0) and [2.0,3.0), which
+    /// must fail the install) apart from constraints that merely differ in their lower bound (e.g. [1.0,) and
+    /// [2.0,), where a higher version satisfies both and keeping winapp's first-selected version is a
+    /// documented limitation, not a conflict).
+    ///
+    /// The intersection of these upward version intervals, when non-empty, is anchored at the greatest lower
+    /// bound, which is one of the ranges' (inclusive) minimum versions — including a float's floor (1.* => 1.0.0,
+    /// 1.2.3-beta.* => 1.2.3-beta.0). So each candidate minimum is tested against every range with the full
+    /// float-aware predicate (<see cref="RangeSatisfiesWithFloat"/>) rather than reducing floats to numeric
+    /// bounds: that keeps prerelease/prefix eligibility intact, so two floats sharing a numeric prefix but no
+    /// common version (1.2.3-beta.* and 1.2.3-rc.*) are correctly reported as a conflict, while an unbounded
+    /// float (*) still overlaps anything. Real NuGet dependency ranges always carry an inclusive lower bound,
+    /// so scanning the candidate minimums is exhaustive for them; a set with no lower bound at all is open below
+    /// and therefore trivially satisfiable.
     /// </summary>
     internal static bool RangesHaveCommonVersion(IReadOnlyList<VersionRange> ranges)
     {
-        NuGetVersion? low = null;
-        var lowInclusive = true;
-        NuGetVersion? high = null;
-        var highInclusive = true;
+        var sawLowerBound = false;
 
         foreach (var range in ranges)
         {
-            var (rangeLow, rangeLowInclusive, rangeHigh, rangeHighInclusive) = GetEffectiveBounds(range);
-
-            if (rangeLow is not null)
+            if (!range.HasLowerBound || range.MinVersion is not { } candidate)
             {
-                var cmp = low is null ? 1 : rangeLow.CompareTo(low);
-                if (cmp > 0)
-                {
-                    low = rangeLow;
-                    lowInclusive = rangeLowInclusive;
-                }
-                else if (cmp == 0)
-                {
-                    lowInclusive = lowInclusive && rangeLowInclusive;
-                }
+                continue;
             }
 
-            if (rangeHigh is not null)
+            sawLowerBound = true;
+            if (ranges.All(r => RangeSatisfiesWithFloat(r, candidate)))
             {
-                var cmp = high is null ? -1 : rangeHigh.CompareTo(high);
-                if (cmp < 0)
-                {
-                    high = rangeHigh;
-                    highInclusive = rangeHighInclusive;
-                }
-                else if (cmp == 0)
-                {
-                    highInclusive = highInclusive && rangeHighInclusive;
-                }
+                return true;
             }
         }
 
-        // An unbounded side leaves the intersection unbounded in that direction — non-empty.
-        if (low is null || high is null)
-        {
-            return true;
-        }
-
-        var bounds = low.CompareTo(high);
-        if (bounds < 0)
-        {
-            return true; // low < high: the open interval contains versions.
-        }
-
-        // low == high collapses to a single point, satisfiable only if both ends include it.
-        return bounds == 0 && lowInclusive && highInclusive;
-    }
-
-    /// <summary>
-    /// Resolves a range's effective lower/upper interval. For a normal range this is just its declared bounds,
-    /// but a floating range (e.g. 1.*, 1.2.*) declares no explicit upper bound on the underlying
-    /// <see cref="VersionRange"/> even though the float behavior confines it to a contiguous band (1.* is
-    /// [1.0.0, 2.0.0)). Treating that band as unbounded above would let two disjoint floats (1.* and 2.*) look
-    /// mutually satisfiable, silently accepting an invalid diamond, so the floated ceiling is derived here.
-    /// </summary>
-    private static (NuGetVersion? Low, bool LowInclusive, NuGetVersion? High, bool HighInclusive) GetEffectiveBounds(VersionRange range)
-    {
-        var low = range.HasLowerBound ? range.MinVersion : null;
-        var lowInclusive = range.IsMinInclusive;
-        var high = range.HasUpperBound ? range.MaxVersion : null;
-        var highInclusive = range.IsMaxInclusive;
-
-        if (high is null && range.IsFloating && range.Float is { } floatRange)
-        {
-            var floatedCeiling = TryGetFloatUpperBound(floatRange);
-            if (floatedCeiling is not null)
-            {
-                high = floatedCeiling;
-                highInclusive = false; // The ceiling is the first version outside the floated band.
-            }
-        }
-
-        return (low, lowInclusive, high, highInclusive);
-    }
-
-    /// <summary>
-    /// Returns the exclusive upper bound implied by a float's behavior (1.* => 2.0.0, 1.2.* => 1.3.0,
-    /// 1.2.3.* => 1.2.4), or null when the float has no numeric ceiling (* / *-* float every component).
-    /// </summary>
-    private static NuGetVersion? TryGetFloatUpperBound(FloatRange floatRange)
-    {
-        var prefix = floatRange.MinVersion;
-        return floatRange.FloatBehavior switch
-        {
-            // Major is fixed, minor and below float => next major.
-            NuGetVersionFloatBehavior.Minor or NuGetVersionFloatBehavior.PrereleaseMinor
-                => new NuGetVersion(prefix.Major + 1, 0, 0),
-            // Major.minor fixed, patch and below float => next minor.
-            NuGetVersionFloatBehavior.Patch or NuGetVersionFloatBehavior.PrereleasePatch
-                => new NuGetVersion(prefix.Major, prefix.Minor + 1, 0),
-            // Major.minor.patch fixed, revision/prerelease float => next patch.
-            NuGetVersionFloatBehavior.Revision or NuGetVersionFloatBehavior.PrereleaseRevision
-                => new NuGetVersion(prefix.Major, prefix.Minor, prefix.Patch + 1),
-            // Major / AbsoluteLatest / PrereleaseMajor float the major too (no numeric ceiling); Prerelease and
-            // None float only the prerelease label / nothing, so they impose no band that changes disjointness.
-            _ => null,
-        };
+        // No range constrains the low end: the intersection is open below and non-empty, so treat it as
+        // satisfiable rather than a conflict.
+        return !sawLowerBound;
     }
 }
