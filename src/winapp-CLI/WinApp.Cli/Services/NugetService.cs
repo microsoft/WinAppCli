@@ -20,6 +20,16 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
     // handler to exercise download / version / dependency flows offline. This is the
     // network boundary — production behavior is unchanged.
     internal HttpClient Http { get; set; } = SharedHttp;
+
+    // Test seam (OS boundary): resolves the current user's profile directory used to build the
+    // default NuGet global-packages cache path. Defaults to the real Environment.GetFolderPath so
+    // production behavior is unchanged; tests override it to redirect the default cache under a
+    // temp directory. A seam (not an env override) is required because overriding the USERPROFILE
+    // environment variable does NOT affect Environment.GetFolderPath(SpecialFolder.UserProfile) on
+    // .NET/Windows, so the default-profile branch could otherwise only be exercised by writing to
+    // the real %USERPROFILE%\.nuget\packages.
+    internal Func<string> UserProfileDirectoryProvider { get; set; } =
+        () => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     private const string FlatIndex = "https://api.nuget.org/v3-flatcontainer";
     private const string RegistrationIndex = "https://api.nuget.org/v3/registration5-semver1";
     private static readonly ConcurrentDictionary<string, Dictionary<string, string>> DependencyCache = new(StringComparer.OrdinalIgnoreCase);
@@ -51,7 +61,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
         }
 
         // Default: %USERPROFILE%/.nuget/packages
-        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var userProfile = UserProfileDirectoryProvider();
         var nugetDir = new DirectoryInfo(Path.Combine(userProfile, ".nuget", "packages"));
         if (!nugetDir.Exists)
         {

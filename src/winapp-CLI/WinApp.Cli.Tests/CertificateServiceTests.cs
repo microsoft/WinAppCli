@@ -181,19 +181,14 @@ public class CertificateServiceTests : BaseCommandTests
         StringAssert.Contains(ex.Message, "Administrator");
     }
 
-    [TestMethod]
-    public void InstallCertificate_RealDefault_NonAdmin_ThrowsAdminError()
-    {
-        // No seams injected: exercises the real machine-store check (read-only, works
-        // unelevated → returns false) and the real add (read-write → Access is denied).
-        var (svc, _, _) = NewService();
-        var pfx = CreatePfx(_tempDirectory.FullName, "realdefault.pfx", "CN=RealDefault", "pw");
-
-        var ex = Assert.ThrowsExactly<InvalidOperationException>(() =>
-            svc.InstallCertificate(pfx, "pw", force: false, TestTaskContext));
-
-        StringAssert.Contains(ex.Message, "Administrator");
-    }
+    // NOTE: There is deliberately no un-seamed "real default" install test. The admin-error
+    // path is already covered deterministically by InstallCertificate_AccessDenied_ThrowsAdminError
+    // (via the AddCertificateToStoreImpl seam). Exercising the real DefaultIsCertificateInstalled
+    // read + DefaultAddCertificateToStore write requires the real InstallCertificate flow, which
+    // persists a machine key container and — on an elevated runner — would add a *trusted*
+    // certificate to LocalMachine\TrustedPeople. That machine-state mutation must never happen in
+    // a unit test, so those LocalMachine cert-store operations are the documented admin/OS-boundary
+    // ceiling for this service.
 
     // ── SignFileAsync ───────────────────────────────────────────────────
 

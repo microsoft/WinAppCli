@@ -497,14 +497,26 @@ public class NugetServiceEnvTests : BaseCommandTests
     [TestMethod]
     public void GetNuGetGlobalPackagesDir_NoEnv_ReturnsUserProfileNugetPackages()
     {
-        var svc = new NugetService(new StubWinappDirectoryService(UserWinappDir()));
-        var expected = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages");
+        // Redirect the profile-directory seam to a temp dir so the default-profile branch
+        // resolves AND creates its cache under the temp dir (cleaned up by the base class)
+        // instead of the real %USERPROFILE%\.nuget\packages. The stub's global dir stays the
+        // real ~/.winapp so IsTestOverride (which reads the real profile) is disabled and the
+        // default-profile branch is the one exercised.
+        var tempProfile = new DirectoryInfo(
+            Path.Combine(_tempDirectory.FullName, "profile-" + Guid.NewGuid().ToString("N")));
+        tempProfile.Create();
+        var svc = new NugetService(new StubWinappDirectoryService(UserWinappDir()))
+        {
+            UserProfileDirectoryProvider = () => tempProfile.FullName,
+        };
+        var expected = Path.Combine(tempProfile.FullName, ".nuget", "packages");
 
         RunWithEnv(() =>
         {
             var dir = svc.GetNuGetGlobalPackagesDir();
             Assert.AreEqual(expected, dir.FullName);
+            Assert.IsTrue(Directory.Exists(dir.FullName),
+                "the default-profile nuget cache should be created under the redirected temp profile");
         }, ("NUGET_PACKAGES", null));
     }
 }

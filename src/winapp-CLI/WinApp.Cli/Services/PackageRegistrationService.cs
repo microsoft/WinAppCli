@@ -332,6 +332,14 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
 
     private static IReadOnlyList<InstalledPackageView> DefaultEnumerateUserPackages()
     {
+        // Behavior note (intentional): this eagerly snapshots Id.Version and IsDevelopmentMode for
+        // every package into plain-data InstalledPackageView records, rather than reading those
+        // WinRT accessors lazily only for the name-matching package as earlier inline code did.
+        // The snapshot decouples callers from live WinRT Package objects (so seams can inject test
+        // data); the only observable difference — a corrupted-metadata *unrelated* package could
+        // abort the whole enumeration — is effectively unreachable for real user packages. The
+        // matching InstalledLocation accessor stays deferred (a Func) because it is the one member
+        // that legitimately throws for a valid package whose files were removed.
         // The (userId, name, publisher) overload rejects empty/null publisher because
         // string.Empty marshals as a null HSTRING in WinRT interop, so use the single
         // (userSecurityId) overload with the current user and filter by name in callers.

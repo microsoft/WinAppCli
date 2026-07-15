@@ -492,26 +492,11 @@ public class PackageRegistrationServiceTests
         Assert.IsTrue(threw, "Installing a non-existent package must fail at the WinRT boundary.");
     }
 
-    [TestMethod]
-    public async Task UnregisterByFullNameAsync_RealDefault_UnknownPackage_ExercisesSeam()
-    {
-        var (svc, logger) = NewService();
-        // Well-formed but non-installed full name.
-        var fullName = "WinAppCliTestNoSuch_1.0.0.0_x64__j3adjyj8sqwmw";
-
-        try
-        {
-            await svc.UnregisterByFullNameAsync(fullName);
-
-            // If WinRT returned an error result instead of throwing, the warning is logged.
-            Assert.IsTrue(logger.Has(LogLevel.Warning, "Warning removing package"));
-        }
-        catch (Exception)
-        {
-            // WinRT RemovePackageAsync surfaced "package not found" by throwing — also
-            // acceptable; the real DefaultRemovePackage seam was still exercised.
-        }
-    }
+    // NOTE: The "Warning removing package" path for UnregisterByFullNameAsync is covered
+    // deterministically by UnregisterByFullNameAsync_Error_LogsWarning / _NoError_LogsDebugOnly
+    // (via the RemovePackageImpl seam). The real DefaultRemovePackage (a live WinRT
+    // PackageManager.RemovePackageAsync) is the documented OS-boundary ceiling — it can't be
+    // exercised without a real installed package / deployment side effects.
 
     [TestMethod]
     public void GetInstalledVersion_RealDefault_UnknownPackage_ReturnsNull()
@@ -523,28 +508,12 @@ public class PackageRegistrationServiceTests
         Assert.IsNull(svc.GetInstalledVersion("WinAppCliTestNoSuchPackage.Contoso"));
     }
 
-    [TestMethod]
-    public void FindDevPackages_RealDefault_MatchingRealPackage_InvokesInstalledLocation()
-    {
-        // Grab a real installed package name so FindDevPackages matches it and invokes
-        // the InstalledLocation accessor lambda (whose result may be a path or throw —
-        // both are valid and covered by the surrounding try/catch).
-        var pm = new Windows.Management.Deployment.PackageManager();
-        string? realName = null;
-        foreach (var p in pm.FindPackagesForUser(string.Empty))
-        {
-            realName = p.Id.Name;
-            break;
-        }
-
-        Assert.IsNotNull(realName, "Expected at least one package for the current user.");
-
-        var (svc, _) = NewService();
-        var results = svc.FindDevPackages(realName);
-
-        Assert.IsTrue(results.Count >= 1, "The matching real package should be projected.");
-        Assert.AreEqual(realName, results[0].Name);
-    }
+    // NOTE: FindDevPackages projection — including invoking the InstalledLocation accessor lambda
+    // (path result AND throwing result) and skipping non-matching packages — is covered
+    // deterministically by FindDevPackages_MapsMatchingPackages / _InstalledLocationThrows /
+    // _NoMatch (via the EnumerateUserPackagesImpl seam). The real DefaultEnumerateUserPackages
+    // accessor lambda (() => p.InstalledLocation?.Path over a live WinRT Package) is the documented
+    // OS-boundary ceiling — invoking it requires a real installed package on the host.
 
     // ---- helpers ------------------------------------------------------------
 
