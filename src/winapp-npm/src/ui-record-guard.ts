@@ -67,7 +67,13 @@ export function buildUiRecordArgs(options: UiRecordOptions): string[] {
  * @throws {Error} if `options.durationSec` is not provided or is ≤ 0.
  */
 export async function uiRecord(options: UiRecordOptions): Promise<WinappResult> {
-  // Runtime guard for JS callers who may pass undefined despite the TypeScript type.
+  // Runtime guard for JS callers who may pass undefined/null despite the TypeScript type.
+  if (options == null || typeof options !== 'object') {
+    throw new Error(
+      `uiRecord: options must be an object with durationSec as a finite integer in [1, 86400]. ` +
+        'Got: null or undefined options. Pass options.durationSec > 0.'
+    );
+  }
   // durationSec must be a finite integer in [1, 86400]: reject NaN, ±Infinity, non-integers,
   // values < 1, and values > 86400 (CLI upper bound). durationSec == 0 (unbounded) is only
   // supported via the CLI with Ctrl+C or piped stdin — the npm wrapper has no way to stop it.
@@ -100,6 +106,13 @@ export async function _uiRecordWithCapture(
   options: UiRecordOptions,
   capture: (args: string[], opts: CallWinappCliCaptureOptions) => Promise<CallWinappCliCaptureResult>
 ): Promise<WinappResult> {
+  // Runtime guard for JS callers who may pass undefined/null despite the TypeScript type.
+  if (options == null || typeof options !== 'object') {
+    throw new Error(
+      `uiRecord: options must be an object with durationSec as a finite integer in [1, 86400]. ` +
+        'Got: null or undefined options. Pass options.durationSec > 0.'
+    );
+  }
   if (
     typeof options.durationSec !== 'number' ||
     !Number.isFinite(options.durationSec) ||

@@ -215,8 +215,48 @@ test('buildUiRecordArgs: leading-dash selector does not appear before --', () =>
 });
 
 // ---------------------------------------------------------------------------
-// L3 (round-7) — guard rejects NaN, Infinity, fractional, and out-of-range durations
+// L1 (round-9) — null/undefined options must throw a clear usage error, not TypeError
 // ---------------------------------------------------------------------------
+
+test('uiRecord(undefined) throws documented range error, not raw TypeError', async () => {
+  await assert.rejects(
+    () => (uiRecord as (o: unknown) => Promise<unknown>)(undefined),
+    (err: unknown) => {
+      assert.ok(err instanceof Error, 'should throw an Error (not a raw TypeError)');
+      // Must NOT be a raw property-access TypeError ("Cannot read properties of undefined")
+      assert.ok(
+        !err.message.startsWith('Cannot read properties'),
+        `must not be a raw TypeError; got: "${err.message}"`
+      );
+      // Must mention durationSec (same style as the existing guard)
+      assert.ok(
+        err.message.includes('durationSec'),
+        `error message should mention durationSec; got: "${err.message}"`
+      );
+      return true;
+    }
+  );
+});
+
+test('uiRecord(null) throws documented range error, not raw TypeError', async () => {
+  await assert.rejects(
+    () => (uiRecord as (o: unknown) => Promise<unknown>)(null),
+    (err: unknown) => {
+      assert.ok(err instanceof Error, 'should throw an Error (not a raw TypeError)');
+      assert.ok(
+        !err.message.startsWith('Cannot read properties'),
+        `must not be a raw TypeError; got: "${err.message}"`
+      );
+      assert.ok(
+        err.message.includes('durationSec'),
+        `error message should mention durationSec; got: "${err.message}"`
+      );
+      return true;
+    }
+  );
+});
+
+
 
 test('uiRecord with NaN durationSec throws', async () => {
   await assert.rejects(

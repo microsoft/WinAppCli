@@ -1402,6 +1402,140 @@ public partial class UiCommandTests
     }
 
     // -----------------------------------------------------------------------
+    // H1 (round-9) — ResolvePopupCaptureHwnd: popup/owned window retargets capture
+    // -----------------------------------------------------------------------
+
+    [TestMethod]
+    public void ResolvePopupCaptureHwnd_SameWindow_NoRetarget()
+    {
+        // When the element's WindowHandle matches the session HWND, the method must return
+        // the session HWND unchanged and leave all capture params untouched.
+        var sessionHwnd = (nint)0x1000;
+        int originLeft = 100, originTop = 200, srcW = 500, srcH = 375;
+
+        var result = UiAutomationService.ResolvePopupCaptureHwnd(
+            elementWindowHandle: (long)sessionHwnd,
+            sessionHwnd: sessionHwnd,
+            captureOriginLeft: ref originLeft, captureOriginTop: ref originTop,
+            srcWidth: ref srcW, srcHeight: ref srcH);
+
+        Assert.AreEqual(sessionHwnd, result, "same-window element must return session HWND");
+        Assert.AreEqual(100, originLeft, "captureOriginLeft must be unchanged");
+        Assert.AreEqual(200, originTop, "captureOriginTop must be unchanged");
+        Assert.AreEqual(500, srcW, "srcWidth must be unchanged");
+        Assert.AreEqual(375, srcH, "srcHeight must be unchanged");
+    }
+
+    [TestMethod]
+    public void ResolvePopupCaptureHwnd_NullWindowHandle_NoRetarget()
+    {
+        // A null WindowHandle must leave all params unchanged and return the session HWND.
+        var sessionHwnd = (nint)0x1000;
+        int originLeft = 100, originTop = 200, srcW = 500, srcH = 375;
+
+        var result = UiAutomationService.ResolvePopupCaptureHwnd(
+            elementWindowHandle: null,
+            sessionHwnd: sessionHwnd,
+            captureOriginLeft: ref originLeft, captureOriginTop: ref originTop,
+            srcWidth: ref srcW, srcHeight: ref srcH);
+
+        Assert.AreEqual(sessionHwnd, result, "null WindowHandle must return session HWND");
+        Assert.AreEqual(100, originLeft, "captureOriginLeft must be unchanged");
+        Assert.AreEqual(200, originTop, "captureOriginTop must be unchanged");
+        Assert.AreEqual(500, srcW, "srcWidth must be unchanged");
+        Assert.AreEqual(375, srcH, "srcHeight must be unchanged");
+    }
+
+    [TestMethod]
+    public void ResolvePopupCaptureHwnd_PopupWindow_RetargetsToCaptureOriginAndSize()
+    {
+        // Core H1 regression test: when element's WindowHandle differs from the session HWND,
+        // ResolvePopupCaptureHwnd must:
+        //   1. Return the popup's top-level HWND (not the session HWND).
+        //   2. Update captureOriginLeft/Top to the popup window's screen origin.
+        //   3. Update srcWidth/srcHeight to the popup window's pixel dimensions.
+        // Before the fix, the crop would be clamped against the main window's frame, producing
+        // a truncated sliver (e.g. "width":64,"height":100 instead of 200×100).
+        var sessionHwnd = (nint)0x1000;
+        var popupHwnd = (nint)0x2000;
+
+        // Main window at (100,100), size 500×375.
+        int originLeft = 100, originTop = 100, srcW = 500, srcH = 375;
+
+        // Popup window at (550,30), size 220×130 (partly outside main window).
+        var result = UiAutomationService.ResolvePopupCaptureHwnd(
+            elementWindowHandle: (long)popupHwnd,
+            sessionHwnd: sessionHwnd,
+            captureOriginLeft: ref originLeft, captureOriginTop: ref originTop,
+            srcWidth: ref srcW, srcHeight: ref srcH,
+            getAncestorRoot: h => h,                             // popup IS already the root
+            getWindowRect: _ => (550, 30, 770, 160));            // left=550,top=30,right=770,bottom=160
+
+        Assert.AreEqual(popupHwnd, result, "popup element must retarget to popup HWND");
+        Assert.AreEqual(550, originLeft, "captureOriginLeft must be updated to popup window's screen-left");
+        Assert.AreEqual(30, originTop, "captureOriginTop must be updated to popup window's screen-top");
+        Assert.AreEqual(220, srcW, "srcWidth must be updated to popup window's width (770-550)");
+        Assert.AreEqual(130, srcH, "srcHeight must be updated to popup window's height (160-30)");
+    }
+
+    [TestMethod]
+    public void ResolvePopupCaptureHwnd_PopupWindow_CropRectUsesRetargetedOrigin()
+    {
+        // Regression: after retargeting, an element at screen (600,50) with size 200×100
+        // in a popup window at screen (550,30,810,150) must produce cropX=50, cropY=20,
+        // cropW=200, cropH=100 — not the clamped sliver from using the main window origin.
+        // Without the fix, using the main window's origin (100,100) with srcW=500 would
+        // give cropX=499 (clamped), cropW=1 — a 1-pixel sliver.
+        var sessionHwnd = (nint)0x1000;
+        var popupHwnd = (nint)0x2000;
+        int originLeft = 100, originTop = 100, srcW = 500, srcH = 375;
+
+        // Popup window at (550,30), size 260×120 — large enough to fully contain the element.
+        UiAutomationService.ResolvePopupCaptureHwnd(
+            elementWindowHandle: (long)popupHwnd,
+            sessionHwnd: sessionHwnd,
+            captureOriginLeft: ref originLeft, captureOriginTop: ref originTop,
+            srcWidth: ref srcW, srcHeight: ref srcH,
+            getAncestorRoot: h => h,
+            getWindowRect: _ => (550, 30, 810, 150));    // width=260, height=120
+
+        // Simulate the crop computation performed in RecordAsync after retarget.
+        double elemX = 600, elemY = 50, elemW = 200, elemH = 100;
+        var cropX = Math.Clamp((int)elemX - originLeft, 0, Math.Max(0, srcW - 1));
+        var cropY = Math.Clamp((int)elemY - originTop, 0, Math.Max(0, srcH - 1));
+        var cropW = Math.Clamp((int)elemW, 1, srcW - cropX);
+        var cropH = Math.Clamp((int)elemH, 1, srcH - cropY);
+
+        Assert.AreEqual(50, cropX, "cropX after retarget must be element.X(600) - popupOrigin.X(550)");
+        Assert.AreEqual(20, cropY, "cropY after retarget must be element.Y(50) - popupOrigin.Y(30)");
+        Assert.AreEqual(200, cropW, "cropW must match element width (element fits within popup window)");
+        Assert.AreEqual(100, cropH, "cropH must match element height (element fits within popup window)");
+    }
+
+    [TestMethod]
+    public void ResolvePopupCaptureHwnd_GaRootResolvesToSessionWindow_NoRetarget()
+    {
+        // If GetAncestor(GA_ROOT) of the element's HWND returns the session HWND, the element's
+        // HWND is a child control inside the session window — no retarget is needed.
+        var sessionHwnd = (nint)0x1000;
+        var childHwnd = (nint)0x2000; // a child HWND inside the session window
+
+        int originLeft = 100, originTop = 100, srcW = 500, srcH = 375;
+
+        var result = UiAutomationService.ResolvePopupCaptureHwnd(
+            elementWindowHandle: (long)childHwnd,
+            sessionHwnd: sessionHwnd,
+            captureOriginLeft: ref originLeft, captureOriginTop: ref originTop,
+            srcWidth: ref srcW, srcHeight: ref srcH,
+            getAncestorRoot: _ => sessionHwnd,            // GA_ROOT resolves to the session window
+            getWindowRect: _ => throw new InvalidOperationException("must not be called"));
+
+        Assert.AreEqual(sessionHwnd, result, "when GA_ROOT = session HWND, no retarget should occur");
+        Assert.AreEqual(100, originLeft, "params must be unchanged when GA_ROOT = session HWND");
+        Assert.AreEqual(500, srcW, "params must be unchanged when GA_ROOT = session HWND");
+    }
+
+    // -----------------------------------------------------------------------
     // M10 — WGC pool Recreate: frame disposed before pool.Recreate (structural)
     // -----------------------------------------------------------------------
 

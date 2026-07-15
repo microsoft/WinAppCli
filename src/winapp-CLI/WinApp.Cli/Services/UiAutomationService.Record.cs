@@ -142,7 +142,69 @@ internal sealed partial class UiAutomationService
                 {
                     throw new UiElementNotFoundException(elementId);
                 }
-                // Compute crop from the element's screen-space bounding rectangle.
+
+                // H1 fix: When the selector resolves to a popup or owned window whose HWND differs
+                // from the session's main window, retarget the capture surface to that window.
+                // Using the main window's rect to clamp an element in a different window produces a
+                // truncated sliver or wrong pixels; the fix switches both the capture origin and
+                // (for WGC/PrintWindow) the capture HWND to the element's actual top-level window.
+                var captureTargetHwnd = ResolvePopupCaptureHwnd(
+                    selectorElement.WindowHandle, (nint)hwnd,
+                    ref captureOriginLeft, ref captureOriginTop,
+                    ref srcWidth, ref srcHeight);
+
+                if (captureTargetHwnd != (nint)hwnd)
+                {
+                    var popupHwnd = new Windows.Win32.Foundation.HWND(captureTargetHwnd);
+                    _logger.LogDebug(
+                        "Selector '{Sel}' resolved to popup window HWND 0x{Hwnd:X}; retargeting capture",
+                        elementId, captureTargetHwnd);
+
+                    if (useWgc)
+                    {
+                        // Restart the WGC grabber on the element's owning top-level window.
+                        grabber?.Dispose();
+                        grabber = null;
+                        try
+                        {
+                            grabber = WgcCapture.StartGrabber(popupHwnd, _logger, options.Fps);
+                            if (!await grabber.WaitForFirstFrameAsync(TimeSpan.FromSeconds(3), ct).ConfigureAwait(false))
+                            {
+                                throw new InvalidOperationException("Timed out waiting for the first captured frame.");
+                            }
+                            var retargetFirst = grabber.TryGetLatest()!.Value;
+                            srcWidth = retargetFirst.Width;
+                            srcHeight = retargetFirst.Height;
+                            Windows.Win32.PInvoke.GetWindowRect(popupHwnd, out var popupWinRect);
+                            var visiblePopupRect = GetVisibleWindowRect(popupHwnd, popupWinRect);
+                            captureOriginLeft = visiblePopupRect.left;
+                            captureOriginTop = visiblePopupRect.top;
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            _logger.LogDebug(ex, "WGC retarget to popup HWND 0x{Hwnd:X} failed", captureTargetHwnd);
+                            grabber?.Dispose();
+                            grabber = null;
+                            // If the user did not pass --capture-screen, EnsureWgcFallbackConsented throws
+                            // (same privacy guard as for main-window WGC init failure).
+                            // captureOriginLeft/Top/srcWidth/srcHeight already reflect the popup window rect
+                            // (set by ResolvePopupCaptureHwnd), so any screen-DC fallback uses the right region.
+                            EnsureWgcFallbackConsented(ex, options.CaptureScreen, _logger);
+                            useScreen = true;
+                            useWgc = false;
+                            mode = "screen";
+                        }
+                    }
+                    else if (!useScreen)
+                    {
+                        // PrintWindow path: retarget the HWND to the popup window.
+                        // captureOriginLeft/Top/srcWidth/srcHeight already updated by ResolvePopupCaptureHwnd.
+                        hwnd = popupHwnd;
+                    }
+                    // For useScreen: captureOriginLeft/Top/srcWidth/srcHeight already updated; no further action.
+                }
+
+                // Compute crop: element screen coords relative to the (possibly retargeted) capture origin.
                 cropX = Math.Clamp((int)selectorElement.X - captureOriginLeft, 0, Math.Max(0, srcWidth - 1));
                 cropY = Math.Clamp((int)selectorElement.Y - captureOriginTop, 0, Math.Max(0, srcHeight - 1));
                 cropW = Math.Clamp((int)selectorElement.Width, 1, srcWidth - cropX);
@@ -373,6 +435,94 @@ internal sealed partial class UiAutomationService
         // Floor to the greatest even integer ≤ v (and ≥ 2).
         static int EvenFloor(int v)
             => Math.Max(2, v % 2 == 0 ? v : v - 1);
+    }
+
+    /// <summary>
+    /// When the resolved UI element lives in a popup or owned window (a top-level HWND different
+    /// from the session's main window), retargets the capture surface to that window so that the
+    /// recording captures the correct pixels rather than a clamped sliver of the main frame.
+    /// </summary>
+    /// <param name="elementWindowHandle">
+    /// The <see cref="Models.UiElement.WindowHandle"/> from the resolved element (nullable).
+    /// Set to the HWND of the window that was searched when the element was found.
+    /// </param>
+    /// <param name="sessionHwnd">The session's main window HWND (as <see cref="nint"/>).</param>
+    /// <param name="captureOriginLeft">In/out: updated to the popup window's screen-left when retargeting.</param>
+    /// <param name="captureOriginTop">In/out: updated to the popup window's screen-top when retargeting.</param>
+    /// <param name="srcWidth">In/out: updated to the popup window's pixel width when retargeting.</param>
+    /// <param name="srcHeight">In/out: updated to the popup window's pixel height when retargeting.</param>
+    /// <param name="getAncestorRoot">
+    /// Optional injectable for <c>GetAncestor(hwnd, GA_ROOT)</c> — used for unit testing without Win32.
+    /// Receives and returns an HWND as <see cref="nint"/> (0 = null/not found).
+    /// When <see langword="null"/>, the real <c>Windows.Win32.PInvoke.GetAncestor</c> is called.
+    /// </param>
+    /// <param name="getWindowRect">
+    /// Optional injectable for <c>GetWindowRect</c> — used for unit testing without Win32.
+    /// Returns <c>(left, top, right, bottom)</c> screen coordinates of the window.
+    /// When <see langword="null"/>, the real <c>Windows.Win32.PInvoke.GetWindowRect</c> is called.
+    /// </param>
+    /// <returns>
+    /// The HWND (as <see cref="nint"/>) to use as the capture surface: the element's top-level
+    /// window when a retarget was needed, or <paramref name="sessionHwnd"/> when unchanged.
+    /// </returns>
+    internal static nint ResolvePopupCaptureHwnd(
+        long? elementWindowHandle,
+        nint sessionHwnd,
+        ref int captureOriginLeft, ref int captureOriginTop,
+        ref int srcWidth, ref int srcHeight,
+        Func<nint, nint>? getAncestorRoot = null,
+        Func<nint, (int left, int top, int right, int bottom)>? getWindowRect = null)
+    {
+        if (!elementWindowHandle.HasValue || elementWindowHandle.Value == sessionHwnd)
+        {
+            return sessionHwnd;
+        }
+
+        var rawElementHwnd = (nint)elementWindowHandle.Value;
+
+        // Walk up to the true top-level window (GA_ROOT) so that child HWNDs (e.g. hosted
+        // control islands) resolve to the containing top-level window for WGC/capture.
+        nint elementOwnerHwnd;
+        if (getAncestorRoot is not null)
+        {
+            var root = getAncestorRoot(rawElementHwnd);
+            elementOwnerHwnd = root != 0 ? root : rawElementHwnd;
+        }
+        else
+        {
+            var rootHwnd = Windows.Win32.PInvoke.GetAncestor(
+                new Windows.Win32.Foundation.HWND(rawElementHwnd),
+                Windows.Win32.UI.WindowsAndMessaging.GET_ANCESTOR_FLAGS.GA_ROOT);
+            elementOwnerHwnd = rootHwnd.IsNull ? rawElementHwnd : (nint)rootHwnd;
+        }
+
+        // If GA_ROOT turned out to be the session window (element is a child HWND inside
+        // the main window), no retarget is needed.
+        if (elementOwnerHwnd == sessionHwnd)
+        {
+            return sessionHwnd;
+        }
+
+        // Update capture origin and dimensions to the element's owning top-level window.
+        if (getWindowRect is not null)
+        {
+            var (l, t, r, b) = getWindowRect(elementOwnerHwnd);
+            captureOriginLeft = l;
+            captureOriginTop = t;
+            srcWidth = Math.Max(1, r - l);
+            srcHeight = Math.Max(1, b - t);
+        }
+        else
+        {
+            Windows.Win32.PInvoke.GetWindowRect(
+                new Windows.Win32.Foundation.HWND(elementOwnerHwnd), out var popupRect);
+            captureOriginLeft = popupRect.left;
+            captureOriginTop = popupRect.top;
+            srcWidth = Math.Max(1, popupRect.right - popupRect.left);
+            srcHeight = Math.Max(1, popupRect.bottom - popupRect.top);
+        }
+
+        return elementOwnerHwnd;
     }
 
     /// <summary>
