@@ -65,6 +65,50 @@ public class NugetServiceDownloadTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task InstallPackageAsync_RequiredTransitiveDependencyUnresolvable_FailsInsteadOfReportingSuccess()
+    {
+        // NUGET_PACKAGES takes precedence over the globalPackagesFolder written by WriteLocalFeedConfig.
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NUGET_PACKAGES")))
+        {
+            Assert.Inconclusive("NUGET_PACKAGES is set in the environment; it overrides the config's globalPackagesFolder, so the local feed would not be exercised.");
+        }
+
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            feed.Create();
+            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+
+            // Root's .nuspec requires Child [5.0.0, ), but the feed only carries Child 1.0.0. The root package
+            // itself downloads fine, but a REQUIRED transitive dependency cannot be resolved. The install must
+            // FAIL (throw) rather than return the root as a success with the child missing — otherwise
+            // `restore` reports an incomplete installation as complete.
+            WriteNupkgToFeed(feed, "Install.Root", "1.0.0", ("Install.Child", "[5.0.0, )"));
+            WriteNupkgToFeed(feed, "Install.Child", "1.0.0");
+
+            WriteLocalFeedConfig(root, feed, packages);
+
+            var service = CreateServiceRootedAt(root);
+
+            var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                async () => await service.InstallPackageAsync("Install.Root", "1.0.0", TestTaskContext, TestContext.CancellationToken));
+
+            // The failure must name the unresolvable dependency (surfacing the gap), proving the incomplete
+            // install was reported as an error rather than a silent partial success.
+            StringAssert.Contains(ex.Message, "Install.Child", StringComparison.Ordinal);
+
+            // The root package WAS still downloaded best-effort before the dependency gap failed the operation.
+            Assert.IsTrue(service.GetNuGetPackageDir("Install.Root", "1.0.0").Exists,
+                "The root package should have been downloaded before the missing dependency failed the install.");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
     public async Task InstallPackageAsync_LocalFeed_InstallsPackageAndNormalizedTransitiveDependency()
     {
         // NUGET_PACKAGES takes precedence over the globalPackagesFolder written by WriteLocalFeedConfig.

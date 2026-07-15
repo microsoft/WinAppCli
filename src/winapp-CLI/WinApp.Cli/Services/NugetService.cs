@@ -147,15 +147,27 @@ internal class NugetService : INugetService
     {
         NugetSourceProvider.EnsureCredentialService();
         var packages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var dependencyFailures = new List<string>();
         using var cacheContext = new SourceCacheContext();
-        await InstallPackageRecursiveAsync(package, version, packages, taskContext, cacheContext, cancellationToken);
+        await InstallPackageRecursiveAsync(package, version, packages, dependencyFailures, taskContext, cacheContext, cancellationToken);
+
+        // A downloaded root package with unresolvable/uninstallable REQUIRED transitive dependencies is an
+        // incomplete install, not a success. Each gap was surfaced as a warning above (and the rest of the
+        // tree was still installed best-effort); now fail the operation so callers such as `restore` exit
+        // non-zero instead of reporting a partial install as complete.
+        if (dependencyFailures.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Installed {package} {version} but {dependencyFailures.Count} required dependency(ies) could not be installed: {string.Join("; ", dependencyFailures)}.");
+        }
+
         return packages;
     }
 
     /// <summary>
     /// Downloads and extracts a NuGet package to the global packages cache, then recursively installs dependencies.
     /// </summary>
-    private async Task InstallPackageRecursiveAsync(string package, string version, Dictionary<string, string> installed, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
+    private async Task InstallPackageRecursiveAsync(string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         // Already processed this package?
         if (installed.ContainsKey(package))
@@ -177,7 +189,7 @@ internal class NugetService : INugetService
             taskContext.AddDebugMessage($"{UiSymbols.Skip} {package} {normalizedVersion} already present");
             installed[package] = normalizedVersion;
             // Still resolve dependencies to populate installed dictionary
-            await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, taskContext, cacheContext, cancellationToken);
+            await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, taskContext, cacheContext, cancellationToken);
             return;
         }
 
@@ -191,13 +203,13 @@ internal class NugetService : INugetService
         taskContext.AddStatusMessage($"{UiSymbols.Check} Installed {package} {normalizedVersion}");
 
         // Recursively install dependencies
-        await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, taskContext, cacheContext, cancellationToken);
+        await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, taskContext, cacheContext, cancellationToken);
     }
 
     /// <summary>
     /// Reads the .nuspec from an extracted package and recursively installs dependencies.
     /// </summary>
-    private async Task ResolveDependenciesAsync(DirectoryInfo packageDir, string package, string version, Dictionary<string, string> installed, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
+    private async Task ResolveDependenciesAsync(DirectoryInfo packageDir, string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         Dictionary<string, VersionRange> deps;
         try
@@ -231,7 +243,7 @@ internal class NugetService : INugetService
                     continue;
                 }
 
-                await InstallPackageRecursiveAsync(depName, depVersion, installed, taskContext, cacheContext, cancellationToken);
+                await InstallPackageRecursiveAsync(depName, depVersion, installed, dependencyFailures, taskContext, cacheContext, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -241,10 +253,12 @@ internal class NugetService : INugetService
             catch (Exception ex)
             {
                 // A single transitive dependency that cannot be resolved (e.g. its only satisfying source
-                // could not be queried) or installed should not abort the whole install, but the failure
-                // must be visible (not hidden behind verbose-only logging) so an incomplete install is not
-                // silently reported as success.
+                // could not be queried) or installed should not abort the rest of the tree — keep installing
+                // the remaining dependencies best-effort — but the failure must be both visible (not hidden
+                // behind verbose-only logging) AND fail the overall operation. Record it so InstallPackageAsync
+                // exits non-zero rather than reporting an incomplete install as success.
                 taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not install dependency {depName} (required by {package} {version}): {ex.Message}");
+                dependencyFailures.Add($"{depName} (required by {package} {version}): {ex.Message}");
             }
         }
     }

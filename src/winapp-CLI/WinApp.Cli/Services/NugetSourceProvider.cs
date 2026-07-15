@@ -88,10 +88,14 @@ internal sealed class NugetSourceProvider
             // that has the package (see NugetService.FetchDirectDependenciesAsync), so two configs with the
             // same feeds listed in a different order can resolve DIFFERENT dependency graphs and must not
             // share the cache. Sorting here would collapse them to one key and serve the wrong graph.
+            // Exclude insecure plain-HTTP sources (mirroring GetRepositories): they are not part of the
+            // EFFECTIVE eligible set, so two roots that differ only in allowInsecureConnections resolve from
+            // different feeds and must get distinct keys — otherwise the opted-in root's cached dependencies
+            // could be served to a non-opted-in root, bypassing the HTTP rejection.
             var sources = string.Join(
                 ";",
                 new PackageSourceProvider(Settings).LoadPackageSources()
-                    .Where(s => s.IsEnabled)
+                    .Where(s => s.IsEnabled && !IsInsecureSource(s))
                     .Select(s => $"{s.Name}|{s.Source}"));
             // Record the complete mapping entries (source key -> ordered patterns), not just whether mapping
             // is enabled: two configs with identical sources/global folder but different package-to-source
@@ -227,6 +231,22 @@ internal sealed class NugetSourceProvider
         }
 
         var mapped = string.Join(", ", mappedSources);
+
+        // A source can be configured AND enabled yet still be excluded from the eligible set because it is an
+        // insecure plain-HTTP feed (dropped by GetRepositories). When the package maps only to such source(s),
+        // the non-empty check above bypassed the dedicated insecure-source message, so detect it here and give
+        // the HTTPS / opt-in guidance rather than the misleading "not enabled/configured" (which is meant for
+        // disabled or misspelled mapped keys).
+        var mappedSet = new HashSet<string>(mappedSources, StringComparer.OrdinalIgnoreCase);
+        var insecureMapped = GetAllConfiguredRepositories()
+            .Where(r => mappedSet.Contains(r.PackageSource.Name) && IsInsecureSource(r.PackageSource))
+            .Select(r => r.PackageSource.Name)
+            .ToList();
+        if (insecureMapped.Count > 0)
+        {
+            return $"'{packageId}' is mapped to source(s) [{string.Join(", ", insecureMapped)}] that use plain HTTP; winapp refuses to download executable SDK packages over an insecure connection (switch the source to HTTPS, or set allowInsecureConnections=\"true\" on it in nuget.config to opt in)";
+        }
+
         return $"'{packageId}' is mapped to source(s) [{mapped}] that are not enabled/configured (enable or fix the mapped source in the <packageSources> section of your nuget.config)";
     }
 }

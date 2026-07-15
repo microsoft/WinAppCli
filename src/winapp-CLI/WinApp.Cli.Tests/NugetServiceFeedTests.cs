@@ -440,6 +440,48 @@ public class NugetServiceFeedTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task GetPackageDependenciesAsync_PackageMappedOnlyToInsecureHttpSource_ReportsInsecureMappedSource()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            // An unrelated HTTPS source is enabled (so the eligible set is non-empty overall), but the
+            // package maps ONLY to a plain-HTTP source that has no allowInsecureConnections opt-in. That
+            // mapped source is configured AND enabled yet dropped for being insecure, so the error must give
+            // the HTTPS / opt-in guidance — not the misleading "not enabled/configured" message meant for
+            // disabled/misspelled mapped keys.
+            WriteNuGetConfig(root, """
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                  <packageSources>
+                    <clear />
+                    <add key="secure" value="https://secure.example.invalid/v3/index.json" />
+                    <add key="insecurehttp" value="http://insecure.example.invalid/v3/index.json" />
+                  </packageSources>
+                  <packageSourceMapping>
+                    <clear />
+                    <packageSource key="insecurehttp">
+                      <package pattern="Winapp.*" />
+                    </packageSource>
+                  </packageSourceMapping>
+                </configuration>
+                """);
+
+            var service = CreateServiceRootedAt(root);
+
+            var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                async () => await service.GetPackageDependenciesAsync("Winapp.Thing", "1.0.0", TestContext.CancellationToken));
+
+            StringAssert.Contains(ex.Message, "mapped to source(s) [insecurehttp]", StringComparison.Ordinal);
+            StringAssert.Contains(ex.Message, "plain HTTP", StringComparison.Ordinal);
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
     public async Task GetPackageDependenciesAsync_InvalidVersion_ReportsActionableError()
     {
         var root = CreateFeedTestDirectory();
