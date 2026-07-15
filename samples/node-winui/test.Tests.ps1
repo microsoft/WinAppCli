@@ -53,14 +53,26 @@ Describe "Node WinUI Sample" {
             }
 
             $bindings = Join-Path $script:appDir '.winapp\bindings'
+            (Join-Path $bindings 'Application.js') | Should -Exist
             (Join-Path $bindings 'AppWindow.js') | Should -Exist
+            (Join-Path $bindings 'Border.js') | Should -Exist
             (Join-Path $bindings 'Button.js') | Should -Exist
+            (Join-Path $bindings 'ComboBox.js') | Should -Exist
+            (Join-Path $bindings 'Grid.js') | Should -Exist
+            (Join-Path $bindings 'IMap_Object_Object.js') | Should -Exist
             (Join-Path $bindings 'IVector_UIElement.js') | Should -Exist
-            (Join-Path $bindings 'WindowsXamlManager.js') | Should -Exist
+            (Join-Path $bindings 'MicaBackdrop.js') | Should -Exist
+            (Join-Path $bindings 'PropertyValue.js') | Should -Exist
+            (Join-Path $bindings 'SolidColorBrush.js') | Should -Exist
+            (Join-Path $bindings 'Window.js') | Should -Exist
+            (Join-Path $bindings 'XamlControlsResources.js') | Should -Exist
+            (Join-Path $bindings 'XamlControlsXamlMetaDataProvider.js') | Should -Exist
         }
 
-        It "Should project inherited Button members used by the sample" -Skip:$script:skip {
+        It "Should project the Application and Button members used by the sample" -Skip:$script:skip {
+            $applicationDts = Get-Content (Join-Path $script:appDir '.winapp\bindings\Application.d.ts') -Raw
             $buttonDts = Get-Content (Join-Path $script:appDir '.winapp\bindings\Button.d.ts') -Raw
+            $applicationDts | Should -Match 'createWithFluentResources'
             $buttonDts | Should -Match 'set content\(value: unknown\)'
             $buttonDts | Should -Match 'onClick\('
         }
@@ -82,14 +94,29 @@ Describe "Node WinUI Sample" {
 
             $package = Get-Content (Join-Path $script:sampleDir 'package.json') -Raw | ConvertFrom-Json
             $package.imports.'#winapp/bindings'.require | Should -Be './.winapp/bindings/index.js'
+            $package.dependencies.'@microsoft/dynwinrt' | Should -Be '0.1.0-preview.13'
+            $package.devDependencies.'@microsoft/dynwinrt-codegen' | Should -Be '0.1.0-preview.13'
             $namespaces = $package.winapp.jsBindings.additionalWinmds.namespace
+            $namespaces | Should -Contain 'Windows.Foundation'
+            $namespaces | Should -Contain 'Microsoft.UI.Xaml'
             $namespaces | Should -Contain 'Microsoft.UI.Xaml.Controls'
-            $namespaces | Should -Contain 'Microsoft.UI.Xaml.Hosting'
+            $namespaces | Should -Contain 'Microsoft.UI.Xaml.Media'
+            $namespaces | Should -Not -Contain 'Microsoft.UI.Xaml.Hosting'
 
             Get-Content (Join-Path $script:sampleDir 'winui-worker.js') -Raw |
                 Should -Match "require\('#winapp/bindings'\)"
             Get-Content (Join-Path $script:sampleDir 'winui-worker.js') -Raw |
-                Should -Match 'siteBridge\.moveAndResize'
+                Should -Match 'Application\.createWithFluentResources'
+            Get-Content (Join-Path $script:sampleDir 'winui-worker.js') -Raw |
+                Should -Match 'Window\.createInstance'
+            Get-Content (Join-Path $script:sampleDir 'winui-worker.js') -Raw |
+                Should -Match 'themePicker\.onSelectionChanged'
+            Get-Content (Join-Path $script:sampleDir 'winui-worker.js') -Raw |
+                Should -Match 'ElementTheme\.Dark'
+            Get-Content (Join-Path $script:sampleDir 'winui-worker.js') -Raw |
+                Should -Match 'TitleBarTheme\.Dark'
+            Get-Content (Join-Path $script:sampleDir 'winui-worker.js') -Raw |
+                Should -Not -Match 'DesktopWindowXamlSource'
         }
     }
 }

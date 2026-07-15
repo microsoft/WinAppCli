@@ -1,21 +1,33 @@
 const { parentPort } = require('node:worker_threads');
-const { roInitialize } = require('@microsoft/dynwinrt');
 const {
-  AppWindow,
+  DynWinRtType,
+  DynWinRtValue,
+  roInitialize,
+} = require('@microsoft/dynwinrt');
+const {
+  Application,
+  Border,
   Button,
-  DesktopWindowXamlSource,
-  DispatcherQueueController,
+  ComboBox,
+  ElementTheme,
+  Grid,
   HorizontalAlignment,
+  IMap_Object_Object,
   IVector_UIElement,
+  MicaBackdrop,
   Orientation,
+  PropertyValue,
   SolidColorBrush,
   StackPanel,
+  Style,
+  TextAlignment,
   TextBlock,
+  TextWrapping,
+  TitleBarTheme,
   VerticalAlignment,
-  WindowsXamlManager,
+  Window,
 } = require('#winapp/bindings');
 
-const color = (r, g, b, a = 255) => ({ a, r, g, b });
 const thickness = (left, top, right, bottom) => ({
   left,
   top,
@@ -23,8 +35,6 @@ const thickness = (left, top, right, bottom) => ({
   bottom,
 });
 const fontWeight = (weight) => ({ weight });
-const brush = (r, g, b, a) =>
-  SolidColorBrush.createInstanceWithColor(color(r, g, b, a));
 
 function appendChildren(panel, ...children) {
   const collection = IVector_UIElement.from(panel.children._obj);
@@ -33,122 +43,230 @@ function appendChildren(panel, ...children) {
   }
 }
 
-function createText(text, size, foreground, weight = 400) {
+const cornerRadius = (radius) => ({
+  topLeft: radius,
+  topRight: radius,
+  bottomRight: radius,
+  bottomLeft: radius,
+});
+const createBrush = (a, r, g, b) =>
+  SolidColorBrush.createInstanceWithColor({ a, r, g, b });
+
+function createText(text, size, weight = 400, centered = false) {
   const block = TextBlock.create();
   block.text = text;
   block.fontSize = size;
   block.fontWeight = fontWeight(weight);
-  block.foreground = foreground;
-  block.horizontalAlignment = HorizontalAlignment.Center;
+  if (centered) {
+    block.horizontalAlignment = HorizontalAlignment.Center;
+    block.textAlignment = TextAlignment.Center;
+  }
   return block;
 }
 
-function createButton(label, background, foreground) {
+function createButton(label) {
   const button = Button.createInstance(null);
-  button.content = createText(label, 16, foreground, 600);
-  button.background = background;
-  button.foreground = foreground;
-  button.padding = thickness(18, 10, 18, 10);
+  button.content = createText(label, 16, 600);
   button.minWidth = 96;
   return button;
 }
 
-roInitialize(0);
-
-try {
-  const controller = DispatcherQueueController.createOnCurrentThread();
-  const dispatcher = controller.dispatcherQueue;
-  const xamlManager = WindowsXamlManager.initializeForCurrentThread();
-
-  const appWindow = AppWindow.create();
-  appWindow.title = 'WinUI 3 from Node.js';
-  appWindow.resize({ width: 640, height: 440 });
-
-  const xamlSource = DesktopWindowXamlSource.createInstance(null);
-  xamlSource.initialize(appWindow.id);
-  const resizeXamlContent = () => {
-    const { width, height } = appWindow.clientSize;
-    xamlSource.siteBridge.moveAndResize({ x: 0, y: 0, width, height });
-  };
-
-  const background = brush(243, 243, 243);
-  const primary = brush(26, 26, 26);
-  const secondary = brush(90, 90, 90);
-  const accent = brush(0, 103, 192);
-  const neutral = brush(225, 225, 225);
-  const white = brush(255, 255, 255);
-  const negative = brush(196, 43, 28);
-
-  const root = StackPanel.createInstance(null);
-  root.orientation = Orientation.Vertical;
-  root.spacing = 16;
-  root.padding = thickness(32, 32, 32, 32);
-  root.background = background;
-  root.horizontalAlignment = HorizontalAlignment.Stretch;
-  root.verticalAlignment = VerticalAlignment.Stretch;
-
-  const title = createText('Native WinUI 3', 30, primary, 600);
-  const subtitle = createText(
-    'Real controls created directly from JavaScript',
-    15,
-    secondary
-  );
-  const countText = createText('0', 72, accent, 700);
-  const statusText = createText('Choose an action', 14, secondary);
-
-  const buttons = StackPanel.createInstance(null);
-  buttons.orientation = Orientation.Horizontal;
-  buttons.spacing = 10;
-  buttons.horizontalAlignment = HorizontalAlignment.Center;
-
-  const decrementButton = createButton('-1', neutral, primary);
-  const resetButton = createButton('Reset', neutral, primary);
-  const incrementButton = createButton('+1', accent, white);
-  appendChildren(buttons, decrementButton, resetButton, incrementButton);
-  appendChildren(root, title, subtitle, countText, buttons, statusText);
-
-  function updateCount(next, action) {
-    countText.text = String(next);
-    countText.foreground = next < 0 ? negative : accent;
-    statusText.text = `${action}: count is now ${next}`;
-  }
-
-  globalThis.__winuiSubscriptions = [
-    decrementButton.onClick(() => {
-      updateCount((Number(countText.text) || 0) - 1, 'Decremented');
-    }),
-    resetButton.onClick(() => {
-      updateCount(0, 'Reset');
-    }),
-    incrementButton.onClick(() => {
-      updateCount((Number(countText.text) || 0) + 1, 'Incremented');
-    }),
-    appWindow.onChanged((_sender, args) => {
-      if (args.didSizeChange) {
-        resizeXamlContent();
-      }
-    }),
-    appWindow.onClosing(() => {
-      dispatcher.enqueueEventLoopExit();
-    }),
-  ];
-
-  xamlSource.content = root;
-  resizeXamlContent();
-  appWindow.show();
-  parentPort.postMessage({ type: 'ready' });
-
-  // WinUI owns this worker thread while the window is open.
-  dispatcher.runEventLoop();
-
-  xamlSource.close();
-  xamlManager.close();
-  controller.shutdownQueue();
-  process.exit(0);
-} catch (error) {
+function reportError(error) {
   parentPort.postMessage({
     type: 'error',
     message: error?.stack || String(error),
   });
-  throw error;
 }
+
+roInitialize(0);
+
+let app;
+let exitCode = 1;
+
+Application.start(() => {
+  try {
+    app = Application.createWithFluentResources(() => {
+      try {
+        const window = Window.createInstance(null);
+        window.title = 'WinUI 3 from Node.js';
+        window.systemBackdrop = MicaBackdrop.createInstance(null);
+
+        const appWindow = window.appWindow;
+        if (!appWindow) {
+          throw new Error('WinUI Window did not expose an AppWindow.');
+        }
+        const titleBar = appWindow.titleBar;
+        if (!titleBar) {
+          throw new Error('AppWindow did not expose a title bar.');
+        }
+
+        const resources = IMap_Object_Object.from(
+          Application.current.resources._obj
+        );
+        const getResource = (key, ResourceType) =>
+          new ResourceType(resources.lookup(PropertyValue.createString(key)));
+
+        const root = Grid.createInstance(null);
+        root.padding = thickness(56, 32, 56, 32);
+
+        const content = StackPanel.createInstance(null);
+        content.orientation = Orientation.Vertical;
+        content.spacing = 16;
+        content.verticalAlignment = VerticalAlignment.Center;
+
+        const eyebrow = createText('NODE.JS + WINUI 3', 12, 600);
+        const title = createText('Fluent Counter', 34, 600);
+        const subtitle = createText(
+          'A native WinUI 3 window composed entirely from JavaScript through dynwinrt.',
+          15
+        );
+        subtitle.textWrapping = TextWrapping.Wrap;
+
+        const themeOptions = [
+          {
+            label: 'System',
+            contentTheme: ElementTheme.Default,
+            titleBarTheme: TitleBarTheme.UseDefaultAppMode,
+          },
+          {
+            label: 'Light',
+            contentTheme: ElementTheme.Light,
+            titleBarTheme: TitleBarTheme.Light,
+          },
+          {
+            label: 'Dark',
+            contentTheme: ElementTheme.Dark,
+            titleBarTheme: TitleBarTheme.Dark,
+          },
+        ];
+        const themePicker = ComboBox.createInstance(null);
+        themePicker.header = createText('Theme', 13, 600);
+        themePicker.minWidth = 180;
+        themePicker.horizontalAlignment = HorizontalAlignment.Left;
+        themePicker.itemsSource = DynWinRtValue.createVector(
+          themeOptions.map(({ label }) => PropertyValue.createString(label)),
+          DynWinRtType.object()
+        );
+        themePicker.selectedIndex = 0;
+        titleBar.preferredTheme = themeOptions[0].titleBarTheme;
+
+        let count = 0;
+        const countCard = Border.create();
+        countCard.padding = thickness(32, 24, 32, 24);
+        countCard.cornerRadius = cornerRadius(12);
+        countCard.borderThickness = thickness(1, 1, 1, 1);
+        countCard.margin = thickness(0, 10, 0, 10);
+
+        const countPanel = StackPanel.createInstance(null);
+        countPanel.orientation = Orientation.Vertical;
+        countPanel.spacing = 2;
+
+        const countLabel = createText('CURRENT VALUE', 11, 600, true);
+        const countText = createText(String(count), 56, 600, true);
+        appendChildren(countPanel, countLabel, countText);
+        countCard.child = countPanel;
+
+        const buttons = StackPanel.createInstance(null);
+        buttons.orientation = Orientation.Horizontal;
+        buttons.spacing = 10;
+        buttons.horizontalAlignment = HorizontalAlignment.Center;
+
+        const decrementButton = createButton('-1');
+        const resetButton = createButton('Reset');
+        const incrementButton = createButton('+1');
+        incrementButton.style = getResource('AccentButtonStyle', Style);
+        appendChildren(buttons, decrementButton, resetButton, incrementButton);
+
+        const statusText = createText('Ready to count.', 13, 400, true);
+        const footer = createText(
+          'Application + Window  |  Fluent resources  |  Mica',
+          11,
+          400,
+          true
+        );
+
+        appendChildren(root, content);
+        appendChildren(
+          content,
+          eyebrow,
+          title,
+          subtitle,
+          themePicker,
+          countCard,
+          buttons,
+          statusText,
+          footer
+        );
+
+        function applyThemeResources() {
+          if (root.actualTheme === ElementTheme.Dark) {
+            countCard.background = createBrush(13, 255, 255, 255);
+            countCard.borderBrush = createBrush(20, 255, 255, 255);
+            eyebrow.foreground = createBrush(255, 96, 205, 255);
+          } else {
+            countCard.background = createBrush(179, 255, 255, 255);
+            countCard.borderBrush = createBrush(24, 0, 0, 0);
+            eyebrow.foreground = createBrush(255, 0, 95, 184);
+          }
+        }
+
+        function updateCount(next, action) {
+          count = next;
+          countText.text = String(count);
+          statusText.text = `${action}: count is now ${count}`;
+        }
+
+        globalThis.__winuiState = {
+          app,
+          window,
+          root,
+          subscriptions: [
+            decrementButton.onClick(() => {
+              updateCount(count - 1, 'Decremented');
+            }),
+            resetButton.onClick(() => {
+              updateCount(0, 'Reset');
+            }),
+            incrementButton.onClick(() => {
+              updateCount(count + 1, 'Incremented');
+            }),
+            themePicker.onSelectionChanged(() => {
+              const selected = themeOptions[themePicker.selectedIndex];
+              if (selected) {
+                root.requestedTheme = selected.contentTheme;
+                titleBar.preferredTheme = selected.titleBarTheme;
+                statusText.text = `Theme changed to ${selected.label}.`;
+              }
+            }),
+            root.onActualThemeChanged(applyThemeResources),
+            window.onClosed(() => {
+              Application.current?.exit();
+            }),
+            root.onceLoaded(() => {
+              applyThemeResources();
+              const scale = root.xamlRoot?.rasterizationScale ?? 1;
+              appWindow.resize({
+                width: Math.round(680 * scale),
+                height: Math.round(600 * scale),
+              });
+            }),
+          ],
+        };
+
+        window.content = root;
+        applyThemeResources();
+        window.activate();
+        exitCode = 0;
+        parentPort.postMessage({ type: 'ready' });
+      } catch (error) {
+        reportError(error);
+        Application.current?.exit();
+      }
+    });
+  } catch (error) {
+    reportError(error);
+    Application.current?.exit();
+  }
+});
+
+process.exit(exitCode);

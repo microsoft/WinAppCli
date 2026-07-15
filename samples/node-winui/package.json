@@ -2,7 +2,7 @@
   "name": "winapp-node-winui-sample",
   "version": "1.0.0",
   "private": true,
-  "description": "Create an AppWindow from Node.js and host real WinUI 3 controls with DesktopWindowXamlSource.",
+  "description": "Create a WinUI 3 Application and Window directly from Node.js.",
   "type": "commonjs",
   "main": "main.js",
   "scripts": {
@@ -26,19 +26,19 @@
     }
   },
   "dependencies": {
-    "@microsoft/dynwinrt": "0.1.0-preview.11"
+    "@microsoft/dynwinrt": "0.1.0-preview.13"
   },
   "devDependencies": {
-    "@microsoft/dynwinrt-codegen": "0.1.0-preview.11",
+    "@microsoft/dynwinrt-codegen": "0.1.0-preview.13",
     "@microsoft/winappcli": "^1.0.0"
   },
   "winapp": {
     "jsBindings": {
       "additionalWinmds": [
         {
-          "namespace": "Microsoft.UI.Dispatching",
+          "namespace": "Windows.Foundation",
           "classes": [
-            "DispatcherQueueController"
+            "PropertyValue"
           ]
         },
         {
@@ -48,24 +48,28 @@
           ]
         },
         {
+          "namespace": "Microsoft.UI.Xaml",
+          "classes": [
+            "Application",
+            "Window"
+          ]
+        },
+        {
           "namespace": "Microsoft.UI.Xaml.Controls",
           "classes": [
+            "Border",
             "Button",
+            "ComboBox",
+            "Grid",
             "ScrollViewer",
             "StackPanel",
             "TextBlock"
           ]
         },
         {
-          "namespace": "Microsoft.UI.Xaml.Hosting",
-          "classes": [
-            "DesktopWindowXamlSource",
-            "WindowsXamlManager"
-          ]
-        },
-        {
           "namespace": "Microsoft.UI.Xaml.Media",
           "classes": [
+            "MicaBackdrop",
             "SolidColorBrush"
           ]
         }
