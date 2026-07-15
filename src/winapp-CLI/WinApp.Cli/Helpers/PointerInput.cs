@@ -40,6 +40,7 @@ internal static class PointerInput
     // touchFlags / touchMask / penFlags / penMask are raw DWORD bitmasks in the generated structs.
     private const uint TOUCH_MASK_CONTACTAREA = 0x00000001;
     private const uint PEN_FLAG_NONE = 0x00000000;
+    private const uint PEN_FLAG_INVERTED = 0x00000002;
     private const uint PEN_FLAG_ERASER = 0x00000004;
     private const uint PEN_MASK_PRESSURE = 0x00000001;
     private const uint PEN_MASK_TILT_X = 0x00000004;
@@ -544,7 +545,7 @@ internal static class PointerInput
     private static void SendPen(
         HSYNTHETICPOINTERDEVICE device, int x, int y, uint pressure, int tiltX, int tiltY, bool eraser, POINTER_FLAGS flags)
     {
-        var penFlags = eraser ? PEN_FLAG_ERASER : PEN_FLAG_NONE;
+        var penFlags = ComputePenFlags(eraser);
 
         var info = new POINTER_TYPE_INFO
         {
@@ -576,6 +577,13 @@ internal static class PointerInput
                     "target may be elevated (run this CLI as administrator) or the desktop is locked.");
             }
         }
+    }
+
+    internal static uint ComputePenFlags(bool eraser)
+    {
+        // Microsoft pen flags distinguish inverted orientation from eraser input; set both so
+        // receivers that check either PointerPointProperties.IsInverted or IsEraser recognize it.
+        return eraser ? (PEN_FLAG_INVERTED | PEN_FLAG_ERASER) : PEN_FLAG_NONE;
     }
 
     private static (int X, int Y) Interpolate(IReadOnlyList<PointerPoint> path, double t)

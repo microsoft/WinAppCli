@@ -14,6 +14,13 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class PointerInputFrameTests
 {
+    [TestMethod]
+    public void ComputePenFlags_MapsEraserToInvertedEraserFlags()
+    {
+        Assert.AreEqual(0x00000000u, PointerInput.ComputePenFlags(eraser: false));
+        Assert.AreEqual(0x00000006u, PointerInput.ComputePenFlags(eraser: true));
+    }
+
     // -------------------------------------------------------------------------
     // HIGH 1 — Long-press emits periodic UPDATE frames during the hold
     // -------------------------------------------------------------------------
