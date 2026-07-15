@@ -160,8 +160,7 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
     {
         var hr = ex.HResult;
         if (hr is unchecked((int)0xC00D5212)  // MF_E_TOPO_CODEC_NOT_FOUND
-            or unchecked((int)0xC00D36B4)     // MF_E_INVALIDMEDIATYPE
-            or unchecked((int)0xC00D36B0))    // MF_E_NOT_AVAILABLE
+            or unchecked((int)0xC00D36B4))    // MF_E_INVALIDMEDIATYPE
         {
             message = $"Could not initialize the H.264 video encoder (HRESULT 0x{hr:X8}). On Windows N/KN editions, install the Media Feature Pack (Settings > System > Optional features > Add a feature > 'Media Feature Pack'), then retry.";
             return true;
