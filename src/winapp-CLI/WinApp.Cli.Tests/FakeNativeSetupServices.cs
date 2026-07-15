@@ -1,0 +1,62 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+using WinApp.Cli.ConsoleTasks;
+using WinApp.Cli.Models;
+using WinApp.Cli.Services;
+
+namespace WinApp.Cli.Tests;
+
+/// <summary>Fake C++/WinRT service: reports a (dummy) cppwinrt.exe and no-ops projection generation.</summary>
+internal sealed class FakeCppWinrtService : ICppWinrtService
+{
+    /// <summary>When true, <see cref="FindCppWinrtExe"/> returns null to exercise the not-found branch.</summary>
+    public bool ReturnNullExe { get; set; }
+
+    public int RunWithRspCallCount { get; private set; }
+
+    public FileInfo? FindCppWinrtExe(DirectoryInfo packagesDir, IDictionary<string, string> usedVersions)
+        => ReturnNullExe ? null : new FileInfo(Path.Combine(packagesDir.FullName, "cppwinrt.exe"));
+
+    public Task RunWithRspAsync(FileInfo cppwinrtExe, IEnumerable<FileInfo> winmdInputs, DirectoryInfo outputDir, DirectoryInfo workingDirectory, TaskContext taskContext, CancellationToken cancellationToken = default)
+    {
+        RunWithRspCallCount++;
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>Fake package layout service: no-ops the copy operations and returns a configurable winmd list.</summary>
+internal sealed class FakePackageLayoutService : IPackageLayoutService
+{
+    /// <summary>Winmds returned from <see cref="FindWinmds"/>. Empty exercises the "no winmd" branch.</summary>
+    public List<FileInfo> Winmds { get; set; } = [];
+
+    public void CopyIncludesFromPackages(DirectoryInfo nugetCacheDir, DirectoryInfo includeOut, Dictionary<string, string> usedVersions) { }
+    public void CopyLibsAllArch(DirectoryInfo nugetCacheDir, DirectoryInfo libRoot, Dictionary<string, string> usedVersions) { }
+    public void CopyRuntimesAllArch(DirectoryInfo nugetCacheDir, DirectoryInfo binRoot, Dictionary<string, string> usedVersions) { }
+    public IEnumerable<FileInfo> FindWinmds(DirectoryInfo nugetCacheDir, Dictionary<string, string> usedVersions) => Winmds;
+}
+
+/// <summary>Fake winmds lockfile service: records writes and never reads from disk.</summary>
+internal sealed class FakeWinmdsLockfileService : IWinmdsLockfileService
+{
+    public int WriteCallCount { get; private set; }
+
+    public FileInfo GetLockfilePath(DirectoryInfo winappDir)
+        => new(Path.Combine(winappDir.FullName, "winmds.lock.json"));
+
+    public Task WriteAsync(
+        DirectoryInfo winappDir,
+        IReadOnlyDictionary<string, string> usedVersions,
+        IReadOnlyList<FileInfo> discoveredWinmds,
+        DirectoryInfo nugetCacheDir,
+        string? yamlPackagesHash = null,
+        CancellationToken cancellationToken = default)
+    {
+        WriteCallCount++;
+        return Task.CompletedTask;
+    }
+
+    public Task<WinmdsLockfile?> TryReadAsync(DirectoryInfo winappDir, CancellationToken cancellationToken = default)
+        => Task.FromResult<WinmdsLockfile?>(null);
+}

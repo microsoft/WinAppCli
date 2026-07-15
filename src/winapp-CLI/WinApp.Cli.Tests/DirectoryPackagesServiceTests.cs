@@ -273,4 +273,38 @@ public class DirectoryPackagesServiceTests : BaseCommandTests
         StringAssert.Contains(updatedContent, "10.0.22621.3233", "Should update first ItemGroup");
         StringAssert.Contains(updatedContent, "2.1.1", "Should update second ItemGroup");
     }
+
+    [TestMethod]
+    public void UpdatePackageVersionsSkipsElementsMissingIncludeOrVersionAttribute()
+    {
+        // Arrange: one PackageVersion missing Version, one missing Include (both skipped),
+        // plus a valid one that should still be updated.
+        var propsFilePath = Path.Combine(_testTempDirectory, "Directory.Packages.props");
+        var originalContent = @"<Project>
+  <ItemGroup>
+    <PackageVersion Include=""MissingVersionPackage"" />
+    <PackageVersion Version=""9.9.9"" />
+    <PackageVersion Include=""Microsoft.Windows.SDK.BuildTools"" Version=""10.0.22621.1000"" />
+  </ItemGroup>
+</Project>";
+        File.WriteAllText(propsFilePath, originalContent);
+
+        var packageVersions = new Dictionary<string, string>
+        {
+            { "MissingVersionPackage", "1.2.3" },
+            { "Microsoft.Windows.SDK.BuildTools", "10.0.22621.3233" }
+        };
+
+        // Act
+        var result = _directoryPackagesService.UpdatePackageVersions(new DirectoryInfo(_testTempDirectory), packageVersions, TestTaskContext);
+
+        // Assert
+        Assert.IsTrue(result, "Should return true because the valid package was updated");
+
+        var updatedContent = File.ReadAllText(propsFilePath);
+        StringAssert.Contains(updatedContent, "10.0.22621.3233", "Should update the fully-specified package");
+        // The attribute-less element must be left untouched (no Version added)
+        StringAssert.Contains(updatedContent, @"<PackageVersion Include=""MissingVersionPackage"" />",
+            "Should skip PackageVersion missing a Version attribute");
+    }
 }

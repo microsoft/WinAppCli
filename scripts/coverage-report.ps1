@@ -10,7 +10,14 @@
     state machines under obj\**) is excluded from the denominator.
 
     Without that exclusion the raw number is dominated by generated code and
-    reports ~18% instead of the real ~49% over hand-written source. See issue #630.
+    reports ~18% instead of the real figure over hand-written source. See issue #630.
+
+    Coverage is collected on a Debug build. On optimized Release builds the compiler
+    often drops or merges the sequence points for standalone block braces (and duplicate
+    returns), so the Microsoft coverage engine reports many '{'/'}' lines as hits=0 even
+    when the code fully executes -- systematically under-counting line coverage and
+    capping control-flow-heavy files around 70-80%. Debug builds map lines faithfully,
+    which is the standard configuration for coverage.
 
     The script parses the produced Cobertura report, de-duplicates line hits across
     partial classes / build configs, and prints:
@@ -23,7 +30,9 @@
     so it can be used as a CI gate.
 
 .PARAMETER Configuration
-    Build configuration to test. Default: Release.
+    Build configuration to test. Default: Debug -- Release optimizations make the
+    coverage engine under-count line coverage (many block-brace lines report hits=0).
+    Only pass -Configuration Release if you specifically need it.
 
 .PARAMETER Filter
     Optional MTP test filter (e.g. "FullyQualifiedName~MsixService"). Note: a filtered
@@ -64,7 +73,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$Configuration = "Release",
+    [string]$Configuration = "Debug",
     [string]$Filter,
     [string]$Area,
     [ValidateRange(0, 100)][double]$Threshold = -1,

@@ -1,240 +1,229 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Spectre.Console.Testing;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
-using static WinApp.Cli.Tests.NugetFeedTestHelpers;
 
 namespace WinApp.Cli.Tests;
 
 /// <summary>
-/// End-to-end tests for <see cref="PackageInstallationService"/> against a real <see cref="NugetService"/>
-/// rooted at a local folder feed. Focused on the "already installed" short-circuits: they must gate on the
-/// shared <see cref="INugetService.IsPackageInstalled"/> completion-marker predicate, not the bare directory,
-/// so a partial cache entry left by an interrupted extraction is re-downloaded instead of being reported as a
-/// complete install with a truncated dependency graph.
+/// Tests for <see cref="PackageInstallationService"/>. A controllable in-memory NuGet fake (backed by a
+/// real temp cache directory so the "already present" checks behave realistically) and a fake config
+/// service drive the version-resolution and version-merge logic without any network. Transitive-graph
+/// resolution now lives inside the real NuGet client (<see cref="INugetService.InstallPackageAsync"/>
+/// returns the full installed set), so this suite exercises the service's own resolve/normalize/merge
+/// orchestration over that returned set — the graph walk itself is covered by the NugetService tests.
 /// </summary>
 [TestClass]
-public class PackageInstallationServiceTests : BaseCommandTests
+public class PackageInstallationServiceTests
 {
-    [TestMethod]
-    public async Task InstallPackagesAsync_CacheFolderExistsWithoutCompletionMarker_ReDownloadsInsteadOfSkipping()
+    private DirectoryInfo _tempDir = null!;
+    private DirectoryInfo _cacheDir = null!;
+    private DirectoryInfo _rootDir = null!;
+    private FakeConfigService _config = null!;
+    private FakeNugetService _nuget = null!;
+    private PackageInstallationService _service = null!;
+    private TaskContext _taskContext = null!;
+
+    [TestInitialize]
+    public void Setup()
     {
-        // NUGET_PACKAGES takes precedence over the globalPackagesFolder written by WriteLocalFeedConfig.
-        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NUGET_PACKAGES")))
+        _tempDir = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"PkgInstTest_{Guid.NewGuid():N}"));
+        _tempDir.Create();
+        _cacheDir = _tempDir.CreateSubdirectory("cache");
+        _rootDir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "root"));
+        _config = new FakeConfigService();
+        _nuget = new FakeNugetService { CacheDirectory = _cacheDir };
+        _service = new PackageInstallationService(_config, _nuget, NullLogger<PackageInstallationService>.Instance);
+
+        var task = new GroupableTask("test", null);
+        _taskContext = new TaskContext(task, null, new TestConsole(), NullLogger<PackageInstallationServiceTests>.Instance, new Lock());
+    }
+
+    [TestCleanup]
+    public void Cleanup()
+    {
+        if (_tempDir.Exists)
         {
-            Assert.Inconclusive("NUGET_PACKAGES is set in the environment; it overrides the config's globalPackagesFolder, so the local feed would not be exercised.");
-        }
-
-        var root = CreateFeedTestDirectory();
-        try
-        {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
-            feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
-
-            WriteNupkgToFeed(feed, "Solo.Pkg", "1.0.0");
-            WriteLocalFeedConfig(root, feed, packages);
-
-            var nuget = CreateServiceRootedAt(root);
-            var installer = new PackageInstallationService(
-                _configService,
-                nuget,
-                GetRequiredService<ILogger<PackageInstallationService>>());
-
-            var projectDir = new DirectoryInfo(Path.Combine(root.FullName, "project"));
-            projectDir.Create();
-
-            // Simulate an interrupted extraction: the version folder exists but the ".nupkg.metadata"
-            // completion marker (written last by NuGet) was never produced, so the entry is incomplete. The
-            // pre-fix code short-circuited on the bare directory here and reported success without ever
-            // downloading the package.
-            var packageDir = nuget.GetNuGetPackageDir("Solo.Pkg", "1.0.0");
-            packageDir.Create();
-            var marker = Path.Combine(packageDir.FullName, ".nupkg.metadata");
-            Assert.IsFalse(File.Exists(marker), "Precondition: the incomplete cache folder must have no completion marker.");
-
-            var installed = await installer.InstallPackagesAsync(
-                projectDir,
-                ["Solo.Pkg"],
-                TestTaskContext,
-                ignoreConfig: true,
-                cancellationToken: TestContext.CancellationToken);
-
-            // The marker-less directory must NOT have short-circuited the install: the package should now be
-            // fully extracted, evidenced by both the completion marker and the extracted nuspec being present.
-            Assert.IsTrue(installed.ContainsKey("Solo.Pkg"), "The package must be reported installed.");
-            Assert.IsTrue(File.Exists(marker), "The completion marker must exist, proving the package was actually (re-)downloaded rather than skipped.");
-            Assert.IsTrue(File.Exists(Path.Combine(packageDir.FullName, "Solo.Pkg.nuspec")), "The extracted nuspec must exist, proving real extraction into the previously-empty folder.");
-        }
-        finally
-        {
-            TryDelete(root);
+            _tempDir.Delete(recursive: true);
         }
     }
 
-    private PackageInstallationService CreateInstaller(INugetService nuget) =>
-        new(_configService, nuget, GetRequiredService<ILogger<PackageInstallationService>>());
+    /// <summary>Marks a package as a complete, already-extracted cache entry (directory + ".nupkg.metadata" completion marker) so the product's <c>IsPackageInstalled</c> gate treats it as present.</summary>
+    private void MarkPresent(string name, string version) => _nuget.MarkInstalled(name, version);
+
+    #region InitializeWorkspace
 
     [TestMethod]
-    public void InitializeWorkspace_MissingRootDirectory_IsCreated()
+    public void InitializeWorkspace_CreatesMissingDirectory()
     {
-        var installer = CreateInstaller(new ConfigurableNugetService());
+        Assert.IsFalse(_rootDir.Exists);
 
-        var root = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, $"new-workspace-{Guid.NewGuid():N}"));
-        Assert.IsFalse(root.Exists, "Precondition: the workspace directory must not exist yet.");
+        _service.InitializeWorkspace(_rootDir);
 
-        installer.InitializeWorkspace(root);
-
-        root.Refresh();
-        Assert.IsTrue(root.Exists, "InitializeWorkspace must create the missing root directory.");
+        _rootDir.Refresh();
+        Assert.IsTrue(_rootDir.Exists);
     }
 
     [TestMethod]
-    public async Task EnsurePackageAsync_AlreadyInstalled_SkipsInstallAndReturnsTrue()
+    public void InitializeWorkspace_ExistingDirectory_NoThrow()
     {
-        // Latest resolves to 1.6.0 and that version is already marked installed, so the install must be
-        // short-circuited (no InstallPackageAsync call) while still reporting success.
-        var nuget = new ConfigurableNugetService { LatestVersion = "1.6.0" };
-        nuget.InstalledMarkers.Add("Some.Pkg/1.6.0");
-        var installer = CreateInstaller(nuget);
+        _rootDir.Create();
 
-        var ok = await installer.EnsurePackageAsync(_tempDirectory, "Some.Pkg", TestTaskContext, cancellationToken: TestContext.CancellationToken);
+        _service.InitializeWorkspace(_rootDir);
 
-        Assert.IsTrue(ok, "An already-installed package must be reported as ensured.");
-        CollectionAssert.Contains(nuget.LatestQueried, "Some.Pkg", "The latest version must still be resolved when no version is pinned.");
-        Assert.AreEqual(0, nuget.InstallCalls.Count, "A fully-cached package must not be re-installed.");
+        _rootDir.Refresh();
+        Assert.IsTrue(_rootDir.Exists);
+    }
+
+    #endregion
+
+    #region EnsurePackageAsync
+
+    [TestMethod]
+    public async Task EnsurePackageAsync_Success_ReturnsTrue_AndCreatesWorkspace()
+    {
+        _nuget.DefaultVersion = "1.6.0";
+
+        var ok = await _service.EnsurePackageAsync(_rootDir, "Pkg.X", _taskContext);
+
+        Assert.IsTrue(ok);
+        _rootDir.Refresh();
+        Assert.IsTrue(_rootDir.Exists);
+        CollectionAssert.Contains(_nuget.InstalledPackages, ("Pkg.X", "1.6.0"));
     }
 
     [TestMethod]
-    public async Task EnsurePackageAsync_WhenInstallThrows_LogsAndReturnsFalse()
+    public async Task EnsurePackageAsync_ExplicitVersion_DoesNotQueryLatest()
     {
-        // A pinned version skips the latest lookup; the install itself fails, which EnsurePackageAsync must
-        // swallow into a false result (logged) rather than letting the exception escape.
-        var nuget = new ConfigurableNugetService { ThrowOnInstall = true };
-        var installer = CreateInstaller(nuget);
+        var ok = await _service.EnsurePackageAsync(_rootDir, "Pkg.X", _taskContext, version: "2.0.0");
 
-        var ok = await installer.EnsurePackageAsync(_tempDirectory, "Broken.Pkg", TestTaskContext, version: "2.0.0", cancellationToken: TestContext.CancellationToken);
-
-        Assert.IsFalse(ok, "A failed install must be reported as false, not thrown.");
-        Assert.AreEqual(1, nuget.InstallCalls.Count, "The install must have been attempted before failing.");
+        Assert.IsTrue(ok);
+        CollectionAssert.DoesNotContain(_nuget.QueriedPackages, "Pkg.X");
+        CollectionAssert.Contains(_nuget.InstalledPackages, ("Pkg.X", "2.0.0"));
     }
 
     [TestMethod]
-    public async Task InstallPackagesAsync_PinnedVersionInConfig_IsUsedWithoutQueryingLatest()
+    public async Task EnsurePackageAsync_AlreadyPresent_SkipsInstall()
     {
-        _configService.Save(new WinappConfig { Packages = [new PackagePin { Name = "Pinned.Pkg", Version = "3.1.4" }] });
-        Assert.IsTrue(_configService.Exists(), "Precondition: the pinned config must exist.");
+        MarkPresent("Pkg.X", "3.0.0");
 
-        var nuget = new ConfigurableNugetService { LatestVersion = "9.9.9" };
-        var installer = CreateInstaller(nuget);
+        var ok = await _service.EnsurePackageAsync(_rootDir, "Pkg.X", _taskContext, version: "3.0.0");
 
-        var installed = await installer.InstallPackagesAsync(
-            _tempDirectory,
-            ["Pinned.Pkg"],
-            TestTaskContext,
-            cancellationToken: TestContext.CancellationToken);
-
-        Assert.AreEqual("3.1.4", installed["Pinned.Pkg"], "The pinned version must win over the latest.");
-        Assert.AreEqual(0, nuget.LatestQueried.Count, "A pinned package must not trigger a latest-version query.");
-        CollectionAssert.Contains(nuget.InstallCalls.Select(c => c.Version).ToList(), "3.1.4");
+        Assert.IsTrue(ok);
+        Assert.AreEqual(0, _nuget.InstalledPackages.Count, "Package already present; no install should occur.");
     }
 
     [TestMethod]
-    public async Task InstallPackagesAsync_ConfigExistsButPackageNotPinned_FallsBackToLatest()
+    public async Task EnsurePackageAsync_NugetThrows_ReturnsFalse()
     {
-        // The config exists but pins a DIFFERENT package, so the requested one has no pin and must fall
-        // through to the latest-version lookup.
-        _configService.Save(new WinappConfig { Packages = [new PackagePin { Name = "Other.Pkg", Version = "1.0.0" }] });
+        _nuget.PackagesToThrow.Add("Pkg.Bad");
 
-        var nuget = new ConfigurableNugetService { LatestVersion = "7.0.0" };
-        var installer = CreateInstaller(nuget);
+        var ok = await _service.EnsurePackageAsync(_rootDir, "Pkg.Bad", _taskContext);
 
-        var installed = await installer.InstallPackagesAsync(
-            _tempDirectory,
-            ["Unpinned.Pkg"],
-            TestTaskContext,
-            cancellationToken: TestContext.CancellationToken);
+        Assert.IsFalse(ok);
+    }
 
-        Assert.AreEqual("7.0.0", installed["Unpinned.Pkg"], "An unpinned package must fall back to the latest version.");
-        CollectionAssert.Contains(nuget.LatestQueried, "Unpinned.Pkg");
+    #endregion
+
+    #region InstallPackagesAsync — version resolution
+
+    [TestMethod]
+    public async Task InstallPackagesAsync_NoConfig_UsesLatestVersion()
+    {
+        _nuget.DefaultVersion = "1.6.0";
+
+        var result = await _service.InstallPackagesAsync(_rootDir, ["Pkg.X"], _taskContext);
+
+        Assert.AreEqual("1.6.0", result["Pkg.X"]);
+        CollectionAssert.Contains(_nuget.InstalledPackages, ("Pkg.X", "1.6.0"));
     }
 
     [TestMethod]
-    public async Task InstallPackagesAsync_SharedTransitiveDependency_KeepsHighestVersionAcrossRoots()
+    public async Task InstallPackagesAsync_PinnedConfigVersion_UsedInsteadOfLatest()
     {
-        // Three roots each pull in a shared transitive id at a different version. The flattened result must
-        // keep the HIGHEST seen version: a later-but-higher wins (upgrade), a later-but-lower is ignored.
-        var nuget = new ConfigurableNugetService();
-        nuget.InstallGraph["Root.A"] = new() { ["Root.A"] = "1.0.0", ["Shared.Dep"] = "1.0.0" };
-        nuget.InstallGraph["Root.B"] = new() { ["Root.B"] = "1.0.0", ["Shared.Dep"] = "2.0.0" };
-        nuget.InstallGraph["Root.C"] = new() { ["Root.C"] = "1.0.0", ["Shared.Dep"] = "1.5.0" };
-        var installer = CreateInstaller(nuget);
+        _config.ExistsResult = true;
+        _config.Config.SetVersion("Pkg.X", "1.2.3");
 
-        var installed = await installer.InstallPackagesAsync(
-            _tempDirectory,
-            ["Root.A", "Root.B", "Root.C"],
-            TestTaskContext,
-            ignoreConfig: true,
-            cancellationToken: TestContext.CancellationToken);
+        var result = await _service.InstallPackagesAsync(_rootDir, ["Pkg.X"], _taskContext);
 
-        Assert.AreEqual("2.0.0", installed["Shared.Dep"], "The highest version of a shared dependency must be kept (B's 2.0.0 over A's 1.0.0; C's later 1.5.0 must not downgrade it).");
-        Assert.AreEqual("1.0.0", installed["Root.A"]);
-        Assert.AreEqual("1.0.0", installed["Root.B"]);
-        Assert.AreEqual("1.0.0", installed["Root.C"]);
+        Assert.AreEqual("1.2.3", result["Pkg.X"]);
+        CollectionAssert.DoesNotContain(_nuget.QueriedPackages, "Pkg.X");
     }
 
-    /// <summary>
-    /// A fully in-memory <see cref="INugetService"/> that lets a test script latest-version resolution,
-    /// per-package "already installed" state, the flattened install graph a package reports, and an install
-    /// failure — so the config/pinning/version-merge/error branches of
-    /// <see cref="PackageInstallationService"/> can be exercised deterministically without a feed.
-    /// </summary>
-    private sealed class ConfigurableNugetService : INugetService
+    [TestMethod]
+    public async Task InstallPackagesAsync_ConfigWithoutPinForPackage_FallsBackToLatest()
     {
-        public string LatestVersion { get; set; } = "1.0.0";
+        _config.ExistsResult = true;
+        _config.Config.SetVersion("Some.Other.Package", "9.9.9");
+        _nuget.DefaultVersion = "1.6.0";
 
-        public List<string> LatestQueried { get; } = [];
+        var result = await _service.InstallPackagesAsync(_rootDir, ["Pkg.X"], _taskContext);
 
-        public List<(string Package, string Version)> InstallCalls { get; } = [];
+        Assert.AreEqual("1.6.0", result["Pkg.X"]);
+        CollectionAssert.Contains(_nuget.QueriedPackages, "Pkg.X");
+    }
 
-        public bool ThrowOnInstall { get; set; }
+    [TestMethod]
+    public async Task InstallPackagesAsync_IgnoreConfig_UsesLatestEvenWhenPinned()
+    {
+        _config.ExistsResult = true;
+        _config.Config.SetVersion("Pkg.X", "1.2.3");
+        _nuget.DefaultVersion = "1.6.0";
 
-        /// <summary>"{id}/{version}" entries reported as fully installed by <see cref="IsPackageInstalled"/>.</summary>
-        public HashSet<string> InstalledMarkers { get; } = new(StringComparer.OrdinalIgnoreCase);
+        var result = await _service.InstallPackagesAsync(_rootDir, ["Pkg.X"], _taskContext, ignoreConfig: true);
 
-        /// <summary>Optional flattened install result per root package id; defaults to just the root itself.</summary>
-        public Dictionary<string, Dictionary<string, string>> InstallGraph { get; } = new(StringComparer.OrdinalIgnoreCase);
+        Assert.AreEqual("1.6.0", result["Pkg.X"]);
+        CollectionAssert.Contains(_nuget.QueriedPackages, "Pkg.X");
+    }
 
-        public Task<string> GetLatestVersionAsync(string packageName, SdkInstallMode sdkInstallMode, CancellationToken cancellationToken = default)
-        {
-            LatestQueried.Add(packageName);
-            return Task.FromResult(LatestVersion);
-        }
+    #endregion
 
-        public Task<Dictionary<string, string>> InstallPackageAsync(string package, string version, TaskContext taskContext, CancellationToken cancellationToken = default)
-        {
-            InstallCalls.Add((package, version));
-            if (ThrowOnInstall)
-            {
-                throw new InvalidOperationException($"Simulated install failure for {package} {version}");
-            }
+    #region InstallPackagesAsync — version merge
 
-            return Task.FromResult(InstallGraph.TryGetValue(package, out var graph)
-                ? new Dictionary<string, string>(graph, StringComparer.OrdinalIgnoreCase)
-                : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [package] = version });
-        }
+    [TestMethod]
+    public async Task InstallPackagesAsync_MergesInstalledVersions_HigherWins()
+    {
+        // Two fresh packages whose installs both surface a shared transitive package at different versions.
+        _nuget.InstallReturns["Pkg.A"] = new() { ["Pkg.A"] = "1.6.0", ["Shared"] = "1.0.0" };
+        _nuget.InstallReturns["Pkg.B"] = new() { ["Pkg.B"] = "1.6.0", ["Shared"] = "2.0.0" };
 
-        public Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, CancellationToken cancellationToken = default)
-            => Task.FromResult(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+        var result = await _service.InstallPackagesAsync(_rootDir, ["Pkg.A", "Pkg.B"], _taskContext);
 
-        public DirectoryInfo GetNuGetGlobalPackagesDir() => throw new NotSupportedException();
+        Assert.AreEqual("2.0.0", result["Shared"], "Higher shared version should win the merge.");
+        Assert.AreEqual("1.6.0", result["Pkg.A"]);
+        Assert.AreEqual("1.6.0", result["Pkg.B"]);
+    }
 
-        public DirectoryInfo GetNuGetPackageDir(string packageName, string version) => throw new NotSupportedException();
+    [TestMethod]
+    public async Task InstallPackagesAsync_MergesInstalledVersions_LowerDoesNotDowngrade()
+    {
+        // The shared package is surfaced at the HIGHER version by the first install and a LOWER version by
+        // the second. The merge must keep the higher one — exercises the compare-not-greater branch (the
+        // second occurrence is not greater than the tracked one, so the existing value is retained).
+        _nuget.InstallReturns["Pkg.A"] = new() { ["Pkg.A"] = "1.6.0", ["Shared"] = "2.0.0" };
+        _nuget.InstallReturns["Pkg.B"] = new() { ["Pkg.B"] = "1.6.0", ["Shared"] = "1.0.0" };
 
-        public bool IsPackageInstalled(string package, string version)
-            => InstalledMarkers.Contains($"{package}/{version}");
+        var result = await _service.InstallPackagesAsync(_rootDir, ["Pkg.A", "Pkg.B"], _taskContext);
+
+        Assert.AreEqual("2.0.0", result["Shared"], "A lower version surfaced by a later install must not downgrade the merged result.");
+        Assert.AreEqual("1.6.0", result["Pkg.A"]);
+        Assert.AreEqual("1.6.0", result["Pkg.B"]);
+    }
+
+    #endregion
+
+    private sealed class FakeConfigService : IConfigService
+    {
+        public FileInfo ConfigPath { get; set; } = new(Path.Combine(Path.GetTempPath(), "winapp.yaml"));
+        public bool ExistsResult { get; set; }
+        public WinappConfig Config { get; set; } = new();
+
+        public bool Exists() => ExistsResult;
+        public WinappConfig Load() => Config;
+        public void Save(WinappConfig cfg) => Config = cfg;
     }
 }

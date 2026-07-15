@@ -45,6 +45,12 @@ internal static class WinDbgJsProviderAcquirer
     private const string TargetFileName = "JsProvider.dll";
     private const int MaxReadAttempts = 5;
 
+    // For testing only — the host-architecture and external verification boundaries. Defaults call the
+    // real OS / helper APIs; tests override them to exercise the acquisition orchestration hermetically.
+    internal static Func<Architecture> HostArchitectureProvider { get; set; } = () => RuntimeInformation.ProcessArchitecture;
+    internal static Func<string, ILogger, bool> SignatureVerifier { get; set; } = AuthenticodeVerifier.IsTrustedMicrosoftSigned;
+    internal static Func<string, string, ILogger, bool> EngineCompatibilityVerifier { get; set; } = XamlTriageBinaries.IsProviderCompatibleWithEngine;
+
     /// <summary>
     /// Attempts to download <c>JsProvider.dll</c> into <paramref name="destDir"/> (next to the
     /// debugging engine). Returns <c>true</c> on success; failures are logged and swallowed so the
@@ -52,17 +58,29 @@ internal static class WinDbgJsProviderAcquirer
     /// </summary>
     public static async Task<bool> TryAcquireAsync(DirectoryInfo destDir, ILogger logger, CancellationToken cancellationToken)
     {
-        var (msixName, pathPrefix) = HostTokens(RuntimeInformation.ProcessArchitecture);
+        var (msixName, pathPrefix) = HostTokens(HostArchitectureProvider());
         if (msixName == null || pathPrefix == null)
         {
-            logger.LogDebug("JsProvider acquisition skipped: unsupported host architecture {Arch}.", RuntimeInformation.ProcessArchitecture);
+            logger.LogDebug("JsProvider acquisition skipped: unsupported host architecture {Arch}.", HostArchitectureProvider());
             return false;
         }
 
+        using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+        var reader = new HttpRangeReader(http, PinnedBundleUrl);
+        return await TryAcquireCoreAsync(reader, destDir, msixName, pathPrefix, logger, cancellationToken);
+    }
+
+    /// <summary>
+    /// Network-free core of <see cref="TryAcquireAsync"/>: extracts the provider bytes via
+    /// <paramref name="reader"/>, stages them, verifies the Authenticode signature and engine
+    /// compatibility (both seamed for tests), then atomically publishes. Returns <c>false</c> on any
+    /// failure; <see cref="OperationCanceledException"/> propagates.
+    /// </summary>
+    internal static async Task<bool> TryAcquireCoreAsync(
+        IRangeReader reader, DirectoryInfo destDir, string msixName, string pathPrefix, ILogger logger, CancellationToken cancellationToken)
+    {
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
-            var reader = new HttpRangeReader(http, PinnedBundleUrl);
             var bytes = await ExtractJsProviderAsync(reader, msixName, pathPrefix, cancellationToken);
             if (bytes == null)
             {
@@ -81,7 +99,7 @@ internal static class WinDbgJsProviderAcquirer
             // Defense-in-depth: this DLL is loaded into the debugger process, so verify it carries a
             // valid Authenticode signature from Microsoft before trusting it (the download is HTTPS
             // from an official host, but this guards against tampering / a compromised mirror).
-            if (!AuthenticodeVerifier.IsTrustedMicrosoftSigned(stagedPath, logger))
+            if (!SignatureVerifier(stagedPath, logger))
             {
                 logger.LogDebug("Discarding {File}: it is not validly signed by Microsoft.", TargetFileName);
                 AtomicFile.DiscardStaged(stagedPath);
@@ -92,7 +110,7 @@ internal static class WinDbgJsProviderAcquirer
             // provider crashes the triage child with STATUS_BREAKPOINT. Reject a mismatch here (fail
             // closed) rather than publishing a provider that would silently break triage — this guards
             // against a future engine bump that outpaces the pinned bundle.
-            if (!XamlTriageBinaries.IsProviderCompatibleWithEngine(destDir.FullName, stagedPath, logger))
+            if (!EngineCompatibilityVerifier(destDir.FullName, stagedPath, logger))
             {
                 logger.LogDebug("Discarding {File}: its build does not match the debugging engine.", TargetFileName);
                 AtomicFile.DiscardStaged(stagedPath);
@@ -171,7 +189,7 @@ internal static class WinDbgJsProviderAcquirer
     };
 
     /// <summary>An <see cref="IRangeReader"/> backed by HTTP range requests with retry-on-transient.</summary>
-    private sealed class HttpRangeReader(HttpClient http, string url) : IRangeReader
+    internal sealed class HttpRangeReader(HttpClient http, string url) : IRangeReader
     {
         private long? _length;
 

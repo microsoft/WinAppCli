@@ -288,15 +288,9 @@ internal partial class MsixService(
             }
         }
 
-        // Check for an AppX subdirectory, which is a build artifact that should not be
-        // included in the package. Exclude it from staging and warn the user.
-        var excludedDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var appxDir = new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
-        if (appxDir.Exists)
-        {
-            excludedDirectories.Add("AppX");
-            taskContext.AddStatusMessage($"{UiSymbols.Warning} Found 'AppX' directory in input folder. It will be excluded from the package.");
-        }
+        // Check for build-artifact subdirectories (e.g. 'AppX') that must not be included in the
+        // package. Any found are excluded from staging and the user is warned.
+        var excludedDirectories = BuildStagingExclusions(inputFolder, taskContext);
 
         // Determine manifest path based on priority:
         // 1. Use provided manifestPath parameter
@@ -387,13 +381,7 @@ internal partial class MsixService(
         // Clean the resolved package name to ensure it meets MSIX schema requirements
         finalPackageName = ManifestService.CleanPackageName(finalPackageName);
 
-        var defaultMsixFileName = (packageArch, extractedVersion) switch
-        {
-            (not null, not null) when !string.IsNullOrWhiteSpace(extractedVersion) => $"{finalPackageName}_{extractedVersion}_{packageArch}.msix",
-            (null, not null) when !string.IsNullOrWhiteSpace(extractedVersion) => $"{finalPackageName}_{extractedVersion}.msix",
-            (not null, _) => $"{finalPackageName}_{packageArch}.msix",
-            _ => $"{finalPackageName}.msix"
-        };
+        var defaultMsixFileName = BuildDefaultMsixFileName(finalPackageName, packageArch, extractedVersion);
 
         FileInfo outputMsixPath;
         DirectoryInfo outputFolder;
@@ -455,7 +443,7 @@ internal partial class MsixService(
             else
             {
                 // No recipe available — copy the entire input folder to staging
-                CopyDirectoryRecursive(inputFolder, stagingDir);
+                CopyDirectoryRecursive(inputFolder, stagingDir, excludedDirectories);
                 taskContext.AddDebugMessage($"{UiSymbols.Files} Copied input folder to staging directory");
             }
 
@@ -646,6 +634,20 @@ internal partial class MsixService(
         await buildToolsService.RunBuildToolAsync(new MakeAppxTool(), makeappxArguments, taskContext, cancellationToken: cancellationToken);
     }
 
+    /// <summary>
+    /// Builds the default MSIX output file name from the resolved package name, optional processor
+    /// architecture, and optional package version. Extracted as a pure function so the naming
+    /// convention (name[_version][_arch].msix) can be verified directly by unit tests, including the
+    /// architecture-only and versionless combinations that a real makeappx-backed flow cannot exercise.
+    /// </summary>
+    internal static string BuildDefaultMsixFileName(string finalPackageName, string? packageArch, string? extractedVersion) => (packageArch, extractedVersion) switch
+    {
+        (not null, not null) when !string.IsNullOrWhiteSpace(extractedVersion) => $"{finalPackageName}_{extractedVersion}_{packageArch}.msix",
+        (null, not null) when !string.IsNullOrWhiteSpace(extractedVersion) => $"{finalPackageName}_{extractedVersion}.msix",
+        (not null, _) => $"{finalPackageName}_{packageArch}.msix",
+        _ => $"{finalPackageName}.msix"
+    };
+
     private static void TryDeleteFile(FileInfo path)
     {
         try
@@ -660,6 +662,26 @@ internal partial class MsixService(
         {
             // Ignore cleanup failures
         }
+    }
+
+    /// <summary>
+    /// Builds the set of top-level build-artifact directory names that must be excluded from the
+    /// staged package (currently the MSBuild-generated 'AppX' output folder). When such a directory
+    /// is found the user is warned. Shared by the single-package (<see cref="CreateMsixPackageAsync"/>)
+    /// and per-slice bundle (<c>PackSingleFolderToMsixAsync</c>) staging paths so both exclude
+    /// build artifacts consistently.
+    /// </summary>
+    private static HashSet<string> BuildStagingExclusions(DirectoryInfo inputFolder, TaskContext taskContext)
+    {
+        var excludedDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var appxDir = new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
+        if (appxDir.Exists)
+        {
+            excludedDirectories.Add("AppX");
+            taskContext.AddStatusMessage($"{UiSymbols.Warning} Found 'AppX' directory in input folder. It will be excluded from the package.");
+        }
+
+        return excludedDirectories;
     }
 
     /// <summary>

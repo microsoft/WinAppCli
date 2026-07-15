@@ -11,7 +11,18 @@ namespace WinApp.Cli.Services;
 
 internal class MSStoreCLIService(IWinappDirectoryService winappDirectoryService, ILogger<MSStoreCLIService> logger) : IMSStoreCLIService
 {
-    private static readonly HttpClient Http = new();
+    private static readonly HttpClient SharedHttp = new();
+
+    // Test seam: HttpClient for the GitHub release API and asset downloads. Defaults to
+    // the shared production client; tests inject a fake-handler-backed client to exercise
+    // the download / checksum / verify flow offline. This is the network boundary —
+    // production behavior is unchanged.
+    internal HttpClient Http { get; set; } = SharedHttp;
+
+    // Test seam: OS architecture lookup, defaulting to the real runtime value. Lets tests
+    // drive both the arch-specific asset selection and the unsupported-architecture path.
+    internal Func<Architecture> OsArchitectureProvider { get; set; } = () => RuntimeInformation.OSArchitecture;
+
     private const string ExeName = "msstore.exe";
     private const string GitHubApiLatestRelease = "https://api.github.com/repos/microsoft/msstore-cli/releases/latest";
 
@@ -29,11 +40,11 @@ internal class MSStoreCLIService(IWinappDirectoryService winappDirectoryService,
 
     private async Task DownloadAndInstallAsync(CancellationToken cancellationToken)
     {
-        var arch = RuntimeInformation.OSArchitecture switch
+        var arch = OsArchitectureProvider() switch
         {
             Architecture.X64 => "x64",
             Architecture.Arm64 => "arm64",
-            _ => throw new PlatformNotSupportedException($"Unsupported architecture: {RuntimeInformation.OSArchitecture}")
+            _ => throw new PlatformNotSupportedException($"Unsupported architecture: {OsArchitectureProvider()}")
         };
 
         var zipFileName = $"MSStoreCLI-win-{arch}.zip";
@@ -80,7 +91,7 @@ internal class MSStoreCLIService(IWinappDirectoryService winappDirectoryService,
     /// <summary>
     /// Queries the GitHub releases API to resolve the latest version, download URL, and SHA-256 checksum.
     /// </summary>
-    private static async Task<(string Version, string DownloadUrl, string ExpectedHash)> GetLatestReleaseInfoAsync(string zipFileName, CancellationToken cancellationToken)
+    private async Task<(string Version, string DownloadUrl, string ExpectedHash)> GetLatestReleaseInfoAsync(string zipFileName, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, GitHubApiLatestRelease);
         request.Headers.Add("Accept", "application/vnd.github+json");
@@ -121,7 +132,7 @@ internal class MSStoreCLIService(IWinappDirectoryService winappDirectoryService,
     /// <summary>
     /// Retrieves the SHA-256 checksum for the given zip file from the release assets.
     /// </summary>
-    private static async Task<string> GetChecksumAsync(JsonDocument releaseDoc, string tagName, string zipFileName, CancellationToken cancellationToken)
+    private async Task<string> GetChecksumAsync(JsonDocument releaseDoc, string tagName, string zipFileName, CancellationToken cancellationToken)
     {
         if (!releaseDoc.RootElement.TryGetProperty("assets", out var assets))
         {
