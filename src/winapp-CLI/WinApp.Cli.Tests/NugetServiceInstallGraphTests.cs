@@ -54,7 +54,55 @@ public class NugetServiceInstallGraphTests : BaseCommandTests
             // The failure must name the conflicting package and describe the unsatisfiable constraint rather
             // than being swallowed as a successful install.
             StringAssert.Contains(ex.Message, "Diamond.C", StringComparison.Ordinal);
-            StringAssert.Contains(ex.Message, "does not satisfy", StringComparison.Ordinal);
+            StringAssert.Contains(ex.Message, "cannot be resolved to a single version", StringComparison.Ordinal);
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
+    public async Task InstallPackageAsync_DiamondDiffersOnlyInLowerBound_DoesNotFalselyFail()
+    {
+        // NUGET_PACKAGES takes precedence over the globalPackagesFolder written by WriteLocalFeedConfig.
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NUGET_PACKAGES")))
+        {
+            Assert.Inconclusive("NUGET_PACKAGES is set in the environment; it overrides the config's globalPackagesFolder, so the local feed would not be exercised.");
+        }
+
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            feed.Create();
+            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+
+            // Diamond graph whose two branches require DiffMin.C at DIFFERENT LOWER BOUNDS but with no upper
+            // bound: A needs [1.0.0, ) and B needs [2.0.0, ). Unlike conflicting exact pins, a version (2.0.0)
+            // satisfies BOTH ranges, so the graph is NOT unsatisfiable. winapp keeps whichever version its
+            // first-resolved branch selected (a documented lowest-first limitation) and must NOT report this
+            // common differing-minimum diamond as a conflict — the round-21 satisfaction check must not fire a
+            // false positive here.
+            WriteNupkgToFeed(feed, "DiffMin.Root", "1.0.0", ("DiffMin.A", "[1.0.0, )"), ("DiffMin.B", "[1.0.0, )"));
+            WriteNupkgToFeed(feed, "DiffMin.A", "1.0.0", ("DiffMin.C", "[1.0.0, )"));
+            WriteNupkgToFeed(feed, "DiffMin.B", "1.0.0", ("DiffMin.C", "[2.0.0, )"));
+            WriteNupkgToFeed(feed, "DiffMin.C", "1.0.0");
+            WriteNupkgToFeed(feed, "DiffMin.C", "2.0.0");
+
+            WriteLocalFeedConfig(root, feed, packages);
+
+            var service = CreateServiceRootedAt(root);
+
+            // Must complete without throwing: a satisfiable differing-minimum diamond is not a conflict.
+            var installed = await service.InstallPackageAsync("DiffMin.Root", "1.0.0", TestTaskContext, TestContext.CancellationToken);
+
+            Assert.IsTrue(installed.ContainsKey("DiffMin.C"), "The shared dependency must have been installed.");
+
+            // Whichever branch resolved first fixes the version; both 1.0.0 and 2.0.0 are valid outcomes of the
+            // documented first-resolution-wins behavior.
+            var resolvedC = installed["DiffMin.C"];
+            Assert.IsTrue(resolvedC is "1.0.0" or "2.0.0", $"Expected DiffMin.C to resolve to 1.0.0 or 2.0.0 but was '{resolvedC}'.");
         }
         finally
         {

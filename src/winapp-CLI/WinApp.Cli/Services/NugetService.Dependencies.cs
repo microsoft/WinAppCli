@@ -448,6 +448,12 @@ internal partial class NugetService
                 var transitiveDeps = await GetPackageDependenciesAsync(depId, depVersion, resolutionPath, cancellationToken);
                 foreach (var (transitiveId, transitiveVersion) in transitiveDeps)
                 {
+                    // First-resolution-wins: the flattened set keeps the version chosen by the first branch to
+                    // resolve this transitive id and does not globally reconcile it against other branches'
+                    // ranges. In a diamond where two branches pin the same id to different versions, the
+                    // returned map can therefore carry a version that violates the other branch's range. This
+                    // is a deliberate limitation of winapp's curated-SDK-graph scope (it does not implement
+                    // NuGet's full graph unification); documented in docs/usage.md under private feeds.
                     allDeps.TryAdd(transitiveId, transitiveVersion);
                 }
             }

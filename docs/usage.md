@@ -160,6 +160,11 @@ Example `nuget.config` that restores the SDK packages exclusively from a private
 
 > **Security note:** winapp honors the `nuget.config` in the selected project/config directory — the working directory by default, or the directory you pass to `winapp init <dir>` / `restore --config-dir <dir>` — so it restores SDK packages from whatever feeds, and into whatever `globalPackagesFolder`, that config specifies. Only run `winapp init`/`restore`/`update` against directories you trust, the same caution that applies to `dotnet restore`/`dotnet build`. When more than one source is configured, use [Package Source Mapping](https://learn.microsoft.com/nuget/consume-packages/package-source-mapping) (`<packageSourceMapping>`) to pin each package to a specific feed and mitigate dependency-confusion attacks.
 
+> **Resolution limitations:** winapp targets the curated Windows App SDK dependency graphs and resolves them as it installs, so it does **not** implement NuGet's full graph unification. Two consequences to be aware of when pointing it at arbitrary private feeds:
+>
+> - **Diamond dependencies keep the first-selected version.** When two branches of the graph require the same package at *different lower bounds* (for example `[1.0,)` on one path and `[2.0,)` on another), winapp keeps the version chosen by the first branch it resolved rather than upgrading to a version that satisfies both. A graph whose ranges are genuinely *incompatible* (for example `[1.0,2.0)` and `[2.0,3.0)`, which no single version can satisfy) still fails the restore.
+> - **Flat-container-only feeds can't hide unlisted versions.** A v3 feed that exposes only a `PackageBaseAddress` (flat container) resource with **no** registration resource carries no listed/unlisted flag, so `init`/`update` may select an unlisted version as "latest". Registration-backed feeds — nuget.org and most Azure Artifacts feeds — are unaffected.
+
 ---
 
 ### update

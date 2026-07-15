@@ -48,9 +48,9 @@ internal sealed class PackageInstallationService(
             version = await nugetService.GetLatestVersionAsync(packageName, sdkInstallMode, cancellationToken);
         }
 
-        // Check if already installed in NuGet global cache
-        var packageDir = nugetService.GetNuGetPackageDir(packageName, version);
-        if (packageDir.Exists)
+        // Check if already installed in NuGet global cache (require the completion marker, not just the
+        // directory, so a partial/interrupted extraction is re-downloaded rather than trusted).
+        if (nugetService.IsPackageInstalled(packageName, version))
         {
             taskContext.AddStatusMessage($"{UiSymbols.Skip} {packageName} {version} already present");
             return version;
@@ -116,9 +116,9 @@ internal sealed class PackageInstallationService(
             // NuGet writer never created.
             version = NugetService.NormalizeVersion(version);
 
-            // Check if already installed in NuGet global cache
-            var packageDir = nugetService.GetNuGetPackageDir(packageName, version);
-            if (packageDir.Exists)
+            // Check if already installed in NuGet global cache (require the completion marker, not just the
+            // directory, so a partial/interrupted extraction is re-downloaded rather than trusted).
+            if (nugetService.IsPackageInstalled(packageName, version))
             {
                 taskContext.AddStatusMessage($"{UiSymbols.Skip} {packageName} {version} already present");
 
@@ -134,9 +134,9 @@ internal sealed class PackageInstallationService(
                         var depVersion = NugetService.ParseMinimumVersion(packageVersion);
                         if (!string.IsNullOrEmpty(depVersion))
                         {
-                            // Check if the dependency actually exists on disk — if not, install it
-                            var depDir = nugetService.GetNuGetPackageDir(packageId, depVersion);
-                            if (!depDir.Exists)
+                            // Check if the dependency is fully installed on disk — if not, install it (a bare
+                            // directory without the completion marker is treated as not installed).
+                            if (!nugetService.IsPackageInstalled(packageId, depVersion))
                             {
                                 logger.LogDebug("Transitive dependency {PackageId} {Version} missing from cache, installing", packageId, depVersion);
                                 var depInstalledVersions = await nugetService.InstallPackageAsync(packageId, depVersion, taskContext, cancellationToken);

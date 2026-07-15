@@ -84,4 +84,10 @@ internal class FakeNugetService : INugetService
         var cache = GetNuGetGlobalPackagesDir();
         return new DirectoryInfo(Path.Combine(cache.FullName, packageName.ToLowerInvariant(), version));
     }
+
+    public bool IsPackageInstalled(string package, string version)
+    {
+        var dir = GetNuGetPackageDir(package, version);
+        return dir.Exists && File.Exists(Path.Combine(dir.FullName, ".nupkg.metadata"));
+    }
 }

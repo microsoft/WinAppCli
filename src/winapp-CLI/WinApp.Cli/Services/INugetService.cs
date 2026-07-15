@@ -13,6 +13,12 @@ internal interface INugetService
     /// <c>&lt;packageSourceMapping&gt;</c>). Throws if an eligible source cannot be queried, so the
     /// result is never a partial "latest".
     /// </summary>
+    /// <remarks>
+    /// Against a flat-container-only v3 feed (one that exposes PackageBaseAddress but no registration
+    /// resource), version enumeration cannot distinguish listed from unlisted packages, so the selected
+    /// "latest" may include an unlisted version. Registration-backed feeds (nuget.org and most private feeds)
+    /// are unaffected. See the private-feed notes in docs/usage.md.
+    /// </remarks>
     Task<string> GetLatestVersionAsync(string packageName, SdkInstallMode sdkInstallMode, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -30,6 +36,12 @@ internal interface INugetService
     /// satisfies the range (which may be higher than the range's lower bound, and for a floating range is
     /// the highest match), not the range minimum.
     /// </summary>
+    /// <remarks>
+    /// The flattened result is first-resolution-wins per dependency id: winapp does not globally reconcile a
+    /// diamond where two branches require the same id at different versions, so the returned version can
+    /// satisfy one branch's range but not another's. This matches winapp's curated-SDK-graph scope; see the
+    /// private-feed notes in docs/usage.md.
+    /// </remarks>
     Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -44,4 +56,11 @@ internal interface INugetService
     /// NuGet's normalized on-disk layout: {cache}/{lowercase-id}/{normalized-version}/.
     /// </summary>
     DirectoryInfo GetNuGetPackageDir(string packageName, string version);
+
+    /// <summary>
+    /// Reports whether a specific package version is FULLY installed in the NuGet global packages cache —
+    /// the version directory exists AND contains NuGet's ".nupkg.metadata" completion marker. Returns false
+    /// for a partial folder left by an interrupted extraction so callers re-download instead of trusting it.
+    /// </summary>
+    bool IsPackageInstalled(string packageName, string version);
 }

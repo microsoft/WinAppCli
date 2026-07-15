@@ -109,6 +109,25 @@ internal partial class NugetService : INugetService
     }
 
     /// <summary>
+    /// Reports whether <paramref name="package"/> <paramref name="version"/> is FULLY installed in the NuGet
+    /// global-packages cache. The version directory merely existing is not sufficient: NuGet writes the
+    /// ".nupkg.metadata" completion marker only after extraction finishes, so an interrupted download can
+    /// leave a partial folder (missing nuspec / lib files) with no marker. Both this service and higher-level
+    /// callers must gate "already installed" decisions on this single predicate so a partial cache entry is
+    /// never mistaken for a complete install (which would let restore report a truncated dependency graph as
+    /// success).
+    /// </summary>
+    public bool IsPackageInstalled(string package, string version) =>
+        HasCompletionMarker(GetNuGetPackageDir(package, version));
+
+    /// <summary>
+    /// True when <paramref name="packageDir"/> exists and contains NuGet's ".nupkg.metadata" completion
+    /// marker — the same signal NuGet itself uses to treat a global-packages entry as fully extracted.
+    /// </summary>
+    private static bool HasCompletionMarker(DirectoryInfo packageDir) =>
+        packageDir.Exists && File.Exists(Path.Combine(packageDir.FullName, ".nupkg.metadata"));
+
+    /// <summary>
     /// Normalizes a version string to NuGet's canonical form (e.g. "1.0" -> "1.0.0") so the value stored
     /// and returned by the installer matches the on-disk global-packages folder layout. Returns the input
     /// unchanged if it is not a parseable NuGet version.
@@ -148,8 +167,11 @@ internal partial class NugetService : INugetService
         NugetSourceProvider.EnsureCredentialService();
         var packages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var dependencyFailures = new List<string>();
+        // Every declared range seen for a given dependency id is accumulated here as the graph is walked, so a
+        // later branch can be evaluated against the full constraint set rather than only its own range.
+        var dependencyConstraints = new Dictionary<string, List<VersionRange>>(StringComparer.OrdinalIgnoreCase);
         using var cacheContext = new SourceCacheContext();
-        await InstallPackageRecursiveAsync(package, version, packages, dependencyFailures, taskContext, cacheContext, cancellationToken);
+        await InstallPackageRecursiveAsync(package, version, packages, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
 
         // A downloaded root package with unresolvable/uninstallable REQUIRED transitive dependencies is an
         // incomplete install, not a success. Each gap was surfaced as a warning above (and the rest of the
@@ -167,7 +189,7 @@ internal partial class NugetService : INugetService
     /// <summary>
     /// Downloads and extracts a NuGet package to the global packages cache, then recursively installs dependencies.
     /// </summary>
-    private async Task InstallPackageRecursiveAsync(string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
+    private async Task InstallPackageRecursiveAsync(string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, Dictionary<string, List<VersionRange>> dependencyConstraints, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         // Already processed this package?
         if (installed.ContainsKey(package))
@@ -183,20 +205,17 @@ internal partial class NugetService : INugetService
 
         var packageDir = GetNuGetPackageDir(package, normalizedVersion);
 
-        // Already fully installed on disk? NuGet writes the ".nupkg.metadata" marker into the version folder
-        // only after extraction completes, and it is the same signal NuGet itself uses to treat a package as
-        // installed. The directory existing is NOT that signal: an interrupted extraction can leave a partial
-        // folder (missing nuspec / lib files) with no marker. Short-circuiting on the bare directory would
-        // accept that corrupt entry — ReadDependenciesFromNuspec returns an empty dependency set when the
-        // nuspec is absent, so restore could report success for a root package with a truncated graph. Require
-        // the marker; when it is missing, fall through so the downloader (GlobalPackagesFolderUtility) re-
-        // extracts and completes the entry.
-        if (packageDir.Exists && File.Exists(Path.Combine(packageDir.FullName, ".nupkg.metadata")))
+        // Already fully installed on disk? Gate on the shared completion-marker predicate (see
+        // IsPackageInstalled): the directory merely existing is not enough, because an interrupted extraction
+        // can leave a partial folder with no ".nupkg.metadata" marker. Accepting that corrupt entry would let
+        // ReadDependenciesFromNuspec return an empty set and restore report a truncated graph as success. When
+        // the marker is missing, fall through so the downloader re-extracts and completes the entry.
+        if (HasCompletionMarker(packageDir))
         {
             taskContext.AddDebugMessage($"{UiSymbols.Skip} {package} {normalizedVersion} already present");
             installed[package] = normalizedVersion;
             // Still resolve dependencies to populate installed dictionary
-            await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, taskContext, cacheContext, cancellationToken);
+            await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
             return;
         }
 
@@ -210,13 +229,13 @@ internal partial class NugetService : INugetService
         taskContext.AddStatusMessage($"{UiSymbols.Check} Installed {package} {normalizedVersion}");
 
         // Recursively install dependencies
-        await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, taskContext, cacheContext, cancellationToken);
+        await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
     }
 
     /// <summary>
     /// Reads the .nuspec from an extracted package and recursively installs dependencies.
     /// </summary>
-    private async Task ResolveDependenciesAsync(DirectoryInfo packageDir, string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
+    private async Task ResolveDependenciesAsync(DirectoryInfo packageDir, string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, Dictionary<string, List<VersionRange>> dependencyConstraints, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         Dictionary<string, VersionRange> deps;
         try
@@ -233,21 +252,43 @@ internal partial class NugetService : INugetService
 
         foreach (var (depName, depVersionRange) in deps)
         {
+            // Accumulate every range required for this dependency id across all branches of the graph so a
+            // later branch can be evaluated against the full constraint set, not just its own range.
+            if (!dependencyConstraints.TryGetValue(depName, out var accumulatedRanges))
+            {
+                accumulatedRanges = [];
+                dependencyConstraints[depName] = accumulatedRanges;
+            }
+            accumulatedRanges.Add(depVersionRange);
+
             if (installed.TryGetValue(depName, out var installedDepVersion))
             {
-                // The dependency id was already installed earlier in this operation. A package-id match alone
-                // is not enough: in a diamond graph two branches can require disjoint ranges (e.g. C [1,2) via
-                // one path and C [2,3) via another), and the first path to run fixes the installed version.
-                // Verify the already-installed version also satisfies THIS branch's range; if it cannot, the
-                // graph has an unsatisfiable version conflict that must fail the operation instead of being
-                // silently accepted as a complete install with an invalid graph.
+                // The dependency id was already installed earlier in this operation, which fixed its version.
+                // A package-id match alone is not enough: in a diamond graph two branches can require ranges
+                // the selected version does not both satisfy. Distinguish two cases:
+                //   * GENUINE conflict — no single version can satisfy every accumulated range (e.g. [1,2) and
+                //     [2,3)). That graph is unsatisfiable and must fail the operation rather than be accepted
+                //     as a complete install with an invalid graph.
+                //   * Differing lower bounds only — some version satisfies every range (e.g. [1.0,) then
+                //     [2.0,)), but winapp keeps the already-selected (lowest) version. That is a documented
+                //     limitation of its resolve-as-it-installs strategy (winapp targets curated SDK graphs and
+                //     does not perform NuGet's global upgrade/downgrade unification), not a conflict — warn at
+                //     debug level and continue so common differing-minimum diamonds are not falsely failed.
                 if (!(NuGetVersion.TryParse(installedDepVersion, out var installedNuGetVersion)
                         && depVersionRange.Satisfies(installedNuGetVersion)))
                 {
                     var rangeText = depVersionRange.OriginalString ?? depVersionRange.ToNormalizedString();
-                    var conflict = $"{depName} {installedDepVersion} (already selected) does not satisfy '{rangeText}' required by {package} {version}";
-                    taskContext.AddStatusMessage($"{UiSymbols.Warning} Dependency version conflict: {conflict}");
-                    dependencyFailures.Add(conflict);
+                    if (RangesHaveCommonVersion(accumulatedRanges))
+                    {
+                        taskContext.AddDebugMessage(
+                            $"{UiSymbols.Skip} {depName} kept at already-selected {installedDepVersion}; {package} {version} requests '{rangeText}' (a higher version would also satisfy it, but winapp keeps the first-selected version).");
+                    }
+                    else
+                    {
+                        var conflict = $"{depName} cannot be resolved to a single version: already selected {installedDepVersion}, but {package} {version} requires '{rangeText}' and no version satisfies every requirement";
+                        taskContext.AddStatusMessage($"{UiSymbols.Warning} Dependency version conflict: {conflict}");
+                        dependencyFailures.Add(conflict);
+                    }
                 }
                 continue;
             }
@@ -264,7 +305,7 @@ internal partial class NugetService : INugetService
                     continue;
                 }
 
-                await InstallPackageRecursiveAsync(depName, depVersion, installed, dependencyFailures, taskContext, cacheContext, cancellationToken);
+                await InstallPackageRecursiveAsync(depName, depVersion, installed, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -282,5 +323,68 @@ internal partial class NugetService : INugetService
                 dependencyFailures.Add($"{depName} (required by {package} {version}): {ex.Message}");
             }
         }
+    }
+
+    /// <summary>
+    /// Returns true when at least one version could satisfy ALL of <paramref name="ranges"/> simultaneously —
+    /// i.e. their intersection interval is non-empty. Used to tell a genuinely unsatisfiable set of diamond
+    /// constraints (e.g. [1.0,2.0) and [2.0,3.0), which must fail the install) apart from constraints that
+    /// merely differ in their lower bound (e.g. [1.0,) and [2.0,), where a higher version satisfies both and
+    /// keeping winapp's first-selected version is a documented limitation, not a conflict). The check is
+    /// deliberately conservative: when a bound is unknown it treats the interval as satisfiable so real,
+    /// common differing-minimum diamonds are never falsely reported as conflicts.
+    /// </summary>
+    private static bool RangesHaveCommonVersion(IReadOnlyList<VersionRange> ranges)
+    {
+        NuGetVersion? low = null;
+        var lowInclusive = true;
+        NuGetVersion? high = null;
+        var highInclusive = true;
+
+        foreach (var range in ranges)
+        {
+            if (range.HasLowerBound)
+            {
+                var cmp = low is null ? 1 : range.MinVersion.CompareTo(low);
+                if (cmp > 0)
+                {
+                    low = range.MinVersion;
+                    lowInclusive = range.IsMinInclusive;
+                }
+                else if (cmp == 0)
+                {
+                    lowInclusive = lowInclusive && range.IsMinInclusive;
+                }
+            }
+
+            if (range.HasUpperBound)
+            {
+                var cmp = high is null ? -1 : range.MaxVersion.CompareTo(high);
+                if (cmp < 0)
+                {
+                    high = range.MaxVersion;
+                    highInclusive = range.IsMaxInclusive;
+                }
+                else if (cmp == 0)
+                {
+                    highInclusive = highInclusive && range.IsMaxInclusive;
+                }
+            }
+        }
+
+        // An unbounded side leaves the intersection unbounded in that direction — non-empty.
+        if (low is null || high is null)
+        {
+            return true;
+        }
+
+        var bounds = low.CompareTo(high);
+        if (bounds < 0)
+        {
+            return true; // low < high: the open interval contains versions.
+        }
+
+        // low == high collapses to a single point, satisfiable only if both ends include it.
+        return bounds == 0 && lowInclusive && highInclusive;
     }
 }
