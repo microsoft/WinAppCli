@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Text.Json;
 using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Tests;
@@ -269,11 +270,28 @@ public class ProgramJsonBridgeTests : BaseCommandTests
             ["cert", "info", "--bogus", "nope", "--json"]);
 
         Assert.AreEqual(1, exitCode, "Parse error must exit 1");
-        // The UI nested schema must NOT appear — check neither stream contains the nested envelope.
-        var combined = stdout + stderr;
-        Assert.IsFalse(
-            combined.Contains("\"code\":") && combined.Contains("\"message\":") && combined.Contains("\"error\":{"),
-            $"Non-ui command must NOT get the nested UI error schema; combined output: {combined}");
+
+        // Deserialize structurally rather than string-matching so the assertion is robust against
+        // JSON formatting differences (e.g. "error": { vs "error":{) — M4 regression fix.
+        static bool HasNestedUiErrorSchema(string text)
+        {
+            var idx = text.IndexOf('{');
+            if (idx < 0) { return false; }
+            try
+            {
+                var el = JsonSerializer.Deserialize<JsonElement>(text.AsSpan(idx).TrimEnd());
+                return el.ValueKind == JsonValueKind.Object
+                    && el.TryGetProperty("error", out var errProp)
+                    && errProp.ValueKind == JsonValueKind.Object
+                    && errProp.TryGetProperty("code", out _);
+            }
+            catch { return false; }
+        }
+
+        Assert.IsFalse(HasNestedUiErrorSchema(stdout),
+            $"Non-ui command must NOT get the nested UI error schema on stdout; got: {stdout}");
+        Assert.IsFalse(HasNestedUiErrorSchema(stderr),
+            $"Non-ui command must NOT get the nested UI error schema on stderr; got: {stderr}");
     }
 
     [TestMethod]
@@ -419,5 +437,147 @@ public class ProgramJsonBridgeTests : BaseCommandTests
             $"Valid args + no app must return missing_app; got stderr: {stderr}");
         Assert.IsFalse(stderr.Contains(UiJsonError.CodeInvalidArguments),
             $"Valid args + no app must NOT return invalid_arguments; got stderr: {stderr}");
+    }
+
+    // -------------------------------------------------------------------------
+    // M1 (round-10) — pen/touch: --app <non-existent> must return missing_app,
+    // not internal_error.  Both commands must agree (parity regression).
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task Pen_AppNotFound_WithAt_ReturnsMissingApp()
+    {
+        // When --app names a process that is not running, the session resolver throws
+        // InvalidOperationException. The command must catch it as missing_app, not bubble
+        // it to the generic handler (which emits internal_error).
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--at", "10,10", "--app", "__no_such_app_9b3a__", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "Non-existent app must fail with exit code 1");
+        Assert.AreEqual(string.Empty, stdout.Trim(), "Stdout must be empty");
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain a JSON error object; got: {stderr}");
+        var error = JsonSerializer.Deserialize<JsonElement>(stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeMissingApp,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            "Non-existent --app with valid --at must return missing_app, not internal_error");
+    }
+
+    [TestMethod]
+    public async Task Pen_AppNotFound_WithPath_ReturnsMissingApp()
+    {
+        // Same as above but with --path instead of --at (covers the path-from-option code branch).
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--path", "10,10 20,20", "--app", "__no_such_app_9b3a__", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "Non-existent app must fail with exit code 1");
+        Assert.AreEqual(string.Empty, stdout.Trim(), "Stdout must be empty");
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain a JSON error object; got: {stderr}");
+        var error = JsonSerializer.Deserialize<JsonElement>(stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeMissingApp,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            "Non-existent --app with valid --path must return missing_app, not internal_error");
+    }
+
+    [TestMethod]
+    public async Task Touch_AppNotFound_WithAt_ReturnsMissingApp()
+    {
+        // Parity test: touch must agree with pen — both must return missing_app for a non-existent app.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "touch", "--at", "10,10", "--app", "__no_such_app_9b3a__", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "Non-existent app must fail with exit code 1");
+        Assert.AreEqual(string.Empty, stdout.Trim(), "Stdout must be empty");
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain a JSON error object; got: {stderr}");
+        var error = JsonSerializer.Deserialize<JsonElement>(stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeMissingApp,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            "Non-existent --app with valid --at must return missing_app for touch (parity with pen)");
+    }
+
+    [TestMethod]
+    public async Task PenAndTouch_NoTarget_AppNotFound_BothReturnInvalidArguments()
+    {
+        // When both the target and the app are missing/invalid, the target-required check fires
+        // first (before session resolution), so both pen and touch return invalid_arguments,
+        // not missing_app. This verifies the ordering is consistent across the two commands.
+        var (_, penStderr, penExit) = await InvokeProgramAsync(
+            ["ui", "pen", "--app", "__no_such_app_9b3a__", "--json"]); // no --at/--path/selector
+        var (_, touchStderr, touchExit) = await InvokeProgramAsync(
+            ["ui", "touch", "--gesture", "tap", "--app", "__no_such_app_9b3a__", "--json"]); // no --at/selector
+
+        Assert.AreEqual(1, penExit, "Pen must exit 1 with no target");
+        Assert.AreEqual(1, touchExit, "Touch must exit 1 with no target");
+
+        int penJsonStart = penStderr.IndexOf('{');
+        Assert.IsTrue(penJsonStart >= 0, $"pen stderr must have JSON; got: {penStderr}");
+        var penError = JsonSerializer.Deserialize<JsonElement>(penStderr.AsSpan(penJsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            penError.GetProperty("error").GetProperty("code").GetString(),
+            "Pen with no target must return invalid_arguments (target check before session resolution)");
+
+        int touchJsonStart = touchStderr.IndexOf('{');
+        Assert.IsTrue(touchJsonStart >= 0, $"touch stderr must have JSON; got: {touchStderr}");
+        var touchError = JsonSerializer.Deserialize<JsonElement>(touchStderr.AsSpan(touchJsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            touchError.GetProperty("error").GetProperty("code").GetString(),
+            "Touch with no target must return invalid_arguments (parity with pen)");
+    }
+
+    // -------------------------------------------------------------------------
+    // M2 (round-10) — single-dash typo bridge is gated by IsUiDescendant
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task JsonBridge_SingleDashTypo_NonUiCommand_NoNestedUiSchema()
+    {
+        // M2 regression: a single-dash typo on a non-UI command with --json must NOT receive
+        // the nested UI {"error":{"code":"...","message":"..."}} schema. Before the fix the
+        // IsUiDescendant gate was absent from the typo path, so cert info got the wrong schema.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["cert", "info", "file.pfx", "-password", "x", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "Single-dash typo must exit 1");
+
+        // Structural check (robust against formatted JSON whitespace differences — M4 fix applied).
+        static bool HasNestedUiErrorSchema(string text)
+        {
+            var idx = text.IndexOf('{');
+            if (idx < 0) { return false; }
+            try
+            {
+                var el = JsonSerializer.Deserialize<JsonElement>(text.AsSpan(idx).TrimEnd());
+                return el.ValueKind == JsonValueKind.Object
+                    && el.TryGetProperty("error", out var errProp)
+                    && errProp.ValueKind == JsonValueKind.Object
+                    && errProp.TryGetProperty("code", out _);
+            }
+            catch { return false; }
+        }
+
+        Assert.IsFalse(HasNestedUiErrorSchema(stdout),
+            $"Non-ui single-dash typo must NOT emit nested UI schema on stdout; got: {stdout}");
+        Assert.IsFalse(HasNestedUiErrorSchema(stderr),
+            $"Non-ui single-dash typo must NOT emit nested UI schema on stderr; got: {stderr}");
+    }
+
+    [TestMethod]
+    public async Task JsonBridge_SingleDashTypo_UiCommand_StillGetsNestedSchema()
+    {
+        // M2 regression guard: a single-dash typo on a ui command must still get the nested schema.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "-pressure", "0.5", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "Single-dash typo must exit 1");
+        Assert.AreEqual(string.Empty, stdout.Trim(), "Stdout must be empty");
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0,
+            $"ui command single-dash typo must still get nested UI schema; got stderr: {stderr}");
+        var error = JsonSerializer.Deserialize<JsonElement>(stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            "ui pen single-dash typo must return invalid_arguments in nested schema");
     }
 }

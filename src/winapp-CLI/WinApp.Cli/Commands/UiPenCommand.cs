@@ -275,8 +275,8 @@ internal class UiPenCommand : Command, IShortDescription
                 }
 
                 // M6: narrow the injection_unsupported catch to only the actual injection call so that
-                // pre-injection failures (session resolution, element not found, etc.) are NOT
-                // mis-classified as injection_unsupported — they surface through GenericError instead.
+                // pre-injection failures (element not found, etc.) are NOT mis-classified as
+                // injection_unsupported. Session resolution failures surface as missing_app (outer catch).
                 try
                 {
                     pointerInput.Pen(path, pressure, tiltX, tiltY, eraser, durationMs);
@@ -320,6 +320,15 @@ internal class UiPenCommand : Command, IShortDescription
             {
                 logger.LogDebug("COM error: {HResult} {StackTrace}", comEx.HResult, comEx.StackTrace);
                 UiErrors.StaleElement(logger, json);
+                return 1;
+            }
+            catch (InvalidOperationException ioEx)
+            {
+                // Session resolution failure — the requested app was not found. Injection IOE is
+                // already caught by the inner try/catch (returns 1 without re-throwing), so the only
+                // InvalidOperationException that reaches here is from ResolveSessionAsync.
+                logger.LogError("{Symbol} {Message}", UiSymbols.Error, ioEx.Message);
+                UiJsonError.Emit(json, UiJsonError.CodeMissingApp, ioEx.Message);
                 return 1;
             }
             catch (Exception ex)

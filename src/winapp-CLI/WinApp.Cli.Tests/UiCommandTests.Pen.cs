@@ -254,4 +254,38 @@ public partial class UiCommandTests
         Assert.IsTrue(_fakeUia.WindowRectCalls.Count >= 1);
         Assert.AreEqual(0, _fakeForeground.Calls.Count);
     }
+
+    [TestMethod]
+    public async Task Pen_NonDefaultPressureAndTilt_PassedThroughToInjector()
+    {
+        // M5 success-path coverage: non-default --pressure and --tilt-x/--tilt-y values must
+        // reach the injector unchanged and appear in the success JSON envelope. Safe to run
+        // without a live injection target because FakePointerInput records the call rather than
+        // issuing real synthetic-pointer input.
+        _fakeSession.SessionResult.WindowHandle = 5500;
+
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "100,100",
+             "--pressure", "0.8", "--tilt-x", "30", "--tilt-y", "-15",
+             "--json"]);
+
+        Assert.AreEqual(0, exitCode, "Non-default pressure/tilt values must succeed");
+        Assert.AreEqual(1, _fakePointer.PenCalls.Count, "Exactly one pen call must be recorded");
+
+        var call = _fakePointer.PenCalls[0];
+        Assert.AreEqual(0.8f, call.Pressure, 0.001f, "Non-default --pressure must reach the injector");
+        Assert.AreEqual(30, call.TiltX, "--tilt-x must reach the injector");
+        Assert.AreEqual(-15, call.TiltY, "--tilt-y must reach the injector");
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual("tap", result.GetProperty("action").GetString(),
+            "Single-point pen action must be 'tap'");
+        Assert.AreEqual(0.8f, result.GetProperty("pressure").GetSingle(), 0.001f,
+            "Success JSON must carry the effective pressure");
+        Assert.AreEqual(30, result.GetProperty("tiltX").GetInt32(),
+            "Success JSON must carry the effective tiltX");
+        Assert.AreEqual(-15, result.GetProperty("tiltY").GetInt32(),
+            "Success JSON must carry the effective tiltY");
+    }
 }

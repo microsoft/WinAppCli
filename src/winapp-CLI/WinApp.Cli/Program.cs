@@ -160,10 +160,10 @@ internal static class Program
             if (typo is not null)
             {
                 var suggested = "-" + typo;
-                if (effectiveJson)
+                if (effectiveJson && IsUiDescendant(parsedArgs))
                 {
-                    // M2: single-dash typo errors must also route through the JSON bridge when
-                    // the selected command has --json and its parsed value is true.
+                    // Gate on IsUiDescendant so that non-ui commands (e.g. cert info) fall through
+                    // to default error handling instead of receiving the nested UI schema (M2).
                     UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments,
                         $"Unknown option '{typo}'. Did you mean '{suggested}'?");
                 }
