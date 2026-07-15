@@ -195,4 +195,229 @@ public class ProgramJsonBridgeTests : BaseCommandTests
         Assert.IsTrue(stderr.Contains(UiJsonError.CodeMissingApp),
             $"Expected missing_app error; got stderr: {stderr}");
     }
+
+    // -------------------------------------------------------------------------
+    // M1 — value-aware pre-scan: --json=true / --json=false spellings
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task JsonBridge_JsonEqualsTrue_ParseError_EmitsJsonEnvelope()
+    {
+        // M1: `--json=true` uses the equals-sign spelling. The pre-scan must detect it as
+        // json=true so the logger is suppressed and the bridge fires on parse error.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--json=true", "--pressure", "nope"]);
+
+        Assert.AreEqual(1, exitCode, "Parse error must exit 1");
+        Assert.AreEqual(string.Empty, stdout.Trim(), "Stdout must be empty (logger suppressed)");
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0,
+            $"--json=true must fire the bridge on parse error; got stderr: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            "JSON error.code must be 'invalid_arguments' for --json=true parse error");
+    }
+
+    [TestMethod]
+    public async Task JsonBridge_JsonEqualsTrue_MissingApp_JsonOnlyOnStderr_NoLoggerLine()
+    {
+        // M1: `--json=true` must suppress the logger (LogLevel.None) so that only the
+        // structured JSON error appears on stderr and stdout is clean.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--json=true", "--at", "100,100", "--app", "__no_such_app__"]);
+
+        Assert.AreEqual(1, exitCode, "Missing/invalid app must exit 1");
+        Assert.AreEqual(string.Empty, stdout.Trim(),
+            $"Stdout must be empty when --json=true — no logger line should contaminate stdout; got: {stdout}");
+        // A JSON error envelope must appear on stderr (runtime error, not parse error).
+        Assert.IsTrue(stderr.Contains('{'),
+            $"stderr must contain a JSON error; got: {stderr}");
+    }
+
+    [TestMethod]
+    public async Task JsonBridge_JsonFalse_Verbose_NoConflict()
+    {
+        // M1: `--json false --verbose` must NOT trigger the json/verbose conflict check.
+        // The pre-scan must correctly resolve --json as false (not true) when followed by "false".
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--json", "false", "--verbose", "--pressure", "nope"]);
+
+        Assert.AreEqual(1, exitCode, "Parse error must exit 1");
+        // Must NOT emit the conflict error.
+        Assert.IsFalse(stdout.Contains("Cannot specify both --verbose and --json"),
+            $"--json false must not trigger the --json/--verbose conflict; got stdout: {stdout}");
+        Assert.IsFalse(stderr.Contains("Cannot specify both --verbose and --json"),
+            $"--json false must not trigger the --json/--verbose conflict; got stderr: {stderr}");
+        // Must NOT emit a JSON bridge envelope (json is false).
+        Assert.IsFalse(stderr.Contains("\"error\":"),
+            $"--json false must not emit a bridge envelope; got stderr: {stderr}");
+    }
+
+    // -------------------------------------------------------------------------
+    // M3 — bridge is scoped to ui descendants only
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task JsonBridge_NonUiCommand_ParseError_NoNestedUiSchema()
+    {
+        // M3: `cert info --bogus nope --json` has a parse error. The bridge must NOT impose the
+        // UI nested schema {"error":{"code":"...","message":"..."}} on non-ui commands. The cert
+        // command uses a flat schema or default SCL error output.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["cert", "info", "--bogus", "nope", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "Parse error must exit 1");
+        // The UI nested schema must NOT appear — check neither stream contains the nested envelope.
+        var combined = stdout + stderr;
+        Assert.IsFalse(
+            combined.Contains("\"code\":") && combined.Contains("\"message\":") && combined.Contains("\"error\":{"),
+            $"Non-ui command must NOT get the nested UI error schema; combined output: {combined}");
+    }
+
+    [TestMethod]
+    public async Task JsonBridge_UiPen_ParseError_StillGetsNestedSchema()
+    {
+        // M3 regression guard: ui pen must still get the nested UI schema after the bridge is scoped.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--pressure", "nope", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "Parse error must exit 1");
+        Assert.AreEqual(string.Empty, stdout.Trim(), "Stdout must be empty");
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0,
+            $"ui pen must still get the nested UI error schema; got stderr: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            "ui pen error.code must be 'invalid_arguments'");
+    }
+
+    // -------------------------------------------------------------------------
+    // M4 — UiTouch: app-independent arg validation before missing-app check
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task Touch_UnknownGesture_NoApp_Json_EmitsInvalidArguments()
+    {
+        // M4: --gesture nope is invalid regardless of --app. Must return invalid_arguments, not missing_app.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "touch", "--gesture", "nope", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "Invalid gesture must exit 1");
+        Assert.AreEqual(string.Empty, stdout.Trim(), "Stdout must be empty");
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain JSON error; got: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            "Must return invalid_arguments (not missing_app) for unknown gesture");
+    }
+
+    [TestMethod]
+    public async Task Touch_BadAtCoord_NoApp_Json_EmitsInvalidArguments()
+    {
+        // M4: --at nope is an invalid coordinate regardless of --app. Must return invalid_arguments.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "touch", "--at", "nope", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "Invalid --at must exit 1");
+        Assert.AreEqual(string.Empty, stdout.Trim(), "Stdout must be empty");
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain JSON error; got: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            "Must return invalid_arguments (not missing_app) for bad --at coordinate");
+    }
+
+    [TestMethod]
+    public async Task Touch_TooManyFingers_NoApp_Json_EmitsInvalidArguments()
+    {
+        // M4: --fingers 99 exceeds the touch-injection contact limit. Must return invalid_arguments.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "touch", "--at", "100,100", "--fingers", "99", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "--fingers 99 must exit 1");
+        Assert.AreEqual(string.Empty, stdout.Trim(), "Stdout must be empty");
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain JSON error; got: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            "Must return invalid_arguments (not missing_app) for --fingers out of range");
+    }
+
+    [TestMethod]
+    public async Task Touch_ValidArgs_NoApp_Json_EmitsMissingApp()
+    {
+        // M4 regression guard: valid args with no app must still return missing_app.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "touch", "--at", "100,100", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "Missing app must exit 1");
+        Assert.IsTrue(stderr.Contains(UiJsonError.CodeMissingApp),
+            $"Valid args + no app must return missing_app; got stderr: {stderr}");
+        Assert.IsFalse(stderr.Contains(UiJsonError.CodeInvalidArguments),
+            $"Valid args + no app must NOT return invalid_arguments; got stderr: {stderr}");
+    }
+
+    // -------------------------------------------------------------------------
+    // M5 — UiPen: --path and --at parsing before missing-app check
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task Pen_BadPath_NoApp_Json_EmitsInvalidArguments()
+    {
+        // M5: --path nope is an invalid path regardless of --app. Must return invalid_arguments.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--path", "nope", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "Invalid --path must exit 1");
+        Assert.AreEqual(string.Empty, stdout.Trim(), "Stdout must be empty");
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain JSON error; got: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            "Must return invalid_arguments (not missing_app) for bad --path");
+    }
+
+    [TestMethod]
+    public async Task Pen_BadAt_NoApp_Json_EmitsInvalidArguments()
+    {
+        // M5: --at nope is an invalid coordinate regardless of --app. Must return invalid_arguments.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--at", "nope", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "Invalid --at must exit 1");
+        Assert.AreEqual(string.Empty, stdout.Trim(), "Stdout must be empty");
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain JSON error; got: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            "Must return invalid_arguments (not missing_app) for bad --at coordinate");
+    }
+
+    [TestMethod]
+    public async Task Pen_ValidArgs_NoApp_Json_EmitsMissingApp()
+    {
+        // M5 regression guard: valid args with no app must still return missing_app.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--at", "100,100", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "Missing app must exit 1");
+        Assert.IsTrue(stderr.Contains(UiJsonError.CodeMissingApp),
+            $"Valid args + no app must return missing_app; got stderr: {stderr}");
+        Assert.IsFalse(stderr.Contains(UiJsonError.CodeInvalidArguments),
+            $"Valid args + no app must NOT return invalid_arguments; got stderr: {stderr}");
+    }
 }

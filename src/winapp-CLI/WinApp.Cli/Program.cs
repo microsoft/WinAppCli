@@ -54,10 +54,12 @@ internal static class Program
             minimumLogLevel = LogLevel.Warning;
             quiet = true;
         }
-        if (GlobalOptionPreScan.IsFlagPresent(args, WinAppRootCommand.JsonOption.Name, WinAppRootCommand.JsonOption.Aliases))
+        // Use value-aware scan for --json so that --json=true, --json true, --json false, and
+        // --json=false are all handled correctly before a real parse is available (M1).
+        json = GlobalOptionPreScan.GetBooleanFlagValue(args, WinAppRootCommand.JsonOption.Name, WinAppRootCommand.JsonOption.Aliases);
+        if (json)
         {
             minimumLogLevel = LogLevel.None;
-            json = true;
         }
 
         if (quiet && verbose)
@@ -143,10 +145,9 @@ internal static class Program
         var parsedArgs = parseResult!;
 
         // Derive the effective JSON mode from the SELECTED command's PARSED --json value (M1).
-        // The pre-scan flag (json) is needed for early logging/first-run setup but may be wrong:
-        //   - `--json false` → pre-scan sees --json as present; parsed value is false
-        //   - commands without --json (e.g. `complete`) → pre-scan may see --json; command has no option
-        bool effectiveJson = ResolveEffectiveJson(parsedArgs, json);
+        // The pre-scan (json) is value-aware but still a heuristic; the parsed value is the truth.
+        // Reading the parsed bool works even when a different option (e.g. --pressure) failed parse.
+        bool effectiveJson = ResolveEffectiveJson(parsedArgs);
 
         // Catch single-dash typos like "-app" before invocation so the user gets a clear
         // "Did you mean --app?" message instead of System.CommandLine's confusing
@@ -183,13 +184,12 @@ internal static class Program
                 CommandInvokedEvent.Log(parsedArgs.CommandResult);
             }
 
-            // Parse-error → JSON bridge: activated only when the SELECTED command exposes --json
-            // AND its parsed value is true (effectiveJson). This guards against:
-            //   - `--json false` firing the bridge (M1)
-            //   - commands without --json (e.g. `complete`) misfiring (M1)
-            //   - single-dash-typo path bypassing the bridge (M2, handled above)
+            // Parse-error → JSON bridge: activated only when the SELECTED command exposes --json,
+            // its parsed value is true (effectiveJson), AND the command is a ui descendant (M3).
+            // Non-ui commands (e.g. cert info) use a flat {"error":"..."} schema — do not impose
+            // the UI nested contract on them; let SCL's default parse-error handling run instead.
             // M3: emit CommandCompletedEvent before the early return to keep telemetry paired.
-            if (effectiveJson && parsedArgs.Errors.Count > 0)
+            if (effectiveJson && parsedArgs.Errors.Count > 0 && IsUiDescendant(parsedArgs))
             {
                 var errorMsg = string.Join("; ", parsedArgs.Errors.Select(e => e.Message));
                 UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments, errorMsg);
@@ -218,21 +218,13 @@ internal static class Program
     }
 
     /// <summary>
-    /// Derives the effective JSON mode from the selected command's PARSED <c>--json</c> option,
-    /// rather than from the raw token pre-scan. Handles two cases the pre-scan gets wrong:
-    /// <list type="bullet">
-    ///   <item><c>--json false</c> — pre-scan sees <c>--json</c> as present; parsed value is false</item>
-    ///   <item>commands without <c>--json</c> — pre-scan may see the token but the selected command
-    ///         does not own the option (e.g. <c>complete</c>), so no bridge should fire</item>
-    /// </list>
+    /// Derives the effective JSON mode from the selected command's PARSED <c>--json</c> option.
+    /// Reading the parsed value is reliable even when a different option caused a parse error,
+    /// because System.CommandLine parses each option independently (M1).
     /// </summary>
-    private static bool ResolveEffectiveJson(System.CommandLine.ParseResult parsedArgs, bool jsonPreScan)
+    private static bool ResolveEffectiveJson(System.CommandLine.ParseResult parsedArgs)
     {
-        if (!jsonPreScan)
-        {
-            return false;
-        }
-        // Only engage the bridge when the selected (innermost) command actually owns --json.
+        // Only engage when the selected (innermost) command actually owns --json.
         var selectedCmd = parsedArgs.CommandResult.Command;
         if (!selectedCmd.Options.Contains(WinAppRootCommand.JsonOption))
         {
@@ -247,5 +239,24 @@ internal static class Program
             // If reading the parsed value fails for any reason, do not fire the bridge.
             return false;
         }
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when the selected command is the <c>ui</c> command
+    /// or any of its descendants. Used to scope the parse-error JSON bridge to ui commands
+    /// only, leaving non-ui commands (e.g. <c>cert info</c>) with their own flat error schema (M3).
+    /// </summary>
+    private static bool IsUiDescendant(System.CommandLine.ParseResult parseResult)
+    {
+        var cmd = parseResult.CommandResult.Command;
+        while (cmd is not null)
+        {
+            if (cmd.Name == "ui")
+            {
+                return true;
+            }
+            cmd = cmd.Parents.OfType<System.CommandLine.Command>().FirstOrDefault();
+        }
+        return false;
     }
 }

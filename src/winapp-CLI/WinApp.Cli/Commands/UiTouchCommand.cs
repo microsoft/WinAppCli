@@ -119,11 +119,8 @@ internal class UiTouchCommand : Command, IShortDescription
             var durationMs = parseResult.GetValue(DurationOption);
             var fingers = parseResult.GetValue(FingersOption);
 
-            if (string.IsNullOrWhiteSpace(app) && window is null)
-            {
-                UiErrors.MissingApp(logger, json);
-                return 1;
-            }
+            // All app-independent semantic validation runs BEFORE the missing-app check so that
+            // malformed argument values return invalid_arguments, not missing_app (M4 root-cause fix).
 
             if (!Gestures.TryGetValue(gestureStr, out var gesture))
             {
@@ -224,6 +221,14 @@ internal class UiTouchCommand : Command, IShortDescription
             {
                 logger.LogError("{Symbol} swipe requires --to-point x,y or --distance (combined with optional --direction).", UiSymbols.Error);
                 UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "swipe requires --to-point x,y or --distance (combined with optional --direction).");
+                return 1;
+            }
+
+            // Missing-app check runs after all argument validation so invalid arg values return
+            // invalid_arguments rather than missing_app.
+            if (string.IsNullOrWhiteSpace(app) && window is null)
+            {
+                UiErrors.MissingApp(logger, json);
                 return 1;
             }
 

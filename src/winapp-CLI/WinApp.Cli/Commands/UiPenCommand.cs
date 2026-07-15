@@ -100,7 +100,7 @@ internal class UiPenCommand : Command, IShortDescription
             var durationMs = parseResult.GetValue(DurationOption);
 
             // Semantic validation runs BEFORE the missing-app check so a malformed value
-            // produces invalid_arguments rather than missing_app (M1 root-cause fix).
+            // produces invalid_arguments rather than missing_app (M5 root-cause fix).
             if (!float.IsFinite(pressure) || pressure < 0f || pressure > 1f)
             {
                 logger.LogError("{Symbol} --pressure must be a finite number between 0.0 and 1.0. Got '{Pressure}'.", UiSymbols.Error, pressure);
@@ -124,12 +124,8 @@ internal class UiPenCommand : Command, IShortDescription
                 return 1;
             }
 
-            if (string.IsNullOrWhiteSpace(app) && window is null)
-            {
-                UiErrors.MissingApp(logger, json);
-                return 1;
-            }
-
+            // --path and --at parsing are app-independent and run before the missing-app check
+            // so invalid path/point values return invalid_arguments, not missing_app (M5).
             List<PointerPoint>? path = null;
             if (!string.IsNullOrWhiteSpace(pathStr))
             {
@@ -157,6 +153,14 @@ internal class UiPenCommand : Command, IShortDescription
             {
                 logger.LogError("{Symbol} Provide a target: a selector, --at x,y, or --path.", UiSymbols.Error);
                 UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "Provide a target: a selector, --at x,y, or --path.");
+                return 1;
+            }
+
+            // Missing-app check runs after all argument validation so invalid arg values return
+            // invalid_arguments rather than missing_app.
+            if (string.IsNullOrWhiteSpace(app) && window is null)
+            {
+                UiErrors.MissingApp(logger, json);
                 return 1;
             }
 

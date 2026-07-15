@@ -46,4 +46,63 @@ internal static class GlobalOptionPreScan
 
         return false;
     }
+
+    /// <summary>
+    /// Returns the effective boolean value of a boolean option, understanding all spellings
+    /// that System.CommandLine accepts:
+    /// <list type="bullet">
+    ///   <item><c>--json</c> (bare flag) → <see langword="true"/></item>
+    ///   <item><c>--json true</c> → <see langword="true"/></item>
+    ///   <item><c>--json false</c> → <see langword="false"/></item>
+    ///   <item><c>--json=true</c> → <see langword="true"/></item>
+    ///   <item><c>--json=false</c> → <see langword="false"/></item>
+    ///   <item>absent → <see langword="false"/> (the default)</item>
+    /// </list>
+    /// Stops scanning at the first standalone <c>--</c> separator.
+    /// </summary>
+    public static bool GetBooleanFlagValue(string[] args, string name, IEnumerable<string> aliases)
+    {
+        var aliasSet = aliases as ICollection<string> ?? aliases.ToList();
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            var token = args[i];
+            if (token == "--")
+            {
+                return false;
+            }
+
+            // --json=true / --json=false (attached value with =)
+            foreach (var n in new[] { name }.Concat(aliasSet))
+            {
+                var prefix = n + "=";
+                if (token.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    var val = token[prefix.Length..];
+                    return !val.Equals("false", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+
+            // --json / alias (bare or space-separated value)
+            if (token == name || aliasSet.Contains(token))
+            {
+                // Peek at the next token for an explicit true/false value.
+                if (i + 1 < args.Length && args[i + 1] != "--")
+                {
+                    var next = args[i + 1];
+                    if (next.Equals("false", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+                    if (next.Equals("true", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+                return true; // bare flag = true
+            }
+        }
+
+        return false; // absent = false
+    }
 }
