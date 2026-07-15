@@ -267,7 +267,7 @@ winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups
 - `--fps N` — Target frames per second (default 15).
 - `--max-edge N` — Downscale so the longest edge is at most N pixels (0 = no downscale).
 - `--capture-screen` — Capture from the screen DC (includes overlays/popups; foregrounds the window).
-- `--output <path>` — Output MP4 path. Defaults to `recording-<timestamp>.mp4` in the current directory.
+- `--output <path>` — Output MP4 path. Defaults to `recording-<timestamp>-<guid>.mp4` in the current directory.
 
 **Stop mechanisms:**
 - Interactive: **Ctrl+C** (any platform).
@@ -288,6 +288,8 @@ The liveness event on stderr lets programmatic callers know the capture loop is 
 - `element_not_found` — Selector given but no matching element found; fails immediately (no partial file written).
 - `ambiguous_selector` — A plain-text selector matched multiple elements; use a slug from the suggestions shown in the error (or from `inspect` output) to target a specific element.
 - `invalid_arguments` — Invalid option value (e.g., `--duration-sec -1` or `> 86400`).
+
+**Known limitation — windowed popups:** When you record a *specific element* (by selector) that lives inside a popup which renders in its own top-level window — e.g. a WinUI/XAML flyout, teaching tip, tooltip, or menu (`Xaml_WindowedPopupClass`) — the recorder may capture the underlying main window instead of the popup, producing blank or stale frames. Record the **whole window** (omit the selector), or use `winapp ui screenshot --capture-screen` for popup stills. Tracked in [#646](https://github.com/microsoft/winappCli/issues/646).
 
 
 Programmatically activate an element (click button, toggle checkbox, expand combo box).

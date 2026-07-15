@@ -1119,10 +1119,15 @@ winapp ui record -a "My App" btn-save-1234 -o button.mp4
 - `--fps <n>` - Frames per second to capture (default `15`).
 - `--max-edge <px>` - Downscale so the longest edge is at most this many pixels (`0` = no downscale).
 - `--capture-screen` - Capture from the screen so overlays/popups are included (may capture occluding windows).
-- `-o, --output <path>` - Output `.mp4` path (defaults to `recording-<timestamp>.mp4`).
+- `-o, --output <path>` - Output `.mp4` path (defaults to `recording-<timestamp>-<guid>.mp4`).
 
 With `--json`, emits a `UiRecordResult` envelope including the output `path`, `frames`, `width`,
 `height`, `fileSize`, `codec` (`"h264"`), and `mode` — the capture path actually used
 (`wgc`, `printwindow`, or `screen`).
+
+> **Known limitation:** recording a *specific element* inside a popup that renders in its own
+> top-level window (WinUI/XAML flyout, teaching tip, tooltip) may capture the underlying main
+> window instead. Record the whole window, or use `ui screenshot --capture-screen` for popup
+> stills. Tracked in [#646](https://github.com/microsoft/winappCli/issues/646).
 
 For full documentation, see [docs/ui-automation.md](ui-automation.md).
