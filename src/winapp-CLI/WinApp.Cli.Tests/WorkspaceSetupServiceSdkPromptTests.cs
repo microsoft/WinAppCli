@@ -81,9 +81,14 @@ public class WorkspaceSetupServiceSdkPromptTests : BaseCommandTests
         TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
 
         var service = GetRequiredService<IWorkspaceSetupService>();
-        var result = await service.SetupWorkspaceAsync(InteractiveOptions(), TestContext.CancellationToken);
+        var options = InteractiveOptions();
+        var result = await service.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         Assert.AreEqual(0, result);
+        Assert.AreEqual(
+            SdkInstallMode.None,
+            options.SdkInstallMode,
+            "Choosing \"Do not setup\" should select SdkInstallMode.None.");
     }
 
     [TestMethod]
@@ -103,9 +108,14 @@ public class WorkspaceSetupServiceSdkPromptTests : BaseCommandTests
         TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
 
         var service = GetRequiredService<IWorkspaceSetupService>();
-        var result = await service.SetupWorkspaceAsync(InteractiveOptions(), TestContext.CancellationToken);
+        var options = InteractiveOptions();
+        var result = await service.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         Assert.AreEqual(0, result);
+        Assert.AreEqual(
+            SdkInstallMode.Stable,
+            options.SdkInstallMode,
+            "Choosing the first option should select SdkInstallMode.Stable.");
         Assert.IsTrue(
             _dotnet.AddedPackages.Any(p => p.PackageName == DotNetService.WINAPP_SDK_NUGET_PACKAGE),
             "Choosing Stable should add the Windows App SDK package reference.");
@@ -137,9 +147,14 @@ public class WorkspaceSetupServiceSdkPromptTests : BaseCommandTests
         TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
 
         var service = GetRequiredService<IWorkspaceSetupService>();
-        var result = await service.SetupWorkspaceAsync(InteractiveOptions(), TestContext.CancellationToken);
+        var options = InteractiveOptions();
+        var result = await service.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         Assert.AreEqual(0, result);
+        Assert.AreEqual(
+            SdkInstallMode.None,
+            options.SdkInstallMode,
+            "When the project already references the Windows App SDK, the prompt is skipped and the mode stays None.");
         // Prompt skipped -> SDK install mode is None -> no new WinApp SDK package added.
         Assert.IsFalse(
             _dotnet.AddedPackages.Any(p => p.PackageName == DotNetService.WINAPP_SDK_NUGET_PACKAGE),
@@ -195,9 +210,14 @@ public class WorkspaceSetupServiceSdkPromptTests : BaseCommandTests
         TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
 
         var service = GetRequiredService<IWorkspaceSetupService>();
-        var result = await service.SetupWorkspaceAsync(InteractiveOptions(), TestContext.CancellationToken);
+        var options = InteractiveOptions();
+        var result = await service.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         Assert.AreEqual(0, result);
+        Assert.AreEqual(
+            SdkInstallMode.Preview,
+            options.SdkInstallMode,
+            "Choosing the second option should select SdkInstallMode.Preview.");
         Assert.IsTrue(
             _dotnet.AddedPackages.Any(p => p.PackageName == DotNetService.WINAPP_SDK_NUGET_PACKAGE),
             "Choosing Preview should add the Windows App SDK package reference.");
@@ -222,9 +242,14 @@ public class WorkspaceSetupServiceSdkPromptTests : BaseCommandTests
         TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
 
         var service = GetRequiredService<IWorkspaceSetupService>();
-        var result = await service.SetupWorkspaceAsync(InteractiveOptions(), TestContext.CancellationToken);
+        var options = InteractiveOptions();
+        var result = await service.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         Assert.AreEqual(0, result);
+        Assert.AreEqual(
+            SdkInstallMode.Experimental,
+            options.SdkInstallMode,
+            "Choosing the third option should select SdkInstallMode.Experimental.");
         Assert.IsTrue(
             _dotnet.AddedPackages.Any(p => p.PackageName == DotNetService.WINAPP_SDK_NUGET_PACKAGE),
             "Choosing Experimental should add the Windows App SDK package reference.");
@@ -248,8 +273,13 @@ public class WorkspaceSetupServiceSdkPromptTests : BaseCommandTests
         TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
 
         var service = GetRequiredService<IWorkspaceSetupService>();
-        var result = await service.SetupWorkspaceAsync(InteractiveOptions(), TestContext.CancellationToken);
+        var options = InteractiveOptions();
+        var result = await service.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         Assert.AreEqual(0, result);
+        Assert.AreEqual(
+            SdkInstallMode.None,
+            options.SdkInstallMode,
+            "Choosing \"Do not setup\" after version-fetch failures should select SdkInstallMode.None.");
     }
 }

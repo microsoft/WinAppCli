@@ -319,6 +319,10 @@ public class WorkspaceSetupServiceNativePathTests : BaseCommandTests
             new[] { BuildToolsService.WINAPP_SDK_PACKAGE, BuildToolsService.CPP_SDK_PACKAGE },
             _install.LastRequestedPackages,
             "Restore should install exactly the packages declared in winapp.yaml.");
+        // No BUILD_TOOLS pin in winapp.yaml -> the build-tools setup must force the latest version.
+        Assert.IsTrue(
+            _buildTools.EnsureBuildToolsForceLatest.Count > 0 && _buildTools.EnsureBuildToolsForceLatest[^1],
+            "With no pinned BUILD_TOOLS version, restore must force the latest build tools (forceLatest=true).");
     }
 
     [TestMethod]
@@ -336,6 +340,12 @@ public class WorkspaceSetupServiceNativePathTests : BaseCommandTests
         var result = await service.SetupWorkspaceAsync(RestoreOptions(), TestContext.CancellationToken);
 
         Assert.AreEqual(0, result);
+        // The winapp.yaml pins BUILD_TOOLS to 10.0.26100.1, so the build-tools setup must install that
+        // exact version rather than forcing the latest.
+        Assert.IsTrue(_buildTools.EnsureBuildToolsForceLatest.Count > 0, "BuildTools setup sub-task should have run.");
+        Assert.IsFalse(
+            _buildTools.EnsureBuildToolsForceLatest[^1],
+            "A pinned BUILD_TOOLS version must be installed as-is (forceLatest=false), not force the latest.");
     }
 
     [TestMethod]

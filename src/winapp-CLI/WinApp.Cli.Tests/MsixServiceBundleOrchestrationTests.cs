@@ -63,6 +63,13 @@ internal sealed class FakeBuildToolsService : IBuildToolsService
     /// </summary>
     public DirectoryInfo? BuildToolsResult { get; set; }
 
+    /// <summary>
+    /// Records the <c>forceLatest</c> argument passed to each <see cref="EnsureBuildToolsAsync"/>
+    /// call, so tests can assert whether a pinned build-tools version suppressed the force-latest
+    /// path (pinned =&gt; <c>false</c>, no pin =&gt; <c>true</c>).
+    /// </summary>
+    public List<bool> EnsureBuildToolsForceLatest { get; } = [];
+
     public FileInfo? GetBuildToolPath(string toolName)
     {
         return new FileInfo(Path.Combine(Path.GetTempPath(), toolName));
@@ -75,6 +82,7 @@ internal sealed class FakeBuildToolsService : IBuildToolsService
 
     public Task<DirectoryInfo?> EnsureBuildToolsAsync(TaskContext taskContext, bool forceLatest = false, CancellationToken cancellationToken = default)
     {
+        EnsureBuildToolsForceLatest.Add(forceLatest);
         return Task.FromResult(BuildToolsResult);
     }
 

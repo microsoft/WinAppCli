@@ -161,6 +161,11 @@ public class WorkspaceSetupServiceDotNetIntegrationTests : BaseCommandTests
 
         // Runtime install failures are surfaced as a sub-task result but do not abort setup.
         Assert.AreEqual(0, result);
+        // The error path is only genuinely exercised if the install was actually attempted: the fake
+        // records the call before throwing, so a non-empty list proves we reached (and failed) the install.
+        Assert.IsTrue(
+            _reg.InstallPackageCalls.Count > 0,
+            "The runtime MSIX install must have been attempted (and then thrown) to exercise this error path.");
     }
 
     #endregion

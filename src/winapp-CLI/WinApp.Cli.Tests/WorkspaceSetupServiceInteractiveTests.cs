@@ -94,6 +94,11 @@ public class WorkspaceSetupServiceInteractiveTests : BaseCommandTests
         var result = await service.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         Assert.AreEqual(0, result);
+        // Overwrite=Yes regenerates the workspace from fresh SDK versions, so the pinned winapp.yaml
+        // is NOT preserved: IgnoreConfig stays false and AskSdkInstallModeAsync is re-run.
+        Assert.IsFalse(
+            options.IgnoreConfig,
+            "Answering Yes to the overwrite prompt should regenerate config, leaving IgnoreConfig false.");
     }
 
     [TestMethod]
@@ -122,6 +127,11 @@ public class WorkspaceSetupServiceInteractiveTests : BaseCommandTests
         var result = await service.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         Assert.AreEqual(0, result);
+        // Overwrite=No keeps the pinned winapp.yaml versions by skipping config regeneration, which
+        // the product signals by setting IgnoreConfig=true on the options.
+        Assert.IsTrue(
+            options.IgnoreConfig,
+            "Answering No to the overwrite prompt should keep the pinned versions (IgnoreConfig=true).");
     }
 
     #endregion
