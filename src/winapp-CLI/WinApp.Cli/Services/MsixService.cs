@@ -387,13 +387,7 @@ internal partial class MsixService(
         // Clean the resolved package name to ensure it meets MSIX schema requirements
         finalPackageName = ManifestService.CleanPackageName(finalPackageName);
 
-        var defaultMsixFileName = (packageArch, extractedVersion) switch
-        {
-            (not null, not null) when !string.IsNullOrWhiteSpace(extractedVersion) => $"{finalPackageName}_{extractedVersion}_{packageArch}.msix",
-            (null, not null) when !string.IsNullOrWhiteSpace(extractedVersion) => $"{finalPackageName}_{extractedVersion}.msix",
-            (not null, _) => $"{finalPackageName}_{packageArch}.msix",
-            _ => $"{finalPackageName}.msix"
-        };
+        var defaultMsixFileName = BuildDefaultMsixFileName(finalPackageName, packageArch, extractedVersion);
 
         FileInfo outputMsixPath;
         DirectoryInfo outputFolder;
@@ -645,6 +639,20 @@ internal partial class MsixService(
 
         await buildToolsService.RunBuildToolAsync(new MakeAppxTool(), makeappxArguments, taskContext, cancellationToken: cancellationToken);
     }
+
+    /// <summary>
+    /// Builds the default MSIX output file name from the resolved package name, optional processor
+    /// architecture, and optional package version. Extracted as a pure function so the naming
+    /// convention (name[_version][_arch].msix) can be verified directly by unit tests, including the
+    /// architecture-only and versionless combinations that a real makeappx-backed flow cannot exercise.
+    /// </summary>
+    internal static string BuildDefaultMsixFileName(string finalPackageName, string? packageArch, string? extractedVersion) => (packageArch, extractedVersion) switch
+    {
+        (not null, not null) when !string.IsNullOrWhiteSpace(extractedVersion) => $"{finalPackageName}_{extractedVersion}_{packageArch}.msix",
+        (null, not null) when !string.IsNullOrWhiteSpace(extractedVersion) => $"{finalPackageName}_{extractedVersion}.msix",
+        (not null, _) => $"{finalPackageName}_{packageArch}.msix",
+        _ => $"{finalPackageName}.msix"
+    };
 
     private static void TryDeleteFile(FileInfo path)
     {

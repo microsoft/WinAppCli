@@ -741,4 +741,146 @@ public class MsixServiceRuntimeTests : BaseCommandTests
         Assert.IsTrue(invocations.Any(i => i.ToolName.Contains("makeappx", StringComparison.OrdinalIgnoreCase)),
             "makeappx should be invoked to pack the staging folder");
     }
+
+    // ---- Additional inventory / third-party / self-contained edge cases -------------
+
+    [TestMethod]
+    public void GetWindowsAppRuntimePackageInfo_IdentityWithoutUnderscore_ReturnsNull()
+    {
+        // A main (non-Framework) runtime entry whose PackageIdentity has no '_' separator
+        // cannot be split into name/version, so it is treated as "not found".
+        var msixDir = CreateMsixInventory(
+            "Microsoft.WindowsAppRuntime.1.7.msix=Microsoft.WindowsAppRuntime.1.7");
+
+        var result = InvokeGetRuntimePackageInfo(msixDir);
+
+        Assert.IsNull(result);
+    }
+
+    [TestMethod]
+    public async Task AppendThirdPartyWinRTEntries_ComponentWithoutClasses_LeavesBuilderUnchanged()
+    {
+        // Component discovered but exposes no activatable classes → skipped (continue).
+        _winmdService.Components.Add(new WinRTComponent(new FileInfo("Empty.winmd"), "Empty.dll"));
+
+        var sb = new StringBuilder();
+        await InvokeAppendThirdPartyEntriesAsync(sb, PackageListWith("Empty", "1.0.0"));
+
+        Assert.AreEqual(0, sb.Length, "A component with no activatable classes should append nothing");
+    }
+
+    [TestMethod]
+    public async Task AddThirdPartyWinRTExtensions_DuplicateDllAlreadyRegistered_Skipped()
+    {
+        _winmdService.Components.Add(new WinRTComponent(new FileInfo("Contoso.Widgets.winmd"), "Contoso.Widgets.dll"));
+        _winmdService.ClassesByWinmd["Contoso.Widgets.winmd"] = ["Contoso.Widgets.Button"];
+
+        // The manifest already registers the same DLL via a <Path> element, so the
+        // discovered component must be deduped rather than added a second time.
+        const string manifestWithDll =
+            """
+            <?xml version="1.0" encoding="utf-8"?>
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
+              <Identity Name="Contoso.App" Publisher="CN=Contoso" Version="1.0.0.0" ProcessorArchitecture="x64" />
+              <Applications>
+                <Application Id="App">
+                  <Extensions>
+                    <Extension Category="windows.activatableClass.inProcessServer">
+                      <InProcessServer>
+                        <Path>Contoso.Widgets.dll</Path>
+                      </InProcessServer>
+                    </Extension>
+                  </Extensions>
+                </Application>
+              </Applications>
+            </Package>
+            """;
+
+        var result = await InvokeAddThirdPartyExtensionsAsync(manifestWithDll, PackageListWith("Contoso.Widgets", "2.0.0"));
+
+        var occurrences = result.Split("Contoso.Widgets.dll").Length - 1;
+        Assert.AreEqual(1, occurrences, "Already-registered DLL must not be added a second time");
+    }
+
+    [TestMethod]
+    public async Task SetupSelfContainedAsync_EmptyMsixToolsDirectory_DoesNotStageRuntime()
+    {
+        // tools/MSIX/win10-{arch} exists but is empty (no inventory, no .msix files), so the
+        // file-pattern fallback finds nothing and throws (swallowed by the sub-task wrapper).
+        var arch = WorkspaceSetupService.GetSystemArchitecture();
+        var cacheDir = GetRequiredService<INugetService>().GetNuGetGlobalPackagesDir();
+        Directory.CreateDirectory(Path.Combine(cacheDir.FullName, SdkPackageId.ToLowerInvariant(), "1.6.0", "tools", "MSIX", $"win10-{arch}"));
+        var winappDir = GetRequiredService<IWinappDirectoryService>().GetLocalWinappDirectory();
+
+        await _msixService.SetupSelfContainedAsync(winappDir, arch, TestTaskContext, PackageListWith(SdkPackageId, "1.6.0"), TestContext.CancellationToken);
+
+        var deploymentDir = Path.Combine(winappDir.FullName, "self-contained", arch, "deployment");
+        Assert.IsFalse(Directory.Exists(deploymentDir), "No runtime files should be staged when the MSIX tools directory is empty");
+    }
+
+    [TestMethod]
+    public async Task SetupSelfContainedAsync_PreExistingExtractedDirectory_Recreated()
+    {
+        var arch = ArrangeRuntimeMsixPackage("1.6.0", "Microsoft.WindowsAppRuntime.1.6.msix", withInventory: true, "Microsoft.Foo.dll");
+        var winappDir = GetRequiredService<IWinappDirectoryService>().GetLocalWinappDirectory();
+
+        // Pre-create the extracted directory with a stale file so the "delete existing" branch runs.
+        var extractedDir = Directory.CreateDirectory(Path.Combine(winappDir.FullName, "self-contained", arch, "extracted"));
+        var staleFile = Path.Combine(extractedDir.FullName, "stale.txt");
+        await File.WriteAllTextAsync(staleFile, "stale", TestContext.CancellationToken);
+
+        await _msixService.SetupSelfContainedAsync(winappDir, arch, TestTaskContext, PackageListWith(SdkPackageId, "1.6.0"), TestContext.CancellationToken);
+
+        Assert.IsFalse(File.Exists(staleFile), "Pre-existing extracted directory should be recreated (stale contents removed)");
+        var deploymentDir = Path.Combine(winappDir.FullName, "self-contained", arch, "deployment");
+        Assert.IsTrue(File.Exists(Path.Combine(deploymentDir, "Microsoft.Foo.dll")));
+    }
+
+    [TestMethod]
+    public async Task PackSingleFolderToMsix_MSBuildManifestWithRecipe_CopiesFromRecipe()
+    {
+        var arch = WorkspaceSetupService.GetSystemArchitecture();
+        var inputFolder = _tempDirectory.CreateSubdirectory("recipe-input");
+        await File.WriteAllTextAsync(Path.Combine(inputFolder.FullName, "App.exe"), "MZ", TestContext.CancellationToken);
+
+        // MSBuild-generated manifest (build:Metadata makepri.exe) so the recipe path is taken.
+        var manifest =
+            $"""
+            <?xml version="1.0" encoding="utf-8"?>
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                     xmlns:build="http://schemas.microsoft.com/developer/appx/2015/build">
+              <Identity Name="Contoso.App" Publisher="CN=Contoso" Version="1.0.0.0" ProcessorArchitecture="{arch}" />
+              <Applications>
+                <Application Id="App" Executable="App.exe" />
+              </Applications>
+              <build:Metadata>
+                <build:Item Name="makepri.exe" Version="10.0.0.0" />
+              </build:Metadata>
+            </Package>
+            """;
+        var srcManifest = new FileInfo(Path.Combine(inputFolder.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, manifest, TestContext.CancellationToken);
+
+        // A .build.appxrecipe listing the manifest + exe with their package paths.
+        var recipe = new StringBuilder();
+        recipe.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+        recipe.AppendLine("<Project xmlns=\"http://schemas.microsoft.com/developer/msbuild/2003\">");
+        recipe.AppendLine("  <ItemGroup>");
+        recipe.AppendLine($"    <AppXManifest Include=\"{srcManifest.FullName}\"><PackagePath>appxmanifest.xml</PackagePath></AppXManifest>");
+        recipe.AppendLine($"    <AppxPackagedFile Include=\"{Path.Combine(inputFolder.FullName, "App.exe")}\"><PackagePath>App.exe</PackagePath></AppxPackagedFile>");
+        recipe.AppendLine("  </ItemGroup>");
+        recipe.AppendLine("</Project>");
+        await File.WriteAllTextAsync(Path.Combine(inputFolder.FullName, "App.build.appxrecipe"), recipe.ToString(), TestContext.CancellationToken);
+
+        var outputMsix = new FileInfo(Path.Combine(_tempDirectory.CreateSubdirectory("recipe-out").FullName, "app.msix"));
+
+        await (Task)PackSingleFolderMethod.Invoke(_msixService, [
+            inputFolder, manifest, srcManifest, outputMsix, TestTaskContext,
+            false /*selfContained*/, "App.exe" /*executable*/, arch /*targetArch*/,
+            true /*skipPri*/, PackageListWith(SdkPackageId, "1.6.0"), CancellationToken.None])!;
+
+        outputMsix.Refresh();
+        Assert.IsTrue(outputMsix.Exists, "makeappx should have produced the .msix from the recipe-staged layout");
+        Assert.IsTrue(File.Exists(Path.Combine(inputFolder.FullName, "App.build.appxrecipe")), "recipe input remains");
+    }
 }

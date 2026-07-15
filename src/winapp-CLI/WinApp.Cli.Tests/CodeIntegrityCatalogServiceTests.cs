@@ -4,6 +4,7 @@
 using Microsoft.Extensions.Logging;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
+using Windows.Win32;
 
 namespace WinApp.Cli.Tests;
 
@@ -498,6 +499,55 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
         // Skip mode must return before collecting/regenerating, leaving the file untouched.
         // (If Skip were ignored, the empty input directory would throw InvalidOperationException.)
         Assert.AreEqual("SENTINEL", File.ReadAllText(outputPath));
+    }
+
+    [TestMethod]
+    public void CollectExecutableFiles_WhitespaceDirectoryEntry_IsSkipped()
+    {
+        var method = typeof(CodeIntegrityCatalogService).GetMethod(
+            "CollectExecutableFiles", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+
+        var result = (List<string>)method.Invoke(
+            _codeIntegrityCatalogService,
+            [new List<string> { "   " }, SearchOption.TopDirectoryOnly])!;
+
+        Assert.AreEqual(0, result.Count, "Whitespace-only directory entries must be skipped, not enumerated");
+    }
+
+    [TestMethod]
+    public void DescribeCatalogErrorArea_KnownAndUnknownAreas_MapToExpectedText()
+    {
+        Assert.AreEqual("The header section of the CDF",
+            CodeIntegrityCatalogService.DescribeCatalogErrorArea(PInvoke.CRYPTCAT_E_AREA_HEADER));
+        Assert.AreEqual("A member file entry in the CatalogFiles section of the CDF",
+            CodeIntegrityCatalogService.DescribeCatalogErrorArea(PInvoke.CRYPTCAT_E_AREA_MEMBER));
+        Assert.AreEqual("An attribute entry in the CDF",
+            CodeIntegrityCatalogService.DescribeCatalogErrorArea(PInvoke.CRYPTCAT_E_AREA_ATTRIBUTE));
+        StringAssert.Contains(CodeIntegrityCatalogService.DescribeCatalogErrorArea(0xDEAD), "Unknown");
+    }
+
+    [TestMethod]
+    public void DescribeCatalogLocalError_KnownAndUnknownErrors_MapToExpectedText()
+    {
+        Assert.AreEqual("The member file name or path is missing.",
+            CodeIntegrityCatalogService.DescribeCatalogLocalError(PInvoke.CRYPTCAT_E_CDF_MEMBER_FILE_PATH));
+        Assert.AreEqual("The function failed to create a hash of the member subject.",
+            CodeIntegrityCatalogService.DescribeCatalogLocalError(PInvoke.CRYPTCAT_E_CDF_MEMBER_INDIRECTDATA));
+        Assert.AreEqual("The function failed to find the member file.",
+            CodeIntegrityCatalogService.DescribeCatalogLocalError(PInvoke.CRYPTCAT_E_CDF_MEMBER_FILENOTFOUND));
+        Assert.AreEqual("The function failed to convert the subject string to a GUID.",
+            CodeIntegrityCatalogService.DescribeCatalogLocalError(PInvoke.CRYPTCAT_E_CDF_BAD_GUID_CONV));
+        Assert.AreEqual("The attribute contains an invalid OID, or the combination of type, name or OID, and value is not valid.",
+            CodeIntegrityCatalogService.DescribeCatalogLocalError(PInvoke.CRYPTCAT_E_CDF_ATTR_TYPECOMBO));
+        Assert.AreEqual("The attribute line is missing one or more elements of its composition including type, object identifier (OID) or name, or value.",
+            CodeIntegrityCatalogService.DescribeCatalogLocalError(PInvoke.CRYPTCAT_E_CDF_ATTR_TOOFEWVALUES));
+        Assert.AreEqual("The function does not support the attribute.",
+            CodeIntegrityCatalogService.DescribeCatalogLocalError(PInvoke.CRYPTCAT_E_CDF_UNSUPPORTED));
+        Assert.AreEqual("The file member already exists.",
+            CodeIntegrityCatalogService.DescribeCatalogLocalError(PInvoke.CRYPTCAT_E_CDF_DUPLICATE));
+        Assert.AreEqual("The CatalogHeader or Name tag is missing.",
+            CodeIntegrityCatalogService.DescribeCatalogLocalError(PInvoke.CRYPTCAT_E_CDF_TAGNOTFOUND));
+        StringAssert.Contains(CodeIntegrityCatalogService.DescribeCatalogLocalError(0xBEEF), "Unknown");
     }
 
     #endregion
