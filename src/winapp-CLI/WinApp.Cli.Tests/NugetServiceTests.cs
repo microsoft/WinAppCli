@@ -976,5 +976,43 @@ public class NugetServiceTests : BaseCommandTests
         }
     }
 
+    [TestMethod]
+    public async Task GetLatestVersionAsync_PackageMatchesNoMappingPattern_ReportsMissingMapping()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            // The version-resolution path (init/update) must give the same actionable mapping guidance as
+            // the download and dependency paths when no source is eligible, instead of a generic
+            // "verify package ID / sources / credentials" message.
+            WriteNuGetConfig(root, """
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                  <packageSources>
+                    <clear />
+                    <add key="alpha" value="alpha-feed" />
+                  </packageSources>
+                  <packageSourceMapping>
+                    <clear />
+                    <packageSource key="alpha">
+                      <package pattern="Contoso.*" />
+                    </packageSource>
+                  </packageSourceMapping>
+                </configuration>
+                """);
+
+            var service = CreateServiceRootedAt(root);
+
+            var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                async () => await service.GetLatestVersionAsync("Unmapped.Package", SdkInstallMode.Stable, TestContext.CancellationToken));
+
+            StringAssert.Contains(ex.Message, "no <packageSourceMapping> pattern maps 'Unmapped.Package'", StringComparison.Ordinal);
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
     #endregion
 }

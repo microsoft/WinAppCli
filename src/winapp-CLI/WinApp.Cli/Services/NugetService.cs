@@ -535,8 +535,11 @@ internal class NugetService(
     }
 
     /// <summary>
-    /// Fetches all listed (non-unlisted) versions of a package, aggregated across every enabled
-    /// package source. Unlisted versions are excluded so they are never selected as "latest".
+    /// Fetches all listed (non-unlisted) versions of a package from every source eligible to serve it
+    /// (honoring <c>&lt;packageSourceMapping&gt;</c>). Unlisted versions are excluded so they are never
+    /// selected as "latest". Because the result feeds a MAX ("latest") decision, a source that cannot be
+    /// queried is treated as fatal rather than silently skipped: a partial result could otherwise make a
+    /// caller select an older version (e.g. <c>update</c> could downgrade a pinned package).
     /// </summary>
     private async Task<List<string>> GetListedVersionsAsync(string packageName, CancellationToken cancellationToken)
     {
@@ -547,7 +550,8 @@ internal class NugetService(
         string? lastErrorSource = null;
         using var cacheContext = new SourceCacheContext();
 
-        foreach (var repo in GetRepositoriesForPackage(packageName))
+        var repos = GetRepositoriesForPackage(packageName);
+        foreach (var repo in repos)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -587,14 +591,24 @@ internal class NugetService(
             }
         }
 
-        if (versions.Count == 0 && lastError != null)
+        // "Latest" is a MAX across sources, so a source we could not reach/authenticate would lower that
+        // max and could cause a downgrade or a missed update. If any eligible source failed, surface it
+        // (naming the source) instead of returning a partial, non-authoritative result. Inline the inner
+        // message because top-level command handlers print only ex.Message.
+        if (lastError != null)
         {
-            // Inline the underlying source error in the message rather than only wrapping it: top-level
-            // command handlers print ex.Message, so 401/403/network detail carried by the inner exception
-            // would otherwise be invisible to the user.
             throw new InvalidOperationException(
-                $"No versions found for {packageName}. Last error from source '{lastErrorSource}': {lastError.Message}",
+                $"Could not reliably determine the versions of {packageName}: source '{lastErrorSource}' could not be queried: {lastError.Message}",
                 lastError);
+        }
+
+        // No source was eligible at all: give the same actionable guidance as the download/dependency
+        // paths (missing mapping vs. disabled mapped source vs. no sources configured) rather than letting
+        // the caller fall back to a generic "verify package ID / sources / credentials" message.
+        if (repos.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"Cannot resolve versions for {packageName}: {DescribeNoEligibleSources(packageName)}.");
         }
 
         return [.. versions];

@@ -63,7 +63,11 @@ internal class UpdateCommand : Command, IShortDescription
                                     {
                                         var latestVersion = await nugetService.GetLatestVersionAsync(package.Name, setupSdks, cancellationToken);
 
-                                        if (latestVersion != package.Version)
+                                        // Only advance to a strictly greater version. Comparing by value
+                                        // (not string inequality) avoids two hazards: a normalized-but-equal
+                                        // version (e.g. "1.0" vs "1.0.0") spuriously counting as an update,
+                                        // and a lower "latest" ever silently downgrading the pinned version.
+                                        if (NugetService.CompareVersions(latestVersion, package.Version) > 0)
                                         {
                                             taskContext.AddStatusMessage($"{UiSymbols.Rocket} {package.Name}: {package.Version} → {latestVersion}");
                                             updatedConfig.SetVersion(package.Name, latestVersion);
@@ -71,7 +75,7 @@ internal class UpdateCommand : Command, IShortDescription
                                         }
                                         else
                                         {
-                                            taskContext.AddDebugMessage($"{UiSymbols.Check} {package.Name}: already latest ({latestVersion})");
+                                            taskContext.AddDebugMessage($"{UiSymbols.Check} {package.Name}: already up to date ({package.Version})");
                                             updatedConfig.SetVersion(package.Name, package.Version);
                                         }
                                     }
