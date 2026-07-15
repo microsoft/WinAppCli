@@ -27,6 +27,17 @@ internal class FakeDotNetService : IDotNetService
     public DotNetPackageListJson? PackageListResult { get; set; }
 
     /// <summary>
+    /// When true, <see cref="GetPackageListAsync"/> throws, simulating a failure of
+    /// <c>dotnet list package --format json</c> (e.g. a project that fails to restore).
+    /// </summary>
+    public bool ThrowOnGetPackageList { get; set; }
+
+    /// <summary>
+    /// Number of times <see cref="GetPackageListAsync"/> has been invoked.
+    /// </summary>
+    public int GetPackageListCallCount { get; private set; }
+
+    /// <summary>
     /// Packages listed here will cause <see cref="AddOrUpdatePackageReferenceAsync"/> to throw,
     /// simulating failures from <c>dotnet add package</c>.
     /// </summary>
@@ -75,6 +86,13 @@ internal class FakeDotNetService : IDotNetService
 
     public Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, CancellationToken cancellationToken = default)
     {
+        GetPackageListCallCount++;
+
+        if (ThrowOnGetPackageList)
+        {
+            throw new InvalidOperationException("Simulated dotnet list package failure.");
+        }
+
         return Task.FromResult(PackageListResult);
     }
 

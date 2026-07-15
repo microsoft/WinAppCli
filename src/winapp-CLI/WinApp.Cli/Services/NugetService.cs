@@ -13,7 +13,13 @@ namespace WinApp.Cli.Services;
 
 internal partial class NugetService(IWinappDirectoryService winappDirectoryService) : INugetService
 {
-    private static readonly HttpClient Http = new();
+    private static readonly HttpClient SharedHttp = new();
+
+    // Test seam: HttpClient used for all NuGet REST calls (flat container + registration
+    // API). Defaults to a shared production client; tests assign one backed by a fake
+    // handler to exercise download / version / dependency flows offline. This is the
+    // network boundary — production behavior is unchanged.
+    internal HttpClient Http { get; set; } = SharedHttp;
     private const string FlatIndex = "https://api.nuget.org/v3-flatcontainer";
     private const string RegistrationIndex = "https://api.nuget.org/v3/registration5-semver1";
     private static readonly ConcurrentDictionary<string, Dictionary<string, string>> DependencyCache = new(StringComparer.OrdinalIgnoreCase);
@@ -301,7 +307,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
     /// The flat container index does not distinguish between listed and unlisted versions,
     /// so we use the registration endpoint which includes a "listed" property.
     /// </summary>
-    private static async Task<List<string>> GetListedVersionsAsync(string packageName, CancellationToken cancellationToken)
+    private async Task<List<string>> GetListedVersionsAsync(string packageName, CancellationToken cancellationToken)
     {
         var url = $"{RegistrationIndex}/{packageName.ToLowerInvariant()}/index.json";
         using var resp = await Http.GetAsync(url, cancellationToken);
@@ -409,7 +415,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
         return new Dictionary<string, string>(allDeps, StringComparer.OrdinalIgnoreCase);
     }
 
-    private static async Task<Dictionary<string, string>> FetchDirectDependenciesAsync(string packageName, string version, CancellationToken cancellationToken)
+    private async Task<Dictionary<string, string>> FetchDirectDependenciesAsync(string packageName, string version, CancellationToken cancellationToken)
     {
         var dependencies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
