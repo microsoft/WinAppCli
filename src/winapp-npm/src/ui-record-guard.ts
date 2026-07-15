@@ -27,6 +27,25 @@ import type { UiRecordOptions as GeneratedUiRecordOptions, WinappResult } from '
  */
 export type UiRecordOptions = Omit<GeneratedUiRecordOptions, 'durationSec'> & { durationSec: number };
 
+type UiRecordArgSpec = {
+  property: keyof UiRecordOptions;
+  flag: string;
+  kind: 'boolean' | 'value';
+};
+
+export const UI_RECORD_ARG_SPECS: readonly UiRecordArgSpec[] = [
+  { property: 'app', flag: '--app', kind: 'value' },
+  { property: 'captureScreen', flag: '--capture-screen', kind: 'boolean' },
+  { property: 'durationSec', flag: '--duration-sec', kind: 'value' },
+  { property: 'fps', flag: '--fps', kind: 'value' },
+  { property: 'json', flag: '--json', kind: 'boolean' },
+  { property: 'maxEdge', flag: '--max-edge', kind: 'value' },
+  { property: 'output', flag: '--output', kind: 'value' },
+  { property: 'window', flag: '--window', kind: 'value' },
+  { property: 'quiet', flag: '--quiet', kind: 'boolean' },
+  { property: 'verbose', flag: '--verbose', kind: 'boolean' },
+] as const;
+
 /**
  * Builds the CLI argument list for `ui record` from a validated options object.
  * Named options are placed before the positional selector, and the selector is
@@ -38,17 +57,14 @@ export type UiRecordOptions = Omit<GeneratedUiRecordOptions, 'durationSec'> & { 
  */
 export function buildUiRecordArgs(options: UiRecordOptions): string[] {
   const args: string[] = ['ui', 'record'];
-  if (options.app) args.push('--app', options.app);
-  if (options.captureScreen) args.push('--capture-screen');
-  // durationSec is always set and > 0 (guarded by callers)
-  args.push('--duration-sec', options.durationSec.toString());
-  if (options.fps !== undefined) args.push('--fps', options.fps.toString());
-  if (options.json) args.push('--json');
-  if (options.maxEdge !== undefined) args.push('--max-edge', options.maxEdge.toString());
-  if (options.output) args.push('--output', options.output);
-  if (options.window !== undefined) args.push('--window', options.window.toString());
-  if (options.quiet) args.push('--quiet');
-  if (options.verbose) args.push('--verbose');
+  for (const spec of UI_RECORD_ARG_SPECS) {
+    const value = options[spec.property];
+    if (spec.kind === 'boolean') {
+      if (value) args.push(spec.flag);
+    } else if (value !== undefined && value !== '') {
+      args.push(spec.flag, value.toString());
+    }
+  }
   // Place the positional selector AFTER '--' so a selector like '--capture-screen' is
   // not misinterpreted as a CLI flag.
   if (options.selector) {

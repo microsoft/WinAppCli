@@ -9,8 +9,11 @@
 
 import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
-import { uiRecord, buildUiRecordArgs, _uiRecordWithCapture } from '../src/ui-record-guard';
+import { uiRecord, buildUiRecordArgs, _uiRecordWithCapture, UI_RECORD_ARG_SPECS } from '../src/ui-record-guard';
+import { uiRecord as publicUiRecord, default as publicPackage } from '../src/index';
 import type { UiRecordOptions } from '../src/ui-record-guard';
 
 // ---------------------------------------------------------------------------
@@ -256,6 +259,36 @@ test('uiRecord(null) throws documented range error, not raw TypeError', async ()
   );
 });
 
+test('public package entrypoint exposes guarded uiRecord', async () => {
+  assert.equal(publicUiRecord, publicPackage.uiRecord, 'default export must use the guarded uiRecord entrypoint');
+  await assert.rejects(
+    () => publicUiRecord({ durationSec: 0 }),
+    (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.ok(err.message.includes('durationSec'), `error should come from guarded public entrypoint: ${err.message}`);
+      return true;
+    }
+  );
+});
+
+test('buildUiRecordArgs stays in sync with generated ui record options', () => {
+  const generatedPath = path.resolve(process.cwd(), 'src', 'winapp-commands.ts');
+  const source = fs.readFileSync(generatedPath, 'utf8');
+  const match = source.match(/export interface UiRecordOptions extends CommonOptions \{([\s\S]*?)\n\}/);
+  assert.ok(match, 'generated UiRecordOptions interface must be present');
+
+  const generatedOptions = [...match[1].matchAll(/^\s+([a-zA-Z][a-zA-Z0-9]*)\??:/gm)]
+    .map((m) => m[1])
+    .sort();
+  const wrapperOptions = [
+    ...UI_RECORD_ARG_SPECS.map((spec) => spec.property).filter((property) => property !== 'quiet' && property !== 'verbose'),
+    'selector',
+  ].sort();
+  assert.deepEqual(wrapperOptions, generatedOptions);
+  assert.ok(UI_RECORD_ARG_SPECS.some((spec) => spec.property === 'quiet'), 'wrapper must still forward CommonOptions.quiet');
+  assert.ok(UI_RECORD_ARG_SPECS.some((spec) => spec.property === 'verbose'), 'wrapper must still forward CommonOptions.verbose');
+});
+
 
 
 test('uiRecord with NaN durationSec throws', async () => {
@@ -315,4 +348,3 @@ test('uiRecord with durationSec = 1 (minimum valid) proceeds to capture', async 
   );
   assert.equal(captureCalledWith.length, 1, 'capture must be called exactly once for valid durationSec=1');
 });
-
