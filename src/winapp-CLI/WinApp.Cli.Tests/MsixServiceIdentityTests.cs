@@ -890,7 +890,7 @@ internal sealed class ScriptedMtBuildToolsService : IBuildToolsService
     private static readonly Regex MtOutRegex =
         new("-out:?\\s*\"(?<path>[^\"]+)\"", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    private readonly FakeBuildToolsService _inner = new();
+    private readonly FakeBuildToolsService _inner = new() { Handler = FakeBuildToolsService.EmulateSdkToolOutput };
 
     /// <summary>Recorded mt.exe argument strings.</summary>
     public List<string> MtInvocations { get; } = [];

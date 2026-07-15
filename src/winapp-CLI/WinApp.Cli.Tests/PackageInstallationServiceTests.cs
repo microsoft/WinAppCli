@@ -21,7 +21,7 @@ public class PackageInstallationServiceTests
     private DirectoryInfo _cacheDir = null!;
     private DirectoryInfo _rootDir = null!;
     private FakeConfigService _config = null!;
-    private ControllableNugetService _nuget = null!;
+    private FakeNugetService _nuget = null!;
     private PackageInstallationService _service = null!;
     private TaskContext _taskContext = null!;
 
@@ -33,7 +33,7 @@ public class PackageInstallationServiceTests
         _cacheDir = _tempDir.CreateSubdirectory("cache");
         _rootDir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "root"));
         _config = new FakeConfigService();
-        _nuget = new ControllableNugetService(_cacheDir);
+        _nuget = new FakeNugetService { CacheDirectory = _cacheDir };
         _service = new PackageInstallationService(_config, _nuget, NullLogger<PackageInstallationService>.Instance);
 
         var task = new GroupableTask("test", null);
@@ -83,14 +83,14 @@ public class PackageInstallationServiceTests
     [TestMethod]
     public async Task EnsurePackageAsync_Success_ReturnsTrue_AndCreatesWorkspace()
     {
-        _nuget.LatestVersion = "1.6.0";
+        _nuget.DefaultVersion = "1.6.0";
 
         var ok = await _service.EnsurePackageAsync(_rootDir, "Pkg.X", _taskContext);
 
         Assert.IsTrue(ok);
         _rootDir.Refresh();
         Assert.IsTrue(_rootDir.Exists);
-        CollectionAssert.Contains(_nuget.Installed, ("Pkg.X", "1.6.0"));
+        CollectionAssert.Contains(_nuget.InstalledPackages, ("Pkg.X", "1.6.0"));
     }
 
     [TestMethod]
@@ -99,8 +99,8 @@ public class PackageInstallationServiceTests
         var ok = await _service.EnsurePackageAsync(_rootDir, "Pkg.X", _taskContext, version: "2.0.0");
 
         Assert.IsTrue(ok);
-        CollectionAssert.DoesNotContain(_nuget.QueriedLatest, "Pkg.X");
-        CollectionAssert.Contains(_nuget.Installed, ("Pkg.X", "2.0.0"));
+        CollectionAssert.DoesNotContain(_nuget.QueriedPackages, "Pkg.X");
+        CollectionAssert.Contains(_nuget.InstalledPackages, ("Pkg.X", "2.0.0"));
     }
 
     [TestMethod]
@@ -111,13 +111,13 @@ public class PackageInstallationServiceTests
         var ok = await _service.EnsurePackageAsync(_rootDir, "Pkg.X", _taskContext, version: "3.0.0");
 
         Assert.IsTrue(ok);
-        Assert.AreEqual(0, _nuget.Installed.Count, "Package already present; no install should occur.");
+        Assert.AreEqual(0, _nuget.InstalledPackages.Count, "Package already present; no install should occur.");
     }
 
     [TestMethod]
     public async Task EnsurePackageAsync_NugetThrows_ReturnsFalse()
     {
-        _nuget.ThrowOnGetLatestFor.Add("Pkg.Bad");
+        _nuget.PackagesToThrow.Add("Pkg.Bad");
 
         var ok = await _service.EnsurePackageAsync(_rootDir, "Pkg.Bad", _taskContext);
 
@@ -131,12 +131,12 @@ public class PackageInstallationServiceTests
     [TestMethod]
     public async Task InstallPackagesAsync_NoConfig_UsesLatestVersion()
     {
-        _nuget.LatestVersion = "1.6.0";
+        _nuget.DefaultVersion = "1.6.0";
 
         var result = await _service.InstallPackagesAsync(_rootDir, ["Pkg.X"], _taskContext);
 
         Assert.AreEqual("1.6.0", result["Pkg.X"]);
-        CollectionAssert.Contains(_nuget.Installed, ("Pkg.X", "1.6.0"));
+        CollectionAssert.Contains(_nuget.InstalledPackages, ("Pkg.X", "1.6.0"));
     }
 
     [TestMethod]
@@ -148,7 +148,7 @@ public class PackageInstallationServiceTests
         var result = await _service.InstallPackagesAsync(_rootDir, ["Pkg.X"], _taskContext);
 
         Assert.AreEqual("1.2.3", result["Pkg.X"]);
-        CollectionAssert.DoesNotContain(_nuget.QueriedLatest, "Pkg.X");
+        CollectionAssert.DoesNotContain(_nuget.QueriedPackages, "Pkg.X");
     }
 
     [TestMethod]
@@ -156,12 +156,12 @@ public class PackageInstallationServiceTests
     {
         _config.ExistsResult = true;
         _config.Config.SetVersion("Some.Other.Package", "9.9.9");
-        _nuget.LatestVersion = "1.6.0";
+        _nuget.DefaultVersion = "1.6.0";
 
         var result = await _service.InstallPackagesAsync(_rootDir, ["Pkg.X"], _taskContext);
 
         Assert.AreEqual("1.6.0", result["Pkg.X"]);
-        CollectionAssert.Contains(_nuget.QueriedLatest, "Pkg.X");
+        CollectionAssert.Contains(_nuget.QueriedPackages, "Pkg.X");
     }
 
     [TestMethod]
@@ -169,12 +169,12 @@ public class PackageInstallationServiceTests
     {
         _config.ExistsResult = true;
         _config.Config.SetVersion("Pkg.X", "1.2.3");
-        _nuget.LatestVersion = "1.6.0";
+        _nuget.DefaultVersion = "1.6.0";
 
         var result = await _service.InstallPackagesAsync(_rootDir, ["Pkg.X"], _taskContext, ignoreConfig: true);
 
         Assert.AreEqual("1.6.0", result["Pkg.X"]);
-        CollectionAssert.Contains(_nuget.QueriedLatest, "Pkg.X");
+        CollectionAssert.Contains(_nuget.QueriedPackages, "Pkg.X");
     }
 
     #endregion
@@ -205,7 +205,7 @@ public class PackageInstallationServiceTests
 
         Assert.AreEqual("1.6.0", result["Pkg.Main"]);
         Assert.AreEqual("1.0.0", result["Common"]);
-        CollectionAssert.Contains(_nuget.Installed, ("Common", "1.0.0"));
+        CollectionAssert.Contains(_nuget.InstalledPackages, ("Common", "1.0.0"));
     }
 
     [TestMethod]
@@ -218,7 +218,7 @@ public class PackageInstallationServiceTests
         var result = await _service.InstallPackagesAsync(_rootDir, ["Pkg.Main"], _taskContext);
 
         Assert.AreEqual("1.0.0", result["Common"]);
-        CollectionAssert.DoesNotContain(_nuget.Installed, ("Common", "1.0.0"));
+        CollectionAssert.DoesNotContain(_nuget.InstalledPackages, ("Common", "1.0.0"));
     }
 
     [TestMethod]
@@ -276,7 +276,7 @@ public class PackageInstallationServiceTests
 
         Assert.AreEqual("2.0.0", result["Pkg.Main"], "Newer version surfaced by the transitive install should win.");
         Assert.AreEqual("1.0.0", result["Common"]);
-        CollectionAssert.Contains(_nuget.Installed, ("Common", "1.0.0"));
+        CollectionAssert.Contains(_nuget.InstalledPackages, ("Common", "1.0.0"));
     }
 
     [TestMethod]
@@ -304,56 +304,5 @@ public class PackageInstallationServiceTests
         public bool Exists() => ExistsResult;
         public WinappConfig Load() => Config;
         public void Save(WinappConfig cfg) => Config = cfg;
-    }
-
-    /// <summary>
-    /// In-memory NuGet fake backed by a real cache directory. Installing a package creates its cache dir
-    /// so subsequent "already present" checks behave like the real cache.
-    /// </summary>
-    private sealed class ControllableNugetService(DirectoryInfo cache) : INugetService
-    {
-        public string LatestVersion { get; set; } = "1.6.0";
-        public List<string> QueriedLatest { get; } = [];
-        public List<(string Package, string Version)> Installed { get; } = [];
-        public Dictionary<string, Dictionary<string, string>> Dependencies { get; } = new(StringComparer.OrdinalIgnoreCase);
-        public Dictionary<string, Dictionary<string, string>> InstallReturns { get; } = new(StringComparer.OrdinalIgnoreCase);
-        public HashSet<string> ThrowKeyNotFoundFor { get; } = new(StringComparer.OrdinalIgnoreCase);
-        public HashSet<string> ThrowOnGetLatestFor { get; } = new(StringComparer.OrdinalIgnoreCase);
-
-        public Task<string> GetLatestVersionAsync(string packageName, SdkInstallMode sdkInstallMode, CancellationToken cancellationToken = default)
-        {
-            QueriedLatest.Add(packageName);
-            if (ThrowOnGetLatestFor.Contains(packageName))
-            {
-                throw new InvalidOperationException($"Simulated NuGet failure for {packageName}");
-            }
-            return Task.FromResult(LatestVersion);
-        }
-
-        public Task<Dictionary<string, string>> InstallPackageAsync(string package, string version, TaskContext taskContext, CancellationToken cancellationToken = default)
-        {
-            Installed.Add((package, version));
-            GetNuGetPackageDir(package, version).Create();
-            var ret = InstallReturns.TryGetValue(package, out var configured)
-                ? new Dictionary<string, string>(configured)
-                : new Dictionary<string, string> { [package] = version };
-            return Task.FromResult(ret);
-        }
-
-        public Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, CancellationToken cancellationToken = default)
-        {
-            if (ThrowKeyNotFoundFor.Contains(packageName))
-            {
-                throw new KeyNotFoundException($"No dependencies cached for {packageName}");
-            }
-            return Task.FromResult(Dependencies.TryGetValue(packageName, out var deps)
-                ? new Dictionary<string, string>(deps)
-                : new Dictionary<string, string>());
-        }
-
-        public DirectoryInfo GetNuGetGlobalPackagesDir() => cache;
-
-        public DirectoryInfo GetNuGetPackageDir(string packageName, string version)
-            => new(Path.Combine(cache.FullName, packageName.ToLowerInvariant(), version));
     }
 }

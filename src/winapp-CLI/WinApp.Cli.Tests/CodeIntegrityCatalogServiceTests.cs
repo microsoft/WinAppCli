@@ -107,9 +107,15 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
 
         var cdfPath = CodeIntegrityCatalogService.CreateCatalogDefinitionFile(outputCatalogPath, files, false, true);
 
-        var content = File.ReadAllText(cdfPath);
-        VerifyCdfContent(content, files, outputCatalogPath, false, true);
-        File.Delete(cdfPath);
+        try
+        {
+            var content = File.ReadAllText(cdfPath);
+            VerifyCdfContent(content, files, outputCatalogPath, false, true);
+        }
+        finally
+        {
+            File.Delete(cdfPath);
+        }
     }
 
     [TestMethod]
@@ -120,10 +126,16 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
 
         var cdfPath = CodeIntegrityCatalogService.CreateCatalogDefinitionFile(outputCatalogPath, files, false, false);
 
-        var content = File.ReadAllText(cdfPath);
-        Assert.IsFalse(content.Contains("ALTSIPID", StringComparison.Ordinal),
-            "CDF should not contain ALTSIPID when computeFlatHashes is false");
-        File.Delete(cdfPath);
+        try
+        {
+            var content = File.ReadAllText(cdfPath);
+            Assert.IsFalse(content.Contains("ALTSIPID", StringComparison.Ordinal),
+                "CDF should not contain ALTSIPID when computeFlatHashes is false");
+        }
+        finally
+        {
+            File.Delete(cdfPath);
+        }
     }
 
     [TestMethod]
@@ -134,8 +146,15 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
 
         var cdfPath = CodeIntegrityCatalogService.CreateCatalogDefinitionFile(outputCatalogPath, files, false, false);
 
-        var content = File.ReadAllText(cdfPath);
-        VerifyCdfContent(content, files, outputCatalogPath, false, false);
+        try
+        {
+            var content = File.ReadAllText(cdfPath);
+            VerifyCdfContent(content, files, outputCatalogPath, false, false);
+        }
+        finally
+        {
+            File.Delete(cdfPath);
+        }
     }
 
     [TestMethod]
@@ -145,11 +164,18 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
         var outputCatalogPath = Path.Combine(_tempDirectory.FullName, "output.cat");
         var cdfPath = CodeIntegrityCatalogService.CreateCatalogDefinitionFile(outputCatalogPath, files, false, false);
 
-        var content = File.ReadAllText(cdfPath);
-        VerifyCdfContent(content, files, outputCatalogPath, false, false);
-        var catalogFilesIndex = content.IndexOf("[CatalogFiles]", StringComparison.Ordinal);
-        var afterCatalogFiles = content[(catalogFilesIndex + "[CatalogFiles]".Length)..].Trim();
-        Assert.AreEqual(string.Empty, afterCatalogFiles, "No file entries should be present");
+        try
+        {
+            var content = File.ReadAllText(cdfPath);
+            VerifyCdfContent(content, files, outputCatalogPath, false, false);
+            var catalogFilesIndex = content.IndexOf("[CatalogFiles]", StringComparison.Ordinal);
+            var afterCatalogFiles = content[(catalogFilesIndex + "[CatalogFiles]".Length)..].Trim();
+            Assert.AreEqual(string.Empty, afterCatalogFiles, "No file entries should be present");
+        }
+        finally
+        {
+            File.Delete(cdfPath);
+        }
     }
 
     #endregion

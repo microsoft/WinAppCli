@@ -14,7 +14,7 @@ namespace WinApp.Cli.Tests;
 public class BundleServiceTests
 {
     private DirectoryInfo _tempDir = null!;
-    private CapturingBuildToolsService _buildToolsService = null!;
+    private FakeBuildToolsService _buildToolsService = null!;
     private BundleService _service = null!;
     private TaskContext _taskContext = null!;
 
@@ -23,7 +23,7 @@ public class BundleServiceTests
     {
         _tempDir = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"BundleSvcTest_{Guid.NewGuid():N}"));
         _tempDir.Create();
-        _buildToolsService = new CapturingBuildToolsService();
+        _buildToolsService = new FakeBuildToolsService();
         _service = new BundleService(_buildToolsService, NullLogger<BundleService>.Instance);
 
         var task = new GroupableTask("test", null);
@@ -137,31 +137,5 @@ public class BundleServiceTests
             dir = dir[4..];
         }
         return dir;
-    }
-
-    /// <summary>
-    /// Captures build tool invocations without actually running anything.
-    /// </summary>
-    private sealed class CapturingBuildToolsService : IBuildToolsService
-    {
-        public List<(string ToolName, string Arguments)> Invocations { get; } = [];
-
-        /// <summary>Optional hook invoked with the raw tool arguments; lets a test simulate side effects.</summary>
-        public Action<string>? OnRun { get; set; }
-
-        public FileInfo? GetBuildToolPath(string toolName) => new(Path.Combine(Path.GetTempPath(), toolName));
-
-        public Task<FileInfo> EnsureBuildToolAvailableAsync(string toolName, TaskContext taskContext, CancellationToken cancellationToken = default)
-            => Task.FromResult(new FileInfo(Path.Combine(Path.GetTempPath(), toolName)));
-
-        public Task<DirectoryInfo?> EnsureBuildToolsAsync(TaskContext taskContext, bool forceLatest = false, CancellationToken cancellationToken = default)
-            => Task.FromResult<DirectoryInfo?>(null);
-
-        public Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, CancellationToken cancellationToken = default)
-        {
-            Invocations.Add((tool.ExecutableName, arguments));
-            OnRun?.Invoke(arguments);
-            return Task.FromResult(("", ""));
-        }
     }
 }

@@ -80,7 +80,7 @@ public class MsixServiceRuntimeTests : BaseCommandTests
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
     {
         return services
-            .AddSingleton<IBuildToolsService, FakeBuildToolsService>()
+            .AddSingleton<IBuildToolsService>(_ => new FakeBuildToolsService { Handler = FakeBuildToolsService.EmulateSdkToolOutput })
             .AddSingleton<INugetService, FakeNugetService>()
             .AddSingleton<IWinmdService, FakeWinmdService>();
     }

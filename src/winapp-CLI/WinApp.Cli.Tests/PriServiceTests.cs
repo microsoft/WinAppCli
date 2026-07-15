@@ -369,28 +369,4 @@ public class PriServiceTests
         var path = match.Groups[1].Value;
         return path.StartsWith(@"\\?\", StringComparison.Ordinal) ? path[4..] : path;
     }
-
-    /// <summary>
-    /// Fake build-tools service that records invocations and delegates output to a per-test handler.
-    /// </summary>
-    private sealed class FakeBuildToolsService : IBuildToolsService
-    {
-        public List<(string Tool, string Args)> Invocations { get; } = [];
-        public Func<Tool, string, (string stdout, string stderr)>? Handler { get; set; }
-
-        public FileInfo? GetBuildToolPath(string toolName) => new(Path.Combine(Path.GetTempPath(), toolName));
-
-        public Task<FileInfo> EnsureBuildToolAvailableAsync(string toolName, TaskContext taskContext, CancellationToken cancellationToken = default)
-            => Task.FromResult(new FileInfo(Path.Combine(Path.GetTempPath(), toolName)));
-
-        public Task<DirectoryInfo?> EnsureBuildToolsAsync(TaskContext taskContext, bool forceLatest = false, CancellationToken cancellationToken = default)
-            => Task.FromResult<DirectoryInfo?>(null);
-
-        public Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, CancellationToken cancellationToken = default)
-        {
-            Invocations.Add((tool.ExecutableName, arguments));
-            var result = Handler?.Invoke(tool, arguments) ?? ("", "");
-            return Task.FromResult(result);
-        }
-    }
 }

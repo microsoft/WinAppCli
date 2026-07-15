@@ -254,14 +254,17 @@ public class PackageLayoutServiceTests
     }
 
     [TestMethod]
-    public void FindWinmds_DeduplicatesResults()
+    public void FindWinmds_SameFileDiscoverableViaMultipleRoots_Deduplicates()
     {
-        // Same package requested twice should not produce duplicate results.
-        WritePackageFile("Pkg.Wmd", "1.0.0", Path.Combine("lib", "Lib.winmd"));
+        // A winmd under References/lib is discovered by BOTH the recursive References search
+        // (line ~153) AND the lib search (line ~132), so without deduplication the same file
+        // would be returned twice. Assert the HashSet collapses it to a single result.
+        WritePackageFile("Pkg.Wmd", "1.0.0", Path.Combine("References", "lib", "Dup.winmd"));
 
         var results = _service.FindWinmds(_cacheDir, Used(("Pkg.Wmd", "1.0.0"))).ToList();
 
-        Assert.AreEqual(1, results.Count);
+        Assert.AreEqual(1, results.Count, "The same winmd found via multiple search roots must be deduplicated");
+        Assert.AreEqual("Dup.winmd", results[0].Name);
     }
 
     [TestMethod]

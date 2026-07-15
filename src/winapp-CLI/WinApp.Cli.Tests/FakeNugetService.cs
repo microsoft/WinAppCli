@@ -27,6 +27,25 @@ internal class FakeNugetService : INugetService
     /// </summary>
     public HashSet<string> PackagesToThrow { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Transitive dependencies returned from <see cref="GetPackageDependenciesAsync"/>, keyed by package name.
+    /// Each value maps a dependency package name to its version range/string.
+    /// </summary>
+    public Dictionary<string, Dictionary<string, string>> Dependencies { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Overrides the map returned from <see cref="InstallPackageAsync"/> for a given package
+    /// (e.g. to simulate a package that pulls in additional installed packages). When a package
+    /// is not listed here, install returns just <c>{ [package] = version }</c>.
+    /// </summary>
+    public Dictionary<string, Dictionary<string, string>> InstallReturns { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Packages listed here cause <see cref="GetPackageDependenciesAsync"/> to throw
+    /// <see cref="KeyNotFoundException"/>, simulating an uncached dependency lookup.
+    /// </summary>
+    public HashSet<string> ThrowKeyNotFoundFor { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     public Task<string> GetLatestVersionAsync(string packageName, SdkInstallMode sdkInstallMode, CancellationToken cancellationToken = default)
     {
         QueriedPackages.Add(packageName);
@@ -40,12 +59,29 @@ internal class FakeNugetService : INugetService
     public Task<Dictionary<string, string>> InstallPackageAsync(string package, string version, TaskContext taskContext, CancellationToken cancellationToken = default)
     {
         InstalledPackages.Add((package, version));
-        return Task.FromResult(new Dictionary<string, string> { [package] = version });
+
+        // When a cache directory is configured, create the package folder so subsequent
+        // "already present" checks (packageDir.Exists) behave like a real NuGet cache.
+        if (CacheDirectory != null)
+        {
+            GetNuGetPackageDir(package, version).Create();
+        }
+
+        return Task.FromResult(InstallReturns.TryGetValue(package, out var configured)
+            ? new Dictionary<string, string>(configured)
+            : new Dictionary<string, string> { [package] = version });
     }
 
     public Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(new Dictionary<string, string>());
+        if (ThrowKeyNotFoundFor.Contains(packageName))
+        {
+            throw new KeyNotFoundException($"No dependencies cached for {packageName}");
+        }
+
+        return Task.FromResult(Dependencies.TryGetValue(packageName, out var deps)
+            ? new Dictionary<string, string>(deps)
+            : new Dictionary<string, string>());
     }
 
     public DirectoryInfo GetNuGetGlobalPackagesDir()

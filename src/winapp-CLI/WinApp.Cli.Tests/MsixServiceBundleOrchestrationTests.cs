@@ -2,13 +2,11 @@
 // Licensed under the MIT License.
 
 using System.Reflection;
-using System.Text.RegularExpressions;
 using Microsoft.Extensions.DependencyInjection;
 using WinApp.Cli.Commands;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
-using WinApp.Cli.Tools;
 
 namespace WinApp.Cli.Tests;
 
@@ -52,92 +50,6 @@ internal sealed class FakeBundleValidationService : IBundleValidationService
     }
 }
 
-internal sealed class FakeBuildToolsService : IBuildToolsService
-{
-    private static readonly Regex OutputPathRegex = new("(?:^|\\s)/p\\s+\"(?<path>[^\"]+)\"", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex ConfigFileRegex = new("/cf\\s+\"(?<path>[^\"]+)\"", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex OutputFileRegex = new("/of\\s+\"(?<path>[^\"]+)\"", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    public List<(string ToolName, string Arguments)> Invocations { get; } = [];
-
-    public FileInfo? GetBuildToolPath(string toolName)
-    {
-        return new FileInfo(Path.Combine(Path.GetTempPath(), toolName));
-    }
-
-    public Task<FileInfo> EnsureBuildToolAvailableAsync(string toolName, TaskContext taskContext, CancellationToken cancellationToken = default)
-    {
-        return Task.FromResult(new FileInfo(Path.Combine(Path.GetTempPath(), toolName)));
-    }
-
-    public Task<DirectoryInfo?> EnsureBuildToolsAsync(TaskContext taskContext, bool forceLatest = false, CancellationToken cancellationToken = default)
-    {
-        return Task.FromResult<DirectoryInfo?>(null);
-    }
-
-    public Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, CancellationToken cancellationToken = default)
-    {
-        Invocations.Add((tool.ExecutableName, arguments));
-
-        // Only create fake output files for makeappx (not signtool or other tools)
-        if (tool.ExecutableName.Contains("makeappx", StringComparison.OrdinalIgnoreCase))
-        {
-            var match = OutputPathRegex.Match(arguments);
-            if (match.Success)
-            {
-                var outputPath = NormalizeLongPath(match.Groups["path"].Value);
-                Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-                File.WriteAllText(outputPath, $"fake {tool.ExecutableName} output");
-            }
-        }
-        else if (tool.ExecutableName.Contains("makepri", StringComparison.OrdinalIgnoreCase))
-        {
-            EmulateMakePri(arguments);
-        }
-
-        return Task.FromResult<(string stdout, string stderr)>((string.Empty, string.Empty));
-    }
-
-    private static void EmulateMakePri(string arguments)
-    {
-        // 'createconfig' must produce a priconfig.xml that PriService then loads and rewrites.
-        if (arguments.Contains("createconfig", StringComparison.OrdinalIgnoreCase))
-        {
-            var match = ConfigFileRegex.Match(arguments);
-            if (match.Success)
-            {
-                var configPath = NormalizeLongPath(match.Groups["path"].Value);
-                Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
-                File.WriteAllText(configPath, """
-                    <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-                    <resources targetOsVersion="10.0.0" majorVersion="1">
-                      <index root="\" startIndexAt="\">
-                        <indexer-config type="folder" foldernameAsQualifier="true" filenameAsQualifier="true" qualifierDelimiter="." />
-                        <indexer-config type="PRI" />
-                      </index>
-                    </resources>
-                    """);
-            }
-        }
-        else if (arguments.Contains("new", StringComparison.OrdinalIgnoreCase))
-        {
-            // 'new' emits resources.pri; PriService only parses stdout, but write the file for realism.
-            var match = OutputFileRegex.Match(arguments);
-            if (match.Success)
-            {
-                var outputPath = NormalizeLongPath(match.Groups["path"].Value);
-                Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-                File.WriteAllText(outputPath, "fake pri");
-            }
-        }
-    }
-
-    private static string NormalizeLongPath(string path)
-    {
-        return path.StartsWith(@"\\?\", StringComparison.Ordinal) ? path[4..] : path;
-    }
-}
-
 [TestClass]
 public class MsixServiceBundleOrchestrationTests : BaseCommandTests
 {
@@ -153,7 +65,7 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
     {
         _fakeBundleService = new FakeBundleService();
         _fakeBundleValidationService = new FakeBundleValidationService();
-        _fakeBuildToolsService = new FakeBuildToolsService();
+        _fakeBuildToolsService = new FakeBuildToolsService { Handler = FakeBuildToolsService.EmulateSdkToolOutput };
 
         return services
             .AddSingleton<IBundleService>(_fakeBundleService)
