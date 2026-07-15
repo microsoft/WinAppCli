@@ -158,7 +158,7 @@ Example `nuget.config` that restores the SDK packages exclusively from a private
 </configuration>
 ```
 
-> **Security note:** Because winapp honors the `nuget.config` in your working directory, it restores SDK packages from whatever feeds — and into whatever `globalPackagesFolder` — that config specifies. Only run `winapp init`/`restore`/`update` in repositories you trust, the same caution that applies to `dotnet restore`/`dotnet build`. When more than one source is configured, use [Package Source Mapping](https://learn.microsoft.com/nuget/consume-packages/package-source-mapping) (`<packageSourceMapping>`) to pin each package to a specific feed and mitigate dependency-confusion attacks.
+> **Security note:** winapp honors the `nuget.config` in the selected project/config directory — the working directory by default, or the directory you pass to `winapp init <dir>` / `restore --config-dir <dir>` — so it restores SDK packages from whatever feeds, and into whatever `globalPackagesFolder`, that config specifies. Only run `winapp init`/`restore`/`update` against directories you trust, the same caution that applies to `dotnet restore`/`dotnet build`. When more than one source is configured, use [Package Source Mapping](https://learn.microsoft.com/nuget/consume-packages/package-source-mapping) (`<packageSourceMapping>`) to pin each package to a specific feed and mitigate dependency-confusion attacks.
 
 ---
 

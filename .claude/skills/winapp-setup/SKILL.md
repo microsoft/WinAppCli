@@ -95,7 +95,7 @@ Use `restore` when you clone a repo that already has `winapp.yaml` but no `.wina
 
 Authentication uses credentials from `nuget.config` (`<packageSourceCredentials>`), environment-based credentials, and NuGet credential-provider plugins automatically — interactive prompts only appear on interactive terminals, so CI relies on pre-configured/environment credentials. The package cache location follows `NUGET_PACKAGES` / `globalPackagesFolder`, falling back to `~/.nuget/packages`.
 
-> **Security note:** winapp honors the `nuget.config` in the working directory, so it restores from the feeds (and into the `globalPackagesFolder`) that config specifies — run `init`/`restore`/`update` only in repos you trust, the same as `dotnet restore`. Use `<packageSourceMapping>` to pin packages to specific feeds when more than one source is configured.
+> **Security note:** winapp honors the `nuget.config` in the selected project/config directory — the working directory by default, or the directory passed to `init <dir>` / `restore --config-dir <dir>` — so it restores from the feeds (and into the `globalPackagesFolder`) that config specifies. Run `init`/`restore`/`update` only against directories you trust, the same as `dotnet restore`. Use `<packageSourceMapping>` to pin packages to specific feeds when more than one source is configured.
 
 ### Update SDK versions
 
