@@ -83,6 +83,7 @@ public class NugetPackageDownloaderCoverageTests : BaseCommandTests
     public async Task DownloadPackageAsync_TempFileCleanupFails_SwallowsErrorAndStillSucceeds()
     {
         var root = CreateFeedTestDirectory();
+        string? leakedTempFile = null;
         try
         {
             var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
@@ -96,7 +97,13 @@ public class NugetPackageDownloaderCoverageTests : BaseCommandTests
             var downloader = new NugetPackageDownloader(sourceProvider)
             {
                 // Force the best-effort temp-file cleanup to throw after the package has transferred.
-                DeleteTempFile = _ => throw new IOException("simulated temp-file cleanup failure"),
+                // Capture the path first so this test can delete the temp file itself — otherwise disabling
+                // the product's cleanup would orphan the downloaded .nupkg under %TEMP% on every run.
+                DeleteTempFile = path =>
+                {
+                    leakedTempFile = path;
+                    throw new IOException("simulated temp-file cleanup failure");
+                },
             };
 
             var identity = new PackageIdentity("Cleanup.Pkg", NuGetVersion.Parse("1.0.0"));
@@ -109,9 +116,25 @@ public class NugetPackageDownloaderCoverageTests : BaseCommandTests
             Assert.IsTrue(
                 Directory.Exists(Path.Combine(packages.FullName, "cleanup.pkg", "1.0.0")),
                 "The package must have extracted into the global packages folder despite the temp-cleanup failure.");
+
+            Assert.IsNotNull(leakedTempFile, "The temp-file cleanup seam must have been invoked with a real temp-file path.");
         }
         finally
         {
+            // The product's cleanup was deliberately disabled above, so delete the orphaned temp file here to
+            // avoid leaking a .nupkg into the system temp directory on every test run.
+            if (leakedTempFile is not null)
+            {
+                try
+                {
+                    File.Delete(leakedTempFile);
+                }
+                catch
+                {
+                    // Best-effort: the file may already be gone.
+                }
+            }
+
             TryDelete(root);
         }
     }
