@@ -580,4 +580,60 @@ public class ProgramJsonBridgeTests : BaseCommandTests
             error.GetProperty("error").GetProperty("code").GetString(),
             "ui pen single-dash typo must return invalid_arguments in nested schema");
     }
+
+    // -------------------------------------------------------------------------
+    // M2 (round-11) — boolean pre-scan: --json=<invalid> must NOT be coerced
+    // to true and must NOT trigger the --json/--verbose conflict check.
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task JsonBridge_JsonEqualsBogus_Verbose_NoConflict_InvalidValueError()
+    {
+        // M2 root-cause fix: --json=bogus must NOT trigger the spurious --json/--verbose conflict
+        // that the old pre-scan produced (it treated any non-"false" attached value as true and
+        // then fired the conflict check). With bool.TryParse the pre-scan returns false for
+        // "bogus", so no conflict fires and the command proceeds normally.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--at", "10,10", "--app", "__no_such__", "--json=bogus", "--verbose"]);
+
+        Assert.AreEqual(1, exitCode, "Invalid --json value must exit 1");
+        // The critical invariant: no conflict error.
+        Assert.IsFalse(stdout.Contains("Cannot specify both --verbose and --json"),
+            $"--json=bogus must NOT trigger the --json/--verbose conflict; got stdout: {stdout}");
+        Assert.IsFalse(stderr.Contains("Cannot specify both --verbose and --json"),
+            $"--json=bogus must NOT trigger the --json/--verbose conflict; got stderr: {stderr}");
+    }
+
+    [TestMethod]
+    public async Task JsonBridge_JsonEqualsBogus_WithBadArg_InvalidValueError_NoConflict()
+    {
+        // Combining --json=bogus with another invalid arg: must produce a parse/error result
+        // but NOT a --json/--verbose conflict.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--json=bogus", "--pressure", "nope"]);
+
+        Assert.AreEqual(1, exitCode, "Invalid args must exit 1");
+        // No conflict error (the key invariant).
+        Assert.IsFalse(stdout.Contains("Cannot specify both --verbose and --json"),
+            $"--json=bogus must NOT trigger the conflict; got stdout: {stdout}");
+        Assert.IsFalse(stderr.Contains("Cannot specify both --verbose and --json"),
+            $"--json=bogus must NOT trigger the conflict; got stderr: {stderr}");
+    }
+
+    [TestMethod]
+    public async Task JsonBridge_JsonEqualsFalse_Verbose_Regression_NoConflict()
+    {
+        // Regression: --json=false (valid bool false) combined with --verbose must still produce
+        // no conflict (this was already fixed in round 9; keep it locked).
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["ui", "pen", "--json=false", "--verbose", "--pressure", "nope"]);
+
+        Assert.AreEqual(1, exitCode, "Parse error must exit 1");
+        Assert.IsFalse(stdout.Contains("Cannot specify both --verbose and --json"),
+            $"--json=false must not trigger the conflict; got stdout: {stdout}");
+        Assert.IsFalse(stderr.Contains("Cannot specify both --verbose and --json"),
+            $"--json=false must not trigger the conflict; got stderr: {stderr}");
+        Assert.IsFalse(stderr.Contains("\"error\":"),
+            $"--json=false must not emit a bridge envelope; got stderr: {stderr}");
+    }
 }

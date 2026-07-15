@@ -79,7 +79,15 @@ internal static class GlobalOptionPreScan
                 if (token.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                 {
                     var val = token[prefix.Length..];
-                    return !val.Equals("false", StringComparison.OrdinalIgnoreCase);
+                    // Only treat as true/false when the value is a valid boolean.
+                    // An unrecognised value (e.g. "bogus") is NOT coerced to true — return
+                    // false so the real System.CommandLine parser surfaces the invalid value
+                    // and the spurious --json/--verbose conflict is not triggered.
+                    if (bool.TryParse(val, out var parsedVal))
+                    {
+                        return parsedVal;
+                    }
+                    return false; // indeterminate — real parser will report the error
                 }
             }
 

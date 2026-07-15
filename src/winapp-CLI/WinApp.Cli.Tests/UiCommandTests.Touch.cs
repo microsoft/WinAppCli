@@ -339,4 +339,66 @@ public partial class UiCommandTests
             error.GetProperty("error").GetProperty("code").GetString(),
             "JSON error.code must be 'injection_unsupported' when injection throws InvalidOperationException");
     }
+
+    // -------------------------------------------------------------------------
+    // M1 (round-11) — typed AppNotFoundException: app-not-found → missing_app;
+    // selector-ambiguity (plain IOE) → invalid_arguments, NOT missing_app.
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task Touch_SessionService_ThrowsAppNotFound_ReturnsMissingApp()
+    {
+        // When the session service throws AppNotFoundException (app not running), the outer
+        // catch must map it to missing_app, not internal_error.
+        _fakeSession.ThrowException = new WinApp.Cli.Services.AppNotFoundException(
+            "No running app found matching '__test_nonexistent__'.");
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "__test_nonexistent__", "--at", "100,100", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "App-not-found must exit 1");
+        var stderr = ConsoleStdErr.ToString();
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain a JSON error; got: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeMissingApp,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            "AppNotFoundException from session service must map to missing_app");
+        Assert.IsFalse(stderr.Contains(UiJsonError.CodeInternalError),
+            $"AppNotFoundException must NOT produce internal_error; got stderr: {stderr}");
+    }
+
+    [TestMethod]
+    public async Task Touch_UiaService_ThrowsSelectorAmbiguity_ReturnsInvalidArguments_NotMissingApp()
+    {
+        // When FindSingleElementAsync throws plain InvalidOperationException (selector matched
+        // multiple elements), the outer catch must map it to invalid_arguments, NOT missing_app.
+        _fakeSession.SessionResult = new WinApp.Cli.Models.UiSessionInfo
+        {
+            ProcessId = 1, ProcessName = "TestApp", WindowHandle = 1234
+        };
+        _fakeUia.FindSingleElementThrowException = new InvalidOperationException(
+            "Selector matched 3 elements: ...");
+
+        var command = GetRequiredService<UiTouchCommand>();
+        // Use a bare selector (no --at) so FindSingleElementAsync is invoked.
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "btn-ok", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "Ambiguous selector must exit 1");
+        var stderr = ConsoleStdErr.ToString();
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain a JSON error; got: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            error.GetProperty("error").GetProperty("code").GetString(),
+            "Selector-ambiguity IOE must map to invalid_arguments, not missing_app");
+        Assert.IsFalse(stderr.Contains(UiJsonError.CodeMissingApp),
+            $"Selector-ambiguity must NOT produce missing_app; got stderr: {stderr}");
+        Assert.IsFalse(stderr.Contains(UiJsonError.CodeInternalError),
+            $"Selector-ambiguity must NOT produce internal_error; got stderr: {stderr}");
+    }
 }

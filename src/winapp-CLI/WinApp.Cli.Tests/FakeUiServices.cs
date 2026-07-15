@@ -43,6 +43,10 @@ internal class FakeUiAutomationService : IUiAutomationService
     public List<(nint Hwnd, int Pid, string Title)> FindWindowsByTitle(string titleQuery) => WindowsByTitleResult;
     public List<(nint Hwnd, int Pid, string Title)> FindWindowsByPid(int pid) => WindowsByPidResult;
 
+    /// <summary>When non-null, <see cref="FindSingleElementAsync"/> throws this exception instead of
+    /// returning a result. Use to simulate selector-ambiguity or other UIA failures.</summary>
+    public Exception? FindSingleElementThrowException { get; set; }
+
     /// <summary>The rectangle returned for any nonzero handle (default: 0,0 – 1920,1080).</summary>
     public WinApp.Cli.Helpers.PointerRect WindowRect { get; set; } = new(0, 0, 1920, 1080);
 
@@ -77,6 +81,8 @@ internal class FakeUiAutomationService : IUiAutomationService
 
     public Task<UiElement?> FindSingleElementAsync(UiSessionInfo session, SelectorExpression selector, CancellationToken ct)
     {
+        if (FindSingleElementThrowException is not null) { throw FindSingleElementThrowException; }
+
         var key = selector.Slug ?? selector.Query ?? string.Empty;
 
         // Per-selector movement sequence (N5 stability tests): advance each read, last value sticks.
@@ -147,8 +153,15 @@ internal class FakeUiSessionService : IUiSessionService
         WindowTitle = "Test Window"
     };
 
+    /// <summary>When non-null, <see cref="ResolveSessionAsync"/> throws this exception instead
+    /// of returning <see cref="SessionResult"/>. Use to test command-level exception handling.</summary>
+    public Exception? ThrowException { get; set; }
+
     public Task<UiSessionInfo> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct)
-        => Task.FromResult(SessionResult);
+    {
+        if (ThrowException is not null) { throw ThrowException; }
+        return Task.FromResult(SessionResult);
+    }
 }
 
 /// <summary>

@@ -59,4 +59,90 @@ public class GlobalOptionPreScanTests
         Assert.IsFalse(GlobalOptionPreScan.IsFlagPresent(
             ["--"], "--json", []));
     }
+
+    // -------------------------------------------------------------------------
+    // GetBooleanFlagValue — valid and invalid attached values
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public void GetBooleanFlagValue_BareName_ReturnsTrue()
+    {
+        Assert.IsTrue(GlobalOptionPreScan.GetBooleanFlagValue(
+            ["ui", "pen", "--json"], "--json", []));
+    }
+
+    [TestMethod]
+    public void GetBooleanFlagValue_Absent_ReturnsFalse()
+    {
+        Assert.IsFalse(GlobalOptionPreScan.GetBooleanFlagValue(
+            ["ui", "pen"], "--json", []));
+    }
+
+    [TestMethod]
+    public void GetBooleanFlagValue_EqualsTrue_ReturnsTrue()
+    {
+        Assert.IsTrue(GlobalOptionPreScan.GetBooleanFlagValue(
+            ["ui", "pen", "--json=true"], "--json", []));
+    }
+
+    [TestMethod]
+    public void GetBooleanFlagValue_EqualsTrueMixedCase_ReturnsTrue()
+    {
+        Assert.IsTrue(GlobalOptionPreScan.GetBooleanFlagValue(
+            ["ui", "pen", "--json=True"], "--json", []));
+    }
+
+    [TestMethod]
+    public void GetBooleanFlagValue_EqualsFalse_ReturnsFalse()
+    {
+        Assert.IsFalse(GlobalOptionPreScan.GetBooleanFlagValue(
+            ["ui", "pen", "--json=false"], "--json", []));
+    }
+
+    [TestMethod]
+    public void GetBooleanFlagValue_EqualsFalseMixedCase_ReturnsFalse()
+    {
+        Assert.IsFalse(GlobalOptionPreScan.GetBooleanFlagValue(
+            ["ui", "pen", "--json=False"], "--json", []));
+    }
+
+    [TestMethod]
+    public void GetBooleanFlagValue_EqualsBogus_ReturnsFalse()
+    {
+        // M2 regression: an invalid attached value (not a bool) must NOT be coerced to true.
+        // The real System.CommandLine parser will surface the parse error; the pre-scan must
+        // return false so the spurious --json/--verbose conflict is not triggered.
+        Assert.IsFalse(GlobalOptionPreScan.GetBooleanFlagValue(
+            ["ui", "pen", "--json=bogus"], "--json", []));
+    }
+
+    [TestMethod]
+    public void GetBooleanFlagValue_SpaceTrue_ReturnsTrue()
+    {
+        Assert.IsTrue(GlobalOptionPreScan.GetBooleanFlagValue(
+            ["ui", "pen", "--json", "true"], "--json", []));
+    }
+
+    [TestMethod]
+    public void GetBooleanFlagValue_SpaceFalse_ReturnsFalse()
+    {
+        Assert.IsFalse(GlobalOptionPreScan.GetBooleanFlagValue(
+            ["ui", "pen", "--json", "false"], "--json", []));
+    }
+
+    [TestMethod]
+    public void GetBooleanFlagValue_SpaceNextOptionNotBool_ReturnsTrue()
+    {
+        // --json immediately followed by a non-bool token that looks like another option:
+        // the bare --json is true; the next token is NOT consumed as the value.
+        Assert.IsTrue(GlobalOptionPreScan.GetBooleanFlagValue(
+            ["ui", "pen", "--json", "--verbose"], "--json", []));
+    }
+
+    [TestMethod]
+    public void GetBooleanFlagValue_AfterDoubleDash_ReturnsFalse()
+    {
+        Assert.IsFalse(GlobalOptionPreScan.GetBooleanFlagValue(
+            ["run", ".", "--", "--json"], "--json", []));
+    }
 }

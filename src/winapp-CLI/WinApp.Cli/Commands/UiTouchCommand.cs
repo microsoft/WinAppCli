@@ -377,13 +377,25 @@ internal class UiTouchCommand : Command, IShortDescription
                 UiErrors.StaleElement(logger, json);
                 return 1;
             }
+            catch (AppNotFoundException ioEx)
+            {
+                // Session resolution failure — the requested app was not found.
+                // Injection IOE is already caught by the inner try/catch (returns 1 without
+                // re-throwing), so AppNotFoundException can only come from ResolveSessionAsync.
+                logger.LogError("{Symbol} {Message}", UiSymbols.Error, ioEx.Message);
+                UiJsonError.Emit(json, UiJsonError.CodeMissingApp, ioEx.Message,
+                    errorOut: parseResult.InvocationConfiguration.Error);
+                return 1;
+            }
             catch (InvalidOperationException ioEx)
             {
-                // Session resolution failure — the requested app was not found. Injection IOE is
-                // already caught by the inner try/catch (returns 1 without re-throwing), so the only
-                // InvalidOperationException that reaches here is from ResolveSessionAsync.
+                // A non-app-not-found InvalidOperationException (e.g. selector ambiguity from
+                // FindSingleElementAsync: "Selector matched N elements") reaches here. Report it
+                // as invalid_arguments so consumers distinguish it from both missing_app and
+                // internal_error.
                 logger.LogError("{Symbol} {Message}", UiSymbols.Error, ioEx.Message);
-                UiJsonError.Emit(json, UiJsonError.CodeMissingApp, ioEx.Message);
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, ioEx.Message,
+                    errorOut: parseResult.InvocationConfiguration.Error);
                 return 1;
             }
             catch (Exception ex)
