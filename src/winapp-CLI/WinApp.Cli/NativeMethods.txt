@@ -96,6 +96,7 @@ WM_SYSKEYUP
 GetSystemMetrics
 GetWindow
 GetClassName
+WindowFromPoint
 IUIAutomationTextPattern
 IUIAutomationTextRange
 MiniDumpWriteDump

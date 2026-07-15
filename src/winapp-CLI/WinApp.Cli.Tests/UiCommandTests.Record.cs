@@ -1536,6 +1536,147 @@ public partial class UiCommandTests
     }
 
     // -----------------------------------------------------------------------
+    // H1 (round-10) — DeriveGeometryCaptureHwnd: geometry-derived retarget for
+    //   main-tree popup elements whose WindowHandle was stamped with sessionHwnd
+    // -----------------------------------------------------------------------
+
+    [TestMethod]
+    public void DeriveGeometryCaptureHwnd_MainTreePopup_RetargetsToPopupWindow()
+    {
+        // H1 regression test: element resolved via main UIA tree → WindowHandle stamped
+        // with session HWND. WindowFromPoint(element center) reveals the true top-level
+        // popup HWND which is a different window in the same process.
+        // Expected: DeriveGeometryCaptureHwnd returns the popup HWND and updates origin/size.
+        var sessionHwnd   = (nint)0x1000;
+        var hitHwnd       = (nint)0x5000; // child HWND under element center
+        var popupRootHwnd = (nint)0x2000; // top-level popup
+        const int sessionPid = 1234;
+
+        int originLeft = 100, originTop = 100, srcW = 500, srcH = 375;
+
+        var result = UiAutomationService.DeriveGeometryCaptureHwnd(
+            cx: 600, cy: 50,
+            sessionHwnd: sessionHwnd,
+            sessionProcessId: sessionPid,
+            captureOriginLeft: ref originLeft, captureOriginTop: ref originTop,
+            srcWidth: ref srcW, srcHeight: ref srcH,
+            windowFromPoint:    _ => hitHwnd,
+            getAncestorRoot:    h => h == hitHwnd ? popupRootHwnd : 0,
+            getWindowProcessId: _ => (uint)sessionPid,          // same process
+            getWindowRect:      _ => (550, 30, 770, 160));      // popup rect
+
+        Assert.AreEqual(popupRootHwnd, result,
+            "main-tree popup element must retarget to the popup's top-level HWND");
+        Assert.AreEqual(550, originLeft, "captureOriginLeft must be updated to popup left");
+        Assert.AreEqual(30,  originTop,  "captureOriginTop must be updated to popup top");
+        Assert.AreEqual(220, srcW,       "srcWidth must be popup width (770-550)");
+        Assert.AreEqual(130, srcH,       "srcHeight must be popup height (160-30)");
+    }
+
+    [TestMethod]
+    public void DeriveGeometryCaptureHwnd_GenuineInWindowElement_NoRetarget()
+    {
+        // When the element center resolves to the session window itself, no retarget.
+        var sessionHwnd = (nint)0x1000;
+        const int sessionPid = 1234;
+        int originLeft = 100, originTop = 100, srcW = 500, srcH = 375;
+
+        var result = UiAutomationService.DeriveGeometryCaptureHwnd(
+            cx: 300, cy: 200,
+            sessionHwnd: sessionHwnd,
+            sessionProcessId: sessionPid,
+            captureOriginLeft: ref originLeft, captureOriginTop: ref originTop,
+            srcWidth: ref srcW, srcHeight: ref srcH,
+            windowFromPoint:    _ => sessionHwnd,               // element center IS in session window
+            getAncestorRoot:    h => h,                         // GA_ROOT returns same HWND
+            getWindowProcessId: _ => throw new InvalidOperationException("must not be called"),
+            getWindowRect:      _ => throw new InvalidOperationException("must not be called"));
+
+        Assert.AreEqual(sessionHwnd, result,
+            "element inside the session window must not retarget");
+        Assert.AreEqual(100, originLeft, "params must be unchanged for in-window element");
+        Assert.AreEqual(500, srcW,       "params must be unchanged for in-window element");
+    }
+
+    [TestMethod]
+    public void DeriveGeometryCaptureHwnd_SameProcessGate_DifferentProcess_NoRetarget()
+    {
+        // The derived top-level window belongs to a different process (e.g. an unrelated
+        // overlapping window from another app). The same-process gate must prevent retarget.
+        var sessionHwnd   = (nint)0x1000;
+        var otherHwnd     = (nint)0x9000;
+        const int sessionPid = 1234;
+        const int otherPid   = 5678;
+
+        int originLeft = 100, originTop = 100, srcW = 500, srcH = 375;
+
+        var result = UiAutomationService.DeriveGeometryCaptureHwnd(
+            cx: 300, cy: 200,
+            sessionHwnd: sessionHwnd,
+            sessionProcessId: sessionPid,
+            captureOriginLeft: ref originLeft, captureOriginTop: ref originTop,
+            srcWidth: ref srcW, srcHeight: ref srcH,
+            windowFromPoint:    _ => otherHwnd,
+            getAncestorRoot:    h => h,
+            getWindowProcessId: _ => (uint)otherPid,            // different process
+            getWindowRect:      _ => throw new InvalidOperationException("must not be called"));
+
+        Assert.AreEqual(sessionHwnd, result,
+            "different-process window must not be retargeted (same-process gate)");
+        Assert.AreEqual(100, originLeft, "params must be unchanged when different-process gate fires");
+        Assert.AreEqual(500, srcW,       "params must be unchanged when different-process gate fires");
+    }
+
+    [TestMethod]
+    public void DeriveGeometryCaptureHwnd_WindowFromPointReturnsZero_NoRetarget()
+    {
+        // When WindowFromPoint returns 0 (no window under center), no retarget.
+        var sessionHwnd = (nint)0x1000;
+        int originLeft = 100, originTop = 100, srcW = 500, srcH = 375;
+
+        var result = UiAutomationService.DeriveGeometryCaptureHwnd(
+            cx: 0, cy: 0,
+            sessionHwnd: sessionHwnd,
+            sessionProcessId: 1234,
+            captureOriginLeft: ref originLeft, captureOriginTop: ref originTop,
+            srcWidth: ref srcW, srcHeight: ref srcH,
+            windowFromPoint:    _ => 0,                         // no window under point
+            getAncestorRoot:    _ => throw new InvalidOperationException("must not be called"),
+            getWindowProcessId: _ => throw new InvalidOperationException("must not be called"),
+            getWindowRect:      _ => throw new InvalidOperationException("must not be called"));
+
+        Assert.AreEqual(sessionHwnd, result, "zero HWND from WindowFromPoint must not retarget");
+        Assert.AreEqual(100, originLeft, "params must be unchanged when no window under point");
+        Assert.AreEqual(500, srcW,       "params must be unchanged when no window under point");
+    }
+
+    [TestMethod]
+    public void DeriveGeometryCaptureHwnd_GaRootResolvesToSessionHwnd_NoRetarget()
+    {
+        // WindowFromPoint returns a child HWND, but GA_ROOT resolves back to the session window.
+        // This means the element's center is over a child control inside the session window — no retarget.
+        var sessionHwnd = (nint)0x1000;
+        var childHwnd   = (nint)0x5000;
+        int originLeft = 100, originTop = 100, srcW = 500, srcH = 375;
+
+        var result = UiAutomationService.DeriveGeometryCaptureHwnd(
+            cx: 300, cy: 200,
+            sessionHwnd: sessionHwnd,
+            sessionProcessId: 1234,
+            captureOriginLeft: ref originLeft, captureOriginTop: ref originTop,
+            srcWidth: ref srcW, srcHeight: ref srcH,
+            windowFromPoint:    _ => childHwnd,
+            getAncestorRoot:    _ => sessionHwnd,               // GA_ROOT = session window
+            getWindowProcessId: _ => throw new InvalidOperationException("must not be called"),
+            getWindowRect:      _ => throw new InvalidOperationException("must not be called"));
+
+        Assert.AreEqual(sessionHwnd, result,
+            "child HWND inside session window must not retarget");
+        Assert.AreEqual(100, originLeft, "params must be unchanged when GA_ROOT = session HWND");
+        Assert.AreEqual(500, srcW,       "params must be unchanged when GA_ROOT = session HWND");
+    }
+
+    // -----------------------------------------------------------------------
     // M10 — WGC pool Recreate: frame disposed before pool.Recreate (structural)
     // -----------------------------------------------------------------------
 
