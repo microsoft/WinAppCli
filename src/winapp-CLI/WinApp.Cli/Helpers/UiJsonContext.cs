@@ -272,6 +272,9 @@ internal sealed class UiTouchResult
     /// <summary>Effective hold time in milliseconds (populated for long-press; 0 for other gestures).</summary>
     public int HoldMs { get; set; }
     public long Hwnd { get; set; }
+
+    /// <summary>Non-fatal advisories (e.g. remote-session delivery uncertainty). Omitted when empty.</summary>
+    public string[]? Warnings { get; set; }
 }
 
 internal sealed class UiPenResult
@@ -286,4 +289,7 @@ internal sealed class UiPenResult
     public bool Eraser { get; set; }
     public int DurationMs { get; set; }
     public long Hwnd { get; set; }
+
+    /// <summary>Non-fatal advisories (e.g. remote-session delivery uncertainty). Omitted when empty.</summary>
+    public string[]? Warnings { get; set; }
 }

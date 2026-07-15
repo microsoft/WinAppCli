@@ -497,4 +497,59 @@ public partial class UiCommandTests
         Assert.IsFalse(stderr.Contains(UiJsonError.CodeInternalError),
             $"Selector-ambiguity must NOT produce internal_error; got stderr: {stderr}");
     }
+
+    // -------------------------------------------------------------------------
+    // id27/id28 — remote-session (RDP) delivery-uncertainty advisory. Synthetic
+    // pointer injection can report success without actually reaching the target
+    // over Remote Desktop, so the result must carry an honest warnings[] advisory
+    // rather than a bare success. Driven by the fake guard's remote-session flag.
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task Touch_RemoteSession_EmitsDeliveryWarning()
+    {
+        _fakeSession.SessionResult.WindowHandle = 8200;
+        _fakeForeground.IsRemoteSessionResult = true;
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "100,100", "--json"]);
+
+        Assert.AreEqual(0, exitCode, "Injection still succeeds; the warning is advisory, not fatal");
+        Assert.AreEqual(1, _fakePointer.TouchCalls.Count);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.IsTrue(result.TryGetProperty("warnings", out var warnings),
+            "Remote session must surface a warnings[] advisory");
+        Assert.AreEqual(1, warnings.GetArrayLength());
+        StringAssert.Contains(warnings[0].GetString(), "remote",
+            "Warning must name the remote/RDP delivery caveat");
+    }
+
+    [TestMethod]
+    public async Task Touch_LocalSession_NoDeliveryWarning()
+    {
+        _fakeSession.SessionResult.WindowHandle = 8201;
+        _fakeForeground.IsRemoteSessionResult = false; // default; explicit for intent
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "100,100", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.IsFalse(result.TryGetProperty("warnings", out _),
+            "A local console session must not emit the remote-delivery warning");
+    }
+
+    [TestMethod]
+    public void RemoteInjectionWarning_PureComposition_NullWhenLocal_MessageWhenRemote()
+    {
+        Assert.IsNull(WinApp.Cli.Helpers.ForegroundGuard.RemoteInjectionWarning(false, "touch"),
+            "No warning on a local session");
+        var msg = WinApp.Cli.Helpers.ForegroundGuard.RemoteInjectionWarning(true, "touch");
+        Assert.IsNotNull(msg);
+        StringAssert.Contains(msg, "touch", "Warning must name the input kind");
+        StringAssert.Contains(msg, "remote", "Warning must name the remote caveat");
+    }
 }

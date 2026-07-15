@@ -311,6 +311,13 @@ internal class UiPenCommand : Command, IShortDescription
 
                 var action = eraser ? "erase" : (path.Count > 1 ? "draw" : "tap");
 
+                // id27/id28: synthetic pen injection frequently reports success without reaching the
+                // target in a remote session (RDP) — pen routing especially does not survive Remote
+                // Desktop. Attach an honest delivery-uncertainty advisory so a ✅ / exit 0 is not
+                // mistaken for confirmed delivery.
+                var deliveryWarning = ForegroundGuard.RemoteInjectionWarning(
+                    foregroundGuard.IsRemoteSession(), "pen");
+
                 if (json)
                 {
                     var result = new UiPenResult
@@ -323,7 +330,8 @@ internal class UiPenCommand : Command, IShortDescription
                         TiltY = tiltY,
                         Eraser = eraser,
                         DurationMs = durationMs,
-                        Hwnd = targetHwnd
+                        Hwnd = targetHwnd,
+                        Warnings = deliveryWarning is null ? null : [deliveryWarning]
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiPenResult));
@@ -332,6 +340,10 @@ internal class UiPenCommand : Command, IShortDescription
                 {
                     logger.LogInformation("{Symbol} pen {Action} with {Count} point(s), pressure {Pressure:0.00}",
                         UiSymbols.Check, action, path.Count, pressure);
+                    if (deliveryWarning is not null)
+                    {
+                        logger.LogWarning("{Symbol} {Warning}", UiSymbols.Warning, deliveryWarning);
+                    }
                 }
 
                 return 0;

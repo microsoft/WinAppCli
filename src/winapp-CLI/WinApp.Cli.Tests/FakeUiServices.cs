@@ -270,6 +270,11 @@ internal class FakeForegroundGuard : WinApp.Cli.Helpers.IForegroundGuard
     /// <summary>Error emitted on denial — defaults to the locked-desktop reason.</summary>
     public string DenyCode { get; set; } = WinApp.Cli.Helpers.UiJsonError.CodeNoInteractiveDesktop;
 
+    /// <summary>Value returned by <see cref="IsRemoteSession"/> — drives the remote-session delivery warning on touch/pen.</summary>
+    public bool IsRemoteSessionResult { get; set; }
+
+    public bool IsRemoteSession() => IsRemoteSessionResult;
+
     public bool TryEnsureForeground(long targetHwnd, Microsoft.Extensions.Logging.ILogger logger, bool json, string action)
     {
         Calls.Add(new(targetHwnd, action));

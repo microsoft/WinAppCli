@@ -394,4 +394,46 @@ public partial class UiCommandTests
         Assert.IsFalse(stderr.Contains(UiJsonError.CodeInternalError),
             $"Selector-ambiguity must NOT produce internal_error; got stderr: {stderr}");
     }
+
+    // -------------------------------------------------------------------------
+    // id27/id28 — remote-session (RDP) delivery-uncertainty advisory. Synthetic
+    // pen injection especially does not route over Remote Desktop yet reports
+    // success, so the result must carry an honest warnings[] advisory.
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task Pen_RemoteSession_EmitsDeliveryWarning()
+    {
+        _fakeSession.SessionResult.WindowHandle = 8300;
+        _fakeForeground.IsRemoteSessionResult = true;
+
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "100,100", "--json"]);
+
+        Assert.AreEqual(0, exitCode, "Injection still succeeds; the warning is advisory, not fatal");
+        Assert.AreEqual(1, _fakePointer.PenCalls.Count);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.IsTrue(result.TryGetProperty("warnings", out var warnings),
+            "Remote session must surface a warnings[] advisory (pen especially does not route over RDP)");
+        Assert.AreEqual(1, warnings.GetArrayLength());
+        StringAssert.Contains(warnings[0].GetString(), "pen",
+            "Warning must name the pen input kind");
+    }
+
+    [TestMethod]
+    public async Task Pen_LocalSession_NoDeliveryWarning()
+    {
+        _fakeSession.SessionResult.WindowHandle = 8301;
+
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "100,100", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.IsFalse(result.TryGetProperty("warnings", out _),
+            "A local console session must not emit the remote-delivery warning");
+    }
 }

@@ -393,6 +393,12 @@ internal class UiTouchCommand : Command, IShortDescription
                     return 1;
                 }
 
+                // id27/id28: synthetic touch injection can report success without actually reaching the
+                // target in a remote session (RDP). Attach an honest delivery-uncertainty advisory so a
+                // ✅ / exit 0 is not mistaken for confirmed delivery.
+                var deliveryWarning = ForegroundGuard.RemoteInjectionWarning(
+                    foregroundGuard.IsRemoteSession(), "touch");
+
                 if (json)
                 {
                     var result = new UiTouchResult
@@ -403,7 +409,8 @@ internal class UiTouchCommand : Command, IShortDescription
                         Fingers = effectiveFingers,
                         DurationMs = durationMs,
                         HoldMs = holdMs,
-                        Hwnd = targetHwnd
+                        Hwnd = targetHwnd,
+                        Warnings = deliveryWarning is null ? null : [deliveryWarning]
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiTouchResult));
@@ -412,6 +419,10 @@ internal class UiTouchCommand : Command, IShortDescription
                 {
                     logger.LogInformation("{Symbol} {Gesture} at ({X}, {Y}) with {Fingers} finger(s)",
                         UiSymbols.Check, gestureStr, start.X, start.Y, effectiveFingers);
+                    if (deliveryWarning is not null)
+                    {
+                        logger.LogWarning("{Symbol} {Warning}", UiSymbols.Warning, deliveryWarning);
+                    }
                 }
 
                 return 0;
