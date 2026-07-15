@@ -2589,31 +2589,49 @@ public class PackageCommandTests : BaseCommandTests
     [TestMethod]
     public async Task CreateMsixPackageAsync_AutoSignWithGenerateDevCert_GeneratesAndSignsWithDevCertificate()
     {
-        // Arrange
+        // Arrange - use a UNIQUE publisher subject for this test. The autoSign + generateDevCert
+        // flow generates a dev certificate that is installed into the shared CurrentUser\My store.
+        // This class runs in parallel and many other tests generate and blanket-remove the shared
+        // "CN=TestPublisher" subject, so reusing it here would race concurrent store add/remove of
+        // the same entry (the flagged flaky failure). A dedicated subject, cleaned up only by this
+        // test, isolates the store interaction and keeps the class fully parallel-safe.
+        const string uniquePublisher = "CN=AutoSignGenDevCertPublisher";
         var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "GenDevCertPackage"));
         CreateTestPackageStructure(packageDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(packageDir.FullName, "AppxManifest.xml"),
+            StandardTestManifestContent.Replace("CN=TestPublisher", uniquePublisher, StringComparison.Ordinal),
+            TestContext.CancellationToken);
         await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
 
-        // Act - autoSign + generateDevCert with NO external certificate path forces the service to
-        // generate a dev certificate for the manifest publisher (CN=TestPublisher), validate the
-        // publisher match, and sign the package with it.
-        var result = await _msixService.CreateMsixPackageAsync(
-            inputFolder: packageDir,
-            outputPath: _tempDirectory,
-            TestTaskContext,
-            packageName: "GenDevCertPackage",
-            skipPri: true,
-            autoSign: true,
-            certificatePassword: "testpassword123",
-            generateDevCert: true,
-            cancellationToken: CancellationToken.None);
+        try
+        {
+            // Act - autoSign + generateDevCert with NO external certificate path forces the service to
+            // generate a dev certificate for the manifest publisher, validate the publisher match, and
+            // sign the package with it.
+            var result = await _msixService.CreateMsixPackageAsync(
+                inputFolder: packageDir,
+                outputPath: _tempDirectory,
+                TestTaskContext,
+                packageName: "GenDevCertPackage",
+                skipPri: true,
+                autoSign: true,
+                certificatePassword: "testpassword123",
+                generateDevCert: true,
+                cancellationToken: CancellationToken.None);
 
-        // Assert
-        Assert.IsNotNull(result, "Result should not be null");
-        Assert.IsTrue(result.Signed, "Package should be signed with the generated dev certificate");
-        Assert.IsTrue(result.MsixPath.Exists, "MSIX package file should exist");
-        var generatedCert = new FileInfo(Path.Combine(_tempDirectory.FullName, "GenDevCertPackage_cert.pfx"));
-        Assert.IsTrue(generatedCert.Exists, "The generated dev certificate PFX should be written next to the package");
+            // Assert
+            Assert.IsNotNull(result, "Result should not be null");
+            Assert.IsTrue(result.Signed, "Package should be signed with the generated dev certificate");
+            Assert.IsTrue(result.MsixPath.Exists, "MSIX package file should exist");
+            var generatedCert = new FileInfo(Path.Combine(_tempDirectory.FullName, "GenDevCertPackage_cert.pfx"));
+            Assert.IsTrue(generatedCert.Exists, "The generated dev certificate PFX should be written next to the package");
+        }
+        finally
+        {
+            // Clean up only this test's own unique subject (matches the SignCommandTests self-cleanup pattern).
+            CleanupInvalidTestCertificatesFromStore(uniquePublisher);
+        }
     }
 
     [TestMethod]

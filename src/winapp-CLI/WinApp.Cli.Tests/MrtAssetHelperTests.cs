@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Spectre.Console.Testing;
 using WinApp.Cli.ConsoleTasks;
@@ -15,6 +16,24 @@ public class MrtAssetHelperTests
 
     private static TaskContext CreateTaskContext()
         => new(new GroupableTask("test", null), null, new TestConsole(), NullLogger<MrtAssetHelperTests>.Instance, new Lock());
+
+    // Debug-enabled variant: TaskContext.AddDebugMessage is a no-op unless the logger has Debug
+    // enabled, so a NullLogger context silently swallows verbose warnings. This returns the
+    // underlying GroupableTask too, so a test can inspect the messages actually emitted.
+    private static (TaskContext TaskContext, GroupableTask Task) CreateVerboseTaskContext()
+    {
+        var task = new GroupableTask("test", null);
+        var taskContext = new TaskContext(task, null, new TestConsole(), new DebugEnabledLogger(), new Lock());
+        return (taskContext, task);
+    }
+
+    /// <summary>Minimal ILogger with Debug enabled so verbose task messages are recorded.</summary>
+    private sealed class DebugEnabledLogger : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Debug;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) { }
+    }
 
     [TestInitialize]
     public void Setup()
@@ -373,7 +392,7 @@ public class MrtAssetHelperTests
     [TestMethod]
     public void ExpandManifestReferencedFiles_MissingDirectory_WithTaskContext_LogsWarningAndSkips()
     {
-        var taskContext = CreateTaskContext();
+        var (taskContext, task) = CreateVerboseTaskContext();
 
         // Referenced file lives under a subdirectory that does not exist -> the per-file source
         // directory check logs a warning and continues (exercising the non-null taskContext path).
@@ -383,6 +402,15 @@ public class MrtAssetHelperTests
             taskContext);
 
         Assert.AreEqual(0, result.Count);
+
+        // The warning is emitted via TaskContext.AddDebugMessage, which records only when the logger
+        // has Debug enabled. Assert the warning was actually produced so this stays a real guard.
+        var messages = task.SubTasks.OfType<StatusMessageTask>().Select(t => t.CompletedMessage ?? string.Empty).ToList();
+        Assert.IsTrue(
+            messages.Any(m =>
+                m.Contains("Source directory not found for referenced file", StringComparison.Ordinal) &&
+                m.Contains("nonexistent", StringComparison.Ordinal)),
+            $"Expected a 'source directory not found' warning naming the missing directory. Messages:\n{string.Join("\n", messages)}");
     }
 
     #endregion
