@@ -14,6 +14,10 @@ public sealed partial class MainWindow : Window
         SetTitleBar(AppTitleBar);
 
         AppWindow.SetIcon("Assets/AppIcon.ico");
+
+        // Seed the RichEditBox with known text so the e2e "get-value (TextPattern read path)"
+        // assertion verifies real content instead of just a zero exit code on an empty control.
+        RichInputBox.Document.SetText(Microsoft.UI.Text.TextSetOptions.None, "Rich text read path OK");
     }
 
     private void CounterButton_Click(object sender, RoutedEventArgs e)

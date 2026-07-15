@@ -84,12 +84,24 @@ export function formatJsBindingsImportsHints(result: EnsureJsBindingsImportsResu
   return hints;
 }
 
-/** Route each `formatJsBindingsImportsHints` line through `log`. Extracted so the
- *  --verbose path (log = taskLog, no buffer) has direct regression coverage. */
-export function emitJsBindingsImportsHints(result: EnsureJsBindingsImportsResult, log: (line: string) => void): void {
-  for (const hint of formatJsBindingsImportsHints(result)) {
-    log(hint);
+export type JsBindingsImportsHintInput =
+  | { kind: 'configured'; result: EnsureJsBindingsImportsResult }
+  | { kind: 'unsupported' };
+
+/** Build the hint lines `handleInit` should emit for the `#winapp/bindings` imports map.
+ *  Pure so quiet/json gating can be tested without mutating package.json. */
+export function planJsBindingsImportsHints(input: JsBindingsImportsHintInput, opts: { quiet: boolean }): string[] {
+  if (opts.quiet) {
+    return [];
   }
+  if (input.kind === 'unsupported') {
+    return [
+      '💡 Skipped "#winapp/bindings" package imports because the installed @microsoft/dynwinrt-codegen is too old. ' +
+        'Upgrade with `npm i -D @microsoft/dynwinrt-codegen@latest && npx winapp init --add-js-bindings`, ' +
+        "or keep using a relative path like `require('../.winapp/bindings/index.js')`.",
+    ];
+  }
+  return formatJsBindingsImportsHints(input.result);
 }
 
 /** Run `work` under a child spinner (grouped if `ui.group` is set, standalone otherwise). */
@@ -399,11 +411,13 @@ export async function handleInit(args: string[]): Promise<void> {
       // means the imports mutation only happens when codegen actually supports
       // the package-shaped output (checked below), and each helper stays
       // testable/reusable without the other.
-      if (supportsPackageImports(codegenVersion)) {
-        const result = ensureJsBindingsImports(workspaceDir);
-        // Route through bufferingLog so `--verbose` (no group) logs immediately
-        // and grouped mode flushes after the spinner settles.
-        emitJsBindingsImportsHints(result, bufferingLog);
+      const importsHintLines = supportsPackageImports(codegenVersion)
+        ? planJsBindingsImportsHints({ kind: 'configured', result: ensureJsBindingsImports(workspaceDir) }, { quiet })
+        : planJsBindingsImportsHints({ kind: 'unsupported' }, { quiet });
+      // Route through bufferingLog so `--verbose` (no group) logs immediately
+      // and grouped mode flushes after the spinner settles.
+      for (const line of importsHintLines) {
+        bufferingLog(line);
       }
 
       // --config-only wrote no lockfile; codegen would fail. Defer to a later restore.
