@@ -192,4 +192,132 @@ public class LongPathHelperTests
     }
 
     #endregion
+
+    #region ValidatePathLength(path, longPathEnabled) tests
+
+    [TestMethod]
+    public void ValidatePathLength_TwoArg_LongPathAndDisabled_Throws()
+    {
+        var path = MakeLocalPath(MaxPath + 1);
+        var ex = Assert.ThrowsExactly<InvalidOperationException>(
+            () => LongPathHelper.ValidatePathLength(path, longPathEnabled: false));
+        Assert.IsTrue(ex.Message.Contains("MAX_PATH"));
+    }
+
+    [TestMethod]
+    public void ValidatePathLength_TwoArg_LongPathButEnabled_DoesNotThrow()
+    {
+        var path = MakeLocalPath(MaxPath + 1);
+        LongPathHelper.ValidatePathLength(path, longPathEnabled: true); // must not throw when enabled
+    }
+
+    [TestMethod]
+    public void IsSystemLongPathEnabled_ReturnsWithoutThrowing()
+    {
+        // Exercises the registry-read happy path; result depends on machine config, so we only
+        // assert it completes and yields a bool.
+        var enabled = LongPathHelper.IsSystemLongPathEnabled();
+        Assert.IsTrue(enabled == true || enabled == false);
+    }
+
+    #endregion
+
+    #region StripExtendedPrefix tests
+
+    [TestMethod]
+    public void StripExtendedPrefix_UncPrefix_RestoresDoubleBackslash()
+    {
+        Assert.AreEqual(@"\\server\share\file", LongPathHelper.StripExtendedPrefix(@"\\?\UNC\server\share\file"));
+    }
+
+    [TestMethod]
+    public void StripExtendedPrefix_LocalPrefix_RemovesPrefix()
+    {
+        Assert.AreEqual(@"C:\dir\file", LongPathHelper.StripExtendedPrefix(@"\\?\C:\dir\file"));
+    }
+
+    [TestMethod]
+    public void StripExtendedPrefix_NoPrefix_ReturnsUnchanged()
+    {
+        Assert.AreEqual(@"C:\dir\file", LongPathHelper.StripExtendedPrefix(@"C:\dir\file"));
+    }
+
+    #endregion
+
+    #region GetShortPath(path, shortener) injected-seam tests
+
+    // A long path whose directory portion exceeds MaxPath, so EnsureExtendedLengthPrefix adds a prefix.
+    private static readonly string LongLocalDirPath = @"C:\" + new string('d', 300) + @"\f.txt";
+    private static readonly string LongUncDirPath = @"\\srv\share\" + new string('d', 300) + @"\f.txt";
+
+    [TestMethod]
+    public void GetShortPath_Injected_LocalPrefixedResult_IsStripped()
+    {
+        var result = LongPathHelper.GetShortPath(LongLocalDirPath, _ => @"\\?\C:\SHORT~1");
+
+        Assert.AreEqual(@"C:\SHORT~1\f.txt", result);
+    }
+
+    [TestMethod]
+    public void GetShortPath_Injected_UncPrefixedResult_IsStripped()
+    {
+        var result = LongPathHelper.GetShortPath(LongUncDirPath, _ => @"\\?\UNC\srv\share\S~1");
+
+        Assert.AreEqual(@"\\srv\share\S~1\f.txt", result);
+    }
+
+    [TestMethod]
+    public void GetShortPath_Injected_NullShortener_ReturnsOriginalDirectoryPath()
+    {
+        // Shortener signals "cannot shorten" by returning null -> original directory preserved.
+        var result = LongPathHelper.GetShortPath(LongLocalDirPath, _ => null);
+
+        Assert.AreEqual(LongLocalDirPath, result);
+    }
+
+    [TestMethod]
+    public void GetShortPath_Injected_ShortenerThrowsDllNotFound_ReturnsOriginalDirectoryPath()
+    {
+        var result = LongPathHelper.GetShortPath(LongLocalDirPath, _ => throw new DllNotFoundException("no api"));
+
+        Assert.AreEqual(LongLocalDirPath, result);
+    }
+
+    [TestMethod]
+    public void GetShortPath_Injected_BareLongFilenameWithoutDirectory_ReturnsOriginal()
+    {
+        var bareLongName = new string('a', 300) + ".txt";
+        var wasCalled = false;
+
+        var result = LongPathHelper.GetShortPath(bareLongName, _ => { wasCalled = true; return "ignored"; });
+
+        Assert.AreEqual(bareLongName, result);
+        Assert.IsFalse(wasCalled, "Shortener must not be invoked when there is no directory portion.");
+    }
+
+    [TestMethod]
+    public void GetShortPath_Production_ExistingShortDirectoryWithLongFilename_InvokesNativeShortener()
+    {
+        // Exercises the real GetShortPathName success path: the directory exists (temp dir), so the
+        // native call returns a non-zero buffer. The filename keeps the total path over MaxPath.
+        var tempDir = Directory.CreateDirectory(
+            Path.Combine(Path.GetTempPath(), "lp" + Guid.NewGuid().ToString("N")[..8])).FullName;
+        try
+        {
+            var longName = new string('a', 300) + ".txt";
+            var path = Path.Combine(tempDir, longName);
+            Assert.IsTrue(path.Length > MaxPath);
+
+            var result = LongPathHelper.GetShortPath(path);
+
+            Assert.IsTrue(result.EndsWith(longName, StringComparison.Ordinal),
+                "The long filename must be preserved regardless of directory shortening.");
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    #endregion
 }

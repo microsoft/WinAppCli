@@ -41,7 +41,21 @@ internal static unsafe partial class AuthenticodeVerifier
     /// untrusted, non-Microsoft, or verification error) returns <c>false</c> — this is a fail-closed
     /// security gate.
     /// </summary>
-    public static bool IsTrustedMicrosoftSigned(string filePath, ILogger logger)
+    public static bool IsTrustedMicrosoftSigned(string filePath, ILogger logger) =>
+        IsTrustedMicrosoftSigned(filePath, logger, VerifyTrustCore, IsMicrosoftSigner);
+
+    /// <summary>
+    /// Core of <see cref="IsTrustedMicrosoftSigned(string, ILogger)"/> with the two OS-boundary
+    /// probes injected: <paramref name="verifyTrustCore"/> runs <c>WinVerifyTrust</c> (returning its
+    /// HRESULT) and <paramref name="isMicrosoftSigner"/> reports whether the signer subject is
+    /// Microsoft. The seam lets unit tests exercise every trust/revocation/signer branch and the
+    /// exception path deterministically, without needing real signed binaries for each case.
+    /// </summary>
+    internal static bool IsTrustedMicrosoftSigned(
+        string filePath,
+        ILogger logger,
+        Func<string, uint, uint, int> verifyTrustCore,
+        Func<string, bool> isMicrosoftSigner)
     {
         try
         {
@@ -50,13 +64,13 @@ internal static unsafe partial class AuthenticodeVerifier
                 return false;
             }
 
-            if (!VerifyTrust(filePath, logger))
+            if (!VerifyTrust(filePath, logger, verifyTrustCore))
             {
                 logger.LogDebug("Authenticode trust verification failed for {File}.", filePath);
                 return false;
             }
 
-            if (!IsMicrosoftSigner(filePath))
+            if (!isMicrosoftSigner(filePath))
             {
                 logger.LogDebug("Authenticode signer for {File} is not Microsoft.", filePath);
                 return false;
@@ -71,13 +85,13 @@ internal static unsafe partial class AuthenticodeVerifier
         }
     }
 
-    private static bool VerifyTrust(string filePath, ILogger logger)
+    private static bool VerifyTrust(string filePath, ILogger logger, Func<string, uint, uint, int> verifyTrustCore)
     {
         // Prefer full-chain revocation using locally cached CRLs only (no network fetch, so a
         // locked-down/offline environment does not hang). A definitively revoked certificate is a hard
         // failure; when revocation data simply cannot be obtained offline, fall back to a signature-only
         // check so the gate still works — the signature and Microsoft-signer checks remain in force.
-        var hr = VerifyTrustCore(filePath, WTD_REVOKE_WHOLECHAIN, WTD_CACHE_ONLY_URL_RETRIEVAL);
+        var hr = verifyTrustCore(filePath, WTD_REVOKE_WHOLECHAIN, WTD_CACHE_ONLY_URL_RETRIEVAL);
         if (hr == 0)
         {
             return true;
@@ -92,7 +106,7 @@ internal static unsafe partial class AuthenticodeVerifier
         if (hr is CERT_E_REVOCATION_FAILURE or CRYPT_E_REVOCATION_OFFLINE or CRYPT_E_NO_REVOCATION_CHECK)
         {
             logger.LogDebug("Revocation data unavailable for {File} (0x{Hr:X8}); falling back to signature-only verification.", filePath, hr);
-            return VerifyTrustCore(filePath, WTD_REVOKE_NONE, WTD_REVOCATION_CHECK_NONE) == 0;
+            return verifyTrustCore(filePath, WTD_REVOKE_NONE, WTD_REVOCATION_CHECK_NONE) == 0;
         }
 
         return false;

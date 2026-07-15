@@ -26,55 +26,22 @@ internal static class Program
         }
 
         // Ensure UTF-8 I/O for emoji-capable terminals; fall back silently if not supported
-        try
+        ConfigureConsoleEncoding(static () =>
         {
             Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
             Console.InputEncoding = Encoding.UTF8;
-        }
-        catch
-        {
-            // ignore
-        }
+        });
 
-        var minimumLogLevel = LogLevel.Information;
-        bool quiet = false;
-        bool verbose = false;
-        bool json = false;
-
-        // Pre-scan argv for the global logging-mode flags. The scan stops at the first
-        // standalone '--' separator so that passthrough payload (e.g. `winapp run . --
-        // --json`) is not misread as a winapp global flag.
-        if (GlobalOptionPreScan.IsFlagPresent(args, WinAppRootCommand.VerboseOption.Name, WinAppRootCommand.VerboseOption.Aliases))
+        var loggingMode = ResolveLoggingMode(args);
+        if (loggingMode.ConflictError is not null)
         {
-            minimumLogLevel = LogLevel.Debug;
-            verbose = true;
-        }
-        if (GlobalOptionPreScan.IsFlagPresent(args, WinAppRootCommand.QuietOption.Name, WinAppRootCommand.QuietOption.Aliases))
-        {
-            minimumLogLevel = LogLevel.Warning;
-            quiet = true;
-        }
-        if (GlobalOptionPreScan.IsFlagPresent(args, WinAppRootCommand.JsonOption.Name, WinAppRootCommand.JsonOption.Aliases))
-        {
-            minimumLogLevel = LogLevel.None;
-            json = true;
-        }
-
-        if (quiet && verbose)
-        {
-            Console.Error.WriteLine($"Cannot specify both --quiet and --verbose options together.");
+            Console.Error.WriteLine(loggingMode.ConflictError);
             return 1;
         }
-        else if (quiet && json)
-        {
-            Console.Error.WriteLine($"Cannot specify both --quiet and --json options together.");
-            return 1;
-        }
-        else if (verbose && json)
-        {
-            Console.Error.WriteLine($"Cannot specify both --verbose and --json options together.");
-            return 1;
-        }
+
+        var minimumLogLevel = loggingMode.MinimumLevel;
+        bool quiet = loggingMode.Quiet;
+        bool json = loggingMode.Json;
 
         // Check if --cli-schema is specified - this outputs machine-readable JSON
         // and should not display any interactive messages like first-run notices
@@ -160,6 +127,35 @@ internal static class Program
             }
         }
 
+        return await RunWithTelemetryAsync(parsedArgs, isCompleteMode, () => parsedArgs.InvokeAsync());
+    }
+
+    /// <summary>
+    /// Applies the given console-encoding mutation, swallowing the platform exception that occurs
+    /// when the standard stream encoding cannot be changed (e.g. redirected or unsupported handles).
+    /// UTF-8 I/O is a best-effort nicety, so a failure here must never abort startup.
+    /// </summary>
+    internal static void ConfigureConsoleEncoding(Action apply)
+    {
+        try
+        {
+            apply();
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    /// <summary>
+    /// Runs the parsed command via <paramref name="invoke"/>, emitting command-invoked/-completed
+    /// telemetry (unless in completion mode) and converting any unhandled exception into a logged
+    /// error plus exit code 1. The <paramref name="invoke"/> seam lets tests exercise both the
+    /// success and top-level-failure paths without needing a real, throwing command.
+    /// </summary>
+    internal static async Task<int> RunWithTelemetryAsync(
+        System.CommandLine.ParseResult parsedArgs, bool isCompleteMode, Func<Task<int>> invoke)
+    {
         try
         {
             if (!isCompleteMode)
@@ -167,7 +163,7 @@ internal static class Program
                 CommandInvokedEvent.Log(parsedArgs.CommandResult);
             }
 
-            var returnCode = await parsedArgs.InvokeAsync();
+            var returnCode = await invoke();
 
             if (!isCompleteMode)
             {
@@ -182,5 +178,59 @@ internal static class Program
             Console.Error.WriteLine($"An unexpected error occurred: {ex.Message}");
             return 1;
         }
+    }
+
+    /// <summary>
+    /// The global logging mode resolved from argv: the minimum log level plus the individual
+    /// <c>--quiet</c>/<c>--verbose</c>/<c>--json</c> flags, and a non-null <see cref="ConflictError"/>
+    /// message when a mutually-exclusive combination was requested.
+    /// </summary>
+    internal readonly record struct LoggingMode(LogLevel MinimumLevel, bool Quiet, bool Verbose, bool Json, string? ConflictError);
+
+    /// <summary>
+    /// Pre-scans argv for the global logging-mode flags and resolves the effective
+    /// <see cref="LoggingMode"/>. The scan (via <see cref="GlobalOptionPreScan"/>) stops at the first
+    /// standalone <c>--</c> separator so passthrough payload (e.g. <c>winapp run . -- --json</c>) is
+    /// not misread as a winapp global flag. Extracted from <see cref="Main"/> so the flag precedence
+    /// and mutual-exclusion rules are unit testable without invoking the full entrypoint.
+    /// </summary>
+    internal static LoggingMode ResolveLoggingMode(string[] args)
+    {
+        var minimumLogLevel = LogLevel.Information;
+        bool quiet = false;
+        bool verbose = false;
+        bool json = false;
+
+        if (GlobalOptionPreScan.IsFlagPresent(args, WinAppRootCommand.VerboseOption.Name, WinAppRootCommand.VerboseOption.Aliases))
+        {
+            minimumLogLevel = LogLevel.Debug;
+            verbose = true;
+        }
+        if (GlobalOptionPreScan.IsFlagPresent(args, WinAppRootCommand.QuietOption.Name, WinAppRootCommand.QuietOption.Aliases))
+        {
+            minimumLogLevel = LogLevel.Warning;
+            quiet = true;
+        }
+        if (GlobalOptionPreScan.IsFlagPresent(args, WinAppRootCommand.JsonOption.Name, WinAppRootCommand.JsonOption.Aliases))
+        {
+            minimumLogLevel = LogLevel.None;
+            json = true;
+        }
+
+        string? conflictError = null;
+        if (quiet && verbose)
+        {
+            conflictError = "Cannot specify both --quiet and --verbose options together.";
+        }
+        else if (quiet && json)
+        {
+            conflictError = "Cannot specify both --quiet and --json options together.";
+        }
+        else if (verbose && json)
+        {
+            conflictError = "Cannot specify both --verbose and --json options together.";
+        }
+
+        return new LoggingMode(minimumLogLevel, quiet, verbose, json, conflictError);
     }
 }
