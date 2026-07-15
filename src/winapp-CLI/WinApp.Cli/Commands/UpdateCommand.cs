@@ -85,6 +85,13 @@ internal class UpdateCommand : Command, IShortDescription
                                             updatedConfig.SetVersion(package.Name, package.Version);
                                         }
                                     }
+                                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                                    {
+                                        // A user cancellation (Ctrl+C) must abort the whole command, not be
+                                        // recorded as an ordinary lookup failure that would let the loop keep
+                                        // checking packages and then proceed to install / build-tool work.
+                                        throw;
+                                    }
                                     catch (Exception ex)
                                     {
                                         taskContext.AddStatusMessage($"{UiSymbols.Warning} Failed to check {package.Name}: {ex.Message}");
@@ -97,6 +104,12 @@ internal class UpdateCommand : Command, IShortDescription
 
                                 return 0;
                             }, cancellationToken);
+
+                            // The package-check subtask runs inside a task wrapper that catches and swallows
+                            // exceptions, so a cancellation rethrown mid-loop stops the loop but does not
+                            // propagate on its own. Surface it here before acting on the (partial) results, so
+                            // Ctrl+C aborts the command instead of falling through to install and build-tool work.
+                            cancellationToken.ThrowIfCancellationRequested();
 
                             if (hasUpdates)
                             {

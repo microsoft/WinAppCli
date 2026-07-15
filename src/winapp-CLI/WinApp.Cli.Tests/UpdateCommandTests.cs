@@ -15,9 +15,10 @@ namespace WinApp.Cli.Tests;
 /// (<c>CompareVersions(latest, current) &gt; 0</c>): only a strictly-greater "latest" rewrites winapp.yaml
 /// and triggers a reinstall; a normalized-equal or lower "latest" must leave the persisted version and the
 /// installed set untouched. These guard against a normalized-but-equal version spuriously counting as an
-/// update, or a lower "latest" silently downgrading the pinned version. A final case pins down the
-/// fail-closed path: a latest-version lookup that throws must exit non-zero and preserve the pin rather than
-/// report a false "up to date".
+/// update, or a lower "latest" silently downgrading the pinned version. Two further cases pin down the
+/// failure paths: a latest-version lookup that throws must exit non-zero and preserve the pin rather than
+/// report a false "up to date", and a cancellation (Ctrl+C) mid-lookup must abort the whole command instead
+/// of being recorded as an ordinary lookup failure that lets the loop keep running.
 /// </summary>
 [TestClass]
 public class UpdateCommandTests : BaseCommandTests
@@ -114,6 +115,34 @@ public class UpdateCommandTests : BaseCommandTests
         var persisted = _configService.Load().Packages.Single(p => p.Name == PackageName).Version;
         Assert.AreEqual("1.0.0", persisted, "A failed lookup must leave the pinned version unchanged.");
         Assert.IsEmpty(_installer.InstalledPackages, "A failed lookup must not trigger a reinstall.");
+    }
+
+    [TestMethod]
+    public async Task Update_CancelledDuringLookup_AbortsWithoutCheckingRemainingPackages()
+    {
+        // Ctrl+C during a latest-version lookup must abort the whole command — cancellation must NOT be
+        // swallowed by the ordinary lookup-failure handler, which would let the loop keep checking the
+        // remaining packages and then proceed to install / build-tool work. The fake cancels the flow token
+        // while checking the first package and throws; the handler must rethrow that cancellation, so the
+        // second package is never queried and nothing is installed. Contrast with the fail-closed test above,
+        // where an ordinary lookup failure lets the loop continue.
+        var config = new WinappConfig();
+        config.SetVersion("First.Pkg", "1.0.0");
+        config.SetVersion("Second.Pkg", "1.0.0");
+        _configService.Save(config);
+
+        using var cts = new CancellationTokenSource();
+        _fakeNuget.CancelOnQuery = cts;
+        _fakeNuget.CancelOnQueryPackage = "First.Pkg";
+
+        var command = GetRequiredService<UpdateCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [], cts.Token);
+
+        Assert.AreNotEqual(0, exitCode, "A cancelled update must not report success.");
+        CollectionAssert.Contains(_fakeNuget.QueriedPackages, "First.Pkg", "The first package triggers the cancellation.");
+        CollectionAssert.DoesNotContain(_fakeNuget.QueriedPackages, "Second.Pkg",
+            "Cancellation must abort the loop, so the second package is never queried.");
+        Assert.IsEmpty(_installer.InstalledPackages, "A cancelled update must not reinstall packages.");
     }
 
     /// <summary>

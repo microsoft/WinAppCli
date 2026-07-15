@@ -27,9 +27,26 @@ internal class FakeNugetService : INugetService
     /// </summary>
     public HashSet<string> PackagesToThrow { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// When set alongside <see cref="CancelOnQuery"/>, querying this package cancels that token source and
+    /// throws, simulating a user Ctrl+C landing during a latest-version lookup for that package.
+    /// </summary>
+    public string? CancelOnQueryPackage { get; set; }
+
+    /// <summary>
+    /// The token source cancelled when <see cref="CancelOnQueryPackage"/> is queried. Wire this to the same
+    /// token passed into the command so the handler observes a genuine cancellation.
+    /// </summary>
+    public CancellationTokenSource? CancelOnQuery { get; set; }
+
     public Task<string> GetLatestVersionAsync(string packageName, SdkInstallMode sdkInstallMode, CancellationToken cancellationToken = default)
     {
         QueriedPackages.Add(packageName);
+        if (CancelOnQueryPackage is not null && string.Equals(packageName, CancelOnQueryPackage, StringComparison.OrdinalIgnoreCase))
+        {
+            CancelOnQuery?.Cancel();
+            cancellationToken.ThrowIfCancellationRequested();
+        }
         if (PackagesToThrow.Contains(packageName))
         {
             throw new InvalidOperationException($"Simulated NuGet failure for {packageName}");
