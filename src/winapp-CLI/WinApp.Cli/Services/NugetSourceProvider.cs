@@ -50,6 +50,7 @@ internal sealed class NugetSourceProvider
     private Lazy<ISettings> _settings;
     private Lazy<SourceRepositoryProvider> _sourceRepositoryProvider;
     private Lazy<PackageSourceMapping> _packageSourceMapping;
+    private Lazy<string> _configScopeKey;
 
     public NugetSourceProvider(ICurrentDirectoryProvider currentDirectoryProvider)
     {
@@ -57,7 +58,7 @@ internal sealed class NugetSourceProvider
         InitializeCaches();
     }
 
-    [MemberNotNull(nameof(_settings), nameof(_sourceRepositoryProvider), nameof(_packageSourceMapping))]
+    [MemberNotNull(nameof(_settings), nameof(_sourceRepositoryProvider), nameof(_packageSourceMapping), nameof(_configScopeKey))]
     private void InitializeCaches()
     {
         _settings = new Lazy<ISettings>(() =>
@@ -67,6 +68,21 @@ internal sealed class NugetSourceProvider
             new SourceRepositoryProvider(new PackageSourceProvider(Settings), Repository.Provider.GetCoreV3()));
         _packageSourceMapping = new Lazy<PackageSourceMapping>(() =>
             NuGet.Configuration.PackageSourceMapping.GetPackageSourceMapping(Settings));
+        // A stable fingerprint of the effective source set + global packages folder + mapping state, so
+        // callers that keep a process-wide cache keyed only by package/version (e.g. the dependency cache in
+        // NugetService) can additionally scope it to THIS configuration and never serve results resolved
+        // against a different config root, private feed or global folder after SetConfigRoot switches it.
+        _configScopeKey = new Lazy<string>(() =>
+        {
+            var globalFolder = SettingsUtility.GetGlobalPackagesFolder(Settings);
+            var sources = string.Join(
+                ";",
+                new PackageSourceProvider(Settings).LoadPackageSources()
+                    .Where(s => s.IsEnabled)
+                    .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+                    .Select(s => $"{s.Name}|{s.Source}"));
+            return $"gpf={globalFolder}\nmapping={PackageSourceMapping.IsEnabled}\nsources={sources}";
+        });
     }
 
     /// <summary>
@@ -88,6 +104,15 @@ internal sealed class NugetSourceProvider
     /// the global packages folder, client policy, etc. from the same configuration.
     /// </summary>
     internal ISettings Settings => _settings.Value;
+
+    /// <summary>
+    /// A stable fingerprint of the effective configuration (global packages folder, enabled sources and
+    /// whether <c>&lt;packageSourceMapping&gt;</c> is on). Consumers that maintain a process-wide, static
+    /// cache keyed only by package identity use this to additionally scope entries to the current config
+    /// root/feed set, so a cache populated under one <c>nuget.config</c> is never reused under another after
+    /// <see cref="SetConfigRoot"/> switches it. Recomputed whenever the caches are re-created.
+    /// </summary>
+    internal string ConfigScopeKey => _configScopeKey.Value;
 
     /// <summary>
     /// Configures NuGet's default credential service so authenticated (private) feeds work using

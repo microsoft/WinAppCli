@@ -89,16 +89,23 @@ internal class NugetService : INugetService
 
     public DirectoryInfo GetNuGetPackageDir(string packageName, string version)
     {
+        // Validate the identity BEFORE it is ever turned into a filesystem path. A malformed id or a value
+        // that is not a real NuGet version (e.g. "..") must never be concatenated into the cache path: it
+        // could otherwise resolve to a directory outside the package folder (path traversal) that a later
+        // DirectoryInfo.Exists() check would treat as an already-installed package. There is deliberately no
+        // raw string fallback — an unparseable version is an error, not a literal folder name.
+        if (string.IsNullOrWhiteSpace(packageName) || !PackageIdValidator.IsValidPackageId(packageName))
+        {
+            throw new InvalidOperationException(
+                $"'{packageName}' is not a valid NuGet package id.");
+        }
+
+        var parsed = ParseVersion(packageName, version);
         var cache = GetNuGetGlobalPackagesDir();
         // Resolve the on-disk folder the same way the global-packages writer does, so the path matches
         // regardless of how the version string is expressed (NuGet stores e.g. "1.0" under "1.0.0").
-        if (NuGetVersion.TryParse(version, out var parsed))
-        {
-            var resolver = new VersionFolderPathResolver(cache.FullName);
-            return new DirectoryInfo(resolver.GetInstallPath(packageName, parsed));
-        }
-
-        return new DirectoryInfo(Path.Combine(cache.FullName, packageName.ToLowerInvariant(), version.ToLowerInvariant()));
+        var resolver = new VersionFolderPathResolver(cache.FullName);
+        return new DirectoryInfo(resolver.GetInstallPath(packageName, parsed));
     }
 
     /// <summary>
@@ -212,17 +219,17 @@ internal class NugetService : INugetService
                 continue;
             }
 
-            var depVersion = await ResolveDependencyVersionAsync(depName, depVersionRange, cacheContext, cancellationToken);
-            if (string.IsNullOrEmpty(depVersion))
-            {
-                // The declared range names no installable version on the configured sources (e.g. a
-                // version-less dependency or a range no listed version satisfies); skip it rather than
-                // guessing a version to install.
-                continue;
-            }
-
             try
             {
+                var depVersion = await ResolveDependencyVersionAsync(depName, depVersionRange, cacheContext, cancellationToken);
+                if (string.IsNullOrEmpty(depVersion))
+                {
+                    // The declared range names no installable version on the configured sources (e.g. a
+                    // version-less dependency or a range no listed version satisfies); skip it rather than
+                    // guessing a version to install.
+                    continue;
+                }
+
                 await InstallPackageRecursiveAsync(depName, depVersion, installed, taskContext, cacheContext, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -232,10 +239,11 @@ internal class NugetService : INugetService
             }
             catch (Exception ex)
             {
-                // A single transitive dependency that cannot be installed should not abort the whole
-                // install, but the failure must be visible (not hidden behind verbose-only logging) so an
-                // incomplete install is not silently reported as success.
-                taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not install dependency {depName} {depVersion} (required by {package} {version}): {ex.Message}");
+                // A single transitive dependency that cannot be resolved (e.g. its only satisfying source
+                // could not be queried) or installed should not abort the whole install, but the failure
+                // must be visible (not hidden behind verbose-only logging) so an incomplete install is not
+                // silently reported as success.
+                taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not install dependency {depName} (required by {package} {version}): {ex.Message}");
             }
         }
     }
@@ -444,27 +452,21 @@ internal class NugetService : INugetService
     }
 
     /// <summary>
-    /// Resolves a dependency's declared <see cref="VersionRange"/> to a single concrete version to install.
-    /// For the common inclusive lower bound (e.g. <c>[1.2.3, )</c>, which is also how a bare <c>1.2.3</c> is
-    /// interpreted) the lower bound itself satisfies the range and is exactly what NuGet's lowest-applicable
-    /// resolution selects, so it is used directly without an extra feed round-trip. For ranges whose lower
-    /// bound is not a valid install target — an exclusive lower bound such as <c>(1.0.0, 2.0.0]</c> or an
-    /// upper-bound-only range such as <c>(, 2.0.0]</c> — the configured sources are queried and the lowest
-    /// listed version that satisfies the full range is chosen. Returns null when the range constrains nothing
-    /// (a version-less dependency) or when no listed version satisfies it.
+    /// Resolves a dependency's declared <see cref="VersionRange"/> to a single concrete version to install by
+    /// selecting the lowest listed version that satisfies the range on the configured sources — matching
+    /// NuGet's lowest-applicable resolution. The declared lower bound is never assumed to exist: a range such
+    /// as <c>[1.2.3, )</c> is satisfied by 1.2.3 only if a source actually lists it, otherwise the next higher
+    /// listed version is selected (a mirror may carry 1.3.0 but not 1.2.3). This also honors floating ranges.
+    /// Returns null when the range constrains nothing (a version-less dependency) or when no listed version
+    /// satisfies it. Throws when no listed version satisfied the range only because a source that could have
+    /// satisfied it failed to answer, so callers can distinguish "no satisfying version" from "source query
+    /// failed" (the graph path surfaces it; the install path catches it and warns).
     /// </summary>
     private async Task<string?> ResolveDependencyVersionAsync(string packageId, VersionRange? range, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         if (range is null)
         {
             return null;
-        }
-
-        // Inclusive lower bound: the lower bound is a valid, satisfying version and is exactly what NuGet's
-        // lowest-applicable resolution picks, so use it directly and avoid an extra feed query.
-        if (range.HasLowerBound && range.IsMinInclusive && range.MinVersion is not null)
-        {
-            return range.MinVersion.ToNormalizedString();
         }
 
         // A range with no bounds at all (a version-less dependency) constrains nothing; keep the historical
@@ -474,23 +476,51 @@ internal class NugetService : INugetService
             return null;
         }
 
-        // Exclusive lower bound or upper-bound-only range: the declared lower bound is not itself an
-        // installable version, so enumerate the listed versions and select the lowest one that satisfies the
-        // full range (FindBestMatch returns null when none do).
-        var available = await GetListedVersionsForRangeAsync(packageId, cacheContext, cancellationToken);
-        return range.FindBestMatch(available)?.ToNormalizedString();
+        // Resolve every bounded/floating range against the versions the sources actually list and pick the
+        // lowest one that satisfies it (NuGet's lowest-applicable rule). Never shortcut to the declared lower
+        // bound: it may be excluded by the range (an exclusive bound) or simply absent from the source.
+        var listed = await GetListedVersionsForRangeAsync(packageId, cacheContext, cancellationToken);
+        var best = range.FindBestMatch(listed.Versions);
+        if (best is not null)
+        {
+            return best.ToNormalizedString();
+        }
+
+        // Nothing satisfied the range. Distinguish a genuine "no listed version satisfies it" (skip the
+        // dependency) from "a source that could have satisfied it could not be queried" — in the latter case
+        // surface the error rather than silently returning null, so the graph path fails loudly and the
+        // install path can report its non-fatal dependency warning instead of dropping a package unnoticed.
+        if (listed.Error is not null)
+        {
+            throw new InvalidOperationException(
+                $"Could not resolve a version for dependency '{packageId}' satisfying '{range}': source '{listed.ErrorSource}' could not be queried: {listed.Error.Message}",
+                listed.Error);
+        }
+
+        return null;
     }
+
+    /// <summary>
+    /// The listed versions of a package collected across eligible sources, plus the last source failure (if
+    /// any) so the caller can tell "no listed version satisfies the range" apart from "a source could not be
+    /// queried".
+    /// </summary>
+    private readonly record struct ListedVersionsResult(IReadOnlyList<NuGetVersion> Versions, Exception? Error, string? ErrorSource);
 
     /// <summary>
     /// Collects the listed (non-unlisted) versions of a package across every eligible source, for resolving a
     /// dependency's version range to a concrete version. Unlike <see cref="GetListedVersionsAsync"/> — which
     /// feeds a "latest" MAX decision and therefore fails closed if any source errors — this tolerates a
     /// per-source failure and moves on, matching the source-by-source failover the dependency paths already
-    /// use: another eligible source may still list a version that satisfies the range.
+    /// use: another eligible source may still list a version that satisfies the range. The last such failure
+    /// is still reported back so the caller can surface it when NO listed version satisfies the range (rather
+    /// than masking a feed/authentication error as a silent skip).
     /// </summary>
-    private async Task<IReadOnlyList<NuGetVersion>> GetListedVersionsForRangeAsync(string packageId, SourceCacheContext cacheContext, CancellationToken cancellationToken)
+    private async Task<ListedVersionsResult> GetListedVersionsForRangeAsync(string packageId, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         var versions = new HashSet<NuGetVersion>();
+        Exception? lastError = null;
+        string? lastErrorSource = null;
 
         foreach (var repo in _sourceProvider.GetRepositoriesForPackage(packageId))
         {
@@ -522,20 +552,28 @@ internal class NugetService : INugetService
                 // Propagate genuine cancellation instead of masking it as "no versions found".
                 throw;
             }
-            catch
+            catch (Exception ex)
             {
                 // Best-effort: a source we cannot query contributes no versions; another eligible source may
-                // still satisfy the range. (The dependency paths already fail over source-by-source.)
+                // still satisfy the range (the dependency paths already fail over source-by-source). Remember
+                // the failure so the caller can distinguish it from a clean "no satisfying version" when
+                // nothing ends up matching.
+                lastError = ex;
+                lastErrorSource = repo.PackageSource.Name;
             }
         }
 
-        return [.. versions];
+        return new ListedVersionsResult([.. versions], lastError, lastErrorSource);
     }
 
     /// <inheritdoc />
     public async Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, CancellationToken cancellationToken = default)
     {
-        var cacheKey = $"{packageName}/{version}";
+        // Scope the process-wide cache to the effective configuration (feeds/global folder/mapping), not just
+        // package/version: dependency results depend on the configured sources, so a bare package/version key
+        // would let a lookup after SetConfigRoot (or another service instance with a different private feed)
+        // return dependencies resolved against the previous source hierarchy.
+        var cacheKey = $"{_sourceProvider.ConfigScopeKey}\n{packageName}/{version}";
         if (DependencyCache.TryGetValue(cacheKey, out var cached))
         {
             return new Dictionary<string, string>(cached, StringComparer.OrdinalIgnoreCase);

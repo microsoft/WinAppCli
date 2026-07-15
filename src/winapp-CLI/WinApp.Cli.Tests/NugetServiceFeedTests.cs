@@ -219,6 +219,57 @@ public class NugetServiceFeedTests : BaseCommandTests
     }
 
     [TestMethod]
+    // A version that is not a real NuGet version must be rejected before it is turned into a cache path.
+    // A traversal segment such as ".." would otherwise resolve to an ancestor of the package folder that a
+    // DirectoryInfo.Exists() check treats as an installed package (path traversal); an empty/garbage value
+    // would point callers at a folder the NuGet writer never created.
+    [DataRow("..")]
+    [DataRow("../../etc")]
+    [DataRow("not-a-version")]
+    [DataRow("")]
+    public void GetNuGetPackageDir_InvalidVersion_Throws(string version)
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var service = CreateServiceRootedAt(root);
+
+            var ex = Assert.ThrowsExactly<InvalidOperationException>(
+                () => service.GetNuGetPackageDir("Some.Package", version));
+
+            StringAssert.Contains(ex.Message, "is not a valid NuGet version", StringComparison.Ordinal);
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
+    // A malformed package id must likewise be rejected before path construction so it cannot escape the
+    // packages folder or be treated as an installed package by a later Exists() check.
+    [DataRow("..")]
+    [DataRow("bad/id")]
+    [DataRow("bad\\id")]
+    public void GetNuGetPackageDir_InvalidPackageId_Throws(string packageId)
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var service = CreateServiceRootedAt(root);
+
+            var ex = Assert.ThrowsExactly<InvalidOperationException>(
+                () => service.GetNuGetPackageDir(packageId, "1.0.0"));
+
+            StringAssert.Contains(ex.Message, "is not a valid NuGet package id", StringComparison.Ordinal);
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
     // Shorthand numeric versions expand to NuGet's canonical 3-part form so the stored/returned value
     // matches the on-disk global-packages folder layout that downstream cache-path builders concatenate.
     [DataRow("1.0", "1.0.0")]
@@ -483,6 +534,128 @@ public class NugetServiceFeedTests : BaseCommandTests
         finally
         {
             TryDelete(root);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetPackageDependenciesAsync_InclusiveLowerBoundNotListed_ResolvesNextHigherListedVersion()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            feed.Create();
+            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+
+            // Root depends on Child with a plain inclusive lower bound (1.0.0 == [1.0.0, )). The declared
+            // lower bound 1.0.0 is NOT listed on the feed; only 1.1.0 and 2.0.0 are. NuGet's lowest-applicable
+            // resolution must select the lowest LISTED satisfying version (1.1.0) — reducing the range to its
+            // MinVersion would instead request the missing 1.0.0 and drop the dependency.
+            WriteNupkgToFeed(feed, "Low.Root", "1.0.0", ("Low.Child", "1.0.0"));
+            WriteNupkgToFeed(feed, "Low.Child", "1.1.0");
+            WriteNupkgToFeed(feed, "Low.Child", "2.0.0");
+
+            WriteLocalFeedConfig(root, feed, packages);
+
+            var service = CreateServiceRootedAt(root);
+
+            var deps = await service.GetPackageDependenciesAsync("Low.Root", "1.0.0", TestContext.CancellationToken);
+
+            Assert.IsTrue(deps.TryGetValue("Low.Child", out var childVersion), "The dependency must be resolved against listed versions, not skipped.");
+            Assert.AreEqual("1.1.0", childVersion, "The unlisted lower bound (1.0.0) must resolve up to the lowest listed satisfying version (1.1.0).");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetPackageDependenciesAsync_SatisfyingSourceUnreachable_SurfacesErrorInsteadOfSkipping()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            // The local feed serves Root (so its dependency group is read) but lists NO versions of Child.
+            // A second eligible source that could have satisfied Child is unreachable (reserved '.invalid'
+            // TLD, RFC 6761). Turning that source failure into an empty version list would silently drop the
+            // dependency; instead the range resolver must surface the error so the graph caller sees it.
+            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            feed.Create();
+            WriteNupkgToFeed(feed, "Broken.Root", "1.0.0", ("Broken.Child", "[1.0.0, )"));
+
+            WriteNuGetConfig(root, $"""
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                  <packageSources>
+                    <clear />
+                    <add key="local" value="{feed.FullName}" />
+                    <add key="broken" value="https://nuget.invalid/v3/index.json" />
+                  </packageSources>
+                  <packageSourceMapping>
+                    <clear />
+                    <packageSource key="local">
+                      <package pattern="*" />
+                    </packageSource>
+                    <packageSource key="broken">
+                      <package pattern="*" />
+                    </packageSource>
+                  </packageSourceMapping>
+                </configuration>
+                """);
+
+            var service = CreateServiceRootedAt(root);
+
+            var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                async () => await service.GetPackageDependenciesAsync("Broken.Root", "1.0.0", TestContext.CancellationToken));
+
+            // The error must name the dependency and the unreachable source, proving the feed/auth failure
+            // was not masked as "no satisfying version" (which would silently omit the dependency).
+            StringAssert.Contains(ex.Message, "Broken.Child", StringComparison.Ordinal);
+            StringAssert.Contains(ex.Message, "could not be queried", StringComparison.Ordinal);
+            StringAssert.Contains(ex.Message, "broken", StringComparison.Ordinal);
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetPackageDependenciesAsync_DifferentConfigRoots_DoNotShareCache()
+    {
+        // Two independent workspaces resolve the SAME package id/version but their private feeds declare
+        // DIFFERENT dependencies. The process-wide dependency cache must be scoped to the effective config
+        // (feeds/global folder), so the second lookup returns ITS feed's dependency rather than the first
+        // one's cached result.
+        var rootA = CreateFeedTestDirectory();
+        var rootB = CreateFeedTestDirectory();
+        try
+        {
+            var feedA = new DirectoryInfo(Path.Combine(rootA.FullName, "feed"));
+            feedA.Create();
+            WriteNupkgToFeed(feedA, "Scoped.Root", "1.0.0", ("Scoped.ChildA", "1.0.0"));
+            WriteNupkgToFeed(feedA, "Scoped.ChildA", "1.0.0");
+            WriteLocalFeedConfig(rootA, feedA, new DirectoryInfo(Path.Combine(rootA.FullName, "packages")));
+
+            var feedB = new DirectoryInfo(Path.Combine(rootB.FullName, "feed"));
+            feedB.Create();
+            WriteNupkgToFeed(feedB, "Scoped.Root", "1.0.0", ("Scoped.ChildB", "1.0.0"));
+            WriteNupkgToFeed(feedB, "Scoped.ChildB", "1.0.0");
+            WriteLocalFeedConfig(rootB, feedB, new DirectoryInfo(Path.Combine(rootB.FullName, "packages")));
+
+            var depsA = await CreateServiceRootedAt(rootA).GetPackageDependenciesAsync("Scoped.Root", "1.0.0", TestContext.CancellationToken);
+            var depsB = await CreateServiceRootedAt(rootB).GetPackageDependenciesAsync("Scoped.Root", "1.0.0", TestContext.CancellationToken);
+
+            Assert.IsTrue(depsA.ContainsKey("Scoped.ChildA"), "Workspace A must resolve its own feed's dependency.");
+            Assert.IsFalse(depsA.ContainsKey("Scoped.ChildB"), "Workspace A must not see workspace B's dependency.");
+            Assert.IsTrue(depsB.ContainsKey("Scoped.ChildB"), "Workspace B must resolve its own feed's dependency, not A's cached result.");
+            Assert.IsFalse(depsB.ContainsKey("Scoped.ChildA"), "Workspace B must not receive workspace A's cached dependency.");
+        }
+        finally
+        {
+            TryDelete(rootA);
+            TryDelete(rootB);
         }
     }
 
