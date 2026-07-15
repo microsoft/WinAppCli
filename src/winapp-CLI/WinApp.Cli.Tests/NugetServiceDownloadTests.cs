@@ -552,6 +552,77 @@ public class NugetServiceDownloadTests : BaseCommandTests
         }
     }
 
+    [TestMethod]
+    public async Task GetPackageDependenciesAsync_ExactPinnedDependencyIsUnlisted_StillResolvesFromRegistrationFeed()
+    {
+        // Regression (a deterministic replacement for a test that used to depend on a specific nuget.org
+        // experimental version staying unlisted): a package can pin an EXACT dependency version whose publisher
+        // has UNLISTED it — the Windows App SDK experimental meta-packages pin their .Runtime/.Foundation
+        // sub-packages to exact, unlisted versions. Resolving a declared dependency range must therefore
+        // consider unlisted versions (unlike a "latest version" decision, which excludes them on purpose);
+        // otherwise the pinned dependency is silently dropped and, downstream, the Windows App Runtime
+        // PackageDependency is never injected into the packaged manifest. Served from an in-process registration
+        // feed that honors each version's listed flag, so the behavior is deterministic and offline.
+        NugetSourceProvider.EnsureCredentialService();
+
+        // Dep.Pkg 9.9.9 is UNLISTED; Dep.Pkg 1.0.0 is listed. Root.Pkg 1.0.0 pins Dep.Pkg to EXACTLY [9.9.9]
+        // (the unlisted version). "Latest" for Dep.Pkg must exclude 9.9.9 (returns 1.0.0), while the exact pin
+        // in Root.Pkg's nuspec must still resolve to the unlisted 9.9.9.
+        using var feed = new BasicAuthNuGetFeed(
+            "winapp-user",
+            "s3cret-token!",
+            advertiseRegistration: true,
+            ("Dep.Pkg", "1.0.0", true, Array.Empty<(string Id, string Version)>()),
+            ("Dep.Pkg", "9.9.9", false, Array.Empty<(string Id, string Version)>()),
+            ("Root.Pkg", "1.0.0", true, [("Dep.Pkg", "[9.9.9]")]));
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            WriteNuGetConfig(root, $"""
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                  <packageSources>
+                    <clear />
+                    <add key="private" value="{feed.IndexUrl}" allowInsecureConnections="true" />
+                  </packageSources>
+                  <disabledPackageSources>
+                    <clear />
+                  </disabledPackageSources>
+                  <packageSourceCredentials>
+                    <private>
+                      <add key="Username" value="{feed.Username}" />
+                      <add key="ClearTextPassword" value="{feed.Password}" />
+                    </private>
+                  </packageSourceCredentials>
+                  <packageSourceMapping>
+                    <clear />
+                    <packageSource key="private">
+                      <package pattern="*" />
+                    </packageSource>
+                  </packageSourceMapping>
+                </configuration>
+                """);
+
+            var service = CreateServiceRootedAt(root);
+
+            // Premise: 9.9.9 really is treated as unlisted — "latest" excludes it and returns the listed 1.0.0.
+            // (If range resolution used the same listed-only filter, the exact pin below would fail to resolve.)
+            var latestDep = await service.GetLatestVersionAsync("Dep.Pkg", SdkInstallMode.Stable, TestContext.CancellationToken);
+            Assert.AreEqual("1.0.0", latestDep, "The unlisted 9.9.9 must be excluded from 'latest'; only the listed 1.0.0 remains.");
+
+            // The exact pin to the unlisted 9.9.9 must still resolve when building the dependency graph.
+            var deps = await service.GetPackageDependenciesAsync("Root.Pkg", "1.0.0", TestContext.CancellationToken);
+
+            Assert.IsTrue(deps.TryGetValue("Dep.Pkg", out var resolved),
+                "The exact-pinned dependency must be resolved, not silently skipped because it is unlisted.");
+            Assert.AreEqual("9.9.9", resolved, "The unlisted, exactly-pinned dependency version must be selected.");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
     /// <summary>
     /// A minimal in-process NuGet v3 feed that requires HTTP Basic authentication. By default it advertises
     /// only a flat container (<c>PackageBaseAddress/3.0.0</c>) and serves what
@@ -597,17 +668,26 @@ public class NugetServiceDownloadTests : BaseCommandTests
         // ".../Versioned" (the first entry in NuGet's ServiceTypes.RegistrationsBaseUrl) and verify unlisted
         // versions are excluded from "latest" resolution.
         public BasicAuthNuGetFeed(string username, string password, bool advertiseRegistration, params (string Id, string Version, bool Listed)[] packages)
+            : this(username, password, advertiseRegistration, [.. packages.Select(p => (p.Id, p.Version, p.Listed, Dependencies: Array.Empty<(string Id, string Version)>()))])
+        {
+        }
+
+        // Richest shape: additionally bake a dependency group into each package's .nupkg, so a test can serve a
+        // root package that pins an exact (possibly unlisted) dependency version and assert the dependency-graph
+        // resolution picks it up. Dependencies are read back from the flat-container nuspec by
+        // FindPackageByIdResource.GetDependencyInfoAsync, exactly as a real feed serves them.
+        public BasicAuthNuGetFeed(string username, string password, bool advertiseRegistration, params (string Id, string Version, bool Listed, (string Id, string Version)[] Dependencies)[] packages)
         {
             Username = username;
             Password = password;
             _advertiseRegistration = advertiseRegistration;
             _expectedAuthorization = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username}:{password}"));
 
-            foreach (var (id, version, listed) in packages)
+            foreach (var (id, version, listed, dependencies) in packages)
             {
                 var lowerId = id.ToLowerInvariant();
                 var lowerVersion = version.ToLowerInvariant();
-                _nupkgsByPath[$"{lowerId}/{lowerVersion}"] = BuildNupkgBytes(id, version);
+                _nupkgsByPath[$"{lowerId}/{lowerVersion}"] = BuildNupkgBytes(id, version, dependencies);
                 _versionsById[lowerId] = _versionsById.TryGetValue(lowerId, out var existing)
                     ? [.. existing, version]
                     : [version];

@@ -15,7 +15,9 @@ namespace WinApp.Cli.Tests;
 /// (<c>CompareVersions(latest, current) &gt; 0</c>): only a strictly-greater "latest" rewrites winapp.yaml
 /// and triggers a reinstall; a normalized-equal or lower "latest" must leave the persisted version and the
 /// installed set untouched. These guard against a normalized-but-equal version spuriously counting as an
-/// update, or a lower "latest" silently downgrading the pinned version.
+/// update, or a lower "latest" silently downgrading the pinned version. A final case pins down the
+/// fail-closed path: a latest-version lookup that throws must exit non-zero and preserve the pin rather than
+/// report a false "up to date".
 /// </summary>
 [TestClass]
 public class UpdateCommandTests : BaseCommandTests
@@ -94,6 +96,24 @@ public class UpdateCommandTests : BaseCommandTests
         var persisted = _configService.Load().Packages.Single(p => p.Name == PackageName).Version;
         Assert.AreEqual("2.0.0", persisted, "A lower latest version must never downgrade the pinned version.");
         Assert.IsEmpty(_installer.InstalledPackages, "A lower latest version must not trigger a reinstall.");
+    }
+
+    [TestMethod]
+    public async Task Update_LatestVersionLookupFails_ExitsNonZeroAndPreservesPin()
+    {
+        // A latest-version lookup that fails closed (a feed outage or auth failure) must NOT be reported as an
+        // authoritative "up to date" result. GetLatestVersionAsync throws; the handler must keep the pinned
+        // version in winapp.yaml untouched, skip the reinstall, and exit non-zero so callers (and CI) surface
+        // the failure instead of a false success that silently freezes the pin.
+        SaveConfigWith("1.0.0");
+        _fakeNuget.PackagesToThrow.Add(PackageName);
+
+        var exitCode = await RunUpdateAsync();
+
+        Assert.AreEqual(1, exitCode, "A failed latest-version lookup must fail the command, not report success.");
+        var persisted = _configService.Load().Packages.Single(p => p.Name == PackageName).Version;
+        Assert.AreEqual("1.0.0", persisted, "A failed lookup must leave the pinned version unchanged.");
+        Assert.IsEmpty(_installer.InstalledPackages, "A failed lookup must not trigger a reinstall.");
     }
 
     /// <summary>

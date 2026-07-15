@@ -35,6 +35,12 @@ internal class UpdateCommand : Command, IShortDescription
             {
                 try
                 {
+                    // Tracks packages whose latest-version lookup failed closed (e.g. a feed outage or auth
+                    // failure). GetLatestVersionAsync now throws rather than returning a stale answer, and a
+                    // lookup failure must not be reported as an authoritative "up to date" result — so record
+                    // them and fail the command (non-zero) at the end instead of emitting the success message.
+                    var lookupFailures = new List<string>();
+
                     // Step 1: Find yaml config file
                     taskContext.AddDebugMessage($"{UiSymbols.Note} Checking for winapp.yaml configuration...");
 
@@ -82,8 +88,10 @@ internal class UpdateCommand : Command, IShortDescription
                                     catch (Exception ex)
                                     {
                                         taskContext.AddStatusMessage($"{UiSymbols.Warning} Failed to check {package.Name}: {ex.Message}");
-                                        // Keep current version on error
+                                        // Keep current version on error, but remember the failure so the
+                                        // command exits non-zero and does not claim everything is up to date.
                                         updatedConfig.SetVersion(package.Name, package.Version);
+                                        lookupFailures.Add(package.Name);
                                     }
                                 }
 
@@ -114,7 +122,12 @@ internal class UpdateCommand : Command, IShortDescription
                             }
                             else
                             {
-                                taskContext.AddStatusMessage($"{UiSymbols.Check} All packages are already up to date");
+                                // Only assert everything is current when every lookup actually succeeded. A
+                                // failed lookup (recorded above) is not evidence of being up to date.
+                                if (lookupFailures.Count == 0)
+                                {
+                                    taskContext.AddStatusMessage($"{UiSymbols.Check} All packages are already up to date");
+                                }
                             }
                         }
                     }
@@ -153,6 +166,13 @@ internal class UpdateCommand : Command, IShortDescription
                     else
                     {
                         taskContext.AddDebugMessage($"{UiSymbols.Note} Windows App SDK packages not found, skipping runtime installation");
+                    }
+
+                    // A version lookup that failed closed (feed outage / auth failure) must fail the command:
+                    // returning 0 here would report a feed error as a successful, authoritative update.
+                    if (lookupFailures.Count > 0)
+                    {
+                        return (1, $"{UiSymbols.Error} Update failed: could not determine the latest version for {lookupFailures.Count} package(s): {string.Join(", ", lookupFailures)}. Their pinned versions in winapp.yaml were left unchanged.");
                     }
 
                     return (0, "Update completed successfully!");
