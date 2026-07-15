@@ -257,7 +257,13 @@ try
     # Step 5: Run tests (unless skipped)
     if (-not $SkipTests) {
         Write-Host "[TEST] Running tests..." -ForegroundColor Blue
-        dotnet run --project $CliTestsProjectPath -c Release --no-build --results-directory $CliSolutionDir\TestResults --report-trx --coverage --coverage-output-format cobertura
+        # Measure coverage against hand-written product source only. coverage.runsettings
+        # excludes generated interop (CsWin32/COM/Regex generators in obj\**) from the
+        # denominator; without it the reported number is diluted from a meaningful ~49% to a
+        # meaningless ~18%. Hand-written services (incl. the hardware/COM/GPU interop) are NOT
+        # excluded -- they are covered by real tests. See issue #630.
+        $CoverageSettings = (Resolve-Path "$CliSolutionDir\coverage.runsettings").Path
+        dotnet run --project $CliTestsProjectPath -c Release --no-build --results-directory $CliSolutionDir\TestResults --report-trx --coverage --coverage-settings $CoverageSettings --coverage-output-format cobertura
         $TestExitCode = $LASTEXITCODE
     
         # Copy test results to artifacts BEFORE checking for failure - find all TRX files
