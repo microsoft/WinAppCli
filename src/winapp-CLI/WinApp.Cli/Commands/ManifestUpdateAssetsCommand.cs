@@ -49,7 +49,9 @@ internal class ManifestUpdateAssetsCommand : Command, IShortDescription
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
-            var imagePath = parseResult.GetValue(ImageArgument);
+            // ImageArgument is a required argument (arity ExactlyOne), so the parser rejects a
+            // missing value before the handler runs — GetValue never returns null here.
+            var imagePath = parseResult.GetValue(ImageArgument)!;
             var manifestPath = parseResult.GetValue(ManifestOption);
             var lightImagePath = parseResult.GetValue(LightImageOption);
 
@@ -64,12 +66,6 @@ internal class ManifestUpdateAssetsCommand : Command, IShortDescription
                 }
 
                 logger.LogDebug("Found manifest at: {ManifestPath}", manifestPath.FullName);
-            }
-
-            if (imagePath == null)
-            {
-                logger.LogError("{UISymbol} Image path is required", UiSymbols.Error);
-                return 1;
             }
 
             return await statusService.ExecuteWithStatusAsync("Updating manifest assets", async (taskContext, cancellationToken) =>

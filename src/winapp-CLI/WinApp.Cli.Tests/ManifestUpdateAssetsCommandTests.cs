@@ -458,4 +458,32 @@ public class ManifestUpdateAssetsCommandTests : BaseCommandTests
         Assert.IsFalse(File.Exists(Path.Combine(assetsDir, "app.ico")),
             "app.ico should NOT be created when an existing ICO file is present");
     }
+
+    [TestMethod]
+    public async Task ManifestUpdateAssets_NoManifestFound_ReturnsError()
+    {
+        // Remove the manifest the setup created so the command's auto-detection finds nothing.
+        File.Delete(_testManifestPath);
+        var command = GetRequiredService<ManifestUpdateAssetsCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_testImagePath]);
+
+        Assert.AreEqual(1, exitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "Could not find Package.appxmanifest");
+    }
+
+    [TestMethod]
+    public async Task ManifestUpdateAssets_InvalidSourceImage_ReturnsError()
+    {
+        // A file that exists (passes AcceptExistingOnly) but is not a decodable image causes the
+        // asset generation to throw, which the handler catches and reports.
+        var badImage = Path.Combine(_tempDirectory.FullName, "bad.png");
+        await File.WriteAllTextAsync(badImage, "this is not a real PNG", TestContext.CancellationToken);
+        var command = GetRequiredService<ManifestUpdateAssetsCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [badImage, "--manifest", _testManifestPath]);
+
+        Assert.AreEqual(1, exitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "Error updating assets");
+    }
 }

@@ -19,6 +19,12 @@ internal class MSStoreCommand : Command, IShortDescription
 
     public class Handler(IMSStoreCLIService msStoreCLIService, ILogger<MSStoreCommand> logger) : AsynchronousCommandLineAction
     {
+        // Test seam isolating the operating-system boundary (starting the MSStoreCLI process) so
+        // the null-process defensive branch can be exercised deterministically. Defaults to the
+        // production behavior, so runtime behavior is unchanged.
+        internal Func<System.Diagnostics.ProcessStartInfo, System.Diagnostics.Process?> ProcessStarter { get; set; }
+            = System.Diagnostics.Process.Start;
+
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var args = parseResult.UnmatchedTokens.ToArray();
@@ -38,7 +44,7 @@ internal class MSStoreCommand : Command, IShortDescription
                     CreateNoWindow = false
                 };
 
-                using var process = System.Diagnostics.Process.Start(processStartInfo);
+                using var process = ProcessStarter(processStartInfo);
                 if (process == null)
                 {
                     logger.LogError("Failed to start process for MSStoreCLI.");
