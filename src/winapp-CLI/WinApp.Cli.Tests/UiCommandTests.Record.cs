@@ -4,6 +4,8 @@
 using WinApp.Cli.Commands;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
+using System.Security.AccessControl;
+using System.Security.Principal;
 
 namespace WinApp.Cli.Tests;
 
@@ -261,6 +263,41 @@ public partial class UiCommandTests
         Assert.AreEqual(1, exitCode);
         Assert.IsTrue(File.Exists(outputPath), "pre-existing output file should survive a recording failure");
         Assert.AreEqual("sentinel content", File.ReadAllText(outputPath), "pre-existing file content should be unchanged");
+    }
+
+    [TestMethod]
+    public void Mp4SinkWriterEncoder_PublishAtomic_PreservesDestinationAcl()
+    {
+        var outputPath = Path.Combine(_tempDirectory.FullName, "acl-preserved.mp4");
+        var tempPath = Path.Combine(_tempDirectory.FullName, "acl-preserved.tmp.mp4");
+        File.WriteAllText(outputPath, "old");
+        File.WriteAllText(tempPath, "new");
+
+        var currentUser = WindowsIdentity.GetCurrent().User;
+        Assert.IsNotNull(currentUser, "current Windows user SID must be available for ACL test");
+        var rule = new FileSystemAccessRule(
+            currentUser,
+            FileSystemRights.FullControl,
+            AccessControlType.Allow);
+        var security = new FileSecurity();
+        security.SetOwner(currentUser);
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.AddAccessRule(rule);
+        FileSystemAclExtensions.SetAccessControl(new FileInfo(outputPath), security);
+
+        Mp4SinkWriterEncoder.PublishAtomic(tempPath, outputPath);
+
+        Assert.AreEqual("new", File.ReadAllText(outputPath), "publish should replace file content");
+        Assert.IsFalse(File.Exists(tempPath), "publish should consume the temp file");
+
+        var after = FileSystemAclExtensions.GetAccessControl(new FileInfo(outputPath));
+        Assert.IsTrue(after.AreAccessRulesProtected, "destination ACL inheritance setting must be preserved");
+        var rules = after.GetAccessRules(includeExplicit: true, includeInherited: false, typeof(SecurityIdentifier));
+        var preserved = rules.Cast<FileSystemAccessRule>().Any(r =>
+            r.IdentityReference == currentUser
+            && r.AccessControlType == AccessControlType.Allow
+            && (r.FileSystemRights & FileSystemRights.FullControl) == FileSystemRights.FullControl);
+        Assert.IsTrue(preserved, "destination explicit FullControl ACL rule must be preserved");
     }
 
     // -----------------------------------------------------------------------
@@ -544,10 +581,10 @@ public partial class UiCommandTests
     {
         // Set the injectable seam: inside the constructor try-block, the seam creates the
         // temp file (simulating what MFCreateSinkWriterFromURL does) and then throws a
-        // COMException (simulating a bad-FPS codec rejection). The constructor catch must
-        // delete the temp file — this test verifies that code path directly.
+        // COMException (simulating a missing/unavailable H.264 encoder). The constructor catch must
+        // delete the temp file and translate the error into an actionable exception.
         var outputPath = Path.Combine(_tempDirectory.FullName, "ctor-fail.mp4");
-        bool threw = false;
+        Mp4EncoderInitializationException? thrown = null;
         try
         {
             Mp4SinkWriterEncoder.s_testFaultAfterTempCreate =
@@ -556,16 +593,19 @@ public partial class UiCommandTests
 
             _ = new Mp4SinkWriterEncoder(outputPath, 640, 480, 30, 2_000_000);
         }
-        catch (System.Runtime.InteropServices.COMException)
+        catch (Mp4EncoderInitializationException ex)
         {
-            threw = true;
+            thrown = ex;
         }
         finally
         {
             Mp4SinkWriterEncoder.s_testFaultAfterTempCreate = null; // always clean up seam
         }
 
-        Assert.IsTrue(threw, "constructor must have thrown COMException via the fault seam");
+        Assert.IsNotNull(thrown, "constructor must translate Media Foundation encoder init failures");
+        StringAssert.Contains(thrown.Message, "Media Feature Pack");
+        StringAssert.Contains(thrown.Message, "0xC00D36B4");
+        Assert.IsInstanceOfType<System.Runtime.InteropServices.COMException>(thrown.InnerException);
 
         // The output (final) path must not have been created.
         Assert.IsFalse(File.Exists(outputPath), "output path must not exist after constructor failure");
@@ -574,6 +614,24 @@ public partial class UiCommandTests
         var orphans = Directory.GetFiles(_tempDirectory.FullName, "*.mp4");
         Assert.AreEqual(0, orphans.Length,
             $"constructor catch must delete the temp file; orphan(s) found: {string.Join(", ", orphans)}");
+    }
+
+    [TestMethod]
+    public async Task Record_EncoderInitializationFailure_ReturnsActionableError()
+    {
+        var inner = new System.Runtime.InteropServices.COMException(
+            "Simulated missing H.264 encoder", unchecked((int)0xC00D5212));
+        Assert.IsTrue(Mp4SinkWriterEncoder.TryDescribeEncoderInitFailure(inner, out var message));
+        _fakeUia.RecordException = new Mp4EncoderInitializationException(message, inner);
+
+        var outputPath = Path.Combine(_tempDirectory.FullName, "encoder-init-fail.mp4");
+        var command = GetRequiredService<UiRecordCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["-a", "TestApp", "-o", outputPath, "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "Media Feature Pack");
+        StringAssert.Contains(ConsoleStdErr.ToString(), "0xC00D5212");
     }
 
     [TestMethod]

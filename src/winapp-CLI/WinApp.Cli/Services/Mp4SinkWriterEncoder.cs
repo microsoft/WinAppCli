@@ -106,7 +106,7 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
 
             _writer.BeginWriting();
         }
-        catch
+        catch (Exception ex)
         {
             // Constructor failed — release any partial writer and undo MFStartup.
             ReleaseCom(_writer);
@@ -135,6 +135,10 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
                 }
                 _mfStarted = false;
             }
+            if (TryDescribeEncoderInitFailure(ex, out var message))
+            {
+                throw new Mp4EncoderInitializationException(message, ex);
+            }
             throw;
         }
         finally
@@ -151,6 +155,21 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
     // to simulate a late-constructor failure and verify the catch block cleans up the temp file.
     // Tests must clear this field in cleanup if the constructor does not consume it.
     internal static volatile Action? s_testFaultAfterTempCreate;
+
+    internal static bool TryDescribeEncoderInitFailure(Exception ex, out string message)
+    {
+        var hr = ex.HResult;
+        if (hr is unchecked((int)0xC00D5212)  // MF_E_TOPO_CODEC_NOT_FOUND
+            or unchecked((int)0xC00D36B4)     // MF_E_INVALIDMEDIATYPE
+            or unchecked((int)0xC00D36B0))    // MF_E_NOT_AVAILABLE
+        {
+            message = $"Could not initialize the H.264 video encoder (HRESULT 0x{hr:X8}). On Windows N/KN editions, install the Media Feature Pack (Settings > System > Optional features > Add a feature > 'Media Feature Pack'), then retry.";
+            return true;
+        }
+
+        message = string.Empty;
+        return false;
+    }
 
     /// <summary>
     /// Writes a single top-down BGRA frame. <paramref name="bgra"/> must contain
@@ -208,12 +227,25 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
         _writer.Finalize();
         _finalized = true;
 
-        // Atomically replace the final path (overwrite any pre-existing file) now that
-        // we have a fully valid MP4. The temp file is now owned by _path.
+        // Atomically publish the final path now that we have a fully valid MP4.
+        // The temp file is now owned by _path.
         // _fileMoved is set ONLY after the move succeeds so that Dispose() can still
         // clean up the temp if the move throws (e.g., destination path locked).
-        File.Move(_tempPath, _path, overwrite: true);
+        PublishAtomic(_tempPath, _path);
         _fileMoved = true;
+    }
+
+    internal static void PublishAtomic(string tempPath, string destPath)
+    {
+        if (File.Exists(destPath))
+        {
+            // Preserve the existing file's ACL/attributes (File.Move would drop them to the directory default).
+            File.Replace(tempPath, destPath, destinationBackupFileName: null, ignoreMetadataErrors: true);
+        }
+        else
+        {
+            File.Move(tempPath, destPath, overwrite: false);
+        }
     }
 
     private static ulong PackU64(uint high, uint low) => ((ulong)high << 32) | low;
@@ -254,7 +286,6 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
                 // Best-effort cleanup of the partial temp file.
             }
         }
-
         if (_mfStarted)
         {
             try
@@ -268,4 +299,9 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
             _mfStarted = false;
         }
     }
+}
+
+internal sealed class Mp4EncoderInitializationException(string message, Exception innerException)
+    : InvalidOperationException(message, innerException)
+{
 }
