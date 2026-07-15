@@ -1565,4 +1565,131 @@ public partial class UiCommandTests
         var isResize = newW > 0 && newH > 0 && (newW != poolW || newH != poolH);
         Assert.IsTrue(isResize, "valid resize must still be detected");
     }
+
+    // -----------------------------------------------------------------------
+    // M1 (round-10) — IsElementOffscreen: crop-rect degeneracy guard
+    // An element with no positive-area intersection with the capture surface
+    // must return true (triggering an error before clamp/pad), while a
+    // legitimately small on-surface element must return false (allow padding).
+    // -----------------------------------------------------------------------
+
+    [TestMethod]
+    public void IsElementOffscreen_ElementFullyInside_ReturnsFalse()
+    {
+        // Element entirely within the capture surface — must NOT be flagged offscreen.
+        Assert.IsFalse(UiAutomationService.IsElementOffscreen(10, 20, 100, 80, 0, 0, 400, 300));
+    }
+
+    [TestMethod]
+    public void IsElementOffscreen_ElementPartiallyClipped_ReturnsFalse()
+    {
+        // Element overlaps the right edge of the surface — intersection > 0, NOT offscreen.
+        Assert.IsFalse(UiAutomationService.IsElementOffscreen(350, 0, 100, 50, 0, 0, 400, 300));
+    }
+
+    [TestMethod]
+    public void IsElementOffscreen_SmallOnSurface_ReturnsFalse()
+    {
+        // Tiny element (10×10) that IS on the capture surface must NOT be flagged offscreen.
+        // The encoder-min padding path must still apply for legitimately small elements.
+        Assert.IsFalse(UiAutomationService.IsElementOffscreen(5, 5, 10, 10, 0, 0, 400, 300));
+    }
+
+    [TestMethod]
+    public void IsElementOffscreen_ElementEntirelyRight_ReturnsTrue()
+    {
+        // Element starts at x=400 in a 400-wide surface → no intersection → offscreen.
+        Assert.IsTrue(UiAutomationService.IsElementOffscreen(400, 0, 100, 100, 0, 0, 400, 300));
+    }
+
+    [TestMethod]
+    public void IsElementOffscreen_ElementEntirelyLeft_ReturnsTrue()
+    {
+        // Element right edge is at x=-100 → entirely left of surface → offscreen.
+        Assert.IsTrue(UiAutomationService.IsElementOffscreen(-200, 0, 100, 100, 0, 0, 400, 300));
+    }
+
+    [TestMethod]
+    public void IsElementOffscreen_ElementEntirelyBelow_ReturnsTrue()
+    {
+        // Element top is at y=300 in a 300-tall surface → no intersection → offscreen.
+        Assert.IsTrue(UiAutomationService.IsElementOffscreen(0, 300, 100, 100, 0, 0, 400, 300));
+    }
+
+    [TestMethod]
+    public void IsElementOffscreen_ElementEntirelyAbove_ReturnsTrue()
+    {
+        // Element bottom is above the surface top → entirely above → offscreen.
+        Assert.IsTrue(UiAutomationService.IsElementOffscreen(0, -100, 100, 50, 0, 0, 400, 300));
+    }
+
+    [TestMethod]
+    public void IsElementOffscreen_ZeroWidth_ReturnsTrue()
+    {
+        // Degenerate element: zero width → nothing to capture → offscreen.
+        Assert.IsTrue(UiAutomationService.IsElementOffscreen(100, 100, 0, 80, 0, 0, 400, 300));
+    }
+
+    [TestMethod]
+    public void IsElementOffscreen_ZeroHeight_ReturnsTrue()
+    {
+        // Degenerate element: zero height → nothing to capture → offscreen.
+        Assert.IsTrue(UiAutomationService.IsElementOffscreen(100, 100, 200, 0, 0, 0, 400, 300));
+    }
+
+    [TestMethod]
+    public void IsElementOffscreen_NegativeDimensions_ReturnsTrue()
+    {
+        // Negative dimensions are degenerate → offscreen.
+        Assert.IsTrue(UiAutomationService.IsElementOffscreen(100, 100, -10, -10, 0, 0, 400, 300));
+    }
+
+    [TestMethod]
+    public void IsElementOffscreen_ReviewerRepro_200x80ButtonOutsidePopup_ReturnsTrue()
+    {
+        // Reviewer repro: 200×80 button entirely outside its 280×180 owned popup.
+        // captureOrigin=(0,0) srcW=280 srcH=180; element at screen (300,10) size 200×80.
+        // Before the fix this clamped to a 1-px sliver and recorded garbage at exit 0.
+        Assert.IsTrue(UiAutomationService.IsElementOffscreen(300, 10, 200, 80, 0, 0, 280, 180));
+    }
+
+    [TestMethod]
+    public void IsElementOffscreen_NonZeroOrigin_ElementOutside_ReturnsTrue()
+    {
+        // Capture surface origin is not (0,0) — element is entirely to the left of the surface.
+        // surface: origin(500,400), 280×180; element at screen (100,100) size 200×80 → no intersection.
+        Assert.IsTrue(UiAutomationService.IsElementOffscreen(100, 100, 200, 80, 500, 400, 280, 180));
+    }
+
+    [TestMethod]
+    public void IsElementOffscreen_NonZeroOrigin_ElementInside_ReturnsFalse()
+    {
+        // Capture surface origin is not (0,0) — element is inside the surface.
+        // surface: origin(500,400), 280×180; element at screen (550,450) size 50×60 → inside.
+        Assert.IsFalse(UiAutomationService.IsElementOffscreen(550, 450, 50, 60, 500, 400, 280, 180));
+    }
+
+    // -----------------------------------------------------------------------
+    // M1 (round-10) — Command-level: UiElementOffscreenException → element_not_found
+    // -----------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task Record_ElementOffscreen_ReturnsElementNotFoundError()
+    {
+        // When the service throws UiElementOffscreenException (element resolved but entirely
+        // outside the capture surface), the command must exit 1 with element_not_found code
+        // and an actionable "offscreen" message — NOT record garbage pixels at exit 0.
+        _fakeUia.RecordException = new UiElementOffscreenException("btn-offscreen-a1b2");
+
+        var outputPath = Path.Combine(_tempDirectory.FullName, "offscreen.mp4");
+        var command = GetRequiredService<UiRecordCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["-a", "TestApp", "btn-offscreen-a1b2", "-o", outputPath, "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "offscreen",
+            "error message must contain 'offscreen' to guide the user");
+        Assert.IsFalse(File.Exists(outputPath),
+            "no output file should be written when element is offscreen");
+    }
 }

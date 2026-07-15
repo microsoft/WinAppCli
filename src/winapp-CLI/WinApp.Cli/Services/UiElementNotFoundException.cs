@@ -23,3 +23,14 @@ internal sealed class UiAmbiguousSelectorException(string message)
     : Exception(message)
 {
 }
+
+/// <summary>
+/// Thrown when a resolved element has no positive-area intersection with its capture surface —
+/// i.e. it is entirely offscreen or positioned outside the window bounds.
+/// Distinct from <see cref="UiElementNotFoundException"/> (element not in the UIA tree at all).
+/// </summary>
+internal sealed class UiElementOffscreenException(string selector)
+    : Exception($"Element '{selector}' is entirely offscreen / has no visible area to capture.")
+{
+    public string Selector { get; } = selector;
+}

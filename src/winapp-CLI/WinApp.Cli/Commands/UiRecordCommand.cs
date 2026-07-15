@@ -223,6 +223,13 @@ internal class UiRecordCommand : Command, IShortDescription
                 UiErrors.AmbiguousSelector(logger, ambiguousEx.Message, json);
                 return 1;
             }
+            catch (UiElementOffscreenException offscreenEx)
+            {
+                const string offscreenMsg = "Element is entirely offscreen / has no visible area to capture; nothing to record. Bring the window/element into view or pass a different selector.";
+                logger.LogError("{Symbol} {Message}", UiSymbols.Error, offscreenMsg);
+                UiJsonError.Emit(json, UiJsonError.CodeElementNotFound, offscreenMsg, offscreenEx.Selector);
+                return 1;
+            }
             catch (UiElementNotFoundException notFoundEx)
             {
                 UiErrors.ElementNotFound(logger, notFoundEx.Selector, json);

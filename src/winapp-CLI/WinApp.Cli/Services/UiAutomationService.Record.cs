@@ -204,6 +204,17 @@ internal sealed partial class UiAutomationService
                     // For useScreen: captureOriginLeft/Top/srcWidth/srcHeight already updated; no further action.
                 }
 
+                // Guard: reject elements with no positive-area intersection with the capture surface.
+                // A zero/negative intersection would be clamped to a 1-pixel edge sliver, then
+                // inflated by encoder-min padding → garbage pixels recorded at exit 0 (M1 fix).
+                // Legitimately small elements that DO intersect fall through to the clamp + padding below.
+                if (IsElementOffscreen(selectorElement.X, selectorElement.Y,
+                    selectorElement.Width, selectorElement.Height,
+                    captureOriginLeft, captureOriginTop, srcWidth, srcHeight))
+                {
+                    throw new UiElementOffscreenException(elementId!);
+                }
+
                 // Compute crop: element screen coords relative to the (possibly retargeted) capture origin.
                 cropX = Math.Clamp((int)selectorElement.X - captureOriginLeft, 0, Math.Max(0, srcWidth - 1));
                 cropY = Math.Clamp((int)selectorElement.Y - captureOriginTop, 0, Math.Max(0, srcHeight - 1));
@@ -523,6 +534,30 @@ internal sealed partial class UiAutomationService
         }
 
         return elementOwnerHwnd;
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when an element rect has no positive-area intersection with
+    /// the capture surface. Used to reject entirely-offscreen elements before crop clamping so
+    /// callers get an actionable error instead of a garbage 1-pixel-sliver recording.
+    /// A legitimately small element that does intersect returns <see langword="false"/> and is
+    /// allowed to fall through to the existing encoder-min padding (intended behaviour).
+    /// </summary>
+    internal static bool IsElementOffscreen(
+        double elemX, double elemY, double elemWidth, double elemHeight,
+        int captureOriginLeft, int captureOriginTop, int srcWidth, int srcHeight)
+    {
+        if (elemWidth <= 0 || elemHeight <= 0)
+        {
+            return true;
+        }
+
+        var interLeft   = Math.Max((int)elemX,                       captureOriginLeft);
+        var interTop    = Math.Max((int)elemY,                       captureOriginTop);
+        var interRight  = Math.Min((int)elemX + (int)elemWidth,      captureOriginLeft + srcWidth);
+        var interBottom = Math.Min((int)elemY + (int)elemHeight,     captureOriginTop  + srcHeight);
+
+        return interRight <= interLeft || interBottom <= interTop;
     }
 
     /// <summary>
