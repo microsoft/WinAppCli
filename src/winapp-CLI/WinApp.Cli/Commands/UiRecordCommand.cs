@@ -158,17 +158,7 @@ internal class UiRecordCommand : Command, IShortDescription
                 if (isStdinRedirected && durationSec == 0)
                 {
                     var stdinReader = s_stdinOverride ?? Console.In;
-                    StdinStopMonitor.Start(stdinReader, readyTcs.Task, () =>
-                    {
-                        // H1 defense in depth: check the stop flag first (set before linkedCts
-                        // is disposed), then catch ObjectDisposedException as a belt-and-suspenders
-                        // guard against a very narrow race between the flag check and disposal.
-                        if (!_stdinMonitorStopped)
-                        {
-                            try { linkedCts.Cancel(); }
-                            catch (ObjectDisposedException) { }
-                        }
-                    });
+                    StdinStopMonitor.Start(stdinReader, readyTcs.Task, () => CancelFromStdinMonitor(linkedCts));
                 }
 
                 // Readiness callback: invoked by RecordAsync after the encoder is initialized and the
@@ -273,6 +263,18 @@ internal class UiRecordCommand : Command, IShortDescription
                 // this flag+ordering eliminates the race window for typical cases.
                 _stdinMonitorStopped = true;
                 linkedCts.Dispose();
+            }
+        }
+
+        internal void CancelFromStdinMonitor(CancellationTokenSource linkedCts)
+        {
+            // H1 defense in depth: check the stop flag first (set before linkedCts
+            // is disposed), then catch ObjectDisposedException as a belt-and-suspenders
+            // guard against a very narrow race between the flag check and disposal.
+            if (!_stdinMonitorStopped)
+            {
+                try { linkedCts.Cancel(); }
+                catch (ObjectDisposedException) { }
             }
         }
     }

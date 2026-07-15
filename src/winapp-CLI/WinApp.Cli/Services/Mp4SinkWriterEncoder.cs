@@ -156,6 +156,8 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
     // Tests must clear this field in cleanup if the constructor does not consume it.
     internal static volatile Action? s_testFaultAfterTempCreate;
 
+    internal static volatile Action<string, string>? s_testPublishAtomic;
+
     internal static bool TryDescribeEncoderInitFailure(Exception ex, out string message)
     {
         var hr = ex.HResult;
@@ -230,8 +232,19 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
         // The temp file is now owned by _path.
         // _fileMoved is set ONLY after the move succeeds so that Dispose() can still
         // clean up the temp if the move throws (e.g., destination path locked).
-        PublishAtomic(_tempPath, _path);
+        PublishAtomicWithTestSeam(_tempPath, _path);
         _fileMoved = true;
+    }
+
+    private static void PublishAtomicWithTestSeam(string tempPath, string destPath)
+    {
+        if (s_testPublishAtomic is { } testPublish)
+        {
+            testPublish(tempPath, destPath);
+            return;
+        }
+
+        PublishAtomic(tempPath, destPath);
     }
 
     internal static void PublishAtomic(string tempPath, string destPath)

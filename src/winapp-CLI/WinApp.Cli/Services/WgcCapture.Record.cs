@@ -154,20 +154,26 @@ internal static partial class WgcCapture
                     // pool's creation size, recreate the pool at the new size so subsequent frames
                     // match. The ENCODER output dimensions remain fixed; ProcessFrame letterboxes/scales.
                     var contentSize = frame.ContentSize;
-                    if (contentSize.Width > 0 && contentSize.Height > 0
-                        && (contentSize.Width != _poolSize.Width || contentSize.Height != _poolSize.Height))
+                    if (ShouldRecreateFramePool(_poolSize, contentSize))
                     {
                         _logger.LogDebug("WGC: window resized {Old}→{New}; recreating frame pool",
                             $"{_poolSize.Width}x{_poolSize.Height}", $"{contentSize.Width}x{contentSize.Height}");
                         // M10: dispose the triggering frame BEFORE recreating the pool so no frame
                         // from the old pool is alive during recreation. Set frame=null to prevent
                         // double-dispose in the outer finally.
-                        frame.Dispose();
-                        frame = null;
                         try
                         {
-                            var winrtDevice = CreateDirect3DDevice(_device);
-                            _pool.Recreate(winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, numberOfBuffers: 2, contentSize);
+                            DisposeFrameBeforeRecreate(
+                                () =>
+                                {
+                                    frame.Dispose();
+                                    frame = null;
+                                },
+                                () =>
+                                {
+                                    var winrtDevice = CreateDirect3DDevice(_device);
+                                    _pool.Recreate(winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, numberOfBuffers: 2, contentSize);
+                                });
                             _poolSize = contentSize;
                         }
                         catch (Exception ex)
@@ -208,6 +214,16 @@ internal static partial class WgcCapture
                     frame?.Dispose();
                 }
             }
+        }
+
+        internal static bool ShouldRecreateFramePool(Windows.Graphics.SizeInt32 poolSize, Windows.Graphics.SizeInt32 contentSize)
+            => contentSize.Width > 0 && contentSize.Height > 0
+                && (contentSize.Width != poolSize.Width || contentSize.Height != poolSize.Height);
+
+        internal static void DisposeFrameBeforeRecreate(Action disposeFrame, Action recreatePool)
+        {
+            disposeFrame();
+            recreatePool();
         }
 
         /// <summary>Returns the most recently captured frame, or <see langword="null"/> if none has arrived yet.</summary>
