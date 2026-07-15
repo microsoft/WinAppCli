@@ -275,7 +275,7 @@ internal partial class NugetService : INugetService
                 //     does not perform NuGet's global upgrade/downgrade unification), not a conflict — warn at
                 //     debug level and continue so common differing-minimum diamonds are not falsely failed.
                 if (!(NuGetVersion.TryParse(installedDepVersion, out var installedNuGetVersion)
-                        && depVersionRange.Satisfies(installedNuGetVersion)))
+                        && RangeSatisfiesWithFloat(depVersionRange, installedNuGetVersion)))
                 {
                     var rangeText = depVersionRange.OriginalString ?? depVersionRange.ToNormalizedString();
                     if (RangesHaveCommonVersion(accumulatedRanges))
@@ -326,15 +326,44 @@ internal partial class NugetService : INugetService
     }
 
     /// <summary>
+    /// Like <see cref="VersionRange.Satisfies(NuGetVersion)"/> but also enforces a floating range's implied
+    /// ceiling. <c>VersionRange.Satisfies</c> only checks the declared min/max bounds and a float declares no
+    /// upper bound, so <c>1.*</c> reports satisfying <c>2.0.0</c>. Without this, a diamond where one branch
+    /// already fixed the shared dependency to a version outside a later branch's float (e.g. the 2.* branch
+    /// installs 2.0.0 first, then the 1.* branch is checked) would be silently accepted as satisfied.
+    /// </summary>
+    internal static bool RangeSatisfiesWithFloat(VersionRange range, NuGetVersion version)
+    {
+        if (!range.Satisfies(version))
+        {
+            return false;
+        }
+
+        if (range.IsFloating && range.Float is { } floatRange)
+        {
+            var ceiling = TryGetFloatUpperBound(floatRange);
+            if (ceiling is not null && version.CompareTo(ceiling) >= 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Returns true when at least one version could satisfy ALL of <paramref name="ranges"/> simultaneously —
     /// i.e. their intersection interval is non-empty. Used to tell a genuinely unsatisfiable set of diamond
     /// constraints (e.g. [1.0,2.0) and [2.0,3.0), which must fail the install) apart from constraints that
     /// merely differ in their lower bound (e.g. [1.0,) and [2.0,), where a higher version satisfies both and
     /// keeping winapp's first-selected version is a documented limitation, not a conflict). The check is
-    /// deliberately conservative: when a bound is unknown it treats the interval as satisfiable so real,
-    /// common differing-minimum diamonds are never falsely reported as conflicts.
+    /// deliberately conservative: when a bound is genuinely unbounded (e.g. [2.0,) or the unrestricted float *)
+    /// it treats the interval as open in that direction so real, common differing-minimum diamonds are never
+    /// falsely reported as conflicts. Floating ranges (1.*, 1.2.*) are confined to their floated band via
+    /// <see cref="GetEffectiveBounds"/> so two disjoint floats (1.* and 2.*) are correctly reported as a
+    /// conflict rather than silently accepted.
     /// </summary>
-    private static bool RangesHaveCommonVersion(IReadOnlyList<VersionRange> ranges)
+    internal static bool RangesHaveCommonVersion(IReadOnlyList<VersionRange> ranges)
     {
         NuGetVersion? low = null;
         var lowInclusive = true;
@@ -343,31 +372,33 @@ internal partial class NugetService : INugetService
 
         foreach (var range in ranges)
         {
-            if (range.HasLowerBound)
+            var (rangeLow, rangeLowInclusive, rangeHigh, rangeHighInclusive) = GetEffectiveBounds(range);
+
+            if (rangeLow is not null)
             {
-                var cmp = low is null ? 1 : range.MinVersion.CompareTo(low);
+                var cmp = low is null ? 1 : rangeLow.CompareTo(low);
                 if (cmp > 0)
                 {
-                    low = range.MinVersion;
-                    lowInclusive = range.IsMinInclusive;
+                    low = rangeLow;
+                    lowInclusive = rangeLowInclusive;
                 }
                 else if (cmp == 0)
                 {
-                    lowInclusive = lowInclusive && range.IsMinInclusive;
+                    lowInclusive = lowInclusive && rangeLowInclusive;
                 }
             }
 
-            if (range.HasUpperBound)
+            if (rangeHigh is not null)
             {
-                var cmp = high is null ? -1 : range.MaxVersion.CompareTo(high);
+                var cmp = high is null ? -1 : rangeHigh.CompareTo(high);
                 if (cmp < 0)
                 {
-                    high = range.MaxVersion;
-                    highInclusive = range.IsMaxInclusive;
+                    high = rangeHigh;
+                    highInclusive = rangeHighInclusive;
                 }
                 else if (cmp == 0)
                 {
-                    highInclusive = highInclusive && range.IsMaxInclusive;
+                    highInclusive = highInclusive && rangeHighInclusive;
                 }
             }
         }
@@ -386,5 +417,56 @@ internal partial class NugetService : INugetService
 
         // low == high collapses to a single point, satisfiable only if both ends include it.
         return bounds == 0 && lowInclusive && highInclusive;
+    }
+
+    /// <summary>
+    /// Resolves a range's effective lower/upper interval. For a normal range this is just its declared bounds,
+    /// but a floating range (e.g. 1.*, 1.2.*) declares no explicit upper bound on the underlying
+    /// <see cref="VersionRange"/> even though the float behavior confines it to a contiguous band (1.* is
+    /// [1.0.0, 2.0.0)). Treating that band as unbounded above would let two disjoint floats (1.* and 2.*) look
+    /// mutually satisfiable, silently accepting an invalid diamond, so the floated ceiling is derived here.
+    /// </summary>
+    private static (NuGetVersion? Low, bool LowInclusive, NuGetVersion? High, bool HighInclusive) GetEffectiveBounds(VersionRange range)
+    {
+        var low = range.HasLowerBound ? range.MinVersion : null;
+        var lowInclusive = range.IsMinInclusive;
+        var high = range.HasUpperBound ? range.MaxVersion : null;
+        var highInclusive = range.IsMaxInclusive;
+
+        if (high is null && range.IsFloating && range.Float is { } floatRange)
+        {
+            var floatedCeiling = TryGetFloatUpperBound(floatRange);
+            if (floatedCeiling is not null)
+            {
+                high = floatedCeiling;
+                highInclusive = false; // The ceiling is the first version outside the floated band.
+            }
+        }
+
+        return (low, lowInclusive, high, highInclusive);
+    }
+
+    /// <summary>
+    /// Returns the exclusive upper bound implied by a float's behavior (1.* => 2.0.0, 1.2.* => 1.3.0,
+    /// 1.2.3.* => 1.2.4), or null when the float has no numeric ceiling (* / *-* float every component).
+    /// </summary>
+    private static NuGetVersion? TryGetFloatUpperBound(FloatRange floatRange)
+    {
+        var prefix = floatRange.MinVersion;
+        return floatRange.FloatBehavior switch
+        {
+            // Major is fixed, minor and below float => next major.
+            NuGetVersionFloatBehavior.Minor or NuGetVersionFloatBehavior.PrereleaseMinor
+                => new NuGetVersion(prefix.Major + 1, 0, 0),
+            // Major.minor fixed, patch and below float => next minor.
+            NuGetVersionFloatBehavior.Patch or NuGetVersionFloatBehavior.PrereleasePatch
+                => new NuGetVersion(prefix.Major, prefix.Minor + 1, 0),
+            // Major.minor.patch fixed, revision/prerelease float => next patch.
+            NuGetVersionFloatBehavior.Revision or NuGetVersionFloatBehavior.PrereleaseRevision
+                => new NuGetVersion(prefix.Major, prefix.Minor, prefix.Patch + 1),
+            // Major / AbsoluteLatest / PrereleaseMajor float the major too (no numeric ceiling); Prerelease and
+            // None float only the prerelease label / nothing, so they impose no band that changes disjointness.
+            _ => null,
+        };
     }
 }
