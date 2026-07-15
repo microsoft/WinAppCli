@@ -10,10 +10,12 @@ namespace WinApp.Cli.Tests;
 /// NuGet.Client-backed dependency-resolution tests for <see cref="NugetService.GetPackageDependenciesAsync"/>:
 /// resolving a dependency's declared <c>VersionRange</c> to the lowest listed satisfying version (inclusive
 /// / exclusive lower bounds, upper-bound-only and unlisted lower bounds), surfacing a source-query failure
-/// instead of silently dropping a dependency, and scoping the process-wide dependency cache to the effective
-/// configuration (feeds, their configured order, global folder and packageSourceMapping). Source-eligibility
-/// / version-selection tests live in <see cref="NugetServiceFeedTests"/>; the shared feed-authoring helpers
-/// live in <see cref="NugetFeedTestHelpers"/> (imported via <c>using static</c>).
+/// instead of silently dropping a dependency, FAILING (rather than silently dropping) when a bounded range
+/// cannot be resolved — no source offers a satisfying version, or a <c>packageSourceMapping</c> exclusion
+/// leaves the transitive package with no eligible source — and scoping the process-wide dependency cache to
+/// the effective configuration (feeds, their configured order, global folder and packageSourceMapping).
+/// Source-eligibility / version-selection tests live in <see cref="NugetServiceFeedTests"/>; the shared
+/// feed-authoring helpers live in <see cref="NugetFeedTestHelpers"/> (imported via <c>using static</c>).
 /// </summary>
 [TestClass]
 public class NugetServiceDependencyTests : BaseCommandTests
@@ -140,6 +142,9 @@ public class NugetServiceDependencyTests : BaseCommandTests
                     <add key="local" value="{feed.FullName}" />
                     <add key="broken" value="https://nuget.invalid/v3/index.json" />
                   </packageSources>
+                  <disabledPackageSources>
+                    <clear />
+                  </disabledPackageSources>
                   <packageSourceMapping>
                     <clear />
                     <packageSource key="local">
@@ -247,6 +252,9 @@ public class NugetServiceDependencyTests : BaseCommandTests
                     <add key="x" value="{feedX.FullName}" />
                     <add key="y" value="{feedY.FullName}" />
                   </packageSources>
+                  <disabledPackageSources>
+                    <clear />
+                  </disabledPackageSources>
                   <packageSourceMapping>
                     <clear />
                     <packageSource key="{mappedSource}">
@@ -322,6 +330,9 @@ public class NugetServiceDependencyTests : BaseCommandTests
                     <add key="{firstKey}" value="{feedByKey[firstKey]}" />
                     <add key="{secondKey}" value="{feedByKey[secondKey]}" />
                   </packageSources>
+                  <disabledPackageSources>
+                    <clear />
+                  </disabledPackageSources>
                   <packageSourceMapping>
                     <clear />
                     <packageSource key="x">
@@ -348,6 +359,94 @@ public class NugetServiceDependencyTests : BaseCommandTests
         finally
         {
             TryDelete(shared);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetPackageDependenciesAsync_BoundedRangeNoSatisfyingVersion_FailsInsteadOfSilentlyDropping()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            feed.Create();
+            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+
+            // Root depends on Child with a bounded range [5.0.0, ) that NO available version satisfies (the
+            // feed only carries Child 1.0.0). A required transitive package that cannot be resolved must FAIL
+            // resolution, not be silently omitted (which would report an incomplete graph as success).
+            WriteNupkgToFeed(feed, "Missing.Root", "1.0.0", ("Missing.Child", "[5.0.0, )"));
+            WriteNupkgToFeed(feed, "Missing.Child", "1.0.0");
+
+            WriteLocalFeedConfig(root, feed, packages);
+
+            var service = CreateServiceRootedAt(root);
+
+            var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                async () => await service.GetPackageDependenciesAsync("Missing.Root", "1.0.0", TestContext.CancellationToken));
+
+            // The error must name the dependency and its unsatisfiable range, proving the missing package was
+            // surfaced rather than dropped.
+            StringAssert.Contains(ex.Message, "Missing.Child", StringComparison.Ordinal);
+            StringAssert.Contains(ex.Message, "[5.0.0, )", StringComparison.Ordinal);
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    [TestMethod]
+    public async Task GetPackageDependenciesAsync_DependencyExcludedByMapping_FailsInsteadOfSilentlyDropping()
+    {
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            feed.Create();
+            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+
+            // The feed physically carries both packages, but packageSourceMapping only routes 'Excl.Root*' to
+            // it. The transitive 'Excl.Child' matches NO mapping pattern, so it has zero eligible sources.
+            // That must FAIL resolution (with the mapping-specific reason) rather than being silently dropped —
+            // otherwise the graph would report success with a required package that can never be restored.
+            WriteNupkgToFeed(feed, "Excl.Root", "1.0.0", ("Excl.Child", "[1.0.0, )"));
+            WriteNupkgToFeed(feed, "Excl.Child", "1.0.0");
+
+            WriteNuGetConfig(root, $"""
+                <?xml version="1.0" encoding="utf-8"?>
+                <configuration>
+                  <config>
+                    <add key="globalPackagesFolder" value="{packages.FullName}" />
+                  </config>
+                  <packageSources>
+                    <clear />
+                    <add key="local" value="{feed.FullName}" />
+                  </packageSources>
+                  <disabledPackageSources>
+                    <clear />
+                  </disabledPackageSources>
+                  <packageSourceMapping>
+                    <clear />
+                    <packageSource key="local">
+                      <package pattern="Excl.Root*" />
+                    </packageSource>
+                  </packageSourceMapping>
+                </configuration>
+                """);
+
+            var service = CreateServiceRootedAt(root);
+
+            var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                async () => await service.GetPackageDependenciesAsync("Excl.Root", "1.0.0", TestContext.CancellationToken));
+
+            // The error must name the excluded dependency and point at the packageSourceMapping gap.
+            StringAssert.Contains(ex.Message, "Excl.Child", StringComparison.Ordinal);
+            StringAssert.Contains(ex.Message, "packageSourceMapping", StringComparison.Ordinal);
+        }
+        finally
+        {
+            TryDelete(root);
         }
     }
 }

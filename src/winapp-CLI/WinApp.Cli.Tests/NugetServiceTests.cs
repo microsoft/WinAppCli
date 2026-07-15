@@ -16,11 +16,12 @@ public class NugetServiceTests : BaseCommandTests
     {
         // Root these live tests at an isolated nuget.config so they never inherit the machine/user config.
         // BaseCommandTests roots the NuGet provider at a temp dir but writes no config there, so NuGet still
-        // merges the user/machine nuget.config — on a machine that clears nuget.org or maps packages to a
-        // private feed (exactly the scenario this migration enables) these nuget.org assertions would then
-        // fail environmentally. Clearing the inherited sources + mapping and re-adding only nuget.org makes
-        // them hermetic. The provider's Settings are evaluated lazily on first use, so writing the file here
-        // (before any test body runs) is sufficient.
+        // merges the user/machine nuget.config — on a machine that clears nuget.org, disables it via
+        // <disabledPackageSources>, or maps packages to a private feed (exactly the scenario this migration
+        // enables) these nuget.org assertions would then fail environmentally. Clearing the inherited sources,
+        // disabled-sources and mapping and re-adding only nuget.org makes them hermetic. The provider's
+        // Settings are evaluated lazily on first use, so writing the file here (before any test body runs) is
+        // sufficient.
         File.WriteAllText(
             Path.Combine(_tempDirectory.FullName, "nuget.config"),
             """
@@ -30,6 +31,9 @@ public class NugetServiceTests : BaseCommandTests
                 <clear />
                 <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
               </packageSources>
+              <disabledPackageSources>
+                <clear />
+              </disabledPackageSources>
               <packageSourceMapping>
                 <clear />
                 <packageSource key="nuget.org">

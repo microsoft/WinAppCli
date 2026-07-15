@@ -224,9 +224,10 @@ internal class NugetService : INugetService
                 var depVersion = await ResolveDependencyVersionAsync(depName, depVersionRange, cacheContext, cancellationToken);
                 if (string.IsNullOrEmpty(depVersion))
                 {
-                    // The declared range names no installable version on the configured sources (e.g. a
-                    // version-less dependency or a range no listed version satisfies); skip it rather than
-                    // guessing a version to install.
+                    // A null result now means only a version-less / fully unbounded dependency (the range
+                    // constrains nothing); skip it rather than guessing a version to install. A bounded range
+                    // that cannot be resolved throws instead and is surfaced by the catch below as a
+                    // non-fatal per-dependency warning, so it is no longer silently dropped.
                     continue;
                 }
 
@@ -451,11 +452,15 @@ internal class NugetService : INugetService
     /// available version is selected (a mirror may carry 1.3.0 but not 1.2.3). This also honors floating ranges.
     /// The candidate set includes UNLISTED versions, because a package legitimately pins an exact dependency
     /// version that the publisher has unlisted (e.g. Windows App SDK experimental builds unlist their
-    /// <c>.Runtime</c>/<c>.Foundation</c> sub-packages) and such a pin must still resolve. Returns null when the
-    /// range constrains nothing (a version-less dependency) or when no available version satisfies it. Throws
-    /// when no available version satisfied the range only because a source that could have satisfied it failed
-    /// to answer, so callers can distinguish "no satisfying version" from "source query failed" (the graph path
-    /// surfaces it; the install path catches it and warns).
+    /// <c>.Runtime</c>/<c>.Foundation</c> sub-packages) and such a pin must still resolve. Returns null ONLY
+    /// when the range constrains nothing (a version-less or fully unbounded dependency) — a deliberate skip.
+    /// A BOUNDED range that no available version satisfies means a required transitive package cannot be
+    /// resolved, so it throws instead of returning null (which both callers read as "omit this dependency"):
+    /// otherwise the graph path would report success with a package missing and the install path would
+    /// silently skip it. The thrown reason is specific — a source that could have satisfied the range failed
+    /// to answer, no source was eligible at all (empty feed list or a <c>packageSourceMapping</c> exclusion),
+    /// or eligible sources offered no satisfying version — so the graph path can surface it (fail loudly) and
+    /// the install path catch it as a non-fatal per-dependency warning.
     /// </summary>
     private async Task<string?> ResolveDependencyVersionAsync(string packageId, VersionRange? range, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
@@ -481,25 +486,41 @@ internal class NugetService : INugetService
             return best.ToNormalizedString();
         }
 
-        // Nothing satisfied the range. Distinguish a genuine "no available version satisfies it" (skip the
-        // dependency) from "a source that could have satisfied it could not be queried" — in the latter case
-        // surface the error rather than silently returning null, so the graph path fails loudly and the
-        // install path can report its non-fatal dependency warning instead of dropping a package unnoticed.
+        // Nothing satisfied the range. A bounded range that matches no available version means a REQUIRED
+        // transitive package cannot be resolved, so fail loudly instead of returning null (which both callers
+        // read as "omit this dependency"): the graph path would otherwise report success with a package
+        // missing and the install path would silently skip it. Distinguish the causes so the error is
+        // actionable.
         if (candidates.Error is not null)
         {
+            // A source that could have satisfied the range could not be queried (feed/auth/network error);
+            // surface it rather than masking a real failure as a missing dependency.
             throw new InvalidOperationException(
                 $"Could not resolve a version for dependency '{packageId}' satisfying '{range}': source '{candidates.ErrorSource}' could not be queried: {candidates.Error.Message}",
                 candidates.Error);
         }
 
-        return null;
+        if (candidates.EligibleSourceCount == 0)
+        {
+            // No source was eligible at all — an empty feed list or a packageSourceMapping exclusion left the
+            // transitive package with nowhere to resolve from. Reuse the mapping-aware diagnosis so the error
+            // points at the specific nuget.config fix (matching the download / direct-dependency paths).
+            throw new InvalidOperationException(
+                $"Cannot resolve dependency '{packageId}' (required version '{range}'): {_sourceProvider.DescribeNoEligibleSources(packageId)}.");
+        }
+
+        // Eligible sources were queried and answered, but none offers a version satisfying the range.
+        throw new InvalidOperationException(
+            $"Cannot resolve dependency '{packageId}': no version offered by the configured NuGet sources satisfies '{range}'.");
     }
 
     /// <summary>
-    /// The candidate versions of a package collected across eligible sources, plus the last source failure (if
-    /// any) so the caller can tell "no version satisfies the range" apart from "a source could not be queried".
+    /// The candidate versions of a package collected across eligible sources, the number of sources that were
+    /// eligible (0 signals a packageSourceMapping exclusion or an empty feed list), plus the last source
+    /// failure (if any) so the caller can tell "no version satisfies the range", "no source was eligible" and
+    /// "a source could not be queried" apart.
     /// </summary>
-    private readonly record struct CandidateVersionsResult(IReadOnlyList<NuGetVersion> Versions, Exception? Error, string? ErrorSource);
+    private readonly record struct CandidateVersionsResult(IReadOnlyList<NuGetVersion> Versions, Exception? Error, string? ErrorSource, int EligibleSourceCount);
 
     /// <summary>
     /// Collects the candidate versions of a package across every eligible source, for resolving a dependency's
@@ -519,7 +540,8 @@ internal class NugetService : INugetService
         Exception? lastError = null;
         string? lastErrorSource = null;
 
-        foreach (var repo in _sourceProvider.GetRepositoriesForPackage(packageId))
+        var repos = _sourceProvider.GetRepositoriesForPackage(packageId);
+        foreach (var repo in repos)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -551,7 +573,7 @@ internal class NugetService : INugetService
             }
         }
 
-        return new CandidateVersionsResult([.. versions], lastError, lastErrorSource);
+        return new CandidateVersionsResult([.. versions], lastError, lastErrorSource, repos.Count);
     }
 
     /// <summary>
@@ -713,6 +735,9 @@ internal class NugetService : INugetService
                         continue;
                     }
 
+                    // A bounded range that cannot be resolved now throws (surfacing loudly here so the graph
+                    // is never reported complete with a required package missing); a null result means only a
+                    // version-less / unbounded dependency, which is skipped.
                     var resolvedVersion = await ResolveDependencyVersionAsync(dependency.Id, dependency.VersionRange, cacheContext, cancellationToken);
                     if (!string.IsNullOrEmpty(resolvedVersion))
                     {

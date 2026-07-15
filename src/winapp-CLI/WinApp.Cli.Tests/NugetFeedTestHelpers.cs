@@ -131,6 +131,9 @@ internal static class NugetFeedTestHelpers
                 <clear />
                 <add key="local" value="{feed.FullName}" />
               </packageSources>
+              <disabledPackageSources>
+                <clear />
+              </disabledPackageSources>
               <packageSourceMapping>
                 <clear />
                 <packageSource key="local">
