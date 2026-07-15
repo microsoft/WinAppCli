@@ -150,6 +150,11 @@ internal static partial class WgcCapture
                 {
                     _logger.LogDebug("WGC: window resized {Old}→{New}; recreating frame pool",
                         $"{_poolSize.Width}x{_poolSize.Height}", $"{contentSize.Width}x{contentSize.Height}");
+                    // M10: dispose the triggering frame BEFORE recreating the pool so no frame
+                    // from the old pool is alive during recreation. Set frame=null to prevent
+                    // double-dispose in the outer finally.
+                    frame.Dispose();
+                    frame = null;
                     try
                     {
                         var winrtDevice = CreateDirect3DDevice(_device);

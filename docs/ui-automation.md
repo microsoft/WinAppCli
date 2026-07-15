@@ -287,6 +287,7 @@ The liveness event on stderr lets programmatic callers know the capture loop is 
 
 **Error codes:**
 - `element_not_found` — Selector given but no matching element found; fails immediately (no partial file written).
+- `ambiguous_selector` — A plain-text selector matched multiple elements; use a slug from the suggestions shown in the error (or from `inspect` output) to target a specific element.
 - `invalid_arguments` — Invalid option value (e.g., `--duration-sec -1` or `> 86400`).
 
 

@@ -114,6 +114,10 @@ internal sealed partial class UiAutomationService
                 captureOriginTop = rect.top;
             }
 
+            // H2: For whole-window WGC capture, derive crop dims from EACH frame (not just the first).
+            // Element-crop captures use the fixed cropW/cropH computed from the element bounds below.
+            var isWholeWindowWgc = useWgc && string.IsNullOrEmpty(elementId);
+
             // Determine the crop rectangle (in capture-space) for an element selector.
             var cropX = 0;
             var cropY = 0;
@@ -167,9 +171,26 @@ internal sealed partial class UiAutomationService
                 }
 
                 // Stop immediately if the captured window closed mid-recording rather than
-                // re-encoding stale frames. Finalize whatever was captured so far.
+                // re-encoding stale frames. M8: drain any available cached frame first so that
+                // a frame that was ready when Closed fired is not silently dropped.
                 if (useWgc && grabber!.IsClosed)
                 {
+                    var closedLatest = grabber.TryGetLatest();
+                    if (closedLatest is not null)
+                    {
+                        var (closedSrc, closedSw, closedSh) = closedLatest.Value;
+                        // H2: use current frame dims for whole-window WGC, fixed crop for element.
+                        var closedCropW = isWholeWindowWgc ? closedSw : cropW;
+                        var closedCropH = isWholeWindowWgc ? closedSh : cropH;
+                        var closedFrame = ProcessFrame(closedSrc, closedSw, closedSh, cropX, cropY, closedCropW, closedCropH, encoderW, encoderH, displayW, displayH);
+                        encoder.WriteFrame(closedFrame, frameIndex * frameDurationHns, frameDurationHns);
+                        frameIndex++;
+                        if (!startedSignaled)
+                        {
+                            startedSignaled = true;
+                            onRecordingStarted?.Invoke();
+                        }
+                    }
                     _logger.LogDebug("WGC capture item closed mid-recording; finalizing {Frames} frames captured so far", frameIndex);
                     break;
                 }
@@ -202,7 +223,13 @@ internal sealed partial class UiAutomationService
                     sh = srcHeight;
                 }
 
-                var frame = ProcessFrame(source, sw, sh, cropX, cropY, cropW, cropH, encoderW, encoderH, displayW, displayH);
+                var frame = ProcessFrame(source, sw, sh, cropX, cropY,
+                    // H2: for whole-window WGC, use the CURRENT frame's dimensions as the crop source
+                    // so that a resized window delivers its full content rather than the stale initial
+                    // sub-rect. Element-crop captures use the fixed cropW/cropH (element position).
+                    isWholeWindowWgc ? sw : cropW,
+                    isWholeWindowWgc ? sh : cropH,
+                    encoderW, encoderH, displayW, displayH);
                 encoder.WriteFrame(frame, frameIndex * frameDurationHns, frameDurationHns);
                 frameIndex++;
 
@@ -281,17 +308,21 @@ internal sealed partial class UiAutomationService
         int displayW, displayH;
         if (maxEdge > 0 && longest > maxEdge)
         {
+            var evenMaxEdge = EvenFloor(maxEdge);
             if (width >= height)
             {
                 // width is the long edge — clamp it down to even ≤ maxEdge
-                displayW = EvenFloor(maxEdge);
-                displayH = EvenRound(height * scale);
+                displayW = evenMaxEdge;
+                // M9: clamp the short edge too — EvenRound can round UP past the cap for
+                // near-square inputs (e.g. 100×100 at maxEdge=99: round(99)=100 > 99).
+                displayH = Math.Min(EvenRound(height * scale), evenMaxEdge);
             }
             else
             {
                 // height is the long edge — clamp it down to even ≤ maxEdge
-                displayH = EvenFloor(maxEdge);
-                displayW = EvenRound(width * scale);
+                displayH = evenMaxEdge;
+                // M9: clamp the short edge for the same reason.
+                displayW = Math.Min(EvenRound(width * scale), evenMaxEdge);
             }
         }
         else

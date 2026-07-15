@@ -9,6 +9,7 @@ using WinApp.Cli.Services;
 namespace WinApp.Cli.Tests;
 
 [TestClass]
+[DoNotParallelize] // UiCommandTests uses shared static fields on Handler (s_isInputRedirectedOverride, s_stdinOverride)
 public partial class UiCommandTests : BaseCommandTests
 {
     private FakeUiAutomationService _fakeUia = null!;

@@ -43,6 +43,11 @@ internal class UiRecordCommand : Command, IShortDescription
         internal static Func<bool>? s_isInputRedirectedOverride;
         internal static TextReader? s_stdinOverride;
 
+        // H1: Guard flag for the stdin monitor cancel callback. Set to true (BEFORE linkedCts
+        // is disposed) so the monitor's callback can safely skip Cancel() on a disposed CTS.
+        // volatile ensures the background thread sees the write from the main thread.
+        private volatile bool _stdinMonitorStopped;
+
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
@@ -88,8 +93,10 @@ internal class UiRecordCommand : Command, IShortDescription
             }
 
             // Linked token so either Ctrl+C OR the stdin monitor can cancel and finalize the MP4.
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-
+            // Use explicit dispose (not using var) so we can set the stop flag BEFORE disposal,
+            // preventing the monitor's cancel callback from racing a disposed CTS (H1 fix).
+            var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            _stdinMonitorStopped = false;
             try
             {
                 // Resolve output path inside error handling so path errors produce structured output.
@@ -132,7 +139,17 @@ internal class UiRecordCommand : Command, IShortDescription
                 if (isStdinRedirected)
                 {
                     var stdinReader = s_stdinOverride ?? Console.In;
-                    StdinStopMonitor.Start(stdinReader, readyTcs.Task, () => linkedCts.Cancel());
+                    StdinStopMonitor.Start(stdinReader, readyTcs.Task, () =>
+                    {
+                        // H1 defense in depth: check the stop flag first (set before linkedCts
+                        // is disposed), then catch ObjectDisposedException as a belt-and-suspenders
+                        // guard against a very narrow race between the flag check and disposal.
+                        if (!_stdinMonitorStopped)
+                        {
+                            try { linkedCts.Cancel(); }
+                            catch (ObjectDisposedException) { }
+                        }
+                    });
                 }
 
                 // Readiness callback: invoked by RecordAsync after the encoder is initialized and the
@@ -221,6 +238,15 @@ internal class UiRecordCommand : Command, IShortDescription
             {
                 UiErrors.GenericError(logger, ex, json);
                 return 1;
+            }
+            finally
+            {
+                // H1 ordering: signal the stop flag BEFORE disposing the CTS so the monitor
+                // callback's flag check sees true and skips Cancel() on the disposed source.
+                // The guarded try/catch in the callback is the reliable guarantee;
+                // this flag+ordering eliminates the race window for typical cases.
+                _stdinMonitorStopped = true;
+                linkedCts.Dispose();
             }
         }
     }
