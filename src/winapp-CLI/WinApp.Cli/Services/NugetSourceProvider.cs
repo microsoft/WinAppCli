@@ -68,10 +68,11 @@ internal sealed class NugetSourceProvider
             new SourceRepositoryProvider(new PackageSourceProvider(Settings), Repository.Provider.GetCoreV3()));
         _packageSourceMapping = new Lazy<PackageSourceMapping>(() =>
             NuGet.Configuration.PackageSourceMapping.GetPackageSourceMapping(Settings));
-        // A stable fingerprint of the effective source set + global packages folder + mapping state, so
-        // callers that keep a process-wide cache keyed only by package/version (e.g. the dependency cache in
-        // NugetService) can additionally scope it to THIS configuration and never serve results resolved
-        // against a different config root, private feed or global folder after SetConfigRoot switches it.
+        // A stable fingerprint of the effective source set + global packages folder + the FULL
+        // packageSourceMapping rules, so callers that keep a process-wide cache keyed only by package/version
+        // (e.g. the dependency cache in NugetService) can additionally scope it to THIS configuration and
+        // never serve results resolved against a different config root, private feed, global folder or
+        // package-to-source mapping after SetConfigRoot switches it.
         _configScopeKey = new Lazy<string>(() =>
         {
             var globalFolder = SettingsUtility.GetGlobalPackagesFolder(Settings);
@@ -81,7 +82,15 @@ internal sealed class NugetSourceProvider
                     .Where(s => s.IsEnabled)
                     .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
                     .Select(s => $"{s.Name}|{s.Source}"));
-            return $"gpf={globalFolder}\nmapping={PackageSourceMapping.IsEnabled}\nsources={sources}";
+            // Record the complete mapping entries (source key -> ordered patterns), not just whether mapping
+            // is enabled: two configs with identical sources/global folder but different package-to-source
+            // mappings resolve dependencies from different feeds and must not share the cache.
+            var mapping = string.Join(
+                ";",
+                new PackageSourceMappingProvider(Settings).GetPackageSourceMappingItems()
+                    .OrderBy(m => m.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(m => $"{m.Key}=>{string.Join(",", m.Patterns.Select(p => p.Pattern).OrderBy(p => p, StringComparer.OrdinalIgnoreCase))}"));
+            return $"gpf={globalFolder}\nsources={sources}\nmapping={mapping}";
         });
     }
 
@@ -106,8 +115,8 @@ internal sealed class NugetSourceProvider
     internal ISettings Settings => _settings.Value;
 
     /// <summary>
-    /// A stable fingerprint of the effective configuration (global packages folder, enabled sources and
-    /// whether <c>&lt;packageSourceMapping&gt;</c> is on). Consumers that maintain a process-wide, static
+    /// A stable fingerprint of the effective configuration (global packages folder, enabled sources and the
+    /// full <c>&lt;packageSourceMapping&gt;</c> entries). Consumers that maintain a process-wide, static
     /// cache keyed only by package identity use this to additionally scope entries to the current config
     /// root/feed set, so a cache populated under one <c>nuget.config</c> is never reused under another after
     /// <see cref="SetConfigRoot"/> switches it. Recomputed whenever the caches are re-created.

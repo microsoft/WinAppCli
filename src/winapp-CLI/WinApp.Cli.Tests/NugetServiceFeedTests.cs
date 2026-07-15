@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+﻿// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
 using WinApp.Cli.Services;
@@ -9,8 +9,9 @@ namespace WinApp.Cli.Tests;
 /// <summary>
 /// NuGet.Client-backed source/configuration and version-selection tests: <c>&lt;packageSourceMapping&gt;</c>
 /// source eligibility, <c>globalPackagesFolder</c> resolution, version normalization, and the
-/// highest-across-sources / fail-closed version resolution. Download/install/authentication behavior lives
-/// in <see cref="NugetServiceDownloadTests"/>; the shared feed-authoring helpers live in
+/// highest-across-sources / fail-closed version resolution. Dependency-graph version-range resolution and
+/// dependency-cache scoping live in <see cref="NugetServiceDependencyTests"/>; download/install/authentication
+/// behavior lives in <see cref="NugetServiceDownloadTests"/>; the shared feed-authoring helpers live in
 /// <see cref="NugetFeedTestHelpers"/> (imported via <c>using static</c>).
 /// </summary>
 [TestClass]
@@ -467,195 +468,6 @@ public class NugetServiceFeedTests : BaseCommandTests
         finally
         {
             TryDelete(root);
-        }
-    }
-
-    [TestMethod]
-    public async Task GetPackageDependenciesAsync_ExclusiveLowerBoundRange_ResolvesLowestListedSatisfyingVersion()
-    {
-        var root = CreateFeedTestDirectory();
-        try
-        {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
-            feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
-
-            // Root depends on Child with an EXCLUSIVE lower bound: (1.0.0, 2.0.0]. The declared lower bound
-            // 1.0.0 does NOT satisfy the range, so reducing the range to MinVersion would resolve to a
-            // disallowed version. The lowest LISTED version that satisfies the range is 1.5.0 (1.0.0 is
-            // excluded; 2.0.0 is a higher valid match).
-            WriteNupkgToFeed(feed, "Range.Root", "1.0.0", ("Range.Child", "(1.0.0, 2.0.0]"));
-            WriteNupkgToFeed(feed, "Range.Child", "1.0.0");
-            WriteNupkgToFeed(feed, "Range.Child", "1.5.0");
-            WriteNupkgToFeed(feed, "Range.Child", "2.0.0");
-
-            WriteLocalFeedConfig(root, feed, packages);
-
-            var service = CreateServiceRootedAt(root);
-
-            var deps = await service.GetPackageDependenciesAsync("Range.Root", "1.0.0", TestContext.CancellationToken);
-
-            Assert.IsTrue(deps.TryGetValue("Range.Child", out var childVersion), "The dependency must be resolved, not skipped.");
-            Assert.AreEqual("1.5.0", childVersion, "The exclusive lower bound (1.0.0) must be excluded and the lowest satisfying listed version selected.");
-        }
-        finally
-        {
-            TryDelete(root);
-        }
-    }
-
-    [TestMethod]
-    public async Task GetPackageDependenciesAsync_UpperBoundOnlyRange_ResolvesInsteadOfSkipping()
-    {
-        var root = CreateFeedTestDirectory();
-        try
-        {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
-            feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
-
-            // Root depends on Child with an UPPER-BOUND-ONLY range: (, 2.0.0]. MinVersion is null for such a
-            // range, so the old MinVersion-based logic silently DROPPED the dependency. The lowest listed
-            // version that satisfies "<= 2.0.0" is 1.0.0 (3.0.0 is excluded).
-            WriteNupkgToFeed(feed, "Upper.Root", "1.0.0", ("Upper.Child", "(, 2.0.0]"));
-            WriteNupkgToFeed(feed, "Upper.Child", "1.0.0");
-            WriteNupkgToFeed(feed, "Upper.Child", "2.0.0");
-            WriteNupkgToFeed(feed, "Upper.Child", "3.0.0");
-
-            WriteLocalFeedConfig(root, feed, packages);
-
-            var service = CreateServiceRootedAt(root);
-
-            var deps = await service.GetPackageDependenciesAsync("Upper.Root", "1.0.0", TestContext.CancellationToken);
-
-            Assert.IsTrue(deps.TryGetValue("Upper.Child", out var childVersion), "An upper-bound-only dependency must be resolved, not silently skipped.");
-            Assert.AreEqual("1.0.0", childVersion, "The lowest listed version satisfying '<= 2.0.0' must be selected.");
-        }
-        finally
-        {
-            TryDelete(root);
-        }
-    }
-
-    [TestMethod]
-    public async Task GetPackageDependenciesAsync_InclusiveLowerBoundNotListed_ResolvesNextHigherListedVersion()
-    {
-        var root = CreateFeedTestDirectory();
-        try
-        {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
-            feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
-
-            // Root depends on Child with a plain inclusive lower bound (1.0.0 == [1.0.0, )). The declared
-            // lower bound 1.0.0 is NOT listed on the feed; only 1.1.0 and 2.0.0 are. NuGet's lowest-applicable
-            // resolution must select the lowest LISTED satisfying version (1.1.0) — reducing the range to its
-            // MinVersion would instead request the missing 1.0.0 and drop the dependency.
-            WriteNupkgToFeed(feed, "Low.Root", "1.0.0", ("Low.Child", "1.0.0"));
-            WriteNupkgToFeed(feed, "Low.Child", "1.1.0");
-            WriteNupkgToFeed(feed, "Low.Child", "2.0.0");
-
-            WriteLocalFeedConfig(root, feed, packages);
-
-            var service = CreateServiceRootedAt(root);
-
-            var deps = await service.GetPackageDependenciesAsync("Low.Root", "1.0.0", TestContext.CancellationToken);
-
-            Assert.IsTrue(deps.TryGetValue("Low.Child", out var childVersion), "The dependency must be resolved against listed versions, not skipped.");
-            Assert.AreEqual("1.1.0", childVersion, "The unlisted lower bound (1.0.0) must resolve up to the lowest listed satisfying version (1.1.0).");
-        }
-        finally
-        {
-            TryDelete(root);
-        }
-    }
-
-    [TestMethod]
-    public async Task GetPackageDependenciesAsync_SatisfyingSourceUnreachable_SurfacesErrorInsteadOfSkipping()
-    {
-        var root = CreateFeedTestDirectory();
-        try
-        {
-            // The local feed serves Root (so its dependency group is read) but lists NO versions of Child.
-            // A second eligible source that could have satisfied Child is unreachable (reserved '.invalid'
-            // TLD, RFC 6761). Turning that source failure into an empty version list would silently drop the
-            // dependency; instead the range resolver must surface the error so the graph caller sees it.
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
-            feed.Create();
-            WriteNupkgToFeed(feed, "Broken.Root", "1.0.0", ("Broken.Child", "[1.0.0, )"));
-
-            WriteNuGetConfig(root, $"""
-                <?xml version="1.0" encoding="utf-8"?>
-                <configuration>
-                  <packageSources>
-                    <clear />
-                    <add key="local" value="{feed.FullName}" />
-                    <add key="broken" value="https://nuget.invalid/v3/index.json" />
-                  </packageSources>
-                  <packageSourceMapping>
-                    <clear />
-                    <packageSource key="local">
-                      <package pattern="*" />
-                    </packageSource>
-                    <packageSource key="broken">
-                      <package pattern="*" />
-                    </packageSource>
-                  </packageSourceMapping>
-                </configuration>
-                """);
-
-            var service = CreateServiceRootedAt(root);
-
-            var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
-                async () => await service.GetPackageDependenciesAsync("Broken.Root", "1.0.0", TestContext.CancellationToken));
-
-            // The error must name the dependency and the unreachable source, proving the feed/auth failure
-            // was not masked as "no satisfying version" (which would silently omit the dependency).
-            StringAssert.Contains(ex.Message, "Broken.Child", StringComparison.Ordinal);
-            StringAssert.Contains(ex.Message, "could not be queried", StringComparison.Ordinal);
-            StringAssert.Contains(ex.Message, "broken", StringComparison.Ordinal);
-        }
-        finally
-        {
-            TryDelete(root);
-        }
-    }
-
-    [TestMethod]
-    public async Task GetPackageDependenciesAsync_DifferentConfigRoots_DoNotShareCache()
-    {
-        // Two independent workspaces resolve the SAME package id/version but their private feeds declare
-        // DIFFERENT dependencies. The process-wide dependency cache must be scoped to the effective config
-        // (feeds/global folder), so the second lookup returns ITS feed's dependency rather than the first
-        // one's cached result.
-        var rootA = CreateFeedTestDirectory();
-        var rootB = CreateFeedTestDirectory();
-        try
-        {
-            var feedA = new DirectoryInfo(Path.Combine(rootA.FullName, "feed"));
-            feedA.Create();
-            WriteNupkgToFeed(feedA, "Scoped.Root", "1.0.0", ("Scoped.ChildA", "1.0.0"));
-            WriteNupkgToFeed(feedA, "Scoped.ChildA", "1.0.0");
-            WriteLocalFeedConfig(rootA, feedA, new DirectoryInfo(Path.Combine(rootA.FullName, "packages")));
-
-            var feedB = new DirectoryInfo(Path.Combine(rootB.FullName, "feed"));
-            feedB.Create();
-            WriteNupkgToFeed(feedB, "Scoped.Root", "1.0.0", ("Scoped.ChildB", "1.0.0"));
-            WriteNupkgToFeed(feedB, "Scoped.ChildB", "1.0.0");
-            WriteLocalFeedConfig(rootB, feedB, new DirectoryInfo(Path.Combine(rootB.FullName, "packages")));
-
-            var depsA = await CreateServiceRootedAt(rootA).GetPackageDependenciesAsync("Scoped.Root", "1.0.0", TestContext.CancellationToken);
-            var depsB = await CreateServiceRootedAt(rootB).GetPackageDependenciesAsync("Scoped.Root", "1.0.0", TestContext.CancellationToken);
-
-            Assert.IsTrue(depsA.ContainsKey("Scoped.ChildA"), "Workspace A must resolve its own feed's dependency.");
-            Assert.IsFalse(depsA.ContainsKey("Scoped.ChildB"), "Workspace A must not see workspace B's dependency.");
-            Assert.IsTrue(depsB.ContainsKey("Scoped.ChildB"), "Workspace B must resolve its own feed's dependency, not A's cached result.");
-            Assert.IsFalse(depsB.ContainsKey("Scoped.ChildA"), "Workspace B must not receive workspace A's cached dependency.");
-        }
-        finally
-        {
-            TryDelete(rootA);
-            TryDelete(rootB);
         }
     }
 
