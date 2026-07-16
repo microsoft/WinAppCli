@@ -40,6 +40,14 @@ internal interface ISystemUiQuery
     /// <summary>The window class name of <paramref name="hwnd"/>, or <c>null</c> when empty/unavailable.</summary>
     string? GetWindowClassName(long hwnd);
 
+    /// <summary>
+    /// The HWND that currently has keyboard focus within the thread that owns <paramref name="hwnd"/>
+    /// (0 when it can't be resolved — e.g. the thread isn't foreground so no window holds focus).
+    /// Used to target <c>PostMessage</c> at the truly-focused child control rather than a top-level
+    /// window that would silently drop the keyboard message.
+    /// </summary>
+    long GetFocusedWindow(long hwnd);
+
     /// <summary>The outer size (width, height) of <paramref name="hwnd"/> in pixels; (0, 0) when unavailable.</summary>
     (int Width, int Height) GetWindowSize(long hwnd);
 

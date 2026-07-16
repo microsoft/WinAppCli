@@ -80,6 +80,8 @@ IsIconic
 ShowWindow
 FindWindowEx
 GetWindowThreadProcessId
+GetGUIThreadInfo
+GUITHREADINFO
 GetAncestor
 GetWindowText
 IsWindowVisible

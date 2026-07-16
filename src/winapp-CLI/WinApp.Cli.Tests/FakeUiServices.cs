@@ -488,6 +488,10 @@ internal sealed class FakeSystemUiQuery : ISystemUiQuery
     /// <summary>Per-HWND owner handles for <see cref="GetWindowOwner"/>. Unmapped handles report 0 (no owner).</summary>
     public Dictionary<long, nint> WindowOwnerByHwnd { get; } = [];
 
+    /// <summary>Per-HWND focused child handles for <see cref="GetFocusedWindow"/>. Unmapped handles report 0
+    /// (no resolvable focus → the command keeps the passed target HWND).</summary>
+    public Dictionary<long, long> FocusedWindowByHwnd { get; } = [];
+
     public UiProcessInfo? GetProcessById(int pid)
     {
         if (ProcessesById.TryGetValue(pid, out var info)) { return info; }
@@ -513,6 +517,9 @@ internal sealed class FakeSystemUiQuery : ISystemUiQuery
 
     public nint GetWindowOwner(long hwnd)
         => WindowOwnerByHwnd.TryGetValue(hwnd, out var owner) ? owner : 0;
+
+    public long GetFocusedWindow(long hwnd)
+        => FocusedWindowByHwnd.TryGetValue(hwnd, out var focused) ? focused : 0;
 }
 
 /// <summary>
