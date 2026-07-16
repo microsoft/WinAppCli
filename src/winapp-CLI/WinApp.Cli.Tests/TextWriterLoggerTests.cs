@@ -158,13 +158,20 @@ public class TextWriterLoggerTests
     }
 
     [TestMethod]
-    public void OutputCapture_Dispose_DisposesInnerWriter()
+    public void OutputCapture_Dispose_DoesNotDisposeBorrowedInnerWriter()
     {
         var inner = new StringWriter();
         var capture = new OutputCapture(inner);
 
         capture.Dispose();
 
-        Assert.ThrowsExactly<ObjectDisposedException>(() => inner.Write("after dispose"));
+        // OutputCapture borrows the inner writer; the caller owns its lifetime, so
+        // disposing the capture must NOT dispose the borrowed writer (disposing a
+        // shared stderr writer would break other concurrently-running tests).
+        inner.Write("after dispose");
+
+        Assert.IsTrue(
+            inner.ToString().Contains("after dispose", StringComparison.Ordinal),
+            "Disposing OutputCapture must not dispose the borrowed inner writer.");
     }
 }
