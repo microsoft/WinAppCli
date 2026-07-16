@@ -6,7 +6,7 @@ using System.Globalization;
 namespace WinApp.Cli.Helpers;
 
 /// <summary>
-/// Shared parser for app-coordinate tokens in the <c>x,y</c> form reported by <c>ui inspect</c>.
+/// Shared parser for screen-coordinate tokens in the <c>x,y</c> form reported by <c>ui inspect</c>.
 /// </summary>
 internal static class CoordinateParser
 {

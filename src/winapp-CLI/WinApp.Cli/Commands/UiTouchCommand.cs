@@ -37,13 +37,13 @@ internal class UiTouchCommand : Command, IShortDescription
 
     public static Option<string?> AtOption { get; } = new("--at")
     {
-        Description = "Explicit start point as app coordinates x,y (as reported by 'ui inspect'). " +
+        Description = "Explicit start point as screen coordinates x,y (as reported by 'ui inspect'). " +
                       "Defaults to the selector's element center."
     };
 
     public static Option<string?> ToPointOption { get; } = new("--to-point")
     {
-        Description = "End point x,y for a swipe (app coordinates). Takes precedence over --direction."
+        Description = "End point x,y for a swipe (screen coordinates). Takes precedence over --direction."
     };
 
     public static Option<int> DistanceOption { get; } = new("--distance")
@@ -80,7 +80,7 @@ internal class UiTouchCommand : Command, IShortDescription
     public UiTouchCommand()
         : base("touch", "Inject synthetic touch input using the Windows touch-injection API. " +
                "Supports tap, double-tap, long-press, swipe, pinch and stretch gestures at an element's " +
-               "center or explicit app x,y coordinates. Requires an unlocked, interactive desktop with the " +
+               "center or explicit screen x,y coordinates. Requires an unlocked, interactive desktop with the " +
                "target window foregroundable.")
     {
         Arguments.Add(SharedUiOptions.SelectorArgument);
