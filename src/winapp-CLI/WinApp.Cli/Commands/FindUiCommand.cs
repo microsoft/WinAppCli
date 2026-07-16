@@ -202,7 +202,10 @@ internal sealed class FindUiCommand : Command, IShortDescription
 
             for (int i = 0; i < entries.Count; i++)
             {
-                if (i > 0) console.WriteLine();
+                if (i > 0)
+                {
+                    console.WriteLine();
+                }
                 console.WriteLine(entries[i].Content);
             }
             return entries.All(e => e.Found) ? 0 : 1;

@@ -35,7 +35,7 @@ internal sealed class ControlsDataUnavailableException : Exception
     public ControlsDataUnavailableException(string message) : base(message) { }
 }
 
-internal sealed class ControlsSearchService : IControlsSearchService
+internal sealed class ControlsSearchService : IControlsSearchService, IDisposable
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private SearchEngine? _engine;
@@ -115,4 +115,6 @@ internal sealed class ControlsSearchService : IControlsSearchService
                 failures);
         }
     }
+
+    public void Dispose() => _gate.Dispose();
 }

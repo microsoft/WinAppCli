@@ -19,3 +19,12 @@ dotnet_diagnostic.CA1845.severity = none
 
 # Member does not access instance data and can be marked as static
 dotnet_diagnostic.CA1822.severity = none
+
+# Prefer 'static readonly' fields over constant array arguments (perf micro-opt; upstream passes inline arrays)
+dotnet_diagnostic.CA1861.severity = none
+
+# Perf micro-opts left as-is to keep the ported engine close to upstream for easy re-syncs.
+dotnet_diagnostic.CA1854.severity = none   # TryGetValue over ContainsKey+indexer
+dotnet_diagnostic.CA1865.severity = none   # EndsWith(char) over EndsWith(string)
+dotnet_diagnostic.CA1866.severity = none   # StartsWith(char) over StartsWith(string)
+dotnet_diagnostic.CA1870.severity = none   # cached SearchValues instance
