@@ -11,6 +11,45 @@ namespace WinApp.Cli.Helpers;
 /// </summary>
 internal static class MouseInput
 {
+    internal delegate uint SendInputHook(INPUT[] inputs);
+
+    /// <remarks>
+    /// Native adapter seam for issue #630: the default body is the innermost <c>SendInput</c> OS
+    /// boundary, which cannot be unit-tested without moving/clicking the real desktop. Unit tests
+    /// replace this delegate and cover batching, normalization, and error handling.
+    /// </remarks>
+    internal static SendInputHook s_sendInput = static inputs =>
+    {
+        unsafe
+        {
+            fixed (INPUT* pInputs = inputs)
+            {
+                return PInvoke.SendInput((uint)inputs.Length, pInputs, sizeof(INPUT));
+            }
+        }
+    };
+
+    /// <remarks>
+    /// Native adapter seam for issue #630: the default body moves the real cursor. Tests replace it
+    /// so public methods can be exercised without mutating machine state.
+    /// </remarks>
+    internal static Func<int, int, bool> s_setCursorPos = static (x, y) => PInvoke.SetCursorPos(x, y);
+
+    /// <remarks>
+    /// Native adapter seam for issue #630: virtual desktop metrics come from User32 and vary by
+    /// machine. Tests inject deterministic dimensions for coordinate-normalization coverage.
+    /// </remarks>
+    internal static Func<Windows.Win32.UI.WindowsAndMessaging.SYSTEM_METRICS_INDEX, int> s_getSystemMetrics =
+        PInvoke.GetSystemMetrics;
+
+    /// <remarks>
+    /// Native adapter seam for issue #630: foreground detection probes the live desktop only when
+    /// formatting a native SendInput failure message. Tests inject this predicate.
+    /// </remarks>
+    internal static Func<bool> s_foregroundWindowIsNull = static () => PInvoke.GetForegroundWindow().IsNull;
+
+    internal static Action<int> s_sleep = Thread.Sleep;
+
     /// <summary>
     /// Moves the cursor to the target position with a small wiggle to trigger hover/tooltip detection.
     /// Uses SendInput MOUSEEVENTF_MOVE|MOUSEEVENTF_ABSOLUTE to ensure apps see real WM_MOUSEMOVE messages.
@@ -19,13 +58,13 @@ internal static class MouseInput
     {
         // Move to target via SendInput (absolute coordinates)
         SendMove(screenX, screenY);
-        Thread.Sleep(30);
+        s_sleep(30);
 
         // Small wiggle (±2px) to ensure the app registers mouse entry
         SendMove(screenX + 2, screenY);
-        Thread.Sleep(20);
+        s_sleep(20);
         SendMove(screenX, screenY + 2);
-        Thread.Sleep(20);
+        s_sleep(20);
 
         // Return to center and stop — dwell timer starts now
         SendMove(screenX, screenY);
@@ -38,36 +77,34 @@ internal static class MouseInput
     /// </summary>
     public static void MoveCursor(int screenX, int screenY)
     {
-        PInvoke.SetCursorPos(screenX, screenY);
+        s_setCursorPos(screenX, screenY);
     }
 
     public static void Click(int screenX, int screenY, bool doubleClick = false, bool rightClick = false, int settleMs = 50)
     {
         // Move cursor to the target position
-        PInvoke.SetCursorPos(screenX, screenY);
+        s_setCursorPos(screenX, screenY);
         if (settleMs > 0)
         {
-            Thread.Sleep(settleMs); // small delay for cursor settle
+            s_sleep(settleMs); // small delay for cursor settle
         }
 
         // Build input events
-        var downFlag = rightClick ? MOUSE_EVENT_FLAGS.MOUSEEVENTF_RIGHTDOWN : MOUSE_EVENT_FLAGS.MOUSEEVENTF_LEFTDOWN;
-        var upFlag = rightClick ? MOUSE_EVENT_FLAGS.MOUSEEVENTF_RIGHTUP : MOUSE_EVENT_FLAGS.MOUSEEVENTF_LEFTUP;
+        var (downFlag, upFlag) = ButtonFlags(rightClick);
 
         // Single click
         SendClick(downFlag, upFlag);
 
         if (doubleClick)
         {
-            Thread.Sleep(50); // inter-click delay
+            s_sleep(50); // inter-click delay
             SendClick(downFlag, upFlag);
         }
     }
 
     public static void Drag(int fromScreenX, int fromScreenY, int toScreenX, int toScreenY, bool rightButton = false, int holdMs = 0, int dwellMs = 0, int settleMs = 50)
     {
-        var downFlag = rightButton ? MOUSE_EVENT_FLAGS.MOUSEEVENTF_RIGHTDOWN : MOUSE_EVENT_FLAGS.MOUSEEVENTF_LEFTDOWN;
-        var upFlag = rightButton ? MOUSE_EVENT_FLAGS.MOUSEEVENTF_RIGHTUP : MOUSE_EVENT_FLAGS.MOUSEEVENTF_LEFTUP;
+        var (downFlag, upFlag) = ButtonFlags(rightButton);
 
         // Settle on the start point, then press the button. Pass settleMs: 0 when the caller has already
         // moved the cursor to the from-point and confirmed the element hasn't drifted, so the button-down
@@ -75,40 +112,37 @@ internal static class MouseInput
         SendMove(fromScreenX, fromScreenY);
         if (settleMs > 0)
         {
-            Thread.Sleep(settleMs);
+            s_sleep(settleMs);
         }
         SendButton(downFlag);
 
         var released = false;
         try
         {
-            Thread.Sleep(50);
+            s_sleep(50);
 
             // Optional press-and-hold at the start before moving: drives long-press / press-and-hold
             // detection. With from == to (no movement) this is a pure long-press gesture.
             if (holdMs > 0)
             {
-                Thread.Sleep(holdMs);
+                s_sleep(holdMs);
             }
 
             // Move toward the destination in steps so the app sees a stream of WM_MOUSEMOVE messages
-            const int steps = 20;
-            for (int i = 1; i <= steps; i++)
+            foreach (var (x, y) in BuildDragPath(fromScreenX, fromScreenY, toScreenX, toScreenY))
             {
-                int x = fromScreenX + (int)Math.Round((toScreenX - fromScreenX) * (i / (double)steps));
-                int y = fromScreenY + (int)Math.Round((toScreenY - fromScreenY) * (i / (double)steps));
                 SendMove(x, y);
-                Thread.Sleep(10);
+                s_sleep(10);
             }
 
             // Optional dwell at the destination before releasing, so drop targets / merge overlays
             // that arm from a sustained hover (rather than the instant the cursor arrives) can latch.
             if (dwellMs > 0)
             {
-                Thread.Sleep(dwellMs);
+                s_sleep(dwellMs);
             }
 
-            Thread.Sleep(50);
+            s_sleep(50);
             SendButton(upFlag);
             released = true;
         }
@@ -131,84 +165,96 @@ internal static class MouseInput
         SendMove(screenX, screenY);
         if (settleMs > 0)
         {
-            Thread.Sleep(settleMs);
+            s_sleep(settleMs);
         }
 
-        Span<INPUT> inputs =
-        [
-            new INPUT
-            {
-                type = INPUT_TYPE.INPUT_MOUSE,
-                Anonymous = { mi = new MOUSEINPUT
-                {
-                    mouseData = unchecked((uint)delta),
-                    dwFlags = MOUSE_EVENT_FLAGS.MOUSEEVENTF_WHEEL
-                }}
-            }
-        ];
-
-        SendInputs(inputs);
+        SendInputs([CreateWheelInput(delta)]);
     }
 
     private static void SendButton(MOUSE_EVENT_FLAGS flag)
     {
-        Span<INPUT> inputs =
-        [
-            new INPUT
-            {
-                type = INPUT_TYPE.INPUT_MOUSE,
-                Anonymous = { mi = new MOUSEINPUT { dwFlags = flag } }
-            }
-        ];
-
-        SendInputs(inputs);
+        SendInputs([CreateButtonInput(flag)]);
     }
 
     private static void SendMove(int screenX, int screenY)
     {
         // Normalize against the full virtual desktop to support multi-monitor setups
-        int vx = PInvoke.GetSystemMetrics(Windows.Win32.UI.WindowsAndMessaging.SYSTEM_METRICS_INDEX.SM_XVIRTUALSCREEN);
-        int vy = PInvoke.GetSystemMetrics(Windows.Win32.UI.WindowsAndMessaging.SYSTEM_METRICS_INDEX.SM_YVIRTUALSCREEN);
-        int vw = PInvoke.GetSystemMetrics(Windows.Win32.UI.WindowsAndMessaging.SYSTEM_METRICS_INDEX.SM_CXVIRTUALSCREEN);
-        int vh = PInvoke.GetSystemMetrics(Windows.Win32.UI.WindowsAndMessaging.SYSTEM_METRICS_INDEX.SM_CYVIRTUALSCREEN);
-
-        int absoluteX = Math.Clamp((int)Math.Round(((screenX - vx) * 65535.0) / Math.Max(vw - 1, 1)), 0, 65535);
-        int absoluteY = Math.Clamp((int)Math.Round(((screenY - vy) * 65535.0) / Math.Max(vh - 1, 1)), 0, 65535);
-
-        Span<INPUT> inputs =
-        [
-            new INPUT
-            {
-                type = INPUT_TYPE.INPUT_MOUSE,
-                Anonymous = { mi = new MOUSEINPUT
-                {
-                    dx = absoluteX,
-                    dy = absoluteY,
-                    dwFlags = MOUSE_EVENT_FLAGS.MOUSEEVENTF_MOVE | MOUSE_EVENT_FLAGS.MOUSEEVENTF_ABSOLUTE | MOUSE_EVENT_FLAGS.MOUSEEVENTF_VIRTUALDESK
-                }}
-            }
-        ];
-
-        SendInputs(inputs);
+        var metrics = ReadVirtualDesktopMetrics();
+        SendInputs([CreateMoveInput(screenX, screenY, metrics)]);
     }
 
     private static void SendClick(MOUSE_EVENT_FLAGS downFlag, MOUSE_EVENT_FLAGS upFlag)
     {
-        Span<INPUT> inputs =
-        [
-            new INPUT
-            {
-                type = INPUT_TYPE.INPUT_MOUSE,
-                Anonymous = { mi = new MOUSEINPUT { dwFlags = downFlag } }
-            },
-            new INPUT
-            {
-                type = INPUT_TYPE.INPUT_MOUSE,
-                Anonymous = { mi = new MOUSEINPUT { dwFlags = upFlag } }
-            }
-        ];
+        SendInputs(CreateClickInputs(downFlag, upFlag));
+    }
 
-        SendInputs(inputs);
+    internal readonly record struct VirtualDesktopMetrics(int X, int Y, int Width, int Height);
+
+    internal static VirtualDesktopMetrics ReadVirtualDesktopMetrics()
+        => new(
+            s_getSystemMetrics(Windows.Win32.UI.WindowsAndMessaging.SYSTEM_METRICS_INDEX.SM_XVIRTUALSCREEN),
+            s_getSystemMetrics(Windows.Win32.UI.WindowsAndMessaging.SYSTEM_METRICS_INDEX.SM_YVIRTUALSCREEN),
+            s_getSystemMetrics(Windows.Win32.UI.WindowsAndMessaging.SYSTEM_METRICS_INDEX.SM_CXVIRTUALSCREEN),
+            s_getSystemMetrics(Windows.Win32.UI.WindowsAndMessaging.SYSTEM_METRICS_INDEX.SM_CYVIRTUALSCREEN));
+
+    internal static (int X, int Y) NormalizeAbsolute(int screenX, int screenY, VirtualDesktopMetrics metrics)
+        => (
+            Math.Clamp((int)Math.Round(((screenX - metrics.X) * 65535.0) / Math.Max(metrics.Width - 1, 1)), 0, 65535),
+            Math.Clamp((int)Math.Round(((screenY - metrics.Y) * 65535.0) / Math.Max(metrics.Height - 1, 1)), 0, 65535));
+
+    internal static INPUT CreateMoveInput(int screenX, int screenY, VirtualDesktopMetrics metrics)
+    {
+        var (absoluteX, absoluteY) = NormalizeAbsolute(screenX, screenY, metrics);
+        return new INPUT
+        {
+            type = INPUT_TYPE.INPUT_MOUSE,
+            Anonymous = { mi = new MOUSEINPUT
+            {
+                dx = absoluteX,
+                dy = absoluteY,
+                dwFlags = MOUSE_EVENT_FLAGS.MOUSEEVENTF_MOVE | MOUSE_EVENT_FLAGS.MOUSEEVENTF_ABSOLUTE | MOUSE_EVENT_FLAGS.MOUSEEVENTF_VIRTUALDESK
+            }}
+        };
+    }
+
+    internal static INPUT CreateButtonInput(MOUSE_EVENT_FLAGS flag)
+        => new()
+        {
+            type = INPUT_TYPE.INPUT_MOUSE,
+            Anonymous = { mi = new MOUSEINPUT { dwFlags = flag } }
+        };
+
+    internal static INPUT[] CreateClickInputs(MOUSE_EVENT_FLAGS downFlag, MOUSE_EVENT_FLAGS upFlag)
+        => [CreateButtonInput(downFlag), CreateButtonInput(upFlag)];
+
+    internal static INPUT CreateWheelInput(int delta)
+        => new()
+        {
+            type = INPUT_TYPE.INPUT_MOUSE,
+            Anonymous = { mi = new MOUSEINPUT
+            {
+                mouseData = unchecked((uint)delta),
+                dwFlags = MOUSE_EVENT_FLAGS.MOUSEEVENTF_WHEEL
+            }}
+        };
+
+    internal static (MOUSE_EVENT_FLAGS Down, MOUSE_EVENT_FLAGS Up) ButtonFlags(bool rightButton)
+        => rightButton
+            ? (MOUSE_EVENT_FLAGS.MOUSEEVENTF_RIGHTDOWN, MOUSE_EVENT_FLAGS.MOUSEEVENTF_RIGHTUP)
+            : (MOUSE_EVENT_FLAGS.MOUSEEVENTF_LEFTDOWN, MOUSE_EVENT_FLAGS.MOUSEEVENTF_LEFTUP);
+
+    internal static IReadOnlyList<(int X, int Y)> BuildDragPath(int fromScreenX, int fromScreenY, int toScreenX, int toScreenY)
+    {
+        const int steps = 20;
+        var points = new List<(int X, int Y)>(steps);
+        for (int i = 1; i <= steps; i++)
+        {
+            int x = fromScreenX + (int)Math.Round((toScreenX - fromScreenX) * (i / (double)steps));
+            int y = fromScreenY + (int)Math.Round((toScreenY - fromScreenY) * (i / (double)steps));
+            points.Add((x, y));
+        }
+
+        return points;
     }
 
     /// <summary>
@@ -217,26 +263,21 @@ internal static class MouseInput
     /// </summary>
     private static void SendInputs(Span<INPUT> inputs)
     {
-        unsafe
+        var array = inputs.ToArray();
+        var sent = s_sendInput(array);
+        if (sent != (uint)array.Length)
         {
-            fixed (INPUT* pInputs = inputs)
-            {
-                var sent = PInvoke.SendInput((uint)inputs.Length, pInputs, sizeof(INPUT));
-                if (sent != (uint)inputs.Length)
-                {
-                    throw new InvalidOperationException(sent == 0
-                        ? (PInvoke.GetForegroundWindow().IsNull
-                            // No foreground window at all → the workstation is locked or on a secure
-                            // desktop (LogonUI/UAC), where a user-session process simply can't inject.
-                            // Don't blame elevation in that case.
-                            ? "SendInput failed — no interactive desktop is available (the session is locked " +
-                              "or on a secure desktop). Unlock the session and retry."
-                            : "SendInput failed — the target window may be elevated (running as admin). " +
-                              "Try running this CLI as administrator.")
-                        : $"SendInput delivered only {sent} of {inputs.Length} mouse events — the gesture was " +
-                          "partially applied.");
-                }
-            }
+            throw new InvalidOperationException(sent == 0
+                ? (s_foregroundWindowIsNull()
+                    // No foreground window at all → the workstation is locked or on a secure
+                    // desktop (LogonUI/UAC), where a user-session process simply can't inject.
+                    // Don't blame elevation in that case.
+                    ? "SendInput failed — no interactive desktop is available (the session is locked " +
+                      "or on a secure desktop). Unlock the session and retry."
+                    : "SendInput failed — the target window may be elevated (running as admin). " +
+                      "Try running this CLI as administrator.")
+                : $"SendInput delivered only {sent} of {array.Length} mouse events — the gesture was " +
+                  "partially applied.");
         }
     }
 }
