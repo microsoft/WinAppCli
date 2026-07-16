@@ -12,6 +12,13 @@ namespace WinApp.Cli.Tests;
 public partial class UiCommandTests
 {
     [TestMethod]
+    public void Record_ShortDescription_IsUserFacing()
+    {
+        var command = GetRequiredService<UiRecordCommand>();
+        StringAssert.Contains(command.ShortDescription, "MP4");
+    }
+
+    [TestMethod]
     public async Task Record_MissingApp_ReturnsError()
     {
         var command = GetRequiredService<UiRecordCommand>();
@@ -250,5 +257,21 @@ public partial class UiCommandTests
         Assert.AreEqual(1, exitCode);
         Assert.IsTrue(File.Exists(outputPath), "pre-existing output file should survive a recording failure");
         Assert.AreEqual("sentinel content", File.ReadAllText(outputPath), "pre-existing file content should be unchanged");
+    }
+
+    [TestMethod]
+    public async Task Record_ComFailure_ReturnsStructuredError()
+    {
+        _fakeUia.RecordException = new System.Runtime.InteropServices.COMException(
+            "simulated UIA COM failure", unchecked((int)0x80004005));
+
+        var outputPath = Path.Combine(_tempDirectory.FullName, "com-fail.mp4");
+        var command = GetRequiredService<UiRecordCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["-a", "TestApp", "-o", outputPath, "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "simulated UIA COM failure");
+        Assert.IsFalse(File.Exists(outputPath));
     }
 }
