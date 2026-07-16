@@ -8,7 +8,7 @@
   "scripts": {
     "restore": "winapp restore",
     "generate": "winapp node generate-bindings",
-    "start": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\run.ps1"
+    "start": "node main.js"
   },
   "engines": {
     "node": ">=20"
@@ -26,10 +26,10 @@
     }
   },
   "dependencies": {
-    "@microsoft/dynwinrt": "0.1.0-preview.13"
+    "@microsoft/dynwinrt": "0.1.0-preview.15"
   },
   "devDependencies": {
-    "@microsoft/dynwinrt-codegen": "0.1.0-preview.13",
+    "@microsoft/dynwinrt-codegen": "0.1.0-preview.15",
     "@microsoft/winappcli": "^1.0.0"
   },
   "winapp": {

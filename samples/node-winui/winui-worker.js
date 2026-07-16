@@ -19,7 +19,6 @@ const {
   PropertyValue,
   SolidColorBrush,
   StackPanel,
-  Style,
   TextAlignment,
   TextBlock,
   TextWrapping,
@@ -37,7 +36,7 @@ const thickness = (left, top, right, bottom) => ({
 const fontWeight = (weight) => ({ weight });
 
 function appendChildren(panel, ...children) {
-  const collection = IVector_UIElement.from(panel.children._obj);
+  const collection = panel.children.as(IVector_UIElement);
   for (const child of children) {
     collection.append(child);
   }
@@ -50,10 +49,10 @@ const cornerRadius = (radius) => ({
   bottomLeft: radius,
 });
 const createBrush = (a, r, g, b) =>
-  SolidColorBrush.createInstanceWithColor({ a, r, g, b });
+  new SolidColorBrush({ a, r, g, b });
 
 function createText(text, size, weight = 400, centered = false) {
-  const block = TextBlock.create();
+  const block = new TextBlock();
   block.text = text;
   block.fontSize = size;
   block.fontWeight = fontWeight(weight);
@@ -65,7 +64,7 @@ function createText(text, size, weight = 400, centered = false) {
 }
 
 function createButton(label) {
-  const button = Button.createInstance(null);
+  const button = new Button();
   button.content = createText(label, 16, 600);
   button.minWidth = 96;
   return button;
@@ -85,11 +84,11 @@ let exitCode = 1;
 
 Application.start(() => {
   try {
-    app = Application.createWithFluentResources(() => {
+    app = Application.create(() => {
       try {
-        const window = Window.createInstance(null);
+        const window = new Window();
         window.title = 'WinUI 3 from Node.js';
-        window.systemBackdrop = MicaBackdrop.createInstance(null);
+        window.systemBackdrop = new MicaBackdrop();
 
         const appWindow = window.appWindow;
         if (!appWindow) {
@@ -100,16 +99,15 @@ Application.start(() => {
           throw new Error('AppWindow did not expose a title bar.');
         }
 
-        const resources = IMap_Object_Object.from(
-          Application.current.resources._obj
-        );
-        const getResource = (key, ResourceType) =>
-          new ResourceType(resources.lookup(PropertyValue.createString(key)));
+        const resources =
+          Application.current.resources.as(IMap_Object_Object);
+        const getResource = (key) =>
+          resources.lookup(PropertyValue.createString(key));
 
-        const root = Grid.createInstance(null);
+        const root = new Grid();
         root.padding = thickness(56, 32, 56, 32);
 
-        const content = StackPanel.createInstance(null);
+        const content = new StackPanel();
         content.orientation = Orientation.Vertical;
         content.spacing = 16;
         content.verticalAlignment = VerticalAlignment.Center;
@@ -139,7 +137,7 @@ Application.start(() => {
             titleBarTheme: TitleBarTheme.Dark,
           },
         ];
-        const themePicker = ComboBox.createInstance(null);
+        const themePicker = new ComboBox();
         themePicker.header = createText('Theme', 13, 600);
         themePicker.minWidth = 180;
         themePicker.horizontalAlignment = HorizontalAlignment.Left;
@@ -151,13 +149,13 @@ Application.start(() => {
         titleBar.preferredTheme = themeOptions[0].titleBarTheme;
 
         let count = 0;
-        const countCard = Border.create();
+        const countCard = new Border();
         countCard.padding = thickness(32, 24, 32, 24);
         countCard.cornerRadius = cornerRadius(12);
         countCard.borderThickness = thickness(1, 1, 1, 1);
         countCard.margin = thickness(0, 10, 0, 10);
 
-        const countPanel = StackPanel.createInstance(null);
+        const countPanel = new StackPanel();
         countPanel.orientation = Orientation.Vertical;
         countPanel.spacing = 2;
 
@@ -166,7 +164,7 @@ Application.start(() => {
         appendChildren(countPanel, countLabel, countText);
         countCard.child = countPanel;
 
-        const buttons = StackPanel.createInstance(null);
+        const buttons = new StackPanel();
         buttons.orientation = Orientation.Horizontal;
         buttons.spacing = 10;
         buttons.horizontalAlignment = HorizontalAlignment.Center;
@@ -174,7 +172,7 @@ Application.start(() => {
         const decrementButton = createButton('-1');
         const resetButton = createButton('Reset');
         const incrementButton = createButton('+1');
-        incrementButton.style = getResource('AccentButtonStyle', Style);
+        incrementButton.style = getResource('AccentButtonStyle');
         appendChildren(buttons, decrementButton, resetButton, incrementButton);
 
         const statusText = createText('Ready to count.', 13, 400, true);

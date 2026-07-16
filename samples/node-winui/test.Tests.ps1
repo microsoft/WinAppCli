@@ -23,7 +23,7 @@ Describe "Node WinUI Sample" {
             $script:appDir = Join-Path $script:tempDir "app"
             $null = New-Item -ItemType Directory -Path $script:appDir -Force
             Get-ChildItem -Path $script:sampleDir -Force |
-                Where-Object Name -NotIn @('node_modules', '.winapp', '.local-node', 'AppX', 'package-lock.json') |
+                Where-Object Name -NotIn @('node_modules', '.winapp', 'package-lock.json') |
                 Copy-Item -Destination $script:appDir -Recurse
         }
     }
@@ -63,39 +63,49 @@ Describe "Node WinUI Sample" {
             (Join-Path $bindings 'IVector_UIElement.js') | Should -Exist
             (Join-Path $bindings 'MicaBackdrop.js') | Should -Exist
             (Join-Path $bindings 'PropertyValue.js') | Should -Exist
+            (Join-Path $bindings 'ResourceManager.js') | Should -Exist
             (Join-Path $bindings 'SolidColorBrush.js') | Should -Exist
             (Join-Path $bindings 'Window.js') | Should -Exist
             (Join-Path $bindings 'XamlControlsResources.js') | Should -Exist
             (Join-Path $bindings 'XamlControlsXamlMetaDataProvider.js') | Should -Exist
         }
 
-        It "Should project the Application and Button members used by the sample" -Skip:$script:skip {
+        It "Should project the constructors and Application members used by the sample" -Skip:$script:skip {
             $applicationDts = Get-Content (Join-Path $script:appDir '.winapp\bindings\Application.d.ts') -Raw
             $buttonDts = Get-Content (Join-Path $script:appDir '.winapp\bindings\Button.d.ts') -Raw
-            $applicationDts | Should -Match 'createWithFluentResources'
+            $brushDts = Get-Content (Join-Path $script:appDir '.winapp\bindings\SolidColorBrush.d.ts') -Raw
+            $windowDts = Get-Content (Join-Path $script:appDir '.winapp\bindings\Window.d.ts') -Raw
+            $applicationDts | Should -Match 'static create\(onLaunched\?: \(\) => void\): Application;'
+            $buttonDts | Should -Match 'constructor\(\);'
             $buttonDts | Should -Match 'set content\(value: unknown\)'
             $buttonDts | Should -Match 'onClick\('
+            $brushDts | Should -Match 'constructor\(color: Color\);'
+            $windowDts | Should -Match 'constructor\(\);'
+
+            $applicationJs = Get-Content (Join-Path $script:appDir '.winapp\bindings\Application.js') -Raw
+            $applicationJs | Should -Match 'getWinappsdkResourcePriPath'
+            $applicationJs | Should -Match 'onResourceManagerRequested'
+
+            $nodeArchitecture = (& node -p 'process.arch').Trim()
+            Join-Path $script:appDir ".winapp\bin\$nodeArchitecture\Microsoft.WindowsAppRuntime.Bootstrap.dll" |
+                Should -Exist
         }
     }
 
     Context "Phase 2: Existing sample source" {
-        It "Should contain valid JavaScript and PowerShell" -Skip:$script:skip {
+        It "Should contain valid JavaScript" -Skip:$script:skip {
             & node --check (Join-Path $script:sampleDir 'main.js')
             $LASTEXITCODE | Should -Be 0
             & node --check (Join-Path $script:sampleDir 'winui-worker.js')
             $LASTEXITCODE | Should -Be 0
-            [scriptblock]::Create((Get-Content (Join-Path $script:sampleDir 'run.ps1') -Raw)) | Should -Not -BeNullOrEmpty
         }
 
-        It "Should declare the execution alias and WinUI binding roots" -Skip:$script:skip {
-            [xml]$manifest = Get-Content (Join-Path $script:sampleDir 'Package.appxmanifest') -Raw
-            $manifest.Package.Applications.Application.Extensions.Extension.AppExecutionAlias.ExecutionAlias.Alias |
-                Should -Be 'winui-node.exe'
-
+        It "Should declare unpackaged startup and WinUI binding roots" -Skip:$script:skip {
             $package = Get-Content (Join-Path $script:sampleDir 'package.json') -Raw | ConvertFrom-Json
+            $package.scripts.start | Should -Be 'node main.js'
             $package.imports.'#winapp/bindings'.require | Should -Be './.winapp/bindings/index.js'
-            $package.dependencies.'@microsoft/dynwinrt' | Should -Be '0.1.0-preview.13'
-            $package.devDependencies.'@microsoft/dynwinrt-codegen' | Should -Be '0.1.0-preview.13'
+            $package.dependencies.'@microsoft/dynwinrt' | Should -Be '0.1.0-preview.15'
+            $package.devDependencies.'@microsoft/dynwinrt-codegen' | Should -Be '0.1.0-preview.15'
             $namespaces = $package.winapp.jsBindings.additionalWinmds.namespace
             $namespaces | Should -Contain 'Windows.Foundation'
             $namespaces | Should -Contain 'Microsoft.UI.Xaml'
@@ -103,19 +113,40 @@ Describe "Node WinUI Sample" {
             $namespaces | Should -Contain 'Microsoft.UI.Xaml.Media'
             $namespaces | Should -Not -Contain 'Microsoft.UI.Xaml.Hosting'
 
-            Get-Content (Join-Path $script:sampleDir 'winui-worker.js') -Raw |
+            (Join-Path $script:sampleDir 'Package.appxmanifest') | Should -Not -Exist
+            (Join-Path $script:sampleDir 'run.ps1') | Should -Not -Exist
+            (Join-Path $script:sampleDir 'Assets') | Should -Not -Exist
+            $mainSource = Get-Content (Join-Path $script:sampleDir 'main.js') -Raw
+            $workerSource = Get-Content (Join-Path $script:sampleDir 'winui-worker.js') -Raw
+            $mainSource |
+                Should -Match 'WINAPPSDK_BOOTSTRAP_DLL_PATH'
+            $mainSource |
+                Should -Match '(?s)initWinappsdk\(2, 2\).*new Worker'
+            $workerSource |
                 Should -Match "require\('#winapp/bindings'\)"
-            Get-Content (Join-Path $script:sampleDir 'winui-worker.js') -Raw |
-                Should -Match 'Application\.createWithFluentResources'
-            Get-Content (Join-Path $script:sampleDir 'winui-worker.js') -Raw |
-                Should -Match 'Window\.createInstance'
-            Get-Content (Join-Path $script:sampleDir 'winui-worker.js') -Raw |
+            $workerSource |
+                Should -Not -Match 'initWinappsdk'
+            $workerSource |
+                Should -Match 'roInitialize\(0\)'
+            $workerSource |
+                Should -Match 'Application\.create\('
+            $workerSource |
+                Should -Match 'new Window\(\)'
+            $workerSource |
+                Should -Match 'new StackPanel\(\)'
+            $workerSource |
+                Should -Match 'new SolidColorBrush\('
+            $workerSource |
+                Should -Not -Match '\.createInstance(?:WithColor)?\('
+            $workerSource |
+                Should -Not -Match '(?:TextBlock|Border)\.create\('
+            $workerSource |
                 Should -Match 'themePicker\.onSelectionChanged'
-            Get-Content (Join-Path $script:sampleDir 'winui-worker.js') -Raw |
+            $workerSource |
                 Should -Match 'ElementTheme\.Dark'
-            Get-Content (Join-Path $script:sampleDir 'winui-worker.js') -Raw |
+            $workerSource |
                 Should -Match 'TitleBarTheme\.Dark'
-            Get-Content (Join-Path $script:sampleDir 'winui-worker.js') -Raw |
+            $workerSource |
                 Should -Not -Match 'DesktopWindowXamlSource'
         }
     }

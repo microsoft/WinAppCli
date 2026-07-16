@@ -1,5 +1,30 @@
+const fs = require('node:fs');
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
+
+const architecture = { arm64: 'arm64', x64: 'x64' }[process.arch];
+if (!architecture) {
+  throw new Error(`Unsupported Node.js architecture: ${process.arch}`);
+}
+
+const bootstrapDll =
+  process.env.WINAPPSDK_BOOTSTRAP_DLL_PATH ??
+  path.join(
+    __dirname,
+    '.winapp',
+    'bin',
+    architecture,
+    'Microsoft.WindowsAppRuntime.Bootstrap.dll'
+  );
+if (!fs.existsSync(bootstrapDll)) {
+  throw new Error(
+    `Windows App SDK bootstrap DLL was not found at ${bootstrapDll}. Run npm run restore first.`
+  );
+}
+process.env.WINAPPSDK_BOOTSTRAP_DLL_PATH = bootstrapDll;
+
+const { initWinappsdk } = require('@microsoft/dynwinrt');
+initWinappsdk(2, 2);
 
 const worker = new Worker(path.join(__dirname, 'winui-worker.js'));
 
