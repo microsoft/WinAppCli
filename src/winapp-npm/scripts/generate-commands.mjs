@@ -315,6 +315,16 @@ function generate(schema) {
     L();
 
     // --- Wrapper function ---
+    // Internal functions (underscore-prefixed) only need the Options interface exported
+    // for type-import by hand-maintained guard wrappers (e.g. ui-record-guard.ts).
+    // The function body is intentionally skipped — guards call the CLI directly so there
+    // is no unused private function to generate or suppress.
+    if (fnName.startsWith('_')) {
+      L(`// ${fnName}: options interface exported above; function body omitted — use the`);
+      L(`//   public guarded wrapper (e.g. uiRecord from ui-record-guard.ts) instead.`);
+      continue;
+    }
+
     const defaultArg = hasRequiredArgs ? '' : ' = {}';
     L('/**');
     L(` * ${cleanDesc(cmd.description)}`);
@@ -379,6 +389,7 @@ function generate(schema) {
 // ---------------------------------------------------------------------------
 const FN_NAME_OVERRIDES = {
   'package': 'packageApp', // `package` is a TS reserved-ish word
+  'ui record': '_uiRecordGenerated', // the public uiRecord is the guarded wrapper in ui-record-guard.ts
 };
 
 function getFunctionName(cmdPath) {

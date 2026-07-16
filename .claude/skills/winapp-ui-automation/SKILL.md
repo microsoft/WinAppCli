@@ -104,6 +104,31 @@ winapp ui screenshot -a myapp --capture-screen --output with-popups.png
 winapp ui screenshot -a myapp --focus --output focused.png
 ```
 
+### Record video (H.264 MP4)
+Record the window — or a single element's region — to an MP4. Frames are captured via Windows
+Graphics Capture (PrintWindow/screen-DC fallback) and encoded incrementally with Media Foundation, so long
+captures never buffer in memory. By default records until stopped; use `--duration-sec N` for a timed run.
+```powershell
+# Record a window for 10s at 15 fps
+winapp ui record -a myapp --duration-sec 10 --fps 15 --output demo.mp4
+
+# Record until Ctrl+C (default — duration 0), downscaled so the longest edge is 1280px
+winapp ui record -a myapp --max-edge 1280 --output capture.mp4
+
+# Record a single element's region (fails with element_not_found if selector doesn't match)
+winapp ui record itm-chart-9f8e -a myapp --output chart.mp4
+
+# Include overlays/popups (captures from screen DC; may include occluding windows)
+winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups.mp4
+
+# Programmatic stop: pipe a newline to stop and finalize the MP4 (for agent/script callers)
+"" | winapp ui record -a myapp --json --output capture.mp4
+```
+- Default `--duration-sec 0` records until stopped — **Ctrl+C** for interactive use, or a **newline / EOF on stdin** for programmatic callers (pipe `""` or close stdin to stop). A valid MP4 is always finalized on any graceful stop.
+- `--capture-screen` captures from the screen DC so overlays and popups are included; the window is brought to the foreground first. When WGC is unavailable and `--capture-screen` is not passed, the CLI returns an error — re-run with `--capture-screen` to consent to screen-DC capture.
+- Providing a selector that doesn't match any element fails immediately with `element_not_found` (rather than silently recording the whole window).
+- `--json` stdout result: `path`, `frames`, `width`, `height`, `fileSize`, `codec` (`"h264"`), `mode` (`wgc`, `printwindow`, or `screen`). A `{"event":"recording-started","path":"…","fps":N,"durationSec":N}` liveness event is emitted to **stderr** as soon as capture begins, before the final result.
+
 ### Hover (for tooltips, flyouts, hover states)
 `--dwell-time <ms>` sets how long to wait after hovering (default: 800, range: 0–10000).
 ```powershell
@@ -299,6 +324,9 @@ Full schemas with examples: `references/ui-json-envelope.md`.
 | "does not support any invoke pattern" | Element can't be invoked | The error shows the invokable ancestor slug if one exists — use that |
 | "No UIA window found" | UIA can't see the window | Use `list-windows` to find HWND, then `-w` |
 | Popup not in screenshot | Default capture path doesn't include unowned overlays | Use `--capture-screen` flag |
+| `element_not_found` during record | Selector given but element not in tree | Re-run `inspect` or `search` to get a fresh selector |
+| `ambiguous_selector` during record | Plain-text selector matched multiple elements | Use a slug from the suggestions in the error message, or from `inspect` output |
+| WGC unavailable during record | WGC capture init failed; no silent fallback | Check GPU/driver; use `--capture-screen` to explicitly request screen DC capture |
 
 
 ## Command Reference
@@ -409,10 +437,33 @@ Capture the target window or element as a PNG image. When multiple windows exist
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
-| `--capture-screen` | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. | (none) |
+| `--capture-screen` | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). | (none) |
 | `--focus` | Bring the target window to the foreground before capture. Already implied by --capture-screen. | (none) |
 | `--json` | Format output as JSON | (none) |
-| `--output` | Save output to file path (e.g., screenshot) | (none) |
+| `--output` | Save output to this file path. | (none) |
+| `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
+
+### `winapp ui record`
+
+Record the target window (or an element's region) to an H.264 MP4 video. Captures frames via Windows Graphics Capture and encodes with Media Foundation. By default records until stopped (Ctrl+C, or a newline/EOF on stdin for programmatic callers). Use --duration-sec N for a timed run. A valid MP4 is always finalized on graceful stop. Use --capture-screen to include overlays/popups.
+
+#### Arguments
+<!-- auto-generated from cli-schema.json -->
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<selector>` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
+| `--capture-screen` | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). | (none) |
+| `--duration-sec` | Recording duration in seconds. Default 0 records until stopped — Ctrl+C, or (for programmatic callers) a newline or EOF on stdin. A valid MP4 is always finalized on graceful stop. | (none) |
+| `--fps` | Frames per second to capture | `15` |
+| `--json` | Format output as JSON | (none) |
+| `--max-edge` | Downscale so the longest edge is at most this many pixels (0 = no downscale) | (none) |
+| `--output` | Save output to this file path. | (none) |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 
 ### `winapp ui invoke`

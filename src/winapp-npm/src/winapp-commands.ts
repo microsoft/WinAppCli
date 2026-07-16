@@ -910,6 +910,34 @@ export async function uiPen(options: UiPenOptions = {}): Promise<WinappResult> {
 }
 
 // ---------------------------------------------------------------------------
+// ui record
+// ---------------------------------------------------------------------------
+
+export interface UiRecordOptions extends CommonOptions {
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). */
+  captureScreen?: boolean;
+  /** Recording duration in seconds. Default 0 records until stopped — Ctrl+C, or (for programmatic callers) a newline or EOF on stdin. A valid MP4 is always finalized on graceful stop. */
+  durationSec?: number;
+  /** Frames per second to capture */
+  fps?: number;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Downscale so the longest edge is at most this many pixels (0 = no downscale) */
+  maxEdge?: number;
+  /** Save output to this file path. */
+  output?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+// _uiRecordGenerated: options interface exported above; function body omitted — use the
+//   public guarded wrapper (e.g. uiRecord from ui-record-guard.ts) instead.
+
+// ---------------------------------------------------------------------------
 // ui screenshot
 // ---------------------------------------------------------------------------
 
@@ -918,13 +946,13 @@ export interface UiScreenshotOptions extends CommonOptions {
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
-  /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. */
+  /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). */
   captureScreen?: boolean;
   /** Bring the target window to the foreground before capture. Already implied by --capture-screen. */
   focus?: boolean;
   /** Format output as JSON */
   json?: boolean;
-  /** Save output to file path (e.g., screenshot) */
+  /** Save output to this file path. */
   output?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
