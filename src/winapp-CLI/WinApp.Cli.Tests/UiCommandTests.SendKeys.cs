@@ -4,6 +4,7 @@
 using Spectre.Console;
 using Spectre.Console.Testing;
 using WinApp.Cli.Commands;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Tests;
@@ -574,6 +575,23 @@ public partial class UiCommandTests
 
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count, "ctrl+alt+del must never reach the keyboard transport");
+        // Asserting only the exit code would still pass if the JSON envelope were dropped or carried the
+        // wrong code/reason. The change promises invalid_arguments + a SAS explanation, so inspect both:
+        // --json consumers must get an honest, actionable error instead of silence or a misleading success.
+        var stderr = ConsoleStdErr.ToString();
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain a JSON error object; got: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        var errorInfo = error.GetProperty("error");
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            errorInfo.GetProperty("code").GetString(),
+            "JSON error.code must be 'invalid_arguments' for the ctrl+alt+del SAS refusal");
+        var message = errorInfo.GetProperty("message").GetString();
+        StringAssert.Contains(message, "ctrl+alt+del",
+            "JSON error.message must name the refused combo");
+        StringAssert.Contains(message, "SAS",
+            "JSON error.message must explain the Secure Attention Sequence block, not just refuse");
     }
 
     // #656 — ctrl+alt+del without the flag is refused too, with a message explaining it can't be synthesized

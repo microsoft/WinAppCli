@@ -252,7 +252,8 @@ internal class UiSendKeysCommand : Command, IShortDescription
                         UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
                             $"Refusing to synthesize {names} via --via send-input. {reasons} " +
                             "This stays blocked even with --allow-system-keys, which is for app-registered " +
-                            "global hotkeys (e.g. win+r, win+shift+v), not combos that can't be driven from automation.");
+                            "global hotkeys (e.g. win+r, win+shift+v), not combos that can't be driven from automation.",
+                            errorOut: parseResult.InvocationConfiguration.Error);
                         return 1;
                     }
 
