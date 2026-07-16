@@ -47,6 +47,18 @@ public class CachedProviderTests
         Assert.IsFalse(File.Exists(keywordsPath), "a keyword-less refresh must not leave a stale keywords.json");
     }
 
+    [TestMethod]
+    public async Task MissingTimestamp_TreatedAsMiss_Refetches()
+    {
+        var provider = new StubProvider(_cacheRoot.FullName, () => SampleData());
+        await provider.LoadAsync();                 // primes cache + timestamp
+        // Simulate a crash mid-refresh: data files present but no freshness marker.
+        File.Delete(TimestampPath);
+
+        await provider.LoadAsync();
+        Assert.AreEqual(2, provider.FetchCalls, "a cache with no freshness marker must be re-fetched");
+    }
+
     private sealed class StubProvider : CachedProviderBase
     {
         private readonly Func<ProviderData> _fetch;

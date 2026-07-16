@@ -181,6 +181,17 @@ internal abstract class CachedProviderBase : ISearchProvider
 
             Directory.CreateDirectory(CacheDir);
 
+            // Invalidate the freshness marker BEFORE mutating any data file. On a
+            // refresh of an already-fresh cache the old timestamp would otherwise
+            // still be valid, so a crash after rewriting some (but not all) data
+            // files would pair mismatched generations under a "fresh" stamp for up
+            // to the TTL. Removing it first means any mid-write crash leaves no
+            // valid timestamp ⇒ next read misses ⇒ clean re-fetch.
+            if (File.Exists(timestampPath))
+            {
+                File.Delete(timestampPath);
+            }
+
             // Atomic per-file writes (temp + rename via the shared PathSafety
             // helper). Order: data first, version next, timestamp LAST, so a
             // partially-written set is detected as still-stale on the next read
