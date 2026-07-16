@@ -1394,7 +1394,6 @@ return Task.FromResult<UiElement?>(null);
     /// </summary>
     private List<(nint Hwnd, int Pid, string Title)> GetAllAppWindows(UiSessionInfo session)
     {
-        _ = _logger;
         return s_getAllAppWindows(this, session);
     }
 
@@ -1456,7 +1455,6 @@ return Task.FromResult<UiElement?>(null);
     /// <summary>Get UIA root element for a specific HWND.</summary>
     private IUIAutomationElement? GetRootElementForHwnd(nint hwnd)
     {
-        _ = _logger;
         return s_getRootElementForHwnd(this, hwnd);
     }
 
@@ -1478,7 +1476,6 @@ return Task.FromResult<UiElement?>(null);
     /// </summary>
     private UiElement? FindElementOnOtherWindows(UiSessionInfo session, SelectorExpression selector)
     {
-        _ = _logger;
         return s_findElementOnOtherWindows(this, session, selector);
     }
 
@@ -1566,7 +1563,6 @@ return Task.FromResult<UiElement?>(null);
 
     private IUIAutomationElement? GetRootElement(UiSessionInfo session)
     {
-        _ = _logger;
         return s_getRootElement(this, session);
     }
 
@@ -1686,7 +1682,6 @@ return Task.FromResult<UiElement?>(null);
     /// </summary>
     private List<IUIAutomationElement> ManualTreeSearch(IUIAutomationElement root, string query, int maxResults, int maxDepth = 25)
     {
-        _ = _logger;
         return s_manualTreeSearch(this, root, query, maxResults);
     }
 
@@ -1787,7 +1782,6 @@ return Task.FromResult<UiElement?>(null);
     /// </summary>
     private IUIAutomationElement? FindInvokableAncestor(IUIAutomationElement element, IUIAutomationElement root)
     {
-        _ = _logger;
         return s_findInvokableAncestor(this, element, root);
     }
 
