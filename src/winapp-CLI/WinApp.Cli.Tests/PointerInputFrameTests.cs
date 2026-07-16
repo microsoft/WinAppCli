@@ -22,6 +22,33 @@ public class PointerInputFrameTests
     }
 
     [TestMethod]
+    public void ComputePenFlags_StripsEraserOnOutOfContactFrames()
+    {
+        // The bug that made --eraser a no-op: the hover-arrival and lift frames (in range but NOT in
+        // contact) carried PEN_FLAG_ERASER (0x6). Windows drops any out-of-contact frame that asserts
+        // ERASER, so the eraser transducer never latched on range entry and the stroke was delivered
+        // as an ordinary tip. Out-of-contact frames must report PEN_FLAG_INVERTED (0x2) only.
+        var hoverArrival = POINTER_FLAGS.POINTER_FLAG_INRANGE | POINTER_FLAGS.POINTER_FLAG_UPDATE;
+        var lift = POINTER_FLAGS.POINTER_FLAG_UP | POINTER_FLAGS.POINTER_FLAG_INRANGE;
+        Assert.AreEqual(0x00000002u, PointerInput.ComputePenFlags(eraser: true, hoverArrival),
+            "Hover-arrival (out of contact) must be PEN_FLAG_INVERTED only — ERASER stripped");
+        Assert.AreEqual(0x00000002u, PointerInput.ComputePenFlags(eraser: true, lift),
+            "Lift (out of contact) must be PEN_FLAG_INVERTED only — ERASER stripped");
+
+        // In-contact frames (DOWN + glide UPDATE) assert the full inverted+eraser flags.
+        var down = POINTER_FLAGS.POINTER_FLAG_DOWN | POINTER_FLAGS.POINTER_FLAG_INRANGE | POINTER_FLAGS.POINTER_FLAG_INCONTACT;
+        var glide = POINTER_FLAGS.POINTER_FLAG_UPDATE | POINTER_FLAGS.POINTER_FLAG_INRANGE | POINTER_FLAGS.POINTER_FLAG_INCONTACT;
+        Assert.AreEqual(0x00000006u, PointerInput.ComputePenFlags(eraser: true, down),
+            "DOWN (in contact) must be PEN_FLAG_INVERTED | PEN_FLAG_ERASER");
+        Assert.AreEqual(0x00000006u, PointerInput.ComputePenFlags(eraser: true, glide),
+            "Glide UPDATE (in contact) must be PEN_FLAG_INVERTED | PEN_FLAG_ERASER");
+
+        // A non-eraser pen never sets pen flags, in or out of contact.
+        Assert.AreEqual(0x00000000u, PointerInput.ComputePenFlags(eraser: false, hoverArrival));
+        Assert.AreEqual(0x00000000u, PointerInput.ComputePenFlags(eraser: false, down));
+    }
+
+    [TestMethod]
     public void InjectPenStroke_EmitsInRangeHoverArrivalBeforeContact()
     {
         // Regression guard for the --eraser delivery fix: a synthetic pen must ENTER RANGE (hover,

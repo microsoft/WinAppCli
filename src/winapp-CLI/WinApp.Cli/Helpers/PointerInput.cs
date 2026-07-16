@@ -482,10 +482,13 @@ internal static class PointerInput
         // moment the pointer ENTERS RANGE. A frame that is already in contact (or a flag change made
         // mid-stroke) is ignored, so an eraser stroke that jumps straight to DOWN is delivered as an
         // ordinary tip contact and PEN_FLAG_INVERTED/ERASER never reaches the app. A physical pen
-        // always hovers before it touches; emitting this in-range frame first (carrying the same
-        // pen flags via the send closure) is what lets --eraser be honoured. pressure 0 = not in
-        // contact. This mirrors the working reference injectors (draw-stream, EGoTouchRev, zpenflow),
-        // which all establish in-range state before contact.
+        // always hovers before it touches; emitting this in-range frame first is what lets --eraser
+        // be honoured. The send closure stamps the orientation via ComputePenFlags: this hover frame
+        // reports PEN_FLAG_INVERTED only (no PEN_FLAG_ERASER), because Windows drops any out-of-
+        // contact frame that carries ERASER — which would defeat the latch we are trying to set. That
+        // mirrors real hardware, where the flipped tip reports "inverted" on hover and only asserts
+        // "eraser" on contact. pressure 0 = not in contact. This mirrors the working reference
+        // injectors (draw-stream, EGoTouchRev, zpenflow), which all establish in-range state first.
         send(first.X, first.Y, 0,
             POINTER_FLAGS.POINTER_FLAG_INRANGE | POINTER_FLAGS.POINTER_FLAG_UPDATE);
 
@@ -561,7 +564,7 @@ internal static class PointerInput
     private static void SendPen(
         HSYNTHETICPOINTERDEVICE device, int x, int y, uint pressure, int tiltX, int tiltY, bool eraser, POINTER_FLAGS flags)
     {
-        var penFlags = ComputePenFlags(eraser);
+        var penFlags = ComputePenFlags(eraser, flags);
 
         var info = new POINTER_TYPE_INFO
         {
@@ -596,10 +599,30 @@ internal static class PointerInput
     }
 
     internal static uint ComputePenFlags(bool eraser)
+        => ComputePenFlags(eraser, POINTER_FLAGS.POINTER_FLAG_INCONTACT);
+
+    /// <summary>
+    /// Computes the <c>penFlags</c> bitmask for a single frame. The eraser transducer is only valid
+    /// while the pen is in contact: Windows silently drops any out-of-contact frame (the hover-arrival
+    /// and lift frames) that carries <see cref="PEN_FLAG_ERASER"/>. If the hover-arrival frame carried
+    /// ERASER it would be dropped, the eraser transducer would never latch on range entry, and the
+    /// stroke would be delivered as an ordinary tip — the exact bug that made <c>--eraser</c> a no-op.
+    /// So on out-of-contact frames report <see cref="PEN_FLAG_INVERTED"/> only, and assert the full
+    /// inverted+eraser flags only on in-contact frames. This mirrors real hardware, where the flipped
+    /// tip reports "inverted" while hovering and only asserts "eraser" once it touches the surface.
+    /// </summary>
+    internal static uint ComputePenFlags(bool eraser, POINTER_FLAGS pointerFlags)
     {
-        // Microsoft pen flags distinguish inverted orientation from eraser input; set both so
-        // receivers that check either PointerPointProperties.IsInverted or IsEraser recognize it.
-        return eraser ? (PEN_FLAG_INVERTED | PEN_FLAG_ERASER) : PEN_FLAG_NONE;
+        if (!eraser)
+        {
+            return PEN_FLAG_NONE;
+        }
+
+        bool inContact = (pointerFlags & POINTER_FLAGS.POINTER_FLAG_INCONTACT) != 0;
+
+        // Microsoft pen flags distinguish inverted orientation from eraser input; on contact set both
+        // so receivers that check either PointerPointProperties.IsInverted or IsEraser recognize it.
+        return inContact ? (PEN_FLAG_INVERTED | PEN_FLAG_ERASER) : PEN_FLAG_INVERTED;
     }
 
     private static (int X, int Y) Interpolate(IReadOnlyList<PointerPoint> path, double t)
