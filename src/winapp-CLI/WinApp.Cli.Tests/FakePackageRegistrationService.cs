@@ -94,9 +94,21 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// When set to a non-null exception, <see cref="InstallPackageAsync"/> throws it
+    /// (after recording the call) instead of completing. Used to exercise the per-package
+    /// install-failure/error-count path in
+    /// <c>WorkspaceSetupService.InstallWindowsAppRuntimeAsync</c>.
+    /// </summary>
+    public Exception? InstallPackageThrows { get; set; }
+
     public Task InstallPackageAsync(string packagePath, CancellationToken cancellationToken = default)
     {
         InstallPackageCalls.Add(packagePath);
+        if (InstallPackageThrows is not null)
+        {
+            throw InstallPackageThrows;
+        }
         return Task.CompletedTask;
     }
 
