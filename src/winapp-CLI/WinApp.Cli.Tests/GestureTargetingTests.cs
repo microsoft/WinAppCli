@@ -171,6 +171,11 @@ public class GestureTargetingTests
         public Task ScrollContainerAsync(UiSessionInfo session, UiElement element, string? direction, string? to, CancellationToken ct) => throw new NotImplementedException();
         public Task<UiElement?> GetFocusedElementAsync(UiSessionInfo session, CancellationToken ct) => throw new NotImplementedException();
         public Task<string?> GetTextAsync(UiSessionInfo session, UiElement element, CancellationToken ct) => throw new NotImplementedException();
+        public bool TryGetWindowRect(long hwnd, out WinApp.Cli.Helpers.PointerRect rect)
+        {
+            rect = default;
+            return false;
+        }
     }
 }
 
