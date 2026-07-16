@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.DependencyInjection;
+using Spectre.Console;
+using Spectre.Console.Testing;
 using System.Diagnostics;
 using System.Text.Json;
 using WinApp.Cli.Commands;
@@ -613,7 +615,10 @@ public class RunCommandTests : BaseCommandTests
     [TestMethod]
     public async Task RunCommand_JsonAndDebugOutput_ReturnsError()
     {
-        // Arrange - --json and --debug-output are mutually exclusive
+        // Arrange - --json and --debug-output are mutually exclusive. In --json mode the
+        // human-readable logger is suppressed, so the rejection must still surface a
+        // machine-readable error object (not an empty stdout with exit code 1).
+        TestAnsiConsole.Profile.Width = 1000; // avoid line-wrapping that would corrupt the JSON string
         await CreateTestManifestAsync();
         var command = GetRequiredService<RunCommand>();
 
@@ -625,6 +630,49 @@ public class RunCommandTests : BaseCommandTests
         Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count, "No identity should be created");
         Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
         Assert.AreEqual(0, _fakeDebugOutputService.AttachCalls.Count, "Debug loop should not run");
+
+        // Regression guard: without the structured-error fallback the command would exit 1 with
+        // empty stdout, so this assertion (not just the exit code) is what fails if PrintJson is removed.
+        var json = ParseJsonOutput();
+        Assert.IsTrue(json.TryGetProperty("Error", out var error),
+            "JSON output should contain an Error property when --json and --debug-output are combined");
+        StringAssert.Contains(error.GetString(), "--json and --debug-output cannot be used together",
+            "The structured error should explain the mutually exclusive options");
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // temporarily swaps the process-wide ambient AnsiConsole to capture logger warnings
+    public async Task RunCommand_SymbolsWithoutDebugOutput_WarnsAndContinues()
+    {
+        // Regression for issue #662: --symbols only affects the --debug-output stowed-exception
+        // triage. Passing it on its own must NOT silently no-op — it should emit a non-fatal
+        // warning and let the command continue (here the default AUMID launch path).
+        // Non-error logger output routes through the static ambient AnsiConsole (TextWriterLogger),
+        // so we swap it to a capturing console for the invoke; [DoNotParallelize] isolates the swap.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var previousAmbient = AnsiConsole.Console;
+        var ambient = new TestConsole();
+        AnsiConsole.Console = ambient;
+        int exitCode;
+        try
+        {
+            exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--symbols"]);
+        }
+        finally
+        {
+            AnsiConsole.Console = previousAmbient;
+        }
+
+        // Assert - non-fatal: the app is still launched normally and no debug loop runs.
+        Assert.AreEqual(0, exitCode, "--symbols without --debug-output must remain non-fatal");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "The app should still launch via AUMID");
+        Assert.AreEqual(0, _fakeDebugOutputService.AttachCalls.Count,
+            "No debug loop should run without --debug-output");
+
+        StringAssert.Contains(ambient.Output, "--symbols has no effect without --debug-output",
+            "A warning should tell the user --symbols was ignored");
     }
 
     [TestMethod]
