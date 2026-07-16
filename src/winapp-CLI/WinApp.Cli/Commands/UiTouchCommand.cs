@@ -301,8 +301,9 @@ internal class UiTouchCommand : Command, IShortDescription
                 var (contactPaths, points, effectiveFingers) =
                     PointerGesturePlanner.PlanTouch(gesture, start, to, distance, fingers, direction);
 
-                if (!PointerCommandSupport.TryPrepareInjection(
-                    uiAutomation, foregroundGuard, targetHwnd, points, "touch", "touch", logger, json))
+                var prep = PointerCommandSupport.TryPrepareInjection(
+                    uiAutomation, foregroundGuard, targetHwnd, points, "touch", "touch", logger, json);
+                if (!prep.Ok)
                 {
                     return 1;
                 }
@@ -322,6 +323,18 @@ internal class UiTouchCommand : Command, IShortDescription
                 // ✅ / exit 0 is not mistaken for confirmed delivery.
                 var deliveryWarning = PointerCommandSupport.RemoteInjectionWarning(foregroundGuard, "touch");
 
+                // #661: out-of-window point (prep.OutOfWindowWarning) is a non-fatal advisory; surface it
+                // alongside any delivery-uncertainty warning rather than failing the command.
+                var warnings = new List<string>();
+                if (prep.OutOfWindowWarning is not null)
+                {
+                    warnings.Add(prep.OutOfWindowWarning);
+                }
+                if (deliveryWarning is not null)
+                {
+                    warnings.Add(deliveryWarning);
+                }
+
                 if (json)
                 {
                     var result = new UiTouchResult
@@ -333,7 +346,7 @@ internal class UiTouchCommand : Command, IShortDescription
                         DurationMs = durationMs,
                         HoldMs = holdMs,
                         Hwnd = targetHwnd,
-                        Warnings = deliveryWarning is null ? null : [deliveryWarning]
+                        Warnings = warnings.Count == 0 ? null : warnings.ToArray()
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiTouchResult));
@@ -342,9 +355,9 @@ internal class UiTouchCommand : Command, IShortDescription
                 {
                     logger.LogInformation("{Symbol} {Gesture} at ({X}, {Y}) with {Fingers} finger(s)",
                         UiSymbols.Check, gestureStr, start.X, start.Y, effectiveFingers);
-                    if (deliveryWarning is not null)
+                    foreach (var warning in warnings)
                     {
-                        logger.LogWarning("{Symbol} {Warning}", UiSymbols.Warning, deliveryWarning);
+                        logger.LogWarning("{Symbol} {Warning}", UiSymbols.Warning, warning);
                     }
                 }
 

@@ -340,19 +340,55 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
-    public async Task Touch_ExplicitPointOutsideWindow_Rejected_NoInjection()
+    public async Task Touch_ExplicitPointOutsideWindow_WarnsAndInjects()
     {
+        // #661: an out-of-window point is a non-fatal advisory, not a hard failure. Touch injects
+        // anyway (consistent with click/drag/hover/scroll, which already inject at out-of-window
+        // coordinates) and surfaces a warning, rather than rejecting with invalid_arguments.
         _fakeSession.SessionResult.WindowHandle = 7000;
         _fakeUia.WindowRect = new PointerRect(0, 0, 800, 600);
 
         var command = GetRequiredService<UiTouchCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["-a", "TestApp", "--at", "5000,5000", "--json"]);
-        Assert.AreEqual(1, exitCode);
-        Assert.AreEqual(0, _fakePointer.TouchCalls.Count);
-        // The window rect WAS consulted (bounds check ran) but the foreground gate never fired.
+
+        Assert.AreEqual(0, exitCode, "Out-of-window point is advisory, not fatal — injection proceeds");
+        Assert.AreEqual(1, _fakePointer.TouchCalls.Count, "Injection must still happen");
+        // The bounds check ran (rect consulted) AND the foreground gate was reached (no early reject).
         Assert.IsTrue(_fakeUia.WindowRectCalls.Count >= 1);
-        Assert.AreEqual(0, _fakeForeground.Calls.Count);
+        Assert.IsTrue(_fakeForeground.Calls.Count >= 1);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.IsTrue(result.TryGetProperty("warnings", out var warnings),
+            "Out-of-window injection must surface a warnings[] advisory");
+        Assert.AreEqual(1, warnings.GetArrayLength());
+        StringAssert.Contains(warnings[0].GetString(), "outside the target window",
+            "Warning must name the out-of-window condition");
+    }
+
+    [TestMethod]
+    public async Task Touch_OutsideWindowAndRemoteSession_EmitsBothWarnings()
+    {
+        // The out-of-window advisory (#661) and the remote-session delivery advisory (id27/id28) are
+        // independent; when both apply they must both appear in warnings[].
+        _fakeSession.SessionResult.WindowHandle = 7050;
+        _fakeUia.WindowRect = new PointerRect(0, 0, 800, 600);
+        _fakeForeground.IsRemoteSessionResult = true;
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "5000,5000", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakePointer.TouchCalls.Count);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.IsTrue(result.TryGetProperty("warnings", out var warnings));
+        Assert.AreEqual(2, warnings.GetArrayLength(),
+            "Both the out-of-window and remote-delivery advisories must be present");
+        var joined = warnings[0].GetString() + " | " + warnings[1].GetString();
+        StringAssert.Contains(joined, "outside the target window");
+        StringAssert.Contains(joined, "remote");
     }
 
     [TestMethod]

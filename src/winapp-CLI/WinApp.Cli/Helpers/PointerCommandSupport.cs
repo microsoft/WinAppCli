@@ -74,7 +74,16 @@ internal static class PointerCommandSupport
         }
     }
 
-    public static bool TryPrepareInjection(
+    /// <summary>
+    /// Outcome of <see cref="TryPrepareInjection"/>. <paramref name="Ok"/> is <c>false</c> when a hard
+    /// pre-injection gate failed (no target window, unreadable window rect, or foreground could not be
+    /// secured) and the caller should return non-zero. <paramref name="OutOfWindowWarning"/> is a
+    /// non-fatal advisory (issue #661): injection proceeds, but the caller should surface this string to
+    /// the user (stderr for text output, <c>warnings[]</c> for <c>--json</c>).
+    /// </summary>
+    public readonly record struct InjectionPreparation(bool Ok, string? OutOfWindowWarning);
+
+    public static InjectionPreparation TryPrepareInjection(
         IUiAutomationService uiAutomation,
         IForegroundGuard foregroundGuard,
         long targetHwnd,
@@ -90,7 +99,7 @@ internal static class PointerCommandSupport
                 UiSymbols.Error, inputNoun);
             UiJsonError.Emit(json, UiJsonError.CodeNoTarget,
                 $"No target window could be resolved — refusing to inject {inputNoun}. Target an app window (via --app/--window) whose element resolves to a window handle.");
-            return false;
+            return new InjectionPreparation(false, null);
         }
 
         if (!uiAutomation.TryGetWindowRect(targetHwnd, out var windowRect))
@@ -99,23 +108,25 @@ internal static class PointerCommandSupport
                 UiSymbols.Error, inputNoun);
             UiJsonError.Emit(json, UiJsonError.CodeNoTarget,
                 $"Could not read the target window rectangle — refusing to inject {inputNoun}.");
-            return false;
+            return new InjectionPreparation(false, null);
         }
 
+        // #661: a point outside the target window is a non-fatal advisory, not a hard failure.
+        // The mouse verbs (click/drag/hover/scroll) already inject at out-of-window coordinates, so
+        // touch/pen warn and inject too. Emit nothing here — the caller decides text-vs-json (mirrors
+        // the RemoteInjectionWarning discipline).
+        string? outOfWindowWarning = null;
         var outOfBounds = PointerGesturePlanner.FirstOutOfBounds(windowRect, points);
         if (outOfBounds is not null)
         {
-            logger.LogError(
-                "{Symbol} Point ({X}, {Y}) is outside the target window ({Left},{Top})-({Right},{Bottom}) — refusing to inject {InputNoun}.",
-                UiSymbols.Error, outOfBounds.Value.X, outOfBounds.Value.Y,
-                windowRect.Left, windowRect.Top, windowRect.Right, windowRect.Bottom, inputNoun);
-            UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
+            outOfWindowWarning =
                 $"Point ({outOfBounds.Value.X},{outOfBounds.Value.Y}) is outside the target window " +
-                $"({windowRect.Left},{windowRect.Top})-({windowRect.Right},{windowRect.Bottom}) — no input injected.");
-            return false;
+                $"({windowRect.Left},{windowRect.Top})-({windowRect.Right},{windowRect.Bottom}) — injecting anyway.";
         }
 
-        return foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, action);
+        return foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, action)
+            ? new InjectionPreparation(true, outOfWindowWarning)
+            : new InjectionPreparation(false, null);
     }
 
     public static bool TryInject(Action inject, ILogger logger, bool json, TextWriter? errorOut)

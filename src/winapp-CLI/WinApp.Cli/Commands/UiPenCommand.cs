@@ -221,8 +221,9 @@ internal class UiPenCommand : Command, IShortDescription
                     await PointerCommandSupport.SetForegroundAsync(targetHwnd, cancellationToken);
                 }
 
-                if (!PointerCommandSupport.TryPrepareInjection(
-                    uiAutomation, foregroundGuard, targetHwnd, path, "pen", "pen input", logger, json))
+                var prep = PointerCommandSupport.TryPrepareInjection(
+                    uiAutomation, foregroundGuard, targetHwnd, path, "pen", "pen input", logger, json);
+                if (!prep.Ok)
                 {
                     return 1;
                 }
@@ -245,6 +246,18 @@ internal class UiPenCommand : Command, IShortDescription
                 // mistaken for confirmed delivery.
                 var deliveryWarning = PointerCommandSupport.RemoteInjectionWarning(foregroundGuard, "pen");
 
+                // #661: out-of-window point (prep.OutOfWindowWarning) is a non-fatal advisory; surface it
+                // alongside any delivery-uncertainty warning rather than failing the command.
+                var warnings = new List<string>();
+                if (prep.OutOfWindowWarning is not null)
+                {
+                    warnings.Add(prep.OutOfWindowWarning);
+                }
+                if (deliveryWarning is not null)
+                {
+                    warnings.Add(deliveryWarning);
+                }
+
                 if (json)
                 {
                     var result = new UiPenResult
@@ -258,7 +271,7 @@ internal class UiPenCommand : Command, IShortDescription
                         Eraser = eraser,
                         DurationMs = durationMs,
                         Hwnd = targetHwnd,
-                        Warnings = deliveryWarning is null ? null : [deliveryWarning]
+                        Warnings = warnings.Count == 0 ? null : warnings.ToArray()
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiPenResult));
@@ -267,9 +280,9 @@ internal class UiPenCommand : Command, IShortDescription
                 {
                     logger.LogInformation("{Symbol} pen {Action} with {Count} point(s), pressure {Pressure:0.00}",
                         UiSymbols.Check, action, path.Count, pressure);
-                    if (deliveryWarning is not null)
+                    foreach (var warning in warnings)
                     {
-                        logger.LogWarning("{Symbol} {Warning}", UiSymbols.Warning, deliveryWarning);
+                        logger.LogWarning("{Symbol} {Warning}", UiSymbols.Warning, warning);
                     }
                 }
 

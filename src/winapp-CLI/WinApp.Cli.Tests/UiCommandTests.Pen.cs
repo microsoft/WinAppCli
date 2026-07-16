@@ -255,18 +255,29 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
-    public async Task Pen_PathOutsideWindow_Rejected_NoInjection()
+    public async Task Pen_PathOutsideWindow_WarnsAndInjects()
     {
+        // #661: an out-of-window ink point is a non-fatal advisory, not a hard failure. Pen injects
+        // anyway (consistent with the mouse verbs) and surfaces a warning, rather than rejecting with
+        // invalid_arguments.
         _fakeSession.SessionResult.WindowHandle = 6600;
         _fakeUia.WindowRect = new PointerRect(0, 0, 800, 600);
 
         var command = GetRequiredService<UiPenCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["-a", "TestApp", "--path", "10,10 9000,9000", "--json"]);
-        Assert.AreEqual(1, exitCode);
-        Assert.AreEqual(0, _fakePointer.PenCalls.Count);
+
+        Assert.AreEqual(0, exitCode, "Out-of-window point is advisory, not fatal — injection proceeds");
+        Assert.AreEqual(1, _fakePointer.PenCalls.Count, "Injection must still happen");
         Assert.IsTrue(_fakeUia.WindowRectCalls.Count >= 1);
-        Assert.AreEqual(0, _fakeForeground.Calls.Count);
+        Assert.IsTrue(_fakeForeground.Calls.Count >= 1);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.IsTrue(result.TryGetProperty("warnings", out var warnings),
+            "Out-of-window injection must surface a warnings[] advisory");
+        Assert.AreEqual(1, warnings.GetArrayLength());
+        StringAssert.Contains(warnings[0].GetString(), "outside the target window",
+            "Warning must name the out-of-window condition");
     }
 
     [TestMethod]
