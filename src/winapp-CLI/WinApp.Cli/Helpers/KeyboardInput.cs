@@ -214,47 +214,51 @@ internal static class KeyboardInput
     {
         // A single SendInput call carrying the whole payload overruns the target thread's input queue,
         // which silently drops characters even though SendInput returns success (issue #657). Split the
-        // work into small self-contained segments (each chord, and text in chunks of s_textChunkChars)
-        // and pace them so the target can drain its queue between bursts.
+        // work into small self-contained segments (each chord, and literal text in chunks of
+        // s_textChunkChars) and pace only the *continuation* chunks of a split text run — the sole place the
+        // #657 overrun happens — so short text and chord sequences (e.g. "ctrl+a delete") add no latency.
         var segments = BuildSendInputSegments(actions, s_vkKeyScan);
 
-        for (int i = 0; i < segments.Count; i++)
+        foreach (var segment in segments)
         {
-            var segment = segments[i];
-            if (segment.Length == 0)
+            var events = segment.Events;
+            if (events.Length == 0)
             {
                 continue;
             }
 
-            // Pacing spreads a long payload over many SendInput calls (up to several seconds). SendInput is
-            // OS-wide — it lands on whatever window currently holds the foreground — so if focus leaves the
-            // target partway through (a popup steals it, the user clicks away), the remaining bursts would be
-            // typed into the wrong window (issue #657 follow-up H1). Re-verify the target still owns the
-            // foreground before EACH burst and abort on drift. We deliberately do NOT inject any releases on
-            // this path: every already-sent segment is self-balanced (nothing is held), and any SendInput now
-            // would go to the window that stole focus — the exact misdirection we're preventing. (hwnd == 0
-            // means there is no window to verify against; the command already refuses send-input without a
-            // resolvable target, and direct callers passing 0 opt out of the check.)
-            if (hwnd != 0 && !s_foregroundBelongsToTarget(hwnd))
+            if (segment.ThrottleBefore)
             {
-                throw BuildForegroundLostFailure();
+                // This is a 2nd-or-later chunk of one long literal-text run. Pace it so the target can drain
+                // its input queue between bursts (issue #657).
+                s_sleep(s_chunkDelayMs);
+
+                // That pause widens the interval since the command's one-time pre-send foreground check, and
+                // SendInput is OS-wide — it lands on whatever window holds the foreground. If focus left the
+                // target during the pause (a popup stole it, the user clicked away), the rest of the literal
+                // text would be typed into the wrong window and could leak secrets (issue #657 follow-up H1).
+                // Re-verify the target still owns the foreground before each paced chunk and abort on drift.
+                // The guard is scoped to literal-text continuation chunks on purpose: a chord may legitimately
+                // move the foreground (alt+tab, win+d) and must not be treated as drift. We deliberately inject
+                // no releases here — every completed segment is self-balanced (nothing is held), and any
+                // SendInput now would go to the window that stole focus, the exact misdirection we're
+                // preventing. (hwnd == 0 means there is no target to verify against; direct callers passing 0
+                // opt out.)
+                if (hwnd != 0 && !s_foregroundBelongsToTarget(hwnd))
+                {
+                    throw BuildForegroundLostFailure();
+                }
             }
 
-            var sent = s_sendInput(segment);
-            if (sent != (uint)segment.Length)
+            var sent = s_sendInput(events);
+            if (sent != (uint)events.Length)
             {
                 // A zero or short write can strand a key/modifier in the down state (e.g. a Shift-down
                 // whose matching up never fired), which corrupts the whole session. Every already-sent
                 // segment is balanced (its downs and ups are contained within it), so only this failing
                 // segment can leave a key held — best-effort release it before surfacing the failure.
-                ReleaseHeldKeys(segment);
-                throw BuildSendInputFailure(sent, segment.Length);
-            }
-
-            // Only sleep *between* segments, so a short payload that fits in one segment adds no latency.
-            if (i < segments.Count - 1)
-            {
-                s_sleep(s_chunkDelayMs);
+                ReleaseHeldKeys(events);
+                throw BuildSendInputFailure(sent, events.Length);
             }
         }
     }
@@ -287,17 +291,28 @@ internal static class KeyboardInput
               "Held keys were released; retry the gesture.");
 
     /// <summary>
+    /// One self-contained SendInput burst plus whether it must be paced before injection.
+    /// <see cref="ThrottleBefore"/> is set only on the 2nd..Nth chunk of a single split literal-text run —
+    /// the sole place the #657 queue overrun occurs — so a pacing delay and a foreground re-check run before
+    /// it. Chords and the first chunk of any text run carry <see langword="false"/>: they inject immediately
+    /// with no added latency, and a focus-changing chord (alt+tab, win+d) is never mistaken for drift.
+    /// </summary>
+    internal readonly record struct SendInputSegment(INPUT[] Events, bool ThrottleBefore);
+
+    /// <summary>
     /// Flattens key actions into ordered, self-contained SendInput segments for throttled delivery: one
     /// segment per chord, and literal text split into chunks of <see cref="s_textChunkChars"/> characters.
     /// Each segment carries balanced key-down/key-up pairs so pacing (or a failure) between segments can
-    /// never strand a modifier. This is the single owner of the action→INPUT encoding;
-    /// <see cref="BuildSendInputBatch"/> is the flattened (un-chunked) view over it.
+    /// never strand a modifier, and each is tagged (<see cref="SendInputSegment.ThrottleBefore"/>) with
+    /// whether it is a continuation chunk of a split text run that must be paced and foreground-rechecked.
+    /// This is the single owner of the action→INPUT encoding; <see cref="BuildSendInputBatch"/> is the
+    /// flattened (un-chunked) view over it.
     /// </summary>
-    internal static List<INPUT[]> BuildSendInputSegments(IReadOnlyList<KeyAction> actions, Func<char, short>? vkKeyScan = null)
+    internal static List<SendInputSegment> BuildSendInputSegments(IReadOnlyList<KeyAction> actions, Func<char, short>? vkKeyScan = null)
     {
         vkKeyScan ??= s_vkKeyScan;
         int chunkChars = Math.Max(1, s_textChunkChars);
-        var segments = new List<INPUT[]>();
+        var segments = new List<SendInputSegment>();
 
         foreach (var action in actions)
         {
@@ -308,7 +323,9 @@ internal static class KeyboardInput
                     AppendChordEvents(chordEvents, chord);
                     if (chordEvents.Count > 0)
                     {
-                        segments.Add(chordEvents.ToArray());
+                        // A chord is atomic and small; it never overruns the queue, and it may intentionally
+                        // change the foreground (alt+tab, win+d), so it is never paced or drift-checked.
+                        segments.Add(new SendInputSegment(chordEvents.ToArray(), ThrottleBefore: false));
                     }
                     break;
 
@@ -324,7 +341,10 @@ internal static class KeyboardInput
 
                         if (chunk.Count > 0)
                         {
-                            segments.Add(chunk.ToArray());
+                            // Pace + foreground-recheck only the continuation chunks (start > 0). The first
+                            // chunk of a run injects immediately under the command's one-time pre-send
+                            // foreground gate, so short text and the leading burst add no latency.
+                            segments.Add(new SendInputSegment(chunk.ToArray(), ThrottleBefore: start > 0));
                         }
                     }
                     break;
@@ -342,7 +362,7 @@ internal static class KeyboardInput
     /// sequence regardless of <see cref="s_textChunkChars"/>.
     /// </summary>
     internal static INPUT[] BuildSendInputBatch(IReadOnlyList<KeyAction> actions, Func<char, short>? vkKeyScan = null) =>
-        BuildSendInputSegments(actions, vkKeyScan).SelectMany(segment => segment).ToArray();
+        BuildSendInputSegments(actions, vkKeyScan).SelectMany(segment => segment.Events).ToArray();
 
     /// <summary>
     /// Appends a chord's events in order: each modifier down, the main key down then up, then each

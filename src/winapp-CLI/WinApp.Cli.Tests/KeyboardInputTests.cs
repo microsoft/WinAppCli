@@ -207,9 +207,15 @@ public class KeyboardInputTests
         ], _ => 0x41); // every char maps to vk 0x41 with no shift -> 2 events each
 
         Assert.AreEqual(3, segments.Count); // chord, "ab", "cd"
-        Assert.AreEqual(4, segments[0].Length); // ctrl-down, a-down, a-up, ctrl-up
-        Assert.AreEqual(4, segments[1].Length); // 2 chars * 2 events
-        Assert.AreEqual(4, segments[2].Length);
+        Assert.AreEqual(4, segments[0].Events.Length); // ctrl-down, a-down, a-up, ctrl-up
+        Assert.AreEqual(4, segments[1].Events.Length); // 2 chars * 2 events
+        Assert.AreEqual(4, segments[2].Events.Length);
+
+        // Only the 2nd chunk of the text run is a throttled continuation: the chord and the run's first
+        // chunk inject immediately (no pacing, no foreground re-check).
+        Assert.IsFalse(segments[0].ThrottleBefore, "a chord is never throttled.");
+        Assert.IsFalse(segments[1].ThrottleBefore, "the first chunk of a text run is not throttled.");
+        Assert.IsTrue(segments[2].ThrottleBefore, "a continuation chunk of a split text run is throttled.");
     }
 
     [TestMethod]
@@ -257,8 +263,11 @@ public class KeyboardInputTests
         AssertKey(batches[0][3], 0x11, KEYBD_EVENT_FLAGS.KEYEVENTF_KEYUP);
         Assert.AreEqual(8, batches[1].Length);
         Assert.AreEqual(2, batches[2].Length);
-        Assert.AreEqual(2, sleeps.Count);
-        Assert.IsTrue(sleeps.TrueForAll(s => s == 7));
+        // Pacing is scoped to the split text run: the only sleep is between the two text chunks. The chord
+        // itself and the chord → text boundary add NO delay, so short chord sequences never gain latency
+        // (issue #657 follow-up).
+        Assert.AreEqual(1, sleeps.Count);
+        Assert.AreEqual(7, sleeps[0]);
     }
 
     [TestMethod]
@@ -308,10 +317,12 @@ public class KeyboardInputTests
     [TestMethod]
     public void Send_SendInput_ForegroundDriftMidInjectionAbortsWithoutSprayingRemainingKeys()
     {
-        // H1 (issue #657 follow-up): a long payload is paced over many SendInput calls spanning seconds. If
-        // the target loses the foreground partway through, the remaining bursts must NOT be sprayed into
-        // whatever window grabbed focus. The loop re-verifies the target owns the foreground before EACH
-        // segment and aborts on drift with a ForegroundLostException (mapped to foreground_not_target).
+        // H1 (issue #657 follow-up): a long literal-text payload is paced over many SendInput calls spanning
+        // seconds. If the target loses the foreground partway through, the remaining chunks must NOT be
+        // sprayed into whatever window grabbed focus. The loop re-verifies the target owns the foreground
+        // before each throttled continuation chunk (the 2nd+ chunk of a split text run) and aborts on drift
+        // with a ForegroundLostException (mapped to foreground_not_target). The first chunk injects under the
+        // command's one-time pre-send gate, so a 3-chunk run performs two re-checks.
         var batches = new List<INPUT[]>();
         long? checkedHwnd = null;
         var checks = 0;
@@ -323,7 +334,7 @@ public class KeyboardInputTests
         {
             checkedHwnd = hwnd;
             checks++;
-            return checks < 3; // target owns the foreground for the first two segments, then focus drifts away
+            return checks < 2; // owns the foreground for the first continuation chunk, then focus drifts before the next
         };
 
         var ex = Assert.ThrowsExactly<ForegroundLostException>(() =>
@@ -332,8 +343,8 @@ public class KeyboardInputTests
         StringAssert.Contains(ex.Message, "lost the foreground");
         Assert.AreEqual(0x1234L, checkedHwnd, "the target hwnd must be what is re-verified against the foreground.");
 
-        // Only the two pre-drift segments were injected; the third was withheld and — crucially — no further
-        // SendInput (not even a release) was sprayed into the window that stole focus.
+        // Only the first chunk and the one that passed its re-check were injected; the third was withheld and
+        // — crucially — no further SendInput (not even a release) was sprayed into the window that stole focus.
         Assert.AreEqual(2, batches.Count);
 
         // Nothing is left held after the abort: across every injected event, key-downs and key-ups balance
