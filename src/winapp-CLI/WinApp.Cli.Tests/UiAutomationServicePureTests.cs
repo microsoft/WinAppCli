@@ -23,10 +23,6 @@ public class UiAutomationServicePureTests
     public void CleanupSeams()
     {
         UiAutomationService.ResetNativeSeams();
-        UiAutomationService.s_captureFromWindow = GetRealCaptureFromWindow();
-        UiAutomationService.s_captureFromScreenScaled = GetRealCaptureFromScreenScaled();
-        UiAutomationService.s_foregroundWindowForBlankRetry = hwnd => Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
-        UiAutomationService.s_sleepForBlankRetry = Thread.Sleep;
         WgcCapture.s_isSupported = Windows.Graphics.Capture.GraphicsCaptureSession.IsSupported;
         WgcCapture.s_startGrabber = (hwnd, logger, fps) => WgcCapture.StartGrabber(hwnd, logger, fps);
         Mp4SinkWriterEncoder.s_testFaultAfterTempCreate = null;
@@ -434,18 +430,4 @@ public class UiAutomationServicePureTests
         Directory.CreateDirectory(dir);
         return dir;
     }
-
-    private static Func<HWND, int, int, byte[]> GetRealCaptureFromWindow()
-        => (Func<HWND, int, int, byte[]>)Delegate.CreateDelegate(
-            typeof(Func<HWND, int, int, byte[]>),
-            typeof(UiAutomationService).GetMethod(
-                "CaptureFromWindow",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!);
-
-    private static Func<int, int, int, int, int, int, byte[]> GetRealCaptureFromScreenScaled()
-        => (Func<int, int, int, int, int, int, byte[]>)Delegate.CreateDelegate(
-            typeof(Func<int, int, int, int, int, int, byte[]>),
-            typeof(UiAutomationService).GetMethod(
-                "CaptureFromScreenScaled",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!);
 }

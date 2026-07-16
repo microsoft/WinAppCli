@@ -52,6 +52,10 @@ internal sealed partial class UiAutomationService : IUiAutomationService
         s_getDesktopRootElement = service => service._automation.GetRootElement();
         s_elementFromHandle = (service, hwnd) => service._automation.ElementFromHandle(new Windows.Win32.Foundation.HWND(hwnd));
         s_getMainWindowHandleForProcessId = pid => System.Diagnostics.Process.GetProcessById(pid).MainWindowHandle;
+        s_captureFromWindow = CaptureFromWindow;
+        s_captureFromScreenScaled = CaptureFromScreenScaled;
+        s_foregroundWindowForBlankRetry = ForegroundWindowForBlankRetry;
+        s_sleepForBlankRetry = Thread.Sleep;
     }
 
     public UiAutomationService(ILogger<UiAutomationService> logger, ISelectorService selectorService)
