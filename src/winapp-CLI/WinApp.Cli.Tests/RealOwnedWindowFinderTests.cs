@@ -14,7 +14,7 @@ public class RealOwnedWindowFinderTests
     public void Initialize() => ResetSeams();
 
     [TestCleanup]
-    public void Cleanup() => ResetSeams();
+    public void Cleanup() => RealOwnedWindowFinder.ResetNativeSeams();
 
     [TestMethod]
     public void FindOwnedWindows_FiltersInvisibleAppWindowsUnownedAndForeignOwnedWindows()
@@ -87,11 +87,11 @@ public class RealOwnedWindowFinderTests
     {
         RealOwnedWindowFinder.ResetNativeSeams();
 
-        // Enumerating the first top-level window from a null handle must be a stable, side-effect-free
-        // read: two back-to-back native calls return the same handle (covers the production delegate
-        // without depending on which specific window happens to be topmost on the agent).
-        var firstTopLevel = RealOwnedWindowFinder.s_findNextTopLevelWindow(HWND.Null);
-        Assert.AreEqual(firstTopLevel, RealOwnedWindowFinder.s_findNextTopLevelWindow(HWND.Null));
+        // Invoke the production enumeration delegate once for coverage. We must NOT assert the
+        // returned handle or compare two live calls: the topmost window is Z-order-dependent and can
+        // change between calls, which would make this test flaky. The deterministic Null-handle reads
+        // below are the stable, asserted invariants.
+        _ = RealOwnedWindowFinder.s_findNextTopLevelWindow(HWND.Null);
         Assert.IsFalse(RealOwnedWindowFinder.s_isWindowVisible(HWND.Null));
         Assert.IsTrue(RealOwnedWindowFinder.s_getWindowOwner(HWND.Null).IsNull);
         Assert.AreEqual(0, RealOwnedWindowFinder.s_getWindowProcessId(HWND.Null));

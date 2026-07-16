@@ -14,7 +14,7 @@ public class SystemUiQueryTests
     public void Initialize() => ResetSeams();
 
     [TestCleanup]
-    public void Cleanup() => ResetSeams();
+    public void Cleanup() => SystemUiQuery.ResetNativeSeams();
 
     [TestMethod]
     public void Capture_ReturnsSnapshotWhenAllAccessorsSucceed()
