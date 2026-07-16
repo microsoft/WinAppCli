@@ -48,9 +48,9 @@ internal sealed class PackageInstallationService(
             version = await nugetService.GetLatestVersionAsync(packageName, sdkInstallMode, cancellationToken);
         }
 
-        // Check if already installed in NuGet global cache (require the completion marker, not just the
-        // directory, so a partial/interrupted extraction is re-downloaded rather than trusted).
-        if (nugetService.IsPackageInstalled(packageName, version))
+        // Check if already installed in NuGet global cache
+        var packageDir = nugetService.GetNuGetPackageDir(packageName, version);
+        if (packageDir.Exists)
         {
             taskContext.AddStatusMessage($"{UiSymbols.Skip} {packageName} {version} already present");
             return version;
@@ -110,18 +110,71 @@ internal sealed class PackageInstallationService(
                 version = await nugetService.GetLatestVersionAsync(packageName, sdkInstallMode, cancellationToken);
             }
 
-            // Normalize the resolved version to NuGet's canonical on-disk form (e.g. a "1.0" pin becomes
-            // "1.0.0"). allInstalledVersions is returned to callers that build global-cache paths by
-            // concatenating this value, so a shorthand pin would otherwise point them at a folder the
-            // NuGet writer never created.
-            version = NugetService.NormalizeVersion(version);
+            // Check if already installed in NuGet global cache
+            var packageDir = nugetService.GetNuGetPackageDir(packageName, version);
+            if (packageDir.Exists)
+            {
+                taskContext.AddStatusMessage($"{UiSymbols.Skip} {packageName} {version} already present");
 
-            // Install the package (and its transitive graph). InstallPackageAsync already short-circuits a
-            // fully-cached package via the completion marker and, on that marker hit, resolves dependencies from
-            // the package's extracted local .nuspec — not from the currently configured feeds. Resolving cache
-            // hits here through the feed-based GetPackageDependenciesAsync instead would break documented cache
-            // reuse under a private nuget.config (a cached id/version absent or unmapped on the current feed
-            // would fail the restore) and could install a graph that diverges from what is actually on disk.
+                // Add the main package to installed versions
+                allInstalledVersions[packageName] = version;
+                
+                // Resolve transitive dependencies and ensure they are also present on disk
+                try
+                {
+                    var cachedPackages = await nugetService.GetPackageDependenciesAsync(packageName, version, cancellationToken);
+                    foreach (var (packageId, packageVersion) in cachedPackages)
+                    {
+                        var depVersion = NugetService.ParseMinimumVersion(packageVersion);
+                        if (!string.IsNullOrEmpty(depVersion))
+                        {
+                            // Check if the dependency actually exists on disk — if not, install it
+                            var depDir = nugetService.GetNuGetPackageDir(packageId, depVersion);
+                            if (!depDir.Exists)
+                            {
+                                logger.LogDebug("Transitive dependency {PackageId} {Version} missing from cache, installing", packageId, depVersion);
+                                var depInstalledVersions = await nugetService.InstallPackageAsync(packageId, depVersion, taskContext, cancellationToken);
+                                foreach (var (depPkg, depVer) in depInstalledVersions)
+                                {
+                                    if (allInstalledVersions.TryGetValue(depPkg, out var existingDepVersion))
+                                    {
+                                        if (NugetService.CompareVersions(depVer, existingDepVersion) > 0)
+                                        {
+                                            allInstalledVersions[depPkg] = depVer;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        allInstalledVersions[depPkg] = depVer;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                if (allInstalledVersions.TryGetValue(packageId, out var existingVersion))
+                                {
+                                    if (NugetService.CompareVersions(depVersion, existingVersion) > 0)
+                                    {
+                                        allInstalledVersions[packageId] = depVersion;
+                                    }
+                                }
+                                else
+                                {
+                                    allInstalledVersions[packageId] = depVersion;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (KeyNotFoundException)
+                {
+                    // Package not in cache yet, that's okay - just continue with main package
+                }
+
+                continue;
+            }
+
+            // Install the package
             taskContext.AddStatusMessage($"{UiSymbols.Bullet} {packageName} {version}");
 
             var installedVersions = await nugetService.InstallPackageAsync(packageName, version, taskContext, cancellationToken);
