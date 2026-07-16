@@ -28,6 +28,32 @@ internal sealed partial class XamlTriageService(
     // Hard ceiling for the isolated triage process (symbol downloads can be slow on first run).
     private static readonly TimeSpan TriageTimeout = TimeSpan.FromMinutes(5);
 
+    // For testing only — overrides the child-process timeout so the timeout branch can be exercised
+    // deterministically without a 5-minute wait. Null means use the real ceiling.
+    internal static TimeSpan? TriageTimeoutOverride { get; set; }
+
+    // For testing only — the GitHub download boundary for the debugger extension. Default performs the
+    // real HTTPS GET; tests supply canned bytes (or throw) to exercise EnsureExtensionAsync hermetically.
+    internal Func<string, CancellationToken, Task<byte[]>>? ExtensionBytesDownloader { get; set; }
+
+    // For testing only — the extension integrity gate. Null means use the real pinned-hash check; tests
+    // can accept controlled bytes so the write/early-return success paths run without the real content.
+    internal Func<byte[], bool>? ExtensionHashValidatorOverride { get; set; }
+
+    // For testing only — builds the triage child ProcessStartInfo. Null means re-invoke the current
+    // binary (production); tests point it at a controlled child to exercise the execution/exit branches.
+    internal Func<string, ResolvedTriageBinaries, string, bool, ProcessStartInfo>? TriageStartInfoFactory { get; set; }
+
+    // For testing only — the debugger-layout resolution boundary (Authenticode/version-gated file
+    // probing). Null means use the real XamlTriageBinaries.ResolveExisting; tests inject a layout so
+    // the orchestration past resolution can run without real signed binaries.
+    internal Func<DirectoryInfo, ResolvedTriageBinaries?>? BinariesResolverOverride { get; set; }
+
+    // For testing only — the current-process path OS boundary. Default returns the real
+    // Environment.ProcessPath; tests point it at a "dotnet"-named path to exercise the dotnet-host
+    // re-invocation branch in BuildTriageStartInfo (the test host is an apphost, never dotnet.exe).
+    internal static Func<string?> ProcessPathProvider { get; set; } = () => Environment.ProcessPath;
+
     /// <inheritdoc/>
     public async Task<XamlTriageResult> TryAnalyzeAsync(string dumpPath, bool useSymbols, CancellationToken cancellationToken = default)
     {
@@ -37,9 +63,12 @@ internal sealed partial class XamlTriageService(
                 winappDirectoryService.GetGlobalWinappDirectory().FullName, "dbgtools"));
             var cacheBinDir = new DirectoryInfo(Path.Combine(dbgToolsRoot.FullName, XamlTriageBinaries.KitsArch));
 
+            ResolvedTriageBinaries? ResolveExisting(DirectoryInfo dir) =>
+                (BinariesResolverOverride ?? (d => XamlTriageBinaries.ResolveExisting(d, logger)))(dir);
+
             // Resolve an existing debugger layout; if none, populate the download-on-first-use cache:
             // engine bits from NuGet (global cache or download) and JsProvider.dll from the WinDbg bundle.
-            var binaries = XamlTriageBinaries.ResolveExisting(cacheBinDir, logger);
+            var binaries = ResolveExisting(cacheBinDir);
             if (binaries == null && !XamlTriageBinaries.IsEnvOverrideSet)
             {
                 // Only populate the download-on-first-use cache when no authoritative override is set;
@@ -54,7 +83,7 @@ internal sealed partial class XamlTriageService(
                     await WinDbgJsProviderAcquirer.TryAcquireAsync(cacheBinDir, logger, cancellationToken);
                 }
 
-                binaries = XamlTriageBinaries.ResolveExisting(cacheBinDir, logger);
+                binaries = ResolveExisting(cacheBinDir);
             }
 
             if (binaries == null)
@@ -254,34 +283,10 @@ internal sealed partial class XamlTriageService(
     /// Returns the captured output, or a short human-readable skip note describing why no output is
     /// available (failed to start, timed out, or non-zero exit).
     /// </summary>
-    private async Task<(string? Output, string? SkipNote)> RunTriageProcessAsync(
+    internal async Task<(string? Output, string? SkipNote)> RunTriageProcessAsync(
         string dumpPath, ResolvedTriageBinaries binaries, string extPath, bool useSymbols, CancellationToken cancellationToken)
     {
-        var startInfo = new ProcessStartInfo
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-
-        // Re-invoke the current binary. When running under the dotnet host (dev/test), ProcessPath is
-        // dotnet.exe and we must pass the managed entry assembly as the first argument.
-        var processPath = Environment.ProcessPath!;
-        startInfo.FileName = processPath;
-        if (Path.GetFileNameWithoutExtension(processPath).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
-        {
-            // Only reached under the dotnet host (dev/test). Derive the managed entry DLL path from
-            // the app base directory + assembly simple name rather than Assembly.Location, which is
-            // empty for single-file apps and trips the IL3000 single-file/AOT analyzer.
-            var entryName = Assembly.GetEntryAssembly()!.GetName().Name;
-            startInfo.ArgumentList.Add(Path.Combine(AppContext.BaseDirectory, entryName + ".dll"));
-        }
-
-        foreach (var arg in BuildTriageArgs(dumpPath, binaries, extPath, useSymbols))
-        {
-            startInfo.ArgumentList.Add(arg);
-        }
+        var startInfo = (TriageStartInfoFactory ?? BuildTriageStartInfo)(dumpPath, binaries, extPath, useSymbols);
 
         using var process = new Process { StartInfo = startInfo };
         var stdout = new StringBuilder();
@@ -298,8 +303,9 @@ internal sealed partial class XamlTriageService(
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
+        var timeout = TriageTimeoutOverride ?? TriageTimeout;
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(TriageTimeout);
+        timeoutCts.CancelAfter(timeout);
         try
         {
             await process.WaitForExitAsync(timeoutCts.Token);
@@ -311,8 +317,8 @@ internal sealed partial class XamlTriageService(
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             TryKill(process);
-            logger.LogDebug("WinUI triage child process timed out after {Timeout}.", TriageTimeout);
-            return (null, $"the triage child process timed out after {TriageTimeout.TotalMinutes:0} minutes.");
+            logger.LogDebug("WinUI triage child process timed out after {Timeout}.", timeout);
+            return (null, $"the triage child process timed out after {timeout.TotalMinutes:0} minutes.");
         }
         catch (OperationCanceledException)
         {
@@ -339,6 +345,42 @@ internal sealed partial class XamlTriageService(
         return (stdout.ToString(), null);
     }
 
+    /// <summary>
+    /// Builds the <see cref="ProcessStartInfo"/> that re-invokes the current binary's hidden
+    /// <c>__xaml-triage</c> verb. When running under the dotnet host (dev/test) the managed entry
+    /// assembly is passed as the first argument. Extracted so it is unit-testable without spawning.
+    /// </summary>
+    internal ProcessStartInfo BuildTriageStartInfo(string dumpPath, ResolvedTriageBinaries binaries, string extPath, bool useSymbols)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        // Re-invoke the current binary. When running under the dotnet host (dev/test), ProcessPath is
+        // dotnet.exe and we must pass the managed entry assembly as the first argument.
+        var processPath = ProcessPathProvider()!;
+        startInfo.FileName = processPath;
+        if (Path.GetFileNameWithoutExtension(processPath).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+        {
+            // Only reached under the dotnet host (dev/test). Derive the managed entry DLL path from
+            // the app base directory + assembly simple name rather than Assembly.Location, which is
+            // empty for single-file apps and trips the IL3000 single-file/AOT analyzer.
+            var entryName = Assembly.GetEntryAssembly()!.GetName().Name;
+            startInfo.ArgumentList.Add(Path.Combine(AppContext.BaseDirectory, entryName + ".dll"));
+        }
+
+        foreach (var arg in BuildTriageArgs(dumpPath, binaries, extPath, useSymbols))
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
+
+        return startInfo;
+    }
+
     private static void TryKill(Process process)
     {
         try
@@ -358,13 +400,15 @@ internal sealed partial class XamlTriageService(
     /// Ensures the pinned <c>winui-dbgext.js</c> is present in the cache and matches its pinned
     /// git blob hash, downloading it on first use. Returns the local path or <c>null</c> on failure.
     /// </summary>
-    private async Task<string?> EnsureExtensionAsync(DirectoryInfo dbgToolsRoot, CancellationToken cancellationToken)
+    internal async Task<string?> EnsureExtensionAsync(DirectoryInfo dbgToolsRoot, CancellationToken cancellationToken)
     {
         var extDir = Path.Combine(dbgToolsRoot.FullName, "ext");
         Directory.CreateDirectory(extDir);
         var extPath = Path.Combine(extDir, ExtFileName);
 
-        if (File.Exists(extPath) && MatchesPinnedExtensionHash(await File.ReadAllBytesAsync(extPath, cancellationToken)))
+        bool MatchesHash(byte[] content) => (ExtensionHashValidatorOverride ?? MatchesPinnedExtensionHash)(content);
+
+        if (File.Exists(extPath) && MatchesHash(await File.ReadAllBytesAsync(extPath, cancellationToken)))
         {
             return extPath;
         }
@@ -372,10 +416,9 @@ internal sealed partial class XamlTriageService(
         try
         {
             var url = $"https://raw.githubusercontent.com/microsoft/microsoft-ui-xaml/{ExtCommit}/{ExtRepoPath}";
-            using var http = new HttpClient();
-            var bytes = await http.GetByteArrayAsync(url, cancellationToken);
+            var bytes = await (ExtensionBytesDownloader ?? DownloadExtensionBytesAsync)(url, cancellationToken);
 
-            if (!MatchesPinnedExtensionHash(bytes))
+            if (!MatchesHash(bytes))
             {
                 logger.LogWarning("Downloaded {Ext} hash mismatch (expected {Expected}, got {Actual}); refusing to use it.",
                     ExtFileName, ExtBlobSha1, GitBlobSha1(bytes));
@@ -390,6 +433,13 @@ internal sealed partial class XamlTriageService(
             logger.LogDebug(ex, "Failed to download {Ext}.", ExtFileName);
             return null;
         }
+    }
+
+    /// <summary>Real GitHub download boundary for the debugger extension; seamed via <see cref="ExtensionBytesDownloader"/>.</summary>
+    private static async Task<byte[]> DownloadExtensionBytesAsync(string url, CancellationToken cancellationToken)
+    {
+        using var http = new HttpClient();
+        return await http.GetByteArrayAsync(url, cancellationToken);
     }
 
     /// <summary>Resolves the NuGet global packages cache directory, tolerating provider failures.</summary>
@@ -425,7 +475,7 @@ internal sealed partial class XamlTriageService(
         return Convert.ToHexStringLower(SHA1.HashData(buffer));
     }
 
-    private static string UnavailableNote()
+    internal static string UnavailableNote()
     {
         // When an authoritative override is configured, the cache/installed-tools paths are skipped,
         // so telling the user to "set WINAPP_DBGTOOLS_DIR" (which is already set) is misleading.

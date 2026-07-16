@@ -49,12 +49,12 @@ internal static class BannerHelper
     {
         try
         {
-            bool isUtf8 = Console.OutputEncoding?.CodePage == 65001;
-            bool isVsCode = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("VSCODE_PID")) ||
-                            string.Equals(Environment.GetEnvironmentVariable("TERM_PROGRAM"), "vscode", StringComparison.OrdinalIgnoreCase);
-            bool isWindowsTerminal = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WT_SESSION"));
-            bool notRedirected = !Console.IsOutputRedirected;
-            return isUtf8 && notRedirected && (isVsCode || isWindowsTerminal);
+            return ComputeUseEmoji(
+                Console.OutputEncoding?.CodePage,
+                Console.IsOutputRedirected,
+                Environment.GetEnvironmentVariable("VSCODE_PID"),
+                Environment.GetEnvironmentVariable("TERM_PROGRAM"),
+                Environment.GetEnvironmentVariable("WT_SESSION"));
         }
         catch
         {
@@ -63,47 +63,68 @@ internal static class BannerHelper
     }
 
     /// <summary>
+    /// Pure decision core for <see cref="UseEmoji"/>: emoji/color output is used only in a UTF-8,
+    /// non-redirected terminal that is either VS Code or Windows Terminal. Extracted so every branch
+    /// can be unit tested without mutating the real console or process environment.
+    /// </summary>
+    internal static bool ComputeUseEmoji(int? outputCodePage, bool outputRedirected, string? vscodePid, string? termProgram, string? wtSession)
+    {
+        bool isUtf8 = outputCodePage == 65001;
+        bool isVsCode = !string.IsNullOrEmpty(vscodePid) ||
+                        string.Equals(termProgram, "vscode", StringComparison.OrdinalIgnoreCase);
+        bool isWindowsTerminal = !string.IsNullOrEmpty(wtSession);
+        bool notRedirected = !outputRedirected;
+        return isUtf8 && notRedirected && (isVsCode || isWindowsTerminal);
+    }
+
+    /// <summary>
     /// Displays the CLI banner with version information.
     /// </summary>
-    public static void DisplayBanner()
+    public static void DisplayBanner() => DisplayBanner(Console.Out, UseEmoji);
+
+    /// <summary>
+    /// Writes the CLI banner (including the version line) to <paramref name="writer"/>, using the
+    /// ANSI color-gradient form when <paramref name="useColor"/> is true and the plain ASCII form
+    /// otherwise. Exposed with an explicit writer so both rendering paths are unit testable.
+    /// </summary>
+    internal static void DisplayBanner(TextWriter writer, bool useColor)
     {
-        var useColor = UseEmoji; // Same check - modern terminals support both
         var version = VersionHelper.GetVersionString();
 
         if (useColor)
         {
-            DisplayColorBanner(version);
+            DisplayColorBanner(writer, version);
         }
         else
         {
-            DisplayPlainBanner(version);
+            DisplayPlainBanner(writer, version);
         }
     }
 
-    private static void DisplayColorBanner(string version)
+    private static void DisplayColorBanner(TextWriter writer, string version)
     {
         var titleLines = TitleBlockArt;
-        Console.WriteLine();
+        writer.WriteLine();
 
         // Display each line with a gradient color
         for (int i = 0; i < titleLines.Length; i++)
         {
             var color = GradientColors[i % GradientColors.Length];
-            Console.WriteLine($" {color}{titleLines[i]}{ResetColor}");
+            writer.WriteLine($" {color}{titleLines[i]}{ResetColor}");
         }
 
-        Console.WriteLine();
-        Console.WriteLine($" \x1b[90mWindows App Development CLI · Version {version}{ResetColor}");
+        writer.WriteLine();
+        writer.WriteLine($" \x1b[90mWindows App Development CLI · Version {version}{ResetColor}");
     }
 
-    private static void DisplayPlainBanner(string version)
+    private static void DisplayPlainBanner(TextWriter writer, string version)
     {
         foreach (var line in TitleAsciiArt)
         {
-            Console.WriteLine($" {line}");
+            writer.WriteLine($" {line}");
         }
 
-        Console.WriteLine($" Windows App Development CLI - Version {version}");
+        writer.WriteLine($" Windows App Development CLI - Version {version}");
     }
 
 }

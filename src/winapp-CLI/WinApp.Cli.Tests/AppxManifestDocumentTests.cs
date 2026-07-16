@@ -231,6 +231,18 @@ public class AppxManifestDocumentTests
         Assert.IsNull(doc.ApplicationId); // still null because there's no Application element
     }
 
+    [TestMethod]
+    public void ApplicationExecutable_SetNull_RemovesAttribute()
+    {
+        var doc = AppxManifestDocument.Parse(MinimalManifest);
+        Assert.AreEqual("TestApp.exe", doc.ApplicationExecutable);
+
+        doc.ApplicationExecutable = null;
+
+        Assert.IsNull(doc.ApplicationExecutable);
+        Assert.DoesNotContain("Executable=", doc.ToXml());
+    }
+
     #endregion
 
     #region VisualElements
@@ -250,6 +262,27 @@ public class AppxManifestDocumentTests
     {
         var doc = AppxManifestDocument.Parse(BareMinimalManifest);
         Assert.IsNull(doc.VisualElementsDisplayName);
+    }
+
+    [TestMethod]
+    public void VisualElementsDisplayName_SetNull_RemovesAttribute()
+    {
+        var doc = AppxManifestDocument.Parse(MinimalManifest);
+        Assert.AreEqual("Test App", doc.VisualElementsDisplayName);
+
+        doc.VisualElementsDisplayName = null;
+
+        Assert.IsNull(doc.VisualElementsDisplayName);
+    }
+
+    [TestMethod]
+    public void VisualElementsDisplayName_SetOnMissing_IsNoOp()
+    {
+        var doc = AppxManifestDocument.Parse(BareMinimalManifest);
+
+        doc.VisualElementsDisplayName = "ShouldNotThrow";
+
+        Assert.IsNull(doc.VisualElementsDisplayName); // still null because there is no VisualElements element
     }
 
     #endregion
@@ -325,6 +358,60 @@ public class AppxManifestDocumentTests
 
         Assert.AreEqual(1, languages.Count);
         Assert.AreEqual("en-US", languages[0]);
+    }
+
+    [TestMethod]
+    public void SetResourceLanguages_AddsToRoot_WhenNoIdentityOrDependencies()
+    {
+        // No Identity and no Dependencies, so the new Resources element falls through
+        // to being appended directly to the Package root.
+        var xml = """
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
+              <Applications>
+                <Application Id="App" />
+              </Applications>
+            </Package>
+            """;
+        var doc = AppxManifestDocument.Parse(xml);
+
+        doc.SetResourceLanguages(["en-US", "fr-FR"]);
+        var languages = doc.GetResourceLanguages();
+
+        Assert.AreEqual(2, languages.Count);
+        Assert.AreEqual("en-US", languages[0]);
+        Assert.AreEqual("fr-FR", languages[1]);
+    }
+
+    [TestMethod]
+    public void SetResourceLanguages_InsertsAfterDependencies_WhenResourcesMissing()
+    {
+        // Identity + Dependencies but no Resources: the new Resources element must be
+        // inserted immediately after Dependencies to satisfy the manifest schema ordering.
+        var xml = """
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
+              <Identity Name="App" Publisher="CN=Test" Version="1.0.0.0" />
+              <Dependencies>
+                <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22621.0" />
+              </Dependencies>
+              <Applications>
+                <Application Id="App" />
+              </Applications>
+            </Package>
+            """;
+        var doc = AppxManifestDocument.Parse(xml);
+
+        doc.SetResourceLanguages(["en-US"]);
+
+        var result = doc.ToXml();
+        var languages = doc.GetResourceLanguages();
+        Assert.AreEqual(1, languages.Count);
+        Assert.AreEqual("en-US", languages[0]);
+        Assert.IsTrue(
+            result.IndexOf("</Dependencies>", StringComparison.Ordinal) < result.IndexOf("<Resources", StringComparison.Ordinal),
+            "Resources element is inserted after Dependencies");
+        Assert.IsTrue(
+            result.IndexOf("<Resources", StringComparison.Ordinal) < result.IndexOf("<Applications", StringComparison.Ordinal),
+            "Resources element precedes Applications");
     }
 
     #endregion
@@ -567,6 +654,21 @@ public class AppxManifestDocumentTests
 
         Assert.IsNotNull(extensions);
         Assert.IsTrue(extensions.HasElements, "Should return existing Extensions with children");
+    }
+
+    [TestMethod]
+    public void GetOrCreatePackageLevelExtensionsElement_AddsToRoot_WhenNoApplications()
+    {
+        // No Applications element, so the new Extensions element is appended
+        // directly to the Package root rather than after Applications.
+        var doc = AppxManifestDocument.Parse(BareMinimalManifest);
+        Assert.IsNull(doc.GetExtensionsElement());
+
+        var extensions = doc.GetOrCreatePackageLevelExtensionsElement();
+
+        Assert.IsNotNull(extensions);
+        Assert.AreSame(extensions, doc.GetExtensionsElement());
+        Assert.Contains("<Extensions", doc.ToXml());
     }
 
     [TestMethod]

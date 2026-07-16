@@ -14,6 +14,34 @@ namespace WinApp.Cli.Helpers;
 /// </summary>
 internal static class ForegroundGuard
 {
+    /// <remarks>
+    /// Native adapter seam for issue #630: the default body reads the live foreground HWND from the
+    /// interactive desktop. Tests inject deterministic handles to cover foreground classification
+    /// without depending on desktop focus.
+    /// </remarks>
+    internal static Func<Windows.Win32.Foundation.HWND> s_getForegroundWindow =
+        Windows.Win32.PInvoke.GetForegroundWindow;
+
+    /// <remarks>
+    /// Native adapter seam for issue #630: the default body walks Win32 HWND ancestry. Tests inject
+    /// deterministic roots so no real windows are required.
+    /// </remarks>
+    internal static Func<Windows.Win32.Foundation.HWND, Windows.Win32.Foundation.HWND> s_getRootAncestor =
+        DefaultGetRootAncestor;
+
+    private static Windows.Win32.Foundation.HWND DefaultGetRootAncestor(Windows.Win32.Foundation.HWND hwnd) =>
+        Windows.Win32.PInvoke.GetAncestor(hwnd, Windows.Win32.UI.WindowsAndMessaging.GET_ANCESTOR_FLAGS.GA_ROOT);
+
+    /// <summary>
+    /// Restores every native seam to its production delegate. Test cleanup calls this so a faked
+    /// seam never leaks into a later test that reads the live foreground window (issue #630).
+    /// </summary>
+    internal static void ResetNativeSeams()
+    {
+        s_getForegroundWindow = Windows.Win32.PInvoke.GetForegroundWindow;
+        s_getRootAncestor = DefaultGetRootAncestor;
+    }
+
     /// <summary>
     /// Returns <see langword="true"/> when the current foreground window is <paramref name="targetHwnd"/>
     /// or the top-level root window that owns it. A <paramref name="targetHwnd"/> of 0 (no resolvable
@@ -26,7 +54,7 @@ internal static class ForegroundGuard
             return false;
         }
 
-        var foreground = Windows.Win32.PInvoke.GetForegroundWindow();
+        var foreground = s_getForegroundWindow();
         if (foreground.IsNull)
         {
             return false;
@@ -44,8 +72,7 @@ internal static class ForegroundGuard
         // by owning process: a PID match would also accept a *different* top-level window of the same
         // process (common in multi-window apps) that merely happens to be foreground, which would let
         // the injection land on the wrong window.
-        var targetRoot = Windows.Win32.PInvoke.GetAncestor(
-            target, Windows.Win32.UI.WindowsAndMessaging.GET_ANCESTOR_FLAGS.GA_ROOT);
+        var targetRoot = s_getRootAncestor(target);
         return !targetRoot.IsNull && targetRoot == foreground;
     }
 
@@ -55,7 +82,34 @@ internal static class ForegroundGuard
     /// inject input. Distinguishes "session locked" from "wrong window" / "elevated target".
     /// </summary>
     public static bool NoInteractiveDesktop()
-        => Windows.Win32.PInvoke.GetForegroundWindow().IsNull;
+        => s_getForegroundWindow().IsNull;
+
+    /// <summary>
+    /// Returns <see langword="true"/> when this process is running inside a remote session (Remote
+    /// Desktop / Terminal Services), detected via <c>GetSystemMetrics(SM_REMOTESESSION)</c>. Synthetic
+    /// pointer injection (<c>ui touch</c> / <c>ui pen</c> via <c>InjectSyntheticPointerInput</c>) is
+    /// frequently accepted by the API — the call reports success — yet not routed to applications over
+    /// the remote-desktop transport (pen in particular). Callers use this to attach an honest
+    /// "delivery not guaranteed" advisory so a reported success is not mistaken for confirmed delivery.
+    /// </summary>
+    public static bool IsRemoteSession()
+        => Windows.Win32.PInvoke.GetSystemMetrics(
+               Windows.Win32.UI.WindowsAndMessaging.SYSTEM_METRICS_INDEX.SM_REMOTESESSION) != 0;
+
+    /// <summary>
+    /// Pure composition of the remote-session delivery advisory for synthetic pointer injection, or
+    /// <see langword="null"/> when none is warranted (a local, physically-attached session). Kept
+    /// side-effect-free (no PInvoke) so the message is unit-testable without a live remote session.
+    /// </summary>
+    /// <param name="isRemoteSession">Whether the current session is remote (see <see cref="IsRemoteSession"/>).</param>
+    /// <param name="inputKind">Human word for the injected input, e.g. "touch" or "pen".</param>
+    public static string? RemoteInjectionWarning(bool isRemoteSession, string inputKind)
+        => isRemoteSession
+            ? $"Injected in a remote/RDP session — synthetic {inputKind} input is often not delivered to the target " +
+              "application over Remote Desktop (pen especially), so this success does not guarantee the gesture " +
+              "reached the app. Verify the effect (e.g. 'ui screenshot' or 'ui inspect'). Delivery is reliable on a " +
+              "local, physically-attached session."
+            : null;
 
     /// <summary>The outcome of the pre-injection foreground check.</summary>
     internal enum ForegroundCheck

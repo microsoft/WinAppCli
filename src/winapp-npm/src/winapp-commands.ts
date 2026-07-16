@@ -862,6 +862,82 @@ export async function uiListWindows(options: UiListWindowsOptions = {}): Promise
 }
 
 // ---------------------------------------------------------------------------
+// ui pen
+// ---------------------------------------------------------------------------
+
+export interface UiPenOptions extends CommonOptions {
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Pen contact point as app coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. Ignored when --path is given. */
+  at?: string;
+  /** Total glide time in milliseconds distributed across the stroke path segments (default: ~10 ms per segment). */
+  durationMs?: number;
+  /** Use the eraser end of the pen instead of the tip. */
+  eraser?: boolean;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Ink stroke path as a whitespace-separated list of x,y pairs, e.g. "10,10 20,30 40,50". */
+  path?: string;
+  /** Pen pressure from 0.0 to 1.0 (default: 0.5). */
+  pressure?: number;
+  /** Pen tilt along the x-axis in degrees (-90 to 90, default: 0). */
+  tiltX?: number;
+  /** Pen tilt along the y-axis in degrees (-90 to 90, default: 0). */
+  tiltY?: number;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Inject synthetic pen/stylus input using the Windows synthetic-pointer API. Taps or draws ink strokes with configurable pressure, tilt and eraser mode, at an element's center or explicit app x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable (Windows 10 1809+).
+ */
+export async function uiPen(options: UiPenOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'pen'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.at) args.push('--at', options.at);
+  if (options.durationMs !== undefined) args.push('--duration-ms', options.durationMs.toString());
+  if (options.eraser) args.push('--eraser');
+  if (options.json) args.push('--json');
+  if (options.path) args.push('--path', options.path);
+  if (options.pressure !== undefined) args.push('--pressure', options.pressure.toString());
+  if (options.tiltX !== undefined) args.push('--tilt-x', options.tiltX.toString());
+  if (options.tiltY !== undefined) args.push('--tilt-y', options.tiltY.toString());
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui record
+// ---------------------------------------------------------------------------
+
+export interface UiRecordOptions extends CommonOptions {
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). */
+  captureScreen?: boolean;
+  /** Recording duration in seconds. Default 0 records until stopped — Ctrl+C, or (for programmatic callers) a newline or EOF on stdin. A valid MP4 is always finalized on graceful stop. */
+  durationSec?: number;
+  /** Frames per second to capture */
+  fps?: number;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Downscale so the longest edge is at most this many pixels (0 = no downscale) */
+  maxEdge?: number;
+  /** Save output to this file path. */
+  output?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+// _uiRecordGenerated: options interface exported above; function body omitted — use the
+//   public guarded wrapper (e.g. uiRecord from ui-record-guard.ts) instead.
+
+// ---------------------------------------------------------------------------
 // ui screenshot
 // ---------------------------------------------------------------------------
 
@@ -870,13 +946,13 @@ export interface UiScreenshotOptions extends CommonOptions {
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
-  /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. */
+  /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). */
   captureScreen?: boolean;
   /** Bring the target window to the foreground before capture. Already implied by --capture-screen. */
   focus?: boolean;
   /** Format output as JSON */
   json?: boolean;
-  /** Save output to file path (e.g., screenshot) */
+  /** Save output to this file path. */
   output?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
@@ -1079,6 +1155,57 @@ export async function uiStatus(options: UiStatusOptions = {}): Promise<WinappRes
   const args: string[] = ['ui', 'status'];
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui touch
+// ---------------------------------------------------------------------------
+
+export interface UiTouchOptions extends CommonOptions {
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Explicit start point as app coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. */
+  at?: string;
+  /** Swipe direction: right (default), left, up, or down. Combined with --distance to compute the end point when --to-point is not given. */
+  direction?: string;
+  /** Distance in pixels for pinch/stretch (finger spread) or swipe. */
+  distance?: number;
+  /** Glide time in milliseconds for moving gestures (swipe/pinch/stretch). */
+  durationMs?: number;
+  /** Number of touch contacts (default: 1). Pinch/stretch always use 2. */
+  fingers?: number;
+  /** Gesture to perform: tap, double-tap, long-press, swipe, pinch, stretch (default: tap). */
+  gesture?: string;
+  /** Milliseconds to hold contacts down before lifting (long-press hold time). Defaults to 500 ms when --gesture long-press is used and this option is not set. */
+  holdMs?: number;
+  /** Format output as JSON */
+  json?: boolean;
+  /** End point x,y for a swipe (app coordinates). Takes precedence over --direction. */
+  toPoint?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Inject synthetic touch input using the Windows touch-injection API. Supports tap, double-tap, long-press, swipe, pinch and stretch gestures at an element's center or explicit app x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable.
+ */
+export async function uiTouch(options: UiTouchOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'touch'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.at) args.push('--at', options.at);
+  if (options.direction) args.push('--direction', options.direction);
+  if (options.distance !== undefined) args.push('--distance', options.distance.toString());
+  if (options.durationMs !== undefined) args.push('--duration-ms', options.durationMs.toString());
+  if (options.fingers !== undefined) args.push('--fingers', options.fingers.toString());
+  if (options.gesture) args.push('--gesture', options.gesture);
+  if (options.holdMs !== undefined) args.push('--hold-ms', options.holdMs.toString());
+  if (options.json) args.push('--json');
+  if (options.toPoint) args.push('--to-point', options.toPoint);
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
 }

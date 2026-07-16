@@ -1,6 +1,10 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Spectre.Console.Testing;
+using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -9,6 +13,27 @@ namespace WinApp.Cli.Tests;
 public class MrtAssetHelperTests
 {
     private DirectoryInfo _tempDir = null!;
+
+    private static TaskContext CreateTaskContext()
+        => new(new GroupableTask("test", null), null, new TestConsole(), NullLogger<MrtAssetHelperTests>.Instance, new Lock());
+
+    // Debug-enabled variant: TaskContext.AddDebugMessage is a no-op unless the logger has Debug
+    // enabled, so a NullLogger context silently swallows verbose warnings. This returns the
+    // underlying GroupableTask too, so a test can inspect the messages actually emitted.
+    private static (TaskContext TaskContext, GroupableTask Task) CreateVerboseTaskContext()
+    {
+        var task = new GroupableTask("test", null);
+        var taskContext = new TaskContext(task, null, new TestConsole(), new DebugEnabledLogger(), new Lock());
+        return (taskContext, task);
+    }
+
+    /// <summary>Minimal ILogger with Debug enabled so verbose task messages are recorded.</summary>
+    private sealed class DebugEnabledLogger : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Debug;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) { }
+    }
 
     [TestInitialize]
     public void Setup()
@@ -362,6 +387,49 @@ public class MrtAssetHelperTests
 
         // Dictionary-based dedup should prevent duplicates
         Assert.AreEqual(2, result.Count); // Logo.png + Logo.scale-200.png
+    }
+
+    [TestMethod]
+    public void ExpandManifestReferencedFiles_MissingDirectory_WithTaskContext_LogsWarningAndSkips()
+    {
+        var (taskContext, task) = CreateVerboseTaskContext();
+
+        // Referenced file lives under a subdirectory that does not exist -> the per-file source
+        // directory check logs a warning and continues (exercising the non-null taskContext path).
+        var result = MrtAssetHelper.ExpandManifestReferencedFiles(
+            _tempDir,
+            ["nonexistent\\Logo.png"],
+            taskContext);
+
+        Assert.AreEqual(0, result.Count);
+
+        // The warning is emitted via TaskContext.AddDebugMessage, which records only when the logger
+        // has Debug enabled. Assert the warning was actually produced so this stays a real guard.
+        var messages = task.SubTasks.OfType<StatusMessageTask>().Select(t => t.CompletedMessage ?? string.Empty).ToList();
+        Assert.IsTrue(
+            messages.Any(m =>
+                m.Contains("Source directory not found for referenced file", StringComparison.Ordinal) &&
+                m.Contains("nonexistent", StringComparison.Ordinal)),
+            $"Expected a 'source directory not found' warning naming the missing directory. Messages:\n{string.Join("\n", messages)}");
+    }
+
+    #endregion
+
+    #region GetExpandedManifestReferencedFiles
+
+    [TestMethod]
+    public void GetExpandedManifestReferencedFiles_ManifestAtDriveRoot_ReturnsEmpty()
+    {
+        var taskContext = CreateTaskContext();
+
+        // A manifest whose FileInfo.Directory is null (drive root) must short-circuit to empty
+        // without attempting to read the file.
+        var driveRoot = Path.GetPathRoot(_tempDir.FullName)!;
+        var manifestAtRoot = new FileInfo(driveRoot);
+
+        var result = MrtAssetHelper.GetExpandedManifestReferencedFiles(manifestAtRoot, taskContext);
+
+        Assert.AreEqual(0, result.Count);
     }
 
     #endregion

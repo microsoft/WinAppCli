@@ -25,32 +25,37 @@ internal class CommandInvokedEvent : EventBase
     internal CommandInvokedEvent(CommandResult commandResult, DateTime startedTime)
     {
         CommandName = commandResult.Command.GetType().FullName!;
-        try
-        {
-            var argumentsDict = commandResult.Children
-                .OfType<ArgumentResult>()
-                .ToDictionary(a => a.Argument.Name, GetValue);
-            var optionsDict = commandResult.Children
-                .OfType<OptionResult>()
-                .ToDictionary(o => o.Option.Name, GetValue);
-            var commandExecutionContext = new CommandExecutionContext(argumentsDict, optionsDict);
-            Context = JsonSerializer.Serialize(commandExecutionContext, CommandInvokedEventJsonContext.Default.CommandExecutionContext);
-        }
-        catch (Exception ex)
-        {
-            Context = $"[error parsing context]: {ex.Message}";
-        }
+        Context = CreateContext(commandResult.Children);
         StartedTime = startedTime;
     }
 
-    private string? GetValue(OptionResult o)
+    internal static string CreateContext(IEnumerable<SymbolResult> children)
+    {
+        try
+        {
+            var argumentsDict = children
+                .OfType<ArgumentResult>()
+                .ToDictionary(a => a.Argument.Name, GetValue);
+            var optionsDict = children
+                .OfType<OptionResult>()
+                .ToDictionary(o => o.Option.Name, GetValue);
+            var commandExecutionContext = new CommandExecutionContext(argumentsDict, optionsDict);
+            return JsonSerializer.Serialize(commandExecutionContext, CommandInvokedEventJsonContext.Default.CommandExecutionContext);
+        }
+        catch (Exception ex)
+        {
+            return $"[error parsing context]: {ex.Message}";
+        }
+    }
+
+    private static string? GetValue(OptionResult o)
     {
         return o.Option is HelpOption
             ? "true"
             : !o.Errors.Any() ? GetValue(o.Option.ValueType, o.Implicit, () => o.GetValueOrDefault<object?>()) : "[error]";
     }
 
-    private string? GetValue(ArgumentResult a)
+    private static string? GetValue(ArgumentResult a)
     {
         return !a.Errors.Any()
             ? GetValue(a.Argument.ValueType, a.Implicit, () => a.GetValueOrDefault<object?>())

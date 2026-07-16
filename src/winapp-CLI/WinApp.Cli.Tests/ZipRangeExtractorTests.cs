@@ -230,4 +230,179 @@ public class ZipRangeExtractorTests
         Assert.IsNull(msix);
         Assert.IsNull(prefix);
     }
+
+    [TestMethod]
+    public async Task FindCentralDirectory_NoEocdSignature_Throws()
+    {
+        // Random bytes with no EOCD record — LastIndexOfSignature returns -1.
+        var data = new byte[200];
+        Array.Fill(data, (byte)0xAB);
+        var reader = new MemoryRangeReader(data);
+
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(async () =>
+            await ZipRangeExtractor.FindCentralDirectoryAsync(reader, 0, data.Length, CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task FindCentralDirectory_Zip64MarkerButNoLocator_Throws()
+    {
+        // EOCD advertises ZIP64 (markers) but there is no ZIP64 locator ahead of it.
+        var data = new byte[122];
+        var eocd = new byte[22];
+        WriteU32(eocd, 0, 0x06054b50);
+        WriteU16(eocd, 10, 0xFFFF);
+        WriteU32(eocd, 12, 0xFFFFFFFF);
+        WriteU32(eocd, 16, 0xFFFFFFFF);
+        eocd.CopyTo(data, 100);
+        var reader = new MemoryRangeReader(data);
+
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(async () =>
+            await ZipRangeExtractor.FindCentralDirectoryAsync(reader, 0, data.Length, CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task FindCentralDirectory_Zip64RecordSignatureMismatch_Throws()
+    {
+        var buf = new List<byte>();
+        buf.AddRange(new byte[10]);                            // central-directory placeholder
+
+        var record = new byte[56];
+        WriteU32(record, 0, 0xDEADBEEF);                      // WRONG ZIP64 EOCD signature
+        buf.AddRange(record);
+
+        var locator = new byte[20];
+        WriteU32(locator, 0, 0x07064b50);
+        WriteU64(locator, 8, 10);                             // record is at offset 10
+        buf.AddRange(locator);
+
+        var eocd = new byte[22];
+        WriteU32(eocd, 0, 0x06054b50);
+        WriteU16(eocd, 10, 0xFFFF);
+        WriteU32(eocd, 12, 0xFFFFFFFF);
+        WriteU32(eocd, 16, 0xFFFFFFFF);
+        buf.AddRange(eocd);
+
+        var reader = new MemoryRangeReader(buf.ToArray());
+
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(async () =>
+            await ZipRangeExtractor.FindCentralDirectoryAsync(reader, 0, buf.Count, CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task FindCentralDirectory_Zip64RecordOutsideTailWindow_ReadsViaRanged()
+    {
+        // Archive larger than the EOCD search window, with the ZIP64 EOCD record near the start so
+        // it falls outside the trailing tail read and must be fetched with a separate ranged read.
+        const long cdOffset = 0;
+        const long cdSize = 10;
+        const int total = 66000; // > MaxEocdSearch (65557)
+        var data = new byte[total];
+
+        var record = new byte[56];
+        WriteU32(record, 0, 0x06064b50);
+        WriteU64(record, 40, unchecked((ulong)cdSize));
+        WriteU64(record, 48, unchecked((ulong)cdOffset));
+        record.CopyTo(data, 0); // record at offset 0 (outside the tail window)
+
+        var locatorOffset = total - 22 - 20;
+        var locator = new byte[20];
+        WriteU32(locator, 0, 0x07064b50);
+        WriteU64(locator, 8, 0); // relative offset of the ZIP64 EOCD record = 0
+        locator.CopyTo(data, locatorOffset);
+
+        var eocd = new byte[22];
+        WriteU32(eocd, 0, 0x06054b50);
+        WriteU16(eocd, 10, 0xFFFF);
+        WriteU32(eocd, 12, 0xFFFFFFFF);
+        WriteU32(eocd, 16, 0xFFFFFFFF);
+        eocd.CopyTo(data, total - 22);
+
+        var reader = new MemoryRangeReader(data);
+
+        var (offset, size) = await ZipRangeExtractor.FindCentralDirectoryAsync(reader, 0, data.Length, CancellationToken.None);
+
+        Assert.AreEqual(cdOffset, offset);
+        Assert.AreEqual(cdSize, size);
+    }
+
+    [TestMethod]
+    public void ParseCentralDirectory_SkipsNonZip64ExtraField_ThenAppliesZip64()
+    {
+        // The first extra field has a non-ZIP64 id and must be skipped before the ZIP64 field applies.
+        const long uncompressed = 0x2_0000_0002;
+        var name = Encoding.UTF8.GetBytes("skip.bin");
+
+        var extra = new byte[(4 + 4) + (4 + 8)];
+        WriteU16(extra, 0, 0x000A);   // non-ZIP64 extra id
+        WriteU16(extra, 2, 4);        // its dataLen (4 bytes of payload, left zero)
+        WriteU16(extra, 8, 0x0001);   // ZIP64 extra id
+        WriteU16(extra, 10, 8);       // dataLen: only the uncompressed 64-bit value follows
+        WriteU64(extra, 12, unchecked((ulong)uncompressed));
+
+        var header = new byte[46 + name.Length + extra.Length];
+        WriteU32(header, 0, 0x02014b50);
+        WriteU16(header, 10, 0);                  // method: stored
+        WriteU32(header, 20, 0x11111111);         // compressed: NOT a marker → left unchanged
+        WriteU32(header, 24, 0xFFFFFFFF);         // uncompressed: marker → taken from ZIP64 extra
+        WriteU16(header, 28, (ushort)name.Length);
+        WriteU16(header, 30, (ushort)extra.Length);
+        WriteU16(header, 32, 0);
+        WriteU32(header, 42, 0x22222222);         // local-header offset: NOT a marker
+        name.CopyTo(header, 46);
+        extra.CopyTo(header, 46 + name.Length);
+
+        var entries = ZipRangeExtractor.ParseCentralDirectory(header, archiveBase: 0);
+
+        Assert.AreEqual(1, entries.Count);
+        Assert.AreEqual(uncompressed, entries[0].UncompressedSize, "uncompressed size must come from the ZIP64 field after skipping the other one");
+        Assert.AreEqual(0x11111111, entries[0].CompressedSize, "non-marker compressed size stays as the 32-bit value");
+    }
+
+    [TestMethod]
+    public async Task ExtractEntry_CompressedSizeExceedsInt32_Throws()
+    {
+        var entry = new ZipEntry("too-big.bin", Method: 0, CompressedSize: (long)int.MaxValue + 1,
+            UncompressedSize: 0, LocalHeaderOffset: 0);
+        var reader = new MemoryRangeReader(new byte[16]);
+
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(async () =>
+            await ZipRangeExtractor.ExtractEntryAsync(reader, entry, CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task ExtractEntry_UnsupportedCompressionMethod_Throws()
+    {
+        // 30-byte local header (nameLen/extraLen = 0) followed by 4 bytes of data.
+        var buf = new byte[34];
+        var entry = new ZipEntry("weird.bin", Method: 99, CompressedSize: 4, UncompressedSize: 4, LocalHeaderOffset: 0);
+        var reader = new MemoryRangeReader(buf);
+
+        await Assert.ThrowsExactlyAsync<NotSupportedException>(async () =>
+            await ZipRangeExtractor.ExtractEntryAsync(reader, entry, CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task MemoryRangeReader_RangeBeyondBuffer_Throws()
+    {
+        var reader = new MemoryRangeReader(new byte[10]);
+
+        await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(async () =>
+            await reader.ReadAsync(5, 10, CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task MemoryRangeReader_NegativeOffset_Throws()
+    {
+        var reader = new MemoryRangeReader(new byte[10]);
+
+        await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(async () =>
+            await reader.ReadAsync(-1, 2, CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task MemoryRangeReader_GetLength_ReturnsBufferLength()
+    {
+        var reader = new MemoryRangeReader(new byte[42]);
+        Assert.AreEqual(42L, await reader.GetLengthAsync(CancellationToken.None));
+    }
 }
