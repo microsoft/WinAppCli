@@ -40,7 +40,7 @@ internal sealed class UiSessionService(
             var windows = uiAutomation.FindWindowsByTitle(app);
             if (windows.Count == 0)
             {
-                throw new InvalidOperationException($"No running app found matching '{app}'.");
+                throw new AppNotFoundException($"No running app found matching '{app}'.");
             }
             if (windows.Count > 1)
             {
@@ -151,7 +151,7 @@ internal sealed class UiSessionService(
         var pid = systemQuery.GetProcessIdForWindow(hwnd);
         if (pid == 0)
         {
-            throw new InvalidOperationException($"Window HWND {hwnd} not found or not accessible.");
+            throw new AppNotFoundException($"Window HWND {hwnd} not found or not accessible.");
         }
 
         var session = CreateSession((int)pid, (nint)hwnd, null);
@@ -195,7 +195,7 @@ internal sealed class UiSessionService(
             var byPid = systemQuery.GetProcessById(pid);
             if (byPid is null)
             {
-                throw new InvalidOperationException($"No process found with PID {pid}.");
+                throw new AppNotFoundException($"No process found with PID {pid}.");
             }
             return byPid;
         }

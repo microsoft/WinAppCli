@@ -39,7 +39,7 @@ public class UiSessionServiceTests
         var (service, _, sys) = NewService();
         sys.ProcessIdForWindowResult = 0; // window not found / not accessible
 
-        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+        var ex = await Assert.ThrowsExactlyAsync<AppNotFoundException>(
             () => service.ResolveSessionAsync(app: null, hwnd: 0x9999, CancellationToken.None));
 
         StringAssert.Contains(ex.Message, "not found or not accessible");
@@ -108,7 +108,7 @@ public class UiSessionServiceTests
     {
         var (service, _, _) = NewService();
 
-        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+        var ex = await Assert.ThrowsExactlyAsync<AppNotFoundException>(
             () => service.ResolveSessionAsync(app: "999999", hwnd: null, CancellationToken.None));
 
         StringAssert.Contains(ex.Message, "No process found with PID 999999");
@@ -310,7 +310,7 @@ public class UiSessionServiceTests
         ];
         uia.WindowsByTitleResult = []; // title search also finds nothing → throws
 
-        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+        var ex = await Assert.ThrowsExactlyAsync<AppNotFoundException>(
             () => service.ResolveSessionAsync(app: "pw", hwnd: null, CancellationToken.None));
 
         StringAssert.Contains(ex.Message, "No running app found matching 'pw'");
@@ -324,7 +324,7 @@ public class UiSessionServiceTests
         var (service, uia, _) = NewService();
         uia.WindowsByTitleResult = [];
 
-        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+        var ex = await Assert.ThrowsExactlyAsync<AppNotFoundException>(
             () => service.ResolveSessionAsync(app: "ghost", hwnd: null, CancellationToken.None));
 
         StringAssert.Contains(ex.Message, "No running app found matching 'ghost'");

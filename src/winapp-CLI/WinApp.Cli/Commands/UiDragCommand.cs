@@ -4,7 +4,6 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
-using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
@@ -290,7 +289,7 @@ internal class UiDragCommand : Command, IShortDescription
         private async Task<Endpoint> ResolveEndpointAsync(
             string token, string label, UiSessionInfo session, bool json, CancellationToken cancellationToken)
         {
-            if (TryParsePoint(token, out int px, out int py))
+            if (CoordinateParser.TryParsePoint(token, out int px, out int py))
             {
                 return new Endpoint(true, px, py, 0, null, null, null);
             }
@@ -299,7 +298,7 @@ internal class UiDragCommand : Command, IShortDescription
             // didn't parse (a trailing/extra field or a non-numeric one — "100,", "100,200,300", "100,x").
             // Surface a precise "expected x,y" error instead of falling through to a selector lookup that
             // reports a misleading "element not found".
-            if (LooksLikeCoordinates(token))
+            if (CoordinateParser.LooksLikeCoordinates(token))
             {
                 logger.LogError("{Symbol} <{Label}> looks like coordinates but isn't a valid x,y pair: '{Token}'. Use two integers, e.g. 100,200.",
                     UiSymbols.Error, label, token);
@@ -329,37 +328,5 @@ internal class UiDragCommand : Command, IShortDescription
             return new Endpoint(true, centerX, centerY, element.WindowHandle ?? 0, selector, element, token);
         }
 
-        private static bool TryParsePoint(string? value, out int x, out int y)
-        {
-            x = 0;
-            y = 0;
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return false;
-            }
-
-            var parts = value.Split(',', StringSplitOptions.TrimEntries);
-            if (parts.Length != 2)
-            {
-                return false;
-            }
-
-            return int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out x)
-                && int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out y);
-        }
-
-        /// <summary>
-        /// Whether a token that failed to parse as a point was nonetheless meant as coordinates: it has a
-        /// comma and its first field is an integer. Selectors are ids / <c>name=…</c> expressions that
-        /// don't start with a bare integer followed by a comma, so this only fires on malformed coordinate
-        /// input (e.g. <c>100,</c>, <c>100,200,300</c>, <c>100,abc</c>) — not on a selector that merely
-        /// contains a comma (e.g. <c>name=Save, Continue</c>).
-        /// </summary>
-        private static bool LooksLikeCoordinates(string token)
-        {
-            var parts = token.Split(',');
-            return parts.Length >= 2
-                && int.TryParse(parts[0].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out _);
-        }
     }
 }

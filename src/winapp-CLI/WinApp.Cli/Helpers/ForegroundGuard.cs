@@ -57,6 +57,33 @@ internal static class ForegroundGuard
     public static bool NoInteractiveDesktop()
         => Windows.Win32.PInvoke.GetForegroundWindow().IsNull;
 
+    /// <summary>
+    /// Returns <see langword="true"/> when this process is running inside a remote session (Remote
+    /// Desktop / Terminal Services), detected via <c>GetSystemMetrics(SM_REMOTESESSION)</c>. Synthetic
+    /// pointer injection (<c>ui touch</c> / <c>ui pen</c> via <c>InjectSyntheticPointerInput</c>) is
+    /// frequently accepted by the API — the call reports success — yet not routed to applications over
+    /// the remote-desktop transport (pen in particular). Callers use this to attach an honest
+    /// "delivery not guaranteed" advisory so a reported success is not mistaken for confirmed delivery.
+    /// </summary>
+    public static bool IsRemoteSession()
+        => Windows.Win32.PInvoke.GetSystemMetrics(
+               Windows.Win32.UI.WindowsAndMessaging.SYSTEM_METRICS_INDEX.SM_REMOTESESSION) != 0;
+
+    /// <summary>
+    /// Pure composition of the remote-session delivery advisory for synthetic pointer injection, or
+    /// <see langword="null"/> when none is warranted (a local, physically-attached session). Kept
+    /// side-effect-free (no PInvoke) so the message is unit-testable without a live remote session.
+    /// </summary>
+    /// <param name="isRemoteSession">Whether the current session is remote (see <see cref="IsRemoteSession"/>).</param>
+    /// <param name="inputKind">Human word for the injected input, e.g. "touch" or "pen".</param>
+    public static string? RemoteInjectionWarning(bool isRemoteSession, string inputKind)
+        => isRemoteSession
+            ? $"Injected in a remote/RDP session — synthetic {inputKind} input is often not delivered to the target " +
+              "application over Remote Desktop (pen especially), so this success does not guarantee the gesture " +
+              "reached the app. Verify the effect (e.g. 'ui screenshot' or 'ui inspect'). Delivery is reliable on a " +
+              "local, physically-attached session."
+            : null;
+
     /// <summary>The outcome of the pre-injection foreground check.</summary>
     internal enum ForegroundCheck
     {
