@@ -560,6 +560,53 @@ public partial class UiCommandTests
         Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count, "win+shift+l must never reach the keyboard transport");
     }
 
+    // #656 — ctrl+alt+del (SAS) must be hard-blocked like win+l, even with --allow-system-keys
+    [TestMethod]
+    public async Task SendKeys_CtrlAltDel_ViaSendInput_WithAllowSystemKeys_IsStillRefused()
+    {
+        // ctrl+alt+del is a Secure Attention Sequence: Windows drops synthesized SAS input regardless of
+        // privilege or flag, so it can never take effect. It must be refused (exit 1) rather than report a
+        // misleading success — even when --allow-system-keys is passed — and never reach the transport.
+        _fakeSession.SessionResult.WindowHandle = 4242;
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["ctrl+alt+del", "-a", "TestApp", "--via", "send-input", "--allow-system-keys", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count, "ctrl+alt+del must never reach the keyboard transport");
+    }
+
+    // #656 — ctrl+alt+del without the flag is refused too, with a message explaining it can't be synthesized
+    [TestMethod]
+    public async Task SendKeys_CtrlAltDel_ViaSendInput_WithoutAllow_IsRefusedWithSasReason()
+    {
+        // Without --allow-system-keys the never-bypassable guard still fires first, and the error must
+        // explain the SAS block (not just "pass --allow-system-keys", which would never help here).
+        _fakeSession.SessionResult.WindowHandle = 4242;
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["ctrl+alt+del", "-a", "TestApp", "--via", "send-input"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "ctrl+alt+del");
+        StringAssert.Contains(ConsoleStdErr.ToString(), "SAS");
+    }
+
+    // #656 — post-message is window-scoped, so ctrl+alt+del is not hard-blocked there (it just posts)
+    [TestMethod]
+    public async Task SendKeys_CtrlAltDel_ViaPostMessage_StillSends()
+    {
+        // The never-bypassable guard only applies to OS-wide send-input; post-message posts straight to the
+        // target HWND's queue (a posted ctrl+alt+del is harmless), so it is unaffected and still sends.
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["ctrl+alt+del", "-a", "TestApp", "--via", "post-message", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+    }
+
     // LOW: lone right-Win key (vk=0x5c) is soft-blocked without --allow-system-keys
     [TestMethod]
     public async Task SendKeys_LoneRWin_ViaSendInput_WithoutAllow_IsBlocked()
