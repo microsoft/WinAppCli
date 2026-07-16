@@ -18,17 +18,17 @@ internal class UiDragCommand : Command, IShortDescription
     public string ShortDescription => "Drag from one element/point to another element/point";
 
     // drag <from> <to> — each endpoint is an element selector (drags from/to the element's center)
-    // or app x,y coordinates in the same space 'ui inspect' reports.
+    // or screen x,y coordinates in the same space 'ui inspect' reports.
     public static Argument<string?> FromArgument { get; } = new("from")
     {
-        Description = "Start point — an element selector (drags from its center) or app coordinates x,y as reported by " +
+        Description = "Start point — an element selector (drags from its center) or screen coordinates x,y as reported by " +
                       "'ui inspect' (e.g. pn-list-d736 or 100,200).",
         Arity = ArgumentArity.ZeroOrOne
     };
 
     public static Argument<string?> ToArgument { get; } = new("to")
     {
-        Description = "End point — an element selector (drops at its center) or app coordinates x,y as reported by " +
+        Description = "End point — an element selector (drops at its center) or screen coordinates x,y as reported by " +
                       "'ui inspect' (e.g. pn-target-d746 or 300,400).",
         Arity = ArgumentArity.ZeroOrOne
     };
@@ -55,7 +55,7 @@ internal class UiDragCommand : Command, IShortDescription
     public UiDragCommand()
         : base("drag", "Press the mouse button at one point, move to another, then release. " +
                "'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or " +
-               "app-relative x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures " +
+               "screen x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures " +
                "and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and " +
                "--dwell-ms to settle on a drop target before releasing.")
     {
@@ -282,7 +282,7 @@ internal class UiDragCommand : Command, IShortDescription
 
         /// <summary>
         /// Resolves a drag endpoint token into screen coordinates. A token of the form <c>x,y</c> is taken as
-        /// app coordinates (the same space <c>ui inspect</c> reports); anything else is treated as an element
+        /// screen coordinates (the same space <c>ui inspect</c> reports); anything else is treated as an element
         /// selector and resolves to that element's center. Emits the appropriate error and returns
         /// <see cref="Endpoint.Ok"/> = <see langword="false"/> on failure.
         /// </summary>

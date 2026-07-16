@@ -164,26 +164,26 @@ winapp ui send-keys "win+shift+v" -a myapp --via send-input --allow-system-keys
 - Per-keystroke events: named keys/combos fire a real `KeyDown` on both transports. For literal typed text, `--via send-input` maps each char to its VK (+Shift) so each character fires a real `KeyDown` + OS-composed `WM_CHAR` (`TextChanged`) — use it when downstream logic keys off `KeyDown` (e.g. WinUI 3/WPF `TextBox`); bring the target window to the foreground first. `--via post-message` posts `WM_CHAR` (raises `TextChanged`, lands correct text across integrity levels) but does not fire a per-character `KeyDown`.
 
 ### Drag (reorder, resize, sliders, drag-and-drop)
-Press the mouse button at one point, move to another, then release with `drag <from> <to>`, where each endpoint is an element selector (uses its center) or app `x,y` coordinates from `ui inspect`. Uses `SendInput` with intermediate moves so apps see a realistic `WM_MOUSEMOVE` stream.
+Press the mouse button at one point, move to another, then release with `drag <from> <to>`, where each endpoint is an element selector (uses its center) or screen `x,y` coordinates from `ui inspect`. Uses `SendInput` with intermediate moves so apps see a realistic `WM_MOUSEMOVE` stream.
 ```powershell
 # Reorder one item onto another (center → center)
 winapp ui drag itm-card-9f8e itm-slot-2c1a -a myapp
 
-# Element center → app coordinates (as reported by `ui inspect`)
+# Element center → screen coordinates (as reported by `ui inspect`)
 winapp ui drag itm-card-9f8e 300,400 -a myapp
 
-# Raw app coordinates → app coordinates
+# Raw screen coordinates → screen coordinates
 winapp ui drag 120,200 480,200 -a myapp
 
 # Right-button drag
 winapp ui drag itm-card-9f8e itm-trash-0001 -a myapp --right
 ```
-- A selector drags from/to the element's center; `x,y` are app coordinates in the same space `ui inspect`/`search` report. Element endpoints are re-resolved just before the drag and fail with `target_moved` if still animating; on a locked/secure desktop the drag fails with `no_interactive_desktop`.
+- A selector drags from/to the element's center; `x,y` are screen coordinates in the same space `ui inspect`/`search` report. Element endpoints are re-resolved just before the drag and fail with `target_moved` if still animating; on a locked/secure desktop the drag fails with `no_interactive_desktop`.
 
 ### Touch gestures (tap, swipe, pinch, stretch, long-press)
-Inject synthetic touch. The contact anchor is an element selector (its center) or an explicit `--at x,y` app coordinate. Prefers the modern synthetic-pointer device and falls back to the legacy touch-injection API.
+Inject synthetic touch. The contact anchor is an element selector (its center) or an explicit `--at x,y` screen coordinate. Prefers the modern synthetic-pointer device and falls back to the legacy touch-injection API.
 ```powershell
-# Tap an element center; or tap explicit app coordinates
+# Tap an element center; or tap explicit screen coordinates
 winapp ui touch btn-ok-1a2b -a myapp
 winapp ui touch -a myapp --at 320,240
 
