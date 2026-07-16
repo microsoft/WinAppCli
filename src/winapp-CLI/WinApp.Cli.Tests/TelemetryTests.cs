@@ -128,23 +128,29 @@ public sealed class TelemetryTests
     }
 
     [TestMethod]
-    public void AddWellKnownSensitiveStrings_ScrubsMachineNameFromLoggedEvents()
+    public void AddWellKnownSensitiveStrings_ScrubsUserProfilePathFromLoggedEvents()
     {
         using var listener = new CapturingEventListener(ProviderName);
         var telemetry = new WinApp.Cli.Telemetry.Telemetry();
 
+        // Probe with the user-profile path rather than the machine name: it is always a real, absolute
+        // path well over the 3-char minimum that AddSensitiveString requires before it registers a value
+        // (Telemetry.cs guards name.Length > 3). A machine name can be 1-3 chars on some hosts and would
+        // be silently skipped by that guard, making a machine-name assertion host-dependent/flaky.
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
         telemetry.AddWellKnownSensitiveStrings();
-        telemetry.Log("AfterWellKnownSensitiveStrings", LogLevel.Local, new ProbeEvent { Detail = Environment.MachineName });
+        telemetry.Log("AfterWellKnownSensitiveStrings", LogLevel.Local, new ProbeEvent { Detail = userProfile });
 
         var events = listener.WaitForEvents(1);
         var match = events.FirstOrDefault(e => e.Name == "AfterWellKnownSensitiveStrings");
         Assert.IsNotNull(match, "Expected the probe event to be emitted.");
         var detail = match!.Payload.TryGetValue("Detail", out var value) ? value as string : null;
         Assert.IsFalse(string.IsNullOrEmpty(detail), "Probe event should carry a Detail payload.");
-        Assert.IsFalse(detail!.Contains(Environment.MachineName, StringComparison.Ordinal),
-            "AddWellKnownSensitiveStrings must scrub the raw machine name from telemetry payloads; a no-op would leak it.");
-        StringAssert.Contains(detail!, "<",
-            "The scrubbed machine name should be replaced with a <Token> placeholder.");
+        Assert.IsFalse(detail!.Contains(userProfile, StringComparison.Ordinal),
+            "AddWellKnownSensitiveStrings must scrub the raw user-profile path from telemetry payloads; a no-op would leak it.");
+        StringAssert.Contains(detail!, "<UserDirectory>",
+            "The scrubbed user-profile path should be replaced with the <UserDirectory> placeholder.");
     }
 
     private static InvalidOperationException CreateExceptionWithInner()
