@@ -84,19 +84,21 @@ public class ControlsSearchServiceTests
     }
 
     [TestMethod]
-    public async Task GetEngineAsync_NamespacesTagsByProvider_NoCollision()
+    public async Task GetEngineAsync_CollidingControlIdsAcrossSources_BothSurvive()
     {
-        // Both providers expose the same bare controlId "colorpicker".
+        // Both providers expose the same bare controlId "colorpicker" (and a
+        // same-named tag). Tags are namespaced by provider id ("{id}:{controlId}")
+        // so neither the scenarios nor the tag entries overwrite each other —
+        // both source-prefixed scenarios must be present in the merged corpus.
         var gallery = new FakeSearchProvider("gallery", Data("gallery", "colorpicker"));
         var toolkit = new FakeSearchProvider("toolkit", Data("toolkit", "colorpicker"));
         var sut = new ControlsSearchService([gallery, toolkit]);
 
-        // Both colliding controls must survive into the engine (proves tags didn't overwrite).
         var engine = await sut.GetEngineAsync();
-        var (gFound, _) = (engine.GetPattern("gallery-colorpicker-1").found, 0);
-        var (tFound, _) = (engine.GetPattern("toolkit-colorpicker-1").found, 0);
-        Assert.IsTrue(gFound);
-        Assert.IsTrue(tFound);
+        var ids = engine.ListAll().Select(x => x.id).ToList();
+
+        CollectionAssert.Contains(ids, "gallery-colorpicker-1", "gallery colorpicker must survive the merge");
+        CollectionAssert.Contains(ids, "toolkit-colorpicker-1", "toolkit colorpicker must survive the merge");
     }
 
     [TestMethod]

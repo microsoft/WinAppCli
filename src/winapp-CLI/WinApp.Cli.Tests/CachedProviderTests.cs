@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Net.Http;
 using WinApp.Cli.Services.Controls;
 
 namespace WinApp.Cli.Tests;
@@ -113,15 +114,26 @@ public class CachedProviderTests
     }
 
     [TestMethod]
-    public async Task ForceRefresh_FetchFails_FallsBackToExistingCache()
+    public async Task ForceRefresh_FetchThrows_FallsBackToExistingCache()
     {
-        bool fail = false;
-        var provider = new StubProvider(_cacheRoot.FullName, () => fail ? ProviderData.Empty : SampleData());
+        bool throwNow = false;
+        var provider = new StubProvider(_cacheRoot.FullName,
+            () => throwNow ? throw new HttpRequestException("network down") : SampleData());
         await provider.LoadAsync();   // seed good cache
 
-        fail = true;                  // now the refresh "fails"
+        throwNow = true;              // now the refresh throws
         var data = await provider.LoadAsync(forceRefresh: true);
 
-        Assert.AreEqual(1, data.Scenarios.Length, "a failed forced refresh should fall back to the existing cache, not drop data");
+        Assert.AreEqual(1, data.Scenarios.Length, "a thrown forced-refresh failure should fall back to the existing cache");
+    }
+
+    [TestMethod]
+    public async Task ColdCache_FetchThrows_ReturnsEmpty()
+    {
+        var provider = new StubProvider(_cacheRoot.FullName, () => throw new HttpRequestException("offline"));
+
+        var data = await provider.LoadAsync();
+
+        Assert.AreEqual(0, data.Scenarios.Length, "a cold-cache fetch failure should degrade to Empty, not throw");
     }
 }

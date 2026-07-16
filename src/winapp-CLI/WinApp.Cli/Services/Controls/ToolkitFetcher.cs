@@ -373,6 +373,7 @@ internal static partial class ToolkitFetcher
 
             return scenarios;
         }
+        catch (OperationCanceledException) { throw; }
         catch { return null; }
         finally { sem.Release(); }
     }
@@ -422,6 +423,7 @@ internal static partial class ToolkitFetcher
 
             return new MdData(cid, tags, keywords, controlDesc, sampleDescs);
         }
+        catch (OperationCanceledException) { throw; }
         catch { return new MdData(null, null, null, null, null); }
         finally { sem.Release(); }
     }

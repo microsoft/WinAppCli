@@ -283,6 +283,7 @@ internal static partial class GalleryFetcher
                 });
             }
         }
+        catch (OperationCanceledException) { throw; }
         catch { /* skip this control */ }
         finally { semaphore.Release(); }
 

@@ -91,8 +91,23 @@ internal abstract class CachedProviderBase : ISearchProvider
         }
 
         // Cold/stale cache (or forced): no embedded snapshot exists, so fetch
-        // from GitHub. On success prime the cache and return.
-        var fetched = await FetchAsync(cancellationToken).ConfigureAwait(false);
+        // from GitHub. Treat a thrown transport/parse failure the same as an
+        // empty result so cold-cache offline surfaces the friendly "run online
+        // once" error and a forced refresh can fall back to the existing cache.
+        ProviderData fetched;
+        try
+        {
+            fetched = await FetchAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            fetched = ProviderData.Empty;
+        }
+
         if (fetched.Scenarios.Length > 0)
         {
             await TryWriteCacheAsync(fetched, cancellationToken).ConfigureAwait(false);
