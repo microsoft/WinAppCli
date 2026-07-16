@@ -194,6 +194,11 @@ internal abstract class CachedProviderBase : ISearchProvider
                 await PathSafety.AtomicWriteAllTextAsync(keywordsPath,
                     JsonSerializer.Serialize(data.Keywords, ControlsJsonContext.Default.DictionaryStringStringArray), Utf8NoBom, cancellationToken).ConfigureAwait(false);
             }
+            else if (File.Exists(keywordsPath))
+            {
+                // A refresh with no keywords must not leave a stale keywords.json behind.
+                File.Delete(keywordsPath);
+            }
             await PathSafety.AtomicWriteAllTextAsync(versionPath, CacheVersion.Current, Utf8NoBom, cancellationToken).ConfigureAwait(false);
             await PathSafety.AtomicWriteAllTextAsync(timestampPath, DateTime.UtcNow.ToString("o"), Utf8NoBom, cancellationToken).ConfigureAwait(false);
         }

@@ -152,6 +152,15 @@ public class FindUiCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task BareIdWithoutValue_Rejected()
+    {
+        _fakeService = FakeControlsSearchService.WithEngine(BuildEngine());
+        // --id requires at least one operand (OneOrMore); a bare --id is a parse error.
+        var exit = await ParseAndInvokeWithCaptureAsync(Command(), ["--id", "--list"]);
+        Assert.AreNotEqual(0, exit, "a bare --id with no value must not silently fall through to another mode");
+    }
+
+    [TestMethod]
     public async Task Refresh_PassedThroughToService()
     {
         var fake = FakeControlsSearchService.WithEngine(BuildEngine());

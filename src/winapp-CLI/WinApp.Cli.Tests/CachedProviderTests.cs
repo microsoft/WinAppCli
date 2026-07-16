@@ -31,6 +31,22 @@ public class CachedProviderTests
         catch { /* best-effort */ }
     }
 
+    [TestMethod]
+    public async Task Refresh_WithNoKeywords_DeletesStaleKeywordsFile()
+    {
+        bool withKeywords = true;
+        var provider = new StubProvider(_cacheRoot.FullName,
+            () => withKeywords ? SampleDataWithKeywords() : SampleData());
+        await provider.LoadAsync();   // primes cache with keywords.json
+        var keywordsPath = Path.Combine(_cacheRoot.FullName, "stub", "keywords.json");
+        Assert.IsTrue(File.Exists(keywordsPath), "first refresh should write keywords.json");
+
+        withKeywords = false;
+        await provider.LoadAsync(forceRefresh: true);   // refresh returns no keywords
+
+        Assert.IsFalse(File.Exists(keywordsPath), "a keyword-less refresh must not leave a stale keywords.json");
+    }
+
     private sealed class StubProvider : CachedProviderBase
     {
         private readonly Func<ProviderData> _fetch;
@@ -52,6 +68,15 @@ public class CachedProviderTests
     {
         var s = new Scenario { Id = $"{controlId}-1", ControlId = controlId, ControlName = controlId, HeaderText = "sample", Source = "stub" };
         return new ProviderData([s], new Dictionary<string, string[]> { [controlId] = [controlId] }, new());
+    }
+
+    private static ProviderData SampleDataWithKeywords(string controlId = "tabview")
+    {
+        var s = new Scenario { Id = $"{controlId}-1", ControlId = controlId, ControlName = controlId, HeaderText = "sample", Source = "stub" };
+        return new ProviderData(
+            [s],
+            new Dictionary<string, string[]> { [controlId] = [controlId] },
+            new Dictionary<string, string[]> { [controlId] = ["kw"] });
     }
 
     private string TimestampPath => Path.Combine(_cacheRoot.FullName, "stub", "last-updated.txt");

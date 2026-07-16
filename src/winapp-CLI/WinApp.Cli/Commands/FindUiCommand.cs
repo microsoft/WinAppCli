@@ -40,7 +40,7 @@ internal sealed class FindUiCommand : Command, IShortDescription
         IdOption = new Option<string[]>("--id")
         {
             Description = "Fetch full XAML + C# (and prerequisite notes) for one or more scenario ids from a prior search (e.g. gallery-tabview-1).",
-            Arity = ArgumentArity.ZeroOrMore,
+            Arity = ArgumentArity.OneOrMore,
             AllowMultipleArgumentsPerToken = true
         };
 
