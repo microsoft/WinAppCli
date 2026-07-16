@@ -50,6 +50,9 @@ internal sealed partial class UiAutomationService
 
         public bool TrySetViaRangeValuePattern(double value)
         {
+            // Coverage ceiling (issue #630): a writable RangeValuePattern provider that lacks a
+            // winning ValuePattern is not exposed by the deterministic WinForms fixture; tests cover
+            // the fallback ordering and the live failure path.
             try
             {
                 var rangePattern = (IUIAutomationRangeValuePattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_RangeValuePatternId);
@@ -65,6 +68,9 @@ internal sealed partial class UiAutomationService
 
         public bool TrySetViaLegacyIAccessible(string text)
         {
+            // Coverage ceiling (issue #630): the success path is covered by live controls; the
+            // LegacyIAccessible COM failure arm requires faulting a native provider after pattern
+            // acquisition, which standard WinForms providers do not do deterministically.
             try
             {
                 var legacyPattern = (IUIAutomationLegacyIAccessiblePattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_LegacyIAccessiblePatternId);

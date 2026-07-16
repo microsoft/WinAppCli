@@ -1981,7 +1981,7 @@ return Task.FromResult<UiElement?>(null);
         }
     }
 
-    private static string GetControlTypeName(UIA_CONTROLTYPE_ID controlType) => controlType switch
+    internal static string GetControlTypeName(UIA_CONTROLTYPE_ID controlType) => controlType switch
     {
         UIA_CONTROLTYPE_ID.UIA_ButtonControlTypeId => "Button",
         UIA_CONTROLTYPE_ID.UIA_CalendarControlTypeId => "Calendar",
@@ -2026,7 +2026,7 @@ return Task.FromResult<UiElement?>(null);
         _ => $"Unknown({(int)controlType})"
     };
 
-    private static int MapControlType(string typeName) => typeName switch
+    internal static int MapControlType(string typeName) => typeName switch
     {
         "Button" => (int)UIA_CONTROLTYPE_ID.UIA_ButtonControlTypeId,
         "CheckBox" => (int)UIA_CONTROLTYPE_ID.UIA_CheckBoxControlTypeId,

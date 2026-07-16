@@ -27,12 +27,13 @@ internal static partial class WgcCapture
     // D3D11_SDK_VERSION — must be 7 per d3d11.h. CsWin32 doesn't project the
     // numeric constant for this header, so it's defined here.
     private const uint D3D11_SDK_VERSION = 7;
+    internal static Func<bool> s_isSupported = GraphicsCaptureSession.IsSupported;
 
     public static bool IsSupported()
     {
         try
         {
-            return GraphicsCaptureSession.IsSupported();
+            return s_isSupported();
         }
         catch
         {
@@ -42,7 +43,7 @@ internal static partial class WgcCapture
 
     public static async Task<(byte[] Pixels, int Width, int Height)> CaptureAsync(HWND hwnd, ILogger logger, CancellationToken ct)
     {
-        if (!GraphicsCaptureSession.IsSupported())
+        if (!s_isSupported())
         {
             throw new PlatformNotSupportedException("Windows.Graphics.Capture is not supported on this system.");
         }
@@ -131,6 +132,11 @@ internal static partial class WgcCapture
         }
     }
 
+    /// <remarks>
+    /// Coverage ceiling (issue #630): this is the innermost WinRT/DXGI projection boundary for
+    /// Windows.Graphics.Capture. It requires a real D3D device and COM ABI ownership transfer; tests
+    /// cover callers and cleanup seams, while this native interop call remains environment-bound.
+    /// </remarks>
     private static unsafe IDirect3DDevice CreateDirect3DDevice(D3D.ID3D11Device device)
     {
         var d3dDevicePtr = ComInterfaceMarshaller<D3D.ID3D11Device>.ConvertToUnmanaged(device);
@@ -166,6 +172,11 @@ internal static partial class WgcCapture
         }
     }
 
+    /// <remarks>
+    /// Coverage ceiling (issue #630): this is the innermost IGraphicsCaptureItemInterop native call.
+    /// It can only succeed for a real HWND on an interactive desktop and cannot be faked without
+    /// replacing the WinRT activation factory itself.
+    /// </remarks>
     private static unsafe GraphicsCaptureItem CreateItemForWindow(HWND hwnd)
     {
         using var factory = ActivationFactory.Get("Windows.Graphics.Capture.GraphicsCaptureItem");
@@ -201,6 +212,11 @@ internal static partial class WgcCapture
         }
     }
 
+    /// <remarks>
+    /// Coverage ceiling (issue #630): GPU-to-CPU readback depends on live WGC/D3D frame resources.
+    /// Deterministic tests cover blank-frame detection and record orchestration; this native copy loop
+    /// is exercised only on hosts where Windows.Graphics.Capture produces non-blank frames.
+    /// </remarks>
     private static unsafe (byte[] Pixels, int Width, int Height) CopyFrame(
         D3D.ID3D11Device device,
         D3D.ID3D11DeviceContext context,
@@ -270,6 +286,11 @@ internal static partial class WgcCapture
         }
     }
 
+    /// <remarks>
+    /// Coverage ceiling (issue #630): this is the innermost IDirect3DDxgiInterfaceAccess COM
+    /// extraction for a WinRT surface. It requires a real Direct3D surface and covers only native ABI
+    /// ownership/error cleanup that cannot be triggered safely with managed fakes.
+    /// </remarks>
     private static unsafe D3D.ID3D11Texture2D GetTexture(IDirect3DSurface surface)
     {
         var surfacePtr = ((IWinRTObject)surface).NativeObject.ThisPtr;
@@ -305,7 +326,7 @@ internal static partial class WgcCapture
         }
     }
 
-    private static bool IsBlankCapture(byte[] pixels)
+    internal static bool IsBlankCapture(byte[] pixels)
     {
         // Check if all pixels are zero (black/unrendered frame). Int-sized chunks for speed.
         var span = MemoryMarshal.Cast<byte, long>(pixels.AsSpan());
@@ -348,7 +369,7 @@ internal static partial class WgcCapture
         int GetInterface(in Guid iid, out IntPtr ppvObject);
     }
 
-    private static void ThrowIfFailed(this int hr, string operation)
+    internal static void ThrowIfFailed(this int hr, string operation)
     {
         if (hr < 0)
         {
@@ -356,4 +377,3 @@ internal static partial class WgcCapture
         }
     }
 }
-

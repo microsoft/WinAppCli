@@ -20,7 +20,7 @@ internal static partial class WgcCapture
     /// </summary>
     public static FrameGrabber StartGrabber(HWND hwnd, ILogger logger, int fps = 0)
     {
-        if (!GraphicsCaptureSession.IsSupported())
+        if (!s_isSupported())
         {
             throw new PlatformNotSupportedException("Windows.Graphics.Capture is not supported on this system.");
         }

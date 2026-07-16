@@ -12,6 +12,12 @@ namespace WinApp.Cli.Services;
 /// </summary>
 internal sealed partial class UiAutomationService
 {
+    internal static Func<Windows.Win32.Foundation.HWND, int, int, byte[]> s_captureFromWindow = CaptureFromWindow;
+    internal static Func<int, int, int, int, int, int, byte[]> s_captureFromScreenScaled = CaptureFromScreenScaled;
+    internal static Action<Windows.Win32.Foundation.HWND> s_foregroundWindowForBlankRetry =
+        hwnd => Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
+    internal static Action<int> s_sleepForBlankRetry = Thread.Sleep;
+
     public async Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, CancellationToken ct)
     {
         _logger.LogDebug("Taking screenshot of process {Pid} (captureScreen={CaptureScreen}, focus={Focus})", session.ProcessId, captureScreen, focus);
@@ -131,19 +137,24 @@ internal sealed partial class UiAutomationService
         return hr.Succeeded ? visibleRect : fallbackRect;
     }
 
-    private byte[] CaptureFromWindowWithBlankRetry(Windows.Win32.Foundation.HWND hwnd, int width, int height)
+    internal byte[] CaptureFromWindowWithBlankRetry(Windows.Win32.Foundation.HWND hwnd, int width, int height)
     {
-        var pixels = CaptureFromWindow(hwnd, width, height);
+        var pixels = s_captureFromWindow(hwnd, width, height);
         if (IsBlankCapture(pixels))
         {
             _logger.LogDebug("PrintWindow returned blank frame; foregrounding and retrying");
-            Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
-            Thread.Sleep(200);
-            pixels = CaptureFromWindow(hwnd, width, height);
+            s_foregroundWindowForBlankRetry(hwnd);
+            s_sleepForBlankRetry(200);
+            pixels = s_captureFromWindow(hwnd, width, height);
         }
         return pixels;
     }
 
+    /// <remarks>
+    /// Coverage ceiling (issue #630): this is the innermost GDI/PrintWindow capture boundary. Tests
+    /// cover the blank-retry and caller orchestration through seams; the native DC/bitmap handles are
+    /// only safe to exercise against a real visible window.
+    /// </remarks>
     private static unsafe byte[] CaptureFromWindow(Windows.Win32.Foundation.HWND hwnd, int width, int height)
     {
         var hdcWindow = Windows.Win32.PInvoke.GetDC(hwnd);
@@ -180,6 +191,10 @@ internal sealed partial class UiAutomationService
         }
     }
 
+    /// <remarks>
+    /// Coverage ceiling (issue #630): this is the innermost screen-DC BitBlt boundary. It reads the
+    /// shared desktop and is intentionally covered only by gated real capture tests.
+    /// </remarks>
     private static unsafe byte[] CaptureFromScreen(int x, int y, int width, int height)
     {
         var hdcScreen = Windows.Win32.PInvoke.GetDC(Windows.Win32.Foundation.HWND.Null);
@@ -217,14 +232,14 @@ internal sealed partial class UiAutomationService
         }
     }
 
-    private static byte[] CaptureScreenFrame(
+    internal static byte[] CaptureScreenFrame(
         int x, int y, int cropWidth, int cropHeight,
         int encoderWidth, int encoderHeight,
         int displayWidth, int displayHeight)
     {
         var (offsetX, offsetY, fitW, fitH) = ComputeFittedContentRect(
             cropWidth, cropHeight, encoderWidth, encoderHeight, displayWidth, displayHeight);
-        var content = CaptureFromScreenScaled(x, y, cropWidth, cropHeight, fitW, fitH);
+        var content = s_captureFromScreenScaled(x, y, cropWidth, cropHeight, fitW, fitH);
         if (offsetX == 0 && offsetY == 0 && fitW == encoderWidth && fitH == encoderHeight)
         {
             return content;
@@ -245,6 +260,11 @@ internal sealed partial class UiAutomationService
         return frame;
     }
 
+    /// <remarks>
+    /// Coverage ceiling (issue #630): this is the innermost scaled screen-DC StretchBlt boundary.
+    /// Deterministic tests cover letterbox composition through a seam; native readback is gated to
+    /// interactive capture hosts.
+    /// </remarks>
     private static unsafe byte[] CaptureFromScreenScaled(int x, int y, int sourceWidth, int sourceHeight, int targetWidth, int targetHeight)
     {
         var hdcScreen = Windows.Win32.PInvoke.GetDC(Windows.Win32.Foundation.HWND.Null);
@@ -288,6 +308,11 @@ internal sealed partial class UiAutomationService
         }
     }
 
+    /// <remarks>
+    /// Coverage ceiling (issue #630): this is the innermost GetDIBits extraction from a native HBITMAP.
+    /// It is covered indirectly by real screenshot attempts and cannot be executed with managed-only
+    /// fakes without fabricating native GDI handles.
+    /// </remarks>
     private static unsafe byte[] ExtractPixels(Windows.Win32.Graphics.Gdi.HDC hdc, Windows.Win32.Graphics.Gdi.HBITMAP hBitmap, int width, int height)
     {
         var bmi = new Windows.Win32.Graphics.Gdi.BITMAPINFO
@@ -313,7 +338,7 @@ internal sealed partial class UiAutomationService
         return pixelData;
     }
 
-    private static bool IsBlankCapture(byte[] pixels)
+    internal static bool IsBlankCapture(byte[] pixels)
     {
         // Check if all pixels are zero (black/unrendered frame).
         // Use int-sized chunks for speed on large buffers.

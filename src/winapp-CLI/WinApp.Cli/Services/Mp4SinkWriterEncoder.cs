@@ -176,6 +176,11 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
     /// Writes a single top-down BGRA frame. <paramref name="bgra"/> must contain
     /// exactly Width*Height*4 bytes.
     /// </summary>
+    /// <remarks>
+    /// Coverage ceiling (issue #630): the validation and successful one-frame path are tested, but
+    /// the per-frame Media Foundation buffer/sample COM error cleanup arms require faulting native MF
+    /// objects after creation and cannot be triggered safely with managed fakes.
+    /// </remarks>
     public void WriteFrame(ReadOnlySpan<byte> bgra, long sampleTimeHns, long sampleDurationHns)
     {
         if (bgra.Length < _frameBytes)
