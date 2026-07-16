@@ -63,6 +63,7 @@ internal sealed class UiaTestFixture : IDisposable
     public LinkLabel Link { get; private set; } = null!;
     public PictureBox Picture { get; private set; } = null!;
     public HScrollBar RangeBar { get; private set; } = null!;
+    public Panel NamelessPanel { get; private set; } = null!;
 
     // A Button and a Label that share the same accessible Name (but different AutomationIds) so a
     // name query matches both — exercising FindSingle's "prefer the only invokable match" branch.
@@ -436,6 +437,15 @@ internal sealed class UiaTestFixture : IDisposable
             });
         }
 
+        NamelessPanel = new Panel
+        {
+            Left = col + 220,
+            Top = 10,
+            Width = 40,
+            Height = 40,
+            BorderStyle = BorderStyle.FixedSingle,
+        };
+
         Menu = new MenuStrip { Name = "menuMain", AccessibleName = "Main Menu" };
         var fileMenu = new ToolStripMenuItem("File") { Name = "menuFile" };
         fileMenu.DropDownItems.Add(new ToolStripMenuItem("Open") { Name = "menuOpen" });
@@ -474,6 +484,7 @@ internal sealed class UiaTestFixture : IDisposable
         form.Controls.Add(Picture);
         form.Controls.Add(RangeBar);
         form.Controls.Add(HScrollPanel);
+        form.Controls.Add(NamelessPanel);
         form.Controls.Add(DupButton);
         form.Controls.Add(DupLabel);
         form.Controls.Add(Menu);
@@ -511,6 +522,25 @@ internal sealed class UiaTestFixture : IDisposable
                     Top = 20,
                     Width = 160,
                     Height = 30,
+                });
+                _ownedWindow.Controls.Add(new Button
+                {
+                    Name = "btnOwnedShared",
+                    Text = "Owned Shared",
+                    AccessibleName = "Owned Shared Widget",
+                    Left = 20,
+                    Top = 60,
+                    Width = 120,
+                    Height = 30,
+                });
+                _ownedWindow.Controls.Add(new Label
+                {
+                    Name = "lblOwnedShared",
+                    Text = "Owned Shared",
+                    AccessibleName = "Owned Shared Widget",
+                    Left = 150,
+                    Top = 66,
+                    Width = 120,
                 });
                 _ownedWindow.Show();
             }

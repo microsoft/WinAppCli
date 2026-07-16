@@ -51,6 +51,7 @@ public partial class RealUiAutomationTests
     [TestCleanup]
     public void ResetNativeSeams()
     {
+        UiAutomationService.ResetNativeSeams();
         WgcCapture.s_isSupported = Windows.Graphics.Capture.GraphicsCaptureSession.IsSupported;
         WgcCapture.s_startGrabber = (hwnd, logger, fps) => WgcCapture.StartGrabber(hwnd, logger, fps);
         UiAutomationService.s_captureFromWindow = (Func<Windows.Win32.Foundation.HWND, int, int, byte[]>)Delegate.CreateDelegate(

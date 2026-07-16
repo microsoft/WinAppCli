@@ -22,6 +22,7 @@ public class UiAutomationServicePureTests
     [TestCleanup]
     public void CleanupSeams()
     {
+        UiAutomationService.ResetNativeSeams();
         UiAutomationService.s_captureFromWindow = GetRealCaptureFromWindow();
         UiAutomationService.s_captureFromScreenScaled = GetRealCaptureFromScreenScaled();
         UiAutomationService.s_foregroundWindowForBlankRetry = hwnd => Windows.Win32.PInvoke.SetForegroundWindow(hwnd);

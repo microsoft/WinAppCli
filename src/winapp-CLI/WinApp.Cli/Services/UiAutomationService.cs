@@ -27,6 +27,27 @@ internal sealed partial class UiAutomationService : IUiAutomationService
     private readonly IUIAutomation _automation;
     private readonly ISelectorService _selectorService;
 
+    internal static Func<UiAutomationService, UiSessionInfo, IUIAutomationElement?> s_getRootElement = (service, session) => service.GetRootElementCore(session);
+    internal static Func<UiAutomationService, nint, IUIAutomationElement?> s_getRootElementForHwnd = (service, hwnd) => service.GetRootElementForHwndCore(hwnd);
+    internal static Func<UiAutomationService, UiSessionInfo, List<(nint Hwnd, int Pid, string Title)>> s_getAllAppWindows = (service, session) => service.GetAllAppWindowsCore(session);
+    internal static Func<UiAutomationService, UiSessionInfo, SelectorExpression, UiElement?> s_findElementOnOtherWindows = (service, session, selector) => service.FindElementOnOtherWindowsCore(session, selector);
+    internal static Func<UiAutomationService, IUIAutomationElement, string, int, List<IUIAutomationElement>> s_manualTreeSearch = (service, root, query, maxResults) => service.ManualTreeSearchCore(root, query, maxResults);
+    internal static Func<UiAutomationService, IUIAutomationElement, IUIAutomationElement, IUIAutomationElement?> s_findInvokableAncestor = (service, element, root) => service.FindInvokableAncestorCore(element, root);
+    internal static Func<UiAutomationService, IUIAutomationElement?> s_getFocusedElement = service => service._automation.GetFocusedElement();
+    internal static Func<IUIAutomationElement, int> s_getElementProcessId = element => element.get_CurrentProcessId();
+
+    internal static void ResetNativeSeams()
+    {
+        s_getRootElement = (service, session) => service.GetRootElementCore(session);
+        s_getRootElementForHwnd = (service, hwnd) => service.GetRootElementForHwndCore(hwnd);
+        s_getAllAppWindows = (service, session) => service.GetAllAppWindowsCore(session);
+        s_findElementOnOtherWindows = (service, session, selector) => service.FindElementOnOtherWindowsCore(session, selector);
+        s_manualTreeSearch = (service, root, query, maxResults) => service.ManualTreeSearchCore(root, query, maxResults);
+        s_findInvokableAncestor = (service, element, root) => service.FindInvokableAncestorCore(element, root);
+        s_getFocusedElement = service => service._automation.GetFocusedElement();
+        s_getElementProcessId = element => element.get_CurrentProcessId();
+    }
+
     public UiAutomationService(ILogger<UiAutomationService> logger, ISelectorService selectorService)
     {
         _logger = logger;
@@ -1130,7 +1151,7 @@ return Task.FromResult<UiElement?>(null);
         IUIAutomationElement? focused;
         try
         {
-            focused = _automation.GetFocusedElement();
+            focused = s_getFocusedElement(this);
         }
         catch
         {
@@ -1145,7 +1166,7 @@ return Task.FromResult<UiElement?>(null);
         // Verify the focused element belongs to the target process
         try
         {
-            var pid = focused.get_CurrentProcessId();
+            var pid = s_getElementProcessId(focused);
             if (pid != session.ProcessId)
             {
                 return Task.FromResult<UiElement?>(null);
@@ -1373,6 +1394,12 @@ return Task.FromResult<UiElement?>(null);
     /// </summary>
     private List<(nint Hwnd, int Pid, string Title)> GetAllAppWindows(UiSessionInfo session)
     {
+        _ = _logger;
+        return s_getAllAppWindows(this, session);
+    }
+
+    private List<(nint Hwnd, int Pid, string Title)> GetAllAppWindowsCore(UiSessionInfo session)
+    {
         var windows = FindWindowsByPid(session.ProcessId);
 
         // Remove internal system windows from same-PID results
@@ -1429,6 +1456,12 @@ return Task.FromResult<UiElement?>(null);
     /// <summary>Get UIA root element for a specific HWND.</summary>
     private IUIAutomationElement? GetRootElementForHwnd(nint hwnd)
     {
+        _ = _logger;
+        return s_getRootElementForHwnd(this, hwnd);
+    }
+
+    private IUIAutomationElement? GetRootElementForHwndCore(nint hwnd)
+    {
         try
         {
             return _automation.ElementFromHandle(new Windows.Win32.Foundation.HWND(hwnd));
@@ -1444,6 +1477,12 @@ return Task.FromResult<UiElement?>(null);
     /// Called when FindSingleElementAsync fails to find the element on the main window.
     /// </summary>
     private UiElement? FindElementOnOtherWindows(UiSessionInfo session, SelectorExpression selector)
+    {
+        _ = _logger;
+        return s_findElementOnOtherWindows(this, session, selector);
+    }
+
+    private UiElement? FindElementOnOtherWindowsCore(UiSessionInfo session, SelectorExpression selector)
     {
         var allWindows = GetAllAppWindows(session);
         var mainHwnd = (nint)session.WindowHandle;
@@ -1526,6 +1565,12 @@ return Task.FromResult<UiElement?>(null);
     }
 
     private IUIAutomationElement? GetRootElement(UiSessionInfo session)
+    {
+        _ = _logger;
+        return s_getRootElement(this, session);
+    }
+
+    private IUIAutomationElement? GetRootElementCore(UiSessionInfo session)
     {
         // If we have a specific window handle, use it directly
         if (session.WindowHandle != 0)
@@ -1641,6 +1686,12 @@ return Task.FromResult<UiElement?>(null);
     /// </summary>
     private List<IUIAutomationElement> ManualTreeSearch(IUIAutomationElement root, string query, int maxResults, int maxDepth = 25)
     {
+        _ = _logger;
+        return s_manualTreeSearch(this, root, query, maxResults);
+    }
+
+    private List<IUIAutomationElement> ManualTreeSearchCore(IUIAutomationElement root, string query, int maxResults, int maxDepth = 25)
+    {
         var walker = _automation.get_ControlViewWalker();
         var results = new List<IUIAutomationElement>();
         ManualTreeSearchRecursive(walker, root, query, maxResults, maxDepth, 0, results);
@@ -1735,6 +1786,12 @@ return Task.FromResult<UiElement?>(null);
     /// Stops at the root element to avoid walking past the target window.
     /// </summary>
     private IUIAutomationElement? FindInvokableAncestor(IUIAutomationElement element, IUIAutomationElement root)
+    {
+        _ = _logger;
+        return s_findInvokableAncestor(this, element, root);
+    }
+
+    private IUIAutomationElement? FindInvokableAncestorCore(IUIAutomationElement element, IUIAutomationElement root)
     {
         var walker = _automation.get_ControlViewWalker();
         var current = walker.GetParentElement(element);
