@@ -11,7 +11,7 @@ public partial class UiCommandTests
 {
     // ---------------------------------------------------------------------
     // touch — synthetic touch gestures (tap/swipe/pinch/…) at a selector
-    // center or explicit app x,y coordinates. Exercised via FakePointerInput
+    // center or explicit screen x,y coordinates. Exercised via FakePointerInput
     // (records contacts), FakeForegroundGuard (proceeds) and
     // FakeUiAutomationService (supplies the bounds rect via TryGetWindowRect).
     // ---------------------------------------------------------------------

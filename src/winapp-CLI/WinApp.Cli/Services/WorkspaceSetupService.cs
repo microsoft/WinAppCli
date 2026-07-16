@@ -46,19 +46,12 @@ internal class WorkspaceSetupService(
     IDotNetService dotNetService,
     IStatusService statusService,
     ICurrentDirectoryProvider currentDirectoryProvider,
-    NugetSourceProvider nugetSourceProvider,
     IAnsiConsole ansiConsole,
     ILogger<WorkspaceSetupService> logger) : IWorkspaceSetupService
 {
     public async Task<int> SetupWorkspaceAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken = default)
     {
         configService.ConfigPath = new FileInfo(Path.Combine(options.ConfigDir.FullName, "winapp.yaml"));
-
-        // Resolve the user's nuget.config hierarchy from the selected project/config directory, which can
-        // differ from the process working directory when `init <dir>` / `restore --config-dir <dir>` is
-        // used. Without this, a project-level private feed, credentials or globalPackagesFolder would be
-        // ignored unless the user first changed into that directory.
-        nugetSourceProvider.SetConfigRoot(options.ConfigDir);
 
         // Detect .NET project (.csproj) in the base directory
         FileInfo? csprojFile = null;

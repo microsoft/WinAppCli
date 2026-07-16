@@ -41,7 +41,7 @@ internal static class PointerGesturePlanner
     }
 
     /// <summary>
-    /// Parses a single <c>x,y</c> integer pair (app coordinates as reported by <c>ui inspect</c>).
+    /// Parses a single <c>x,y</c> integer pair (screen coordinates as reported by <c>ui inspect</c>).
     /// </summary>
     public static bool TryParsePoint(string? value, out PointerPoint point)
         => CoordinateParser.TryParsePoint(value, out point);
