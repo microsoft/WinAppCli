@@ -625,7 +625,28 @@ public partial class UiCommandTests
         Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
     }
 
-    // LOW: lone right-Win key (vk=0x5c) is soft-blocked without --allow-system-keys
+    // #656 — a single send-input invocation containing BOTH hard-blocked combos must compose both
+    // names AND both distinct reasons. Guard-level ordering is covered in SystemKeyGuardTests; this
+    // asserts the command-level message actually stitches each combo to its own reason (SAS vs. lock),
+    // not just the first one.
+    [TestMethod]
+    public async Task SendKeys_CtrlAltDelAndWinL_ViaSendInput_ComposesBothNamesAndReasons()
+    {
+        _fakeSession.SessionResult.WindowHandle = 4242;
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["ctrl+alt+del win+l", "-a", "TestApp", "--via", "send-input", "--allow-system-keys"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count, "neither hard-blocked combo may reach the transport");
+        var stderr = ConsoleStdErr.ToString();
+        // Both combo names must appear...
+        StringAssert.Contains(stderr, "ctrl+alt+del", "message must name ctrl+alt+del");
+        StringAssert.Contains(stderr, "win+l", "message must name win+l");
+        // ...each stitched to its OWN distinct reason: SAS for ctrl+alt+del, workstation-lock for win+l.
+        StringAssert.Contains(stderr, "SAS", "message must carry the ctrl+alt+del SAS reason");
+        StringAssert.Contains(stderr, "locks the workstation", "message must carry the win+l lock reason");
+    }
     [TestMethod]
     public async Task SendKeys_LoneRWin_ViaSendInput_WithoutAllow_IsBlocked()
     {
