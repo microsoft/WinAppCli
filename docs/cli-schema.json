@@ -1,6 +1,6 @@
 {
   "name": "winapp",
-  "version": "0.4.1",
+  "version": "1.0.0",
   "schemaVersion": "1.0",
   "description": "CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows",
   "hidden": false,
@@ -1799,11 +1799,11 @@
           }
         },
         "drag": {
-          "description": "Press the mouse button at one point, move to another, then release. 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or app-relative x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.",
+          "description": "Press the mouse button at one point, move to another, then release. 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or screen x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.",
           "hidden": false,
           "arguments": {
             "from": {
-              "description": "Start point — an element selector (drags from its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200).",
+              "description": "Start point — an element selector (drags from its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200).",
               "order": 0,
               "hidden": false,
               "valueType": "System.String",
@@ -1814,7 +1814,7 @@
               }
             },
             "to": {
-              "description": "End point — an element selector (drops at its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400).",
+              "description": "End point — an element selector (drops at its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400).",
               "order": 1,
               "hidden": false,
               "valueType": "System.String",
@@ -2766,7 +2766,7 @@
           }
         },
         "pen": {
-          "description": "Inject synthetic pen/stylus input using the Windows synthetic-pointer API. Taps or draws ink strokes with configurable pressure, tilt and eraser mode, at an element's center or explicit app x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable (Windows 10 1809+).",
+          "description": "Inject synthetic pen/stylus input using the Windows synthetic-pointer API. Taps or draws ink strokes with configurable pressure, tilt and eraser mode, at an element's center or explicit screen x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable (Windows 10 1809+).",
           "hidden": false,
           "arguments": {
             "selector": {
@@ -2798,7 +2798,7 @@
               "recursive": false
             },
             "--at": {
-              "description": "Pen contact point as app coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. Ignored when --path is given.",
+              "description": "Pen contact point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. Ignored when --path is given.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,
@@ -3907,7 +3907,7 @@
           }
         },
         "touch": {
-          "description": "Inject synthetic touch input using the Windows touch-injection API. Supports tap, double-tap, long-press, swipe, pinch and stretch gestures at an element's center or explicit app x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable.",
+          "description": "Inject synthetic touch input using the Windows touch-injection API. Supports tap, double-tap, long-press, swipe, pinch and stretch gestures at an element's center or explicit screen x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable.",
           "hidden": false,
           "arguments": {
             "selector": {
@@ -3939,7 +3939,7 @@
               "recursive": false
             },
             "--at": {
-              "description": "Explicit start point as app coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center.",
+              "description": "Explicit start point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,
@@ -4061,7 +4061,7 @@
               "recursive": false
             },
             "--to-point": {
-              "description": "End point x,y for a swipe (app coordinates). Takes precedence over --direction.",
+              "description": "End point x,y for a swipe (screen coordinates). Takes precedence over --direction.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,

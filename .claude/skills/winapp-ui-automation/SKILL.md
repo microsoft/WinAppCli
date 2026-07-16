@@ -1,7 +1,7 @@
 ---
 name: winapp-ui-automation
 description: Inspect and interact with running Windows app UIs from the command line using UI Automation (UIA). Use when an AI agent or developer needs to inspect a UI element tree, find controls, take screenshots, click buttons, read or set text, or verify UI state in a running Windows app. Works with any framework WinUI 3, WPF, WinForms, Win32, Electron.
-version: 0.4.1
+version: 1.0.0
 ---
 ## When to use
 - Inspecting a running Windows app's UI from the command line
@@ -169,26 +169,26 @@ winapp ui send-keys "win+shift+v" -a myapp --via send-input --allow-system-keys
 - Per-keystroke events: named keys/combos fire a real `KeyDown` on both transports. For literal typed text, `--via send-input` maps each char to its VK (+Shift) so each character fires a real `KeyDown` + OS-composed `WM_CHAR` (`TextChanged`) — use it when downstream logic keys off `KeyDown` (e.g. WinUI 3/WPF `TextBox`); bring the target window to the foreground first. `--via post-message` posts `WM_CHAR`/`WM_KEYDOWN` to the focused child control (raises `TextChanged`, lands correct text into classic Win32 controls across integrity levels) but does not fire a per-character `KeyDown`, and — because WinUI 3 / UWP / XAML controls are windowless — does **not** reach them at all (named keys and text alike); use `--via send-input` there.
 
 ### Drag (reorder, resize, sliders, drag-and-drop)
-Press the mouse button at one point, move to another, then release with `drag <from> <to>`, where each endpoint is an element selector (uses its center) or app `x,y` coordinates from `ui inspect`. Uses `SendInput` with intermediate moves so apps see a realistic `WM_MOUSEMOVE` stream.
+Press the mouse button at one point, move to another, then release with `drag <from> <to>`, where each endpoint is an element selector (uses its center) or screen `x,y` coordinates from `ui inspect`. Uses `SendInput` with intermediate moves so apps see a realistic `WM_MOUSEMOVE` stream.
 ```powershell
 # Reorder one item onto another (center → center)
 winapp ui drag itm-card-9f8e itm-slot-2c1a -a myapp
 
-# Element center → app coordinates (as reported by `ui inspect`)
+# Element center → screen coordinates (as reported by `ui inspect`)
 winapp ui drag itm-card-9f8e 300,400 -a myapp
 
-# Raw app coordinates → app coordinates
+# Raw screen coordinates → screen coordinates
 winapp ui drag 120,200 480,200 -a myapp
 
 # Right-button drag
 winapp ui drag itm-card-9f8e itm-trash-0001 -a myapp --right
 ```
-- A selector drags from/to the element's center; `x,y` are app coordinates in the same space `ui inspect`/`search` report. Element endpoints are re-resolved just before the drag and fail with `target_moved` if still animating; on a locked/secure desktop the drag fails with `no_interactive_desktop`.
+- A selector drags from/to the element's center; `x,y` are screen coordinates in the same space `ui inspect`/`search` report. Element endpoints are re-resolved just before the drag and fail with `target_moved` if still animating; on a locked/secure desktop the drag fails with `no_interactive_desktop`.
 
 ### Touch gestures (tap, swipe, pinch, stretch, long-press)
-Inject synthetic touch. The contact anchor is an element selector (its center) or an explicit `--at x,y` app coordinate. Prefers the modern synthetic-pointer device and falls back to the legacy touch-injection API.
+Inject synthetic touch. The contact anchor is an element selector (its center) or an explicit `--at x,y` screen coordinate. Prefers the modern synthetic-pointer device and falls back to the legacy touch-injection API.
 ```powershell
-# Tap an element center; or tap explicit app coordinates
+# Tap an element center; or tap explicit screen coordinates
 winapp ui touch btn-ok-1a2b -a myapp
 winapp ui touch -a myapp --at 320,240
 
@@ -506,14 +506,14 @@ Click an element by slug or text search using mouse simulation. Works on element
 
 ### `winapp ui drag`
 
-Press the mouse button at one point, move to another, then release. 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or app-relative x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.
+Press the mouse button at one point, move to another, then release. 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or screen x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `<from>` | No | Start point — an element selector (drags from its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200). |
-| `<to>` | No | End point — an element selector (drops at its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400). |
+| `<from>` | No | Start point — an element selector (drags from its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200). |
+| `<to>` | No | End point — an element selector (drops at its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400). |
 
 #### Options
 <!-- auto-generated from cli-schema.json -->
@@ -528,7 +528,7 @@ Press the mouse button at one point, move to another, then release. 'drag <from>
 
 ### `winapp ui touch`
 
-Inject synthetic touch input using the Windows touch-injection API. Supports tap, double-tap, long-press, swipe, pinch and stretch gestures at an element's center or explicit app x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable.
+Inject synthetic touch input using the Windows touch-injection API. Supports tap, double-tap, long-press, swipe, pinch and stretch gestures at an element's center or explicit screen x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable.
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->
@@ -541,7 +541,7 @@ Inject synthetic touch input using the Windows touch-injection API. Supports tap
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
-| `--at` | Explicit start point as app coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. | (none) |
+| `--at` | Explicit start point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. | (none) |
 | `--direction` | Swipe direction: right (default), left, up, or down. Combined with --distance to compute the end point when --to-point is not given. | `right` |
 | `--distance` | Distance in pixels for pinch/stretch (finger spread) or swipe. | (none) |
 | `--duration-ms` | Glide time in milliseconds for moving gestures (swipe/pinch/stretch). | `300` |
@@ -549,12 +549,12 @@ Inject synthetic touch input using the Windows touch-injection API. Supports tap
 | `--gesture` | Gesture to perform: tap, double-tap, long-press, swipe, pinch, stretch (default: tap). | `tap` |
 | `--hold-ms` | Milliseconds to hold contacts down before lifting (long-press hold time). Defaults to 500 ms when --gesture long-press is used and this option is not set. | (none) |
 | `--json` | Format output as JSON | (none) |
-| `--to-point` | End point x,y for a swipe (app coordinates). Takes precedence over --direction. | (none) |
+| `--to-point` | End point x,y for a swipe (screen coordinates). Takes precedence over --direction. | (none) |
 | `--window` | Target window by HWND (stable handle from list output). Takes precedence over --app. | (none) |
 
 ### `winapp ui pen`
 
-Inject synthetic pen/stylus input using the Windows synthetic-pointer API. Taps or draws ink strokes with configurable pressure, tilt and eraser mode, at an element's center or explicit app x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable (Windows 10 1809+).
+Inject synthetic pen/stylus input using the Windows synthetic-pointer API. Taps or draws ink strokes with configurable pressure, tilt and eraser mode, at an element's center or explicit screen x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable (Windows 10 1809+).
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->
@@ -567,7 +567,7 @@ Inject synthetic pen/stylus input using the Windows synthetic-pointer API. Taps 
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
-| `--at` | Pen contact point as app coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. Ignored when --path is given. | (none) |
+| `--at` | Pen contact point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. Ignored when --path is given. | (none) |
 | `--duration-ms` | Total glide time in milliseconds distributed across the stroke path segments (default: ~10 ms per segment). | (none) |
 | `--eraser` | Use the eraser end of the pen instead of the tip. | (none) |
 | `--json` | Format output as JSON | (none) |

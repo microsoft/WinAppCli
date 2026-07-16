@@ -21,7 +21,7 @@ internal class UiPenCommand : Command, IShortDescription
 
     public static Option<string?> AtOption { get; } = new("--at")
     {
-        Description = "Pen contact point as app coordinates x,y (as reported by 'ui inspect'). " +
+        Description = "Pen contact point as screen coordinates x,y (as reported by 'ui inspect'). " +
                       "Defaults to the selector's element center. Ignored when --path is given."
     };
 
@@ -62,7 +62,7 @@ internal class UiPenCommand : Command, IShortDescription
     public UiPenCommand()
         : base("pen", "Inject synthetic pen/stylus input using the Windows synthetic-pointer API. " +
                "Taps or draws ink strokes with configurable pressure, tilt and eraser mode, at an element's " +
-               "center or explicit app x,y coordinates. Requires an unlocked, interactive desktop with the " +
+               "center or explicit screen x,y coordinates. Requires an unlocked, interactive desktop with the " +
                "target window foregroundable (Windows 10 1809+).")
     {
         Arguments.Add(SharedUiOptions.SelectorArgument);

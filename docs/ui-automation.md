@@ -313,13 +313,13 @@ winapp ui click btn-column1-a3f2 -a myapp --right       # right-click
 > Like the other input-injecting verbs, `click` brings the target to the foreground and **fails fast** (`no_interactive_desktop` on a locked/secure desktop, `foreground_not_target` if focus couldn't be transferred) rather than clicking the wrong window. It also **re-resolves the element just before the button-down**: after positioning the cursor it does one final position check, so a continuously moving/animating target fails with **`target_moved`** instead of reporting success after the click landed on empty space — a reported success means the target was still in place when the button went down.
 
 ### drag
-Press the mouse button at one point, move to another, then release with `drag <from> <to>`, where each endpoint is either an **element selector** (drags from/to the element's center) or **app coordinates `x,y`** exactly as reported by `winapp ui inspect`. Mix and match freely (selector→selector, selector→coords, coords→coords).
+Press the mouse button at one point, move to another, then release with `drag <from> <to>`, where each endpoint is either an **element selector** (drags from/to the element's center) or **screen coordinates `x,y`** exactly as reported by `winapp ui inspect`. Mix and match freely (selector→selector, selector→coords, coords→coords).
 
 Uses `SendInput` with intermediate moves so the app sees a realistic stream of `WM_MOUSEMOVE` messages. Use it for reorder/resize handles, sliders, canvas drawing, and drag-and-drop.
 ```bash
 winapp ui drag itm-card-9f8e itm-slot-2c1a -a myapp           # reorder: card center → slot center
-winapp ui drag itm-card-9f8e 300,400 -a myapp                 # element center → app coords (from inspect)
-winapp ui drag 120,200 480,200 -a myapp                       # raw app coords → app coords
+winapp ui drag itm-card-9f8e 300,400 -a myapp                 # element center → screen coords (from inspect)
+winapp ui drag 120,200 480,200 -a myapp                       # raw screen coords → screen coords
 winapp ui drag itm-card-9f8e itm-trash-0001 -a myapp --right  # right-button drag
 
 # Press-and-hold / long-press and drop-target dwell
@@ -332,15 +332,15 @@ winapp ui drag itm-card-9f8e pane-left-2c1a -a myapp --dwell-ms 350      # settl
 - `--hold-ms <ms>` — Hold the button down at the start before moving (default: 0). With `<from> == <to>` (no movement) this performs a **press-and-hold / long-press** gesture.
 - `--dwell-ms <ms>` — Dwell at the destination after moving, before releasing (default: 0). Lets **drop targets / merge overlays** that arm from a sustained hover (rather than the instant the cursor arrives) latch before the button-up.
 
-> Bare `x,y` are app coordinates in the same space `winapp ui inspect`/`search` report, and a selector resolves to the element's center — inspect first to pick points.
+> Bare `x,y` are screen coordinates in the same space `winapp ui inspect`/`search` report, and a selector resolves to the element's center — inspect first to pick points.
 
 > Like `send-keys --via send-input`, `drag` injects OS-wide at screen coordinates after bringing the target to the foreground. If focus can't be brought to the target (e.g. focus-stealing prevention from a background process), the command **fails (`foreground_not_target`)** rather than dragging on the wrong window — focus or click the window first. On a locked/secure desktop it fails with **`no_interactive_desktop`**. Each element endpoint is **re-resolved immediately before the drag**; if it's still moving/resizing (an animating target), the command fails with **`target_moved`** instead of dragging to a stale point. (Bare `x,y` endpoints can't be re-verified, so they're used as-is.)
 
 ### touch
-Inject synthetic **touch** gestures using the Windows pointer-injection API. The contact anchor is either an **element selector** (uses the element's center) or an explicit **app coordinate `x,y`** via `--at` (same space `winapp ui inspect` reports). Use it for tap/press interactions and multi-touch gestures that mouse simulation can't express.
+Inject synthetic **touch** gestures using the Windows pointer-injection API. The contact anchor is either an **element selector** (uses the element's center) or an explicit **screen coordinate `x,y`** via `--at` (same space `winapp ui inspect` reports). Use it for tap/press interactions and multi-touch gestures that mouse simulation can't express.
 ```bash
 winapp ui touch btn-ok-1a2b -a myapp                                   # tap at the element center
-winapp ui touch -a myapp --at 320,240                                  # tap at explicit app coords
+winapp ui touch -a myapp --at 320,240                                  # tap at explicit screen coords
 winapp ui touch tile-photo-7b3c -a myapp --gesture long-press --hold-ms 600
 winapp ui touch -a myapp --at 100,300 --gesture swipe --to-point 400,300
 winapp ui touch img-map-9f8e -a myapp --gesture pinch --distance 200    # pinch-to-zoom out (2 fingers)
@@ -349,7 +349,7 @@ winapp ui touch img-map-9f8e -a myapp --gesture stretch --distance 200  # stretc
 
 **Options:**
 - `--gesture <g>` — `tap` (default), `double-tap`, `long-press`, `swipe`, `pinch`, `stretch`.
-- `--at <x,y>` — Explicit start point (app coordinates). Defaults to the selector's element center.
+- `--at <x,y>` — Explicit start point (screen coordinates). Defaults to the selector's element center.
 - `--to-point <x,y>` — End point for a `swipe`. Takes precedence over `--direction`.
 - `--direction <right|left|up|down>` — Swipe direction (default: `right`). Combined with `--distance` to compute the end point when `--to-point` is not given.
 - `--distance <px>` — Finger spread for `pinch`/`stretch`, or swipe distance in pixels.
@@ -374,7 +374,7 @@ winapp ui pen -a myapp --at 200,200 --tilt-x 30 --tilt-y -15           # tilted 
 ```
 
 **Options:**
-- `--at <x,y>` — Pen contact point (app coordinates). Defaults to the selector's element center. Ignored when `--path` is given.
+- `--at <x,y>` — Pen contact point (screen coordinates). Defaults to the selector's element center. Ignored when `--path` is given.
 - `--path "<x,y x,y …>"` — Ink stroke path as whitespace-separated `x,y` pairs (a one-point path is a tap).
 - `--pressure <0.0–1.0>` — Pen pressure (default 0.5).
 - `--tilt-x <deg>` / `--tilt-y <deg>` — Pen tilt angles, −90 to 90 (default 0).
