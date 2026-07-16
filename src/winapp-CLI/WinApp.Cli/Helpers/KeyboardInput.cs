@@ -308,8 +308,10 @@ internal static class KeyboardInput
     /// Normalizes newline characters in synthesized text to a carriage return (<c>\r</c>, 0x0D) so a
     /// line break is actually inserted. Windows edit controls create a new line only on a carriage
     /// return: it maps to <c>VK_RETURN</c> (a real Enter key for SendInput) and is honored as
-    /// <c>WM_CHAR 0x0D</c> for PostMessage. A bare line feed (<c>\n</c>, 0x0A) has no virtual key and is
-    /// silently ignored by edit controls, so it would otherwise vanish (issue #658). Collapsing
+    /// <c>WM_CHAR 0x0D</c> for PostMessage. A bare line feed (<c>\n</c>, 0x0A) does not map to a plain
+    /// Enter — on a US layout <c>VkKeyScan('\n')</c> returns 0x020D (VK_RETURN + Ctrl), so SendInput takes
+    /// the Ctrl/Alt Unicode-packet fallback and PostMessage sends <c>WM_CHAR 0x0A</c>; either way edit
+    /// controls silently ignore the raw 0x0A, so the newline would otherwise vanish (issue #658). Collapsing
     /// <c>\r\n</c> to a single <c>\r</c> keeps a CRLF as one newline rather than two.
     /// </summary>
     internal static string NormalizeNewlines(string text)

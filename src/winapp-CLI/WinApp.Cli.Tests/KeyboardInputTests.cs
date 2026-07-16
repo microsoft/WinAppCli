@@ -217,8 +217,10 @@ public class KeyboardInputTests
     [DataRow("a\rb")]   // lone carriage return already worked — regression guard
     public void BuildSendInputBatch_NewlineFormsDeliverAsSingleReturnKey(string text)
     {
-        // Mirrors the real US layout: VkKeyScan maps '\r' to VK_RETURN (0x0D), while '\n' has no key
-        // (-1) and would otherwise take the Unicode-packet fallback that edit controls ignore.
+        // After NormalizeNewlines runs, every newline form arrives as '\r', which VkKeyScan maps to
+        // VK_RETURN (0x0D) — a real Enter key. (Without it a bare '\n' would take the Unicode-packet
+        // fallback that edit controls ignore: on a US layout VkKeyScan('\n') returns 0x020D =
+        // VK_RETURN+Ctrl, which the Ctrl/Alt guard routes to a raw 0x0A packet.)
         short Scan(char ch) => ch switch
         {
             'a' => 0x41,
