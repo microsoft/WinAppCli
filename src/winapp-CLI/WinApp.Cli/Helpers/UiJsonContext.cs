@@ -36,6 +36,10 @@ namespace WinApp.Cli.Helpers;
 [JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(UiSendKeysResult))]
 [JsonSerializable(typeof(UiDragResult))]
+[JsonSerializable(typeof(UiTouchResult))]
+[JsonSerializable(typeof(UiPenResult))]
+[JsonSerializable(typeof(UiPointResult))]
+[JsonSerializable(typeof(UiPointResult[]))]
 [JsonSerializable(typeof(UiErrorResult))]
 [JsonSerializable(typeof(UiErrorInfo))]
 [JsonSerializable(typeof(UiFocusedResult))]
@@ -277,4 +281,44 @@ internal sealed class UiDragResult
     public int HoldMs { get; set; }
     public int DwellMs { get; set; }
     public long Hwnd { get; set; }
+}
+
+/// <summary>A point in app/screen pixel space for touch/pen JSON output.</summary>
+internal sealed class UiPointResult
+{
+    public int X { get; set; }
+    public int Y { get; set; }
+}
+
+internal sealed class UiTouchResult
+{
+    public string Gesture { get; set; } = "";
+    /// <summary>The selector or app <c>x,y</c> the gesture targeted.</summary>
+    public string? Target { get; set; }
+    public UiPointResult[] Points { get; set; } = [];
+    public int Fingers { get; set; }
+    public int DurationMs { get; set; }
+    /// <summary>Effective hold time in milliseconds (populated for long-press; 0 for other gestures).</summary>
+    public int HoldMs { get; set; }
+    public long Hwnd { get; set; }
+
+    /// <summary>Non-fatal advisories (e.g. remote-session delivery uncertainty). Omitted when empty.</summary>
+    public string[]? Warnings { get; set; }
+}
+
+internal sealed class UiPenResult
+{
+    public string Action { get; set; } = "";
+    /// <summary>The selector or app <c>x,y</c> the pen action targeted.</summary>
+    public string? Target { get; set; }
+    public UiPointResult[] Points { get; set; } = [];
+    public float Pressure { get; set; }
+    public int TiltX { get; set; }
+    public int TiltY { get; set; }
+    public bool Eraser { get; set; }
+    public int DurationMs { get; set; }
+    public long Hwnd { get; set; }
+
+    /// <summary>Non-fatal advisories (e.g. remote-session delivery uncertainty). Omitted when empty.</summary>
+    public string[]? Warnings { get; set; }
 }

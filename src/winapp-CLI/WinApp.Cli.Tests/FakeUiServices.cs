@@ -88,6 +88,33 @@ internal class FakeUiAutomationService : IUiAutomationService
         return WindowsByPidResult;
     }
 
+    /// <summary>When non-null, <see cref="FindSingleElementAsync"/> throws this exception instead of
+    /// returning a result. Use to simulate selector-ambiguity or other UIA failures.</summary>
+    public Exception? FindSingleElementThrowException { get; set; }
+
+    /// <summary>The rectangle returned for any nonzero handle (default: 0,0 – 1920,1080).</summary>
+    public WinApp.Cli.Helpers.PointerRect WindowRect { get; set; } = new(0, 0, 1920, 1080);
+
+    /// <summary>When <see langword="false"/>, reports the window rect as unreadable (returns false).</summary>
+    public bool WindowRectAllow { get; set; } = true;
+
+    /// <summary>Records each <see cref="TryGetWindowRect"/> call so tests can distinguish the
+    /// hwnd-0 rejection (no lookup) from the out-of-bounds rejection (lookup happened).</summary>
+    public List<long> WindowRectCalls { get; } = [];
+
+    public bool TryGetWindowRect(long hwnd, out WinApp.Cli.Helpers.PointerRect rect)
+    {
+        WindowRectCalls.Add(hwnd);
+        if (!WindowRectAllow || hwnd == 0)
+        {
+            rect = default;
+            return false;
+        }
+
+        rect = WindowRect;
+        return true;
+    }
+
     public Task<UiElement[]> InspectAsync(UiSessionInfo session, string? elementId, int depth, CancellationToken ct)
     {
         if (InspectThrow is not null) { throw InspectThrow; }
@@ -108,6 +135,7 @@ internal class FakeUiAutomationService : IUiAutomationService
 
     public Task<UiElement?> FindSingleElementAsync(UiSessionInfo session, SelectorExpression selector, CancellationToken ct)
     {
+        if (FindSingleElementThrowException is not null) { throw FindSingleElementThrowException; }
         if (FindSingleThrow is not null) { throw FindSingleThrow; }
         if (FindSingleThrowCount > 0)
         {
@@ -257,12 +285,17 @@ internal class FakeUiSessionService : IUiSessionService
         WindowTitle = "Test Window"
     };
 
+    /// <summary>When non-null, <see cref="ResolveSessionAsync"/> throws this exception instead
+    /// of returning <see cref="SessionResult"/>. Use to test command-level exception handling.</summary>
+    public Exception? ThrowException { get; set; }
+
     /// <summary>When set, <see cref="ResolveSessionAsync"/> throws this — drives a command's generic
     /// (or COMException) catch from inside its <c>try</c>, before any element work. Default null = no-op.</summary>
     public Exception? ResolveThrow { get; set; }
 
     public Task<UiSessionInfo> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct)
     {
+        if (ThrowException is not null) { throw ThrowException; }
         if (ResolveThrow is not null) { throw ResolveThrow; }
         return Task.FromResult(SessionResult);
     }
@@ -293,6 +326,56 @@ internal class FakeMouseInput : WinApp.Cli.Helpers.IMouseInput
         => DragCalls.Add(new(fromScreenX, fromScreenY, toScreenX, toScreenY, rightButton, holdMs, dwellMs, settleMs));
     public void ScrollWheel(int screenX, int screenY, int delta, int settleMs = 30)
         => ScrollWheelCalls.Add(new(screenX, screenY, delta, settleMs));
+}
+
+/// <summary>
+/// Fake pointer input for testing — records injected touch contacts and pen strokes instead of
+/// issuing real synthetic-pointer injection.
+/// </summary>
+internal class FakePointerInput : WinApp.Cli.Helpers.IPointerInput
+{
+    public record TouchCall(
+        WinApp.Cli.Helpers.TouchGesture Gesture,
+        IReadOnlyList<IReadOnlyList<WinApp.Cli.Helpers.PointerPoint>> ContactPaths,
+        int HoldMs,
+        int DurationMs);
+
+    public record PenCall(
+        IReadOnlyList<WinApp.Cli.Helpers.PointerPoint> Path,
+        float Pressure,
+        int TiltX,
+        int TiltY,
+        bool Eraser,
+        int DurationMs);
+
+    public List<TouchCall> TouchCalls { get; } = [];
+    public List<PenCall> PenCalls { get; } = [];
+
+    /// <summary>When non-null, both Touch() and Pen() throw this exception instead of recording the call.
+    /// Use to test command-level exception handling without a live injection path.</summary>
+    public Exception? ThrowException { get; set; }
+
+    public void Touch(
+        WinApp.Cli.Helpers.TouchGesture gesture,
+        IReadOnlyList<IReadOnlyList<WinApp.Cli.Helpers.PointerPoint>> contactPaths,
+        int holdMs,
+        int durationMs)
+    {
+        if (ThrowException is not null) { throw ThrowException; }
+        TouchCalls.Add(new(gesture, contactPaths, holdMs, durationMs));
+    }
+
+    public void Pen(
+        IReadOnlyList<WinApp.Cli.Helpers.PointerPoint> path,
+        float pressure,
+        int tiltX,
+        int tiltY,
+        bool eraser,
+        int durationMs)
+    {
+        if (ThrowException is not null) { throw ThrowException; }
+        PenCalls.Add(new(path, pressure, tiltX, tiltY, eraser, durationMs));
+    }
 }
 
 /// <summary>
@@ -328,6 +411,11 @@ internal class FakeForegroundGuard : WinApp.Cli.Helpers.IForegroundGuard
 
     /// <summary>Error emitted on denial — defaults to the locked-desktop reason.</summary>
     public string DenyCode { get; set; } = WinApp.Cli.Helpers.UiJsonError.CodeNoInteractiveDesktop;
+
+    /// <summary>Value returned by <see cref="IsRemoteSession"/> — drives the remote-session delivery warning on touch/pen.</summary>
+    public bool IsRemoteSessionResult { get; set; }
+
+    public bool IsRemoteSession() => IsRemoteSessionResult;
 
     public bool TryEnsureForeground(long targetHwnd, Microsoft.Extensions.Logging.ILogger logger, bool json, string action)
     {

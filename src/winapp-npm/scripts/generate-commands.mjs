@@ -108,7 +108,7 @@ function deriveUnionName(valueType) {
 function tsType(valueType, helpName) {
   if (!valueType) return 'string';
   if (valueType.includes('Boolean')) return 'boolean';
-  if (valueType.includes('Int32') || valueType.includes('Int64') || valueType.includes('Double')) return 'number';
+  if (valueType.includes('Int32') || valueType.includes('Int64') || valueType.includes('Double') || valueType.includes('Single')) return 'number';
 
   // If helpName has pipe-separated values, it's an enum — derive a named union type
   if (helpName && helpName.includes('|')) {
