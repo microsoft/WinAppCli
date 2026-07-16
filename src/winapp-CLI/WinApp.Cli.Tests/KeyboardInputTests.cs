@@ -196,6 +196,115 @@ public class KeyboardInputTests
         Assert.AreEqual(0, calls);
     }
 
+    [TestMethod]
+    public void BuildSendInputSegments_ChordIsOneSegmentAndTextSplitsByChunkSize()
+    {
+        KeyboardInput.s_textChunkChars = 2;
+
+        var segments = KeyboardInput.BuildSendInputSegments([
+            new KeyChord([0x11], 0x41, Extended: false),
+            new TextInput("abcd")
+        ], _ => 0x41); // every char maps to vk 0x41 with no shift -> 2 events each
+
+        Assert.AreEqual(3, segments.Count); // chord, "ab", "cd"
+        Assert.AreEqual(4, segments[0].Length); // ctrl-down, a-down, a-up, ctrl-up
+        Assert.AreEqual(4, segments[1].Length); // 2 chars * 2 events
+        Assert.AreEqual(4, segments[2].Length);
+    }
+
+    [TestMethod]
+    public void Send_SendInput_LongTextSplitsIntoThrottledChunksSleepingBetweenOnly()
+    {
+        var batches = new List<INPUT[]>();
+        var sleeps = new List<int>();
+        KeyboardInput.s_vkKeyScan = _ => 0x41; // no shift -> 2 events per char
+        KeyboardInput.s_sleep = sleeps.Add;
+        KeyboardInput.s_textChunkChars = 4;
+        KeyboardInput.s_chunkDelayMs = 15;
+        KeyboardInput.s_sendInput = inputs => { batches.Add(inputs.ToArray()); return (uint)inputs.Length; };
+
+        // 10 chars -> chunks of 4, 4, 2 -> three SendInput calls.
+        KeyboardInput.Send(0, [new TextInput(new string('a', 10))], KeyTransport.SendInput);
+
+        Assert.AreEqual(3, batches.Count);
+        Assert.AreEqual(8, batches[0].Length); // 4 chars * 2 events
+        Assert.AreEqual(8, batches[1].Length);
+        Assert.AreEqual(4, batches[2].Length); // final 2 chars
+        // A sleep occurs only *between* segments, never after the last one.
+        Assert.AreEqual(2, sleeps.Count);
+        Assert.IsTrue(sleeps.TrueForAll(s => s == 15));
+    }
+
+    [TestMethod]
+    public void Send_SendInput_ChordStaysAtomicWhenInterleavedWithChunkedText()
+    {
+        var batches = new List<INPUT[]>();
+        var sleeps = new List<int>();
+        KeyboardInput.s_vkKeyScan = _ => 0x41;
+        KeyboardInput.s_sleep = sleeps.Add;
+        KeyboardInput.s_textChunkChars = 4;
+        KeyboardInput.s_chunkDelayMs = 7;
+        KeyboardInput.s_sendInput = inputs => { batches.Add(inputs.ToArray()); return (uint)inputs.Length; };
+
+        KeyboardInput.Send(0, [
+            new KeyChord([0x11], 0x41, Extended: false),
+            new TextInput(new string('a', 5))
+        ], KeyTransport.SendInput);
+
+        Assert.AreEqual(3, batches.Count); // chord, text[0..4], text[4..5]
+        Assert.AreEqual(4, batches[0].Length); // whole chord in one atomic segment
+        AssertKey(batches[0][0], 0x11, (KEYBD_EVENT_FLAGS)0);
+        AssertKey(batches[0][3], 0x11, KEYBD_EVENT_FLAGS.KEYEVENTF_KEYUP);
+        Assert.AreEqual(8, batches[1].Length);
+        Assert.AreEqual(2, batches[2].Length);
+        Assert.AreEqual(2, sleeps.Count);
+        Assert.IsTrue(sleeps.TrueForAll(s => s == 7));
+    }
+
+    [TestMethod]
+    public void Send_SendInput_TextShorterThanOneChunkIsSingleCallWithNoThrottleSleep()
+    {
+        var batches = new List<INPUT[]>();
+        var sleeps = new List<int>();
+        KeyboardInput.s_vkKeyScan = _ => 0x41;
+        KeyboardInput.s_sleep = sleeps.Add;
+        KeyboardInput.s_textChunkChars = 16;
+        KeyboardInput.s_sendInput = inputs => { batches.Add(inputs.ToArray()); return (uint)inputs.Length; };
+
+        KeyboardInput.Send(0, [new TextInput("abc")], KeyTransport.SendInput);
+
+        Assert.AreEqual(1, batches.Count);
+        Assert.AreEqual(6, batches[0].Length);
+        Assert.AreEqual(0, sleeps.Count, "text that fits in one chunk must not add throttle latency");
+    }
+
+    [TestMethod]
+    public void Send_SendInput_ShortWriteOnLaterChunkReleasesOnlyThatChunk()
+    {
+        var batches = new List<INPUT[]>();
+        KeyboardInput.s_foregroundWindowIsNull = () => false;
+        KeyboardInput.s_vkKeyScan = _ => 0x0141; // vk 0x41 requiring Shift -> 4 events per char
+        KeyboardInput.s_textChunkChars = 1;       // one char per segment
+        KeyboardInput.s_chunkDelayMs = 0;
+        KeyboardInput.s_sendInput = inputs =>
+        {
+            batches.Add(inputs.ToArray());
+            return batches.Count == 2 ? 1u : (uint)inputs.Length; // second segment short-writes
+        };
+
+        var ex = Assert.ThrowsExactly<InvalidOperationException>(() =>
+            KeyboardInput.Send(0, [new TextInput("ab")], KeyTransport.SendInput));
+
+        StringAssert.Contains(ex.Message, "partially applied");
+        // batches: [0] first char fully sent, [1] second char short write, [2] release of ONLY the second char.
+        Assert.AreEqual(3, batches.Count);
+        Assert.AreEqual(4, batches[0].Length);
+        Assert.AreEqual(4, batches[1].Length);
+        Assert.AreEqual(2, batches[2].Length); // only the stranded segment's keys, reversed
+        AssertKey(batches[2][0], 0x41, KEYBD_EVENT_FLAGS.KEYEVENTF_KEYUP);
+        AssertKey(batches[2][1], 0x10, KEYBD_EVENT_FLAGS.KEYEVENTF_KEYUP);
+    }
+
     private static void AssertKey(INPUT input, ushort vk, KEYBD_EVENT_FLAGS flags)
     {
         Assert.AreEqual(INPUT_TYPE.INPUT_KEYBOARD, input.type);
@@ -232,6 +341,8 @@ public class KeyboardInputTests
         KeyboardInput.s_mapVirtualKey = vk => PInvoke.MapVirtualKey(vk, MAP_VIRTUAL_KEY_TYPE.MAPVK_VK_TO_VSC);
         KeyboardInput.s_foregroundWindowIsNull = () => false;
         KeyboardInput.s_sleep = _ => { };
+        KeyboardInput.s_textChunkChars = KeyboardInput.DefaultTextChunkChars;
+        KeyboardInput.s_chunkDelayMs = KeyboardInput.DefaultChunkDelayMs;
     }
 }
 

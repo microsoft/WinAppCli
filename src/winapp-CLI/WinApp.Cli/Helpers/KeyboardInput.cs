@@ -61,6 +61,28 @@ internal static class KeyboardInput
 
     internal static Action<int> s_sleep = Thread.Sleep;
 
+    /// <summary>
+    /// Number of characters injected per <c>SendInput</c> call for literal typed text. Long text sent as
+    /// one unbroken burst overruns the target thread's input queue, which silently drops characters even
+    /// though <c>SendInput</c> reports success (issue #657). Splitting the text into small chunks paced by
+    /// <see cref="s_chunkDelayMs"/> lets the target drain its queue between bursts so every character lands.
+    /// </summary>
+    internal const int DefaultTextChunkChars = 16;
+
+    /// <summary>
+    /// Pause (ms) between injected chunks, giving the target time to pump its input queue. Chosen so the
+    /// injection rate (<see cref="DefaultTextChunkChars"/> chars per delay) stays comfortably below the
+    /// rate a target drains its input queue, with margin at both the coarse (~15.6&#160;ms) and fine
+    /// (~1&#160;ms) Windows timer resolutions <c>Thread.Sleep</c> may run at.
+    /// </summary>
+    internal const int DefaultChunkDelayMs = 15;
+
+    /// <remarks>Overridable seam so tests can drive the chunking branches deterministically.</remarks>
+    internal static int s_textChunkChars = DefaultTextChunkChars;
+
+    /// <remarks>Overridable seam so tests can drive the throttle branches deterministically.</remarks>
+    internal static int s_chunkDelayMs = DefaultChunkDelayMs;
+
     private static unsafe uint DefaultSendInput(INPUT[] inputs)
     {
         fixed (INPUT* pInputs = inputs)
@@ -89,6 +111,8 @@ internal static class KeyboardInput
         s_mapVirtualKey = DefaultMapVirtualKey;
         s_foregroundWindowIsNull = DefaultForegroundWindowIsNull;
         s_sleep = Thread.Sleep;
+        s_textChunkChars = DefaultTextChunkChars;
+        s_chunkDelayMs = DefaultChunkDelayMs;
     }
 
     public static void Send(long hwnd, IReadOnlyList<KeyAction> actions, KeyTransport transport)
@@ -176,31 +200,101 @@ internal static class KeyboardInput
 
     private static void SendViaSendInput(IReadOnlyList<KeyAction> actions)
     {
-        var array = BuildSendInputBatch(actions, s_vkKeyScan);
-        if (array.Length == 0)
+        // A single SendInput call carrying the whole payload overruns the target thread's input queue,
+        // which silently drops characters even though SendInput returns success (issue #657). Split the
+        // work into small self-contained segments (each chord, and text in chunks of s_textChunkChars)
+        // and pace them so the target can drain its queue between bursts.
+        var segments = BuildSendInputSegments(actions, s_vkKeyScan);
+
+        for (int i = 0; i < segments.Count; i++)
         {
-            return;
+            var segment = segments[i];
+            if (segment.Length == 0)
+            {
+                continue;
+            }
+
+            var sent = s_sendInput(segment);
+            if (sent != (uint)segment.Length)
+            {
+                // A zero or short write can strand a key/modifier in the down state (e.g. a Shift-down
+                // whose matching up never fired), which corrupts the whole session. Every already-sent
+                // segment is balanced (its downs and ups are contained within it), so only this failing
+                // segment can leave a key held — best-effort release it before surfacing the failure.
+                ReleaseHeldKeys(segment);
+                throw BuildSendInputFailure(sent, segment.Length);
+            }
+
+            // Only sleep *between* segments, so a short payload that fits in one segment adds no latency.
+            if (i < segments.Count - 1)
+            {
+                s_sleep(s_chunkDelayMs);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Builds the SendInput failure surfaced when a chunk is only partially injected. A zero write means
+    /// the injection was refused outright (no interactive desktop, or UIPI/integrity mismatch); a short
+    /// write means input was partially applied and the held keys were already released.
+    /// </summary>
+    private static InvalidOperationException BuildSendInputFailure(uint sent, int expected) =>
+        new(sent == 0
+            ? (s_foregroundWindowIsNull()
+                // No foreground window → the session is locked or on a secure desktop, where a
+                // user-session process can't inject. That's not an elevation/UIPI problem.
+                ? "SendInput failed — no interactive desktop is available (the session is locked " +
+                  "or on a secure desktop). Unlock the session and retry."
+                : "SendInput failed — the target window may be running at a higher integrity level (elevated) " +
+                  "or be an AppContainer/AppX app blocked by UIPI. Try --via post-message, or run this CLI as administrator.")
+            : $"SendInput delivered only {sent} of {expected} key events — input was partially applied. " +
+              "Held keys were released; retry the gesture.");
+
+    /// <summary>
+    /// Flattens key actions into ordered, self-contained SendInput segments for throttled delivery: one
+    /// segment per chord, and literal text split into chunks of <see cref="s_textChunkChars"/> characters.
+    /// Each segment carries balanced key-down/key-up pairs so pacing (or a failure) between segments can
+    /// never strand a modifier. See <see cref="BuildSendInputBatch"/> for the un-chunked equivalent.
+    /// </summary>
+    internal static List<INPUT[]> BuildSendInputSegments(IReadOnlyList<KeyAction> actions, Func<char, short>? vkKeyScan = null)
+    {
+        vkKeyScan ??= s_vkKeyScan;
+        int chunkChars = Math.Max(1, s_textChunkChars);
+        var segments = new List<INPUT[]>();
+
+        foreach (var action in actions)
+        {
+            switch (action)
+            {
+                case KeyChord chord:
+                    var chordEvents = new List<INPUT>();
+                    AppendChordEvents(chordEvents, chord);
+                    if (chordEvents.Count > 0)
+                    {
+                        segments.Add(chordEvents.ToArray());
+                    }
+                    break;
+
+                case TextInput text:
+                    for (int start = 0; start < text.Text.Length; start += chunkChars)
+                    {
+                        int end = Math.Min(start + chunkChars, text.Text.Length);
+                        var chunk = new List<INPUT>();
+                        for (int j = start; j < end; j++)
+                        {
+                            AppendCharEvents(chunk, text.Text[j], vkKeyScan);
+                        }
+
+                        if (chunk.Count > 0)
+                        {
+                            segments.Add(chunk.ToArray());
+                        }
+                    }
+                    break;
+            }
         }
 
-        var sent = s_sendInput(array);
-        if (sent != (uint)array.Length)
-        {
-            // A zero or short write can strand a key/modifier in the down state (e.g. a Ctrl-down
-            // whose matching up never fired), which corrupts the whole session. Best-effort release
-            // everything we pressed before surfacing the failure.
-            ReleaseHeldKeys(array);
-
-            throw new InvalidOperationException(sent == 0
-                ? (s_foregroundWindowIsNull()
-                    // No foreground window → the session is locked or on a secure desktop, where a
-                    // user-session process can't inject. That's not an elevation/UIPI problem.
-                    ? "SendInput failed — no interactive desktop is available (the session is locked " +
-                      "or on a secure desktop). Unlock the session and retry."
-                    : "SendInput failed — the target window may be running at a higher integrity level (elevated) " +
-                      "or be an AppContainer/AppX app blocked by UIPI. Try --via post-message, or run this CLI as administrator.")
-                : $"SendInput delivered only {sent} of {array.Length} key events — input was partially applied. " +
-                  "Held keys were released; retry the gesture.");
-        }
+        return segments;
     }
 
     internal static INPUT[] BuildSendInputBatch(IReadOnlyList<KeyAction> actions, Func<char, short>? vkKeyScan = null)
@@ -212,18 +306,7 @@ internal static class KeyboardInput
             switch (action)
             {
                 case KeyChord chord:
-                    foreach (var mod in chord.Modifiers)
-                    {
-                        inputs.Add(KeyEvent(mod, IsExtended(mod), keyUp: false));
-                    }
-
-                    inputs.Add(KeyEvent(chord.Vk, chord.Extended, keyUp: false));
-                    inputs.Add(KeyEvent(chord.Vk, chord.Extended, keyUp: true));
-
-                    for (int i = chord.Modifiers.Count - 1; i >= 0; i--)
-                    {
-                        inputs.Add(KeyEvent(chord.Modifiers[i], IsExtended(chord.Modifiers[i]), keyUp: true));
-                    }
+                    AppendChordEvents(inputs, chord);
                     break;
 
                 case TextInput text:
@@ -236,6 +319,26 @@ internal static class KeyboardInput
         }
 
         return inputs.ToArray();
+    }
+
+    /// <summary>
+    /// Appends a chord's events in order: each modifier down, the main key down then up, then each
+    /// modifier up in reverse — so the modifiers wrap the key press symmetrically.
+    /// </summary>
+    private static void AppendChordEvents(List<INPUT> inputs, KeyChord chord)
+    {
+        foreach (var mod in chord.Modifiers)
+        {
+            inputs.Add(KeyEvent(mod, IsExtended(mod), keyUp: false));
+        }
+
+        inputs.Add(KeyEvent(chord.Vk, chord.Extended, keyUp: false));
+        inputs.Add(KeyEvent(chord.Vk, chord.Extended, keyUp: true));
+
+        for (int i = chord.Modifiers.Count - 1; i >= 0; i--)
+        {
+            inputs.Add(KeyEvent(chord.Modifiers[i], IsExtended(chord.Modifiers[i]), keyUp: true));
+        }
     }
 
     /// <summary>
