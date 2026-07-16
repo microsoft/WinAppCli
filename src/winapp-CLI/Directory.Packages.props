@@ -12,16 +12,6 @@
     <PackageVersion Include="System.Drawing.Common" Version="10.0.5" />
     <PackageVersion Include="Microsoft.Diagnostics.Runtime" Version="3.1.512801" />
     <PackageVersion Include="Microsoft.Diagnostics.Runtime.Utilities" Version="3.0.442202" />
-    <!-- NuGet client libraries. Prerelease (7.9.0-rc) is required for Native AOT: it exposes the
-         `NuGet.UseSystemTextJsonDeserialization` feature switch that lets the linker trim the
-         reflection-based Newtonsoft.Json path entirely. Once a 7.8+ stable ships to nuget.org,
-         bump these to the stable version and drop the dotnet-tools feed from nuget.config.
-         See https://github.com/NuGet/NuGet.Client/blob/dev/docs/aot-compatibility.md -->
-    <PackageVersion Include="NuGet.Protocol" Version="7.9.0-rc.36120" />
-    <PackageVersion Include="NuGet.Packaging" Version="7.9.0-rc.36120" />
-    <PackageVersion Include="NuGet.Configuration" Version="7.9.0-rc.36120" />
-    <PackageVersion Include="NuGet.Versioning" Version="7.9.0-rc.36120" />
-    <PackageVersion Include="NuGet.Credentials" Version="7.9.0-rc.36120" />
     <!-- Native debugging engine bits for WinUI stowed-exception triage (the run debug-output flag).
          Restore-only (ExcludeAssets="all"): pins versions and populates the NuGet global cache for
          dev/CI; the published single-file CLI resolves these at runtime from the cache or downloads
