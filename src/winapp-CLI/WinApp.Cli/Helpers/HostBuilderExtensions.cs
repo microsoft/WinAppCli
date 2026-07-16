@@ -55,6 +55,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IUpdateNotificationService, UpdateNotificationService>()
             // UI Automation services
             .AddSingleton<IMouseInput, RealMouseInput>()
+            .AddSingleton<IPointerInput, RealPointerInput>()
             .AddSingleton<IKeyboardInput, RealKeyboardInput>()
             .AddSingleton<IForegroundGuard, RealForegroundGuard>()
             .AddSingleton<IOwnedWindowFinder, RealOwnedWindowFinder>()
@@ -101,6 +102,8 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<UiInvokeCommand, UiInvokeCommand.Handler>()
                 .UseCommandHandler<UiClickCommand, UiClickCommand.Handler>()
                 .UseCommandHandler<UiDragCommand, UiDragCommand.Handler>()
+                .UseCommandHandler<UiTouchCommand, UiTouchCommand.Handler>()
+                .UseCommandHandler<UiPenCommand, UiPenCommand.Handler>()
                 .UseCommandHandler<UiHoverCommand, UiHoverCommand.Handler>()
                 .UseCommandHandler<UiSendKeysCommand, UiSendKeysCommand.Handler>()
                 .UseCommandHandler<UiSetValueCommand, UiSetValueCommand.Handler>()

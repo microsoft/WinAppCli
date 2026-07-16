@@ -13,4 +13,6 @@ internal class RealForegroundGuard : IForegroundGuard
 {
     public bool TryEnsureForeground(long targetHwnd, ILogger logger, bool json, string action)
         => ForegroundGuard.TryEnsureForeground(targetHwnd, logger, json, action);
+
+    public bool IsRemoteSession() => ForegroundGuard.IsRemoteSession();
 }
