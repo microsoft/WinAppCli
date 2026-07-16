@@ -35,6 +35,9 @@ internal sealed partial class UiAutomationService : IUiAutomationService
     internal static Func<UiAutomationService, IUIAutomationElement, IUIAutomationElement, IUIAutomationElement?> s_findInvokableAncestor = (service, element, root) => service.FindInvokableAncestorCore(element, root);
     internal static Func<UiAutomationService, IUIAutomationElement?> s_getFocusedElement = service => service._automation.GetFocusedElement();
     internal static Func<IUIAutomationElement, int> s_getElementProcessId = element => element.get_CurrentProcessId();
+    internal static Func<UiAutomationService, IUIAutomationElement?> s_getDesktopRootElement = service => service._automation.GetRootElement();
+    internal static Func<UiAutomationService, nint, IUIAutomationElement?> s_elementFromHandle = (service, hwnd) => service._automation.ElementFromHandle(new Windows.Win32.Foundation.HWND(hwnd));
+    internal static Func<int, nint> s_getMainWindowHandleForProcessId = pid => System.Diagnostics.Process.GetProcessById(pid).MainWindowHandle;
 
     internal static void ResetNativeSeams()
     {
@@ -46,6 +49,9 @@ internal sealed partial class UiAutomationService : IUiAutomationService
         s_findInvokableAncestor = (service, element, root) => service.FindInvokableAncestorCore(element, root);
         s_getFocusedElement = service => service._automation.GetFocusedElement();
         s_getElementProcessId = element => element.get_CurrentProcessId();
+        s_getDesktopRootElement = service => service._automation.GetRootElement();
+        s_elementFromHandle = (service, hwnd) => service._automation.ElementFromHandle(new Windows.Win32.Foundation.HWND(hwnd));
+        s_getMainWindowHandleForProcessId = pid => System.Diagnostics.Process.GetProcessById(pid).MainWindowHandle;
     }
 
     public UiAutomationService(ILogger<UiAutomationService> logger, ISelectorService selectorService)
@@ -1462,7 +1468,7 @@ return Task.FromResult<UiElement?>(null);
     {
         try
         {
-            return _automation.ElementFromHandle(new Windows.Win32.Foundation.HWND(hwnd));
+            return s_elementFromHandle(this, hwnd);
         }
         catch
         {
@@ -1573,8 +1579,7 @@ return Task.FromResult<UiElement?>(null);
         {
             try
             {
-                var hwnd = new Windows.Win32.Foundation.HWND((nint)session.WindowHandle);
-                var element = _automation.ElementFromHandle(hwnd);
+                var element = s_elementFromHandle(this, (nint)session.WindowHandle);
                 if (element is not null)
                 {
                     var name = SafeGetBstr(() => element.get_CurrentName());
@@ -1588,7 +1593,7 @@ return Task.FromResult<UiElement?>(null);
             }
         }
 
-        var root = _automation.GetRootElement();
+        var root = s_getDesktopRootElement(this);
         if (root is null)
 
         {
@@ -1654,11 +1659,10 @@ return Task.FromResult<UiElement?>(null);
         _logger.LogDebug("PID search returned 0 elements, trying ElementFromHandle fallback");
         try
         {
-            var proc = System.Diagnostics.Process.GetProcessById(session.ProcessId);
-            if (proc.MainWindowHandle != 0)
+            var mainWindowHandle = s_getMainWindowHandleForProcessId(session.ProcessId);
+            if (mainWindowHandle != 0)
             {
-                var hwnd = new Windows.Win32.Foundation.HWND(proc.MainWindowHandle);
-                var element = _automation.ElementFromHandle(hwnd);
+                var element = s_elementFromHandle(this, mainWindowHandle);
                 if (element is not null)
                 {
                     var name = SafeGetBstr(() => element.get_CurrentName());

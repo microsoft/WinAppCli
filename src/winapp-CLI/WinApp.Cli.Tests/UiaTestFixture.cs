@@ -43,8 +43,13 @@ internal sealed class UiaTestFixture : IDisposable
     public CheckBox ToggleCheck { get; private set; } = null!;
     public ListBox ItemsList { get; private set; } = null!;
     public Panel ScrollPanel { get; private set; } = null!;
+    public Panel ScrollNestedPanel { get; private set; } = null!;
+    public Label ScrollNestedLabel { get; private set; } = null!;
     public TextBox MultilineBox { get; private set; } = null!;
     public Label TextLabel { get; private set; } = null!;
+    public Button ParentInvokeButton { get; private set; } = null!;
+    public Panel InvokableMiddlePanel { get; private set; } = null!;
+    public Label InvokableChildLabel { get; private set; } = null!;
 
     // Additional controls exercising a broad range of UIA control types / patterns so ToUiElement,
     // GetControlTypeName, GetText, Invoke and the property extractors are driven against real providers.
@@ -178,6 +183,37 @@ internal sealed class UiaTestFixture : IDisposable
             Width = 250,
         };
 
+        ParentInvokeButton = new Button
+        {
+            Name = "btnParentInvoke",
+            Text = "",
+            AccessibleName = "Parent Invoke",
+            Left = 220,
+            Top = 10,
+            Width = 120,
+            Height = 30,
+        };
+        InvokableChildLabel = new Label
+        {
+            Name = "lblInsideInvoke",
+            Text = "Inside Invoke",
+            AccessibleName = "Inside Invoke",
+            Left = 2,
+            Top = 2,
+            Width = 95,
+            Height = 16,
+        };
+        InvokableMiddlePanel = new Panel
+        {
+            Name = "pnlInsideInvoke",
+            Left = 6,
+            Top = 6,
+            Width = 105,
+            Height = 20,
+        };
+        InvokableMiddlePanel.Controls.Add(InvokableChildLabel);
+        ParentInvokeButton.Controls.Add(InvokableMiddlePanel);
+
         ItemsList = new ListBox
         {
             Name = "lstItems",
@@ -233,12 +269,34 @@ internal sealed class UiaTestFixture : IDisposable
                 Height = 30,
             });
         }
+        ScrollNestedPanel = new Panel
+        {
+            Name = "pnlScrollNested",
+            Left = 240,
+            Top = 900,
+            Width = 160,
+            Height = 60,
+            BorderStyle = BorderStyle.FixedSingle,
+        };
+        ScrollNestedLabel = new Label
+        {
+            Name = "lblScrollNested",
+            Text = "Nested Scroll Label",
+            AccessibleName = "Nested Scroll Label",
+            Left = 8,
+            Top = 8,
+            Width = 130,
+            Height = 20,
+        };
+        ScrollNestedPanel.Controls.Add(ScrollNestedLabel);
+        ScrollPanel.Controls.Add(ScrollNestedPanel);
 
         form.Controls.Add(InvokeButton);
         form.Controls.Add(ResultBox);
         form.Controls.Add(ValueBox);
         form.Controls.Add(ToggleCheck);
         form.Controls.Add(TextLabel);
+        form.Controls.Add(ParentInvokeButton);
         form.Controls.Add(ItemsList);
         form.Controls.Add(MultilineBox);
         form.Controls.Add(ScrollPanel);
@@ -492,12 +550,11 @@ internal sealed class UiaTestFixture : IDisposable
     }
 
     /// <summary>
-    /// Opens (once) a second top-level Form of the same process (not owned, so it is a sibling of the
-    /// main window rather than a UIA descendant) with its own title and a button, and returns its
+    /// Opens (once) a second top-level Form with its own title and controls, and returns its
     /// native window handle. Used to exercise the popup / other-window search code paths
     /// (GetAllAppWindows, FindElementOnOtherWindows) and the multi-window PID-root resolution.
     /// </summary>
-    public (nint Hwnd, string Title) OpenOwnedWindow(string title)
+    public (nint Hwnd, string Title) OpenOwnedWindow(string title, bool ownedByMain = false)
     {
         return OnUiThread(() =>
         {
@@ -513,6 +570,10 @@ internal sealed class UiaTestFixture : IDisposable
                     Location = new System.Drawing.Point(40, 40),
                     ShowInTaskbar = false,
                 };
+                if (ownedByMain)
+                {
+                    _ownedWindow.Owner = _form;
+                }
                 _ownedWindow.Controls.Add(new Button
                 {
                     Name = "btnOwned",
@@ -541,6 +602,16 @@ internal sealed class UiaTestFixture : IDisposable
                     Left = 150,
                     Top = 66,
                     Width = 120,
+                });
+                _ownedWindow.Controls.Add(new Button
+                {
+                    Name = "btnOwnedOnly",
+                    Text = "Owned Only",
+                    AccessibleName = "OwnedOnly",
+                    Left = 20,
+                    Top = 105,
+                    Width = 160,
+                    Height = 30,
                 });
                 _ownedWindow.Show();
             }

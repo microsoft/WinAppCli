@@ -299,6 +299,143 @@ public partial class RealUiAutomationTests
     }
 
     [TestMethod]
+    public async Task OwnedWindowOnlyButton_ExercisesOwnedEnumerationAndOtherWindowSlug()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var session = NonExplicitSession(fx);
+        var (_, title) = fx.OpenOwnedWindow("OwnedOnly_" + Guid.NewGuid().ToString("N")[..6], ownedByMain: true);
+
+        var byName = await PollFindOtherWindowAsync(svc, session, "OwnedOnly");
+        var bySearch = (await PollSearchAsync(svc, session, "btnOwnedOnly")).Single(e => e.AutomationId == "btnOwnedOnly");
+        var missingSlug = await svc.FindSingleElementAsync(session, new SelectorExpression { Slug = "btn-definitely-missing-0000" }, CancellationToken.None);
+
+        Assert.AreEqual("btnOwnedOnly", byName.AutomationId);
+        Assert.AreEqual("btnOwnedOnly", bySearch.AutomationId);
+        Assert.IsTrue(bySearch.WindowHandle.GetValueOrDefault() != 0);
+        Assert.IsNull(missingSlug);
+        StringAssert.StartsWith(title, "OwnedOnly_");
+    }
+
+    [TestMethod]
+    public async Task FindSingleElementAsync_LabelInsideButtonSurfacesInvokableAncestor()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var session = SessionFor(fx);
+
+        var found = await svc.FindSingleElementAsync(session, new SelectorExpression { Query = "Inside Invoke" }, CancellationToken.None);
+
+        Assert.IsNotNull(found);
+        Assert.AreEqual("lblInsideInvoke", found!.AutomationId);
+        Assert.IsNotNull(found.InvokableAncestor);
+        Assert.AreEqual("btnParentInvoke", found.InvokableAncestor!.AutomationId);
+
+        var bySlug = await svc.FindSingleElementAsync(session, new SelectorExpression { Slug = found.Selector! }, CancellationToken.None);
+        Assert.IsNotNull(bySlug!.InvokableAncestor);
+        Assert.AreEqual("btnParentInvoke", bySlug.InvokableAncestor!.AutomationId);
+    }
+
+    [TestMethod]
+    public async Task SearchAsync_LabelInsideButtonSurfacesInvokableAncestor()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var session = SessionFor(fx);
+
+        var results = await svc.SearchAsync(session, new SelectorExpression { Query = "Inside Invoke" }, 5, CancellationToken.None);
+        var label = results.Single(e => e.AutomationId == "lblInsideInvoke");
+
+        Assert.IsNotNull(label.InvokableAncestor);
+        Assert.AreEqual("btnParentInvoke", label.InvokableAncestor!.AutomationId);
+    }
+
+    [TestMethod]
+    public async Task MalformedSlugSelector_ReturnsStaleElementError()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var session = SessionFor(fx);
+        var malformed = new UiElement { Id = "bad-slug", Type = "Button", Selector = "not-a-valid-slug" };
+
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => svc.GetTextAsync(session, malformed, CancellationToken.None));
+
+        StringAssert.Contains(ex.Message, "stale");
+    }
+
+    [TestMethod]
+    public async Task InvalidStoredHwndFallsBackAndReturnsEmpty()
+    {
+        var logger = new CapturingLogger<UiAutomationService>();
+        var svc = new UiAutomationService(logger, new SelectorService());
+        var session = new UiSessionInfo
+        {
+            ProcessId = int.MaxValue,
+            ProcessName = "missing",
+            WindowHandle = 123,
+            IsExplicitWindow = true,
+        };
+
+        var tree = await svc.InspectAsync(session, null, 1, CancellationToken.None);
+
+        Assert.AreEqual(0, tree.Length);
+        Assert.IsTrue(logger.Has(Microsoft.Extensions.Logging.LogLevel.Debug, "Stored HWND 123 failed"));
+    }
+
+    [TestMethod]
+    public async Task GetTextAsync_ComboAndTabUseValueAndSelectionPatterns()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var session = SessionFor(fx);
+        var combo = await ResolveAsync(svc, session, "cboSelect");
+        var tabs = await ResolveAsync(svc, session, "tabMain");
+
+        var comboText = await svc.GetTextAsync(session, combo, CancellationToken.None);
+        var tabText = await svc.GetTextAsync(session, tabs, CancellationToken.None);
+
+        Assert.AreEqual("Beta", comboText);
+        Assert.AreEqual("One", tabText);
+    }
+
+    [TestMethod]
+    public async Task ScrollIntoViewAsync_TopLevelButtonWithoutScrollableAncestorThrows()
+    {
+        var svc = NewService();
+        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake" };
+        var model = new UiElement { Id = "no-scroll", Type = "Text", AutomationId = "noScroll" };
+        var target = ComProxy<IUIAutomationElement>((method, _) => method.Name switch
+        {
+            "get_CurrentBoundingRectangle" => new RECT { left = 0, top = 0, right = 10, bottom = 10 },
+            "GetCurrentPattern" => ThrowCom(),
+            _ => ThrowCom(),
+        });
+        var root = ComProxy<IUIAutomationElement>((method, _) => method.Name == "FindFirst" ? target : ThrowCom());
+        UiAutomationService.s_getRootElement = (_, _) => root;
+
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => svc.ScrollIntoViewAsync(session, model, CancellationToken.None));
+
+        StringAssert.Contains(ex.Message, "does not support ScrollItemPattern and no scrollable ancestor found");
+    }
+
+    [TestMethod]
+    public async Task ScrollContainerAsync_ChildButtonWalksUpToScrollablePanel()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var session = SessionFor(fx);
+        var child = await ResolveAsync(svc, session, "pnlChild18");
+        var before = await VerticalPercentAsync(svc, session, "pnlScroll");
+
+        await svc.ScrollContainerAsync(session, child, "down", null, CancellationToken.None);
+
+        await WaitForAsync(async () => await VerticalPercentAsync(svc, session, "pnlScroll") > before,
+            "scrolling a panel child should move its scrollable ancestor");
+    }
+
+    [TestMethod]
     public async Task OtherWindowSearch_ComFailureIsLoggedAndIgnored()
     {
         using var fx = new UiaTestFixture();
@@ -354,8 +491,8 @@ public partial class RealUiAutomationTests
                 "get_CurrentAutomationId" => EmptyBstr(),
                 "get_CurrentClassName" => EmptyBstr(),
                 "get_CurrentControlType" => UIA_CONTROLTYPE_ID.UIA_CustomControlTypeId,
-                "get_CurrentIsEnabled" => true,
-                "get_CurrentIsOffscreen" => false,
+                "get_CurrentIsEnabled" => new BOOL(true),
+                "get_CurrentIsOffscreen" => new BOOL(false),
                 "SetFocus" => null,
                 _ => ThrowCom(),
             };
@@ -371,6 +508,235 @@ public partial class RealUiAutomationTests
         Assert.AreEqual("999", props["ToggleState"]);
         Assert.AreEqual("999", props["ExpandCollapseState"]);
         Assert.IsTrue(logger.Has(Microsoft.Extensions.Logging.LogLevel.Warning, "Element position unchanged"));
+    }
+
+    [TestMethod]
+    public async Task FaultInjectedComProxies_CoverAmbiguousPatternCatchesAndFallbackSlug()
+    {
+        var svc = NewService();
+        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake" };
+        IUIAutomationElement MakeMatch(string name) => ComProxy<IUIAutomationElement>((method, _) => method.Name switch
+        {
+            "get_CurrentBoundingRectangle" => new RECT { left = 1, top = 2, right = 11, bottom = 12 },
+            "get_CurrentName" => StringBstr(name),
+            "get_CurrentAutomationId" => EmptyBstr(),
+            "get_CurrentClassName" => EmptyBstr(),
+            "get_CurrentControlType" => UIA_CONTROLTYPE_ID.UIA_TextControlTypeId,
+            "GetRuntimeId" => ThrowCom(),
+            "GetCurrentPattern" => ThrowCom(),
+            _ => ThrowCom(),
+        });
+        var first = MakeMatch("Ambiguous Proxy");
+        var second = MakeMatch("Ambiguous Proxy");
+        var matches = ComProxy<IUIAutomationElementArray>((method, args) => method.Name switch
+        {
+            "get_Length" => 2,
+            "GetElement" => (int)args![0]! == 0 ? first : second,
+            _ => ThrowCom(),
+        });
+        var root = ComProxy<IUIAutomationElement>((method, _) => method.Name switch
+        {
+            "FindFirst" => null,
+            "FindAll" => matches,
+            _ => ThrowCom(),
+        });
+        UiAutomationService.s_getRootElement = (_, _) => root;
+
+        var ex = await Assert.ThrowsExactlyAsync<UiAmbiguousSelectorException>(
+            () => svc.FindSingleElementAsync(session, new SelectorExpression { Query = "Ambiguous" }, CancellationToken.None));
+
+        StringAssert.Contains(ex.Message, "lbl[0]");
+    }
+
+    [TestMethod]
+    public async Task FaultInjectedComProxies_CoverExpandCollapsePropertyStates()
+    {
+        var svc = NewService();
+        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake" };
+        var model = new UiElement { Id = "fake", Type = "Custom", AutomationId = "fakeAid" };
+        foreach (var (state, expected) in new[]
+        {
+            (ExpandCollapseState.ExpandCollapseState_Expanded, "Expanded"),
+            (ExpandCollapseState.ExpandCollapseState_PartiallyExpanded, "PartiallyExpanded"),
+            (ExpandCollapseState.ExpandCollapseState_LeafNode, "LeafNode"),
+        })
+        {
+            var expand = ComProxy<IUIAutomationExpandCollapsePattern>((method, _) =>
+                method.Name == "get_CurrentExpandCollapseState" ? state : ThrowCom());
+            var target = ComProxy<IUIAutomationElement>((method, args) =>
+            {
+                if (method.Name == "GetCurrentPattern" && (UIA_PATTERN_ID)args![0]! == UIA_PATTERN_ID.UIA_ExpandCollapsePatternId)
+                {
+                    return expand;
+                }
+                return method.Name == "FindFirst" ? null : ThrowCom();
+            });
+            var root = ComProxy<IUIAutomationElement>((method, _) => method.Name == "FindFirst" ? target : ThrowCom());
+            UiAutomationService.s_getRootElement = (_, _) => root;
+
+            var props = await svc.GetPropertiesAsync(session, model, "ExpandCollapseState", CancellationToken.None);
+            Assert.AreEqual(expected, props["ExpandCollapseState"]);
+        }
+    }
+
+    [TestMethod]
+    public async Task FaultInjectedComProxies_CoverPromoteFailureAndPatternCatches()
+    {
+        var logger = new CapturingLogger<UiAutomationService>();
+        var svc = new UiAutomationService(logger, new SelectorService());
+        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake", WindowHandle = 111 };
+        var target = ComProxy<IUIAutomationElement>((method, _) => method.Name switch
+        {
+            "get_CurrentBoundingRectangle" => new RECT { left = 1, top = 2, right = 31, bottom = 42 },
+            "get_CurrentName" => StringBstr("Proxy Target"),
+            "get_CurrentAutomationId" => StringBstr("proxyAid"),
+            "get_CurrentClassName" => StringBstr("ProxyClass"),
+            "get_CurrentControlType" => UIA_CONTROLTYPE_ID.UIA_CustomControlTypeId,
+            "get_CurrentIsEnabled" => new BOOL(true),
+            "get_CurrentIsOffscreen" => new BOOL(false),
+            "GetRuntimeId" => ThrowCom(),
+            "GetCurrentPattern" => ThrowCom(),
+            _ => ThrowCom(),
+        });
+        var array = ComProxy<IUIAutomationElementArray>((method, _) => method.Name switch
+        {
+            "get_Length" => 1,
+            "GetElement" => target,
+            _ => ThrowCom(),
+        });
+        var findAllCalls = 0;
+        var root = ComProxy<IUIAutomationElement>((method, _) =>
+        {
+            if (method.Name == "FindAll")
+            {
+                findAllCalls++;
+                return findAllCalls == 1 ? array : throw new COMException("uniqueness failed");
+            }
+            return ThrowCom();
+        });
+        UiAutomationService.s_getRootElement = (_, _) => root;
+
+        var results = await svc.SearchAsync(session, new SelectorExpression { Query = "proxyAid" }, 5, CancellationToken.None);
+
+        Assert.AreEqual(1, results.Length);
+        Assert.AreEqual("proxyAid", results[0].AutomationId);
+        Assert.IsNull(results[0].Selector);
+        Assert.IsTrue(logger.Has(Microsoft.Extensions.Logging.LogLevel.Debug, "uniqueness failed"));
+    }
+
+    [TestMethod]
+    public async Task FaultInjectedComProxies_CoverPromoteInnerElementFailure()
+    {
+        var svc = NewService();
+        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake", WindowHandle = 222 };
+        var target = ComProxy<IUIAutomationElement>((method, _) => method.Name switch
+        {
+            "get_CurrentBoundingRectangle" => new RECT { left = 1, top = 2, right = 31, bottom = 42 },
+            "get_CurrentName" => StringBstr("Promote Target"),
+            "get_CurrentAutomationId" => StringBstr("promoteAid"),
+            "get_CurrentClassName" => EmptyBstr(),
+            "get_CurrentControlType" => UIA_CONTROLTYPE_ID.UIA_ButtonControlTypeId,
+            "get_CurrentIsEnabled" => new BOOL(true),
+            "get_CurrentIsOffscreen" => new BOOL(false),
+            "GetRuntimeId" => ThrowCom(),
+            "GetCurrentPattern" => ThrowCom(),
+            _ => ThrowCom(),
+        });
+        var exact = ComProxy<IUIAutomationElementArray>((method, _) => method.Name switch
+        {
+            "get_Length" => 1,
+            "GetElement" => target,
+            _ => ThrowCom(),
+        });
+        var all = ComProxy<IUIAutomationElementArray>((method, args) => method.Name switch
+        {
+            "get_Length" => 2,
+            "GetElement" => (int)args![0]! == 0 ? ThrowCom() : target,
+            _ => ThrowCom(),
+        });
+        var findAllCalls = 0;
+        var root = ComProxy<IUIAutomationElement>((method, _) =>
+        {
+            if (method.Name == "FindAll") { return ++findAllCalls == 1 ? exact : all; }
+            return ThrowCom();
+        });
+        UiAutomationService.s_getRootElement = (_, _) => root;
+
+        var results = await svc.SearchAsync(session, new SelectorExpression { Query = "promoteAid" }, 5, CancellationToken.None);
+
+        Assert.AreEqual("promoteAid", results.Single().Selector);
+    }
+
+    [TestMethod]
+    public async Task NativeSeams_CoverRootElementFallbacks()
+    {
+        var logger = new CapturingLogger<UiAutomationService>();
+        var svc = new UiAutomationService(logger, new SelectorService());
+        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake", WindowHandle = 0 };
+        var target = ComProxy<IUIAutomationElement>((method, _) => method.Name switch
+        {
+            "get_CurrentBoundingRectangle" => new RECT { left = 1, top = 2, right = 101, bottom = 82 },
+            "get_CurrentName" => StringBstr("Fallback Window"),
+            "get_CurrentAutomationId" => StringBstr("fallbackWindow"),
+            "get_CurrentClassName" => EmptyBstr(),
+            "get_CurrentControlType" => UIA_CONTROLTYPE_ID.UIA_WindowControlTypeId,
+            "get_CurrentIsEnabled" => new BOOL(true),
+            "get_CurrentIsOffscreen" => new BOOL(false),
+            "GetRuntimeId" => ThrowCom(),
+            "GetCurrentPattern" => ThrowCom(),
+            _ => ThrowCom(),
+        });
+        var one = ComProxy<IUIAutomationElementArray>((method, _) => method.Name switch
+        {
+            "get_Length" => 1,
+            "GetElement" => target,
+            _ => ThrowCom(),
+        });
+        var empty = ComProxy<IUIAutomationElementArray>((method, _) => method.Name switch
+        {
+            "get_Length" => 0,
+            _ => ThrowCom(),
+        });
+
+        UiAutomationService.s_getDesktopRootElement = _ => null;
+        Assert.AreEqual(0, (await svc.InspectAsync(session, null, 0, CancellationToken.None)).Length);
+
+        UiAutomationService.s_getDesktopRootElement = _ =>
+            ComProxy<IUIAutomationElement>((method, _) => method.Name == "FindAll" ? one : ThrowCom());
+        var single = await svc.InspectAsync(session, null, 0, CancellationToken.None);
+        Assert.AreEqual("Fallback Window", single.Single().Name);
+
+        UiAutomationService.s_getDesktopRootElement = _ =>
+            ComProxy<IUIAutomationElement>((method, _) => method.Name == "FindAll" ? empty : ThrowCom());
+        UiAutomationService.s_getMainWindowHandleForProcessId = _ => 456;
+        UiAutomationService.s_elementFromHandle = (_, hwnd) => hwnd == 456 ? target : throw new COMException("bad hwnd");
+        var fallback = await svc.InspectAsync(session, null, 0, CancellationToken.None);
+        Assert.AreEqual("Fallback Window", fallback.Single().Name);
+
+        var otherWindowElement = new UiElement { Id = "other", Type = "Button", WindowHandle = 999, AutomationId = "missing" };
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => svc.GetTextAsync(session, otherWindowElement, CancellationToken.None));
+        StringAssert.Contains(ex.Message, "stale");
+        Assert.IsTrue(logger.Has(Microsoft.Extensions.Logging.LogLevel.Debug, "ElementFromHandle found"));
+    }
+
+    [TestMethod]
+    public async Task FaultInjectedComProxies_CoverDirectSelectionItemProperties()
+    {
+        var svc = NewService();
+        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake" };
+        var model = new UiElement { Id = "sel", Type = "ListItem", AutomationId = "selAid" };
+        var target = ComProxy<ISelectionItemElement>((method, _) => method.Name switch
+        {
+            "get_CurrentIsSelected" => new BOOL(true),
+            _ => ThrowCom(),
+        });
+        var root = ComProxy<IUIAutomationElement>((method, _) => method.Name == "FindFirst" ? target : ThrowCom());
+        UiAutomationService.s_getRootElement = (_, _) => root;
+
+        var props = await svc.GetPropertiesAsync(session, model, "IsSelected", CancellationToken.None);
+
+        Assert.AreEqual(true, props["IsSelected"]);
     }
 
     [TestMethod]
@@ -442,6 +808,98 @@ public partial class RealUiAutomationTests
         StringAssert.Contains(ex.Message, "try --direction left");
     }
 
+    [TestMethod]
+    public async Task FaultInjectedComProxies_CoverEmptyTextAndValueFallthrough()
+    {
+        var svc = NewService();
+        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake" };
+        var model = new UiElement { Id = "text-fallback", Type = "Custom", AutomationId = "textAid", Name = "Fallback Name" };
+        var textRange = ComProxy<IUIAutomationTextRange>((method, _) =>
+            method.Name == "GetText" ? EmptyBstr() : ThrowCom());
+        var textPattern = ComProxy<IUIAutomationTextPattern>((method, _) =>
+            method.Name == "get_DocumentRange" ? textRange : ThrowCom());
+        var valuePattern = ComProxy<IUIAutomationValuePattern>((method, _) =>
+            method.Name == "get_CurrentValue" ? EmptyBstr() : ThrowCom());
+        var selected = ComProxy<IUIAutomationElement>((method, _) =>
+            method.Name == "get_CurrentName" ? EmptyBstr() : ThrowCom());
+        var selection = ComProxy<IUIAutomationElementArray>((method, _) => method.Name switch
+        {
+            "get_Length" => 1,
+            "GetElement" => selected,
+            _ => ThrowCom(),
+        });
+        var selectionPattern = ComProxy<IUIAutomationSelectionPattern>((method, _) =>
+            method.Name == "GetCurrentSelection" ? selection : ThrowCom());
+        var target = ComProxy<IUIAutomationElement>((method, args) =>
+        {
+            if (method.Name == "GetCurrentPattern")
+            {
+                return (UIA_PATTERN_ID)args![0]! switch
+                {
+                    UIA_PATTERN_ID.UIA_TextPatternId => textPattern,
+                    UIA_PATTERN_ID.UIA_ValuePatternId => valuePattern,
+                    UIA_PATTERN_ID.UIA_SelectionPatternId => selectionPattern,
+                    _ => ThrowCom(),
+                };
+            }
+            return ThrowCom();
+        });
+        var root = ComProxy<IUIAutomationElement>((method, _) => method.Name == "FindFirst" ? target : ThrowCom());
+        UiAutomationService.s_getRootElement = (_, _) => root;
+
+        var text = await svc.GetTextAsync(session, model, CancellationToken.None);
+
+        Assert.AreEqual("Fallback Name", text);
+    }
+
+    [TestMethod]
+    public async Task FaultInjectedComProxies_CoverToUiElementUnknownToggleAndCollapsedExpand()
+    {
+        var svc = NewService();
+        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake", WindowHandle = 333 };
+        var toggle = ComProxy<IUIAutomationTogglePattern>((method, _) =>
+            method.Name == "get_CurrentToggleState" ? (ToggleState)999 : ThrowCom());
+        var expand = ComProxy<IUIAutomationExpandCollapsePattern>((method, _) =>
+            method.Name == "get_CurrentExpandCollapseState" ? ExpandCollapseState.ExpandCollapseState_Collapsed : ThrowCom());
+        var target = ComProxy<IUIAutomationElement>((method, args) =>
+        {
+            if (method.Name == "GetCurrentPattern")
+            {
+                return (UIA_PATTERN_ID)args![0]! switch
+                {
+                    UIA_PATTERN_ID.UIA_TogglePatternId => toggle,
+                    UIA_PATTERN_ID.UIA_ExpandCollapsePatternId => expand,
+                    _ => ThrowCom(),
+                };
+            }
+            return method.Name switch
+            {
+                "get_CurrentBoundingRectangle" => new RECT { left = 1, top = 2, right = 31, bottom = 42 },
+                "get_CurrentName" => StringBstr("State Proxy"),
+                "get_CurrentAutomationId" => StringBstr("stateAid"),
+                "get_CurrentClassName" => EmptyBstr(),
+                "get_CurrentControlType" => UIA_CONTROLTYPE_ID.UIA_ButtonControlTypeId,
+                "get_CurrentIsEnabled" => new BOOL(true),
+                "get_CurrentIsOffscreen" => new BOOL(false),
+                "GetRuntimeId" => ThrowCom(),
+                _ => ThrowCom(),
+            };
+        });
+        var array = ComProxy<IUIAutomationElementArray>((method, _) => method.Name switch
+        {
+            "get_Length" => 1,
+            "GetElement" => target,
+            _ => ThrowCom(),
+        });
+        var root = ComProxy<IUIAutomationElement>((method, _) => method.Name == "FindAll" ? array : ThrowCom());
+        UiAutomationService.s_getRootElement = (_, _) => root;
+
+        var result = (await svc.SearchAsync(session, new SelectorExpression { Query = "stateAid" }, 1, CancellationToken.None)).Single();
+
+        Assert.IsNull(result.ToggleState);
+        Assert.AreEqual("collapsed", result.ExpandState);
+    }
+
     private static object ThrowCom() => throw new COMException("simulated COM failure");
 
     private static unsafe BSTR EmptyBstr() => new((char*)Marshal.StringToBSTR(string.Empty));
@@ -462,5 +920,9 @@ public partial class RealUiAutomationTests
 
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
             => Handler(targetMethod!, args);
+    }
+
+    private interface ISelectionItemElement : IUIAutomationElement, IUIAutomationSelectionItemPattern
+    {
     }
 }
