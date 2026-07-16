@@ -302,7 +302,7 @@ function generate(schema) {
     }
     // then named options
     for (const opt of opts) {
-      const tp = tsType(opt.def.valueType, opt.def.helpName);
+      const tp = isVariadicArg(opt.def) ? 'string | string[]' : tsType(opt.def.valueType, opt.def.helpName);
       L(`  /** ${cleanDesc(opt.def.description)} */`);
       L(`  ${opt.propName}?: ${tp};`);
     }
@@ -361,6 +361,12 @@ function generate(schema) {
         L(`  if (options.${opt.propName}) args.push('${opt.cliName}');`);
       } else if (tsType(opt.def.valueType) === 'number') {
         L(`  if (options.${opt.propName} !== undefined) args.push('${opt.cliName}', options.${opt.propName}.toString());`);
+      } else if (isVariadicArg(opt.def)) {
+        // Repeatable option (e.g. --id): accept a single value or an array and emit '--opt <v>' per value.
+        L(`  if (options.${opt.propName}) {`);
+        L(`    const ${opt.propName}Arr = Array.isArray(options.${opt.propName}) ? options.${opt.propName} : [options.${opt.propName}];`);
+        L(`    for (const v of ${opt.propName}Arr) args.push('${opt.cliName}', v);`);
+        L('  }');
       } else {
         L(`  if (options.${opt.propName}) args.push('${opt.cliName}', options.${opt.propName});`);
       }

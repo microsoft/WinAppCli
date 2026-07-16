@@ -24,25 +24,37 @@ internal static class ControlsHttpHelper
     /// <summary>
     /// Like <see cref="HttpClient.GetStringAsync(string, CancellationToken)"/>,
     /// but streams the body and throws <see cref="HttpRequestException"/> if it
-    /// exceeds <see cref="MaxResponseBytes"/>.
+    /// exceeds <see cref="MaxResponseBytes"/>. A request-timeout (surfaced by
+    /// <see cref="HttpClient"/> as a cancellation that the CALLER did not request)
+    /// is converted to <see cref="HttpRequestException"/> so it reads as a fetch
+    /// failure, not a user cancellation.
     /// </summary>
     public static async Task<string> GetStringCappedAsync(
         HttpClient client,
         string url,
         CancellationToken cancellationToken = default)
     {
-        using var response = await client
-            .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
-            .ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        return await ReadCappedAsync(response, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var response = await client
+                .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            return await ReadCappedAsync(response, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // HttpClient.Timeout, not caller cancellation — treat as a transport failure.
+            throw new HttpRequestException($"Request to {url} timed out.");
+        }
     }
 
     /// <summary>
     /// Like <see cref="GetStringCappedAsync"/> but returns <c>null</c> on any
-    /// non-success status or transport error instead of throwing — for
-    /// best-effort per-sample fetches where a single missing file must not abort
-    /// the whole refresh.
+    /// non-success status, transport error, or request-timeout instead of
+    /// throwing — for best-effort per-sample fetches where a single missing/slow
+    /// file must not abort the whole refresh. Genuine caller cancellation still
+    /// propagates.
     /// </summary>
     public static async Task<string?> TryGetStringCappedAsync(
         HttpClient client,
@@ -60,9 +72,13 @@ internal static class ControlsHttpHelper
             }
             return await ReadCappedAsync(response, cancellationToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw; // genuine caller cancellation
+        }
         catch (OperationCanceledException)
         {
-            throw;
+            return null; // request timeout — best-effort miss
         }
         catch (HttpRequestException)
         {

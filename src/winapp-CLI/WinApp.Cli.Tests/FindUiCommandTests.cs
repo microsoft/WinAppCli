@@ -133,6 +133,25 @@ public class FindUiCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task MultipleModes_Rejected_Exit1()
+    {
+        _fakeService = FakeControlsSearchService.WithEngine(BuildEngine());
+        var exit = await ParseAndInvokeWithCaptureAsync(Command(), ["tabview", "--list", "--json"]);
+        Assert.AreEqual(1, exit);
+        StringAssert.Contains(TestAnsiConsole.Output, "Choose one of");
+    }
+
+    [TestMethod]
+    public async Task Id_MultipleValues_AllFetched()
+    {
+        _fakeService = FakeControlsSearchService.WithEngine(BuildEngine());
+        var exit = await ParseAndInvokeWithCaptureAsync(Command(), ["--id", "gallery-tabview-1", "--id", "toolkit-datagrid-1"]);
+        Assert.AreEqual(0, exit);
+        StringAssert.Contains(TestAnsiConsole.Output, "TabView");
+        StringAssert.Contains(TestAnsiConsole.Output, "DataGrid");
+    }
+
+    [TestMethod]
     public async Task Refresh_PassedThroughToService()
     {
         var fake = FakeControlsSearchService.WithEngine(BuildEngine());

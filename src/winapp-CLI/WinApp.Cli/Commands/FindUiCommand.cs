@@ -111,10 +111,19 @@ internal sealed class FindUiCommand : Command, IShortDescription
                 return Fail(json, "--max must be at least 1.");
             }
 
-            // Nothing to do without a mode: no query, no ids, not listing.
-            if (!list && ids.Length == 0 && string.IsNullOrWhiteSpace(query))
+            // Exactly one mode: search (query), fetch (--id), or browse (--list).
+            var modes = 0;
+            if (!string.IsNullOrWhiteSpace(query)) { modes++; }
+            if (ids.Length > 0) { modes++; }
+            if (list) { modes++; }
+
+            if (modes == 0)
             {
                 return Fail(json, "Provide a search query (e.g. winapp find-ui \"tabbed layout\"), or use --id <id> to fetch code, or --list to browse.");
+            }
+            if (modes > 1)
+            {
+                return Fail(json, "Choose one of: a search query, --id <id>, or --list — they can't be combined.");
             }
 
             SearchEngine engine;

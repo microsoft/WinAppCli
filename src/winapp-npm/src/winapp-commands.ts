@@ -224,7 +224,7 @@ export interface FindUiOptions extends CommonOptions {
   /** What you're looking for, e.g. "tabbed layout" or "color picker". Matched lexically against WinUI control names, sample headers, and tags. */
   query?: string;
   /** Fetch full XAML + C# (and prerequisite notes) for one or more scenario ids from a prior search (e.g. gallery-tabview-1). */
-  id?: string;
+  id?: string | string[];
   /** Format output as JSON */
   json?: boolean;
   /** List every discoverable control/sample id instead of searching. */
@@ -243,7 +243,10 @@ export interface FindUiOptions extends CommonOptions {
 export async function findUi(options: FindUiOptions = {}): Promise<WinappResult> {
   const args: string[] = ['find-ui'];
   if (options.query) args.push(options.query);
-  if (options.id) args.push('--id', options.id);
+  if (options.id) {
+    const idArr = Array.isArray(options.id) ? options.id : [options.id];
+    for (const v of idArr) args.push('--id', v);
+  }
   if (options.json) args.push('--json');
   if (options.list) args.push('--list');
   if (options.max !== undefined) args.push('--max', options.max.toString());
