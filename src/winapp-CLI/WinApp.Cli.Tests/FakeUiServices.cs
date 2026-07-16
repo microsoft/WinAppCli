@@ -154,6 +154,47 @@ internal class FakeUiAutomationService : IUiAutomationService
         return Task.FromResult(ScreenshotResult);
     }
 
+    /// <summary>Configurable result for <see cref="RecordAsync"/>. The fake writes a tiny placeholder file to the output path.</summary>
+    public RecordCaptureResult RecordResult { get; set; } = new() { Frames = 3, Width = 2, Height = 2, FileSize = 0, Mode = "wgc" };
+
+    /// <summary>When non-null, <see cref="RecordAsync"/> throws this exception instead of writing a file.</summary>
+    public Exception? RecordException { get; set; }
+
+    /// <summary>
+    /// When <see langword="true"/>, <see cref="RecordAsync"/> signals readiness (calls onRecordingStarted)
+    /// then blocks on the cancellation token rather than returning immediately. This lets tests verify that
+    /// a stop signal (stdin EOF, Ctrl+C) cancels an in-progress recording and produces a graceful result.
+    /// </summary>
+    public bool RecordShouldWaitForCancellation { get; set; }
+
+    public async Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action? onRecordingStarted = null)
+    {
+        if (RecordException is not null)
+        {
+            throw RecordException;
+        }
+        await File.WriteAllBytesAsync(options.OutputPath, new byte[16], CancellationToken.None);
+        // Signal readiness before returning — mirrors the real service behavior (encoder is
+        // initialized and the first frame has been captured at this point).
+        onRecordingStarted?.Invoke();
+        if (RecordShouldWaitForCancellation)
+        {
+            // Block until cancelled — simulates a long recording that is stopped early
+            // by a stdin EOF, Ctrl+C, or a duration-expiry. The real RecordAsync returns
+            // normally (not via exception) when cancelled inside the frame loop.
+            try { await Task.Delay(Timeout.Infinite, ct); } catch (OperationCanceledException) { /* graceful stop */ }
+        }
+        var size = new FileInfo(options.OutputPath).Length;
+        return new RecordCaptureResult
+        {
+            Frames = RecordResult.Frames,
+            Width = RecordResult.Width,
+            Height = RecordResult.Height,
+            FileSize = size,
+            Mode = RecordResult.Mode,
+        };
+    }
+
     public Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
     {
         if (InvokeThrow is not null) { throw InvokeThrow; }

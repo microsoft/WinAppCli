@@ -41,6 +41,12 @@ internal static class UiErrors
         UiJsonError.Emit(json, UiJsonError.CodeStaleElement, "Element is no longer accessible");
     }
 
+    public static void AmbiguousSelector(ILogger logger, string message, bool json = false)
+    {
+        logger.LogError("{Symbol} {Message}", UiSymbols.Error, message);
+        UiJsonError.Emit(json, UiJsonError.CodeAmbiguousSelector, message);
+    }
+
     public static void GenericError(ILogger logger, Exception ex, bool json = false)
     {
         logger.LogDebug("Stack trace: {StackTrace}", ex.StackTrace);

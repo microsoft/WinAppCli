@@ -597,7 +597,7 @@ return Task.FromResult<UiElement?>(null);
                 listing.AppendLine($"  ... and {matchCount - 5} more");
             }
             listing.Append("Use a slug from 'inspect' to target a specific element.");
-            throw new InvalidOperationException(listing.ToString());
+            throw new UiAmbiguousSelectorException(listing.ToString());
         }
 
         var element = found.GetElement(0);

@@ -74,6 +74,8 @@ const typeExports = [];   // interfaces & type aliases
 for (const sym of allExports) {
   const name = sym.getName();
   if (name === 'default') continue;
+  // Skip internal helpers — underscore-prefixed names are not part of the public API.
+  if (name.startsWith('_')) continue;
 
   const resolved = resolveSymbol(sym);
   const src = getSourcePath(resolved);

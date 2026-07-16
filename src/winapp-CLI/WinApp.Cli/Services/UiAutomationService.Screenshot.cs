@@ -217,6 +217,77 @@ internal sealed partial class UiAutomationService
         }
     }
 
+    private static byte[] CaptureScreenFrame(
+        int x, int y, int cropWidth, int cropHeight,
+        int encoderWidth, int encoderHeight,
+        int displayWidth, int displayHeight)
+    {
+        var (offsetX, offsetY, fitW, fitH) = ComputeFittedContentRect(
+            cropWidth, cropHeight, encoderWidth, encoderHeight, displayWidth, displayHeight);
+        var content = CaptureFromScreenScaled(x, y, cropWidth, cropHeight, fitW, fitH);
+        if (offsetX == 0 && offsetY == 0 && fitW == encoderWidth && fitH == encoderHeight)
+        {
+            return content;
+        }
+
+        var frame = new byte[encoderWidth * encoderHeight * 4];
+        var sourceStride = fitW * 4;
+        var destinationStride = encoderWidth * 4;
+        for (var row = 0; row < fitH; row++)
+        {
+            Buffer.BlockCopy(
+                content,
+                row * sourceStride,
+                frame,
+                ((offsetY + row) * destinationStride) + (offsetX * 4),
+                sourceStride);
+        }
+        return frame;
+    }
+
+    private static unsafe byte[] CaptureFromScreenScaled(int x, int y, int sourceWidth, int sourceHeight, int targetWidth, int targetHeight)
+    {
+        var hdcScreen = Windows.Win32.PInvoke.GetDC(Windows.Win32.Foundation.HWND.Null);
+        try
+        {
+            var hdcMem = Windows.Win32.PInvoke.CreateCompatibleDC(hdcScreen);
+            try
+            {
+                var hBitmap = Windows.Win32.PInvoke.CreateCompatibleBitmap(hdcScreen, targetWidth, targetHeight);
+                try
+                {
+                    var hOld = Windows.Win32.PInvoke.SelectObject(hdcMem, *(Windows.Win32.Graphics.Gdi.HGDIOBJ*)&hBitmap);
+                    try
+                    {
+                        _ = Windows.Win32.PInvoke.SetStretchBltMode(hdcMem, Windows.Win32.Graphics.Gdi.STRETCH_BLT_MODE.HALFTONE);
+                        Windows.Win32.PInvoke.StretchBlt(
+                            hdcMem, 0, 0, targetWidth, targetHeight,
+                            hdcScreen, x, y, sourceWidth, sourceHeight,
+                            Windows.Win32.Graphics.Gdi.ROP_CODE.SRCCOPY);
+                    }
+                    finally
+                    {
+                        Windows.Win32.PInvoke.SelectObject(hdcMem, hOld);
+                    }
+
+                    return ExtractPixels(hdcScreen, hBitmap, targetWidth, targetHeight);
+                }
+                finally
+                {
+                    Windows.Win32.PInvoke.DeleteObject(*(Windows.Win32.Graphics.Gdi.HGDIOBJ*)&hBitmap);
+                }
+            }
+            finally
+            {
+                Windows.Win32.PInvoke.DeleteDC(hdcMem);
+            }
+        }
+        finally
+        {
+            Windows.Win32.PInvoke.ReleaseDC(Windows.Win32.Foundation.HWND.Null, hdcScreen);
+        }
+    }
+
     private static unsafe byte[] ExtractPixels(Windows.Win32.Graphics.Gdi.HDC hdc, Windows.Win32.Graphics.Gdi.HBITMAP hBitmap, int width, int height)
     {
         var bmi = new Windows.Win32.Graphics.Gdi.BITMAPINFO
