@@ -128,14 +128,23 @@ public sealed class TelemetryTests
     }
 
     [TestMethod]
-    public void AddWellKnownSensitiveStrings_DoesNotThrowAndPreservesTelemetryUsability()
+    public void AddWellKnownSensitiveStrings_ScrubsMachineNameFromLoggedEvents()
     {
+        using var listener = new CapturingEventListener(ProviderName);
         var telemetry = new WinApp.Cli.Telemetry.Telemetry();
 
         telemetry.AddWellKnownSensitiveStrings();
-        telemetry.Log("AfterWellKnownSensitiveStrings", LogLevel.Local, new ProbeEvent { Detail = Environment.CurrentDirectory });
+        telemetry.Log("AfterWellKnownSensitiveStrings", LogLevel.Local, new ProbeEvent { Detail = Environment.MachineName });
 
-        Assert.IsTrue(telemetry.IsTelemetryOn);
+        var events = listener.WaitForEvents(1);
+        var match = events.FirstOrDefault(e => e.Name == "AfterWellKnownSensitiveStrings");
+        Assert.IsNotNull(match, "Expected the probe event to be emitted.");
+        var detail = match!.Payload.TryGetValue("Detail", out var value) ? value as string : null;
+        Assert.IsFalse(string.IsNullOrEmpty(detail), "Probe event should carry a Detail payload.");
+        Assert.IsFalse(detail!.Contains(Environment.MachineName, StringComparison.Ordinal),
+            "AddWellKnownSensitiveStrings must scrub the raw machine name from telemetry payloads; a no-op would leak it.");
+        StringAssert.Contains(detail!, "<",
+            "The scrubbed machine name should be replaced with a <Token> placeholder.");
     }
 
     private static InvalidOperationException CreateExceptionWithInner()

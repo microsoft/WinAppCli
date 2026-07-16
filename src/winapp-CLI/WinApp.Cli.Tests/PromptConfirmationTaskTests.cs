@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.Logging.Abstractions;
+using Spectre.Console;
+using Spectre.Console.Rendering;
 using Spectre.Console.Testing;
 using WinApp.Cli.ConsoleTasks;
 
@@ -126,12 +128,32 @@ public sealed class PromptConfirmationTaskTests
     }
 
     [TestMethod]
-    public async Task WaitForInputAsync_CancellationWhileWaiting_ReturnsFalseAndShowsCancelledPrompt()
+    public async Task WaitForInputAsync_NoInputAvailable_TreatedAsCancelled()
     {
+        // An empty console reader reports EOF as InvalidOperationException; the prompt treats it as cancelled.
         var (task, _, updates) = CreateTask("Still waiting?");
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+        using var cts = new CancellationTokenSource();
 
         var result = await task.WaitForInputAsync(cts.Token);
+
+        Assert.IsFalse(result);
+        Assert.AreEqual(PromptState.Cancelled, task.State);
+        Assert.IsTrue(updates.Last().Contains("(cancelled)", StringComparison.Ordinal), string.Join("|", updates));
+    }
+
+    [TestMethod]
+    public async Task WaitForInputAsync_CancelledWhileWaitingForKey_ReturnsFalseAndShowsCancelledPrompt()
+    {
+        // The console blocks in ReadKeyAsync until the token fires, so this genuinely exercises the
+        // OperationCanceledException path rather than the empty-console EOF fast-path.
+        var (task, updates) = CreateBlockingTask("Still waiting?");
+        using var cts = new CancellationTokenSource();
+
+        var pending = task.WaitForInputAsync(cts.Token);
+        Assert.IsFalse(pending.IsCompleted, "The prompt should block while the reader is waiting for a key.");
+
+        cts.Cancel();
+        var result = await pending;
 
         Assert.IsFalse(result);
         Assert.AreEqual(PromptState.Cancelled, task.State);
@@ -174,5 +196,48 @@ public sealed class PromptConfirmationTaskTests
             onUpdate: () => updates.Add(task!.InProgressMessage));
         updates.Add(task.InProgressMessage);
         return (task, console, updates);
+    }
+
+    private static (PromptConfirmationTask Task, List<string> Updates) CreateBlockingTask(string promptText)
+    {
+        var console = new BlockingInputConsole(new TestConsole());
+        var updates = new List<string>();
+        PromptConfirmationTask? task = null;
+        task = new PromptConfirmationTask(
+            promptText,
+            parent: null,
+            ansiConsole: console,
+            logger: NullLogger.Instance,
+            renderLock: new Lock(),
+            onUpdate: () => updates.Add(task!.InProgressMessage));
+        updates.Add(task.InProgressMessage);
+        return (task, updates);
+    }
+
+    // A console whose input blocks until the cancellation token fires, so tests can exercise the real
+    // "cancelled while waiting for a key" path (ReadKeyAsync throws OperationCanceledException) rather
+    // than the empty-console EOF fast-path.
+    private sealed class BlockingInputConsole(IAnsiConsole inner) : IAnsiConsole
+    {
+        public Profile Profile => inner.Profile;
+        public IAnsiConsoleCursor Cursor => inner.Cursor;
+        public IAnsiConsoleInput Input { get; } = new BlockingConsoleInput();
+        public IExclusivityMode ExclusivityMode => inner.ExclusivityMode;
+        public RenderPipeline Pipeline => inner.Pipeline;
+        public void Clear(bool home) => inner.Clear(home);
+        public void Write(IRenderable renderable) => inner.Write(renderable);
+    }
+
+    private sealed class BlockingConsoleInput : IAnsiConsoleInput
+    {
+        public bool IsKeyAvailable() => false;
+
+        public ConsoleKeyInfo? ReadKey(bool intercept) => throw new NotSupportedException();
+
+        public async Task<ConsoleKeyInfo?> ReadKeyAsync(bool intercept, CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+            return null;
+        }
     }
 }

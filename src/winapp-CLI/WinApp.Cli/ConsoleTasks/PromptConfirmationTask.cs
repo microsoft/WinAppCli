@@ -99,7 +99,18 @@ internal class PromptConfirmationTask : GroupableTask<bool>
             // Read keys until we get Enter, Escape, or cancellation
             while (!cancellationToken.IsCancellationRequested)
             {
-                var keyInfo = await AnsiConsole.Input.ReadKeyAsync(intercept: true, cancellationToken: cancellationToken);
+                ConsoleKeyInfo? keyInfo;
+                try
+                {
+                    keyInfo = await AnsiConsole.Input.ReadKeyAsync(intercept: true, cancellationToken: cancellationToken);
+                }
+                catch (InvalidOperationException)
+                {
+                    // Some console readers report EOF/no input as an invalid operation; treat it like a
+                    // cancelled prompt. Scoped to the read itself so failures elsewhere still surface.
+                    break;
+                }
+
                 if (keyInfo != null)
                 {
                     // Enter key confirms based on typed input (default to Yes)
@@ -144,10 +155,6 @@ internal class PromptConfirmationTask : GroupableTask<bool>
         catch (OperationCanceledException)
         {
             // Cancelled
-        }
-        catch (InvalidOperationException)
-        {
-            // Some console readers report EOF/no input as an invalid operation; treat it like a cancelled prompt.
         }
 
         State = PromptState.Cancelled;
