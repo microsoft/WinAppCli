@@ -71,6 +71,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         IAnsiConsole ansiConsole,
         CreateExternalCatalogCommand createExternalCatalogCommand,
         CompleteCommand completeCommand,
+        FindUiCommand findUiCommand,
         UiCommand uiCommand) : base("CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows")
     {
         Subcommands.Add(initCommand);
@@ -87,6 +88,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Subcommands.Add(toolCommand);
         Subcommands.Add(msStoreCommand);
         Subcommands.Add(createExternalCatalogCommand);
+        Subcommands.Add(findUiCommand);
         Subcommands.Add(uiCommand);
         Subcommands.Add(completeCommand);
 
@@ -102,6 +104,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
             ("Setup", [typeof(InitCommand), typeof(RestoreCommand), typeof(UpdateCommand)]),
             ("Packaging & Signing", [typeof(PackageCommand), typeof(SignCommand), typeof(CertCommand), typeof(ManifestCommand), typeof(CreateExternalCatalogCommand)]),
             ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand), typeof(RunCommand), typeof(UnregisterCommand)]),
+            ("Discovery", [typeof(FindUiCommand)]),
             ("UI Automation", [typeof(UiCommand)])
         );
     }

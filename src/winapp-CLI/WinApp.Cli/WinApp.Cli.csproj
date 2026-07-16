@@ -53,6 +53,16 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- find-ui curated enrichment (tags/keywords) + core patterns. The large
+         Gallery/Toolkit scenario corpora are NOT embedded — they are fetched
+         from GitHub on first use and cached per-user. -->
+    <EmbeddedResource Include="Services\Controls\Data\core-patterns.json" LogicalName="core-patterns.json" />
+    <EmbeddedResource Include="Services\Controls\Data\gallery-tags.json" LogicalName="gallery-tags.json" />
+    <EmbeddedResource Include="Services\Controls\Data\toolkit-tags.json" LogicalName="toolkit-tags.json" />
+    <EmbeddedResource Include="Services\Controls\Data\toolkit-keywords.json" LogicalName="toolkit-keywords.json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" />
     <PackageReference Include="Microsoft.Windows.CsWin32">
