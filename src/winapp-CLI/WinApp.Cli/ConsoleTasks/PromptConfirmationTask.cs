@@ -145,6 +145,10 @@ internal class PromptConfirmationTask : GroupableTask<bool>
         {
             // Cancelled
         }
+        catch (InvalidOperationException)
+        {
+            // Some console readers report EOF/no input as an invalid operation; treat it like a cancelled prompt.
+        }
 
         State = PromptState.Cancelled;
         _resultTcs.TrySetResult(false);
