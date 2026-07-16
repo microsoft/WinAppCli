@@ -1084,8 +1084,8 @@ winapp ui [command] [options]
 - `invoke` - Activate element (click, toggle, expand)
 - `click` - Click element via mouse simulation (for controls that don't support invoke)
 - `hover` - Move mouse to element to trigger tooltips, flyouts, and hover states (default dwell: 800ms)
-- `drag` - Drag the mouse from one point to another, by element selector or app `x,y` coordinates (reorder, resize, sliders, drag-and-drop)
-- `touch` - Inject synthetic touch gestures (tap, double-tap, long-press, swipe, pinch, stretch) at an element center or app `x,y` coordinates
+- `drag` - Drag the mouse from one point to another, by element selector or screen `x,y` coordinates (reorder, resize, sliders, drag-and-drop)
+- `touch` - Inject synthetic touch gestures (tap, double-tap, long-press, swipe, pinch, stretch) at an element center or screen `x,y` coordinates
 - `pen` - Inject synthetic pen/stylus input — taps and ink strokes with configurable pressure, tilt, and eraser mode
 - `send-keys` - Send synthetic keyboard input (named keys, combos, raw vk=0xNN, or literal text) to a window
 - `set-value` - Set value on editable element (text, number); falls back to LegacyIAccessible `put_accValue` for TextPattern-only rich-edit controls
