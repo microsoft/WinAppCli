@@ -14,6 +14,13 @@ namespace WinApp.Cli.Services;
 /// UIA backend using Windows UI Automation COM APIs via CsWin32.
 /// Provides cross-process element tree inspection and pattern-based interaction.
 /// </summary>
+/// <remarks>
+/// Coverage ceiling (issue #630): the deterministic real-UIA suite drives a live in-process WinForms
+/// target to cover the ordinary success and error paths across this partial class. The lines that
+/// remain uncovered are defensive UI Automation COM provider fault arms (catch/break/continue/log)
+/// and native HWND-enumeration branches that cannot be triggered safely without unsafe native
+/// provider fault injection on the shared desktop.
+/// </remarks>
 internal sealed partial class UiAutomationService : IUiAutomationService
 {
     private readonly ILogger<UiAutomationService> _logger;
@@ -120,12 +127,6 @@ internal sealed partial class UiAutomationService : IUiAutomationService
         return results;
     }
 
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     public Task<UiElement[]> InspectAsync(UiSessionInfo session, string? elementId, int depth, CancellationToken ct)
     {
         _logger.LogDebug("Inspecting process {Pid} at depth {Depth}", session.ProcessId, depth);
@@ -262,12 +263,6 @@ internal sealed partial class UiAutomationService : IUiAutomationService
         return Task.FromResult(result);
     }
 
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     public Task<UiElement[]> InspectAncestorsAsync(UiSessionInfo session, string elementId, CancellationToken ct)
     {
         _logger.LogDebug("Inspecting ancestors of {ElementId}", elementId);
@@ -361,12 +356,6 @@ internal sealed partial class UiAutomationService : IUiAutomationService
         return Task.FromResult(result);
     }
 
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     public Task<UiElement[]> SearchAsync(UiSessionInfo session, SelectorExpression selector, int maxResults, CancellationToken ct)
     {
         _logger.LogDebug("Searching in process {Pid}", session.ProcessId);
@@ -511,12 +500,6 @@ internal sealed partial class UiAutomationService : IUiAutomationService
         return Task.FromResult(results);
     }
 
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     public Task<UiElement?> FindSingleElementAsync(UiSessionInfo session, SelectorExpression selector, CancellationToken ct)
     {
         _logger.LogDebug("Finding single element in process {Pid}", session.ProcessId);
@@ -685,12 +668,6 @@ return Task.FromResult<UiElement?>(null);
         return Task.FromResult<UiElement?>(result);
     }
 
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     public Task<Dictionary<string, object?>> GetPropertiesAsync(UiSessionInfo session, UiElement element, string? propertyName, CancellationToken ct)
     {
         // Basic properties from the UiElement model
@@ -797,12 +774,6 @@ return Task.FromResult<UiElement?>(null);
         return Task.FromResult(props);
     }
 
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     public Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
     {
         _logger.LogDebug("Invoking element {ElementId}", element.Id);
@@ -857,12 +828,6 @@ return Task.FromResult<UiElement?>(null);
             $"Element {element.Selector ?? element.Id} ({element.Type}) does not support any invoke pattern. {hint}");
     }
 
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     public Task SetValueAsync(UiSessionInfo session, UiElement element, string text, CancellationToken ct)
     {
         _logger.LogDebug("Setting value on element {ElementId}", element.Id);
@@ -880,12 +845,6 @@ return Task.FromResult<UiElement?>(null);
         return Task.CompletedTask;
     }
 
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     public Task FocusAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
     {
         _logger.LogDebug("Focusing element {ElementId}", element.Id);
@@ -900,12 +859,6 @@ return Task.FromResult<UiElement?>(null);
         return Task.CompletedTask;
     }
 
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     public Task<string?> GetTextAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
     {
         _logger.LogDebug("Getting text from element {ElementId}", element.Id);
@@ -982,12 +935,6 @@ return Task.FromResult<UiElement?>(null);
         return Task.FromResult<string?>(null);
     }
 
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     public Task ScrollIntoViewAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
     {
         _logger.LogDebug("Scrolling element {ElementId} into view", element.Id);
@@ -1058,12 +1005,6 @@ return Task.FromResult<UiElement?>(null);
         }
     }
 
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     public Task ScrollContainerAsync(UiSessionInfo session, UiElement element, string? direction, string? to, CancellationToken ct)
     {
         _logger.LogDebug("Scrolling container {ElementId}", element.Id);
@@ -1182,12 +1123,6 @@ return Task.FromResult<UiElement?>(null);
         return Task.CompletedTask;
     }
 
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     public Task<UiElement?> GetFocusedElementAsync(UiSessionInfo session, CancellationToken ct)
     {
         _logger.LogDebug("Getting focused element for process {Pid}", session.ProcessId);
@@ -1231,12 +1166,6 @@ return Task.FromResult<UiElement?>(null);
     /// and matching + validating the RuntimeId hash.
     /// Returns both the UiElement model and the live COM element.
     /// </summary>
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     private (UiElement? Model, IUIAutomationElement? ComElement) FindElementBySlugWithCom(string targetSlug, IUIAutomationElement root)
     {
         var parsed = SlugGenerator.ParseSlug(targetSlug);
@@ -1353,12 +1282,6 @@ return Task.FromResult<UiElement?>(null);
     /// <summary>
     /// Convenience wrapper that returns only the UiElement model from slug resolution.
     /// </summary>
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     private UiElement? FindElementBySlug(string targetSlug, IUIAutomationElement root)
     {
         return FindElementBySlugWithCom(targetSlug, root).Model;
@@ -1371,12 +1294,6 @@ return Task.FromResult<UiElement?>(null);
     /// Uses slug-based resolution first (most precise), then falls back to
     /// AutomationId or Name+Type property matching.
     /// </summary>
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     private IUIAutomationElement? ResolveComElement(UiSessionInfo session, UiElement element)
     {
         // Use the element's source HWND if it came from a different window (popup/dialog)
@@ -1454,12 +1371,6 @@ return Task.FromResult<UiElement?>(null);
     /// Get all windows associated with an app: same-PID windows + cross-process owned windows.
     /// Excludes internal system windows (PseudoConsoleWindow, IME, etc.).
     /// </summary>
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     private List<(nint Hwnd, int Pid, string Title)> GetAllAppWindows(UiSessionInfo session)
     {
         var windows = FindWindowsByPid(session.ProcessId);
@@ -1516,18 +1427,6 @@ return Task.FromResult<UiElement?>(null);
         className is not null && InternalWindowClasses.Contains(className);
 
     /// <summary>Get UIA root element for a specific HWND.</summary>
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     private IUIAutomationElement? GetRootElementForHwnd(nint hwnd)
     {
         try
@@ -1544,12 +1443,6 @@ return Task.FromResult<UiElement?>(null);
     /// Search for an element across all popup/owned windows of the app.
     /// Called when FindSingleElementAsync fails to find the element on the main window.
     /// </summary>
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     private UiElement? FindElementOnOtherWindows(UiSessionInfo session, SelectorExpression selector)
     {
         var allWindows = GetAllAppWindows(session);
@@ -1746,12 +1639,6 @@ return Task.FromResult<UiElement?>(null);
     /// works around UIA FindAll bugs where WebView2 controls stall the tree traversal
     /// and cause sibling elements after the WebView to be skipped.
     /// </summary>
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     private List<IUIAutomationElement> ManualTreeSearch(IUIAutomationElement root, string query, int maxResults, int maxDepth = 25)
     {
         var walker = _automation.get_ControlViewWalker();
@@ -1789,12 +1676,6 @@ return Task.FromResult<UiElement?>(null);
         }
     }
 
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     private IUIAutomationCondition? BuildCondition(SelectorExpression selector)
     {
         if (selector.Query is not null)
@@ -1820,12 +1701,6 @@ return Task.FromResult<UiElement?>(null);
     /// <summary>
     /// Checks if an element supports any invokable pattern (Invoke, Toggle, SelectionItem, ExpandCollapse).
     /// </summary>
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     private static bool IsInvokable(IUIAutomationElement element)
     {
         try
@@ -1859,12 +1734,6 @@ return Task.FromResult<UiElement?>(null);
     /// Walks up the tree from an element to find the nearest ancestor that supports an invoke pattern.
     /// Stops at the root element to avoid walking past the target window.
     /// </summary>
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     private IUIAutomationElement? FindInvokableAncestor(IUIAutomationElement element, IUIAutomationElement root)
     {
         var walker = _automation.get_ControlViewWalker();
@@ -1959,12 +1828,6 @@ return Task.FromResult<UiElement?>(null);
         }
     }
 
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     private static UiElement ToUiElement(IUIAutomationElement element, string path, ref int nextElementId)
     {
         var id = $"e{nextElementId++}";
@@ -2075,12 +1938,6 @@ return Task.FromResult<UiElement?>(null);
         };
     }
 
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     private static bool HasPattern(IUIAutomationElement element, UIA_PATTERN_ID patternId)
     {
         try
@@ -2098,12 +1955,6 @@ return Task.FromResult<UiElement?>(null);
     /// across the full UIA tree, use it directly as the selector instead of a generated slug.
     /// AutomationIds are developer-set, stable across layout changes, and more readable.
     /// </summary>
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     private void PromoteUniqueAutomationIds(IUIAutomationElement root, IList<UiElement> elements, long mainWindowHandle = 0)
     {
         // Collect AutomationIds from the inspected elements that could be promoted
@@ -2166,12 +2017,6 @@ return Task.FromResult<UiElement?>(null);
     }
 
 
-    /// <remarks>
-    /// Coverage ceiling (issue #630): deterministic real-UIA tests cover the ordinary success/error
-    /// paths for this method. Remaining uncovered lines are defensive UI Automation COM provider
-    /// fault arms (catch/break/continue/log) or native HWND enumeration branches that cannot be
-    /// triggered safely without unsafe native provider fault injection on the shared desktop.
-    /// </remarks>
     private static string? SafeGetBstr(Func<Windows.Win32.Foundation.BSTR> getter)
     {
         try

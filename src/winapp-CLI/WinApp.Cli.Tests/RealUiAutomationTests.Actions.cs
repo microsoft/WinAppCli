@@ -324,16 +324,21 @@ public partial class RealUiAutomationTests
     }
 
     [TestMethod]
-    public async Task ScrollIntoViewAsync_OffscreenChild_DoesNotThrow()
+    public async Task ScrollIntoViewAsync_OffscreenChild_MovesItIntoView()
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
         var session = SessionFor(fx);
         var deepChild = await ResolveAsync(svc, session, "pnlChild39");
+        var before = await VerticalPercentAsync(svc, session, "pnlScroll");
 
-        // Should either scroll the item into view via ScrollItemPattern or fall back to the
-        // ancestor ScrollPattern; either way it must complete without throwing.
+        // pnlChild39 is the last child of a top-scrolled AutoScroll panel, so bringing it into view must
+        // scroll the ancestor down (via ScrollItemPattern or the ScrollPattern fallback), not merely
+        // avoid throwing.
         await svc.ScrollIntoViewAsync(session, deepChild, CancellationToken.None);
+
+        var after = await VerticalPercentAsync(svc, session, "pnlScroll");
+        Assert.IsTrue(after > before, $"scrolling the last child into view should move the panel down (before={before}, after={after})");
     }
 
 }
