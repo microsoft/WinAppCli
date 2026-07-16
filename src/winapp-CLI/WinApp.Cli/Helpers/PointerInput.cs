@@ -475,8 +475,21 @@ internal static class PointerInput
         Action<int>? sleep = null,
         Func<long>? nowMs = null)
     {
-        // DOWN at the first point.
         var first = path[0];
+
+        // Hover-arrival: bring the pen IN RANGE (hovering, not yet in contact) BEFORE the DOWN
+        // frame. Windows latches the pen's transducer type — tip vs. inverted/eraser end — at the
+        // moment the pointer ENTERS RANGE. A frame that is already in contact (or a flag change made
+        // mid-stroke) is ignored, so an eraser stroke that jumps straight to DOWN is delivered as an
+        // ordinary tip contact and PEN_FLAG_INVERTED/ERASER never reaches the app. A physical pen
+        // always hovers before it touches; emitting this in-range frame first (carrying the same
+        // pen flags via the send closure) is what lets --eraser be honoured. pressure 0 = not in
+        // contact. This mirrors the working reference injectors (draw-stream, EGoTouchRev, zpenflow),
+        // which all establish in-range state before contact.
+        send(first.X, first.Y, 0,
+            POINTER_FLAGS.POINTER_FLAG_INRANGE | POINTER_FLAGS.POINTER_FLAG_UPDATE);
+
+        // DOWN at the first point.
         send(first.X, first.Y, contactPressure,
             POINTER_FLAGS.POINTER_FLAG_DOWN | POINTER_FLAGS.POINTER_FLAG_INRANGE | POINTER_FLAGS.POINTER_FLAG_INCONTACT);
 
@@ -523,10 +536,13 @@ internal static class PointerInput
                     }
                 }
             }
-            // --- Lift on the normal path: let failure propagate so the caller knows the pen
-            //     may be stuck and the command exits non-zero with a structured error. ---
+            // --- Lift on the normal path: break contact but stay IN RANGE (a clean lift to hover).
+            //     The synthetic pen device is destroyed immediately after the stroke, which retracts
+            //     the in-range pointer, so this mirrors a real pen lifting off the surface. Let a
+            //     failure propagate so the caller knows the pen may be stuck and the command exits
+            //     non-zero with a structured error. ---
             var last = path[^1];
-            send(last.X, last.Y, 0, POINTER_FLAGS.POINTER_FLAG_UP);
+            send(last.X, last.Y, 0, POINTER_FLAGS.POINTER_FLAG_UP | POINTER_FLAGS.POINTER_FLAG_INRANGE);
             released = true;
         }
         finally
@@ -536,7 +552,7 @@ internal static class PointerInput
             if (!released)
             {
                 var last = path[^1];
-                try { send(last.X, last.Y, 0, POINTER_FLAGS.POINTER_FLAG_UP); }
+                try { send(last.X, last.Y, 0, POINTER_FLAGS.POINTER_FLAG_UP | POINTER_FLAGS.POINTER_FLAG_INRANGE); }
                 catch (InvalidOperationException) { }
             }
         }

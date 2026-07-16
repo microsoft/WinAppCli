@@ -21,6 +21,45 @@ public class PointerInputFrameTests
         Assert.AreEqual(0x00000006u, PointerInput.ComputePenFlags(eraser: true));
     }
 
+    [TestMethod]
+    public void InjectPenStroke_EmitsInRangeHoverArrivalBeforeContact()
+    {
+        // Regression guard for the --eraser delivery fix: a synthetic pen must ENTER RANGE (hover,
+        // not in contact) before the DOWN frame. Windows latches the transducer type (tip vs.
+        // inverted/eraser end) on range entry, so this hover-arrival frame — which carries the same
+        // pen flags as the stroke via the send closure — is what lets PEN_FLAG_INVERTED/ERASER reach
+        // the target app. A stroke that jumps straight to DOWN drops the eraser flag.
+        var frames = new List<(int X, int Y, uint Pressure, POINTER_FLAGS Flags)>();
+        PointerInput.PenFrameSender recorder = (x, y, p, flags) => frames.Add((x, y, p, flags));
+
+        var path = new List<PointerPoint> { new PointerPoint(100, 200) };
+
+        PointerInput.InjectPenStroke(path, contactPressure: 512, durationMs: 0, recorder);
+
+        // Frame 0 = in-range hover-arrival at the start point: in range, NOT in contact, zero pressure.
+        Assert.IsTrue(frames[0].Flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_INRANGE),
+            "Frame 0 must be IN RANGE (hover-arrival)");
+        Assert.IsFalse(frames[0].Flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_INCONTACT),
+            "Frame 0 (hover-arrival) must NOT be in contact");
+        Assert.IsFalse(frames[0].Flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_DOWN),
+            "Frame 0 (hover-arrival) must NOT be a DOWN transition");
+        Assert.AreEqual(0u, frames[0].Pressure, "Hover-arrival frame must carry zero pressure");
+        Assert.AreEqual(100, frames[0].X, "Hover-arrival must be at the stroke start X");
+        Assert.AreEqual(200, frames[0].Y, "Hover-arrival must be at the stroke start Y");
+
+        // Frame 1 = DOWN (contact) at the same point.
+        Assert.IsTrue(frames[1].Flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_DOWN),
+            "Frame 1 must be the DOWN (contact) frame");
+        Assert.IsTrue(frames[1].Flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_INCONTACT),
+            "DOWN frame must be in contact");
+
+        // Final frame = clean lift: breaks contact (UP) while no longer in contact.
+        Assert.IsTrue(frames[^1].Flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_UP),
+            "Final frame must break contact (UP)");
+        Assert.IsFalse(frames[^1].Flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_INCONTACT),
+            "Final lift frame must not be in contact");
+    }
+
     // -------------------------------------------------------------------------
     // HIGH 1 — Long-press emits periodic UPDATE frames during the hold
     // -------------------------------------------------------------------------
@@ -153,18 +192,26 @@ public class PointerInputFrameTests
 
         PointerInput.InjectPenStroke(path, contactPressure: 512, durationMs: 200, recorder);
 
-        // Must have more than just DOWN + UP.
-        Assert.IsTrue(frames.Count > 2,
+        // Must have more than just hover + DOWN + UP.
+        Assert.IsTrue(frames.Count > 3,
             $"durationMs stroke must emit UPDATE frames; got {frames.Count} total frames");
 
-        Assert.IsTrue(frames[0].Flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_DOWN), "First frame must be DOWN");
+        // Frame 0 = in-range hover-arrival (not in contact); frame 1 = DOWN.
+        Assert.IsTrue(frames[0].Flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_INRANGE)
+            && !frames[0].Flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_INCONTACT),
+            "First frame must be the in-range hover-arrival (before contact)");
+        Assert.IsTrue(frames[1].Flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_DOWN), "Second frame must be DOWN");
         Assert.IsTrue(frames[^1].Flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_UP), "Last frame must be UP");
 
-        var updateFrames = frames.Skip(1).SkipLast(1).ToList();
+        // Glide frames = the in-contact UPDATE frames between DOWN and the lift (excludes the hover).
+        var updateFrames = frames
+            .Where(f => f.Flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_UPDATE)
+                     && f.Flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_INCONTACT))
+            .ToList();
         Assert.IsTrue(updateFrames.Count > 1,
             "Must emit multiple UPDATE frames (not a single teleport) when durationMs is set");
 
-        // All intermediate frames must be UPDATE+INRANGE+INCONTACT.
+        // All glide frames must be UPDATE+INRANGE+INCONTACT.
         foreach (var f in updateFrames)
         {
             Assert.IsTrue(f.Flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_UPDATE),
@@ -210,9 +257,9 @@ public class PointerInputFrameTests
 
         PointerInput.InjectPenStroke(path, contactPressure: 512, durationMs: 200, recorder, fakeSleep, fakeNowMs);
 
-        // Frame count: DOWN + 20 UPDATE + UP = 22.
-        Assert.AreEqual(22, frames.Count,
-            $"1-segment stroke with durationMs>0 should produce DOWN + 20 UPDATE + UP = 22 frames; got {frames.Count}");
+        // Frame count: hover + DOWN + 20 UPDATE + lift = 23.
+        Assert.AreEqual(23, frames.Count,
+            $"1-segment stroke with durationMs>0 should produce hover + DOWN + 20 UPDATE + lift = 23 frames; got {frames.Count}");
 
         // Total scheduled sleep must equal durationMs exactly (cumulative target timestamp approach).
         int totalSleep = sleeps.Sum();
@@ -247,7 +294,7 @@ public class PointerInputFrameTests
             $"Old Math.Max(1,…) code would return ~{sleeps.Count}ms.");
 
         // Still must produce the correct frame sequence.
-        Assert.AreEqual(22, frames.Count, "Frame count must still be DOWN + 20 UPDATE + UP = 22");
+        Assert.AreEqual(23, frames.Count, "Frame count must still be hover + DOWN + 20 UPDATE + lift = 23");
         Assert.AreEqual(100, frames[^2].X, "Last UPDATE frame must reach destination X=100");
     }
 
@@ -328,9 +375,9 @@ public class PointerInputFrameTests
 
         PointerInput.InjectPenStroke(path, contactPressure: 512, durationMs: 400, recorder, fakeSleep, fakeNowMs);
 
-        // 2 segments × 20 steps = 40 UPDATE frames; DOWN + 40 + UP = 42.
-        Assert.AreEqual(42, frames.Count,
-            $"2-segment stroke should produce DOWN + 40 UPDATE + UP = 42 frames; got {frames.Count}");
+        // 2 segments × 20 steps = 40 UPDATE frames; hover + DOWN + 40 + lift = 43.
+        Assert.AreEqual(43, frames.Count,
+            $"2-segment stroke should produce hover + DOWN + 40 UPDATE + lift = 43 frames; got {frames.Count}");
 
         int totalSleep = sleeps.Sum();
         Assert.AreEqual(400, totalSleep,
@@ -354,11 +401,11 @@ public class PointerInputFrameTests
 
         PointerInput.InjectPenStroke(path, contactPressure: 512, durationMs: 0, recorder);
 
-        // durationMs=0 → 1 UPDATE per waypoint (2 waypoints) → DOWN + 2 UPDATE + UP = 4 frames.
-        Assert.AreEqual(4, frames.Count,
-            $"durationMs=0 should produce DOWN + 1 UPDATE per waypoint + UP; got {frames.Count}");
-        Assert.IsTrue(frames[1].X == 50, "First UPDATE should be at waypoint[1] X=50");
-        Assert.IsTrue(frames[2].X == 100, "Second UPDATE should be at waypoint[2] X=100");
+        // durationMs=0 → hover + DOWN + 1 UPDATE per waypoint (2 waypoints) + lift = 5 frames.
+        Assert.AreEqual(5, frames.Count,
+            $"durationMs=0 should produce hover + DOWN + 1 UPDATE per waypoint + lift; got {frames.Count}");
+        Assert.IsTrue(frames[2].X == 50, "First UPDATE should be at waypoint[1] X=50");
+        Assert.IsTrue(frames[3].X == 100, "Second UPDATE should be at waypoint[2] X=100");
     }
 
     // -------------------------------------------------------------------------
@@ -698,7 +745,11 @@ public class PointerInputFrameTests
 
         PointerInput.PenFrameSender sender = (x, y, pressure, flags) =>
         {
-            if (flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_UPDATE)) { throw glideEx; }
+            // Throw only on a true in-contact glide frame — NOT on the in-range hover-arrival
+            // (which also carries POINTER_FLAG_UPDATE but no INCONTACT) — so the test exercises a
+            // mid-stroke glide failure and the best-effort UP lift in the finally.
+            if (flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_UPDATE)
+                && flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_INCONTACT)) { throw glideEx; }
             if (flags.HasFlag(POINTER_FLAGS.POINTER_FLAG_UP))    { throw upEx; }
         };
 
