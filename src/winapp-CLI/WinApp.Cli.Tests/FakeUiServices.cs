@@ -387,8 +387,18 @@ internal class FakeKeyboardInput : WinApp.Cli.Helpers.IKeyboardInput
 
     public List<SendCall> SendCalls { get; } = [];
 
+    /// <summary>When set, <see cref="Send"/> records the call then throws this — lets a test drive the
+    /// command's exception mapping (e.g. a mid-injection <c>ForegroundLostException</c> → foreground_not_target).</summary>
+    public Exception? SendException { get; set; }
+
     public void Send(long hwnd, IReadOnlyList<WinApp.Cli.Helpers.KeyAction> actions, WinApp.Cli.Helpers.KeyTransport transport)
-        => SendCalls.Add(new(hwnd, actions, transport));
+    {
+        SendCalls.Add(new(hwnd, actions, transport));
+        if (SendException is not null)
+        {
+            throw SendException;
+        }
+    }
 }
 
 /// <summary>

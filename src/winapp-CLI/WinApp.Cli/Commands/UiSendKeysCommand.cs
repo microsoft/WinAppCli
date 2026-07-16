@@ -281,6 +281,24 @@ internal class UiSendKeysCommand : Command, IShortDescription
                     }
                 }
 
+                // Long literal text via send-input is auto-throttled into paced chunks (issue #657) so the
+                // target's input queue never overruns and no characters are silently dropped. That pacing
+                // adds a little wall-clock time for big payloads, so let the caller know the throttling is
+                // intentional — and that 'ui set-value' lands bulk text in one shot — when the payload is
+                // large enough to be chunked (more than one chunk's worth of characters).
+                if (transport == KeyTransport.SendInput)
+                {
+                    int textChars = actions.OfType<TextInput>().Sum(t => t.Text.Length);
+                    if (textChars > KeyboardInput.DefaultTextChunkChars)
+                    {
+                        logger.LogWarning(
+                            "{Symbol} {Count} characters via --via send-input are auto-throttled into paced chunks for reliable delivery, so this may take a moment. For bulk text, 'ui set-value' is faster and more reliable.",
+                            UiSymbols.Warning, textChars);
+                        warnings.Add(
+                            $"{textChars} characters via send-input are auto-throttled into paced chunks for reliable delivery, so this may take a moment. For bulk text, 'ui set-value' is faster and more reliable.");
+                    }
+                }
+
                 keyboardInput.Send(targetHwnd, actions, transport);
 
                 if (json)
@@ -308,6 +326,18 @@ internal class UiSendKeysCommand : Command, IShortDescription
                 }
 
                 return 0;
+            }
+            catch (ForegroundLostException)
+            {
+                // Focus left the target partway through a throttled --via send-input injection; the rest of
+                // the keystrokes were withheld rather than sprayed into whatever window grabbed focus (issue
+                // #657 follow-up H1). Surface the same foreground_not_target contract as the pre-send check.
+                logger.LogError(
+                    "{Symbol} Target window lost the foreground partway through --via send-input — aborted to avoid typing the rest into the wrong window. Keep the target focused (avoid clicking away or focus-stealing popups) and retry; for bulk text prefer 'ui set-value'.",
+                    UiSymbols.Error);
+                UiJsonError.Emit(json, UiJsonError.CodeForegroundNotTarget,
+                    "Target window lost the foreground partway through --via send-input — aborted to avoid injecting the rest into the wrong window. Keep the target focused and retry, or use 'ui set-value' for bulk text.");
+                return 1;
             }
             catch (System.Runtime.InteropServices.COMException comEx)
             {

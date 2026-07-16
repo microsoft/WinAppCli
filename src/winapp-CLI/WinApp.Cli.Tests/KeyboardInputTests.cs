@@ -305,6 +305,100 @@ public class KeyboardInputTests
         AssertKey(batches[2][1], 0x10, KEYBD_EVENT_FLAGS.KEYEVENTF_KEYUP);
     }
 
+    [TestMethod]
+    public void Send_SendInput_ForegroundDriftMidInjectionAbortsWithoutSprayingRemainingKeys()
+    {
+        // H1 (issue #657 follow-up): a long payload is paced over many SendInput calls spanning seconds. If
+        // the target loses the foreground partway through, the remaining bursts must NOT be sprayed into
+        // whatever window grabbed focus. The loop re-verifies the target owns the foreground before EACH
+        // segment and aborts on drift with a ForegroundLostException (mapped to foreground_not_target).
+        var batches = new List<INPUT[]>();
+        long? checkedHwnd = null;
+        var checks = 0;
+        KeyboardInput.s_vkKeyScan = _ => 0x41; // no shift -> two balanced events per char
+        KeyboardInput.s_textChunkChars = 2;    // 6 chars -> three segments
+        KeyboardInput.s_chunkDelayMs = 0;
+        KeyboardInput.s_sendInput = inputs => { batches.Add(inputs.ToArray()); return (uint)inputs.Length; };
+        KeyboardInput.s_foregroundBelongsToTarget = hwnd =>
+        {
+            checkedHwnd = hwnd;
+            checks++;
+            return checks < 3; // target owns the foreground for the first two segments, then focus drifts away
+        };
+
+        var ex = Assert.ThrowsExactly<ForegroundLostException>(() =>
+            KeyboardInput.Send(0x1234, [new TextInput(new string('a', 6))], KeyTransport.SendInput));
+
+        StringAssert.Contains(ex.Message, "lost the foreground");
+        Assert.AreEqual(0x1234L, checkedHwnd, "the target hwnd must be what is re-verified against the foreground.");
+
+        // Only the two pre-drift segments were injected; the third was withheld and — crucially — no further
+        // SendInput (not even a release) was sprayed into the window that stole focus.
+        Assert.AreEqual(2, batches.Count);
+
+        // Nothing is left held after the abort: across every injected event, key-downs and key-ups balance
+        // (each already-sent segment is self-contained), so no modifier/key is stranded in the down state.
+        int downs = 0, ups = 0;
+        foreach (var batch in batches)
+        {
+            foreach (var input in batch)
+            {
+                if (input.type != INPUT_TYPE.INPUT_KEYBOARD) { continue; }
+                if ((input.Anonymous.ki.dwFlags & KEYBD_EVENT_FLAGS.KEYEVENTF_KEYUP) != 0) { ups++; } else { downs++; }
+            }
+        }
+
+        Assert.AreEqual(downs, ups, "focus-drift abort must not strand any key in the down state.");
+        Assert.AreEqual(4, downs); // two 2-char segments, each char one key-down
+    }
+
+    [TestMethod]
+    public void Send_SendInput_ForegroundHeldThroughoutInjectsEveryChunk()
+    {
+        // Guard the happy path of the H1 re-check: while the target keeps the foreground, every segment is
+        // injected (the per-segment verification never aborts a legitimate long send).
+        var batches = new List<INPUT[]>();
+        KeyboardInput.s_vkKeyScan = _ => 0x41;
+        KeyboardInput.s_textChunkChars = 2;
+        KeyboardInput.s_chunkDelayMs = 0;
+        KeyboardInput.s_sendInput = inputs => { batches.Add(inputs.ToArray()); return (uint)inputs.Length; };
+        KeyboardInput.s_foregroundBelongsToTarget = _ => true;
+
+        KeyboardInput.Send(0x1234, [new TextInput(new string('a', 6))], KeyTransport.SendInput);
+
+        Assert.AreEqual(3, batches.Count); // all three 2-char segments delivered
+    }
+
+    [TestMethod]
+    public void Send_SendInput_ProductionDefaultsChunkSeventeenCharsIntoTwoCallsWithDefaultDelay()
+    {
+        // Pins the shipping throttle defaults so a future change to DefaultTextChunkChars / DefaultChunkDelayMs
+        // can't silently reintroduce #657 (long text injected as one over-queued burst that drops characters).
+        // Intentionally does NOT override the chunk/delay seams — this test must read the real production
+        // defaults (restored by ResetSeams in TestInitialize). The default chunk size is pinned *behaviorally*
+        // below (17 chars must split into a 16-char + 1-char pair); guard here that the throttle keeps a real
+        // pause between bursts (a 0ms default would remove the drain window and risk regressing #657). The
+        // local copy keeps the assertion off a compile-time constant so the analyzer doesn't flag it.
+        var defaultChunkDelayMs = KeyboardInput.DefaultChunkDelayMs;
+        Assert.IsTrue(defaultChunkDelayMs > 0,
+            "send-input throttle delay must stay positive so the target can drain its input queue between bursts (#657).");
+
+        var batches = new List<INPUT[]>();
+        var sleeps = new List<int>();
+        KeyboardInput.s_vkKeyScan = _ => 0x41; // no shift -> two events per char
+        KeyboardInput.s_sleep = sleeps.Add;
+        KeyboardInput.s_sendInput = inputs => { batches.Add(inputs.ToArray()); return (uint)inputs.Length; };
+
+        // 17 chars at the default 16-char chunk -> [16, 1] -> two SendInput calls and exactly one throttle sleep.
+        KeyboardInput.Send(0, [new TextInput(new string('a', 17))], KeyTransport.SendInput);
+
+        Assert.AreEqual(2, batches.Count);
+        Assert.AreEqual(32, batches[0].Length); // 16 chars * 2 events
+        Assert.AreEqual(2, batches[1].Length);  // final 1 char * 2 events
+        Assert.AreEqual(1, sleeps.Count);
+        Assert.AreEqual(KeyboardInput.DefaultChunkDelayMs, sleeps[0]);
+    }
+
     private static void AssertKey(INPUT input, ushort vk, KEYBD_EVENT_FLAGS flags)
     {
         Assert.AreEqual(INPUT_TYPE.INPUT_KEYBOARD, input.type);
@@ -340,6 +434,7 @@ public class KeyboardInputTests
         KeyboardInput.s_vkKeyScan = PInvoke.VkKeyScan;
         KeyboardInput.s_mapVirtualKey = vk => PInvoke.MapVirtualKey(vk, MAP_VIRTUAL_KEY_TYPE.MAPVK_VK_TO_VSC);
         KeyboardInput.s_foregroundWindowIsNull = () => false;
+        KeyboardInput.s_foregroundBelongsToTarget = _ => true;
         KeyboardInput.s_sleep = _ => { };
         KeyboardInput.s_textChunkChars = KeyboardInput.DefaultTextChunkChars;
         KeyboardInput.s_chunkDelayMs = KeyboardInput.DefaultChunkDelayMs;

@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Linq;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.UI.Input.KeyboardAndMouse;
@@ -59,6 +60,16 @@ internal static class KeyboardInput
     /// </remarks>
     internal static Func<bool> s_foregroundWindowIsNull = DefaultForegroundWindowIsNull;
 
+    /// <remarks>
+    /// Native adapter seam for issue #657 (follow-up H1): re-verifies before each throttled SendInput
+    /// burst that the injection target still owns the foreground (its GA_ROOT is the foreground window).
+    /// A long payload is paced over many SendInput calls spanning seconds, so a focus change mid-injection
+    /// would otherwise spray the remaining keystrokes into whatever window is now foreground. Defaults to the
+    /// shared <see cref="ForegroundGuard.ForegroundBelongsTo"/> ancestry check; tests inject a predicate to
+    /// drive the drift-abort branch deterministically.
+    /// </remarks>
+    internal static Func<long, bool> s_foregroundBelongsToTarget = ForegroundGuard.ForegroundBelongsTo;
+
     internal static Action<int> s_sleep = Thread.Sleep;
 
     /// <summary>
@@ -110,6 +121,7 @@ internal static class KeyboardInput
         s_vkKeyScan = PInvoke.VkKeyScan;
         s_mapVirtualKey = DefaultMapVirtualKey;
         s_foregroundWindowIsNull = DefaultForegroundWindowIsNull;
+        s_foregroundBelongsToTarget = ForegroundGuard.ForegroundBelongsTo;
         s_sleep = Thread.Sleep;
         s_textChunkChars = DefaultTextChunkChars;
         s_chunkDelayMs = DefaultChunkDelayMs;
@@ -123,7 +135,7 @@ internal static class KeyboardInput
                 SendViaPostMessage(new HWND((nint)hwnd), actions);
                 break;
             case KeyTransport.SendInput:
-                SendViaSendInput(actions);
+                SendViaSendInput(hwnd, actions);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(transport), transport, "Unknown key transport.");
@@ -198,7 +210,7 @@ internal static class KeyboardInput
         return lParam;
     }
 
-    private static void SendViaSendInput(IReadOnlyList<KeyAction> actions)
+    private static void SendViaSendInput(long hwnd, IReadOnlyList<KeyAction> actions)
     {
         // A single SendInput call carrying the whole payload overruns the target thread's input queue,
         // which silently drops characters even though SendInput returns success (issue #657). Split the
@@ -212,6 +224,20 @@ internal static class KeyboardInput
             if (segment.Length == 0)
             {
                 continue;
+            }
+
+            // Pacing spreads a long payload over many SendInput calls (up to several seconds). SendInput is
+            // OS-wide — it lands on whatever window currently holds the foreground — so if focus leaves the
+            // target partway through (a popup steals it, the user clicks away), the remaining bursts would be
+            // typed into the wrong window (issue #657 follow-up H1). Re-verify the target still owns the
+            // foreground before EACH burst and abort on drift. We deliberately do NOT inject any releases on
+            // this path: every already-sent segment is self-balanced (nothing is held), and any SendInput now
+            // would go to the window that stole focus — the exact misdirection we're preventing. (hwnd == 0
+            // means there is no window to verify against; the command already refuses send-input without a
+            // resolvable target, and direct callers passing 0 opt out of the check.)
+            if (hwnd != 0 && !s_foregroundBelongsToTarget(hwnd))
+            {
+                throw BuildForegroundLostFailure();
             }
 
             var sent = s_sendInput(segment);
@@ -234,6 +260,16 @@ internal static class KeyboardInput
     }
 
     /// <summary>
+    /// Builds the failure thrown when the foreground window drifts away from the injection target partway
+    /// through a throttled send-input sequence (issue #657 follow-up H1). Surfaced as a
+    /// <see cref="ForegroundLostException"/> so the command maps it to the same foreground_not_target
+    /// contract as the pre-send foreground check, rather than a generic error.
+    /// </summary>
+    private static ForegroundLostException BuildForegroundLostFailure() =>
+        new("SendInput aborted — the target window lost the foreground partway through sending, so the " +
+            "remaining keystrokes were withheld to avoid injecting them into whatever window took focus.");
+
+    /// <summary>
     /// Builds the SendInput failure surfaced when a chunk is only partially injected. A zero write means
     /// the injection was refused outright (no interactive desktop, or UIPI/integrity mismatch); a short
     /// write means input was partially applied and the held keys were already released.
@@ -254,7 +290,8 @@ internal static class KeyboardInput
     /// Flattens key actions into ordered, self-contained SendInput segments for throttled delivery: one
     /// segment per chord, and literal text split into chunks of <see cref="s_textChunkChars"/> characters.
     /// Each segment carries balanced key-down/key-up pairs so pacing (or a failure) between segments can
-    /// never strand a modifier. See <see cref="BuildSendInputBatch"/> for the un-chunked equivalent.
+    /// never strand a modifier. This is the single owner of the action→INPUT encoding;
+    /// <see cref="BuildSendInputBatch"/> is the flattened (un-chunked) view over it.
     /// </summary>
     internal static List<INPUT[]> BuildSendInputSegments(IReadOnlyList<KeyAction> actions, Func<char, short>? vkKeyScan = null)
     {
@@ -297,29 +334,15 @@ internal static class KeyboardInput
         return segments;
     }
 
-    internal static INPUT[] BuildSendInputBatch(IReadOnlyList<KeyAction> actions, Func<char, short>? vkKeyScan = null)
-    {
-        vkKeyScan ??= s_vkKeyScan;
-        var inputs = new List<INPUT>();
-        foreach (var action in actions)
-        {
-            switch (action)
-            {
-                case KeyChord chord:
-                    AppendChordEvents(inputs, chord);
-                    break;
-
-                case TextInput text:
-                    foreach (var ch in text.Text)
-                    {
-                        AppendCharEvents(inputs, ch, vkKeyScan);
-                    }
-                    break;
-            }
-        }
-
-        return inputs.ToArray();
-    }
+    /// <summary>
+    /// Flattens key actions into a single un-chunked SendInput batch — the flat view over
+    /// <see cref="BuildSendInputSegments"/> (the single owner of the action→INPUT encoding), so callers and
+    /// tests that need the whole ordered event sequence share exactly the same per-action encoding as
+    /// throttled delivery. Chunk size only groups the events into segments; flattening yields the same
+    /// sequence regardless of <see cref="s_textChunkChars"/>.
+    /// </summary>
+    internal static INPUT[] BuildSendInputBatch(IReadOnlyList<KeyAction> actions, Func<char, short>? vkKeyScan = null) =>
+        BuildSendInputSegments(actions, vkKeyScan).SelectMany(segment => segment).ToArray();
 
     /// <summary>
     /// Appends a chord's events in order: each modifier down, the main key down then up, then each
