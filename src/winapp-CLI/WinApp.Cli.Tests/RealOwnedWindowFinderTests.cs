@@ -87,7 +87,11 @@ public class RealOwnedWindowFinderTests
     {
         RealOwnedWindowFinder.ResetNativeSeams();
 
-        _ = RealOwnedWindowFinder.s_findNextTopLevelWindow(HWND.Null);
+        // Enumerating the first top-level window from a null handle must be a stable, side-effect-free
+        // read: two back-to-back native calls return the same handle (covers the production delegate
+        // without depending on which specific window happens to be topmost on the agent).
+        var firstTopLevel = RealOwnedWindowFinder.s_findNextTopLevelWindow(HWND.Null);
+        Assert.AreEqual(firstTopLevel, RealOwnedWindowFinder.s_findNextTopLevelWindow(HWND.Null));
         Assert.IsFalse(RealOwnedWindowFinder.s_isWindowVisible(HWND.Null));
         Assert.IsTrue(RealOwnedWindowFinder.s_getWindowOwner(HWND.Null).IsNull);
         Assert.AreEqual(0, RealOwnedWindowFinder.s_getWindowProcessId(HWND.Null));

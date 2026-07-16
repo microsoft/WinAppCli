@@ -12,8 +12,11 @@ namespace WinApp.Cli.Tests;
 [DoNotParallelize]
 public class KeyboardInputTests
 {
+    [TestInitialize]
+    public void Initialize() => ResetSeams();
+
     [TestCleanup]
-    public void Cleanup() => ResetSeams();
+    public void Cleanup() => KeyboardInput.ResetNativeSeams();
 
     [TestMethod]
     public void BuildKeyLParam_ComposesScanExtendedSysAndKeyUpBits()
@@ -207,6 +210,18 @@ public class KeyboardInputTests
         Assert.AreEqual(ch, input.Anonymous.ki.wScan);
         var expected = KEYBD_EVENT_FLAGS.KEYEVENTF_UNICODE | (keyUp ? KEYBD_EVENT_FLAGS.KEYEVENTF_KEYUP : 0);
         Assert.AreEqual(expected, input.Anonymous.ki.dwFlags);
+    }
+
+    [TestMethod]
+    public void RealKeyboardInput_DelegatesToKeyboardInput()
+    {
+        var sent = new List<INPUT[]>();
+        KeyboardInput.s_sendInput = inputs => { sent.Add(inputs.ToArray()); return (uint)inputs.Length; };
+
+        new RealKeyboardInput().Send(0, [new KeyChord([], 0x41, Extended: false)], KeyTransport.SendInput);
+
+        Assert.AreEqual(1, sent.Count,
+            "RealKeyboardInput.Send must delegate to KeyboardInput.Send, which batches the chord into one SendInput seam call.");
     }
 
     private static void ResetSeams()

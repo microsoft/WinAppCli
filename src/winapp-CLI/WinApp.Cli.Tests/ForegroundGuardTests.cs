@@ -15,7 +15,7 @@ public class ForegroundGuardTests
     public void Initialize() => ResetSeams();
 
     [TestCleanup]
-    public void Cleanup() => ResetSeams();
+    public void Cleanup() => ForegroundGuard.ResetNativeSeams();
 
     [TestMethod]
     public void ForegroundBelongsTo_ReturnsFalseForZeroNullForegroundOrUnrelatedRoot()
@@ -102,6 +102,20 @@ public class ForegroundGuardTests
 
         Assert.AreEqual(LogLevel.Error, logger.Messages.Single().Level);
         StringAssert.Contains(logger.Messages.Single().Message, "refusing to scroll --wheel");
+    }
+
+    [TestMethod]
+    public void RealForegroundGuard_DelegatesToForegroundGuard()
+    {
+        ForegroundGuard.s_getForegroundWindow = () => new HWND(1);
+        var logger = new CapturingLogger();
+
+        // targetHwnd 0 => no target to verify; with a live foreground window present the guard
+        // classifies Proceed. A true result proves the adapter forwarded to ForegroundGuard.
+        var result = new RealForegroundGuard().TryEnsureForeground(0, logger, json: false, action: "click");
+
+        Assert.IsTrue(result,
+            "RealForegroundGuard must delegate to ForegroundGuard.TryEnsureForeground and return its result.");
     }
 
     private static void ResetSeams()

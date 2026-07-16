@@ -32,23 +32,13 @@ internal static class KeyboardInput
     /// boundary, which cannot be unit-tested without injecting real keyboard input into the desktop.
     /// Unit tests replace the delegate and cover all surrounding batching/error logic.
     /// </remarks>
-    internal static SendInputHook s_sendInput = static inputs =>
-    {
-        unsafe
-        {
-            fixed (INPUT* pInputs = inputs)
-            {
-                return PInvoke.SendInput((uint)inputs.Length, pInputs, sizeof(INPUT));
-            }
-        }
-    };
+    internal static SendInputHook s_sendInput = DefaultSendInput;
 
     /// <remarks>
     /// Native adapter seam for issue #630: the default body posts to a real HWND queue and is left as
     /// an honest native ceiling; tests inject a fake to verify exact messages and lParams.
     /// </remarks>
-    internal static PostMessageHook s_postMessage = static (hwnd, message, wParam, lParam) =>
-        PInvoke.PostMessage(hwnd, message, wParam, lParam);
+    internal static PostMessageHook s_postMessage = DefaultPostMessage;
 
     /// <remarks>
     /// Native adapter seam for issue #630: keyboard-layout mapping is provided by User32. Tests inject
@@ -61,16 +51,45 @@ internal static class KeyboardInput
     /// Native adapter seam for issue #630: scan-code mapping is provided by User32. Tests inject known
     /// values to cover lParam construction deterministically.
     /// </remarks>
-    internal static Func<ushort, uint> s_mapVirtualKey = static vk =>
-        PInvoke.MapVirtualKey(vk, MAP_VIRTUAL_KEY_TYPE.MAPVK_VK_TO_VSC);
+    internal static Func<ushort, uint> s_mapVirtualKey = DefaultMapVirtualKey;
 
     /// <remarks>
     /// Native adapter seam for issue #630: foreground detection probes the live desktop only when
     /// formatting a native SendInput failure message. Tests inject this predicate.
     /// </remarks>
-    internal static Func<bool> s_foregroundWindowIsNull = static () => PInvoke.GetForegroundWindow().IsNull;
+    internal static Func<bool> s_foregroundWindowIsNull = DefaultForegroundWindowIsNull;
 
     internal static Action<int> s_sleep = Thread.Sleep;
+
+    private static unsafe uint DefaultSendInput(INPUT[] inputs)
+    {
+        fixed (INPUT* pInputs = inputs)
+        {
+            return PInvoke.SendInput((uint)inputs.Length, pInputs, sizeof(INPUT));
+        }
+    }
+
+    private static void DefaultPostMessage(HWND hwnd, uint message, WPARAM wParam, LPARAM lParam) =>
+        PInvoke.PostMessage(hwnd, message, wParam, lParam);
+
+    private static uint DefaultMapVirtualKey(ushort vk) =>
+        PInvoke.MapVirtualKey(vk, MAP_VIRTUAL_KEY_TYPE.MAPVK_VK_TO_VSC);
+
+    private static bool DefaultForegroundWindowIsNull() => PInvoke.GetForegroundWindow().IsNull;
+
+    /// <summary>
+    /// Restores every native seam to its production delegate. Test cleanup calls this so a faked
+    /// seam never leaks into a later test that exercises real keyboard input (issue #630).
+    /// </summary>
+    internal static void ResetNativeSeams()
+    {
+        s_sendInput = DefaultSendInput;
+        s_postMessage = DefaultPostMessage;
+        s_vkKeyScan = PInvoke.VkKeyScan;
+        s_mapVirtualKey = DefaultMapVirtualKey;
+        s_foregroundWindowIsNull = DefaultForegroundWindowIsNull;
+        s_sleep = Thread.Sleep;
+    }
 
     public static void Send(long hwnd, IReadOnlyList<KeyAction> actions, KeyTransport transport)
     {

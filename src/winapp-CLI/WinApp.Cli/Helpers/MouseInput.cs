@@ -18,22 +18,13 @@ internal static class MouseInput
     /// boundary, which cannot be unit-tested without moving/clicking the real desktop. Unit tests
     /// replace this delegate and cover batching, normalization, and error handling.
     /// </remarks>
-    internal static SendInputHook s_sendInput = static inputs =>
-    {
-        unsafe
-        {
-            fixed (INPUT* pInputs = inputs)
-            {
-                return PInvoke.SendInput((uint)inputs.Length, pInputs, sizeof(INPUT));
-            }
-        }
-    };
+    internal static SendInputHook s_sendInput = DefaultSendInput;
 
     /// <remarks>
     /// Native adapter seam for issue #630: the default body moves the real cursor. Tests replace it
     /// so public methods can be exercised without mutating machine state.
     /// </remarks>
-    internal static Func<int, int, bool> s_setCursorPos = static (x, y) => PInvoke.SetCursorPos(x, y);
+    internal static Func<int, int, bool> s_setCursorPos = DefaultSetCursorPos;
 
     /// <remarks>
     /// Native adapter seam for issue #630: virtual desktop metrics come from User32 and vary by
@@ -46,9 +37,34 @@ internal static class MouseInput
     /// Native adapter seam for issue #630: foreground detection probes the live desktop only when
     /// formatting a native SendInput failure message. Tests inject this predicate.
     /// </remarks>
-    internal static Func<bool> s_foregroundWindowIsNull = static () => PInvoke.GetForegroundWindow().IsNull;
+    internal static Func<bool> s_foregroundWindowIsNull = DefaultForegroundWindowIsNull;
 
     internal static Action<int> s_sleep = Thread.Sleep;
+
+    private static unsafe uint DefaultSendInput(INPUT[] inputs)
+    {
+        fixed (INPUT* pInputs = inputs)
+        {
+            return PInvoke.SendInput((uint)inputs.Length, pInputs, sizeof(INPUT));
+        }
+    }
+
+    private static bool DefaultSetCursorPos(int x, int y) => PInvoke.SetCursorPos(x, y);
+
+    private static bool DefaultForegroundWindowIsNull() => PInvoke.GetForegroundWindow().IsNull;
+
+    /// <summary>
+    /// Restores every native seam to its production delegate. Test cleanup calls this so a faked
+    /// seam never leaks into a later test that exercises real mouse input (issue #630).
+    /// </summary>
+    internal static void ResetNativeSeams()
+    {
+        s_sendInput = DefaultSendInput;
+        s_setCursorPos = DefaultSetCursorPos;
+        s_getSystemMetrics = PInvoke.GetSystemMetrics;
+        s_foregroundWindowIsNull = DefaultForegroundWindowIsNull;
+        s_sleep = Thread.Sleep;
+    }
 
     /// <summary>
     /// Moves the cursor to the target position with a small wiggle to trigger hover/tooltip detection.

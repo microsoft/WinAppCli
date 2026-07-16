@@ -15,7 +15,7 @@ public class MouseInputTests
     public void Initialize() => ResetSeams();
 
     [TestCleanup]
-    public void Cleanup() => ResetSeams();
+    public void Cleanup() => MouseInput.ResetNativeSeams();
 
     [TestMethod]
     public void NormalizeAbsolute_UsesVirtualDesktopOriginSizeAndClamps()

@@ -27,8 +27,20 @@ internal static class ForegroundGuard
     /// deterministic roots so no real windows are required.
     /// </remarks>
     internal static Func<Windows.Win32.Foundation.HWND, Windows.Win32.Foundation.HWND> s_getRootAncestor =
-        static hwnd => Windows.Win32.PInvoke.GetAncestor(
-            hwnd, Windows.Win32.UI.WindowsAndMessaging.GET_ANCESTOR_FLAGS.GA_ROOT);
+        DefaultGetRootAncestor;
+
+    private static Windows.Win32.Foundation.HWND DefaultGetRootAncestor(Windows.Win32.Foundation.HWND hwnd) =>
+        Windows.Win32.PInvoke.GetAncestor(hwnd, Windows.Win32.UI.WindowsAndMessaging.GET_ANCESTOR_FLAGS.GA_ROOT);
+
+    /// <summary>
+    /// Restores every native seam to its production delegate. Test cleanup calls this so a faked
+    /// seam never leaks into a later test that reads the live foreground window (issue #630).
+    /// </summary>
+    internal static void ResetNativeSeams()
+    {
+        s_getForegroundWindow = Windows.Win32.PInvoke.GetForegroundWindow;
+        s_getRootAncestor = DefaultGetRootAncestor;
+    }
 
     /// <summary>
     /// Returns <see langword="true"/> when the current foreground window is <paramref name="targetHwnd"/>
