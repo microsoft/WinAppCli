@@ -41,6 +41,12 @@ internal static partial class WgcCapture
         }
     }
 
+    /// <remarks>
+    /// Coverage ceiling (issue #630): tests cover support probing, blank-frame handling helpers, and
+    /// recorder orchestration through seams. The remaining lines create a D3D11 device, a WinRT WGC
+    /// frame pool/session, and copy real GPU frames; these native GPU/WinRT resources cannot be
+    /// produced deterministically on headless or shared desktops.
+    /// </remarks>
     public static async Task<(byte[] Pixels, int Width, int Height)> CaptureAsync(HWND hwnd, ILogger logger, CancellationToken ct)
     {
         if (!s_isSupported())

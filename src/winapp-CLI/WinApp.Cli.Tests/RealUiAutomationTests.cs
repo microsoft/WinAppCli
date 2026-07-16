@@ -48,6 +48,24 @@ public partial class RealUiAutomationTests
         }
     }
 
+    [TestCleanup]
+    public void ResetNativeSeams()
+    {
+        WgcCapture.s_isSupported = Windows.Graphics.Capture.GraphicsCaptureSession.IsSupported;
+        WgcCapture.s_startGrabber = (hwnd, logger, fps) => WgcCapture.StartGrabber(hwnd, logger, fps);
+        UiAutomationService.s_captureFromWindow = (Func<Windows.Win32.Foundation.HWND, int, int, byte[]>)Delegate.CreateDelegate(
+            typeof(Func<Windows.Win32.Foundation.HWND, int, int, byte[]>),
+            typeof(UiAutomationService).GetMethod(
+                "CaptureFromWindow",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!);
+        UiAutomationService.s_captureFromScreenScaled = (Func<int, int, int, int, int, int, byte[]>)Delegate.CreateDelegate(
+            typeof(Func<int, int, int, int, int, int, byte[]>),
+            typeof(UiAutomationService).GetMethod(
+                "CaptureFromScreenScaled",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!);
+        Mp4SinkWriterEncoder.s_create = (path, width, height, fps, bitrate) => new Mp4SinkWriterEncoder(path, width, height, fps, bitrate);
+    }
+
     private static UiAutomationService NewService()
         => new(NullLogger<UiAutomationService>.Instance, new SelectorService());
 
@@ -115,6 +133,18 @@ public partial class RealUiAutomationTests
 
         Assert.IsTrue(windows.Any(w => w.Hwnd == fx.Hwnd),
             "An empty title query must match all visible windows, including the fixture.");
+    }
+
+    [TestMethod]
+    public void TryGetWindowRect_ReturnsTopLevelBoundsForFixture()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+
+        Assert.IsFalse(svc.TryGetWindowRect(0, out _), "zero HWND should be rejected");
+        Assert.IsTrue(svc.TryGetWindowRect(fx.Hwnd, out var rect), "fixture HWND should have a window rect");
+        Assert.IsTrue(rect.Right > rect.Left);
+        Assert.IsTrue(rect.Bottom > rect.Top);
     }
 
     // -----------------------------------------------------------------------------

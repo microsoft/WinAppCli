@@ -14,10 +14,22 @@ internal sealed partial class UiAutomationService
 {
     internal static Func<Windows.Win32.Foundation.HWND, int, int, byte[]> s_captureFromWindow = CaptureFromWindow;
     internal static Func<int, int, int, int, int, int, byte[]> s_captureFromScreenScaled = CaptureFromScreenScaled;
-    internal static Action<Windows.Win32.Foundation.HWND> s_foregroundWindowForBlankRetry =
-        hwnd => Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
+    internal static Action<Windows.Win32.Foundation.HWND> s_foregroundWindowForBlankRetry = ForegroundWindowForBlankRetry;
     internal static Action<int> s_sleepForBlankRetry = Thread.Sleep;
 
+    /// <remarks>
+    /// Coverage ceiling (issue #630): this is a direct Win32 foreground request used only after a
+    /// native PrintWindow blank frame. Tests cover callers through the injectable seam.
+    /// </remarks>
+    private static void ForegroundWindowForBlankRetry(Windows.Win32.Foundation.HWND hwnd)
+        => Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
+
+    /// <remarks>
+    /// Coverage ceiling (issue #630): tests cover real WGC/screen/PrintWindow attempts and deterministic
+    /// blank-retry/composition seams. Remaining lines require minimized/zero-size native HWND state,
+    /// foreground policy transitions, WGC cancellation timing, or UIA elements without native handles
+    /// that cannot be forced safely on the shared desktop.
+    /// </remarks>
     public async Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, CancellationToken ct)
     {
         _logger.LogDebug("Taking screenshot of process {Pid} (captureScreen={CaptureScreen}, focus={Focus})", session.ProcessId, captureScreen, focus);
@@ -361,6 +373,11 @@ internal sealed partial class UiAutomationService
         return true;
     }
 
+    /// <remarks>
+    /// Coverage ceiling (issue #630): real screenshot tests cover element cropping for normal controls.
+    /// Remaining branches require stale/missing UIA selector resolution or off-surface native bounding
+    /// rectangles, which would need unsafe COM/provider fault injection or desktop mutation.
+    /// </remarks>
     private (byte[] Pixels, int Width, int Height)? CropToElement(
         byte[] fullPixels, int fullWidth, int fullHeight,
         string selector, UiSessionInfo session, IUIAutomationElement root,

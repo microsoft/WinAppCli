@@ -48,6 +48,12 @@ internal sealed partial class UiAutomationService
             }
         }
 
+        /// <remarks>
+        /// Coverage ceiling (issue #630): live tests cover the failure/fallback path and the pure
+        /// ordering logic. The remaining success line requires a writable RangeValuePattern provider
+        /// that does not first succeed through ValuePattern, which the deterministic fixture cannot
+        /// expose without a custom native UIA provider.
+        /// </remarks>
         public bool TrySetViaRangeValuePattern(double value)
         {
             // Coverage ceiling (issue #630): a writable RangeValuePattern provider that lacks a
@@ -66,6 +72,11 @@ internal sealed partial class UiAutomationService
             }
         }
 
+        /// <remarks>
+        /// Coverage ceiling (issue #630): live tests cover the LegacyIAccessible success path. The
+        /// remaining catch/log lines require a native provider to expose the pattern and then fault
+        /// during SetValue, which needs unsafe COM fault injection.
+        /// </remarks>
         public bool TrySetViaLegacyIAccessible(string text)
         {
             // Coverage ceiling (issue #630): the success path is covered by live controls; the

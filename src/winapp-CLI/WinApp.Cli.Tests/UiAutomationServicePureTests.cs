@@ -27,8 +27,10 @@ public class UiAutomationServicePureTests
         UiAutomationService.s_foregroundWindowForBlankRetry = hwnd => Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
         UiAutomationService.s_sleepForBlankRetry = Thread.Sleep;
         WgcCapture.s_isSupported = Windows.Graphics.Capture.GraphicsCaptureSession.IsSupported;
+        WgcCapture.s_startGrabber = (hwnd, logger, fps) => WgcCapture.StartGrabber(hwnd, logger, fps);
         Mp4SinkWriterEncoder.s_testFaultAfterTempCreate = null;
         Mp4SinkWriterEncoder.s_testPublishAtomic = null;
+        Mp4SinkWriterEncoder.s_create = (path, width, height, fps, bitrate) => new Mp4SinkWriterEncoder(path, width, height, fps, bitrate);
     }
 
     // Note: UIA_CONTROLTYPE_ID is an internal (CsWin32-generated) enum, so it cannot appear in a
