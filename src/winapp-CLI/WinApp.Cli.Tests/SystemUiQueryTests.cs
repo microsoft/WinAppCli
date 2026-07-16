@@ -97,6 +97,7 @@ public class SystemUiQueryTests
         SystemUiQuery.s_getWindowSize = hwnd => ((int)hwnd, (int)hwnd + 2);
         SystemUiQuery.s_getWindowOwner = hwnd => (nint)(hwnd + 3);
         SystemUiQuery.s_getFocusedWindow = hwnd => hwnd + 4;
+        SystemUiQuery.s_getRootWindow = hwnd => hwnd + 5;
         var query = new SystemUiQuery();
 
         Assert.AreEqual((nint)101, query.GetForegroundWindow());
@@ -106,6 +107,7 @@ public class SystemUiQueryTests
         Assert.AreEqual((501, 503), query.GetWindowSize(501));
         Assert.AreEqual((nint)604, query.GetWindowOwner(601));
         Assert.AreEqual(705, query.GetFocusedWindow(701));
+        Assert.AreEqual(806, query.GetRootWindow(801));
     }
 
     [TestMethod]
@@ -116,6 +118,7 @@ public class SystemUiQueryTests
         SystemUiQuery.s_getWindowSize = _ => throw new InvalidOperationException("rect failed");
         SystemUiQuery.s_getWindowOwner = _ => throw new InvalidOperationException("owner failed");
         SystemUiQuery.s_getFocusedWindow = _ => throw new InvalidOperationException("focus failed");
+        SystemUiQuery.s_getRootWindow = _ => throw new InvalidOperationException("root failed");
         var query = new SystemUiQuery();
 
         Assert.IsNull(query.GetWindowText(1));
@@ -123,6 +126,7 @@ public class SystemUiQueryTests
         Assert.AreEqual((0, 0), query.GetWindowSize(1));
         Assert.AreEqual((nint)0, query.GetWindowOwner(1));
         Assert.AreEqual(0, query.GetFocusedWindow(1));
+        Assert.AreEqual(0, query.GetRootWindow(1));
     }
 
     [TestMethod]
@@ -138,6 +142,7 @@ public class SystemUiQueryTests
         Assert.AreEqual((0, 0), query.GetWindowSize(0));
         Assert.AreEqual((nint)0, query.GetWindowOwner(0));
         Assert.AreEqual(0, query.GetFocusedWindow(0));
+        Assert.AreEqual(0, query.GetRootWindow(0));
     }
     private static void ResetSeams()
     {
@@ -148,6 +153,7 @@ public class SystemUiQueryTests
         SystemUiQuery.s_getWindowSize = _ => (0, 0);
         SystemUiQuery.s_getWindowOwner = _ => 0;
         SystemUiQuery.s_getFocusedWindow = _ => 0;
+        SystemUiQuery.s_getRootWindow = _ => 0;
     }
 }
 

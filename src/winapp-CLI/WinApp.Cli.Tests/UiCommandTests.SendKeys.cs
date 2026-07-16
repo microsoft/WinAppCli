@@ -440,6 +440,7 @@ public partial class UiCommandTests
         // thread's focused child HWND (resolved via ISystemUiQuery) so the keys reach the real control.
         _fakeSession.SessionResult.WindowHandle = 0xABC;          // top-level window
         _fakeSystemQuery.FocusedWindowByHwnd[0xABC] = 0x789;      // focused child edit control
+        _fakeSystemQuery.RootWindowByHwnd[0x789] = 0xABC;         // child's top-level root is the target
 
         var command = GetRequiredService<UiSendKeysCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
@@ -451,6 +452,31 @@ public partial class UiCommandTests
 
         var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
         Assert.AreEqual(0x789, result.GetProperty("hwnd").GetInt64(), "JSON hwnd reflects the effective post target");
+    }
+
+    [TestMethod]
+    public async Task SendKeys_PostMessage_DoesNotRetargetToFocusOnDifferentTopLevelWindow()
+    {
+        // GetGUIThreadInfo reports focus for the whole GUI thread, and one thread can own several
+        // top-level windows. If SetForegroundWindow was denied, the reported focus may belong to a
+        // *different* top-level window on that thread. Retargeting there would post the keys to the wrong
+        // window despite an explicit target, so the command must keep the resolved target when the focused
+        // HWND's top-level root differs.
+        _fakeSession.SessionResult.WindowHandle = 0xABC;          // target top-level window (its own root)
+        _fakeSystemQuery.FocusedWindowByHwnd[0xABC] = 0x999;      // focus is on the thread, but...
+        _fakeSystemQuery.RootWindowByHwnd[0x999] = 0xDDD;         // ...it belongs to a different top-level window
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["enter", "-a", "TestApp", "--via", "post-message", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+        Assert.AreEqual(0xABC, _fakeKeyboard.SendCalls[0].Hwnd,
+            "post-message must keep the target HWND when the focused window belongs to a different top-level window");
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual(0xABC, result.GetProperty("hwnd").GetInt64(), "JSON hwnd reflects the un-retargeted target");
     }
 
     [TestMethod]

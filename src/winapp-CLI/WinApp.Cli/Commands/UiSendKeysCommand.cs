@@ -197,10 +197,26 @@ internal class UiSendKeysCommand : Command, IShortDescription
                     var focused = systemQuery.GetFocusedWindow(targetHwnd);
                     if (focused != 0 && focused != targetHwnd)
                     {
-                        logger.LogDebug(
-                            "post-message: retargeting from HWND {Target} to focused child HWND {Focused}",
-                            targetHwnd, focused);
-                        effectiveHwnd = focused;
+                        // GetGUIThreadInfo reports focus for the entire GUI thread, and one thread can
+                        // own several top-level windows. If SetForegroundWindow was denied (focus-stealing
+                        // prevention, a UAC prompt, etc.), the focused HWND may belong to a *different*
+                        // window on that thread — posting there would deliver the keys to the wrong window
+                        // despite an explicit target. Only retarget when the focused HWND shares the
+                        // target's top-level root; otherwise keep the passed target.
+                        var targetRoot = systemQuery.GetRootWindow(targetHwnd);
+                        if (targetRoot != 0 && systemQuery.GetRootWindow(focused) == targetRoot)
+                        {
+                            logger.LogDebug(
+                                "post-message: retargeting from HWND {Target} to focused child HWND {Focused}",
+                                targetHwnd, focused);
+                            effectiveHwnd = focused;
+                        }
+                        else
+                        {
+                            logger.LogDebug(
+                                "post-message: focused HWND {Focused} is not within target {Target}'s top-level window; keeping target",
+                                focused, targetHwnd);
+                        }
                     }
                 }
 

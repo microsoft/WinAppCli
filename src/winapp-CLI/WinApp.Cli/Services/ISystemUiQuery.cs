@@ -53,4 +53,13 @@ internal interface ISystemUiQuery
 
     /// <summary>The owner window handle of <paramref name="hwnd"/> (0 when it has no owner).</summary>
     nint GetWindowOwner(long hwnd);
+
+    /// <summary>
+    /// The top-level root window of <paramref name="hwnd"/> (via <c>GetAncestor(GA_ROOT)</c>) — the
+    /// window itself for a top-level window, or 0 when it can't be resolved. Used to confirm a thread's
+    /// focused HWND actually belongs to the intended target window before retargeting <c>PostMessage</c>
+    /// at it, since <c>GetGUIThreadInfo</c> reports focus for the whole GUI thread (which can own
+    /// several top-level windows).
+    /// </summary>
+    long GetRootWindow(long hwnd);
 }

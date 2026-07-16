@@ -145,6 +145,22 @@ internal sealed class SystemUiQuery : ISystemUiQuery
         }
     }
 
+    /// <remarks>
+    /// Native adapter seam (issue #655): the default body resolves a window's top-level root via
+    /// <c>GetAncestor(GA_ROOT)</c>. Tests replace it with deterministic values so the focused-child
+    /// retarget guard (which confirms the focused HWND belongs to the target window) is exercisable
+    /// without a real desktop.
+    /// </remarks>
+    internal static Func<long, long> s_getRootWindow = NativeGetRootWindow;
+
+    internal static long NativeGetRootWindow(long hwnd)
+    {
+        var root = Windows.Win32.PInvoke.GetAncestor(
+            new Windows.Win32.Foundation.HWND((nint)hwnd),
+            Windows.Win32.UI.WindowsAndMessaging.GET_ANCESTOR_FLAGS.GA_ROOT);
+        return (long)(nint)root;
+    }
+
     internal static void ResetNativeSeams()
     {
         s_getForegroundWindow = NativeGetForegroundWindow;
@@ -154,6 +170,7 @@ internal sealed class SystemUiQuery : ISystemUiQuery
         s_getWindowSize = NativeGetWindowSize;
         s_getWindowOwner = NativeGetWindowOwner;
         s_getFocusedWindow = NativeGetFocusedWindow;
+        s_getRootWindow = NativeGetRootWindow;
     }
 
     public UiProcessInfo? GetProcessById(int pid)
@@ -291,6 +308,16 @@ internal sealed class SystemUiQuery : ISystemUiQuery
             return s_getFocusedWindow(hwnd);
         }
         // Native guard: GetGUIThreadInfo does not throw for invalid handles — honest ceiling.
+        catch { return 0; }
+    }
+
+    public long GetRootWindow(long hwnd)
+    {
+        try
+        {
+            return s_getRootWindow(hwnd);
+        }
+        // Native guard: GetAncestor does not throw for invalid handles — honest ceiling.
         catch { return 0; }
     }
 }

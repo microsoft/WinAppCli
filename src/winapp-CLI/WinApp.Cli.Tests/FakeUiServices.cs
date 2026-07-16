@@ -492,6 +492,11 @@ internal sealed class FakeSystemUiQuery : ISystemUiQuery
     /// (no resolvable focus → the command keeps the passed target HWND).</summary>
     public Dictionary<long, long> FocusedWindowByHwnd { get; } = [];
 
+    /// <summary>Per-HWND top-level root handles for <see cref="GetRootWindow"/>. Unmapped handles report the
+    /// handle itself (a top-level window is its own root); map a child to its top-level window to model
+    /// <c>GetAncestor(GA_ROOT)</c>.</summary>
+    public Dictionary<long, long> RootWindowByHwnd { get; } = [];
+
     public UiProcessInfo? GetProcessById(int pid)
     {
         if (ProcessesById.TryGetValue(pid, out var info)) { return info; }
@@ -520,6 +525,9 @@ internal sealed class FakeSystemUiQuery : ISystemUiQuery
 
     public long GetFocusedWindow(long hwnd)
         => FocusedWindowByHwnd.TryGetValue(hwnd, out var focused) ? focused : 0;
+
+    public long GetRootWindow(long hwnd)
+        => RootWindowByHwnd.TryGetValue(hwnd, out var root) ? root : hwnd;
 }
 
 /// <summary>
