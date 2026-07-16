@@ -385,7 +385,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
     [TestMethod]
     public async Task AddSparseIdentityAsync_DevModeDisabled_ThrowsInvalidOperation()
     {
-        _fakeDevMode.Enabled = false;
+        _fakeDevMode.IsEnabledResult = false;
         var manifest = new FileInfo(Path.Combine(_tempDirectory.FullName, "appxmanifest.xml"));
         await File.WriteAllTextAsync(manifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
 
@@ -433,7 +433,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
     [TestMethod]
     public async Task AddLooseLayoutIdentityAsync_DevModeDisabled_ThrowsInvalidOperation()
     {
-        _fakeDevMode.Enabled = false;
+        _fakeDevMode.IsEnabledResult = false;
         var manifest = new FileInfo(Path.Combine(_tempDirectory.FullName, "appxmanifest.xml"));
         await File.WriteAllTextAsync(manifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
         var input = _tempDirectory.CreateSubdirectory("input");

@@ -31,13 +31,29 @@ internal sealed class FakeBuildToolsService : IBuildToolsService
     /// <summary>Optional hook that produces the (stdout, stderr) result for a given tool + arguments.</summary>
     public Func<Tool, string, (string stdout, string stderr)>? Handler { get; set; }
 
+    /// <summary>
+    /// Result returned from <see cref="EnsureBuildToolsAsync"/>. Defaults to null (build-tools
+    /// directory not resolved); set to a directory to exercise the "BuildTools ready" branch.
+    /// </summary>
+    public DirectoryInfo? BuildToolsResult { get; set; }
+
+    /// <summary>
+    /// Records the <c>forceLatest</c> argument passed to each <see cref="EnsureBuildToolsAsync"/>
+    /// call, in order, so tests can assert whether a pinned build-tools version suppressed the
+    /// force-latest path (pinned =&gt; <c>false</c>, no pin =&gt; <c>true</c>).
+    /// </summary>
+    public List<bool> EnsureBuildToolsForceLatest { get; } = [];
+
     public FileInfo? GetBuildToolPath(string toolName) => new(Path.Combine(Path.GetTempPath(), toolName));
 
     public Task<FileInfo> EnsureBuildToolAvailableAsync(string toolName, TaskContext taskContext, CancellationToken cancellationToken = default)
         => Task.FromResult(new FileInfo(Path.Combine(Path.GetTempPath(), toolName)));
 
     public Task<DirectoryInfo?> EnsureBuildToolsAsync(TaskContext taskContext, bool forceLatest = false, CancellationToken cancellationToken = default)
-        => Task.FromResult<DirectoryInfo?>(null);
+    {
+        EnsureBuildToolsForceLatest.Add(forceLatest);
+        return Task.FromResult(BuildToolsResult);
+    }
 
     public Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, CancellationToken cancellationToken = default)
     {
