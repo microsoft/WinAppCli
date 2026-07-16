@@ -900,6 +900,68 @@ public partial class RealUiAutomationTests
         Assert.AreEqual("collapsed", result.ExpandState);
     }
 
+    [TestMethod]
+    public async Task SetValueAsync_RangeValuePatternSucceedsWhenValuePatternUnavailable()
+    {
+        var svc = NewService();
+        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake" };
+        var model = new UiElement { Id = "range", Type = "Slider", AutomationId = "rangeAid" };
+        var setValues = new List<double>();
+        var rangePattern = ComProxy<IUIAutomationRangeValuePattern>((method, args) =>
+        {
+            if (method.Name == "SetValue")
+            {
+                setValues.Add((double)args![0]!);
+                return null;
+            }
+            return ThrowCom();
+        });
+        var target = ComProxy<IUIAutomationElement>((method, args) =>
+        {
+            if (method.Name == "GetCurrentPattern")
+            {
+                return (UIA_PATTERN_ID)args![0]! == UIA_PATTERN_ID.UIA_RangeValuePatternId
+                    ? rangePattern
+                    : ThrowCom();
+            }
+            return ThrowCom();
+        });
+        var root = ComProxy<IUIAutomationElement>((method, _) => method.Name == "FindFirst" ? target : ThrowCom());
+        UiAutomationService.s_getRootElement = (_, _) => root;
+
+        await svc.SetValueAsync(session, model, "42", CancellationToken.None);
+
+        Assert.AreEqual(42d, setValues.Single());
+    }
+
+    [TestMethod]
+    public async Task SetValueAsync_LegacyIAccessibleComFailureIsLoggedAndThrows()
+    {
+        var logger = new CapturingLogger<UiAutomationService>();
+        var svc = new UiAutomationService(logger, new SelectorService());
+        var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake" };
+        var model = new UiElement { Id = "legacy", Type = "Edit", AutomationId = "legacyAid" };
+        var legacyPattern = ComProxy<IUIAutomationLegacyIAccessiblePattern>((_, _) => ThrowCom());
+        var target = ComProxy<IUIAutomationElement>((method, args) =>
+        {
+            if (method.Name == "GetCurrentPattern")
+            {
+                return (UIA_PATTERN_ID)args![0]! == UIA_PATTERN_ID.UIA_LegacyIAccessiblePatternId
+                    ? legacyPattern
+                    : ThrowCom();
+            }
+            return ThrowCom();
+        });
+        var root = ComProxy<IUIAutomationElement>((method, _) => method.Name == "FindFirst" ? target : ThrowCom());
+        UiAutomationService.s_getRootElement = (_, _) => root;
+
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => svc.SetValueAsync(session, model, "hello", CancellationToken.None));
+
+        StringAssert.Contains(ex.Message, "could not be set via ValuePattern");
+        Assert.IsTrue(logger.Has(Microsoft.Extensions.Logging.LogLevel.Debug, "LegacyIAccessible.SetValue failed"));
+    }
+
     private static object ThrowCom() => throw new COMException("simulated COM failure");
 
     private static unsafe BSTR EmptyBstr() => new((char*)Marshal.StringToBSTR(string.Empty));
