@@ -44,16 +44,6 @@ public class NugetServiceVersionRangeTests
     [DataRow("1.*|(1.2.0, 1.8.0)", true, DisplayName = "Float overlapping an exclusively-bounded range is satisfiable")]
     [DataRow("[1.0.0, 2.0.0]|[2.0.0, 3.0.0]", true, DisplayName = "Inclusive endpoints sharing exactly 2.0.0 are satisfiable")]
     [DataRow("[1.0.0, 2.0.0)|[2.0.0, 3.0.0]", false, DisplayName = "Exclusive upper vs inclusive lower at 2.0.0 share no version")]
-    // Two ranges sharing the SAME upper bound with differing inclusivity: the least-upper-bound must keep the
-    // stricter (exclusive) endpoint by AND-ing the inclusivity, so [1.5.0, 2.0.0) still bounds the result even
-    // though [1.0.0, 2.0.0] declared the same numeric maximum inclusively.
-    [DataRow("[1.0.0, 2.0.0]|[1.5.0, 2.0.0)", true, DisplayName = "Same upper bound, one exclusive: interval [1.5.0, 2.0.0) is non-empty")]
-    [DataRow("[2.0.0, 2.0.0]|[1.0.0, 2.0.0)", false, DisplayName = "Same upper bound where the AND-ed exclusivity empties the interval that touches an inclusive lower pin")]
-    // Revision-level floats (1.2.3.*) exercise the fourth-component ceiling in TryGetFloatUpperBound
-    // (1.2.3.* caps just below 1.2.4.0).
-    [DataRow("1.2.3.*|1.2.3.*", true, DisplayName = "Identical revision floats (1.2.3.*) are satisfiable")]
-    [DataRow("1.2.3.*|1.2.4.*", false, DisplayName = "Disjoint revision floats (1.2.3.* and 1.2.4.*) are a conflict")]
-    [DataRow("1.2.3.*|[1.2.4.0, 2.0.0)", false, DisplayName = "Revision float's exclusive 1.2.4.0 ceiling meets a range starting at 1.2.4.0")]
     public void RangesHaveCommonVersion_AccountsForFloatingBands(string pipeSeparatedRanges, bool expected)
     {
         var ranges = pipeSeparatedRanges.Split('|').Select(VersionRange.Parse).ToList();

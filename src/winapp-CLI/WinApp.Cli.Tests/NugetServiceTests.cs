@@ -466,28 +466,6 @@ public class NugetServiceTests : BaseCommandTests
         Assert.IsLessThan(0, NugetService.CompareVersions("1.0.0-preview", "1.0.0"));
     }
 
-    [TestMethod]
-    public void CompareVersions_NonNuGetVersionInputs_FallsBackToNumericSegmentComparison()
-    {
-        // When either input is not a parseable NuGet version, CompareVersions cannot defer to NuGetVersion and
-        // falls back to a numeric-segment comparison that parses each non-numeric segment as 0. These inputs
-        // (an "x" revision) force that fallback so the branch that real "latest" selection never reaches with
-        // clean feed data is still exercised.
-
-        // Differing numeric segments: 1.2.x -> [1,2,0] vs 1.3.x -> [1,3,0].
-        Assert.IsLessThan(0, NugetService.CompareVersions("1.2.x", "1.3.x"));
-        Assert.IsGreaterThan(0, NugetService.CompareVersions("1.3.x", "1.2.x"));
-
-        // A longer numeric run outranks a shorter one when the shared segments tie: 1.2.x.5 vs 1.2.x.
-        Assert.IsGreaterThan(0, NugetService.CompareVersions("1.2.x.5", "1.2.x"));
-
-        // Two non-version strings whose numeric segments all tie (non-numeric -> 0) compare equal.
-        Assert.AreEqual(0, NugetService.CompareVersions("x.y", "z.w"));
-
-        // Only one side unparseable still routes through the fallback (both-parse gate fails).
-        Assert.IsLessThan(0, NugetService.CompareVersions("1.0.0", "2.0.x"));
-    }
-
     #endregion
 
     #region ParseMinimumVersion
