@@ -872,6 +872,49 @@ winapp get-winapp-path [options]
 
 ---
 
+### find-ui
+
+Search **WinUI** controls and samples for a working code example. WinUI-only: the corpus is the [WinUI 3 Gallery](https://github.com/microsoft/WinUI-Gallery) and the [Windows Community Toolkit](https://github.com/CommunityToolkit/Windows) (plus a few curated core patterns) — it does **not** cover WPF, WinForms, or other UI frameworks.
+
+```bash
+winapp find-ui "<query>" [options]
+```
+
+The corpus is fetched from GitHub on first use and cached per-user under `<global .winapp>/cache/find-ui`, so the **first run requires network access**. Subsequent runs are served from the local cache (refreshed at most every 7 days, or on demand with `--refresh`).
+
+**Options:**
+
+- `--id <id>` - Fetch full XAML + C# (and prerequisite notes) for one or more scenario ids from a prior search (e.g. `gallery-tabview-1`). Repeatable.
+- `--list` - List every discoverable control/sample id instead of searching.
+- `--source <gallery|toolkit|core>` - Restrict search results to a single source. (Search only — not valid with `--list`/`--id`.)
+- `--max <N>` - Maximum number of matched controls to return (default: 3).
+- `--refresh` - Bypass the local cache and re-fetch the WinUI corpus from GitHub.
+- `--json` - Emit structured JSON (agent-friendly): a compact list of matches (`id`, `control`, `source`, `header`, `score`) for search, or full code for `--id`.
+
+**Workflow:** search compactly to find the right control and its scenario ids, then fetch the full code for the best match with `--id`.
+
+**Examples:**
+
+```bash
+# Find a control by intent (compact results with scenario ids)
+winapp find-ui "tabbed layout"
+
+# Restrict to the Windows Community Toolkit
+winapp find-ui "swipeable list rows" --source toolkit
+
+# Fetch the full XAML + C# for a specific scenario
+winapp find-ui --id gallery-tabview-1
+
+# Agent-friendly structured output
+winapp find-ui "color picker" --json
+
+# Browse everything, or force a corpus refresh
+winapp find-ui --list
+winapp find-ui "navigation view" --refresh
+```
+
+---
+
 ### node generate-bindings
 
 *(Available in NPM package only)* Generate JS bindings for Windows App SDK APIs. The bindings are declared by a `"winapp": { "jsBindings": {...} }` namespace in **`package.json`** and written to `.winapp/bindings/`.
