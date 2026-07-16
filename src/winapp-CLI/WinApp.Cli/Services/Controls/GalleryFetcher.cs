@@ -73,7 +73,7 @@ internal static partial class GalleryFetcher
     private static async Task<(Scenario[], Dictionary<string, string[]>)> FetchFromGitHub(CancellationToken cancellationToken)
     {
         // Step 1: Fetch ControlInfoData.json — list of controls + Subtitle/Description/RelatedControls/Docs
-        var infoJson = await Http.GetStringAsync(ControlInfoUrl, cancellationToken);
+        var infoJson = await ControlsHttpHelper.GetStringCappedAsync(Http, ControlInfoUrl, cancellationToken);
         using var doc = JsonDocument.Parse(infoJson);
         var groups = doc.RootElement.GetProperty("Groups");
 
@@ -142,7 +142,7 @@ internal static partial class GalleryFetcher
         foreach (var (uniqueId, title) in controlPages)
         {
             fetchTasks.Add(FetchControlPageAsync(
-                uniqueId, title, controlSubtitles.GetValueOrDefault(uniqueId.ToLowerInvariant()), semaphore));
+                uniqueId, title, controlSubtitles.GetValueOrDefault(uniqueId.ToLowerInvariant()), semaphore, cancellationToken));
         }
         var results = await Task.WhenAll(fetchTasks);
         foreach (var batch in results)
@@ -213,19 +213,18 @@ internal static partial class GalleryFetcher
     }
 
     private static async Task<List<Scenario>> FetchControlPageAsync(
-        string uniqueId, string title, string? controlSubtitle, SemaphoreSlim semaphore)
+        string uniqueId, string title, string? controlSubtitle, SemaphoreSlim semaphore, CancellationToken cancellationToken)
     {
         var scenarios = new List<Scenario>();
-        await semaphore.WaitAsync();
+        await semaphore.WaitAsync(cancellationToken);
         try
         {
             // Pages are uniform: Samples/{UniqueId}/{UniqueId}Page.xaml.
             var url = $"{SamplesBase}{uniqueId}/{uniqueId}Page.xaml";
 
-            var response = await Http.GetAsync(url);
-            if (!response.IsSuccessStatusCode) return scenarios;
+            var xamlContent = await ControlsHttpHelper.TryGetStringCappedAsync(Http, url, cancellationToken);
+            if (xamlContent is null) return scenarios;
 
-            var xamlContent = await response.Content.ReadAsStringAsync();
             var controlId = uniqueId.ToLowerInvariant();
             int scenarioIndex = 0;
 
@@ -238,7 +237,7 @@ internal static partial class GalleryFetcher
                 if (!string.IsNullOrEmpty(sampleDef))
                 {
                     // New format: header + xaml + c# all live in the co-located .txt bundle.
-                    (headerText, xaml, csharp) = await FetchSampleDefinition(sampleDef);
+                    (headerText, xaml, csharp) = await FetchSampleDefinition(sampleDef, cancellationToken);
                 }
                 else
                 {
@@ -298,17 +297,11 @@ internal static partial class GalleryFetcher
     /// flattening them yields non-compileable code (e.g. `new Vector3(..., ..., ...)`) — the same
     /// "no misleading C#" rule the inline extractor already applied.
     /// </summary>
-    private static async Task<(string header, string? xaml, string? csharp)> FetchSampleDefinition(string sampleDef)
+    private static async Task<(string header, string? xaml, string? csharp)> FetchSampleDefinition(string sampleDef, CancellationToken cancellationToken)
     {
         var url = SamplesBase + sampleDef.Replace('\\', '/');
-        string content;
-        try
-        {
-            var resp = await Http.GetAsync(url);
-            if (!resp.IsSuccessStatusCode) return ("", null, null);
-            content = await resp.Content.ReadAsStringAsync();
-        }
-        catch { return ("", null, null); }
+        var content = await ControlsHttpHelper.TryGetStringCappedAsync(Http, url, cancellationToken);
+        if (content is null) return ("", null, null);
 
         var (header, rawXaml, rawCsharp) = SplitSampleSections(content);
 

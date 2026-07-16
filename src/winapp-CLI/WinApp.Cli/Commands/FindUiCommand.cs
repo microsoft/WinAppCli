@@ -99,6 +99,13 @@ internal sealed class FindUiCommand : Command, IShortDescription
                 return Fail(json, $"--source must be one of: {valid} (got: {source})");
             }
 
+            // --source only affects search. Reject it with --list/--id rather than
+            // silently ignoring it, so scripted callers don't get a false sense of filtering.
+            if (source is not null && (list || ids.Length > 0))
+            {
+                return Fail(json, "--source only applies to search; it can't be combined with --list or --id.");
+            }
+
             if (max < 1)
             {
                 return Fail(json, "--max must be at least 1.");

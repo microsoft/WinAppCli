@@ -4,11 +4,9 @@
 namespace WinApp.Cli.Services.Controls;
 
 /// <summary>
-/// Small file-IO helpers for the per-user find-ui cache. The upstream
-/// winui-search tool spawned a detached background refresher; find-ui instead
-/// refreshes on demand (cold cache, or an explicit refresh) so nothing runs
-/// behind the user's back. Only the atomic-write and timestamp-read primitives
-/// are retained here.
+/// Timestamp helper for the per-user find-ui cache. Atomic writes go through the
+/// shared <see cref="WinApp.Cli.Helpers.PathSafety"/> helper; only the "o"-format
+/// timestamp read is find-ui-specific and lives here.
 /// </summary>
 internal static class ControlsCacheIo
 {
@@ -33,20 +31,5 @@ internal static class ControlsCacheIo
             return null;
         }
         catch { return null; }
-    }
-
-    /// <summary>
-    /// Write <paramref name="contents"/> to <paramref name="path"/> via a temp file
-    /// + rename. The rename is atomic on Windows for same-volume moves, so a crash
-    /// mid-write can never leave a truncated/corrupted file — readers see either the
-    /// previous contents or the full new contents, never a partial write.
-    /// </summary>
-    public static void AtomicWriteAllText(string path, string contents)
-    {
-        var dir = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        var tmp = path + ".tmp";
-        File.WriteAllText(tmp, contents);
-        File.Move(tmp, path, overwrite: true);
     }
 }

@@ -10,6 +10,8 @@ namespace WinApp.Cli.Services.Controls;
 /// </summary>
 internal sealed class GalleryProvider : CachedProviderBase
 {
+    public GalleryProvider(string cacheRoot) : base(cacheRoot) { }
+
     public override string Id => "gallery";
     public override string DisplayName => "Gallery (WinUI 3)";
 

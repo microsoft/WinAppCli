@@ -160,7 +160,7 @@ internal static partial class ToolkitFetcher
     private static async Task<(Scenario[], Dictionary<string, string[]>, Dictionary<string, string[]>)> FetchFromGitHub(CancellationToken cancellationToken)
     {
         // Step 1: Get full file tree
-        var treeJson = await Http.GetStringAsync(TreeApiUrl, cancellationToken);
+        var treeJson = await ControlsHttpHelper.GetStringCappedAsync(Http, TreeApiUrl, cancellationToken);
         using var doc = JsonDocument.Parse(treeJson);
         var tree = doc.RootElement.GetProperty("tree");
 
@@ -209,7 +209,7 @@ internal static partial class ToolkitFetcher
         // Step 2: Fetch all md docs FIRST (parallel) — gives us tags + descriptions
         // before processing samples, so each scenario can be enriched with prose.
         var sem = new SemaphoreSlim(10);
-        var mdTasks = mdDocs.Select(p => FetchMdAsync(p, sem)).ToArray();
+        var mdTasks = mdDocs.Select(p => FetchMdAsync(p, sem, cancellationToken)).ToArray();
         var mdResults = await Task.WhenAll(mdTasks);
         var tags = new Dictionary<string, string[]>();
         var keywords = new Dictionary<string, string[]>();
@@ -243,7 +243,7 @@ internal static partial class ToolkitFetcher
 
         // Step 3: Fetch all sample XAML + C# (parallel) — pass NuGet map and description
         // maps down so each FetchSampleAsync can stamp packaging + prose on its scenarios.
-        var sampleTasks = xamlSamples.Select(p => FetchSampleAsync(p, sem, nugetByComponent, controlDescByCid, sampleDescByName)).ToArray();
+        var sampleTasks = xamlSamples.Select(p => FetchSampleAsync(p, sem, nugetByComponent, controlDescByCid, sampleDescByName, cancellationToken)).ToArray();
         var sampleResults = await Task.WhenAll(sampleTasks);
         var allScenarios = sampleResults.Where(s => s != null).SelectMany(s => s!).ToArray();
 
@@ -272,9 +272,10 @@ internal static partial class ToolkitFetcher
         SemaphoreSlim sem,
         Dictionary<string, string> nugetByComponent,
         Dictionary<string, string> controlDescByCid,
-        Dictionary<string, string> sampleDescByName)
+        Dictionary<string, string> sampleDescByName,
+        CancellationToken cancellationToken)
     {
-        await sem.WaitAsync();
+        await sem.WaitAsync(cancellationToken);
         try
         {
             var sampleName = Path.GetFileNameWithoutExtension(path);
@@ -282,11 +283,11 @@ internal static partial class ToolkitFetcher
 
             var (controlId, controlName) = GetControlInfo(componentName, sampleName);
 
-            var xamlText = await TryGetString(RawBase + path);
+            var xamlText = await TryGetString(RawBase + path, cancellationToken);
             if (xamlText == null) return null;
 
             var csPath = path + ".cs";
-            var csText = await TryGetString(RawBase + csPath) ?? "";
+            var csText = await TryGetString(RawBase + csPath, cancellationToken) ?? "";
 
             // Strip Page wrapper from XAML
             var pageContent = ExtractPageContent(xamlText);
@@ -384,13 +385,13 @@ internal static partial class ToolkitFetcher
         string? ControlDescription,
         Dictionary<string, string>? SampleDescriptions);
 
-    private static async Task<MdData> FetchMdAsync(string path, SemaphoreSlim sem)
+    private static async Task<MdData> FetchMdAsync(string path, SemaphoreSlim sem, CancellationToken cancellationToken)
     {
-        await sem.WaitAsync();
+        await sem.WaitAsync(cancellationToken);
         try
         {
             var fileName = Path.GetFileName(path);
-            var text = await TryGetString(RawBase + path);
+            var text = await TryGetString(RawBase + path, cancellationToken);
             if (text == null) return new MdData(null, null, null, null, null);
 
             // Normalize newlines once: downstream parsers (ParseFrontmatter,
@@ -478,15 +479,9 @@ internal static partial class ToolkitFetcher
         return s;
     }
 
-    private static async Task<string?> TryGetString(string url)
+    private static async Task<string?> TryGetString(string url, CancellationToken cancellationToken)
     {
-        try
-        {
-            var resp = await Http.GetAsync(url);
-            if (!resp.IsSuccessStatusCode) return null;
-            return await resp.Content.ReadAsStringAsync();
-        }
-        catch { return null; }
+        return await ControlsHttpHelper.TryGetStringCappedAsync(Http, url, cancellationToken);
     }
 
     private static (string id, string name) GetControlInfo(string componentName, string sampleName)

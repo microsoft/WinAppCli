@@ -3,6 +3,8 @@
 
 namespace WinApp.Cli.Services.Controls;
 
+using WinApp.Cli.Services;
+
 /// <summary>
 /// Builds and memoizes the <see cref="SearchEngine"/> that backs
 /// <c>winapp find-ui</c>. Scenario data comes from the registered
@@ -38,7 +40,23 @@ internal sealed class ControlsDataUnavailableException : Exception
 internal sealed class ControlsSearchService : IControlsSearchService, IDisposable
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly ISearchProvider[] _providers;
     private SearchEngine? _engine;
+
+    /// <summary>Production constructor: providers are rooted at the managed
+    /// global <c>.winapp</c> cache directory so environment/test path overrides
+    /// (<c>WINAPP_CLI_CACHE_DIRECTORY</c>) and repo-wide path policy apply.</summary>
+    public ControlsSearchService(IWinappDirectoryService directoryService)
+        : this(ProviderRegistry.CreateProviders(
+            Path.Combine(directoryService.GetGlobalWinappDirectory().FullName, "cache", "find-ui")))
+    {
+    }
+
+    /// <summary>Test seam: inject providers directly (e.g. fakes with a temp cache).</summary>
+    internal ControlsSearchService(ISearchProvider[] providers)
+    {
+        _providers = providers;
+    }
 
     public async Task<SearchEngine> GetEngineAsync(bool forceRefresh = false, CancellationToken cancellationToken = default)
     {
@@ -61,10 +79,16 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
             // expose "colorpicker") don't overwrite each other.
             var allTags = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
             var allKeywords = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+            bool anyProviderEmpty = false;
 
-            foreach (var provider in ProviderRegistry.All)
+            foreach (var provider in _providers)
             {
                 var data = await provider.LoadAsync(forceRefresh, cancellationToken).ConfigureAwait(false);
+                if (data.Scenarios.Length == 0)
+                {
+                    anyProviderEmpty = true;
+                    continue;
+                }
                 allScenarios.AddRange(data.Scenarios);
                 foreach (var kv in data.Tags) allTags[$"{provider.Id}:{kv.Key}"] = kv.Value;
                 foreach (var kv in data.Keywords) allKeywords[$"{provider.Id}:{kv.Key}"] = kv.Value;
@@ -84,7 +108,14 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
                 allTags,
                 allKeywords);
 
-            _engine = engine;
+            // Only memoize a COMPLETE corpus. If a provider came back empty (its
+            // cold-cache fetch failed), serve the partial result for this call but
+            // don't cache it in-memory, so a later invocation re-attempts the
+            // missing source instead of being pinned to a degraded engine.
+            if (!anyProviderEmpty)
+            {
+                _engine = engine;
+            }
             return engine;
         }
         finally
@@ -98,13 +129,10 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
         _engine = null;
 
         var failures = new List<Exception>();
-        foreach (var provider in ProviderRegistry.All)
+        foreach (var provider in _providers)
         {
-            if (provider is CachedProviderBase cached)
-            {
-                try { cached.ClearCache(); }
-                catch (Exception ex) { failures.Add(ex); }
-            }
+            try { provider.ClearCache(); }
+            catch (Exception ex) { failures.Add(ex); }
         }
 
         if (failures.Count > 0)

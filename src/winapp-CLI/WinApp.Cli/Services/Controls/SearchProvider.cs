@@ -3,7 +3,9 @@
 
 namespace WinApp.Cli.Services.Controls;
 
+using System.Text;
 using System.Text.Json;
+using WinApp.Cli.Helpers;
 
 /// <summary>
 /// Data contributed by a search provider: its scenarios plus the per-control
@@ -25,7 +27,7 @@ internal sealed record ProviderData(
 /// <c>Scenario.Source</c> value, the on-disk cache subdirectory, the scenario
 /// id prefix (<c>{Id}-…</c>), the <c>--source</c> token, and the composite
 /// tag/keyword key namespace. Register a new provider in
-/// <see cref="ProviderRegistry.All"/> and the rest of the tool picks it up.
+/// <see cref="ProviderRegistry"/> and the rest of the tool picks it up.
 /// </summary>
 internal interface ISearchProvider
 {
@@ -44,28 +46,32 @@ internal interface ISearchProvider
     /// </summary>
     Task<ProviderData> LoadAsync(bool forceRefresh = false, CancellationToken cancellationToken = default);
 
-    /// <summary>Force a GitHub refresh and rewrite the cache.</summary>
-    Task RefreshFromGitHubAsync(CancellationToken cancellationToken = default);
+    /// <summary>Delete this provider's cache directory so the next load re-fetches.</summary>
+    void ClearCache();
 }
 
 /// <summary>
 /// Boilerplate shared by every GitHub-backed provider: the on-disk cache
 /// protocol (schema-version stamp + 7-day TTL + atomic writes) and the
 /// fetch-on-cold-cache flow. Concrete providers only supply their identity and
-/// their GitHub fetch.
+/// their GitHub fetch. The cache root is injected so it can live under the
+/// managed <c>.winapp</c> directory (and be redirected in tests).
 /// </summary>
 internal abstract class CachedProviderBase : ISearchProvider
 {
+    private readonly string _cacheRoot;
+
+    protected CachedProviderBase(string cacheRoot)
+    {
+        _cacheRoot = cacheRoot;
+    }
+
     public abstract string Id { get; }
     public abstract string DisplayName { get; }
 
     private static readonly TimeSpan CacheTtl = TimeSpan.FromDays(7);
 
-    // Per-user cache root. find-ui-specific so it never collides with the
-    // upstream winui-search tool's cache.
-    private string CacheDir => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "winapp", "find-ui", "cache", Id);
+    private string CacheDir => Path.Combine(_cacheRoot, Id);
 
     /// <summary>Fully-prepared GitHub fetch (tags already cleaned). Return
     /// <see cref="ProviderData.Empty"/> to leave the cache untouched.</summary>
@@ -85,21 +91,24 @@ internal abstract class CachedProviderBase : ISearchProvider
         }
 
         // Cold/stale cache (or forced): no embedded snapshot exists, so fetch
-        // from GitHub. On success prime the cache; on failure return Empty so the
-        // caller can emit a network-required message.
+        // from GitHub. On success prime the cache and return.
         var fetched = await FetchAsync(cancellationToken).ConfigureAwait(false);
         if (fetched.Scenarios.Length > 0)
         {
-            TryWriteCache(fetched);
+            await TryWriteCacheAsync(fetched, cancellationToken).ConfigureAwait(false);
             return fetched;
         }
-        return ProviderData.Empty;
-    }
 
-    public async Task RefreshFromGitHubAsync(CancellationToken cancellationToken = default)
-    {
-        var data = await FetchAsync(cancellationToken).ConfigureAwait(false);
-        if (data.Scenarios.Length > 0) TryWriteCache(data);
+        // Fetch failed (offline / upstream error). For a forced refresh, fall
+        // back to any existing cache rather than dropping the provider entirely
+        // — a stale corpus beats no corpus. On a cold cache there is nothing to
+        // fall back to, so return Empty and let the caller surface the error.
+        if (forceRefresh)
+        {
+            var cached = TryReadCache();
+            if (cached != null) return cached;
+        }
+        return ProviderData.Empty;
     }
 
     private ProviderData? TryReadCache()
@@ -145,7 +154,7 @@ internal abstract class CachedProviderBase : ISearchProvider
         catch { return null; }
     }
 
-    private void TryWriteCache(ProviderData data)
+    private async Task TryWriteCacheAsync(ProviderData data, CancellationToken cancellationToken)
     {
         try
         {
@@ -155,23 +164,30 @@ internal abstract class CachedProviderBase : ISearchProvider
             var timestampPath = Path.Combine(CacheDir, "last-updated.txt");
             var versionPath = Path.Combine(CacheDir, "schema-version.txt");
 
-            // Atomic per-file writes. Order: data first, version next, timestamp
-            // LAST, so a partially-written set is detected as still-stale on the
-            // next read (no fresh timestamp ⇒ cache miss ⇒ re-fetch).
-            ControlsCacheIo.AtomicWriteAllText(scenariosPath,
-                JsonSerializer.Serialize(data.Scenarios, ControlsJsonContext.Default.ScenarioArray));
-            ControlsCacheIo.AtomicWriteAllText(tagsPath,
-                JsonSerializer.Serialize(data.Tags, ControlsJsonContext.Default.DictionaryStringStringArray));
+            Directory.CreateDirectory(CacheDir);
+
+            // Atomic per-file writes (temp + rename via the shared PathSafety
+            // helper). Order: data first, version next, timestamp LAST, so a
+            // partially-written set is detected as still-stale on the next read
+            // (no fresh timestamp ⇒ cache miss ⇒ re-fetch).
+            await PathSafety.AtomicWriteAllTextAsync(scenariosPath,
+                JsonSerializer.Serialize(data.Scenarios, ControlsJsonContext.Default.ScenarioArray), Utf8NoBom, cancellationToken).ConfigureAwait(false);
+            await PathSafety.AtomicWriteAllTextAsync(tagsPath,
+                JsonSerializer.Serialize(data.Tags, ControlsJsonContext.Default.DictionaryStringStringArray), Utf8NoBom, cancellationToken).ConfigureAwait(false);
             if (data.Keywords.Count > 0)
-                ControlsCacheIo.AtomicWriteAllText(keywordsPath,
-                    JsonSerializer.Serialize(data.Keywords, ControlsJsonContext.Default.DictionaryStringStringArray));
-            ControlsCacheIo.AtomicWriteAllText(versionPath, CacheVersion.Current);
-            ControlsCacheIo.AtomicWriteAllText(timestampPath, DateTime.UtcNow.ToString("o"));
+            {
+                await PathSafety.AtomicWriteAllTextAsync(keywordsPath,
+                    JsonSerializer.Serialize(data.Keywords, ControlsJsonContext.Default.DictionaryStringStringArray), Utf8NoBom, cancellationToken).ConfigureAwait(false);
+            }
+            await PathSafety.AtomicWriteAllTextAsync(versionPath, CacheVersion.Current, Utf8NoBom, cancellationToken).ConfigureAwait(false);
+            await PathSafety.AtomicWriteAllTextAsync(timestampPath, DateTime.UtcNow.ToString("o"), Utf8NoBom, cancellationToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) { throw; }
         catch { /* cache write is best-effort */ }
     }
 
-    /// <summary>Delete this provider's cache directory so the next load re-fetches.</summary>
+    private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
     public void ClearCache()
     {
         try
@@ -185,29 +201,43 @@ internal abstract class CachedProviderBase : ISearchProvider
     }
 }
 
+/// <summary>Lightweight, instance-free descriptor of a provider — its id and
+/// display name — used for <c>--source</c> validation and id-prefix mapping
+/// without constructing (network-backed) provider instances.</summary>
+internal sealed record ProviderDescriptor(string Id, string DisplayName);
+
 /// <summary>
-/// The ordered set of scenario providers. This is the single place to register
-/// a new source; the search service and <see cref="SearchEngine"/> are driven
-/// entirely off this list (plus the special-cased curated core patterns).
+/// The single registry of scenario providers. <see cref="Descriptors"/> lists
+/// them without side effects (for validation), and <see cref="CreateProviders"/>
+/// builds live instances rooted at a caller-supplied cache directory. This is
+/// the one place to register a new source.
 /// </summary>
 internal static class ProviderRegistry
 {
-    /// <summary>All scenario providers, in display order (gallery first).</summary>
-    public static readonly ISearchProvider[] All =
+    /// <summary>Provider descriptors in display order (gallery first).</summary>
+    public static readonly ProviderDescriptor[] Descriptors =
     {
-        new GalleryProvider(),
-        new ToolkitProvider(),
+        new("gallery", "Gallery (WinUI 3)"),
+        new("toolkit", "CommunityToolkit"),
     };
+
+    /// <summary>Build live provider instances whose caches live under
+    /// <paramref name="cacheRoot"/> (each in its own <c>{Id}</c> subfolder).</summary>
+    public static ISearchProvider[] CreateProviders(string cacheRoot) =>
+    [
+        new GalleryProvider(cacheRoot),
+        new ToolkitProvider(cacheRoot),
+    ];
 
     /// <summary>Provider ids plus the pseudo-source <c>"core"</c> — the valid
     /// values for <c>--source</c>.</summary>
     public static IEnumerable<string> SourceFilterValues =>
-        All.Select(p => p.Id).Append("core");
+        Descriptors.Select(d => d.Id).Append("core");
 
     public static bool IsValidSourceFilter(string source) =>
         SourceFilterValues.Any(s => string.Equals(s, source, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>Provider whose <c>{Id}-</c> prefix matches <paramref name="scenarioId"/>, if any.</summary>
-    public static ISearchProvider? ForScenarioId(string scenarioId) =>
-        All.FirstOrDefault(p => scenarioId.StartsWith($"{p.Id}-", StringComparison.Ordinal));
+    /// <summary>Descriptor whose <c>{Id}-</c> prefix matches <paramref name="scenarioId"/>, if any.</summary>
+    public static ProviderDescriptor? ForScenarioId(string scenarioId) =>
+        Descriptors.FirstOrDefault(d => scenarioId.StartsWith($"{d.Id}-", StringComparison.Ordinal));
 }

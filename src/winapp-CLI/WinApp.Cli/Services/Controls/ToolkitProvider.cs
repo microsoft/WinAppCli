@@ -10,6 +10,8 @@ namespace WinApp.Cli.Services.Controls;
 /// </summary>
 internal sealed class ToolkitProvider : CachedProviderBase
 {
+    public ToolkitProvider(string cacheRoot) : base(cacheRoot) { }
+
     public override string Id => "toolkit";
     public override string DisplayName => "CommunityToolkit";
 
