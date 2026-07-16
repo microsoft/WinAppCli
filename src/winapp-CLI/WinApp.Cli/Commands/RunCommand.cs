@@ -221,7 +221,13 @@ internal partial class RunCommand : Command, IShortDescription
 
             if (isJson && debugOutput)
             {
-                logger.LogError("{UISymbol} --json and --debug-output cannot be used together.", UiSymbols.Error);
+                const string msg = "--json and --debug-output cannot be used together.";
+                logger.LogError("{UISymbol} {Message}", UiSymbols.Error, msg);
+
+                // In --json mode the logger above is suppressed (LogLevel.None), so users would
+                // otherwise see only an empty stdout and exit code 1. Emit a structured error so
+                // machine-readable callers can surface a useful message.
+                PrintJson(aumid: null, processId: null, errorMessage: msg);
                 return 1;
             }
 
@@ -259,6 +265,13 @@ internal partial class RunCommand : Command, IShortDescription
             {
                 logger.LogError("{UISymbol} --detach and --unregister-on-exit cannot be used together.", UiSymbols.Error);
                 return 1;
+            }
+
+            // --symbols only affects the stowed-exception triage that runs under --debug-output.
+            // Warn (non-fatal) when it is supplied on its own so the flag isn't silently ignored.
+            if (useSymbols && !debugOutput)
+            {
+                logger.LogWarning("{UISymbol} --symbols has no effect without --debug-output; ignoring.", UiSymbols.Warning);
             }
 
             // Validate the input folder path early so the command fails fast with a clear
