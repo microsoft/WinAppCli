@@ -30,6 +30,7 @@ public sealed class NugetServiceOfflineTests : BaseCommandTests
     private DirectoryInfo _nugetGlobal = null!;
     private NugetService _service = null!;
     private Func<string, CancellationToken, Task<HttpResponseMessage>> _originalGet = null!;
+    private Func<string> _originalUserProfile = null!;
     private string? _originalNugetPackages;
     private string? _originalCacheDir;
 
@@ -37,6 +38,7 @@ public sealed class NugetServiceOfflineTests : BaseCommandTests
     public void SetupOffline()
     {
         _originalGet = NugetService.HttpGetAsync;
+        _originalUserProfile = NugetService.GetUserProfileDirectory;
         _originalNugetPackages = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
         _originalCacheDir = Environment.GetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY");
 
@@ -50,6 +52,7 @@ public sealed class NugetServiceOfflineTests : BaseCommandTests
     public void CleanupOffline()
     {
         NugetService.HttpGetAsync = _originalGet;
+        NugetService.GetUserProfileDirectory = _originalUserProfile;
         Environment.SetEnvironmentVariable("NUGET_PACKAGES", _originalNugetPackages);
         Environment.SetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY", _originalCacheDir);
     }
@@ -391,8 +394,10 @@ public sealed class NugetServiceOfflineTests : BaseCommandTests
     [TestMethod]
     public async Task GetPackageDependenciesAsync_ReturnsDirectAndTransitive_ExcludesIgnoredPrefixes()
     {
-        // A -> B (+ ignored System.Text.Json); B -> C. Result should contain B and C but not the
-        // framework/System.* dependency.
+        // A -> B (+ ignored System.Text.Json); B -> C. B is declared as the range "[2.0.0, )" so this
+        // also proves the transitive walk normalizes the range to its minimum version before fetching
+        // B's nuspec (otherwise the malformed URL would 404 and C would be silently dropped). Result
+        // should contain B and C but not the framework/System.* dependency.
         StubNuspecFeed(
             ("a.pkg/1.0.0", NuspecXml("A.Pkg", ("B.Pkg", "[2.0.0, )"), ("System.Text.Json", "8.0.0"))),
             ("b.pkg/2.0.0", NuspecXml("B.Pkg", ("C.Pkg", "3.0.0"))),
@@ -483,17 +488,33 @@ public sealed class NugetServiceOfflineTests : BaseCommandTests
     }
 
     [TestMethod]
-    public void GetNuGetGlobalPackagesDir_NoOverrides_FallsBackToUserProfileNuget()
+    public void GetNuGetGlobalPackagesDir_NoOverrides_FallsBackToUserProfileNugetAndCreatesIt()
     {
         // IsTestOverride() false (WINAPP_CLI_CACHE_DIRECTORY set) and NUGET_PACKAGES cleared =>
-        // the default %USERPROFILE%\.nuget\packages location is returned.
+        // the default %USERPROFILE%\.nuget\packages location is returned. The user-profile lookup is
+        // redirected to a temp directory so the on-demand create-branch runs hermetically, without
+        // mutating the developer's (or CI runner's) real user profile.
         Environment.SetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY", _tempDirectory.FullName);
         Environment.SetEnvironmentVariable("NUGET_PACKAGES", null);
+        var fakeProfile = _tempDirectory.CreateSubdirectory("fakeprofile");
+        NugetService.GetUserProfileDirectory = () => fakeProfile.FullName;
 
         var dir = _service.GetNuGetGlobalPackagesDir();
 
-        var expectedSuffix = Path.Combine(".nuget", "packages");
-        StringAssert.EndsWith(dir.FullName, expectedSuffix, StringComparison.OrdinalIgnoreCase);
+        var expected = Path.Combine(fakeProfile.FullName, ".nuget", "packages");
+        Assert.AreEqual(expected, dir.FullName);
+        Assert.IsTrue(dir.Exists, "The default .nuget/packages directory should be created on demand.");
+    }
+
+    [TestMethod]
+    public void GetUserProfileDirectory_Default_ResolvesToWindowsUserProfile()
+    {
+        // Pins the seam's production default: with no override it must resolve to the real
+        // %USERPROFILE% so the computed NuGet global-packages path stays byte-for-byte the
+        // same as the pre-seam behavior. CleanupOffline restores the default before each test.
+        Assert.AreEqual(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            NugetService.GetUserProfileDirectory());
     }
 
     // ───────────────────────────────────── helpers ─────────────────────────────────────
@@ -508,14 +529,19 @@ public sealed class NugetServiceOfflineTests : BaseCommandTests
         File.WriteAllText(Path.Combine(dir, $"{lowerId}.nuspec"), nuspec);
     }
 
-    /// <summary>Serves each requested .nupkg by matching "<id>/<version>" in the flat-container URL.</summary>
+    /// <summary>
+    /// Serves each requested .nupkg by matching the slash-delimited <c>/&lt;id&gt;/&lt;version&gt;/</c>
+    /// path segment in the flat-container URL. Matching the surrounding slashes (rather than a bare
+    /// substring) means a malformed request such as <c>/pkg/1.2.3, /</c> — which a raw range that was
+    /// never normalized would produce — correctly misses and 404s instead of being silently served.
+    /// </summary>
     private static void StubNupkgFeed(params (string idVersionSegment, byte[] bytes)[] packages)
     {
         NugetService.HttpGetAsync = (url, _) =>
         {
             foreach (var (segment, bytes) in packages)
             {
-                if (url.Contains(segment, StringComparison.Ordinal))
+                if (url.Contains($"/{segment}/", StringComparison.Ordinal))
                 {
                     return Task.FromResult(BytesResponse(bytes));
                 }
@@ -524,14 +550,18 @@ public sealed class NugetServiceOfflineTests : BaseCommandTests
         };
     }
 
-    /// <summary>Serves each requested .nuspec by matching "<id>/<version>" in the flat-container URL.</summary>
+    /// <summary>
+    /// Serves each requested .nuspec by matching the slash-delimited <c>/&lt;id&gt;/&lt;version&gt;/</c>
+    /// path segment in the flat-container URL (see <see cref="StubNupkgFeed"/> for why the surrounding
+    /// slashes matter — an unnormalized range would build a malformed URL that must not match).
+    /// </summary>
     private static void StubNuspecFeed(params (string idVersionSegment, string nuspec)[] nuspecs)
     {
         NugetService.HttpGetAsync = (url, _) =>
         {
             foreach (var (segment, nuspec) in nuspecs)
             {
-                if (url.Contains(segment, StringComparison.Ordinal))
+                if (url.Contains($"/{segment}/", StringComparison.Ordinal))
                 {
                     return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                     {

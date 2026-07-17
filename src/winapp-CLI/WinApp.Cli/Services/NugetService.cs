@@ -30,16 +30,20 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
     internal static Func<string, CancellationToken, Task<HttpResponseMessage>> HttpGetAsync { get; set; }
         = static (url, cancellationToken) => Http.GetAsync(url, cancellationToken);
 
+    /// <summary>
+    /// Seam for the current user's profile directory, used to compute the default NuGet
+    /// global-packages location (<c>%USERPROFILE%\.nuget\packages</c>). Defaults to
+    /// <see cref="Environment.GetFolderPath(Environment.SpecialFolder)"/> so production behavior is
+    /// unchanged; tests point it at a temporary directory so the default create-branch runs
+    /// hermetically without mutating the developer's (or CI runner's) real user profile.
+    /// </summary>
+    internal static Func<string> GetUserProfileDirectory { get; set; }
+        = static () => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
     private const string FlatIndex = "https://api.nuget.org/v3-flatcontainer";
     private const string RegistrationIndex = "https://api.nuget.org/v3/registration5-semver1";
     private static readonly ConcurrentDictionary<string, Dictionary<string, string>> DependencyCache = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <remarks>
-    /// The final fallback creates <c>%USERPROFILE%\.nuget\packages</c> when it does not already
-    /// exist. That directory-creation branch is not deterministically unit-coverable: the path comes
-    /// from <see cref="Environment.GetFolderPath(Environment.SpecialFolder)"/> (which ignores env-var
-    /// redirection), so exercising it would require mutating the real user profile. See issue #630.
-    /// </remarks>
     public DirectoryInfo GetNuGetGlobalPackagesDir()
     {
         // In test mode (cache override set), use a "packages" subdir of the override directory
@@ -67,7 +71,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
         }
 
         // Default: %USERPROFILE%/.nuget/packages
-        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var userProfile = GetUserProfileDirectory();
         var nugetDir = new DirectoryInfo(Path.Combine(userProfile, ".nuget", "packages"));
         if (!nugetDir.Exists)
         {
@@ -426,7 +430,11 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
         var allDeps = new Dictionary<string, string>(directDeps, StringComparer.OrdinalIgnoreCase);
         foreach (var (depId, depVersion) in directDeps)
         {
-            var transitiveDeps = await GetPackageDependenciesAsync(depId, depVersion, cancellationToken);
+            // Normalize the dependency's version range to its minimum version before recursing so the
+            // transitive nuspec URL is well-formed. FetchDirectDependenciesAsync only strips brackets
+            // (e.g. "[2.0.0, )" -> "2.0.0, "), which would otherwise build a malformed flat-container
+            // URL and silently drop transitive dependencies nested under a range-versioned package.
+            var transitiveDeps = await GetPackageDependenciesAsync(depId, ParseMinimumVersion(depVersion), cancellationToken);
             foreach (var (transitiveId, transitiveVersion) in transitiveDeps)
             {
                 allDeps.TryAdd(transitiveId, transitiveVersion);
