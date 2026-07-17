@@ -40,9 +40,26 @@ internal interface ISystemUiQuery
     /// <summary>The window class name of <paramref name="hwnd"/>, or <c>null</c> when empty/unavailable.</summary>
     string? GetWindowClassName(long hwnd);
 
+    /// <summary>
+    /// The HWND that currently has keyboard focus within the thread that owns <paramref name="hwnd"/>
+    /// (0 when it can't be resolved — e.g. the thread isn't foreground so no window holds focus).
+    /// Used to target <c>PostMessage</c> at the truly-focused child control rather than a top-level
+    /// window that would silently drop the keyboard message.
+    /// </summary>
+    long GetFocusedWindow(long hwnd);
+
     /// <summary>The outer size (width, height) of <paramref name="hwnd"/> in pixels; (0, 0) when unavailable.</summary>
     (int Width, int Height) GetWindowSize(long hwnd);
 
     /// <summary>The owner window handle of <paramref name="hwnd"/> (0 when it has no owner).</summary>
     nint GetWindowOwner(long hwnd);
+
+    /// <summary>
+    /// The top-level root window of <paramref name="hwnd"/> (via <c>GetAncestor(GA_ROOT)</c>) — the
+    /// window itself for a top-level window, or 0 when it can't be resolved. Used to confirm a thread's
+    /// focused HWND actually belongs to the intended target window before retargeting <c>PostMessage</c>
+    /// at it, since <c>GetGUIThreadInfo</c> reports focus for the whole GUI thread (which can own
+    /// several top-level windows).
+    /// </summary>
+    long GetRootWindow(long hwnd);
 }

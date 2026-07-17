@@ -384,6 +384,250 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
+    [DoNotParallelize] // temporarily swaps the process-wide ambient AnsiConsole to capture logger warnings
+    public async Task SendKeys_PostMessageNamedKey_XamlWindow_Warns()
+    {
+        // #655: a named key (Enter) — not just literal text — is also dropped by the XAML input
+        // pipeline when posted, because WinUI/UWP controls are windowless. The broadened warning must
+        // fire for any post-message payload to a XAML target, not only text=.
+        _fakeSession.SessionResult.WindowHandle = 0xABC;
+        _fakeSystemQuery.WindowClassNameByHwnd[0xABC] = "Windows.UI.Core.CoreWindow";
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var previousAmbient = AnsiConsole.Console;
+        var ambient = new TestConsole();
+        AnsiConsole.Console = ambient;
+        int exitCode;
+        try
+        {
+            exitCode = await ParseAndInvokeWithCaptureAsync(command, ["enter", "-a", "TestApp", "--via", "post-message"]);
+        }
+        finally
+        {
+            AnsiConsole.Console = previousAmbient;
+        }
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count, "the warning is advisory — the key is still posted");
+        StringAssert.Contains(ambient.Output, "windowless",
+            "a named key to a XAML target must trigger the may-not-deliver warning");
+    }
+
+    [TestMethod]
+    public async Task SendKeys_PostMessage_XamlWindow_Json_IncludesWarning()
+    {
+        // The honest-reporting warning must also surface in the structured --json warnings[] so
+        // automation (not just a human reading the console) can see the delivery caveat.
+        _fakeSession.SessionResult.WindowHandle = 0xABC;
+        _fakeSystemQuery.WindowClassNameByHwnd[0xABC] = "WinUIDesktopWin32WindowClass";
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["text=hello", "-a", "TestApp", "--via", "post-message", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        var warnings = result.GetProperty("warnings");
+        Assert.AreEqual(1, warnings.GetArrayLength(), "XAML post-message emits exactly the delivery caveat");
+        StringAssert.Contains(warnings[0].GetString(), "post-message");
+        StringAssert.Contains(warnings[0].GetString(), "windowless");
+    }
+
+    [TestMethod]
+    public async Task SendKeys_PostMessage_RetargetsToFocusedChildHwnd()
+    {
+        // #655 root cause: the resolved target is the top-level window, but a top-level window does not
+        // route posted keyboard messages to its focused child control. The command must retarget to the
+        // thread's focused child HWND (resolved via ISystemUiQuery) so the keys reach the real control.
+        _fakeSession.SessionResult.WindowHandle = 0xABC;          // top-level window
+        _fakeSystemQuery.FocusedWindowByHwnd[0xABC] = 0x789;      // focused child edit control
+        _fakeSystemQuery.RootWindowByHwnd[0x789] = 0xABC;         // child's top-level root is the target
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["text=hello", "-a", "TestApp", "--via", "post-message", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+        Assert.AreEqual(0x789, _fakeKeyboard.SendCalls[0].Hwnd, "post-message must target the focused child HWND");
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual(0x789, result.GetProperty("hwnd").GetInt64(), "JSON hwnd reflects the effective post target");
+    }
+
+    [TestMethod]
+    public async Task SendKeys_PostMessage_DoesNotRetargetToFocusOnDifferentTopLevelWindow()
+    {
+        // GetGUIThreadInfo reports focus for the whole GUI thread, and one thread can own several
+        // top-level windows. If SetForegroundWindow was denied, the reported focus may belong to a
+        // *different* top-level window on that thread. Retargeting there would post the keys to the wrong
+        // window despite an explicit target, so the command must keep the resolved target when the focused
+        // HWND's top-level root differs.
+        _fakeSession.SessionResult.WindowHandle = 0xABC;          // target top-level window (its own root)
+        _fakeSystemQuery.FocusedWindowByHwnd[0xABC] = 0x999;      // focus is on the thread, but...
+        _fakeSystemQuery.RootWindowByHwnd[0x999] = 0xDDD;         // ...it belongs to a different top-level window
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["enter", "-a", "TestApp", "--via", "post-message", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+        Assert.AreEqual(0xABC, _fakeKeyboard.SendCalls[0].Hwnd,
+            "post-message must keep the target HWND when the focused window belongs to a different top-level window");
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual(0xABC, result.GetProperty("hwnd").GetInt64(), "JSON hwnd reflects the un-retargeted target");
+    }
+
+    [TestMethod]
+    public async Task SendKeys_SendInput_DoesNotRetargetToFocusedChild()
+    {
+        // Focused-child retargeting is a PostMessage-only concern (a top-level window doesn't forward
+        // posted messages). send-input is OS-wide and lands on the foreground window, so it must keep
+        // the resolved target HWND even when a focused child is available.
+        _fakeSession.SessionResult.WindowHandle = 0xABC;
+        _fakeSystemQuery.FocusedWindowByHwnd[0xABC] = 0x789;      // present, but must be ignored for send-input
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["enter", "-a", "TestApp", "--via", "send-input", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+        Assert.AreEqual(0xABC, _fakeKeyboard.SendCalls[0].Hwnd, "send-input keeps the resolved target HWND");
+    }
+
+    [TestMethod]
+    public async Task SendKeys_SendInput_XamlWindow_DoesNotWarnAboutPostMessage()
+    {
+        // The may-not-deliver caveat is specific to post-message. send-input delivers real input to
+        // XAML apps, so it must not carry the post-message warning even when the target looks like XAML.
+        _fakeSession.SessionResult.WindowHandle = 0xABC;
+        _fakeSystemQuery.WindowClassNameByHwnd[0xABC] = "WinUIDesktopWin32WindowClass";
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["text=hello", "-a", "TestApp", "--via", "send-input", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual(0, result.GetProperty("warnings").GetArrayLength(),
+            "send-input must not emit the post-message delivery caveat");
+    }
+
+    [TestMethod]
+    public async Task SendKeys_PostMessage_NonXamlTarget_WithXamlFocusedChild_Json_WarnsAndTargetsChild()
+    {
+        // Second clause of the XAML-delivery check (UiSendKeysCommand: targetLooksXaml): the top-level
+        // target is NOT XAML, but post-message retargets to the thread's focused child and *that child*
+        // is a windowless XAML control. Classifying only the top-level target would miss it, so the
+        // command must also inspect the effective (retargeted) HWND, warn, and post to the child.
+        _fakeSession.SessionResult.WindowHandle = 0xABC;                                // top-level window (its own root)
+        _fakeSystemQuery.WindowClassNameByHwnd[0xABC] = "Notepad";                      // non-XAML top-level
+        _fakeSystemQuery.FocusedWindowByHwnd[0xABC] = 0x789;                            // focused child...
+        _fakeSystemQuery.RootWindowByHwnd[0x789] = 0xABC;                               // ...whose root is the target -> retarget
+        _fakeSystemQuery.WindowClassNameByHwnd[0x789] = "WinUIDesktopWin32WindowClass"; // ...and is itself XAML
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["text=hello", "-a", "TestApp", "--via", "post-message", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(0x789, _fakeKeyboard.SendCalls[0].Hwnd, "post-message must target the focused XAML child HWND");
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual(0x789, result.GetProperty("hwnd").GetInt64(), "JSON hwnd reflects the effective (child) post target");
+        var warnings = result.GetProperty("warnings");
+        Assert.AreEqual(1, warnings.GetArrayLength(),
+            "a XAML focused child must raise the delivery caveat even when the top-level target is not XAML");
+        StringAssert.Contains(warnings[0].GetString(), "windowless");
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // swaps the process-wide ambient AnsiConsole to capture the logger warning
+    public async Task SendKeys_PostMessage_NonXamlTarget_WithXamlFocusedChild_WarnsOnConsole()
+    {
+        // Console parity for the second-clause warning: non-XAML top-level, XAML retargeted child. The
+        // advisory must surface on the console (not only --json), and the keys are still posted to the child.
+        _fakeSession.SessionResult.WindowHandle = 0xABC;
+        _fakeSystemQuery.WindowClassNameByHwnd[0xABC] = "Notepad";                      // non-XAML top-level
+        _fakeSystemQuery.FocusedWindowByHwnd[0xABC] = 0x789;                            // focused child...
+        _fakeSystemQuery.RootWindowByHwnd[0x789] = 0xABC;                               // ...whose root is the target -> retarget
+        _fakeSystemQuery.WindowClassNameByHwnd[0x789] = "WinUIDesktopWin32WindowClass"; // ...and is itself XAML
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var (exitCode, ambientOutput) = await InvokeWithAmbientConsoleCaptureAsync(command,
+            ["hello", "-a", "TestApp", "--via", "post-message"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count, "the warning is advisory — the text is still posted");
+        Assert.AreEqual(0x789, _fakeKeyboard.SendCalls[0].Hwnd, "post-message retargets to the focused XAML child");
+        StringAssert.Contains(ambientOutput, "windowless",
+            "a XAML focused child must trigger the may-not-deliver warning on the console");
+    }
+
+    [TestMethod]
+    public async Task SendKeys_PostMessage_KeepsTarget_WhenTargetRootUnresolved()
+    {
+        // Retarget guard fall-through #1: a different HWND is focused, but the target's own GA_ROOT can't
+        // be resolved (returns 0). With no root to compare against, the command must NOT adopt the focused
+        // HWND — it keeps the resolved target.
+        _fakeSession.SessionResult.WindowHandle = 0xABC;
+        _fakeSystemQuery.FocusedWindowByHwnd[0xABC] = 0x789;   // a different focused HWND...
+        _fakeSystemQuery.RootWindowByHwnd[0xABC] = 0;          // ...but the target's own root is unresolvable (0)
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["enter", "-a", "TestApp", "--via", "post-message", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(0xABC, _fakeKeyboard.SendCalls[0].Hwnd, "an unresolved target root must keep the target HWND");
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual(0xABC, result.GetProperty("hwnd").GetInt64());
+    }
+
+    [TestMethod]
+    public async Task SendKeys_PostMessage_KeepsTarget_WhenFocusedEqualsTarget()
+    {
+        // Retarget guard fall-through #2: GetGUIThreadInfo reports the target window itself as focused
+        // (focused == target). There is no distinct child to adopt, so the command keeps the target.
+        _fakeSession.SessionResult.WindowHandle = 0xABC;
+        _fakeSystemQuery.FocusedWindowByHwnd[0xABC] = 0xABC;   // focus resolves to the target itself
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["enter", "-a", "TestApp", "--via", "post-message", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(0xABC, _fakeKeyboard.SendCalls[0].Hwnd, "focused == target must keep the target HWND (no retarget)");
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.AreEqual(0xABC, result.GetProperty("hwnd").GetInt64());
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // swaps the process-wide ambient AnsiConsole to capture the success log line
+    public async Task SendKeys_SuccessLog_SaysPostedForPostMessage_AndSentForSendInput()
+    {
+        // The human success line reports the transport honestly: post-message is fire-and-forget (it only
+        // queues the message and can't confirm delivery) so it reads "Posted", while send-input is real
+        // synthesized input and reads "Sent".
+        _fakeSession.SessionResult.WindowHandle = 0xABC;
+        var command = GetRequiredService<UiSendKeysCommand>();
+
+        var (postExit, postOutput) = await InvokeWithAmbientConsoleCaptureAsync(command,
+            ["enter", "-a", "TestApp", "--via", "post-message"]);
+        Assert.AreEqual(0, postExit);
+        StringAssert.Contains(postOutput, "Posted", "post-message must report the queued 'Posted' verb");
+        Assert.IsFalse(postOutput.Contains("Sent"), "post-message must not overstate delivery with 'Sent'");
+
+        var (sendExit, sendOutput) = await InvokeWithAmbientConsoleCaptureAsync(command,
+            ["enter", "-a", "TestApp", "--via", "send-input"]);
+        Assert.AreEqual(0, sendExit);
+        StringAssert.Contains(sendOutput, "Sent", "send-input must report the 'Sent' verb");
+    }
+
+    [TestMethod]
     public async Task SendKeys_SystemCombo_ViaSendInput_WithAllowSystemKeys_Sends()
     {
         // --allow-system-keys opts in to OS/shell-wide combos (e.g. driving a global hotkey such as
