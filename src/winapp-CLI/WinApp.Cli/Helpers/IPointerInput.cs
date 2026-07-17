@@ -8,7 +8,8 @@ internal readonly record struct PointerPoint(int X, int Y);
 
 /// <summary>
 /// A window rectangle in screen pixels (as returned by <c>GetWindowRect</c>). Used to bounds-check
-/// explicit touch/pen coordinates so a gesture can never be injected outside the target window.
+/// explicit touch/pen coordinates; a point outside the target window is surfaced as a non-fatal
+/// warning (issue #661) and injection still proceeds — consistent with the mouse verbs.
 /// </summary>
 internal readonly record struct PointerRect(int Left, int Top, int Right, int Bottom)
 {
