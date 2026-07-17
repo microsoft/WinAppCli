@@ -58,9 +58,10 @@ internal class UiSendKeysCommand : Command, IShortDescription
                       "--via send-input, which are refused by default because they act on the OS/shell beyond the " +
                       "target app. Opt in to drive global hotkeys (e.g. PowerToys' win+shift+v, win+r). " +
                       "No effect on --via post-message (already window-scoped; a warning is emitted if set without send-input). " +
-                      "Note: win+l stays blocked even with this flag — it locks the workstation (LockWorkStation() via " +
-                      "the shell hook), which is unrecoverable from automation. Windows still blocks secure sequences " +
-                      "such as ctrl+alt+del (SAS) from injected input regardless of this flag."
+                      "Note: win+l and ctrl+alt+del stay blocked even with this flag — win+l locks the workstation " +
+                      "(LockWorkStation() via the shell hook), which is unrecoverable from automation, and ctrl+alt+del " +
+                      "is a Secure Attention Sequence (SAS) that Windows drops from injected input regardless of this flag, " +
+                      "so it can never take effect."
     };
 
     public UiSendKeysCommand()
@@ -275,22 +276,27 @@ internal class UiSendKeysCommand : Command, IShortDescription
                 // beyond the target window makes silently sending them too dangerous for an automation run.
                 if (transport == KeyTransport.SendInput)
                 {
-                    // win+l (LockWorkStation) is unconditionally blocked even with --allow-system-keys:
-                    // injecting it OS-wide locks the interactive session with no recovery path from
-                    // automation (breaks CI and remote-desktop sessions irreversibly). Return early so
-                    // it does not fall through into the soft-combo / allow path below.
+                    // win+l (LockWorkStation) and ctrl+alt+del (SAS) are unconditionally blocked even
+                    // with --allow-system-keys: win+l locks the interactive session with no recovery
+                    // path from automation, and ctrl+alt+del is a Secure Attention Sequence that Windows
+                    // drops from injected input regardless of the flag — reporting success for it would
+                    // be misleading. Each carries its own reason so the message explains why. Return
+                    // early so they don't fall through into the soft-combo / allow path below.
                     var neverBypassable = SystemKeyGuard.FindNeverBypassableCombos(actions);
                     if (neverBypassable.Count > 0)
                     {
+                        var names = string.Join(", ", neverBypassable.Select(c => c.Name));
+                        var reasons = string.Join(" ", neverBypassable.Select(c => $"{c.Name} {c.Reason}."));
                         logger.LogError(
-                            "{Symbol} Refusing to synthesize {Combos} via --via send-input — this stays blocked " +
-                            "even with --allow-system-keys because it locks the workstation (unrecoverable from automation). " +
-                            "--allow-system-keys is for app-registered global hotkeys (e.g. win+r, win+shift+v), not session-locking combos.",
-                            UiSymbols.Error, string.Join(", ", neverBypassable));
+                            "{Symbol} Refusing to synthesize {Combos} via --via send-input. {Reasons} " +
+                            "This stays blocked even with --allow-system-keys, which is for app-registered " +
+                            "global hotkeys (e.g. win+r, win+shift+v), not combos that can't be driven from automation.",
+                            UiSymbols.Error, names, reasons);
                         UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
-                            $"Refusing to synthesize {string.Join(", ", neverBypassable)} via --via send-input. " +
-                            "This combo locks the workstation (unrecoverable from automation) and stays blocked even with " +
-                            "--allow-system-keys. Use --allow-system-keys only for app-registered global hotkeys (e.g. win+r, win+shift+v).");
+                            $"Refusing to synthesize {names} via --via send-input. {reasons} " +
+                            "This stays blocked even with --allow-system-keys, which is for app-registered " +
+                            "global hotkeys (e.g. win+r, win+shift+v), not combos that can't be driven from automation.",
+                            errorOut: parseResult.InvocationConfiguration.Error);
                         return 1;
                     }
 
@@ -312,7 +318,7 @@ internal class UiSendKeysCommand : Command, IShortDescription
 
                         // Caller explicitly opted in with --allow-system-keys (e.g. to fire a global hotkey such as
                         // PowerToys' win+shift+v). Record the bypass so it's auditable in persisted logs, then fall
-                        // through and inject. (Windows still blocks secure sequences like ctrl+alt+del regardless.)
+                        // through and inject. (win+l and ctrl+alt+del never reach here — they're hard-blocked above.)
                         var systemCombosStr = string.Join(", ", systemCombos);
                         logger.LogWarning(
                             "{Symbol} Injecting system-reserved key(s) via --via send-input because --allow-system-keys was set: {Combos}. " +

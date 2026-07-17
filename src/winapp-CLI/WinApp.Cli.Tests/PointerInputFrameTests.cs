@@ -917,4 +917,103 @@ public class PointerInputFrameTests
         Assert.IsFalse(PointerInput.IsWin32ErrorNotReady(caught!),
             "The propagated exception must not be recognised as a Win32 error 21");
     }
+
+    // -------------------------------------------------------------------------
+    // Bucket 3 (issue #630) — coverage top-up for two residual InjectTouchStroke
+    // frame branches: (1) the best-effort finally lift that SUCCEEDS after a
+    // mid-stroke glide throw (complement to the ..._UpFailureSwallowed case), and
+    // (2) Interpolate's single-waypoint fast path, reached when one contact has a
+    // lone waypoint while another glides. Both use durationMs:0 so they run with
+    // no real-clock delays.
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public void InjectTouchStroke_GlideFrameThrows_BestEffortLiftSucceeds_OriginalExceptionPreserved()
+    {
+        // Complement to ..._UpFailureSwallowed: the mid-stroke glide throws, but the finally's
+        // best-effort UP lift SUCCEEDS. The original glide exception must still propagate unmasked,
+        // and a genuine UP frame must have been emitted during the unwind (best-effort cleanup).
+        var glideEx = new InvalidOperationException("glide frame failed");
+
+        int sendCount = 0;
+        bool glideAttempted = false;
+        bool upLiftSent = false;
+
+        PointerInput.TouchSender sender = contacts =>
+        {
+            sendCount++;
+            if (contacts.Any(c => c.pointerInfo.pointerFlags.HasFlag(POINTER_FLAGS.POINTER_FLAG_UP)))
+            {
+                upLiftSent = true; // best-effort lift in the finally succeeds (does NOT throw)
+                return;
+            }
+            if (contacts.Any(c => c.pointerInfo.pointerFlags.HasFlag(POINTER_FLAGS.POINTER_FLAG_UPDATE)))
+            {
+                glideAttempted = true;
+                throw glideEx;
+            }
+        };
+
+        // Single contact, two waypoints → exactly one immediate glide (UPDATE) frame, which throws
+        // and unwinds to the finally before the normal-path UP is reached.
+        var paths = new List<IReadOnlyList<PointerPoint>>
+        {
+            new List<PointerPoint> { new PointerPoint(0, 0), new PointerPoint(100, 0) }
+        };
+
+        InvalidOperationException? caught = null;
+        try
+        {
+            PointerInput.InjectTouchStroke(paths, holdMs: 0, durationMs: 0, sender);
+            Assert.Fail("Expected the glide exception to propagate");
+        }
+        catch (InvalidOperationException ex) { caught = ex; }
+
+        Assert.AreSame(glideEx, caught,
+            "The original glide exception must propagate even though the best-effort lift SUCCEEDED");
+        Assert.IsTrue(glideAttempted, "The glide (UPDATE) frame must have been attempted");
+        Assert.IsTrue(upLiftSent, "The finally must still emit a best-effort UP lift frame after the glide throw");
+        Assert.AreEqual(3, sendCount,
+            "Expected exactly three sends: DOWN, the throwing glide UPDATE, then the best-effort UP lift");
+    }
+
+    [TestMethod]
+    public void InjectTouchStroke_MixedWaypointCounts_SingleWaypointContactStaysPinned()
+    {
+        // One multi-waypoint contact drives the glide loop; a second, single-waypoint contact must
+        // stay pinned at its lone coordinate on every glide frame (Interpolate's Count==1 fast path),
+        // rather than drifting toward the moving contact.
+        var movingStart = new PointerPoint(0, 0);
+        var movingEnd = new PointerPoint(100, 0);
+        var pinned = new PointerPoint(500, 500);
+
+        var paths = new List<IReadOnlyList<PointerPoint>>
+        {
+            new List<PointerPoint> { movingStart, movingEnd }, // contact 0: two waypoints → glides
+            new List<PointerPoint> { pinned }                  // contact 1: one waypoint → pinned
+        };
+
+        var contact1Positions = new List<(int X, int Y)>();
+        var contact0Positions = new List<(int X, int Y)>();
+
+        PointerInput.TouchSender sender = contacts =>
+        {
+            if (contacts.Any(c => c.pointerInfo.pointerFlags.HasFlag(POINTER_FLAGS.POINTER_FLAG_UPDATE)))
+            {
+                var c0 = contacts[0];
+                var c1 = contacts[1];
+                contact0Positions.Add((c0.pointerInfo.ptPixelLocation.X, c0.pointerInfo.ptPixelLocation.Y));
+                contact1Positions.Add((c1.pointerInfo.ptPixelLocation.X, c1.pointerInfo.ptPixelLocation.Y));
+            }
+        };
+
+        PointerInput.InjectTouchStroke(paths, holdMs: 0, durationMs: 0, sender);
+
+        Assert.IsTrue(contact1Positions.Count > 1,
+            "A multi-waypoint contact must produce multiple glide (UPDATE) frames");
+        Assert.IsTrue(contact1Positions.All(p => p == (pinned.X, pinned.Y)),
+            "The single-waypoint contact must stay pinned at its lone coordinate across every glide frame");
+        Assert.IsTrue(contact0Positions.Any(p => p.X > movingStart.X && p.X <= movingEnd.X),
+            "The multi-waypoint contact must actually advance along its segment (sanity check the glide moved)");
+    }
 }

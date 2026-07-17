@@ -57,6 +57,13 @@ internal static class PointerInput
     /// OS only allows a single successful <c>InitializeTouchInjection</c> per process. On failure the
     /// actual Win32 error is surfaced so callers can tell "unsupported" from "locked desktop".
     /// </summary>
+    /// <remarks>
+    /// Coverage ceiling (issue #630): the <c>InitializeTouchInjection</c> P/Invoke and its Win32
+    /// failure branch require a touch-capable, unlocked interactive desktop and cannot be exercised in
+    /// the shared CI/test environment without live input injection. The logic that drives this path is
+    /// covered deterministically through the injectable <see cref="TouchSender"/> seam
+    /// (see PointerInputFrameTests); only the native call is un-coverable here.
+    /// </remarks>
     private static void EnsureTouchInitialized()
     {
         if (_touchInitialized)
@@ -86,12 +93,29 @@ internal static class PointerInput
     }
 
     /// <summary>Formats a Win32 error code into its system message for honest diagnostics.</summary>
+    /// <remarks>
+    /// Coverage ceiling (issue #630): only reached from the native injection error branches
+    /// (<c>InitializeTouchInjection</c> / <c>InjectTouchInput</c> / <c>InjectSyntheticPointerInput</c>
+    /// failures), which require a real interactive desktop and live input injection to trigger, so this
+    /// helper is transitively un-coverable in the shared CI/test environment.
+    /// </remarks>
     private static string Win32Message(int error)
     {
         try { return new Win32Exception(error).Message; }
         catch { return "unknown error"; }
     }
 
+    /// <summary>Injects a synthetic touch gesture, preferring the modern synthetic-pointer device and
+    /// falling back to the legacy <c>InjectTouchInput</c> API when it is unavailable.</summary>
+    /// <remarks>
+    /// Coverage ceiling (issue #630): the native device path
+    /// (<c>CreateSyntheticPointerDevice</c> → inject → <c>DestroySyntheticPointerDevice</c>) and the
+    /// legacy fallback both require a touch-capable, unlocked interactive desktop and cannot run in the
+    /// shared CI/test environment without live input injection. The gesture-planning and frame-ordering
+    /// logic is covered deterministically through the injectable <see cref="TouchSender"/> seam on
+    /// <see cref="InjectTouchStroke"/> (see PointerInputFrameTests); only the OS injection calls are
+    /// un-coverable here.
+    /// </remarks>
     public static void Touch(
         TouchGesture gesture,
         IReadOnlyList<IReadOnlyList<PointerPoint>> contactPaths,
@@ -366,6 +390,12 @@ internal static class PointerInput
     }
 
     /// <summary>Submits one frame of touch contacts via the legacy <c>InjectTouchInput</c> API.</summary>
+    /// <remarks>
+    /// Coverage ceiling (issue #630): the <c>InjectTouchInput</c> P/Invoke and its Win32 failure branch
+    /// require an unlocked interactive desktop and live touch injection, so this native sender is
+    /// un-coverable in the shared CI/test environment. The frames it would submit are validated via the
+    /// injectable <see cref="TouchSender"/> seam (see PointerInputFrameTests).
+    /// </remarks>
     private static void SendLegacyTouch(POINTER_TOUCH_INFO[] contacts)
     {
         unsafe
@@ -388,6 +418,12 @@ internal static class PointerInput
     /// Submits one frame of touch contacts via the synthetic-pointer device
     /// (<c>InjectSyntheticPointerInput</c>) — the modern path shared with pen injection.
     /// </summary>
+    /// <remarks>
+    /// Coverage ceiling (issue #630): the <c>InjectSyntheticPointerInput</c> P/Invoke and its Win32
+    /// failure branch require a live synthetic-pointer device on an unlocked interactive desktop, so
+    /// this native sender is un-coverable in the shared CI/test environment. The frames it would submit
+    /// are validated via the injectable <see cref="TouchSender"/> seam (see PointerInputFrameTests).
+    /// </remarks>
     private static void SendSyntheticTouch(HSYNTHETICPOINTERDEVICE device, POINTER_TOUCH_INFO[] contacts)
     {
         var infos = new POINTER_TYPE_INFO[contacts.Length];
@@ -413,6 +449,33 @@ internal static class PointerInput
         }
     }
 
+    /// <summary>
+    /// Maps a normalized pen pressure (0..1, where 0 is barely touching and 1 is full force) onto the
+    /// Win32 synthetic-pointer pressure range (1..<see cref="PenPressureMax"/>). The value is clamped
+    /// into range and rounded to the nearest integer; because in-contact pen frames require a non-zero
+    /// pressure, a mapped value of 0 is bumped to 1.
+    /// </summary>
+    /// <remarks>
+    /// Pure arithmetic extracted from <see cref="Pen"/> so it is unit-testable without the native
+    /// synthetic-pointer device (issue #630); see PointerInputPressureTests.
+    /// </remarks>
+    internal static uint MapPenPressure(float pressure)
+    {
+        uint mapped = (uint)Math.Clamp((int)Math.Round(pressure * PenPressureMax), 0, (int)PenPressureMax);
+        return mapped == 0 ? 1u : mapped; // in-contact frames need non-zero pressure
+    }
+
+    /// <summary>Injects a synthetic pen/stylus stroke (tap or ink path) with pressure and tilt.</summary>
+    /// <remarks>
+    /// Coverage ceiling (issue #630): the native device path
+    /// (<c>CreateSyntheticPointerDevice(PT_PEN)</c> → inject → <c>DestroySyntheticPointerDevice</c>)
+    /// requires Windows 10 1809+ and an unlocked interactive desktop and cannot run in the shared
+    /// CI/test environment without live input injection. The pressure mapping is covered directly by
+    /// <see cref="MapPenPressure"/> unit tests, and the frame-ordering logic through the injectable
+    /// <see cref="PenFrameSender"/> seam on <see cref="InjectPenStroke"/> (see PointerInputFrameTests
+    /// and PointerInputPressureTests); only the OS injection calls (device create / inject / destroy)
+    /// remain un-coverable here.
+    /// </remarks>
     public static void Pen(
         IReadOnlyList<PointerPoint> path,
         float pressure,
@@ -433,11 +496,7 @@ internal static class PointerInput
 
         try
         {
-            uint mappedPressure = (uint)Math.Clamp((int)Math.Round(pressure * PenPressureMax), 0, (int)PenPressureMax);
-            if (mappedPressure == 0)
-            {
-                mappedPressure = 1; // in-contact frames need non-zero pressure
-            }
+            uint mappedPressure = MapPenPressure(pressure);
 
             InjectPenStroke(path, mappedPressure, durationMs,
                 (x, y, p, flags) => SendPen(device, x, y, p, tiltX, tiltY, eraser, flags));
@@ -561,6 +620,14 @@ internal static class PointerInput
         }
     }
 
+    /// <summary>Submits one pen frame via the synthetic-pointer device (<c>InjectSyntheticPointerInput</c>).</summary>
+    /// <remarks>
+    /// Coverage ceiling (issue #630): the <c>InjectSyntheticPointerInput</c> P/Invoke and its Win32
+    /// failure branch require a live synthetic pen device on an unlocked interactive desktop, so this
+    /// native sender is un-coverable in the shared CI/test environment. The <see cref="ComputePenFlags"/>
+    /// bitmask logic it applies per frame is covered directly, and the frames it would submit are
+    /// validated via the injectable <see cref="PenFrameSender"/> seam (see PointerInputFrameTests).
+    /// </remarks>
     private static void SendPen(
         HSYNTHETICPOINTERDEVICE device, int x, int y, uint pressure, int tiltX, int tiltY, bool eraser, POINTER_FLAGS flags)
     {

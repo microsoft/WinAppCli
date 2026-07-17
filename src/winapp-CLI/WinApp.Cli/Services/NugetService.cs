@@ -14,6 +14,32 @@ namespace WinApp.Cli.Services;
 internal partial class NugetService(IWinappDirectoryService winappDirectoryService) : INugetService
 {
     private static readonly HttpClient Http = new();
+
+    /// <summary>
+    /// Seam for the flat-container and registration HTTP GETs used by package download,
+    /// version resolution, and dependency parsing. Defaults to the shared <see cref="Http"/>
+    /// client so production behavior is byte-for-byte unchanged; tests replace it with canned
+    /// in-memory responses so those paths run without network I/O.
+    /// </summary>
+    /// <remarks>
+    /// The default delegate wraps the single real
+    /// <see cref="HttpClient.GetAsync(string?, System.Threading.CancellationToken)"/> network
+    /// boundary. That boundary itself is not unit-coverable without a live NuGet endpoint; see
+    /// issue #630. Only the default delegate performs network I/O.
+    /// </remarks>
+    internal static Func<string, CancellationToken, Task<HttpResponseMessage>> HttpGetAsync { get; set; }
+        = static (url, cancellationToken) => Http.GetAsync(url, cancellationToken);
+
+    /// <summary>
+    /// Seam for the current user's profile directory, used to compute the default NuGet
+    /// global-packages location (<c>%USERPROFILE%\.nuget\packages</c>). Defaults to
+    /// <see cref="Environment.GetFolderPath(Environment.SpecialFolder)"/> so production behavior is
+    /// unchanged; tests point it at a temporary directory so the default create-branch runs
+    /// hermetically without mutating the developer's (or CI runner's) real user profile.
+    /// </summary>
+    internal static Func<string> GetUserProfileDirectory { get; set; }
+        = static () => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
     private const string FlatIndex = "https://api.nuget.org/v3-flatcontainer";
     private const string RegistrationIndex = "https://api.nuget.org/v3/registration5-semver1";
     private static readonly ConcurrentDictionary<string, Dictionary<string, string>> DependencyCache = new(StringComparer.OrdinalIgnoreCase);
@@ -45,7 +71,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
         }
 
         // Default: %USERPROFILE%/.nuget/packages
-        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var userProfile = GetUserProfileDirectory();
         var nugetDir = new DirectoryInfo(Path.Combine(userProfile, ".nuget", "packages"));
         if (!nugetDir.Exists)
         {
@@ -99,6 +125,12 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
     /// <summary>
     /// Downloads and extracts a NuGet package to the global packages cache, then recursively installs dependencies.
     /// </summary>
+    /// <remarks>
+    /// The leading <c>installed.ContainsKey(package)</c> short-circuit is a defensive guard: the public
+    /// entry point seeds an empty dictionary and <see cref="ResolveDependenciesAsync"/> already skips
+    /// dependencies that are present before recursing, so this branch is not reachable through the public
+    /// API and is intentionally left uncovered. See issue #630.
+    /// </remarks>
     private async Task InstallPackageRecursiveAsync(string package, string version, Dictionary<string, string> installed, TaskContext taskContext, CancellationToken cancellationToken)
     {
         // Already processed this package?
@@ -124,7 +156,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
         var lowerVersion = version.ToLowerInvariant();
         var url = $"{FlatIndex}/{lowerId}/{lowerVersion}/{lowerId}.{lowerVersion}.nupkg";
 
-        using var resp = await Http.GetAsync(url, cancellationToken);
+        using var resp = await HttpGetAsync(url, cancellationToken);
         if (!resp.IsSuccessStatusCode)
         {
             throw new InvalidOperationException($"Failed to download {package} {version} from NuGet (HTTP {resp.StatusCode})");
@@ -304,7 +336,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
     private static async Task<List<string>> GetListedVersionsAsync(string packageName, CancellationToken cancellationToken)
     {
         var url = $"{RegistrationIndex}/{packageName.ToLowerInvariant()}/index.json";
-        using var resp = await Http.GetAsync(url, cancellationToken);
+        using var resp = await HttpGetAsync(url, cancellationToken);
         resp.EnsureSuccessStatusCode();
         using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
@@ -340,7 +372,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
                     continue;
                 }
 
-                using var pageResp = await Http.GetAsync(pageUrl, cancellationToken);
+                using var pageResp = await HttpGetAsync(pageUrl, cancellationToken);
                 pageResp.EnsureSuccessStatusCode();
                 using var pageStream = await pageResp.Content.ReadAsStreamAsync(cancellationToken);
                 using var pageDoc = await JsonDocument.ParseAsync(pageStream, cancellationToken: cancellationToken);
@@ -398,7 +430,20 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
         var allDeps = new Dictionary<string, string>(directDeps, StringComparer.OrdinalIgnoreCase);
         foreach (var (depId, depVersion) in directDeps)
         {
-            var transitiveDeps = await GetPackageDependenciesAsync(depId, depVersion, cancellationToken);
+            // Normalize the dependency's version range to its minimum version before recursing so the
+            // transitive nuspec URL is well-formed. FetchDirectDependenciesAsync only strips brackets
+            // (e.g. "[2.0.0, )" -> "2.0.0, "), which would otherwise build a malformed flat-container
+            // URL and silently drop transitive dependencies nested under a range-versioned package.
+            var depMinVersion = ParseMinimumVersion(depVersion);
+            if (string.IsNullOrEmpty(depMinVersion))
+            {
+                // An open-lower-bound or otherwise unparseable range (e.g. "(,2.0.0]") has no concrete
+                // minimum to form a flat-container URL from; the direct dependency is already in allDeps,
+                // so skip its transitive fetch instead of requesting a malformed ".../<id>//<id>.nuspec".
+                continue;
+            }
+
+            var transitiveDeps = await GetPackageDependenciesAsync(depId, depMinVersion, cancellationToken);
             foreach (var (transitiveId, transitiveVersion) in transitiveDeps)
             {
                 allDeps.TryAdd(transitiveId, transitiveVersion);
@@ -418,7 +463,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
         var ver = version.ToLowerInvariant();
         var nuspecUrl = $"{FlatIndex}/{id}/{ver}/{id}.nuspec";
 
-        using var resp = await Http.GetAsync(nuspecUrl, cancellationToken);
+        using var resp = await HttpGetAsync(nuspecUrl, cancellationToken);
         if (!resp.IsSuccessStatusCode)
         {
             return dependencies;

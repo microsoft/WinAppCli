@@ -17,6 +17,13 @@ namespace WinApp.Cli.Services;
 /// </summary>
 internal sealed partial class UiAutomationService
 {
+    /// <remarks>
+    /// Coverage ceiling (issue #630): deterministic tests cover the frame-loop orchestration through
+    /// WGC/screen/PrintWindow seams. The remaining lines in this method are native window-state arms
+    /// (minimized/zero-size HWNDs), popup retargeting against real top-level HWND ownership, WGC init
+    /// fault arms, and cancellation timing races that require mutating real desktop windows or native
+    /// WGC failures and are not safe to trigger on the shared coverage host.
+    /// </remarks>
     public async Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action? onRecordingStarted = null)
     {
         _logger.LogDebug("Recording process {Pid} (duration={Dur}s, fps={Fps}, maxEdge={MaxEdge}, captureScreen={Screen})",
@@ -66,7 +73,7 @@ internal sealed partial class UiAutomationService
         var useScreen = options.CaptureScreen;
         var useWgc = !useScreen && WgcCapture.IsSupported();
 
-        WgcCapture.FrameGrabber? grabber = null;
+        WgcCapture.IFrameGrabber? grabber = null;
         var mode = useScreen ? "screen" : (useWgc ? "wgc" : "printwindow");
 
         try
@@ -80,7 +87,7 @@ internal sealed partial class UiAutomationService
             {
                 try
                 {
-                    grabber = WgcCapture.StartGrabber(hwnd, _logger, options.Fps);
+                    grabber = WgcCapture.s_startGrabber(hwnd, _logger, options.Fps);
                     if (!await grabber.WaitForFirstFrameAsync(TimeSpan.FromSeconds(3), ct).ConfigureAwait(false))
                     {
                         throw new InvalidOperationException("Timed out waiting for the first captured frame.");
@@ -190,7 +197,7 @@ internal sealed partial class UiAutomationService
                         grabber = null;
                         try
                         {
-                            grabber = WgcCapture.StartGrabber(popupHwnd, _logger, options.Fps);
+                            grabber = WgcCapture.s_startGrabber(popupHwnd, _logger, options.Fps);
                             if (!await grabber.WaitForFirstFrameAsync(TimeSpan.FromSeconds(3), ct).ConfigureAwait(false))
                             {
                                 throw new InvalidOperationException("Timed out waiting for the first captured frame.");
@@ -248,7 +255,7 @@ internal sealed partial class UiAutomationService
             var (encoderW, encoderH, displayW, displayH) = ComputeTargetSize(cropW, cropH, options.MaxEdge);
             var bitrate = (uint)Math.Clamp((long)encoderW * encoderH * options.Fps / 8, 1_000_000, 24_000_000);
 
-            using var encoder = new Mp4SinkWriterEncoder(options.OutputPath, encoderW, encoderH, options.Fps, bitrate);
+            using var encoder = Mp4SinkWriterEncoder.s_create(options.OutputPath, encoderW, encoderH, options.Fps, bitrate);
 
             var frameDurationHns = 10_000_000L / options.Fps;
             // Use long arithmetic to avoid int overflow for high fps × long duration combinations.
@@ -517,6 +524,12 @@ internal sealed partial class UiAutomationService
     /// The HWND (as <see cref="nint"/>) to use as the capture surface: the element's top-level
     /// window when a retarget was needed, or <paramref name="sessionHwnd"/> when unchanged.
     /// </returns>
+    /// <remarks>
+    /// Coverage ceiling (issue #630): unit tests cover the retargeting decisions through injected
+    /// ancestor/rect delegates. The only remaining uncovered lines call the real GetAncestor/
+    /// GetWindowRect Win32 APIs for live popup HWNDs, which require desktop window topology that is
+    /// not deterministic on the shared test host.
+    /// </remarks>
     internal static nint ResolvePopupCaptureHwnd(
         long? elementWindowHandle,
         nint sessionHwnd,
@@ -674,6 +687,11 @@ internal sealed partial class UiAutomationService
     /// Returns 0 when the element cannot be re-resolved or has no native-window ancestor, in which
     /// case the caller leaves capture on the session window (no retarget).
     /// </summary>
+    /// <remarks>
+    /// Coverage ceiling (issue #630): this walks live UIA COM parents and Win32 ancestors. The safe
+    /// static decision helper is unit-tested; the remaining lines require a real popup/owned HWND
+    /// ancestor chain or a COM provider fault during parent walking.
+    /// </remarks>
     private nint ResolveElementTopLevelHwnd(UiSessionInfo session, UiElement selectorElement)
     {
         try
@@ -733,6 +751,11 @@ internal sealed partial class UiAutomationService
     /// <returns>
     /// The derived top-level HWND when a retarget is warranted, otherwise <paramref name="sessionHwnd"/>.
     /// </returns>
+    /// <remarks>
+    /// Coverage ceiling (issue #630): unit tests cover the decision logic through the injectable rect
+    /// delegate. The uncovered branch is the real GetWindowRect call for a live derived HWND, which is
+    /// native desktop state and not deterministic in headless/shared coverage runs.
+    /// </remarks>
     internal static nint DeriveElementCaptureHwnd(
         nint sessionHwnd,
         ref int captureOriginLeft, ref int captureOriginTop,
