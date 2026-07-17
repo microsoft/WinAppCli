@@ -162,6 +162,11 @@ public class KeyboardInputTests
             KeyboardInput.Send(0, [new KeyChord([0x11], 0x41, Extended: false)], KeyTransport.SendInput));
 
         StringAssert.Contains(ex.Message, "partially applied");
+        // This first segment failed with nothing typed before it, so the message must NOT warn about
+        // already-applied input and the plain retry hint stands.
+        Assert.IsFalse(ex.Message.Contains("verify or clear it before retrying"),
+            "a first-segment failure typed nothing beforehand, so it must not warn about already-applied input.");
+        StringAssert.Contains(ex.Message, "retry the gesture");
         Assert.AreEqual(2, batches.Count);
         Assert.AreEqual(4, batches[0].Length);
         Assert.AreEqual(2, batches[1].Length);
@@ -305,6 +310,12 @@ public class KeyboardInputTests
             KeyboardInput.Send(0, [new TextInput("ab")], KeyTransport.SendInput));
 
         StringAssert.Contains(ex.Message, "partially applied");
+        // A later chunk failed after the first already landed, so the message must warn that a literal retry
+        // would duplicate the text already applied — and must drop the bare "retry the gesture" hint that
+        // would invite exactly that duplication (issue #657 follow-up).
+        StringAssert.Contains(ex.Message, "verify or clear it before retrying");
+        Assert.IsFalse(ex.Message.Contains("retry the gesture"),
+            "once earlier input has landed, the duplicate-inviting bare retry hint must be dropped.");
         // batches: [0] first char fully sent, [1] second char short write, [2] release of ONLY the second char.
         Assert.AreEqual(3, batches.Count);
         Assert.AreEqual(4, batches[0].Length);
@@ -312,6 +323,47 @@ public class KeyboardInputTests
         Assert.AreEqual(2, batches[2].Length); // only the stranded segment's keys, reversed
         AssertKey(batches[2][0], 0x41, KEYBD_EVENT_FLAGS.KEYEVENTF_KEYUP);
         AssertKey(batches[2][1], 0x10, KEYBD_EVENT_FLAGS.KEYEVENTF_KEYUP);
+    }
+
+    [TestMethod]
+    public void Send_SendInput_ZeroWriteAfterEarlierChunkWarnsInputAlreadyApplied()
+    {
+        // If a later chunk is refused outright (0 written) after an earlier chunk already landed, the failure
+        // must not read as if nothing was typed. It leads with a caveat that earlier input applied — so a
+        // retry doesn't silently duplicate it — while still carrying the precise zero-write reason
+        // (issue #657 follow-up).
+        var batches = new List<INPUT[]>();
+        KeyboardInput.s_foregroundWindowIsNull = () => false;
+        KeyboardInput.s_vkKeyScan = _ => 0x41; // no shift -> two balanced events per char
+        KeyboardInput.s_textChunkChars = 1;    // one char per segment
+        KeyboardInput.s_chunkDelayMs = 0;
+        KeyboardInput.s_sendInput = inputs =>
+        {
+            batches.Add(inputs.ToArray());
+            return batches.Count == 1 ? (uint)inputs.Length : 0u; // first char lands, second is refused
+        };
+
+        var ex = Assert.ThrowsExactly<InvalidOperationException>(() =>
+            KeyboardInput.Send(0, [new TextInput("ab")], KeyTransport.SendInput));
+
+        StringAssert.Contains(ex.Message, "earlier keystrokes already landed");
+        StringAssert.Contains(ex.Message, "higher integrity level"); // precise zero-write reason preserved
+    }
+
+    [TestMethod]
+    public void Send_SendInput_ZeroWriteOnFirstSegmentDoesNotWarnInputAlreadyApplied()
+    {
+        // The partial-apply caveat must be scoped: a zero write on the very first segment typed nothing, so
+        // the message stays the plain reason with no "already landed" wording (issue #657 follow-up).
+        KeyboardInput.s_foregroundWindowIsNull = () => false;
+        KeyboardInput.s_sendInput = _ => 0;
+
+        var ex = Assert.ThrowsExactly<InvalidOperationException>(() =>
+            KeyboardInput.Send(0, [new KeyChord([], 0x41, Extended: false)], KeyTransport.SendInput));
+
+        StringAssert.Contains(ex.Message, "higher integrity level");
+        Assert.IsFalse(ex.Message.Contains("earlier keystrokes already landed"),
+            "a first-segment failure typed nothing beforehand, so it must not warn about already-applied input.");
     }
 
     [TestMethod]

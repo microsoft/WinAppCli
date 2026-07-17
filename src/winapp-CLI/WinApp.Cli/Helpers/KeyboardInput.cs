@@ -219,6 +219,10 @@ internal static class KeyboardInput
         // #657 overrun happens — so short text and chord sequences (e.g. "ctrl+a delete") add no latency.
         var segments = BuildSendInputSegments(actions, s_vkKeyScan);
 
+        // Track whether any earlier segment already landed. If a later segment then fails, the caller must be
+        // warned that a naive retry would re-type the text that already went in (issue #657 follow-up).
+        bool anyDelivered = false;
+
         foreach (var segment in segments)
         {
             var events = segment.Events;
@@ -258,8 +262,10 @@ internal static class KeyboardInput
                 // segment is balanced (its downs and ups are contained within it), so only this failing
                 // segment can leave a key held — best-effort release it before surfacing the failure.
                 ReleaseHeldKeys(events);
-                throw BuildSendInputFailure(sent, events.Length);
+                throw BuildSendInputFailure(sent, events.Length, anyDelivered);
             }
+
+            anyDelivered = true;
         }
     }
 
@@ -276,19 +282,36 @@ internal static class KeyboardInput
     /// <summary>
     /// Builds the SendInput failure surfaced when a chunk is only partially injected. A zero write means
     /// the injection was refused outright (no interactive desktop, or UIPI/integrity mismatch); a short
-    /// write means input was partially applied and the held keys were already released.
+    /// write means input was partially applied and the held keys were already released. When
+    /// <paramref name="priorInputDelivered"/> is <see langword="true"/> an earlier segment of a split payload
+    /// already landed, so the message leads with a caveat: the base text would otherwise imply nothing was
+    /// typed (zero write) or invite a literal retry (short write) that duplicates the text already applied
+    /// — e.g. retyping a password as "passpass…word" (issue #657 follow-up).
     /// </summary>
-    private static InvalidOperationException BuildSendInputFailure(uint sent, int expected) =>
-        new(sent == 0
-            ? (s_foregroundWindowIsNull()
+    private static InvalidOperationException BuildSendInputFailure(uint sent, int expected, bool priorInputDelivered)
+    {
+        string prefix = priorInputDelivered
+            ? "SendInput stopped partway through — earlier keystrokes already landed in the target window, so " +
+              "verify or clear it before retrying to avoid duplicated text. "
+            : string.Empty;
+
+        if (sent == 0)
+        {
+            return new(prefix + (s_foregroundWindowIsNull()
                 // No foreground window → the session is locked or on a secure desktop, where a
                 // user-session process can't inject. That's not an elevation/UIPI problem.
                 ? "SendInput failed — no interactive desktop is available (the session is locked " +
                   "or on a secure desktop). Unlock the session and retry."
                 : "SendInput failed — the target window may be running at a higher integrity level (elevated) " +
-                  "or be an AppContainer/AppX app blocked by UIPI. Try --via post-message, or run this CLI as administrator.")
-            : $"SendInput delivered only {sent} of {expected} key events — input was partially applied. " +
-              "Held keys were released; retry the gesture.");
+                  "or be an AppContainer/AppX app blocked by UIPI. Try --via post-message, or run this CLI as administrator."));
+        }
+
+        // Short write: this chunk's held keys were already released so the keyboard state is clean. Only offer
+        // the bare "retry the gesture" hint when nothing landed before this chunk — once earlier input has
+        // applied, the caveat above owns the retry guidance so a literal retry doesn't duplicate text.
+        string retryHint = priorInputDelivered ? " Held keys were released." : " Held keys were released; retry the gesture.";
+        return new(prefix + $"SendInput delivered only {sent} of {expected} key events — input was partially applied." + retryHint);
+    }
 
     /// <summary>
     /// One self-contained SendInput burst plus whether it must be paced before injection.
