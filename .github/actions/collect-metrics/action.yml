@@ -181,7 +181,7 @@ runs:
         $md.Add("| Branch coverage | $branchCov |")
         $md.Add('')
 
-        if ($tests) {
+        if ($tests -and $tests.total -gt 0) {
           $durSec = [math]::Round(([double]$tests.durationMs) / 1000, 1)
           $md.Add('### Test Results')
           $md.Add('')
