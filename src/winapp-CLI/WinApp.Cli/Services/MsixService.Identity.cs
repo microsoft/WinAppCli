@@ -420,6 +420,19 @@ internal partial class MsixService
     public async Task EnsureWindowsAppRuntimeInstalledAsync(FileInfo? projectFile, string? architecture, TaskContext taskContext, CancellationToken cancellationToken = default)
     {
         var packageList = await ResolveDotNetPackageListAsync(projectFile, cancellationToken);
+
+        // A framework-dependent app needs the Windows App Runtime only if it actually uses the Windows
+        // App SDK. A plain console/desktop Exe (no WindowsAppSDK reference) doesn't — preparing the
+        // runtime for it is wasted work and prints a noisy "could not determine runtime" warning. Skip
+        // only when we can positively confirm no reference; an unresolved list falls through to prep so
+        // a real WinUI app is never left without its runtime.
+        if (packageList is not null && !ReferencesWindowsAppSdk(packageList))
+        {
+            taskContext.AddDebugMessage(
+                $"{UiSymbols.Note} No Windows App SDK reference found; skipping Windows App Runtime preparation.");
+            return;
+        }
+
         var expectedRuntimePackages = await EnsureWindowsAppRuntimeInstalledAsync(packageList, architecture, taskContext, cancellationToken);
 
         // L1-residual: this is the project-mode UNPACKAGED path (callers gate on WindowsAppSDKSelfContained
@@ -463,6 +476,23 @@ internal partial class MsixService
         return projectFile is not null
             ? await dotNetService.GetPackageListAsync(projectFile, cancellationToken: cancellationToken)
             : await FetchDotNetPackageListAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// True when the resolved package list references the Windows App SDK (top-level or transitive).
+    /// Used to skip Windows App Runtime preparation for apps that don't use the SDK.
+    /// </summary>
+    internal static bool ReferencesWindowsAppSdk(DotNetPackageListJson packageList)
+    {
+        if (packageList.Projects is null)
+        {
+            return false;
+        }
+
+        return packageList.Projects
+            .SelectMany(p => p.Frameworks ?? [])
+            .SelectMany(f => (f.TopLevelPackages ?? []).Concat(f.TransitivePackages ?? []))
+            .Any(pkg => pkg.Id.StartsWith("Microsoft.WindowsAppSDK", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

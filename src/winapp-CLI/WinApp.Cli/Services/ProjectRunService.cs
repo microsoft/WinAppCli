@@ -103,7 +103,7 @@ internal sealed class ProjectRunService(
         // A --project selector disambiguates directly without evaluation.
         if (!string.IsNullOrWhiteSpace(projectSelector))
         {
-            var selected = MatchProjectSelector(csprojs, projectSelector);
+            var selected = MatchProjectSelector(csprojs, projectSelector, dir);
             if (selected is null)
             {
                 var available = string.Join(", ", csprojs.Select(c => c.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
@@ -122,7 +122,7 @@ internal sealed class ProjectRunService(
         var executable = new List<FileInfo>();
         foreach (var csproj in csprojs)
         {
-            if (await IsExecutableNonTestProjectAsync(csproj, dir, cancellationToken))
+            if (await IsExecutableNonTestProjectAsync(csproj, dir, null, cancellationToken))
             {
                 executable.Add(csproj);
             }
@@ -165,7 +165,7 @@ internal sealed class ProjectRunService(
         // An explicit --project selector short-circuits classification.
         if (!string.IsNullOrWhiteSpace(projectSelector))
         {
-            var selected = MatchProjectSelector(projects, projectSelector);
+            var selected = MatchProjectSelector(projects, projectSelector, solutionDir);
             if (selected is null)
             {
                 var available = string.Join(", ", projects.Select(p => p.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
@@ -179,7 +179,7 @@ internal sealed class ProjectRunService(
         var executable = new List<FileInfo>();
         foreach (var project in projects)
         {
-            if (await IsExecutableNonTestProjectAsync(project, solutionDir, cancellationToken))
+            if (await IsExecutableNonTestProjectAsync(project, solutionDir, solution, cancellationToken))
             {
                 executable.Add(project);
             }
@@ -211,6 +211,14 @@ internal sealed class ProjectRunService(
     /// </summary>
     private async Task<List<FileInfo>> GetSolutionProjectsAsync(FileInfo solution, DirectoryInfo solutionDir, CancellationToken cancellationToken)
     {
+        // Check for a capable SDK first: 'dotnet sln list' below also needs the SDK, and its failure
+        // message ("could not read the solution") is far less actionable than the SDK guidance.
+        var sdkError = await CheckSdkAsync(solutionDir, cancellationToken);
+        if (sdkError != null)
+        {
+            throw new ProjectRunException(sdkError);
+        }
+
         var arguments = WindowsCommandLine.JoinArguments(["sln", solution.FullName, "list"]) ?? string.Empty;
 
         int exitCode;
@@ -264,11 +272,14 @@ internal sealed class ProjectRunService(
     /// without the <c>.csproj</c> extension). Returns the single match, or null when zero or several
     /// candidates match (ambiguous).
     /// </summary>
-    private static FileInfo? MatchProjectSelector(IReadOnlyList<FileInfo> projects, string selector)
+    internal static FileInfo? MatchProjectSelector(IReadOnlyList<FileInfo> projects, string selector, DirectoryInfo baseDir)
     {
         var trimmed = selector.Trim();
+        // Resolve a path-style selector against the input/solution directory (not the process cwd),
+        // so `--project src/App/App.csproj` means "relative to what the user pointed winapp at".
+        var rooted = Path.GetFullPath(trimmed, baseDir.FullName);
         var matches = projects.Where(p =>
-            string.Equals(p.FullName, Path.GetFullPath(trimmed), StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(p.FullName, rooted, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(p.Name, trimmed, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(Path.GetFileNameWithoutExtension(p.Name), trimmed, StringComparison.OrdinalIgnoreCase))
             .ToList();
@@ -295,17 +306,27 @@ internal sealed class ProjectRunService(
     /// evaluation of <c>OutputType</c>/<c>IsTestProject</c> (which honors imports) and falling back
     /// to the static XML parse when evaluation is unavailable (no capable SDK, project not restored).
     /// </summary>
-    private async Task<bool> IsExecutableNonTestProjectAsync(FileInfo csproj, DirectoryInfo workingDirectory, CancellationToken cancellationToken)
+    private async Task<bool> IsExecutableNonTestProjectAsync(FileInfo csproj, DirectoryInfo workingDirectory, FileInfo? solution, CancellationToken cancellationToken)
     {
         // Evaluate-only (no -t:Build): fast and side-effect free. Unlike a build, we only read
         // static-ish properties, so a stale/absent output is irrelevant here.
-        var arguments = WindowsCommandLine.JoinArguments(
-        [
+        var argTokens = new List<string>
+        {
             "msbuild",
             csproj.FullName,
             "--getProperty:OutputType",
             "--getProperty:IsTestProject",
-        ]) ?? string.Empty;
+        };
+
+        // Match what the build pass will see: a project whose OutputType/IsTestProject depends on
+        // $(SolutionDir) (shared prop imports) would otherwise evaluate differently here than at build
+        // time and be misclassified. Inject the same Solution* properties when resolving from a solution.
+        if (solution is not null)
+        {
+            argTokens.AddRange(BuildSolutionPropertyTokens(solution));
+        }
+
+        var arguments = WindowsCommandLine.JoinArguments(argTokens) ?? string.Empty;
 
         try
         {
@@ -671,6 +692,17 @@ internal sealed class ProjectRunService(
             return;
         }
 
+        tokens.AddRange(BuildSolutionPropertyTokens(solution));
+    }
+
+    /// <summary>
+    /// Builds the <c>-p:Solution*</c> MSBuild property tokens a solution build normally sets — most
+    /// importantly <c>$(SolutionDir)</c> (trailing separator, per MSBuild convention). Shared by the
+    /// build pass, the evaluation pass, and project classification so all three see the same
+    /// solution-defined properties.
+    /// </summary>
+    private static IReadOnlyList<string> BuildSolutionPropertyTokens(FileInfo solution)
+    {
         var solutionDir = solution.Directory?.FullName ?? Directory.GetCurrentDirectory();
         // MSBuild's $(SolutionDir) convention is a trailing directory separator. EscapeArgument
         // doubles a trailing backslash before a closing quote, so a quoted value round-trips exactly.
@@ -679,14 +711,16 @@ internal sealed class ProjectRunService(
             solutionDir += Path.DirectorySeparatorChar;
         }
 
-        var solutionExt = solution.Extension;
         var solutionName = Path.GetFileNameWithoutExtension(solution.Name);
 
-        tokens.Add($"-p:SolutionDir={solutionDir}");
-        tokens.Add($"-p:SolutionPath={solution.FullName}");
-        tokens.Add($"-p:SolutionName={solutionName}");
-        tokens.Add($"-p:SolutionFileName={solution.Name}");
-        tokens.Add($"-p:SolutionExt={solutionExt}");
+        return
+        [
+            $"-p:SolutionDir={solutionDir}",
+            $"-p:SolutionPath={solution.FullName}",
+            $"-p:SolutionName={solutionName}",
+            $"-p:SolutionFileName={solution.Name}",
+            $"-p:SolutionExt={solution.Extension}",
+        ];
     }
     /// <list type="bullet">
     ///   <item><c>--json</c>: stream to stderr only so stdout stays pure JSON — no banner, no spinner.</item>
@@ -758,6 +792,18 @@ internal sealed class ProjectRunService(
 
         // Verbose, or a non-interactive/agent/CI terminal: a single static line + live streamed output.
         // Serialize the writes so the concurrent stdout/stderr callbacks don't interleave.
+        //
+        // --quiet (Information suppressed) must keep stdout clean like --json: skip the banner and
+        // route build output to stderr so failures stay visible without polluting stdout.
+        if (!logger.IsEnabled(LogLevel.Information))
+        {
+            return await dotNetService.RunDotnetStreamingAsync(
+                workingDir, buildArgs,
+                onOutputLine: static line => Console.Error.WriteLine(line),
+                onErrorLine: static line => Console.Error.WriteLine(line),
+                cancellationToken);
+        }
+
         ansiConsole.MarkupLineInterpolated($"{UiSymbols.Wrench} {banner}");
         var writeLock = new object();
         void WriteLive(string line)

@@ -18,7 +18,7 @@ namespace WinApp.Cli.Commands;
 
 internal partial class RunCommand : Command, IShortDescription
 {
-    public string ShortDescription => "Create debug identity and launch the packaged application.";
+    public string ShortDescription => "Build and run a Windows app from a .csproj, .sln, or build-output folder.";
 
     public static Argument<FileSystemInfo> InputFolderArgument { get; }
     public static Option<FileInfo> ManifestOption { get; }
@@ -174,7 +174,7 @@ internal partial class RunCommand : Command, IShortDescription
         };
     }
 
-    public RunCommand() : base("run", "Creates packaged layout, registers the Application, and launches the packaged application.")
+    public RunCommand() : base("run", "Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.")
     {
         Arguments.Add(InputFolderArgument);
         Arguments.Add(PassthroughArgument);

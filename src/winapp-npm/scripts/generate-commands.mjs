@@ -155,6 +155,7 @@ function isVariadicOption(optDef) {
 const PASSTHROUGH_COMMANDS = {
   tool: { propName: 'toolArgs', description: "Arguments to pass to the SDK tool, e.g. ['makeappx', 'pack', '/d', './folder', '/p', './out.msix'].", separator: ' -- ' },
   store: { propName: 'storeArgs', description: 'Arguments to pass through to the Microsoft Store Developer CLI.', separator: '' },
+  run: { propName: 'appArgs', description: 'Arguments to pass to the launched application (forwarded after --).', separator: ' -- ' },
 };
 
 // ---------------------------------------------------------------------------
@@ -285,7 +286,10 @@ function generate(schema) {
     // Collect arguments (positional)
     const positionalArgs = [];
     for (const [argName, argDef] of Object.entries(cmd.arguments || {})) {
-      positionalArgs.push({ cliName: argName, def: argDef, propName: kebabToCamel(argName) });
+      const propName = kebabToCamel(argName);
+      // The passthrough arg (e.g. run's app-args) is emitted after '--' below, not as a positional.
+      if (passthrough && propName === passthrough.propName) continue;
+      positionalArgs.push({ cliName: argName, def: argDef, propName });
     }
     // Sort by order
     positionalArgs.sort((a, b) => (a.def.order ?? 0) - (b.def.order ?? 0));

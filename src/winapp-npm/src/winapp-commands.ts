@@ -440,8 +440,6 @@ export async function restore(options: RestoreOptions = {}): Promise<WinappResul
 export interface RunOptions extends CommonOptions {
   /** Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one (default: current directory). */
   inputFolder?: string;
-  /** Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). */
-  appArgs?: string | string[];
   /** Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Default: the current process architecture. */
   arch?: string;
   /** Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). */
@@ -482,18 +480,16 @@ export interface RunOptions extends CommonOptions {
   unregisterOnExit?: boolean;
   /** Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. */
   withAlias?: boolean;
+  /** Arguments to pass to the launched application (forwarded after --). */
+  appArgs?: string[];
 }
 
 /**
- * Creates packaged layout, registers the Application, and launches the packaged application.
+ * Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.
  */
 export async function run(options: RunOptions = {}): Promise<WinappResult> {
   const args: string[] = ['run'];
   if (options.inputFolder) args.push(options.inputFolder);
-  if (options.appArgs) {
-    const appArgsArr = Array.isArray(options.appArgs) ? options.appArgs : [options.appArgs];
-    args.push(...appArgsArr);
-  }
   if (options.arch) args.push('--arch', options.arch);
   if (options.args) args.push('--args', options.args);
   if (options.clean) args.push('--clean');
@@ -517,6 +513,9 @@ export async function run(options: RunOptions = {}): Promise<WinappResult> {
   if (options.symbols) args.push('--symbols');
   if (options.unregisterOnExit) args.push('--unregister-on-exit');
   if (options.withAlias) args.push('--with-alias');
+  if (options.appArgs && options.appArgs.length > 0) {
+    args.push('--', ...options.appArgs);
+  }
   return execCommand(args, options);
 }
 

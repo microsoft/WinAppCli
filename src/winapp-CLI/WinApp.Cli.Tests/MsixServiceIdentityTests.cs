@@ -872,6 +872,55 @@ public class MsixServiceIdentityTests : BaseCommandTests
         Assert.IsEmpty(_fakeWorkspaceSetup.InstallRuntimeCalls);
     }
 
+    // ---- ReferencesWindowsAppSdk (runtime-prep skip gate, review NOTE) ------------
+
+    [TestMethod]
+    public void ReferencesWindowsAppSdk_WinAppSdkTopLevel_ReturnsTrue()
+    {
+        Assert.IsTrue(MsixService.ReferencesWindowsAppSdk(WinAppSdkPackageList()));
+    }
+
+    [TestMethod]
+    public void ReferencesWindowsAppSdk_WinAppSdkTransitive_ReturnsTrue()
+    {
+        var list = new DotNetPackageListJson([
+            new DotNetProject([
+                new DotNetFramework(
+                    "net8.0-windows10.0.19041.0",
+                    [new DotNetPackage("Contoso.Ui", "1.0.0", "1.0.0")],
+                    [new DotNetPackage("Microsoft.WindowsAppSDK", "1.6.240701", "1.6.240701")])
+            ])
+        ]);
+
+        Assert.IsTrue(MsixService.ReferencesWindowsAppSdk(list));
+    }
+
+    [TestMethod]
+    public void ReferencesWindowsAppSdk_NoWinAppSdk_ReturnsFalse()
+    {
+        // A plain console/desktop Exe that does not reference the Windows App SDK: runtime prep is
+        // wasted work and the public entry point skips it based on this classification.
+        var list = new DotNetPackageListJson([
+            new DotNetProject([
+                new DotNetFramework(
+                    "net8.0-windows10.0.19041.0",
+                    [new DotNetPackage("Newtonsoft.Json", "13.0.3", "13.0.3")],
+                    [new DotNetPackage("System.Text.Json", "8.0.0", "8.0.0")])
+            ])
+        ]);
+
+        Assert.IsFalse(MsixService.ReferencesWindowsAppSdk(list));
+    }
+
+    [TestMethod]
+    public void ReferencesWindowsAppSdk_NoProjectsOrPackages_ReturnsFalse()
+    {
+        Assert.IsFalse(MsixService.ReferencesWindowsAppSdk(new DotNetPackageListJson([])));
+        Assert.IsFalse(MsixService.ReferencesWindowsAppSdk(new DotNetPackageListJson([
+            new DotNetProject([new DotNetFramework("net8.0", [], [])])
+        ])));
+    }
+
     // ---- UnregisterExistingPackageAsync error handling ---------------------------
 
     [TestMethod]

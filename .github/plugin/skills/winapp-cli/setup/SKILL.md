@@ -235,7 +235,7 @@ Check for and install newer SDK versions. Updates winapp.yaml with latest versio
 
 ### `winapp run`
 
-Creates packaged layout, registers the Application, and launches the packaged application.
+Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->

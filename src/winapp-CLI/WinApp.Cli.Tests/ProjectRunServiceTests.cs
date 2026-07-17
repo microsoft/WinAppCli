@@ -352,6 +352,65 @@ public class ProjectRunServiceTests
 
     #endregion
 
+    #region MatchProjectSelector (--project resolution, M7)
+
+    [TestMethod]
+    public void MatchProjectSelector_RelativePath_ResolvesAgainstBaseDir_NotCwd()
+    {
+        // The project lives under the input/solution dir (_tempDir), which is NOT the process cwd.
+        // A relative `--project src\App\App.csproj` must resolve against baseDir so it still matches;
+        // resolving against the cwd (the old behavior) would miss it entirely.
+        var projectPath = Path.Combine(_tempDir.FullName, "src", "App", "App.csproj");
+        Directory.CreateDirectory(Path.GetDirectoryName(projectPath)!);
+        var projects = new List<FileInfo> { new(projectPath), new(Path.Combine(_tempDir.FullName, "src", "Other", "Other.csproj")) };
+
+        var match = ProjectRunService.MatchProjectSelector(projects, "src\\App\\App.csproj", _tempDir);
+
+        Assert.IsNotNull(match);
+        Assert.AreEqual(projectPath, match!.FullName);
+    }
+
+    [TestMethod]
+    public void MatchProjectSelector_ByProjectName_Matches()
+    {
+        var appPath = Path.Combine(_tempDir.FullName, "src", "App", "App.csproj");
+        var projects = new List<FileInfo> { new(appPath), new(Path.Combine(_tempDir.FullName, "src", "Other", "Other.csproj")) };
+
+        var byFileName = ProjectRunService.MatchProjectSelector(projects, "App.csproj", _tempDir);
+        var byBareName = ProjectRunService.MatchProjectSelector(projects, "App", _tempDir);
+
+        Assert.AreEqual(appPath, byFileName!.FullName);
+        Assert.AreEqual(appPath, byBareName!.FullName);
+    }
+
+    [TestMethod]
+    public void MatchProjectSelector_NoMatch_ReturnsNull()
+    {
+        var projects = new List<FileInfo> { new(Path.Combine(_tempDir.FullName, "App", "App.csproj")) };
+
+        var match = ProjectRunService.MatchProjectSelector(projects, "DoesNotExist", _tempDir);
+
+        Assert.IsNull(match);
+    }
+
+    [TestMethod]
+    public void MatchProjectSelector_AmbiguousLeafName_ReturnsNull()
+    {
+        // Two projects with the same leaf file name: a leaf-name selector is ambiguous, so no single
+        // match — the caller then errors listing candidates rather than guessing.
+        var projects = new List<FileInfo>
+        {
+            new(Path.Combine(_tempDir.FullName, "a", "App.csproj")),
+            new(Path.Combine(_tempDir.FullName, "b", "App.csproj")),
+        };
+
+        var match = ProjectRunService.MatchProjectSelector(projects, "App.csproj", _tempDir);
+
+        Assert.IsNull(match);
+    }
+
+    #endregion
+
     #region TryParseSdkVersion
 
     [TestMethod]
@@ -726,13 +785,31 @@ public class ProjectRunServiceTests
     {
         var csproj = WriteFile("App.csproj", ExecutableCsproj);
         var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => (0, PackagedPropertiesJson(), string.Empty) };
-        var service = NewServiceWith(dotnet, out var console);
+        // Information enabled models the default (non-quiet) run where the human banner is shown.
+        var service = NewServiceWith(dotnet, LogLevel.Information, out var console);
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
 
         await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
 
         StringAssert.Contains(console.Output, "Building",
             "non-json mode should print the human-readable build banner");
+    }
+
+    [TestMethod]
+    public async Task BuildAndResolveAsync_QuietMode_SuppressesBuildBanner()
+    {
+        // M8: --quiet (Information suppressed) must keep stdout clean like --json — no "Building" banner
+        // written to the console; build output is routed to stderr instead.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => (0, PackagedPropertiesJson(), string.Empty) };
+        var service = NewServiceWith(dotnet, LogLevel.Warning, out var console);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
+
+        var outcome = await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsNotNull(outcome.Resolution, "the canned packaged build should still resolve under --quiet");
+        Assert.IsFalse(console.Output.Contains("Building", StringComparison.OrdinalIgnoreCase),
+            "--quiet must not print the build banner to stdout");
     }
 
     [TestMethod]

@@ -456,7 +456,27 @@ internal partial class DotNetService : IDotNetService
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        await process.WaitForExitAsync(cancellationToken);
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // Ctrl+C — kill the dotnet/MSBuild process tree so it isn't orphaned.
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup; the process may have already exited.
+            }
+
+            throw;
+        }
 
         return process.ExitCode;
     }
