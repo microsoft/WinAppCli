@@ -1331,7 +1331,7 @@
       "hidden": false,
       "arguments": {
         "input-folder": {
-          "description": "Path to the app to run: a build-output folder, a .csproj project, or a directory containing one (default: current directory).",
+          "description": "Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one (default: current directory).",
           "order": 0,
           "hidden": false,
           "valueType": "System.IO.FileSystemInfo",
@@ -1530,6 +1530,18 @@
           "description": "Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used.",
           "hidden": false,
           "valueType": "System.IO.DirectoryInfo",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--project": {
+          "description": "Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode.",
+          "hidden": false,
+          "valueType": "System.String",
           "hasDefaultValue": false,
           "arity": {
             "minimum": 1,

@@ -37,10 +37,17 @@ internal enum ProjectPackaging
 /// <param name="Mode">The resolved run mode.</param>
 /// <param name="Csproj">The resolved project file, when <see cref="Mode"/> is Project.</param>
 /// <param name="ProjectDirectory">The directory containing the project (project mode) or the input folder.</param>
+/// <param name="Solution">
+/// The solution (<c>.sln</c>/<c>.slnx</c>) the project was resolved from, when the input was a
+/// solution. Null for a bare <c>.csproj</c>/directory input. When set, the build/evaluate passes
+/// define <c>$(SolutionDir)</c> and the sibling <c>Solution*</c> properties so projects that depend
+/// on them resolve exactly as they do under a Visual Studio / <c>dotnet build &lt;sln&gt;</c> build.
+/// </param>
 internal sealed record RunInputResolution(
     WinAppRunMode Mode,
     FileInfo? Csproj,
-    DirectoryInfo ProjectDirectory);
+    DirectoryInfo ProjectDirectory,
+    FileInfo? Solution = null);
 
 /// <summary>
 /// The build-and-resolve result for a project-mode target (spec §8.3): the evaluated output
@@ -70,6 +77,12 @@ internal sealed record ProjectRunResolution(
 /// <param name="NoRestore">Pass <c>--no-restore</c> to the build.</param>
 /// <param name="Properties">Raw repeatable <c>-p Name=Value</c> passthrough, forwarded to both build and evaluation.</param>
 /// <param name="Json">When true, suppress human-readable stdout (banner) and route build diagnostics to stderr so stdout stays pure JSON.</param>
+/// <param name="Solution">
+/// When the run target was resolved from a solution (<c>.sln</c>/<c>.slnx</c>), the solution file.
+/// The build and evaluate passes then define <c>$(SolutionDir)</c> and the sibling <c>Solution*</c>
+/// MSBuild properties (the ones a solution build sets) so projects that reference them build the
+/// same way they do in Visual Studio. Null for a bare <c>.csproj</c> target.
+/// </param>
 internal sealed record ProjectRunOptions(
     string Configuration,
     string Architecture,
@@ -77,7 +90,8 @@ internal sealed record ProjectRunOptions(
     bool NoBuild,
     bool NoRestore,
     IReadOnlyList<string> Properties,
-    bool Json = false);
+    bool Json = false,
+    FileInfo? Solution = null);
 
 /// <summary>
 /// Outcome of <see cref="Services.IProjectRunService.BuildAndResolveAsync"/>. On success,

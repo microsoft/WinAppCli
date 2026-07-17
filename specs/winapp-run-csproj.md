@@ -74,7 +74,7 @@ Implications this spec must preserve:
 ## 4. Terminology
 
 - **Folder mode** — current behavior: input is a build-output folder. *Unchanged.*
-- **Project mode** — new: input is a `.csproj` (or source dir containing one); `run` builds then launches.
+- **Project mode** — new: input is a `.csproj`, a `.sln`/`.slnx` solution, or a source dir containing one; `run` builds then launches.
 - **Packaged app** — has MSIX identity: `Package.appxmanifest` present and/or `<EnableMsixTooling>true</EnableMsixTooling>`; build emits `AppxManifest.xml` + `*.build.appxrecipe`.
 - **Unpackaged app** — `<WindowsPackageType>None</WindowsPackageType>`; no identity; launched as a plain `.exe` (WindowsAppSDK bootstrap self-initializes).
 
@@ -91,6 +91,12 @@ winapp run .\src\MyApp\MyApp.csproj
 # Project mode — source directory containing exactly one buildable .csproj
 winapp run .\src\MyApp
 
+# Project mode — a solution; run resolves the runnable app project and defines $(SolutionDir)
+winapp run .\MyApp.sln
+
+# Project mode — a solution with several runnable apps; pick one with --project
+winapp run .\MyApp.sln --project MyApp
+
 # Folder mode — UNCHANGED (folder has build output, no .csproj inside)
 winapp run .\src\MyApp\bin\x64\Debug\net10.0-windows10.0.26100.0\win-x64
 ```
@@ -105,6 +111,7 @@ winapp run .\src\MyApp\bin\x64\Debug\net10.0-windows10.0.26100.0\win-x64
 | `--no-build` | off | Skip building; resolve & launch the **existing** output (fast re-run, or when an MSBuild hook already built). |
 | `--no-restore` | off | Pass through to `dotnet build`. |
 | `-p, --property <Name=Value>` (repeatable) | — | Forward an arbitrary MSBuild property to **both** the build and the output-property evaluation (§8.5). Also the escape hatch to force packaging: `-p:WindowsPackageType=None` (§7.1). |
+| `--project <name-or-path>` | — | Select the runnable app project when the input is a solution or a directory with multiple runnable app projects. Matches by project name or path. |
 
 All existing options (`--args`, `--`, `--no-launch`, `--with-alias`, `--debug-output`,
 `--symbols`, `--unregister-on-exit`, `--detach`, `--clean`, `--executable`, `--json`,
@@ -136,9 +143,10 @@ flowchart TD
 
 Notes / rules:
 - **Explicit `.csproj` file** is the unambiguous form (recommended in docs/automation).
-- A directory with **multiple** buildable `.csproj` files → error asking the user to pass the exact `.csproj`. ⚠️ **Review note:** `ProjectDetectionService.FindExecutableCsproj` returns the *first* match — it does **not** raise on multiples — so `run` must implement this ambiguity check itself. Its `OutputType` filter is also a *static* XML parse, so a project that sets `OutputType`/`IsTestProject` via `Directory.Build.props`/SDK defaults can be misclassified; the reliable signal is the evaluated `--getProperty:OutputType` from the build step.
+- **Solution input (`.sln`/`.slnx`)** — a solution file, or a directory containing one, enters project mode. `run` lists the solution's projects (`dotnet sln <sln> list`), classifies each by evaluated `OutputType`/`IsTestProject`, and resolves the single runnable app project. The resolved project is built with the solution's `$(SolutionDir)` and sibling `Solution*` MSBuild properties defined, so projects that depend on `$(SolutionDir)` build exactly as under `dotnet build <sln>` / VS (closes the AI-Dev-Gallery-on-x64 class of failure). A directory with a solution **prefers the solution** over loose `.csproj` files.
+- A directory with **multiple** buildable `.csproj` files, or a solution with **multiple** runnable app projects → error asking the user to pass `--project <name>` (or the exact `.csproj`). `run` does **not** emulate VS's startup-project selection. ⚠️ **Review note:** `ProjectDetectionService.FindExecutableCsproj` returns the *first* match — it does **not** raise on multiples — so `run` implements this ambiguity check itself. Its `OutputType` filter is also a *static* XML parse, so a project that sets `OutputType`/`IsTestProject` via `Directory.Build.props`/SDK defaults can be misclassified; the reliable signal is the evaluated `--getProperty:OutputType`.
 - A directory that is a **build output** (manifest/binaries, no csproj) → folder mode, byte-for-byte the current path.
-- **Resolved (Q1):** positional auto-detection only — **no** `--project` flag.
+- **Resolved (Q1, revised):** single-input disambiguation is positional auto-detection; a **`--project`** selector was added to disambiguate solutions and multi-project directories (it is not required for the single-project case).
 - **CLI plumbing:** positional arg type must widen from `DirectoryInfo` to accept a file *or* directory (e.g. resolve a raw `string`/`FileSystemInfo` and branch), preserving `AcceptExistingOnly` semantics.
 
 ---

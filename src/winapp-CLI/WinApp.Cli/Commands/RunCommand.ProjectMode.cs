@@ -37,6 +37,7 @@ internal partial class RunCommand
         private async Task<int> RunProjectModeAsync(
             ParseResult parseResult,
             FileInfo csproj,
+            FileInfo? solution,
             string? appArgs,
             bool isJson,
             CancellationToken cancellationToken)
@@ -90,7 +91,7 @@ internal partial class RunCommand
             // build UX (Change #1/#4): it streams dotnet output live, shows an interactive spinner for
             // humans, and maps --verbose to dotnet's -v. In --json mode it suppresses the banner and
             // routes build output to stderr to keep stdout pure JSON.
-            var buildOptions = new ProjectRunOptions(configuration, architecture, framework, noBuild, noRestore, properties, isJson);
+            var buildOptions = new ProjectRunOptions(configuration, architecture, framework, noBuild, noRestore, properties, isJson, solution);
             ProjectBuildOutcome outcome;
             try
             {

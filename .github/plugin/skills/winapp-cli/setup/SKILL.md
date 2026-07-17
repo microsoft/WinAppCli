@@ -241,7 +241,7 @@ Creates packaged layout, registers the Application, and launches the packaged ap
 <!-- auto-generated from cli-schema.json -->
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `<input-folder>` | No | Path to the app to run: a build-output folder, a .csproj project, or a directory containing one (default: current directory). |
+| `<input-folder>` | No | Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one (default: current directory). |
 | `<app-args>` | No | Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). |
 
 #### Options
@@ -262,6 +262,7 @@ Creates packaged layout, registers the Application, and launches the packaged ap
 | `--no-launch` | Only create the debug identity and register the package without launching the application | (none) |
 | `--no-restore` | Project mode: skip restoring the project before building. Ignored in folder mode. | (none) |
 | `--output-appx-directory` | Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used. | (none) |
+| `--project` | Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode. | (none) |
 | `--property` | Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. | (none) |
 | `--runtime` | Project mode: target .NET runtime identifier (RID), e.g. win-x64. Only the RID's architecture is used; it overrides --arch (the RID is reduced to its architecture). Ignored in folder mode. | (none) |
 | `--symbols` | Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. | (none) |

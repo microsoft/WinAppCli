@@ -41,6 +41,7 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<bool> NoBuildOption { get; }
     public static Option<bool> NoRestoreOption { get; }
     public static Option<string[]> PropertyOption { get; }
+    public static Option<string?> ProjectOption { get; }
 
     /// <summary>
     /// Captures zero or more arguments after the <c>--</c> separator and forwards them to the
@@ -53,7 +54,7 @@ internal partial class RunCommand : Command, IShortDescription
     {
         InputFolderArgument = new Argument<FileSystemInfo>("input-folder")
         {
-            Description = "Path to the app to run: a build-output folder, a .csproj project, or a directory containing one (default: current directory).",
+            Description = "Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one (default: current directory).",
             Arity = ArgumentArity.ZeroOrOne
         };
 
@@ -166,6 +167,11 @@ internal partial class RunCommand : Command, IShortDescription
             AllowMultipleArgumentsPerToken = false,
         };
         PropertyOption.Aliases.Add("-p");
+
+        ProjectOption = new Option<string?>("--project")
+        {
+            Description = "Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode."
+        };
     }
 
     public RunCommand() : base("run", "Creates packaged layout, registers the Application, and launches the packaged application.")
@@ -190,6 +196,7 @@ internal partial class RunCommand : Command, IShortDescription
         Options.Add(NoBuildOption);
         Options.Add(NoRestoreOption);
         Options.Add(PropertyOption);
+        Options.Add(ProjectOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -379,7 +386,8 @@ internal partial class RunCommand : Command, IShortDescription
             RunInputResolution inputResolution;
             try
             {
-                inputResolution = await projectRunService.ResolveInputAsync(inputFsi, cancellationToken);
+                var projectSelector = parseResult.GetValue(ProjectOption);
+                inputResolution = await projectRunService.ResolveInputAsync(inputFsi, cancellationToken, projectSelector);
             }
             catch (ProjectRunException ex)
             {
@@ -388,7 +396,7 @@ internal partial class RunCommand : Command, IShortDescription
 
             if (inputResolution.Mode == WinAppRunMode.Project)
             {
-                return await RunProjectModeAsync(parseResult, inputResolution.Csproj!, appArgs, isJson, cancellationToken);
+                return await RunProjectModeAsync(parseResult, inputResolution.Csproj!, inputResolution.Solution, appArgs, isJson, cancellationToken);
             }
 
             // Folder mode: the FileSystemInfo converter yields a DirectoryInfo for an existing

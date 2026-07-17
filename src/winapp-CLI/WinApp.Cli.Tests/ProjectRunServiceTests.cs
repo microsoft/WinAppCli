@@ -303,6 +303,53 @@ public class ProjectRunServiceTests
             "winapp must not override an explicit user EnableDynamicPlatformResolution value");
     }
 
+    [TestMethod]
+    public void BuildBuildPassArguments_WithSolution_EmitsSolutionProperties()
+    {
+        // Solution mode resolves a startup .csproj but hands MSBuild the $(SolutionDir) family so the
+        // project builds exactly as it does under `dotnet build <sln>` / VS (the AI-Dev-Gallery class
+        // of failure where a bare .csproj build has $(SolutionDir) undefined).
+        var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "src", "App", "App.csproj"));
+        var solution = new FileInfo(Path.Combine(_tempDir.FullName, "MyApp.sln"));
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Solution: solution);
+
+        var args = ProjectRunService.BuildBuildPassArguments(csproj, options, "minimal");
+
+        StringAssert.Contains(args, $"-p:SolutionDir={_tempDir.FullName}\\");
+        StringAssert.Contains(args, $"-p:SolutionPath={solution.FullName}");
+        StringAssert.Contains(args, "-p:SolutionName=MyApp");
+        StringAssert.Contains(args, "-p:SolutionFileName=MyApp.sln");
+        StringAssert.Contains(args, "-p:SolutionExt=.sln");
+    }
+
+    [TestMethod]
+    public void BuildBuildPassArguments_NoSolution_OmitsSolutionProperties()
+    {
+        var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: []);
+
+        var args = ProjectRunService.BuildBuildPassArguments(csproj, options, "minimal");
+
+        Assert.IsFalse(args.Contains("-p:SolutionDir"), "bare .csproj mode must not define solution properties");
+    }
+
+    [TestMethod]
+    public void BuildEvaluateArguments_WithSolution_EmitsSolutionProperties()
+    {
+        // The evaluate pass must define the same $(SolutionDir) family as the build pass so
+        // TargetDir/RunCommand resolve against identical inputs.
+        var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "src", "App", "App.csproj"));
+        var solution = new FileInfo(Path.Combine(_tempDir.FullName, "MyApp.slnx"));
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Solution: solution);
+
+        var args = ProjectRunService.BuildEvaluateArguments(csproj, options);
+
+        StringAssert.Contains(args, $"-p:SolutionDir={_tempDir.FullName}\\");
+        StringAssert.Contains(args, "-p:SolutionName=MyApp");
+        StringAssert.Contains(args, "-p:SolutionFileName=MyApp.slnx");
+        StringAssert.Contains(args, "-p:SolutionExt=.slnx");
+    }
+
     #endregion
 
     #region TryParseSdkVersion
@@ -485,6 +532,136 @@ public class ProjectRunServiceTests
 
     private static string EvalJson(string outputType, string isTestProject = "") =>
         $$"""{ "Properties": { "OutputType": "{{outputType}}", "IsTestProject": "{{isTestProject}}" } }""";
+
+    // Reproduces `dotnet sln <sln> list` output: a "Project(s)" header, a dashed underline, then one
+    // project path per line (relative to the solution directory).
+    private static string SlnListOutput(params string[] relativePaths) =>
+        "Project(s)" + Environment.NewLine + "----------" + Environment.NewLine +
+        string.Join(Environment.NewLine, relativePaths);
+
+    private static bool IsSlnListCall(string args) =>
+        args.Contains("sln", StringComparison.OrdinalIgnoreCase) && args.Contains("list", StringComparison.OrdinalIgnoreCase);
+
+    [TestMethod]
+    public async Task ResolveInput_SolutionFile_SingleExecutable_ReturnsProjectModeWithSolution()
+    {
+        var solution = WriteFile("MyApp.sln", "");
+        var app = WriteFile("App.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService
+        {
+            // sln list → the one project; any eval falls through to the static parse (App=WinExe).
+            RunDotnetCommandHandler = args =>
+                IsSlnListCall(args) ? (0, SlnListOutput("App.csproj"), string.Empty) : (0, string.Empty, string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+
+        var resolution = await service.ResolveInputAsync(solution, CancellationToken.None);
+
+        Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
+        Assert.AreEqual(app.FullName, resolution.Csproj!.FullName);
+        Assert.IsNotNull(resolution.Solution, "solution mode must record the solution so $(SolutionDir) is defined");
+        Assert.AreEqual(solution.FullName, resolution.Solution!.FullName);
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_DirectoryWithSolution_PrefersSolutionOverLooseCsproj()
+    {
+        WriteFile("MyApp.sln", "");
+        WriteFile("App.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                IsSlnListCall(args) ? (0, SlnListOutput("App.csproj"), string.Empty) : (0, string.Empty, string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+
+        var resolution = await service.ResolveInputAsync(_tempDir, CancellationToken.None);
+
+        Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
+        Assert.IsNotNull(resolution.Solution, "a solution in the directory must be preferred over loose .csproj files");
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_MultipleSolutions_ThrowsAmbiguity()
+    {
+        WriteFile("One.sln", "");
+        WriteFile("Two.sln", "");
+
+        var ex = await Assert.ThrowsExactlyAsync<ProjectRunException>(() => _service.ResolveInputAsync(_tempDir, CancellationToken.None));
+        StringAssert.Contains(ex.Message, "Multiple solution files");
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_Solution_MultipleExecutables_RequiresProjectSelector()
+    {
+        var solution = WriteFile("MyApp.sln", "");
+        var app1 = WriteFile("App1.csproj", ExecutableCsproj);
+        var app2 = WriteFile("App2.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                IsSlnListCall(args) ? (0, SlnListOutput("App1.csproj", "App2.csproj"), string.Empty)
+                : args.Contains(app1.FullName, StringComparison.OrdinalIgnoreCase) ? (0, EvalJson("WinExe"), string.Empty)
+                : args.Contains(app2.FullName, StringComparison.OrdinalIgnoreCase) ? (0, EvalJson("WinExe"), string.Empty)
+                : (0, string.Empty, string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+
+        var ex = await Assert.ThrowsExactlyAsync<ProjectRunException>(() => service.ResolveInputAsync(solution, CancellationToken.None));
+        StringAssert.Contains(ex.Message, "--project");
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_Solution_ProjectSelector_PicksMatch()
+    {
+        var solution = WriteFile("MyApp.sln", "");
+        WriteFile("App1.csproj", ExecutableCsproj);
+        var app2 = WriteFile("App2.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService
+        {
+            // The selector short-circuits classification, so only the sln list call is needed.
+            RunDotnetCommandHandler = args =>
+                IsSlnListCall(args) ? (0, SlnListOutput("App1.csproj", "App2.csproj"), string.Empty) : (0, string.Empty, string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+
+        var resolution = await service.ResolveInputAsync(solution, CancellationToken.None, "App2");
+
+        Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
+        Assert.AreEqual(app2.FullName, resolution.Csproj!.FullName);
+        Assert.AreEqual(solution.FullName, resolution.Solution!.FullName);
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_Solution_NoCsprojProjects_Throws()
+    {
+        var solution = WriteFile("Native.sln", "");
+        var dotnet = new FakeDotNetService
+        {
+            // Only a C++ project → filtered out because `winapp run` builds managed app projects.
+            RunDotnetCommandHandler = args =>
+                IsSlnListCall(args) ? (0, SlnListOutput("Native.vcxproj"), string.Empty) : (0, string.Empty, string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+
+        var ex = await Assert.ThrowsExactlyAsync<ProjectRunException>(() => service.ResolveInputAsync(solution, CancellationToken.None));
+        StringAssert.Contains(ex.Message, "No .csproj projects");
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_Solution_SlnListFails_Throws()
+    {
+        var solution = WriteFile("Broken.sln", "");
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                IsSlnListCall(args) ? (1, string.Empty, "MSB1234: invalid solution") : (0, string.Empty, string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+
+        var ex = await Assert.ThrowsExactlyAsync<ProjectRunException>(() => service.ResolveInputAsync(solution, CancellationToken.None));
+        StringAssert.Contains(ex.Message, "Broken.sln");
+    }
 
     #endregion
 

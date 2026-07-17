@@ -29,12 +29,14 @@ internal sealed class FakeProjectRunService : IProjectRunService
     public ProjectRunException? BuildThrows { get; set; }
 
     public List<FileSystemInfo> ResolveInputCalls { get; } = [];
+    public List<string?> ResolveInputSelectors { get; } = [];
     public List<FileInfo> BuildAndResolveCalls { get; } = [];
     public List<ProjectRunOptions> BuildOptions { get; } = [];
 
-    public Task<RunInputResolution> ResolveInputAsync(FileSystemInfo input, CancellationToken cancellationToken)
+    public Task<RunInputResolution> ResolveInputAsync(FileSystemInfo input, CancellationToken cancellationToken, string? projectSelector = null)
     {
         ResolveInputCalls.Add(input);
+        ResolveInputSelectors.Add(projectSelector);
         if (ResolveInputThrows != null)
         {
             throw ResolveInputThrows;

@@ -29,15 +29,20 @@ internal sealed class ProjectRunService(
     private const int MaxBuildTailLines = 500;
 
     /// <inheritdoc />
-    public async Task<RunInputResolution> ResolveInputAsync(FileSystemInfo input, CancellationToken cancellationToken)
+    public async Task<RunInputResolution> ResolveInputAsync(FileSystemInfo input, CancellationToken cancellationToken, string? projectSelector = null)
     {
-        // Explicit file input: must be a .csproj (the unambiguous project-mode form).
+        // Explicit file input: a .csproj (project mode) or a .sln/.slnx (solution mode).
         if (input is FileInfo file)
         {
+            if (IsSolutionFile(file))
+            {
+                return await ResolveSolutionAsync(file, projectSelector, cancellationToken);
+            }
+
             if (!string.Equals(file.Extension, ".csproj", StringComparison.OrdinalIgnoreCase))
             {
                 throw new ProjectRunException(
-                    $"'{file.FullName}' is not a .csproj file. Pass a .csproj, a directory containing one, or a build-output folder.");
+                    $"'{file.FullName}' is not a runnable input. Pass a .csproj, a .sln/.slnx solution, a directory containing one, or a build-output folder.");
             }
 
             var projectDir = file.Directory ?? new DirectoryInfo(Directory.GetCurrentDirectory());
@@ -45,6 +50,34 @@ internal sealed class ProjectRunService(
         }
 
         var dir = (DirectoryInfo)input;
+
+        // A solution in the directory wins over loose .csproj files: it carries the config→platform
+        // map and defines $(SolutionDir), which some projects (e.g. those importing shared props via
+        // $(SolutionDir)) need to build at all. Prefer it, matching what a developer opens in VS.
+        List<FileInfo> solutions;
+        try
+        {
+            solutions = dir.EnumerateFiles("*.sln", SearchOption.TopDirectoryOnly)
+                .Concat(dir.EnumerateFiles("*.slnx", SearchOption.TopDirectoryOnly))
+                .ToList();
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            solutions = [];
+        }
+
+        if (solutions.Count == 1)
+        {
+            return await ResolveSolutionAsync(solutions[0], projectSelector, cancellationToken);
+        }
+
+        if (solutions.Count > 1)
+        {
+            var slnNames = string.Join(", ", solutions.Select(s => s.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+            throw new ProjectRunException(
+                $"Multiple solution files found in '{dir.FullName}' ({slnNames}). Specify which one to run, e.g. 'winapp run {solutions[0].Name}'.");
+        }
+
         List<FileInfo> csprojs;
         try
         {
@@ -65,6 +98,20 @@ internal sealed class ProjectRunService(
         if (csprojs.Count == 1)
         {
             return new RunInputResolution(WinAppRunMode.Project, csprojs[0], dir);
+        }
+
+        // A --project selector disambiguates directly without evaluation.
+        if (!string.IsNullOrWhiteSpace(projectSelector))
+        {
+            var selected = MatchProjectSelector(csprojs, projectSelector);
+            if (selected is null)
+            {
+                var available = string.Join(", ", csprojs.Select(c => c.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+                throw new ProjectRunException(
+                    $"--project '{projectSelector}' did not match a single .csproj in '{dir.FullName}'. Available: {available}.");
+            }
+
+            return new RunInputResolution(WinAppRunMode.Project, selected, dir);
         }
 
         // Multiple .csproj files — classify each via MSBuild evaluation so an executable/test project
@@ -89,7 +136,158 @@ internal sealed class ProjectRunService(
         // Zero or several runnable candidates → we cannot safely guess; require explicit selection.
         var names = string.Join(", ", csprojs.Select(c => c.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
         throw new ProjectRunException(
-            $"Multiple .csproj files found in '{dir.FullName}' ({names}). Specify which project to run, e.g. 'winapp run {csprojs[0].Name}'.");
+            $"Multiple .csproj files found in '{dir.FullName}' ({names}). Specify which project to run, e.g. 'winapp run {csprojs[0].Name}' or --project <name>.");
+    }
+
+    /// <summary>True when the file is a solution (<c>.sln</c> or the newer XML <c>.slnx</c>).</summary>
+    private static bool IsSolutionFile(FileInfo file) =>
+        string.Equals(file.Extension, ".sln", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(file.Extension, ".slnx", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Resolves the runnable app project out of a solution and records the solution on the result so
+    /// the build defines <c>$(SolutionDir)</c>. The solution's project list comes from
+    /// <c>dotnet sln &lt;sln&gt; list</c>; each candidate is classified with the same MSBuild
+    /// evaluation used for a multi-<c>.csproj</c> directory. Exactly one launchable (non-test
+    /// executable) project is required unless a matching <c>--project</c> selector is supplied.
+    /// </summary>
+    private async Task<RunInputResolution> ResolveSolutionAsync(FileInfo solution, string? projectSelector, CancellationToken cancellationToken)
+    {
+        var solutionDir = solution.Directory ?? new DirectoryInfo(Directory.GetCurrentDirectory());
+        var projects = await GetSolutionProjectsAsync(solution, solutionDir, cancellationToken);
+
+        if (projects.Count == 0)
+        {
+            throw new ProjectRunException(
+                $"No .csproj projects were found in '{solution.Name}'. 'winapp run' needs a runnable C# project in the solution.");
+        }
+
+        // An explicit --project selector short-circuits classification.
+        if (!string.IsNullOrWhiteSpace(projectSelector))
+        {
+            var selected = MatchProjectSelector(projects, projectSelector);
+            if (selected is null)
+            {
+                var available = string.Join(", ", projects.Select(p => p.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+                throw new ProjectRunException(
+                    $"--project '{projectSelector}' did not match a single project in '{solution.Name}'. Available: {available}.");
+            }
+
+            return new RunInputResolution(WinAppRunMode.Project, selected, selected.Directory ?? solutionDir, solution);
+        }
+
+        var executable = new List<FileInfo>();
+        foreach (var project in projects)
+        {
+            if (await IsExecutableNonTestProjectAsync(project, solutionDir, cancellationToken))
+            {
+                executable.Add(project);
+            }
+        }
+
+        if (executable.Count == 1)
+        {
+            var startup = executable[0];
+            return new RunInputResolution(WinAppRunMode.Project, startup, startup.Directory ?? solutionDir, solution);
+        }
+
+        // Zero or several runnable app projects → we don't emulate VS's startup-project selection;
+        // require an explicit --project so the wrong app is never launched behind the user's back.
+        var candidates = (executable.Count > 0 ? executable : projects)
+            .Select(p => p.Name)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase);
+        var candidateList = string.Join(", ", candidates);
+        var reason = executable.Count == 0
+            ? $"No single runnable app project was found in '{solution.Name}'"
+            : $"'{solution.Name}' contains multiple runnable app projects ({candidateList})";
+        throw new ProjectRunException(
+            $"{reason}. Specify which project to run with --project <name>. Projects: {candidateList}.");
+    }
+
+    /// <summary>
+    /// Lists the C# projects in a solution via <c>dotnet sln &lt;sln&gt; list</c>, resolving each to an
+    /// absolute <see cref="FileInfo"/>. Non-<c>.csproj</c> projects (e.g. <c>.vcxproj</c>) are excluded
+    /// because <c>winapp run</c> builds and launches managed app projects.
+    /// </summary>
+    private async Task<List<FileInfo>> GetSolutionProjectsAsync(FileInfo solution, DirectoryInfo solutionDir, CancellationToken cancellationToken)
+    {
+        var arguments = WindowsCommandLine.JoinArguments(["sln", solution.FullName, "list"]) ?? string.Empty;
+
+        int exitCode;
+        string stdout;
+        string stderr;
+        try
+        {
+            (exitCode, stdout, stderr) = await dotNetService.RunDotnetCommandAsync(solutionDir, arguments, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            throw new ProjectRunException(
+                $"Could not read the solution '{solution.Name}' ('dotnet sln list' failed): {ex.Message}");
+        }
+
+        if (exitCode != 0)
+        {
+            var detail = string.Join(Environment.NewLine,
+                new[] { stdout, stderr }.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.TrimEnd()));
+            throw new ProjectRunException(
+                $"Could not read the solution '{solution.Name}' ('dotnet sln list' exited {exitCode}). {detail}".TrimEnd());
+        }
+
+        var projects = new List<FileInfo>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var raw in stdout.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            // Skip the `dotnet sln list` header ("Project(s)" and its dashed underline).
+            if (raw.All(c => c == '-') || string.Equals(raw, "Project(s)", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!raw.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var full = Path.GetFullPath(Path.Combine(solutionDir.FullName, raw));
+            if (seen.Add(full))
+            {
+                projects.Add(new FileInfo(full));
+            }
+        }
+
+        return projects;
+    }
+
+    /// <summary>
+    /// Matches a <c>--project</c> selector against candidate projects by full path, file name (with or
+    /// without the <c>.csproj</c> extension). Returns the single match, or null when zero or several
+    /// candidates match (ambiguous).
+    /// </summary>
+    private static FileInfo? MatchProjectSelector(IReadOnlyList<FileInfo> projects, string selector)
+    {
+        var trimmed = selector.Trim();
+        var matches = projects.Where(p =>
+            string.Equals(p.FullName, Path.GetFullPath(trimmed), StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(p.Name, trimmed, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Path.GetFileNameWithoutExtension(p.Name), trimmed, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        // A path-based selector may not be rooted at the current directory; fall back to a name match
+        // on the selector's leaf so `--project src/App/App.csproj` still resolves.
+        if (matches.Count == 0)
+        {
+            var leaf = Path.GetFileName(trimmed);
+            if (!string.IsNullOrEmpty(leaf))
+            {
+                matches = projects.Where(p =>
+                    string.Equals(p.Name, leaf, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(Path.GetFileNameWithoutExtension(p.Name), Path.GetFileNameWithoutExtension(leaf), StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+        }
+
+        return matches.Count == 1 ? matches[0] : null;
     }
 
     /// <summary>
@@ -371,6 +569,10 @@ internal sealed class ProjectRunService(
             tokens.Add($"-p:{property}");
         }
 
+        // When the target was resolved from a solution, define $(SolutionDir) and its siblings so
+        // projects that reference them build exactly as they do under `dotnet build <sln>` / VS.
+        AppendSolutionProperties(tokens, options);
+
         // Derived Platform only when the user didn't specify one (a user -p:Platform wins, spec R2-L2).
         if (!userSpecifiesPlatform)
         {
@@ -421,6 +623,10 @@ internal sealed class ProjectRunService(
             tokens.Add($"-p:{property}");
         }
 
+        // Match the build pass: define $(SolutionDir) & siblings so the evaluated TargetDir/RunCommand
+        // resolve against the same solution-anchored inputs as the build (solution mode only).
+        AppendSolutionProperties(tokens, options);
+
         tokens.Add($"-p:Configuration={options.Configuration}");
         tokens.Add($"-p:RuntimeIdentifier={rid}");
         if (!string.IsNullOrWhiteSpace(options.Framework))
@@ -452,8 +658,36 @@ internal sealed class ProjectRunService(
     }
 
     /// <summary>
-    /// Runs the project-mode BUILD pass, streaming dotnet's output according to the environment
-    /// (Change #1 + Change #4):
+    /// Appends the <c>Solution*</c> MSBuild properties a solution build normally sets — most
+    /// importantly <c>$(SolutionDir)</c> — when the run target was resolved from a solution. Building
+    /// a bare <c>.csproj</c> leaves these undefined, so projects that reference them (shared prop
+    /// imports, output paths) fail; defining them here builds the project the same way it builds under
+    /// <c>dotnet build &lt;sln&gt;</c> / Visual Studio. No-op for a bare <c>.csproj</c> target.
+    /// </summary>
+    private static void AppendSolutionProperties(List<string> tokens, ProjectRunOptions options)
+    {
+        if (options.Solution is not { } solution)
+        {
+            return;
+        }
+
+        var solutionDir = solution.Directory?.FullName ?? Directory.GetCurrentDirectory();
+        // MSBuild's $(SolutionDir) convention is a trailing directory separator. EscapeArgument
+        // doubles a trailing backslash before a closing quote, so a quoted value round-trips exactly.
+        if (!solutionDir.EndsWith(Path.DirectorySeparatorChar) && !solutionDir.EndsWith(Path.AltDirectorySeparatorChar))
+        {
+            solutionDir += Path.DirectorySeparatorChar;
+        }
+
+        var solutionExt = solution.Extension;
+        var solutionName = Path.GetFileNameWithoutExtension(solution.Name);
+
+        tokens.Add($"-p:SolutionDir={solutionDir}");
+        tokens.Add($"-p:SolutionPath={solution.FullName}");
+        tokens.Add($"-p:SolutionName={solutionName}");
+        tokens.Add($"-p:SolutionFileName={solution.Name}");
+        tokens.Add($"-p:SolutionExt={solutionExt}");
+    }
     /// <list type="bullet">
     ///   <item><c>--json</c>: stream to stderr only so stdout stays pure JSON — no banner, no spinner.</item>
     ///   <item>Interactive terminal, non-verbose: animate a Spectre status spinner and hide the raw

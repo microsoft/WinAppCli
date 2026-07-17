@@ -438,7 +438,7 @@ export async function restore(options: RestoreOptions = {}): Promise<WinappResul
 // ---------------------------------------------------------------------------
 
 export interface RunOptions extends CommonOptions {
-  /** Path to the app to run: a build-output folder, a .csproj project, or a directory containing one (default: current directory). */
+  /** Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one (default: current directory). */
   inputFolder?: string;
   /** Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). */
   appArgs?: string | string[];
@@ -470,6 +470,8 @@ export interface RunOptions extends CommonOptions {
   noRestore?: boolean;
   /** Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used. */
   outputAppxDirectory?: string;
+  /** Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode. */
+  project?: string;
   /** Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. */
   property?: string | string[];
   /** Project mode: target .NET runtime identifier (RID), e.g. win-x64. Only the RID's architecture is used; it overrides --arch (the RID is reduced to its architecture). Ignored in folder mode. */
@@ -506,6 +508,7 @@ export async function run(options: RunOptions = {}): Promise<WinappResult> {
   if (options.noLaunch) args.push('--no-launch');
   if (options.noRestore) args.push('--no-restore');
   if (options.outputAppxDirectory) args.push('--output-appx-directory', options.outputAppxDirectory);
+  if (options.project) args.push('--project', options.project);
   if (options.property) {
     const propertyArr = Array.isArray(options.property) ? options.property : [options.property];
     for (const v of propertyArr) args.push('--property', v);

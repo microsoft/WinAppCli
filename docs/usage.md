@@ -490,7 +490,7 @@ Create a loose layout package from a build output folder, register it with Windo
 `winapp run` operates in one of two modes, chosen automatically from the input:
 
 - **Folder mode** — the input is a build-output folder (contains a `Package.appxmanifest`/`AppxManifest.xml`). This is the original behavior and is unchanged.
-- **Project mode** — the input is a `.csproj`, or a directory containing a single buildable (`OutputType` `Exe`/`WinExe`) `.csproj`. `winapp run` builds the project and launches it, supporting both **packaged** and **unpackaged** WinUI apps. See [Project mode](#project-mode-net-sdk-projects) below.
+- **Project mode** — the input is a `.csproj`, a `.sln`/`.slnx` solution, or a directory containing one. `winapp run` builds the project and launches it, supporting both **packaged** and **unpackaged** WinUI apps. See [Project mode](#project-mode-net-sdk-projects) below.
 
 > **This is the preferred command for debugging with package identity** for most frameworks (.NET, C++, Rust, Flutter, Tauri). Unlike [`create-debug-identity`](#create-debug-identity) which registers a sparse package for a single exe, `winapp run` registers the entire folder as a loose layout package, just like a real MSIX install. See the [Debugging Guide](debugging.md) for common debugging workflows.
 
@@ -500,7 +500,7 @@ winapp run [<input>] [options]
 
 **Arguments:**
 
-- `input` - The app to run: a build-output folder (folder mode), a `.csproj` project, or a directory containing a single buildable `.csproj` (project mode). Use `.` to build/run the project in the current directory. **Optional — defaults to the current directory when omitted** (matches `dotnet run`).
+- `input` - The app to run: a build-output folder (folder mode), a `.csproj` project, a `.sln`/`.slnx` solution, or a directory containing one (project mode). Use `.` to build/run the project in the current directory. **Optional — defaults to the current directory when omitted** (matches `dotnet run`).
 
 **Options:**
 
@@ -575,7 +575,9 @@ winapp run ./bin/Debug --clean
 
 #### Project mode (.NET SDK projects)
 
-When the input is a `.csproj` (or a directory containing a single buildable one, including `.`), `winapp run` **builds the project** with `dotnet build` and then launches it. It supports both packaged and unpackaged WinUI apps, and installs the matching-architecture Windows App Runtime the app needs before launching.
+When the input is a `.csproj`, a `.sln`/`.slnx` solution, or a directory containing one (including `.`), `winapp run` **builds the project** with `dotnet build` and then launches it. It supports both packaged and unpackaged WinUI apps, and installs the matching-architecture Windows App Runtime the app needs before launching.
+
+**Solution input:** point `winapp run` at a `.sln`/`.slnx` (or a directory containing one — a solution is preferred over loose `.csproj` files) and it resolves the runnable app project from the solution, then builds that project with the solution's `$(SolutionDir)` (and the sibling `Solution*` properties) defined — so projects that depend on `$(SolutionDir)` build exactly as they do in Visual Studio. When a solution (or a directory) contains more than one runnable app project, `winapp run` does not guess a startup project; use `--project <name>` to choose one, otherwise it errors listing the candidates.
 
 Packaged vs. unpackaged is detected automatically from the project's effective `WindowsPackageType` MSBuild property (never from manifest presence):
 
@@ -590,6 +592,7 @@ Project mode requires the **.NET SDK 8.0.100 or newer** (for MSBuild `--getPrope
 - `--arch <x64|arm64|x86>` - Target architecture. Default: the current process architecture. Determines both the build RID and the architecture of the Windows App Runtime that gets installed.
 - `-r, --runtime <rid>` - Target .NET runtime identifier (e.g. `win-x64`). Its architecture overrides `--arch`.
 - `-f, --framework <tfm>` - Target framework moniker for multi-targeted projects (e.g. `net10.0-windows10.0.26100.0`).
+- `--project <name-or-path>` - When the input is a solution (`.sln`/`.slnx`) or a directory with multiple runnable app projects, selects which project to launch (by project name or path).
 - `--no-build` - Skip building and run the existing build output (still evaluates output properties).
 - `--no-restore` - Skip restoring the project before building.
 - `-p, --property <Name=Value>` - MSBuild property, forwarded to both the build and the property evaluation. Repeatable (e.g. `-p WindowsPackageType=None`).
@@ -609,6 +612,12 @@ winapp run
 
 # Run a specific project
 winapp run ./src/MyApp/MyApp.csproj
+
+# Build and run from a solution (resolves the runnable app project, defines $(SolutionDir))
+winapp run ./MyApp.sln
+
+# Pick a startup project when the solution has more than one runnable app
+winapp run ./MyApp.sln --project MyApp
 
 # Release build for arm64
 winapp run . -c Release --arch arm64
