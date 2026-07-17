@@ -1279,7 +1279,7 @@ internal class WorkspaceSetupService(
             return (0, 0, Array.Empty<(string, string)>());
         }
 
-        var msixArchDir = Path.Combine(msixDir.FullName, $"win10-{dirArch}");
+        var msixArchDir = Path.Join(msixDir.FullName, $"win10-{dirArch}");
 
         // Build list of packages to evaluate
         var packagesToCheck = new List<(string FilePath, string PackageName, string NewVersion, string FileName)>();

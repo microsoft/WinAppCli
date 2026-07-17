@@ -67,7 +67,7 @@ public class ProjectRunServiceTests
     [TestInitialize]
     public void Setup()
     {
-        _tempDir = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"ProjectRunServiceTests_{Guid.NewGuid():N}"));
+        _tempDir = new DirectoryInfo(Path.Join(Path.GetTempPath(), $"ProjectRunServiceTests_{Guid.NewGuid():N}"));
         _tempDir.Create();
         _service = new ProjectRunService(new FakeDotNetService(), new TestConsole(), NullLogger<ProjectRunService>.Instance);
     }
