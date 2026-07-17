@@ -14,10 +14,32 @@ namespace WinApp.Cli.Services;
 internal partial class NugetService(IWinappDirectoryService winappDirectoryService) : INugetService
 {
     private static readonly HttpClient Http = new();
+
+    /// <summary>
+    /// Seam for the flat-container and registration HTTP GETs used by package download,
+    /// version resolution, and dependency parsing. Defaults to the shared <see cref="Http"/>
+    /// client so production behavior is byte-for-byte unchanged; tests replace it with canned
+    /// in-memory responses so those paths run without network I/O.
+    /// </summary>
+    /// <remarks>
+    /// The default delegate wraps the single real
+    /// <see cref="HttpClient.GetAsync(string?, System.Threading.CancellationToken)"/> network
+    /// boundary. That boundary itself is not unit-coverable without a live NuGet endpoint; see
+    /// issue #630. Only the default delegate performs network I/O.
+    /// </remarks>
+    internal static Func<string, CancellationToken, Task<HttpResponseMessage>> HttpGetAsync { get; set; }
+        = static (url, cancellationToken) => Http.GetAsync(url, cancellationToken);
+
     private const string FlatIndex = "https://api.nuget.org/v3-flatcontainer";
     private const string RegistrationIndex = "https://api.nuget.org/v3/registration5-semver1";
     private static readonly ConcurrentDictionary<string, Dictionary<string, string>> DependencyCache = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <remarks>
+    /// The final fallback creates <c>%USERPROFILE%\.nuget\packages</c> when it does not already
+    /// exist. That directory-creation branch is not deterministically unit-coverable: the path comes
+    /// from <see cref="Environment.GetFolderPath(Environment.SpecialFolder)"/> (which ignores env-var
+    /// redirection), so exercising it would require mutating the real user profile. See issue #630.
+    /// </remarks>
     public DirectoryInfo GetNuGetGlobalPackagesDir()
     {
         // In test mode (cache override set), use a "packages" subdir of the override directory
@@ -99,6 +121,12 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
     /// <summary>
     /// Downloads and extracts a NuGet package to the global packages cache, then recursively installs dependencies.
     /// </summary>
+    /// <remarks>
+    /// The leading <c>installed.ContainsKey(package)</c> short-circuit is a defensive guard: the public
+    /// entry point seeds an empty dictionary and <see cref="ResolveDependenciesAsync"/> already skips
+    /// dependencies that are present before recursing, so this branch is not reachable through the public
+    /// API and is intentionally left uncovered. See issue #630.
+    /// </remarks>
     private async Task InstallPackageRecursiveAsync(string package, string version, Dictionary<string, string> installed, TaskContext taskContext, CancellationToken cancellationToken)
     {
         // Already processed this package?
@@ -124,7 +152,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
         var lowerVersion = version.ToLowerInvariant();
         var url = $"{FlatIndex}/{lowerId}/{lowerVersion}/{lowerId}.{lowerVersion}.nupkg";
 
-        using var resp = await Http.GetAsync(url, cancellationToken);
+        using var resp = await HttpGetAsync(url, cancellationToken);
         if (!resp.IsSuccessStatusCode)
         {
             throw new InvalidOperationException($"Failed to download {package} {version} from NuGet (HTTP {resp.StatusCode})");
@@ -304,7 +332,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
     private static async Task<List<string>> GetListedVersionsAsync(string packageName, CancellationToken cancellationToken)
     {
         var url = $"{RegistrationIndex}/{packageName.ToLowerInvariant()}/index.json";
-        using var resp = await Http.GetAsync(url, cancellationToken);
+        using var resp = await HttpGetAsync(url, cancellationToken);
         resp.EnsureSuccessStatusCode();
         using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
@@ -340,7 +368,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
                     continue;
                 }
 
-                using var pageResp = await Http.GetAsync(pageUrl, cancellationToken);
+                using var pageResp = await HttpGetAsync(pageUrl, cancellationToken);
                 pageResp.EnsureSuccessStatusCode();
                 using var pageStream = await pageResp.Content.ReadAsStreamAsync(cancellationToken);
                 using var pageDoc = await JsonDocument.ParseAsync(pageStream, cancellationToken: cancellationToken);
@@ -418,7 +446,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
         var ver = version.ToLowerInvariant();
         var nuspecUrl = $"{FlatIndex}/{id}/{ver}/{id}.nuspec";
 
-        using var resp = await Http.GetAsync(nuspecUrl, cancellationToken);
+        using var resp = await HttpGetAsync(nuspecUrl, cancellationToken);
         if (!resp.IsSuccessStatusCode)
         {
             return dependencies;
