@@ -447,4 +447,178 @@ public partial class UiCommandTests
         Assert.IsFalse(result.TryGetProperty("warnings", out _),
             "A local console session must not emit the remote-delivery warning");
     }
+
+    // -------------------------------------------------------------------------
+    // Bucket 3 (issue #630) — coverage top-up: the remaining argument-validation
+    // branches, the selector-resolution failure guard, the non-JSON success/
+    // warning render path, and the COM / generic catch arms. Driven through the
+    // command handler with the existing fakes — no live injection.
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public void Pen_ShortDescription_NamesPenInput()
+    {
+        var description = GetRequiredService<UiPenCommand>().ShortDescription;
+        Assert.IsFalse(string.IsNullOrWhiteSpace(description));
+        StringAssert.Contains(description, "pen");
+    }
+
+    [TestMethod]
+    public async Task Pen_NegativeDuration_RejectedWithInvalidArguments()
+    {
+        // A negative --duration-ms is rejected by the lower-bound guard (distinct from the >Max guard).
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--duration-ms", "-5", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.PenCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "--duration-ms");
+    }
+
+    [TestMethod]
+    public async Task Pen_TiltOutOfRange_RejectedWithInvalidArguments()
+    {
+        // A parseable but out-of-range --tilt-x (>90) trips the handler's tilt range guard (distinct
+        // from the parse-time non-integer rejection already covered).
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "100,100", "--tilt-x", "200", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.PenCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "tilt");
+    }
+
+    [TestMethod]
+    public async Task Pen_MalformedPath_RejectedWithInvalidArguments()
+    {
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--path", "not-a-path", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.PenCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "--path");
+    }
+
+    [TestMethod]
+    public async Task Pen_MalformedAtPoint_RejectedWithInvalidArguments()
+    {
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "nonsense", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.PenCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "--at");
+    }
+
+    [TestMethod]
+    public async Task Pen_NoTarget_NoSelectorNoAtNoPath_RejectedWithInvalidArguments()
+    {
+        // Without a selector, --at, or --path there is no contact point to resolve.
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.PenCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "Provide a target");
+    }
+
+    [TestMethod]
+    public async Task Pen_MissingApp_NoAppNoWindow_ReturnsMissingApp()
+    {
+        // A valid selector but no --app/--window: the missing-app guard fires after all argument
+        // validation (so it yields missing_app, not invalid_arguments).
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["canvas-1", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.PenCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "Target app required");
+    }
+
+    [TestMethod]
+    public async Task Pen_SelectorNotFound_ReturnsElementNotFound_NoInjection()
+    {
+        // A bare selector that resolves to no element: ResolvePointAsync reports element_not_found and
+        // returns not-Ok, so the command aborts before injection (covers the !target.Ok guard in the
+        // selector branch). FindSingleResult stays null by default.
+        _fakeSession.SessionResult.WindowHandle = 6100;
+
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["ghost-element", "-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.PenCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "No element found");
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // swaps the process-wide ambient AnsiConsole to capture non-error logger output
+    public async Task Pen_NonJson_LocalSession_LogsSuccessWithoutWarning()
+    {
+        // The non-JSON render path logs a human success line and, for a local session, no delivery
+        // warning. Info/Warning route through the static ambient console, so we swap it to capture.
+        _fakeSession.SessionResult.WindowHandle = 8400;
+        _fakeForeground.IsRemoteSessionResult = false;
+
+        var command = GetRequiredService<UiPenCommand>();
+        var (exitCode, ambientOutput) = await InvokeWithAmbientConsoleCaptureAsync(command, ["-a", "TestApp", "--at", "120,130"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakePointer.PenCalls.Count);
+        Assert.IsFalse(TestAnsiConsole.Output.Contains('{'), "Non-JSON path must not emit a JSON envelope");
+        StringAssert.Contains(ambientOutput, "pen", "Success line must name the pen action");
+        Assert.IsFalse(ambientOutput.Contains("remote", StringComparison.OrdinalIgnoreCase),
+            "A local session must not emit the remote-delivery warning");
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // swaps the process-wide ambient AnsiConsole to capture non-error logger output
+    public async Task Pen_NonJson_RemoteSession_LogsSuccessAndDeliveryWarning()
+    {
+        _fakeSession.SessionResult.WindowHandle = 8401;
+        _fakeForeground.IsRemoteSessionResult = true;
+
+        var command = GetRequiredService<UiPenCommand>();
+        var (exitCode, ambientOutput) = await InvokeWithAmbientConsoleCaptureAsync(command, ["-a", "TestApp", "--at", "120,130"]);
+
+        Assert.AreEqual(0, exitCode, "The remote warning is advisory; injection still succeeds");
+        Assert.AreEqual(1, _fakePointer.PenCalls.Count);
+        StringAssert.Contains(ambientOutput, "remote", "Remote session must surface the delivery-uncertainty warning");
+    }
+
+    [TestMethod]
+    public async Task Pen_ComException_ReturnsStaleElement_NoInjection()
+    {
+        // A COMException surfacing during resolution is a stale-element signal; the command maps it to
+        // the stale envelope and never injects.
+        _fakeUia.FindSingleElementThrowException = new System.Runtime.InteropServices.COMException("UIA stale (test)");
+
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["canvas-1", "-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.PenCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "no longer accessible");
+        AssertJsonErrorCode(UiJsonError.CodeStaleElement);
+    }
+
+    [TestMethod]
+    public async Task Pen_GenericException_ReturnsInternalError_NoInjection()
+    {
+        // A non-COM, non-app-not-found, non-IOE exception during session resolution falls through to
+        // the catch-all generic handler and is reported (not swallowed or crashed).
+        _fakeSession.ResolveThrow = new TimeoutException("boom (test)");
+
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["canvas-1", "-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.PenCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "boom (test)");
+        AssertJsonErrorCode(UiJsonError.CodeInternalError);
+    }
 }

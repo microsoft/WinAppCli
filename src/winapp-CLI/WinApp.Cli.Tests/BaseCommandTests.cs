@@ -106,6 +106,37 @@ public abstract class BaseCommandTests(bool configPaths = true, LogLevel logLeve
     }
 
     /// <summary>
+    /// Invokes <paramref name="command"/> with the process-wide Spectre ambient console
+    /// (<see cref="AnsiConsole.Console"/>) temporarily redirected to a fresh <see cref="TestConsole"/>,
+    /// then always restores the previous ambient console — even on failure — so global console state
+    /// does not leak across tests. Use this to capture output written through the static ambient
+    /// console (e.g. Info/Warning log lines that do not route through the injected stderr writer).
+    /// </summary>
+    /// <remarks>
+    /// Callers must be <c>[DoNotParallelize]</c> because the ambient console is process-wide. The
+    /// command's own stdout/stderr are still captured via <see cref="ParseAndInvokeWithCaptureAsync(Command, string[])"/>
+    /// (into <see cref="TestAnsiConsole"/> / <see cref="ConsoleStdErr"/>); the returned string is the
+    /// text written to the swapped-in ambient console.
+    /// </remarks>
+    /// <returns>The command exit code and the text captured from the ambient console.</returns>
+    protected async Task<(int ExitCode, string AmbientOutput)> InvokeWithAmbientConsoleCaptureAsync(
+        Command command, string[] manifestArgs)
+    {
+        var previousAmbient = AnsiConsole.Console;
+        var ambient = new TestConsole();
+        AnsiConsole.Console = ambient;
+        try
+        {
+            int exitCode = await ParseAndInvokeWithCaptureAsync(command, manifestArgs);
+            return (exitCode, ambient.Output);
+        }
+        finally
+        {
+            AnsiConsole.Console = previousAmbient;
+        }
+    }
+
+    /// <summary>
     /// Invokes <see cref="Program.Main"/> with captured stdout/stderr.
     /// Writers are intentionally not disposed to avoid ObjectDisposedException from
     /// Spectre.Console's static AnsiConsole.Console which may reference them after return.
