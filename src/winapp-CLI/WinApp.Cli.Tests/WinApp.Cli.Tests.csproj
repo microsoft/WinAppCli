@@ -5,6 +5,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 
+    <!-- WinForms is used only by the real-UIA test fixture (UiaTestFixture) to host a
+         live in-process window that the real UiAutomationService can inspect and drive. -->
+    <UseWindowsForms>true</UseWindowsForms>
+
     <!-- Enable Code Analysis -->
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisMode>Recommended</AnalysisMode>
