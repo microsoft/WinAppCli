@@ -434,7 +434,16 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
             // transitive nuspec URL is well-formed. FetchDirectDependenciesAsync only strips brackets
             // (e.g. "[2.0.0, )" -> "2.0.0, "), which would otherwise build a malformed flat-container
             // URL and silently drop transitive dependencies nested under a range-versioned package.
-            var transitiveDeps = await GetPackageDependenciesAsync(depId, ParseMinimumVersion(depVersion), cancellationToken);
+            var depMinVersion = ParseMinimumVersion(depVersion);
+            if (string.IsNullOrEmpty(depMinVersion))
+            {
+                // An open-lower-bound or otherwise unparseable range (e.g. "(,2.0.0]") has no concrete
+                // minimum to form a flat-container URL from; the direct dependency is already in allDeps,
+                // so skip its transitive fetch instead of requesting a malformed ".../<id>//<id>.nuspec".
+                continue;
+            }
+
+            var transitiveDeps = await GetPackageDependenciesAsync(depId, depMinVersion, cancellationToken);
             foreach (var (transitiveId, transitiveVersion) in transitiveDeps)
             {
                 allDeps.TryAdd(transitiveId, transitiveVersion);

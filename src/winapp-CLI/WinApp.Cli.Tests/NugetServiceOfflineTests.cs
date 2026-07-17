@@ -411,6 +411,37 @@ public sealed class NugetServiceOfflineTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task GetPackageDependenciesAsync_OpenLowerBoundRange_KeepsDirectDep_AndSkipsMalformedTransitiveFetch()
+    {
+        // RangeRoot -> RangeChild declared with an open-lower-bound range "(,2.0.0]" (no concrete minimum
+        // version). ParseMinimumVersion yields empty for that range, so the transitive walk must SKIP
+        // RangeChild rather than requesting a malformed ".../rangechild.pkg//rangechild.pkg.nuspec". The
+        // direct dependency itself is still returned. A unique package id avoids the static DependencyCache
+        // colliding with other tests.
+        var requestedUrls = new List<string>();
+        NugetService.HttpGetAsync = (url, _) =>
+        {
+            requestedUrls.Add(url);
+            if (url.Contains("/rangeroot.pkg/1.0.0/", StringComparison.Ordinal))
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(NuspecXml("RangeRoot.Pkg", ("RangeChild.Pkg", "(,2.0.0]"))),
+                });
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        };
+
+        var deps = await _service.GetPackageDependenciesAsync("RangeRoot.Pkg", "1.0.0", TestContext.CancellationToken);
+
+        Assert.IsTrue(deps.ContainsKey("RangeChild.Pkg"), "The direct dependency must still be returned.");
+        Assert.IsFalse(
+            requestedUrls.Any(u => u.Contains("rangechild", StringComparison.OrdinalIgnoreCase)),
+            "An open-lower-bound range has no minimum version, so no (malformed) transitive nuspec fetch should be issued for it.");
+    }
+
+    [TestMethod]
     public async Task GetPackageDependenciesAsync_StripsVersionRangeBrackets()
     {
         StubNuspecFeed(
