@@ -242,7 +242,7 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
         return null;
     }
 
-    private static bool IsExecutableNonTestProject(FileInfo csprojFile)
+    internal static bool IsExecutableNonTestProject(FileInfo csprojFile)
     {
         try
         {

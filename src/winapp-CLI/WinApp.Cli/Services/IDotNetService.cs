@@ -68,6 +68,20 @@ internal interface IDotNetService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Runs a dotnet CLI command in the given working directory, delivering each stdout/stderr line
+    /// to the supplied callbacks as it is produced (rather than capturing it all up front). Used for
+    /// the project-mode build pass so build progress is visible live. Returns the process exit code.
+    /// The callbacks are invoked on background threads; callers that touch shared state must
+    /// synchronize. The command's own output is NOT written anywhere unless a callback does so.
+    /// </summary>
+    Task<int> RunDotnetStreamingAsync(
+        DirectoryInfo workingDirectory,
+        string arguments,
+        Action<string>? onOutputLine,
+        Action<string>? onErrorLine,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Ensures the .csproj has a RuntimeIdentifier element with a default that auto-detects
     /// the current platform architecture. Only adds the element if no RuntimeIdentifier or
     /// RuntimeIdentifiers element already exists in the project.

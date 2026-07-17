@@ -487,15 +487,20 @@ winapp manifest update-assets mylogo.png --verbose
 
 Create a loose layout package from a build output folder, register it with Windows using the `Windows.Management.Deployment.PackageManager` API, and launch the application — simulating a full MSIX install for debugging. Returns the process ID for debugger attachment.
 
+`winapp run` operates in one of two modes, chosen automatically from the input:
+
+- **Folder mode** — the input is a build-output folder (contains a `Package.appxmanifest`/`AppxManifest.xml`). This is the original behavior and is unchanged.
+- **Project mode** — the input is a `.csproj`, or a directory containing a single buildable (`OutputType` `Exe`/`WinExe`) `.csproj`. `winapp run` builds the project and launches it, supporting both **packaged** and **unpackaged** WinUI apps. See [Project mode](#project-mode-net-sdk-projects) below.
+
 > **This is the preferred command for debugging with package identity** for most frameworks (.NET, C++, Rust, Flutter, Tauri). Unlike [`create-debug-identity`](#create-debug-identity) which registers a sparse package for a single exe, `winapp run` registers the entire folder as a loose layout package, just like a real MSIX install. See the [Debugging Guide](debugging.md) for common debugging workflows.
 
 ```bash
-winapp run <input-folder> [options]
+winapp run [<input>] [options]
 ```
 
 **Arguments:**
 
-- `input-folder` - Directory containing the app to run (required)
+- `input` - The app to run: a build-output folder (folder mode), a `.csproj` project, or a directory containing a single buildable `.csproj` (project mode). Use `.` to build/run the project in the current directory. **Optional — defaults to the current directory when omitted** (matches `dotnet run`).
 
 **Options:**
 
@@ -566,6 +571,59 @@ winapp run ./bin/Debug --detach --json
 
 # Wipe application data (LocalState, settings) and start fresh
 winapp run ./bin/Debug --clean
+```
+
+#### Project mode (.NET SDK projects)
+
+When the input is a `.csproj` (or a directory containing a single buildable one, including `.`), `winapp run` **builds the project** with `dotnet build` and then launches it. It supports both packaged and unpackaged WinUI apps, and installs the matching-architecture Windows App Runtime the app needs before launching.
+
+Packaged vs. unpackaged is detected automatically from the project's effective `WindowsPackageType` MSBuild property (never from manifest presence):
+
+- **Packaged** (`WindowsPackageType=MSIX`, the WinUI packaged default) — builds, then registers the build output as a loose-layout package and launches via AUMID (the same pipeline as folder mode).
+- **Unpackaged** (`WindowsPackageType=None`) — builds, ensures the framework-dependent Windows App Runtime is installed, then launches the built `.exe` directly. Force this for a packaged project with `-p WindowsPackageType=None`.
+
+Project mode requires the **.NET SDK 8.0.100 or newer** (for MSBuild `--getProperty`).
+
+**Project-mode options** (ignored in folder mode):
+
+- `-c, --configuration <name>` - Build configuration. Default: `Debug`.
+- `--arch <x64|arm64|x86>` - Target architecture. Default: the current process architecture. Determines both the build RID and the architecture of the Windows App Runtime that gets installed.
+- `-r, --runtime <rid>` - Target .NET runtime identifier (e.g. `win-x64`). Its architecture overrides `--arch`.
+- `-f, --framework <tfm>` - Target framework moniker for multi-targeted projects (e.g. `net10.0-windows10.0.26100.0`).
+- `--no-build` - Skip building and run the existing build output (still evaluates output properties).
+- `--no-restore` - Skip restoring the project before building.
+- `-p, --property <Name=Value>` - MSBuild property, forwarded to both the build and the property evaluation. Repeatable (e.g. `-p WindowsPackageType=None`).
+
+**Build output & verbosity:** the project is built in two steps — a `dotnet build` whose output **streams live** to your console, followed by a fast property-evaluation pass. In an interactive terminal a spinner shows build progress; on failure the full build log is shown so the error is visible. Add `--verbose` to stream dotnet's full build log as it runs (it maps to dotnet's `-v`). Under `--json` the build output is routed to stderr so stdout stays pure JSON.
+
+**Option applicability:** the identity/loose-layout options (`--manifest`, `--output-appx-directory`, `--no-launch`, `--with-alias`, `--unregister-on-exit`, `--clean`) apply to packaged apps only. They are rejected with a clear error for unpackaged apps (which have no MSIX package). Launch/debug options (`--args`/`--`, `--detach`, `--debug-output`, `--symbols`, `--json`) work in both.
+
+**Project-mode examples:**
+
+```bash
+# Build and run the WinUI project in the current directory
+winapp run .
+
+# Same as above — with no input, winapp run defaults to the current directory
+winapp run
+
+# Run a specific project
+winapp run ./src/MyApp/MyApp.csproj
+
+# Release build for arm64
+winapp run . -c Release --arch arm64
+
+# Force an unpackaged run of a packaged project
+winapp run . -p WindowsPackageType=None
+
+# Run the existing build output without rebuilding, and capture crash diagnostics
+winapp run . --no-build --debug-output
+
+# Stream dotnet's full build log while building (maps to dotnet -v)
+winapp run . --verbose
+
+# Launch and detach (prints PID), forwarding args to the app
+winapp run . --detach -- --my-flag value
 ```
 
 **MSBuild properties (NuGet package):**

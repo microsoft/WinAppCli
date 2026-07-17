@@ -38,6 +38,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IWinmdService, WinmdService>()
             .AddSingleton<IWinmdsLockfileService, WinmdsLockfileService>()
             .AddSingleton<IProjectDetectionService, ProjectDetectionService>()
+            .AddSingleton<IProjectRunService, ProjectRunService>()
             .AddSingleton<IWorkspaceSetupService, WorkspaceSetupService>()
             .AddSingleton<IGitignoreService, GitignoreService>()
             .AddSingleton<IFirstRunService, FirstRunService>()

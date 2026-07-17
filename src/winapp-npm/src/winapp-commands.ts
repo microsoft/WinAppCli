@@ -438,28 +438,42 @@ export async function restore(options: RestoreOptions = {}): Promise<WinappResul
 // ---------------------------------------------------------------------------
 
 export interface RunOptions extends CommonOptions {
-  /** Input folder containing the app to run */
-  inputFolder: string;
+  /** Path to the app to run: a build-output folder, a .csproj project, or a directory containing one (default: current directory). */
+  inputFolder?: string;
   /** Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). */
   appArgs?: string | string[];
+  /** Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Default: the current process architecture. */
+  arch?: string;
   /** Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). */
   args?: string;
   /** Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. */
   clean?: boolean;
+  /** Project mode: build configuration (e.g., Debug, Release). Ignored in folder mode. Default: Debug. */
+  configuration?: string;
   /** Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. For WinUI apps, a crash also triggers a stowed-exception triage pass; the first run downloads debugger components (cached under the winapp global directory) and can be pointed at an existing debugger install via the WINAPP_DBGTOOLS_DIR environment variable. Cannot be combined with --no-launch or --json. */
   debugOutput?: boolean;
   /** Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). */
   detach?: boolean;
   /** Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. */
   executable?: string;
+  /** Project mode: target framework moniker for multi-targeted projects (e.g. net10.0-windows10.0.26100.0). Ignored in folder mode. */
+  framework?: string;
   /** Format output as JSON */
   json?: boolean;
   /** Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) */
   manifest?: string;
+  /** Project mode: skip building and run the existing build output (still evaluates output properties). Ignored in folder mode. */
+  noBuild?: boolean;
   /** Only create the debug identity and register the package without launching the application */
   noLaunch?: boolean;
+  /** Project mode: skip restoring the project before building. Ignored in folder mode. */
+  noRestore?: boolean;
   /** Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used. */
   outputAppxDirectory?: string;
+  /** Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. */
+  property?: string | string[];
+  /** Project mode: target .NET runtime identifier (RID), e.g. win-x64. Only the RID's architecture is used; it overrides --arch (the RID is reduced to its architecture). Ignored in folder mode. */
+  runtime?: string;
   /** Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. */
   symbols?: boolean;
   /** Unregister the development package after the application exits. Only removes packages registered in development mode. */
@@ -471,22 +485,32 @@ export interface RunOptions extends CommonOptions {
 /**
  * Creates packaged layout, registers the Application, and launches the packaged application.
  */
-export async function run(options: RunOptions): Promise<WinappResult> {
+export async function run(options: RunOptions = {}): Promise<WinappResult> {
   const args: string[] = ['run'];
-  args.push(options.inputFolder);
+  if (options.inputFolder) args.push(options.inputFolder);
   if (options.appArgs) {
     const appArgsArr = Array.isArray(options.appArgs) ? options.appArgs : [options.appArgs];
     args.push(...appArgsArr);
   }
+  if (options.arch) args.push('--arch', options.arch);
   if (options.args) args.push('--args', options.args);
   if (options.clean) args.push('--clean');
+  if (options.configuration) args.push('--configuration', options.configuration);
   if (options.debugOutput) args.push('--debug-output');
   if (options.detach) args.push('--detach');
   if (options.executable) args.push('--executable', options.executable);
+  if (options.framework) args.push('--framework', options.framework);
   if (options.json) args.push('--json');
   if (options.manifest) args.push('--manifest', options.manifest);
+  if (options.noBuild) args.push('--no-build');
   if (options.noLaunch) args.push('--no-launch');
+  if (options.noRestore) args.push('--no-restore');
   if (options.outputAppxDirectory) args.push('--output-appx-directory', options.outputAppxDirectory);
+  if (options.property) {
+    const propertyArr = Array.isArray(options.property) ? options.property : [options.property];
+    for (const v of propertyArr) args.push('--property', v);
+  }
+  if (options.runtime) args.push('--runtime', options.runtime);
   if (options.symbols) args.push('--symbols');
   if (options.unregisterOnExit) args.push('--unregister-on-exit');
   if (options.withAlias) args.push('--with-alias');

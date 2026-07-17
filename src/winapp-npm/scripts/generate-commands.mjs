@@ -140,6 +140,15 @@ function isVariadicArg(argDef) {
 }
 
 /**
+ * Whether a named option accepts multiple values (a C# Option<T[]>, e.g. run's repeatable
+ * `--property`). Keyed strictly on an array value type so single-valued options with an
+ * open-ended arity aren't misclassified.
+ */
+function isVariadicOption(optDef) {
+  return !!(optDef.valueType && optDef.valueType.endsWith('[]'));
+}
+
+/**
  * Commands that act as pass-throughs (arbitrary extra args forwarded to
  * an underlying tool). We add a `string[]` property for the extra args.
  */
@@ -302,7 +311,8 @@ function generate(schema) {
     }
     // then named options
     for (const opt of opts) {
-      const tp = tsType(opt.def.valueType, opt.def.helpName);
+      const variadic = isVariadicOption(opt.def);
+      const tp = variadic ? 'string | string[]' : tsType(opt.def.valueType, opt.def.helpName);
       L(`  /** ${cleanDesc(opt.def.description)} */`);
       L(`  ${opt.propName}?: ${tp};`);
     }
@@ -359,6 +369,12 @@ function generate(schema) {
     for (const opt of opts) {
       if (isBoolFlag(opt.def)) {
         L(`  if (options.${opt.propName}) args.push('${opt.cliName}');`);
+      } else if (isVariadicOption(opt.def)) {
+        // Repeatable option: emit one flag+value pair per element (e.g. --property A=1 --property B=2).
+        L(`  if (options.${opt.propName}) {`);
+        L(`    const ${opt.propName}Arr = Array.isArray(options.${opt.propName}) ? options.${opt.propName} : [options.${opt.propName}];`);
+        L(`    for (const v of ${opt.propName}Arr) args.push('${opt.cliName}', v);`);
+        L('  }');
       } else if (tsType(opt.def.valueType) === 'number') {
         L(`  if (options.${opt.propName} !== undefined) args.push('${opt.cliName}', options.${opt.propName}.toString());`);
       } else {

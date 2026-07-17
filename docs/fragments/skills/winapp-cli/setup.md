@@ -108,6 +108,28 @@ winapp run ./bin/Debug --debug-output
 
 Use `winapp run` during iterative development — it creates a loose layout package, registers a debug identity, and launches the app in one step. For identity-only registration without loose layout, use `winapp create-debug-identity` instead.
 
+#### Project mode: `winapp run` on a `.csproj` (.NET / WinUI)
+
+For .NET SDK projects you can point `winapp run` **at the project instead of the build output** — it builds the `.csproj` and launches it in one step, so there's no separate `dotnet build` and no need to know the output path:
+
+```powershell
+# Build and run the WinUI project in the current directory
+winapp run .
+
+# Same as above — with no input, winapp run defaults to the current directory
+winapp run
+
+# Run a specific project, configuration, and architecture
+winapp run ./src/MyApp/MyApp.csproj -c Release --arch arm64
+
+# Force an unpackaged run of a packaged project
+winapp run . -p WindowsPackageType=None
+
+# Stream dotnet's full build log while building (maps to dotnet -v)
+winapp run . --verbose
+```
+
+Project mode supports both **packaged** and **unpackaged** WinUI apps. It detects which from the project's effective `WindowsPackageType` MSBuild property (`MSIX` ⇒ packaged loose-layout + AUMID launch; `None` ⇒ launch the built `.exe` directly), and installs the matching-architecture Windows App Runtime the app needs before launching. Build inputs: `-c/--configuration`, `--arch`, `-r/--runtime`, `-f/--framework`, `--no-build`, `--no-restore`, `-p/--property` (repeatable). Requires the .NET SDK 8.0.100+. Identity-only options (`--manifest`, `--no-launch`, `--with-alias`, `--clean`, `--unregister-on-exit`, `--output-appx-directory`) apply to packaged apps only and are rejected for unpackaged ones. The build output **streams live** as it runs (with a progress spinner in interactive terminals, and the full log shown on failure); `--verbose` maps to dotnet's `-v` for the full build log, and under `--json` build output goes to stderr so stdout stays pure JSON.
 
 #### Choosing between `run` and `create-debug-identity`
 

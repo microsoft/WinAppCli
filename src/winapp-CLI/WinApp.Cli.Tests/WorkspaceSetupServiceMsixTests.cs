@@ -250,7 +250,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
         var msixDir = _tempDirectory.CreateSubdirectory("msix"); // no inventory at all
         var service = GetRequiredService<IWorkspaceSetupService>();
 
-        var (installed, errors) = await service.InstallWindowsAppRuntimeAsync(
+        var (installed, errors, _) = await service.InstallWindowsAppRuntimeAsync(
             msixDir, TestTaskContext, TestContext.CancellationToken);
 
         Assert.AreEqual(0, installed);
@@ -266,7 +266,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
         WriteInventory(msixDir, "missing.msix=Microsoft.WindowsAppRuntime.1.6_6000.0.0.0_x64");
         var service = GetRequiredService<IWorkspaceSetupService>();
 
-        var (installed, errors) = await service.InstallWindowsAppRuntimeAsync(
+        var (installed, errors, _) = await service.InstallWindowsAppRuntimeAsync(
             msixDir, TestTaskContext, TestContext.CancellationToken);
 
         Assert.AreEqual(0, installed);
@@ -284,7 +284,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
         _fakePackageRegistrationService.FakeInstalledVersion = null; // not installed
         var service = GetRequiredService<IWorkspaceSetupService>();
 
-        var (installed, errors) = await service.InstallWindowsAppRuntimeAsync(
+        var (installed, errors, _) = await service.InstallWindowsAppRuntimeAsync(
             msixDir, TestTaskContext, TestContext.CancellationToken);
 
         Assert.AreEqual(1, installed);
@@ -303,7 +303,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
         _fakePackageRegistrationService.FakeInstalledVersion = "9999.0.0.0"; // newer already installed
         var service = GetRequiredService<IWorkspaceSetupService>();
 
-        var (installed, errors) = await service.InstallWindowsAppRuntimeAsync(
+        var (installed, errors, _) = await service.InstallWindowsAppRuntimeAsync(
             msixDir, TestTaskContext, TestContext.CancellationToken);
 
         Assert.AreEqual(0, installed);
@@ -322,7 +322,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
         _fakePackageRegistrationService.InstallPackageThrows = new InvalidOperationException("boom");
         var service = GetRequiredService<IWorkspaceSetupService>();
 
-        var (installed, errors) = await service.InstallWindowsAppRuntimeAsync(
+        var (installed, errors, _) = await service.InstallWindowsAppRuntimeAsync(
             msixDir, TestTaskContext, TestContext.CancellationToken);
 
         Assert.AreEqual(0, installed);
@@ -341,15 +341,15 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
         _fakePackageRegistrationService.FakeInstalledVersion = null;
         var service = GetRequiredService<IWorkspaceSetupService>();
 
-        var (installed, errors) = await service.InstallWindowsAppRuntimeAsync(
+        var (installed, errors, _) = await service.InstallWindowsAppRuntimeAsync(
             msixDir, TestTaskContext, TestContext.CancellationToken);
 
         Assert.AreEqual(1, installed);
         Assert.AreEqual(0, errors);
         // Fallback parsed the package name from the inventory identity before "_".
-        CollectionAssert.Contains(
-            _fakePackageRegistrationService.GetInstalledVersionCalls,
-            "Microsoft.WindowsAppRuntime.1.6");
+        Assert.IsTrue(
+            _fakePackageRegistrationService.GetInstalledVersionCalls.Any(c => c.PackageName == "Microsoft.WindowsAppRuntime.1.6"),
+            "Expected GetInstalledVersion to be called with the package name parsed from the inventory identity.");
     }
 
     [TestMethod]
@@ -364,7 +364,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
         _fakePackageRegistrationService.FakeInstalledVersion = null;
         var service = GetRequiredService<IWorkspaceSetupService>();
 
-        var (installed, errors) = await service.InstallWindowsAppRuntimeAsync(
+        var (installed, errors, _) = await service.InstallWindowsAppRuntimeAsync(
             msixDir, TestTaskContext, TestContext.CancellationToken);
 
         Assert.AreEqual(1, installed);

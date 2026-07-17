@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Window
+    x:Class="winui_unpackaged_app.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="WinUI Unpackaged Sample"
+    mc:Ignorable="d">
+    <Window.SystemBackdrop>
+        <MicaBackdrop />
+    </Window.SystemBackdrop>
+
+    <ScrollViewer AutomationProperties.AutomationId="MainScroller">
+        <StackPanel Padding="40" Spacing="16">
+
+            <TextBlock
+                AutomationProperties.AutomationId="PageTitle"
+                Style="{StaticResource TitleTextBlockStyle}"
+                Text="WinUI Unpackaged Sample" />
+
+            <TextBlock
+                AutomationProperties.AutomationId="PageSubtitle"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Text="Runs without MSIX identity (WindowsPackageType=None)" />
+
+            <!-- Counter -->
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <Button
+                    x:Name="CounterButton"
+                    AutomationProperties.AutomationId="CounterButton"
+                    AutomationProperties.Name="Counter Button"
+                    Click="CounterButton_Click"
+                    Content="Click Me" />
+                <TextBlock
+                    x:Name="CounterText"
+                    AutomationProperties.AutomationId="CounterDisplay"
+                    VerticalAlignment="Center"
+                    Text="Count: 0" />
+            </StackPanel>
+
+        </StackPanel>
+    </ScrollViewer>
+</Window>

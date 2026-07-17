@@ -829,7 +829,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
 
     private Task InvokeEnsureWindowsAppRuntimeInstalledAsync(DotNetPackageListJson? list) =>
         (Task)EnsureWindowsAppRuntimeInstalledMethod.Invoke(
-            _msixService, [list, TestTaskContext, TestContext.CancellationToken])!;
+            _msixService, [list, null, TestTaskContext, TestContext.CancellationToken])!;
 
     [TestMethod]
     public async Task EnsureWindowsAppRuntimeInstalledAsync_InstallsMissingPackages()

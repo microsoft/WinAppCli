@@ -416,6 +416,51 @@ internal partial class DotNetService : IDotNetService
         return (process.ExitCode, outputBuilder.ToString(), errorBuilder.ToString());
     }
 
+    public async Task<int> RunDotnetStreamingAsync(
+        DirectoryInfo workingDirectory,
+        string arguments,
+        Action<string>? onOutputLine,
+        Action<string>? onErrorLine,
+        CancellationToken cancellationToken = default)
+    {
+        var processStartInfo = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            Arguments = arguments,
+            WorkingDirectory = workingDirectory.FullName,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var process = new Process { StartInfo = processStartInfo };
+
+        process.OutputDataReceived += (sender, e) =>
+        {
+            if (e.Data != null)
+            {
+                onOutputLine?.Invoke(e.Data);
+            }
+        };
+
+        process.ErrorDataReceived += (sender, e) =>
+        {
+            if (e.Data != null)
+            {
+                onErrorLine?.Invoke(e.Data);
+            }
+        };
+
+        process.Start();
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+
+        await process.WaitForExitAsync(cancellationToken);
+
+        return process.ExitCode;
+    }
+
     public async Task<bool> HasPackageReferenceAsync(FileInfo csprojPath, string packageName, CancellationToken cancellationToken = default)
     {
         // Fast path: many .csproj files declare PackageReference inline. A direct XML scan avoids

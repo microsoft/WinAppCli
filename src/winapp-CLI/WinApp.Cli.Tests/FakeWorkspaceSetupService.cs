@@ -35,9 +35,15 @@ internal sealed class FakeWorkspaceSetupService : IWorkspaceSetupService
         return Task.FromResult(SetupWorkspaceResult);
     }
 
-    public Task<(int InstalledCount, int ErrorCount)> InstallWindowsAppRuntimeAsync(DirectoryInfo msixDir, TaskContext taskContext, CancellationToken cancellationToken)
+    /// <summary>Value returned by <see cref="IsWindowsAppRuntimeRegistered"/>.</summary>
+    public bool IsRuntimeRegisteredResult { get; set; } = true;
+
+    public Task<(int InstalledCount, int ErrorCount, IReadOnlyList<(string Name, string Version)> RuntimePackages)> InstallWindowsAppRuntimeAsync(DirectoryInfo msixDir, TaskContext taskContext, CancellationToken cancellationToken, string? architecture = null)
     {
         InstallRuntimeCalls.Add(msixDir);
-        return Task.FromResult(InstallRuntimeResult);
+        return Task.FromResult((InstallRuntimeResult.InstalledCount, InstallRuntimeResult.ErrorCount, (IReadOnlyList<(string Name, string Version)>)[]));
     }
+
+    public bool IsWindowsAppRuntimeRegistered(string? architecture, IReadOnlyList<(string Name, string Version)>? expectedRuntimePackages = null)
+        => IsRuntimeRegisteredResult;
 }

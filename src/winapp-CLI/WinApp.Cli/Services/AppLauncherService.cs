@@ -39,6 +39,37 @@ internal class AppLauncherService(ILogger<AppLauncherService> logger) : IAppLaun
     }
 
     /// <inheritdoc />
+    public ILaunchedProcess LaunchExecutable(string exePath, string? arguments = null, string? workingDirectory = null)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = exePath,
+            // Inherit the console: an unpackaged WinUI app's stdout/stderr should stream inline,
+            // matching how `dotnet run` behaves.
+            UseShellExecute = false,
+        };
+
+        if (!string.IsNullOrEmpty(arguments))
+        {
+            psi.Arguments = arguments;
+        }
+
+        if (!string.IsNullOrEmpty(workingDirectory))
+        {
+            psi.WorkingDirectory = workingDirectory;
+        }
+
+        // Return the owned Process wrapped in ILaunchedProcess. The caller keeps the handle to wait
+        // and read the exit code — re-attaching by PID later would race PID reuse and lose the exit
+        // code once the process exits.
+        var process = Process.Start(psi)
+            ?? throw new InvalidOperationException($"Failed to start process '{exePath}'.");
+
+        logger.LogDebug("Launched executable {ExePath} (PID {PID}).", exePath, process.Id);
+        return new LaunchedProcess(process);
+    }
+
+    /// <inheritdoc />
     public string ComputePackageFamilyName(string packageName, string publisher)
     {
         // Windows uses the first 13 characters of a Crockford Base32 encoding
