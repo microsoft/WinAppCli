@@ -14,9 +14,10 @@ namespace WinApp.Cli.Commands;
 
 /// <summary>
 /// <c>winapp find-ui</c> — lexical search over WinUI controls and samples.
-/// WinUI-only by design: the corpus is the WinUI 3 Gallery plus the Windows
-/// Community Toolkit gallery (and a few curated core patterns). It does not
-/// cover WPF, WinForms, or other UI frameworks.
+/// WinUI-only by design: the corpus is the WinUI 3 Gallery, the Windows
+/// Community Toolkit gallery, and the microsoft-ui-reactor ReactorGallery
+/// (plus a few curated core patterns). It does not cover WPF, WinForms, or
+/// other UI frameworks.
 /// </summary>
 internal sealed class FindUiCommand : Command, IShortDescription
 {
@@ -51,7 +52,7 @@ internal sealed class FindUiCommand : Command, IShortDescription
 
         SourceOption = new Option<string?>("--source")
         {
-            Description = "Restrict results to a single source: gallery (WinUI 3 Gallery), toolkit (Windows Community Toolkit), or core (curated patterns)."
+            Description = "Restrict results to a single source: gallery (WinUI 3 Gallery), toolkit (Windows Community Toolkit), reactor (microsoft-ui-reactor, C#-only declarative WinUI), or core (curated patterns)."
         };
 
         MaxOption = new Option<int>("--max")
@@ -67,7 +68,7 @@ internal sealed class FindUiCommand : Command, IShortDescription
     }
 
     public FindUiCommand()
-        : base("find-ui", "Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery and Windows Community Toolkit (not WPF/WinForms). The corpus is fetched from GitHub on first use and cached per-user, so the first run requires network access.")
+        : base("find-ui", "Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery, the Windows Community Toolkit, and the microsoft-ui-reactor ReactorGallery (not WPF/WinForms). The corpus is fetched from GitHub on first use and cached per-user, so the first run requires network access.")
     {
         Arguments.Add(QueryArgument);
         Options.Add(IdOption);

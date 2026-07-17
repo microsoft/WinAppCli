@@ -711,7 +711,12 @@ internal sealed class SearchEngine
     {
         // See note on FormatCorePattern: no blank-line separators (runtime collapses them).
         var sb = new System.Text.StringBuilder();
-        var sourceTag = s.Source == "toolkit" ? " [CommunityToolkit]" : "";
+        var sourceTag = s.Source switch
+        {
+            "toolkit" => " [CommunityToolkit]",
+            "reactor" => " [Reactor]",
+            _ => ""
+        };
         sb.AppendLine($"## {ControlHeader(s.ControlName, s.HeaderText)}{sourceTag}");
 
         // Toolkit-specific prerequisites — single compact line
@@ -723,6 +728,15 @@ internal sealed class SearchEngine
             foreach (var ns in s.XmlnsImports)
                 parts.Add($"`{ns}`");
             sb.AppendLine($"**Setup:** {string.Join(" · ", parts)}");
+        }
+        // Reactor: surface the (uniform) NuGet package. Any control-level `using`
+        // directives are already folded into the C# snippet, and the shared
+        // Microsoft.UI.Reactor api namespace is deliberately NOT emitted as a
+        // **Namespace:** line — all reactor controls share it, so it'd be pure noise.
+        else if (s.Source == "reactor")
+        {
+            if (!string.IsNullOrEmpty(s.NuGetPackage))
+                sb.AppendLine($"**Setup:** NuGet `{s.NuGetPackage}`");
         }
         // Gallery non-default namespace hint — agents miss `using Microsoft.Windows.Notifications`
         // and similar long-tail imports. Skip the dominant Microsoft.UI.Xaml.Controls (auto-imported

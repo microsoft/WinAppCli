@@ -4,12 +4,14 @@ Use this skill when building a **WinUI 3** UI and you need to discover which
 control fits an intent and get a real, working code example — without leaving the
 CLI or guessing at control names and APIs.
 
-`winapp find-ui` searches the **WinUI 3 Gallery** and the **Windows Community
-Toolkit** (plus a few curated core patterns) and returns a working XAML + C#
-snippet plus where it came from.
+`winapp find-ui` searches the **WinUI 3 Gallery**, the **Windows Community
+Toolkit**, and the **microsoft-ui-reactor ReactorGallery** (plus a few curated
+core patterns) and returns a working code snippet plus where it came from.
 
-- **WinUI-only.** The corpus is WinUI 3 Gallery + Windows Community Toolkit. It
-  does **not** cover WPF, WinForms, or other UI frameworks.
+- **WinUI-only.** The corpus is WinUI 3 Gallery + Windows Community Toolkit +
+  Reactor. It does **not** cover WPF, WinForms, or other UI frameworks.
+- **Result shape varies by source.** Gallery and Toolkit scenarios return XAML +
+  C#; Reactor scenarios are C#-only declarative WinUI (no XAML).
 - Distinct from `winapp ui search`, which searches a *running app's* UI tree via
   UI Automation — unrelated to control/sample discovery.
 
@@ -40,6 +42,7 @@ winapp find-ui "swipeable list rows"
 # Restrict to one source
 winapp find-ui "settings card" --source toolkit
 winapp find-ui "color picker" --source gallery
+winapp find-ui "flex layout" --source reactor
 
 # Return more candidates
 winapp find-ui "navigation" --max 6
@@ -74,8 +77,9 @@ winapp find-ui "color picker" --json
   `--refresh`). If the very first run is offline you'll get a clear "connect and
   run once" message.
 - **Scenario ids** are stable within a cached corpus and look like
-  `gallery-<control>-<n>` / `toolkit-<control>-<n>`; the `<source>-` prefix
-  disambiguates controls that exist in both galleries (e.g. `ColorPicker`).
+  `gallery-<control>-<n>` / `toolkit-<control>-<n>` / `reactor-<control>-<n>`; the
+  `<source>-` prefix disambiguates controls that exist in more than one gallery
+  (e.g. `ColorPicker`).
 - **Exit codes** are script-friendly: `0` on a hit, `1` on no match / error.
 - Keep queries **focused** (one feature per query) — the lexical ranker rewards
   specific phrasing. Batch multiple focused queries rather than one broad one.

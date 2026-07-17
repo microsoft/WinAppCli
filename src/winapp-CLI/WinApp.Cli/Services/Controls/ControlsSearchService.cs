@@ -8,8 +8,8 @@ using WinApp.Cli.Services;
 /// <summary>
 /// Builds and memoizes the <see cref="SearchEngine"/> that backs
 /// <c>winapp find-ui</c>. Scenario data comes from the registered
-/// <see cref="ISearchProvider"/>s (WinUI Gallery + Community Toolkit), which
-/// serve a fresh per-user cache or fetch from GitHub on a cold/stale cache.
+/// <see cref="ISearchProvider"/>s (WinUI Gallery + Community Toolkit + Reactor),
+/// which serve a fresh per-user cache or fetch from GitHub on a cold/stale cache.
 /// The curated core patterns are baked in (they have no upstream endpoint).
 ///
 /// find-ui ships no embedded scenario snapshot, so the very first run (or any
@@ -97,9 +97,9 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
             if (allScenarios.Count == 0)
             {
                 throw new ControlsDataUnavailableException(
-                    "No WinUI control data is available. find-ui fetches the WinUI Gallery and " +
-                    "Community Toolkit corpora from GitHub on first use — connect to the internet " +
-                    "and run the command once to populate the local cache.");
+                    "No WinUI control data is available. find-ui fetches the WinUI Gallery, " +
+                    "Community Toolkit, and Reactor corpora from GitHub on first use — connect to the " +
+                    "internet and run the command once to populate the local cache.");
             }
 
             var engine = new SearchEngine(

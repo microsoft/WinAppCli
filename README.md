@@ -234,7 +234,7 @@ See also: [Debugging Guide](./docs/debugging.md) — choosing between `winapp ru
 
 **Discovery:**
 
-- [`find-ui`](./docs/usage.md#find-ui) - Search WinUI controls & samples (WinUI 3 Gallery + Windows Community Toolkit) for a working code example
+- [`find-ui`](./docs/usage.md#find-ui) - Search WinUI controls & samples (WinUI 3 Gallery + Windows Community Toolkit + Reactor) for a working code example
 
 **Node.js/Electron Specific:**
 

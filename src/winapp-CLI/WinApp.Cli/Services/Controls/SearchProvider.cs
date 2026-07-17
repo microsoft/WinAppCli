@@ -250,6 +250,7 @@ internal static class ProviderRegistry
     {
         new("gallery", "Gallery (WinUI 3)"),
         new("toolkit", "CommunityToolkit"),
+        new("reactor", "Reactor (WinUI)"),
     };
 
     /// <summary>Build live provider instances whose caches live under
@@ -258,6 +259,7 @@ internal static class ProviderRegistry
     [
         new GalleryProvider(cacheRoot),
         new ToolkitProvider(cacheRoot),
+        new ReactorProvider(cacheRoot),
     ];
 
     /// <summary>Provider ids plus the pseudo-source <c>"core"</c> — the valid

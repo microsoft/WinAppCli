@@ -575,7 +575,7 @@
       }
     },
     "find-ui": {
-      "description": "Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery and Windows Community Toolkit (not WPF/WinForms). The corpus is fetched from GitHub on first use and cached per-user, so the first run requires network access.",
+      "description": "Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery, the Windows Community Toolkit, and the microsoft-ui-reactor ReactorGallery (not WPF/WinForms). The corpus is fetched from GitHub on first use and cached per-user, so the first run requires network access.",
       "hidden": false,
       "arguments": {
         "query": {
@@ -671,7 +671,7 @@
           "recursive": false
         },
         "--source": {
-          "description": "Restrict results to a single source: gallery (WinUI 3 Gallery), toolkit (Windows Community Toolkit), or core (curated patterns).",
+          "description": "Restrict results to a single source: gallery (WinUI 3 Gallery), toolkit (Windows Community Toolkit), reactor (microsoft-ui-reactor, C#-only declarative WinUI), or core (curated patterns).",
           "hidden": false,
           "valueType": "System.String",
           "hasDefaultValue": false,
