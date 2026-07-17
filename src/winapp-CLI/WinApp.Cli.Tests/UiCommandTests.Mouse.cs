@@ -10,7 +10,7 @@ public partial class UiCommandTests
 {
     // ---------------------------------------------------------------------
     // drag (#498) — mouse drag gesture: drag <from> <to>, each a selector
-    // (element center) or app x,y coordinates
+    // (element center) or screen x,y coordinates
     // ---------------------------------------------------------------------
 
     [TestMethod]
@@ -47,7 +47,7 @@ public partial class UiCommandTests
         Assert.AreEqual(0, _fakeMouse.DragCalls.Count);
     }
 
-    // ---- drag <from> <to> where each is a selector (center) or x,y app coords ----
+    // ---- drag <from> <to> where each is a selector (center) or x,y screen coords ----
 
     [TestMethod]
     public async Task Drag_TwoArg_SelectorToCoordinates_UsesElementCenter()

@@ -13,14 +13,31 @@ namespace WinApp.Cli.Services;
 
 internal static partial class WgcCapture
 {
+    internal static Func<HWND, ILogger, int, IFrameGrabber> s_startGrabber =
+        (hwnd, logger, fps) => StartGrabber(hwnd, logger, fps);
+
+    internal interface IFrameGrabber : IDisposable
+    {
+        bool IsClosed { get; }
+
+        (byte[] Pixels, int Width, int Height, long Version)? TryGetLatest();
+
+        Task<bool> WaitForFirstFrameAsync(TimeSpan timeout, CancellationToken ct);
+    }
+
     /// <summary>
     /// Opens a persistent Windows Graphics Capture session for a window and keeps
     /// the most recently arrived frame available on demand. Used by the recorder to
     /// sample frames at a fixed cadence without re-initializing D3D per frame.
     /// </summary>
+    /// <remarks>
+    /// Coverage ceiling (issue #630): tests cover recorder orchestration through the start-grabber
+    /// seam. This method itself performs D3D11CreateDevice and WGC FramePool/session creation for a
+    /// real HWND, which requires native GPU/WinRT resources unavailable in deterministic headless runs.
+    /// </remarks>
     public static FrameGrabber StartGrabber(HWND hwnd, ILogger logger, int fps = 0)
     {
-        if (!GraphicsCaptureSession.IsSupported())
+        if (!s_isSupported())
         {
             throw new PlatformNotSupportedException("Windows.Graphics.Capture is not supported on this system.");
         }
@@ -36,22 +53,28 @@ internal static partial class WgcCapture
             out _,
             out var context).ThrowOnFailure();
 
+        Direct3D11CaptureFramePool? pool = null;
+        GraphicsCaptureSession? session = null;
         try
         {
             var winrtDevice = CreateDirect3DDevice(device);
             var item = CreateItemForWindow(hwnd);
-            var pool = Direct3D11CaptureFramePool.CreateFreeThreaded(
+            pool = Direct3D11CaptureFramePool.CreateFreeThreaded(
                 winrtDevice,
                 DirectXPixelFormat.B8G8R8A8UIntNormalized,
                 numberOfBuffers: 2,
                 item.Size);
-            var session = pool.CreateCaptureSession(item);
+            session = pool.CreateCaptureSession(item);
             session.IsCursorCaptureEnabled = false;
 
             return new FrameGrabber(device, context, pool, session, item, logger, fps);
         }
         catch
         {
+            // If we fail after allocating the frame pool/session but before FrameGrabber takes
+            // ownership, dispose them here so the heavy WGC/GPU resources are not leaked.
+            session?.Dispose();
+            pool?.Dispose();
             (context as IDisposable)?.Dispose();
             (device as IDisposable)?.Dispose();
             throw;
@@ -63,7 +86,7 @@ internal static partial class WgcCapture
     /// frames arrive on WGC's free-threaded pool while the recorder samples via
     /// <see cref="TryGetLatest"/>.
     /// </summary>
-    internal sealed class FrameGrabber : IDisposable
+    internal sealed class FrameGrabber : IFrameGrabber
     {
         private readonly D3D.ID3D11Device _device;
         private readonly D3D.ID3D11DeviceContext _context;
@@ -91,6 +114,11 @@ internal static partial class WgcCapture
         private long _lastSampleMs;
         private readonly int _minIntervalMs; // 0 = no throttle
 
+        /// <remarks>
+        /// Coverage ceiling (issue #630): constructing this type subscribes to a live WGC frame pool
+        /// and starts native capture. Tests use the <see cref="IFrameGrabber"/> seam for orchestration;
+        /// this constructor remains bound to real D3D/WGC objects.
+        /// </remarks>
         internal FrameGrabber(
             D3D.ID3D11Device device,
             D3D.ID3D11DeviceContext context,
@@ -119,6 +147,10 @@ internal static partial class WgcCapture
         /// Fires when the captured window or item is closed/destroyed mid-recording.
         /// Sets <see cref="IsClosed"/> so the recording loop can stop gracefully.
         /// </summary>
+        /// <remarks>
+        /// Coverage ceiling (issue #630): WGC raises this only when a real captured item closes during
+        /// a live session. Recorder close-drain behavior is covered through the frame-grabber seam.
+        /// </remarks>
         private void OnItemClosed(GraphicsCaptureItem sender, object args)
         {
             _isClosed = true;
@@ -132,6 +164,11 @@ internal static partial class WgcCapture
         /// </summary>
         public bool IsClosed => _isClosed;
 
+        /// <remarks>
+        /// Coverage ceiling (issue #630): this callback depends on a live WGC frame pool and GPU
+        /// frame resources. Pure resize/throttle helpers and recorder consumers are tested; native
+        /// frame arrival/copy COM fault arms cannot be triggered safely.
+        /// </remarks>
         private void OnFrameArrived(Direct3D11CaptureFramePool sender, object args)
         {
             lock (_callbackLock)
@@ -227,6 +264,10 @@ internal static partial class WgcCapture
         }
 
         /// <summary>Returns the most recently captured frame, or <see langword="null"/> if none has arrived yet.</summary>
+        /// <remarks>
+        /// Coverage ceiling (issue #630): the real cache is populated only by live WGC callbacks; the
+        /// recorder paths that consume cached frames are covered with a deterministic fake grabber.
+        /// </remarks>
         public (byte[] Pixels, int Width, int Height, long Version)? TryGetLatest()
         {
             lock (_lock)
@@ -240,6 +281,10 @@ internal static partial class WgcCapture
         }
 
         /// <summary>Waits (up to <paramref name="timeout"/>) for the first frame to arrive.</summary>
+        /// <remarks>
+        /// Coverage ceiling (issue #630): waiting for the first frame requires the native WGC callback
+        /// to populate this instance; recorder timeout behavior is covered through the grabber seam.
+        /// </remarks>
         public async Task<bool> WaitForFirstFrameAsync(TimeSpan timeout, CancellationToken ct)
         {
             var deadline = DateTime.UtcNow + timeout;
@@ -254,6 +299,11 @@ internal static partial class WgcCapture
             return TryGetLatest() is not null;
         }
 
+        /// <remarks>
+        /// Coverage ceiling (issue #630): disposal releases real WGC/D3D COM resources and unsubscribes
+        /// native events. Tests verify consumers dispose fake grabbers; native resource release itself
+        /// requires a live capture session.
+        /// </remarks>
         public void Dispose()
         {
             lock (_callbackLock)

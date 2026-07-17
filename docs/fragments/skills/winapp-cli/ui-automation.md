@@ -165,26 +165,26 @@ winapp ui send-keys "win+shift+v" -a myapp --via send-input --allow-system-keys
 - Long literal text on `--via send-input` is **auto-throttled**: the text is split into small character chunks injected one `SendInput` at a time with a brief pause between the chunks of that one run, so the target can drain its input queue and every character lands. A single unbroken burst overruns the queue and silently drops characters even though the command reports success. The pacing is scoped to a single long text run — short text, key names, and modifier combos (including sequences like `ctrl+a delete`) inject with no added delay, and the command emits an informational warning when a payload is large enough to be throttled. Because each paced chunk lands on whatever window is foreground, `send-input` re-verifies the target still owns the foreground before every continuation chunk and **aborts with `foreground_not_target`** if focus leaves the target mid-injection, so a focus change partway through can't spray the rest of the text into another window (a focus-changing chord such as `alt+tab` is exempt and is never treated as drift). For large bulk text, prefer `set-value` (atomic, no keystrokes or foreground needed) on controls that support it.
 
 ### Drag (reorder, resize, sliders, drag-and-drop)
-Press the mouse button at one point, move to another, then release with `drag <from> <to>`, where each endpoint is an element selector (uses its center) or app `x,y` coordinates from `ui inspect`. Uses `SendInput` with intermediate moves so apps see a realistic `WM_MOUSEMOVE` stream.
+Press the mouse button at one point, move to another, then release with `drag <from> <to>`, where each endpoint is an element selector (uses its center) or screen `x,y` coordinates from `ui inspect`. Uses `SendInput` with intermediate moves so apps see a realistic `WM_MOUSEMOVE` stream.
 ```powershell
 # Reorder one item onto another (center → center)
 winapp ui drag itm-card-9f8e itm-slot-2c1a -a myapp
 
-# Element center → app coordinates (as reported by `ui inspect`)
+# Element center → screen coordinates (as reported by `ui inspect`)
 winapp ui drag itm-card-9f8e 300,400 -a myapp
 
-# Raw app coordinates → app coordinates
+# Raw screen coordinates → screen coordinates
 winapp ui drag 120,200 480,200 -a myapp
 
 # Right-button drag
 winapp ui drag itm-card-9f8e itm-trash-0001 -a myapp --right
 ```
-- A selector drags from/to the element's center; `x,y` are app coordinates in the same space `ui inspect`/`search` report. Element endpoints are re-resolved just before the drag and fail with `target_moved` if still animating; on a locked/secure desktop the drag fails with `no_interactive_desktop`.
+- A selector drags from/to the element's center; `x,y` are screen coordinates in the same space `ui inspect`/`search` report. Element endpoints are re-resolved just before the drag and fail with `target_moved` if still animating; on a locked/secure desktop the drag fails with `no_interactive_desktop`.
 
 ### Touch gestures (tap, swipe, pinch, stretch, long-press)
-Inject synthetic touch. The contact anchor is an element selector (its center) or an explicit `--at x,y` app coordinate. Prefers the modern synthetic-pointer device and falls back to the legacy touch-injection API.
+Inject synthetic touch. The contact anchor is an element selector (its center) or an explicit `--at x,y` screen coordinate. Prefers the modern synthetic-pointer device and falls back to the legacy touch-injection API.
 ```powershell
-# Tap an element center; or tap explicit app coordinates
+# Tap an element center; or tap explicit screen coordinates
 winapp ui touch btn-ok-1a2b -a myapp
 winapp ui touch -a myapp --at 320,240
 
