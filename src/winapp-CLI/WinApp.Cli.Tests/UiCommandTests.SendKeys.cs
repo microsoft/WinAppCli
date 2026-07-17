@@ -4,6 +4,7 @@
 using Spectre.Console;
 using Spectre.Console.Testing;
 using WinApp.Cli.Commands;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Tests;
@@ -560,7 +561,92 @@ public partial class UiCommandTests
         Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count, "win+shift+l must never reach the keyboard transport");
     }
 
-    // LOW: lone right-Win key (vk=0x5c) is soft-blocked without --allow-system-keys
+    // #656 — ctrl+alt+del (SAS) must be hard-blocked like win+l, even with --allow-system-keys
+    [TestMethod]
+    public async Task SendKeys_CtrlAltDel_ViaSendInput_WithAllowSystemKeys_IsStillRefused()
+    {
+        // ctrl+alt+del is a Secure Attention Sequence: Windows drops synthesized SAS input regardless of
+        // privilege or flag, so it can never take effect. It must be refused (exit 1) rather than report a
+        // misleading success — even when --allow-system-keys is passed — and never reach the transport.
+        _fakeSession.SessionResult.WindowHandle = 4242;
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["ctrl+alt+del", "-a", "TestApp", "--via", "send-input", "--allow-system-keys", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count, "ctrl+alt+del must never reach the keyboard transport");
+        // Asserting only the exit code would still pass if the JSON envelope were dropped or carried the
+        // wrong code/reason. The change promises invalid_arguments + a SAS explanation, so inspect both:
+        // --json consumers must get an honest, actionable error instead of silence or a misleading success.
+        var stderr = ConsoleStdErr.ToString();
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain a JSON error object; got: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        var errorInfo = error.GetProperty("error");
+        Assert.AreEqual(UiJsonError.CodeInvalidArguments,
+            errorInfo.GetProperty("code").GetString(),
+            "JSON error.code must be 'invalid_arguments' for the ctrl+alt+del SAS refusal");
+        var message = errorInfo.GetProperty("message").GetString();
+        StringAssert.Contains(message, "ctrl+alt+del",
+            "JSON error.message must name the refused combo");
+        StringAssert.Contains(message, "SAS",
+            "JSON error.message must explain the Secure Attention Sequence block, not just refuse");
+    }
+
+    // #656 — ctrl+alt+del without the flag is refused too, with a message explaining it can't be synthesized
+    [TestMethod]
+    public async Task SendKeys_CtrlAltDel_ViaSendInput_WithoutAllow_IsRefusedWithSasReason()
+    {
+        // Without --allow-system-keys the never-bypassable guard still fires first, and the error must
+        // explain the SAS block (not just "pass --allow-system-keys", which would never help here).
+        _fakeSession.SessionResult.WindowHandle = 4242;
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["ctrl+alt+del", "-a", "TestApp", "--via", "send-input"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "ctrl+alt+del");
+        StringAssert.Contains(ConsoleStdErr.ToString(), "SAS");
+    }
+
+    // #656 — post-message is window-scoped, so ctrl+alt+del is not hard-blocked there (it just posts)
+    [TestMethod]
+    public async Task SendKeys_CtrlAltDel_ViaPostMessage_StillSends()
+    {
+        // The never-bypassable guard only applies to OS-wide send-input; post-message posts straight to the
+        // target HWND's queue (a posted ctrl+alt+del is harmless), so it is unaffected and still sends.
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["ctrl+alt+del", "-a", "TestApp", "--via", "post-message", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+    }
+
+    // #656 — a single send-input invocation containing BOTH hard-blocked combos must compose both
+    // names AND both distinct reasons. Guard-level ordering is covered in SystemKeyGuardTests; this
+    // asserts the command-level message actually stitches each combo to its own reason (SAS vs. lock),
+    // not just the first one.
+    [TestMethod]
+    public async Task SendKeys_CtrlAltDelAndWinL_ViaSendInput_ComposesBothNamesAndReasons()
+    {
+        _fakeSession.SessionResult.WindowHandle = 4242;
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["ctrl+alt+del win+l", "-a", "TestApp", "--via", "send-input", "--allow-system-keys"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count, "neither hard-blocked combo may reach the transport");
+        var stderr = ConsoleStdErr.ToString();
+        // Both combo names must appear...
+        StringAssert.Contains(stderr, "ctrl+alt+del", "message must name ctrl+alt+del");
+        StringAssert.Contains(stderr, "win+l", "message must name win+l");
+        // ...each stitched to its OWN distinct reason: SAS for ctrl+alt+del, workstation-lock for win+l.
+        StringAssert.Contains(stderr, "SAS", "message must carry the ctrl+alt+del SAS reason");
+        StringAssert.Contains(stderr, "locks the workstation", "message must carry the win+l lock reason");
+    }
     [TestMethod]
     public async Task SendKeys_LoneRWin_ViaSendInput_WithoutAllow_IsBlocked()
     {
