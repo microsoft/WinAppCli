@@ -26,6 +26,11 @@ public partial class UiCommandTests
         public override string? ReadLine() => null;
     }
 
+    private sealed class ThrowingStdinReader : TextReader
+    {
+        public override string? ReadLine() => throw new IOException("stdin pipe broke");
+    }
+
     [TestMethod]
     public void StdinStopMonitor_Newline_StopsRecording()
     {
@@ -71,6 +76,34 @@ public partial class UiCommandTests
             Task.CompletedTask,
             () => stopped = true);
         Assert.IsTrue(stopped, "any line of text should trigger stop");
+    }
+
+    [TestMethod]
+    public void StdinStopMonitor_ReadThrows_TreatedAsEofAndStops()
+    {
+        // An IO error while reading stdin (e.g. a broken pipe) must be swallowed and treated as EOF
+        // so the recording still finalizes gracefully instead of leaving the monitor thread wedged.
+        var stopped = false;
+        StdinStopMonitor.MonitorCore(
+            new ThrowingStdinReader(),
+            Task.CompletedTask,
+            () => stopped = true);
+        Assert.IsTrue(stopped, "a stdin read error must be treated as EOF and still trigger stop");
+    }
+
+    [TestMethod]
+    public void StdinStopMonitor_Start_RunsOnBackgroundThreadAndFiresStop()
+    {
+        // Start() is the production entry point: it must spawn the monitor on a daemon thread and
+        // invoke the stop callback once stdin yields a line and the ready gate is already open.
+        using var stopped = new ManualResetEventSlim(false);
+        StdinStopMonitor.Start(
+            new StringReader("\n"),
+            Task.CompletedTask,
+            () => stopped.Set());
+
+        Assert.IsTrue(stopped.Wait(TimeSpan.FromSeconds(5)),
+            "Start must run the monitor on a background thread and fire stop for a pre-buffered line.");
     }
 
     [TestMethod]

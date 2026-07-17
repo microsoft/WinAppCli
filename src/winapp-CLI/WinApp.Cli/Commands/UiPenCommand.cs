@@ -278,7 +278,7 @@ internal class UiPenCommand : Command, IShortDescription
             catch (System.Runtime.InteropServices.COMException comEx)
             {
                 logger.LogDebug("COM error: {HResult} {StackTrace}", comEx.HResult, comEx.StackTrace);
-                UiErrors.StaleElement(logger, json);
+                UiErrors.StaleElement(logger, json, parseResult.InvocationConfiguration.Error);
                 return 1;
             }
             catch (AppNotFoundException ioEx)
@@ -304,7 +304,7 @@ internal class UiPenCommand : Command, IShortDescription
             }
             catch (Exception ex)
             {
-                UiErrors.GenericError(logger, ex, json);
+                UiErrors.GenericError(logger, ex, json, parseResult.InvocationConfiguration.Error);
                 return 1;
             }
 

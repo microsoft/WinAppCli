@@ -314,13 +314,25 @@ public sealed class CrashDumpServiceWorkflowTests
 
         try
         {
-            // Stub the symbol-server boundary: pretend every PDB is available (small dummy payload) so
-            // the "downloaded > 0 -> reload and re-run with symbols" branch runs without any network.
+            // Stub the symbol-server boundary: pretend every PDB is available so the
+            // "downloaded > 0 -> reload and re-run with symbols" branch runs without any network.
             CrashDumpService.SymbolFileDownloader = (url, destPath) =>
             {
                 requestedUrls.Add(url);
                 Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
-                File.WriteAllBytes(destPath, [0x4D, 0x69, 0x63]); // drop a dummy PDB at the cache path
+                // Drop a benign, deliberately-invalid PDB at the module's expected cache path. The
+                // product's `.reload /f` (in AnalyzeWithDbgEng) force-loads whatever file lives here,
+                // so the payload must NOT begin with the "Microsoft C/C++ MSF 7.00" magic and must be
+                // large enough that dbghelp rejects it at the signature check WITHOUT reading past the
+                // end of the file. A prior 3-byte payload ([0x4D,0x69,0x63] = "Mic") matched the magic's
+                // prefix, causing some dbghelp versions to over-read the truncated MSF superblock and
+                // fault with an access violation (0xC0000005) during `.reload /f` — a native crash that
+                // took down the whole test host on Azure DevOps 1ES agents (GitHub-hosted runners and
+                // local dev machines happened to tolerate/reject the same bytes). dbghelp rejects this
+                // file cleanly as "not a PDB"; the test still drives the download seam with msdl URLs.
+                var dummyPdb = new byte[8192];
+                "winapp-test-fixture-not-a-real-pdb\n"u8.CopyTo(dummyPdb);
+                File.WriteAllBytes(destPath, dummyPdb);
                 return true;
             };
 
