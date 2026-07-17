@@ -449,15 +449,32 @@ internal static class PointerInput
         }
     }
 
+    /// <summary>
+    /// Maps a normalized pen pressure (0..1, where 0 is barely touching and 1 is full force) onto the
+    /// Win32 synthetic-pointer pressure range (1..<see cref="PenPressureMax"/>). The value is clamped
+    /// into range and rounded to the nearest integer; because in-contact pen frames require a non-zero
+    /// pressure, a mapped value of 0 is bumped to 1.
+    /// </summary>
+    /// <remarks>
+    /// Pure arithmetic extracted from <see cref="Pen"/> so it is unit-testable without the native
+    /// synthetic-pointer device (issue #630); see PointerInputPressureTests.
+    /// </remarks>
+    internal static uint MapPenPressure(float pressure)
+    {
+        uint mapped = (uint)Math.Clamp((int)Math.Round(pressure * PenPressureMax), 0, (int)PenPressureMax);
+        return mapped == 0 ? 1u : mapped; // in-contact frames need non-zero pressure
+    }
+
     /// <summary>Injects a synthetic pen/stylus stroke (tap or ink path) with pressure and tilt.</summary>
     /// <remarks>
     /// Coverage ceiling (issue #630): the native device path
     /// (<c>CreateSyntheticPointerDevice(PT_PEN)</c> → inject → <c>DestroySyntheticPointerDevice</c>)
     /// requires Windows 10 1809+ and an unlocked interactive desktop and cannot run in the shared
-    /// CI/test environment without live input injection. The pressure-mapping and frame-ordering logic
-    /// is covered deterministically through the injectable <see cref="PenFrameSender"/> seam on
-    /// <see cref="InjectPenStroke"/> (see PointerInputFrameTests); only the OS injection calls are
-    /// un-coverable here.
+    /// CI/test environment without live input injection. The pressure mapping is covered directly by
+    /// <see cref="MapPenPressure"/> unit tests, and the frame-ordering logic through the injectable
+    /// <see cref="PenFrameSender"/> seam on <see cref="InjectPenStroke"/> (see PointerInputFrameTests
+    /// and PointerInputPressureTests); only the OS injection calls (device create / inject / destroy)
+    /// remain un-coverable here.
     /// </remarks>
     public static void Pen(
         IReadOnlyList<PointerPoint> path,
@@ -479,11 +496,7 @@ internal static class PointerInput
 
         try
         {
-            uint mappedPressure = (uint)Math.Clamp((int)Math.Round(pressure * PenPressureMax), 0, (int)PenPressureMax);
-            if (mappedPressure == 0)
-            {
-                mappedPressure = 1; // in-contact frames need non-zero pressure
-            }
+            uint mappedPressure = MapPenPressure(pressure);
 
             InjectPenStroke(path, mappedPressure, durationMs,
                 (x, y, p, flags) => SendPen(device, x, y, p, tiltX, tiltY, eraser, flags));

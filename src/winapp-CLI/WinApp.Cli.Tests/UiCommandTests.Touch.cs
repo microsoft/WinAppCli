@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using Spectre.Console;
-using Spectre.Console.Testing;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
@@ -745,24 +743,13 @@ public partial class UiCommandTests
         _fakeForeground.IsRemoteSessionResult = false;
 
         var command = GetRequiredService<UiTouchCommand>();
-        var previousAmbient = AnsiConsole.Console;
-        var ambient = new TestConsole();
-        AnsiConsole.Console = ambient;
-        int exitCode;
-        try
-        {
-            exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--at", "150,160"]);
-        }
-        finally
-        {
-            AnsiConsole.Console = previousAmbient;
-        }
+        var (exitCode, ambientOutput) = await InvokeWithAmbientConsoleCaptureAsync(command, ["-a", "TestApp", "--at", "150,160"]);
 
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(1, _fakePointer.TouchCalls.Count);
         Assert.IsFalse(TestAnsiConsole.Output.Contains('{'), "Non-JSON path must not emit a JSON envelope");
-        StringAssert.Contains(ambient.Output, "tap", "Success line must name the gesture");
-        Assert.IsFalse(ambient.Output.Contains("remote", StringComparison.OrdinalIgnoreCase),
+        StringAssert.Contains(ambientOutput, "tap", "Success line must name the gesture");
+        Assert.IsFalse(ambientOutput.Contains("remote", StringComparison.OrdinalIgnoreCase),
             "A local session must not emit the remote-delivery warning");
     }
 
@@ -776,22 +763,11 @@ public partial class UiCommandTests
         _fakeForeground.IsRemoteSessionResult = true;
 
         var command = GetRequiredService<UiTouchCommand>();
-        var previousAmbient = AnsiConsole.Console;
-        var ambient = new TestConsole();
-        AnsiConsole.Console = ambient;
-        int exitCode;
-        try
-        {
-            exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--at", "150,160"]);
-        }
-        finally
-        {
-            AnsiConsole.Console = previousAmbient;
-        }
+        var (exitCode, ambientOutput) = await InvokeWithAmbientConsoleCaptureAsync(command, ["-a", "TestApp", "--at", "150,160"]);
 
         Assert.AreEqual(0, exitCode, "The remote warning is advisory; injection still succeeds");
         Assert.AreEqual(1, _fakePointer.TouchCalls.Count);
-        StringAssert.Contains(ambient.Output, "remote", "Remote session must surface the delivery-uncertainty warning");
+        StringAssert.Contains(ambientOutput, "remote", "Remote session must surface the delivery-uncertainty warning");
     }
 
     [TestMethod]
