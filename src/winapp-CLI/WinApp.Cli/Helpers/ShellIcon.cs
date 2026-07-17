@@ -15,7 +15,7 @@ public static class ShellIcon
     /// Returns null if no icon can be resolved.
     /// </summary>
     public static Icon? GetJumboIcon(string path) =>
-        GetJumboIconCore(path, GetSystemIconIndex, GetIconFromJumboImageList);
+        GetJumboIconCore(path, GetSystemIconIndex, index => GetIconFromJumboImageList(index, AcquireJumboImageList));
 
     /// <summary>
     /// Pure orchestration seam for <see cref="GetJumboIcon"/>: resolves the system icon index for
@@ -62,16 +62,18 @@ public static class ShellIcon
 
     /// <summary>
     /// Materializes a standalone <see cref="Icon"/> for the given system image-list index from the
-    /// Jumbo image list, or null when the image list cannot be obtained.
+    /// Jumbo image list, or null when the image list cannot be obtained. The <paramref name="acquire"/>
+    /// delegate is a behavior-preserving seam over the native <c>SHGetImageList</c> call so tests can
+    /// drive the otherwise-unreachable "image list unavailable" guard without a broken shell.
     /// </summary>
-    private static Icon? GetIconFromJumboImageList(int iconIndex)
+    internal static Icon? GetIconFromJumboImageList(int iconIndex, Func<(bool Failed, object? PpvObj)> acquire)
     {
         // CsWin32 exposes SHGetImageList and IImageList
-        var hr = PInvoke.SHGetImageList((int)PInvoke.SHIL_JUMBO, typeof(IImageList2).GUID, out object ppvObj);
-        IImageList2 imageList = (IImageList2)ppvObj;
+        var (failed, ppvObj) = acquire();
+        var imageList = ppvObj as IImageList2;
         // Defensive guard: the system Jumbo image list is always available on a real desktop, so this
-        // failure branch is not reachable from a test without a broken shell. Kept for safety.
-        if (hr.Failed || imageList is null)
+        // failure branch is not reachable from the real acquirer without a broken shell. Kept for safety.
+        if (failed || imageList is null)
         {
             return null;
         }
@@ -95,5 +97,16 @@ public static class ShellIcon
             }
             hIcon?.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Default acquirer for <see cref="GetIconFromJumboImageList"/>: obtains the system Jumbo image
+    /// list via <c>SHGetImageList</c>, reporting whether the call failed alongside the raw COM object
+    /// (so the caller can release it). This is the exact native path used in production.
+    /// </summary>
+    private static (bool Failed, object? PpvObj) AcquireJumboImageList()
+    {
+        var hr = PInvoke.SHGetImageList((int)PInvoke.SHIL_JUMBO, typeof(IImageList2).GUID, out object ppvObj);
+        return (hr.Failed, ppvObj);
     }
 }
