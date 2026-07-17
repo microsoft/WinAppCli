@@ -592,6 +592,7 @@ public partial class UiCommandTests
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakePointer.PenCalls.Count);
         StringAssert.Contains(ConsoleStdErr.ToString(), "no longer accessible");
+        AssertJsonErrorCode(UiJsonError.CodeStaleElement);
     }
 
     [TestMethod]
@@ -607,5 +608,6 @@ public partial class UiCommandTests
         Assert.AreEqual(1, exitCode);
         Assert.AreEqual(0, _fakePointer.PenCalls.Count);
         StringAssert.Contains(ConsoleStdErr.ToString(), "boom (test)");
+        AssertJsonErrorCode(UiJsonError.CodeInternalError);
     }
 }
