@@ -79,7 +79,8 @@ internal static class PointerCommandSupport
     /// pre-injection gate failed (no target window, unreadable window rect, or foreground could not be
     /// secured) and the caller should return non-zero. <paramref name="OutOfWindowWarning"/> is a
     /// non-fatal advisory (issue #661): injection proceeds, but the caller should surface this string to
-    /// the user (stderr for text output, <c>warnings[]</c> for <c>--json</c>).
+    /// the user (stdout for text output — <see cref="ILogger.LogWarning"/> routes non-error levels to
+    /// stdout — and <c>warnings[]</c> for <c>--json</c>).
     /// </summary>
     public readonly record struct InjectionPreparation(bool Ok, string? OutOfWindowWarning);
 

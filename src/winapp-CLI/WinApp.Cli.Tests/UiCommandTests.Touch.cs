@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using Spectre.Console;
+using Spectre.Console.Testing;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
@@ -389,6 +391,70 @@ public partial class UiCommandTests
         var joined = warnings[0].GetString() + " | " + warnings[1].GetString();
         StringAssert.Contains(joined, "outside the target window");
         StringAssert.Contains(joined, "remote");
+    }
+
+    [TestMethod]
+    public async Task Touch_GestureWaypointOutsideWindow_WarnsAndInjects()
+    {
+        // #661: FirstOutOfBounds walks EVERY planned point, including gesture-generated waypoints — not
+        // just the explicit --at/--path anchor. A swipe whose START is in-bounds but whose generated END
+        // waypoint lands outside the window must still warn (and inject), proving the bounds check covers
+        // the whole gesture path rather than only the anchor.
+        _fakeSession.SessionResult.WindowHandle = 7100;
+        _fakeUia.WindowRect = new PointerRect(0, 0, 800, 600);
+
+        var command = GetRequiredService<UiTouchCommand>();
+        // Start (400,300) is inside the window; a 5000px rightward swipe generates an end waypoint at
+        // (5400,300), which is outside it.
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--gesture", "swipe", "--at", "400,300", "--distance", "5000", "--json"]);
+
+        Assert.AreEqual(0, exitCode, "Out-of-window waypoint is advisory, not fatal — injection proceeds");
+        Assert.AreEqual(1, _fakePointer.TouchCalls.Count, "Injection must still happen");
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.IsTrue(result.TryGetProperty("warnings", out var warnings),
+            "A gesture waypoint outside the window must surface a warnings[] advisory");
+        Assert.AreEqual(1, warnings.GetArrayLength());
+        // The advisory must name the out-of-bounds WAYPOINT (5400,300), not the in-bounds start (400,300),
+        // proving FirstOutOfBounds walked past the anchor into the generated path.
+        StringAssert.Contains(warnings[0].GetString(), "(5400,300)",
+            "Warning must name the out-of-bounds waypoint, not the in-bounds start");
+        StringAssert.Contains(warnings[0].GetString(), "outside the target window");
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // temporarily swaps the process-wide ambient AnsiConsole to capture logger warnings
+    public async Task Touch_ExplicitPointOutsideWindow_TextMode_LogsWarning()
+    {
+        // Coverage for the text-mode (non-json) branch: every other out-of-window test passes --json, so
+        // the logger.LogWarning foreach path is otherwise unexercised. Non-error logger output routes
+        // through the static ambient AnsiConsole (TextWriterLogger), so we swap it to a capturing console
+        // for the invoke; [DoNotParallelize] keeps that global swap isolated. The advisory must land on
+        // that (stdout) console and NOT on stderr, proving it is a non-fatal warning.
+        _fakeSession.SessionResult.WindowHandle = 7200;
+        _fakeUia.WindowRect = new PointerRect(0, 0, 800, 600);
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var previousAmbient = AnsiConsole.Console;
+        var ambient = new TestConsole();
+        AnsiConsole.Console = ambient;
+        int exitCode;
+        try
+        {
+            exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--at", "5000,5000"]);
+        }
+        finally
+        {
+            AnsiConsole.Console = previousAmbient;
+        }
+
+        Assert.AreEqual(0, exitCode, "Out-of-window point is advisory, not fatal — injection proceeds");
+        Assert.AreEqual(1, _fakePointer.TouchCalls.Count, "Injection must still happen");
+        StringAssert.Contains(ambient.Output, "outside the target window",
+            "Text mode must log the out-of-window advisory, not only emit it in the --json warnings[] envelope");
+        Assert.IsFalse(ConsoleStdErr.ToString().Contains("outside the target window"),
+            "The advisory is a non-error warning — it must route to stdout, not stderr");
     }
 
     [TestMethod]
