@@ -107,4 +107,33 @@ public class ShellIconTests
 
         Assert.IsNull(icon, "Exceptions while materializing the icon must be swallowed as null.");
     }
+
+    [TestMethod]
+    public void GetIconFromJumboImageList_AcquisitionReportsFailure_ReturnsNull()
+    {
+        // Drives the defensive guard that is unreachable via the real shell: SHGetImageList does not
+        // fail on a live desktop. The behavior-preserving acquirer seam lets us assert that a failed
+        // acquisition (hr.Failed == true) yields a null icon instead of dereferencing a bad list.
+        Assert.IsNull(
+            ShellIcon.GetIconFromJumboImageList(0, () => (Failed: true, PpvObj: null)),
+            "A failed image-list acquisition must yield a null icon.");
+    }
+
+    [TestMethod]
+    public void GetIconFromJumboImageList_NullImageList_ReturnsNull()
+    {
+        // Even when the acquire call reports success, a null COM object must be guarded against.
+        Assert.IsNull(
+            ShellIcon.GetIconFromJumboImageList(0, () => (Failed: false, PpvObj: null)),
+            "A null image-list object must yield a null icon.");
+    }
+
+    [TestMethod]
+    public void GetIconFromJumboImageList_NonImageListObject_ReturnsNull()
+    {
+        // A non-null object that isn't an IImageList2 must not be treated as a usable image list.
+        Assert.IsNull(
+            ShellIcon.GetIconFromJumboImageList(0, () => (Failed: false, PpvObj: new object())),
+            "A non-IImageList2 object must yield a null icon.");
+    }
 }
