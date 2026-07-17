@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using Spectre.Console;
+using Spectre.Console.Testing;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
@@ -255,18 +257,89 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
-    public async Task Pen_PathOutsideWindow_Rejected_NoInjection()
+    public async Task Pen_PathOutsideWindow_WarnsAndInjects()
     {
+        // #661: an out-of-window ink point is a non-fatal advisory, not a hard failure. Pen injects
+        // anyway (consistent with the mouse verbs) and surfaces a warning, rather than rejecting with
+        // invalid_arguments.
         _fakeSession.SessionResult.WindowHandle = 6600;
         _fakeUia.WindowRect = new PointerRect(0, 0, 800, 600);
 
         var command = GetRequiredService<UiPenCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["-a", "TestApp", "--path", "10,10 9000,9000", "--json"]);
-        Assert.AreEqual(1, exitCode);
-        Assert.AreEqual(0, _fakePointer.PenCalls.Count);
+
+        Assert.AreEqual(0, exitCode, "Out-of-window point is advisory, not fatal — injection proceeds");
+        Assert.AreEqual(1, _fakePointer.PenCalls.Count, "Injection must still happen");
         Assert.IsTrue(_fakeUia.WindowRectCalls.Count >= 1);
-        Assert.AreEqual(0, _fakeForeground.Calls.Count);
+        Assert.IsTrue(_fakeForeground.Calls.Count >= 1);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.IsTrue(result.TryGetProperty("warnings", out var warnings),
+            "Out-of-window injection must surface a warnings[] advisory");
+        Assert.AreEqual(1, warnings.GetArrayLength());
+        StringAssert.Contains(warnings[0].GetString(), "outside the target window",
+            "Warning must name the out-of-window condition");
+    }
+
+    [TestMethod]
+    public async Task Pen_OutsideWindowAndRemoteSession_EmitsBothWarnings()
+    {
+        // The out-of-window advisory (#661) and the remote-session delivery advisory (id27/id28) are
+        // independent. Pen's warning-aggregation block is byte-identical to touch's, so the combined case
+        // must likewise surface both entries in warnings[] (mirrors Touch_OutsideWindowAndRemoteSession).
+        _fakeSession.SessionResult.WindowHandle = 6650;
+        _fakeUia.WindowRect = new PointerRect(0, 0, 800, 600);
+        _fakeForeground.IsRemoteSessionResult = true;
+
+        var command = GetRequiredService<UiPenCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--path", "10,10 9000,9000", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakePointer.PenCalls.Count);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.IsTrue(result.TryGetProperty("warnings", out var warnings));
+        Assert.AreEqual(2, warnings.GetArrayLength(),
+            "Both the out-of-window and remote-delivery advisories must be present");
+        var joined = warnings[0].GetString() + " | " + warnings[1].GetString();
+        StringAssert.Contains(joined, "outside the target window");
+        StringAssert.Contains(joined, "remote");
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // temporarily swaps the process-wide ambient AnsiConsole to capture logger warnings
+    public async Task Pen_PathOutsideWindow_TextMode_LogsWarning()
+    {
+        // Coverage for the text-mode (non-json) branch: every other out-of-window pen test passes --json,
+        // so the logger.LogWarning foreach path is otherwise unexercised. Non-error logger output routes
+        // through the static ambient AnsiConsole (TextWriterLogger), so we swap it to a capturing console
+        // for the invoke; [DoNotParallelize] keeps that global swap isolated. The advisory must land on
+        // that (stdout) console and NOT on stderr, proving it is a non-fatal warning.
+        _fakeSession.SessionResult.WindowHandle = 6700;
+        _fakeUia.WindowRect = new PointerRect(0, 0, 800, 600);
+
+        var command = GetRequiredService<UiPenCommand>();
+        var previousAmbient = AnsiConsole.Console;
+        var ambient = new TestConsole();
+        AnsiConsole.Console = ambient;
+        int exitCode;
+        try
+        {
+            exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--path", "10,10 9000,9000"]);
+        }
+        finally
+        {
+            AnsiConsole.Console = previousAmbient;
+        }
+
+        Assert.AreEqual(0, exitCode, "Out-of-window point is advisory, not fatal — injection proceeds");
+        Assert.AreEqual(1, _fakePointer.PenCalls.Count, "Injection must still happen");
+        StringAssert.Contains(ambient.Output, "outside the target window",
+            "Text mode must log the out-of-window advisory, not only emit it in the --json warnings[] envelope");
+        Assert.IsFalse(ConsoleStdErr.ToString().Contains("outside the target window"),
+            "The advisory is a non-error warning — it must route to stdout, not stderr");
     }
 
     [TestMethod]

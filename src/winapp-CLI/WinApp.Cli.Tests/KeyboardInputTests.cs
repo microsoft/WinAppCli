@@ -462,6 +462,96 @@ public class KeyboardInputTests
         Assert.AreEqual(KeyboardInput.DefaultChunkDelayMs, sleeps[0]);
     }
 
+    [TestMethod]
+    [DataRow("abc", "abc")]           // no line feed → unchanged
+    [DataRow("a\nb", "a\rb")]         // bare LF → CR
+    [DataRow("a\r\nb", "a\rb")]       // CRLF collapses to a single CR (one newline)
+    [DataRow("a\rb", "a\rb")]         // lone CR is left as-is
+    [DataRow("a\n\nb", "a\r\rb")]     // two LFs → two CRs (two newlines preserved)
+    [DataRow("a\r\n\r\nb", "a\r\rb")] // two CRLFs → two CRs (two newlines preserved)
+    [DataRow("\n", "\r")]
+    public void NormalizeNewlines_ConvertsEveryNewlineFormToCarriageReturn(string input, string expected)
+    {
+        // Edit controls insert a line break only on \r, so \n (and \r\n) must be normalized to \r
+        // before delivery, otherwise a bare line feed is silently dropped (issue #658).
+        Assert.AreEqual(expected, KeyboardInput.NormalizeNewlines(input));
+    }
+
+    [TestMethod]
+    [DataRow("a\nb")]   // bare line feed — was silently dropped before the fix
+    [DataRow("a\r\nb")] // CRLF collapses to a single newline
+    [DataRow("a\rb")]   // lone carriage return already worked — regression guard
+    public void BuildSendInputBatch_NewlineFormsDeliverAsSingleReturnKey(string text)
+    {
+        // After NormalizeNewlines runs, every newline form arrives as '\r', which VkKeyScan maps to
+        // VK_RETURN (0x0D) — a real Enter key. (Without it a bare '\n' would take the Unicode-packet
+        // fallback that edit controls ignore: on a US layout VkKeyScan('\n') returns 0x020D =
+        // VK_RETURN+Ctrl, which the Ctrl/Alt guard routes to a raw 0x0A packet.)
+        short Scan(char ch) => ch switch
+        {
+            'a' => 0x41,
+            'b' => 0x42,
+            '\r' => 0x0D,
+            _ => -1,
+        };
+
+        var inputs = KeyboardInput.BuildSendInputBatch([new TextInput(text)], Scan);
+
+        // 'a' down/up, one VK_RETURN down/up (never a Unicode 0x0A packet), 'b' down/up.
+        Assert.AreEqual(6, inputs.Length);
+        AssertKey(inputs[0], 0x41, (KEYBD_EVENT_FLAGS)0);
+        AssertKey(inputs[1], 0x41, KEYBD_EVENT_FLAGS.KEYEVENTF_KEYUP);
+        AssertKey(inputs[2], 0x0D, (KEYBD_EVENT_FLAGS)0);
+        AssertKey(inputs[3], 0x0D, KEYBD_EVENT_FLAGS.KEYEVENTF_KEYUP);
+        AssertKey(inputs[4], 0x42, (KEYBD_EVENT_FLAGS)0);
+        AssertKey(inputs[5], 0x42, KEYBD_EVENT_FLAGS.KEYEVENTF_KEYUP);
+    }
+
+    [TestMethod]
+    [DataRow("a\nb")]   // bare line feed — was silently dropped before the fix
+    [DataRow("a\r\nb")] // CRLF collapses to a single newline
+    [DataRow("a\rb")]   // lone carriage return already worked — regression guard
+    public void Send_PostMessage_NewlineFormsDeliverAsSingleCarriageReturnChar(string text)
+    {
+        var chars = new List<char>();
+        KeyboardInput.s_postMessage = (_, message, wParam, _) =>
+        {
+            if (message == PInvoke.WM_CHAR) { chars.Add((char)wParam.Value); }
+        };
+
+        KeyboardInput.Send(123, [new TextInput(text)], KeyTransport.PostMessage);
+
+        // WM_CHAR carries a single carriage return (0x0D) for the newline — never a bare 0x0A.
+        Assert.AreEqual("a\rb", new string(chars.ToArray()));
+    }
+
+    [TestMethod]
+    public void ParseThenBuildSendInputBatch_TextNewlineEscape_DeliversReturnKeyNotDroppedUnicode()
+    {
+        // End-to-end repro of issue #658: `text=A\nB` decodes to a line feed, which must reach the
+        // target as a real Enter key (VK_RETURN) instead of a Unicode 0x0A packet that edit controls
+        // silently drop.
+        short Scan(char ch) => ch switch
+        {
+            'A' => 0x41,
+            'B' => 0x42,
+            '\r' => 0x0D,
+            _ => -1,
+        };
+
+        var actions = KeyStringParser.Parse(@"text=A\nB");
+        var inputs = KeyboardInput.BuildSendInputBatch(actions, Scan);
+
+        Assert.AreEqual(1, inputs.Count(i =>
+            i.type == INPUT_TYPE.INPUT_KEYBOARD &&
+            i.Anonymous.ki.wVk == (VIRTUAL_KEY)0x0D &&
+            (i.Anonymous.ki.dwFlags & KEYBD_EVENT_FLAGS.KEYEVENTF_KEYUP) == 0),
+            "The \\n must be delivered as exactly one VK_RETURN key-down.");
+        Assert.AreEqual(0, inputs.Count(i =>
+            (i.Anonymous.ki.dwFlags & KEYBD_EVENT_FLAGS.KEYEVENTF_UNICODE) != 0),
+            "The \\n must not fall through to a Unicode packet — that's the dropped-newline bug.");
+    }
+
     private static void AssertKey(INPUT input, ushort vk, KEYBD_EVENT_FLAGS flags)
     {
         Assert.AreEqual(INPUT_TYPE.INPUT_KEYBOARD, input.type);

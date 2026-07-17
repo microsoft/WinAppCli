@@ -157,7 +157,7 @@ internal static class KeyStringParser
     /// <summary>
     /// Decodes backslash escapes inside a <c>text=</c> value so whitespace the tokenizer can't carry
     /// (it splits on whitespace and re-joins literal runs with a single space) can still be typed
-    /// verbatim: <c>\s</c>→space, <c>\t</c>→tab, <c>\n</c>→newline, <c>\r</c>→carriage return,
+    /// verbatim: <c>\s</c>→space, <c>\t</c>→tab, <c>\n</c>→newline, <c>\r</c>→newline (a carriage return, delivered as one line break),
     /// <c>\\</c>→backslash. So <c>text=a\s\sb</c> types "a  b" (double space) and <c>text=line1\nline2</c>
     /// types a newline. An unknown escape (e.g. <c>\x</c>) is left as-is so literal backslashes in text
     /// don't silently vanish.

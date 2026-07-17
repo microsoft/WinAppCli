@@ -173,7 +173,7 @@ internal static class KeyboardInput
                     break;
 
                 case TextInput text:
-                    foreach (var ch in text.Text)
+                    foreach (var ch in NormalizeNewlines(text.Text))
                     {
                         s_postMessage(hwnd, PInvoke.WM_CHAR, new WPARAM(ch), new LPARAM(1));
                     }
@@ -353,13 +353,18 @@ internal static class KeyboardInput
                     break;
 
                 case TextInput text:
-                    for (int start = 0; start < text.Text.Length; start += chunkChars)
+                    // Normalize newlines (\n and \r\n → \r) so a line break actually inserts instead of being
+                    // silently dropped (issue #658), then split the normalized run into chunks for throttled
+                    // delivery (issue #657). Normalizing before chunking keeps the newline handling identical
+                    // regardless of where a chunk boundary falls.
+                    var normalized = NormalizeNewlines(text.Text);
+                    for (int start = 0; start < normalized.Length; start += chunkChars)
                     {
-                        int end = Math.Min(start + chunkChars, text.Text.Length);
+                        int end = Math.Min(start + chunkChars, normalized.Length);
                         var chunk = new List<INPUT>();
                         for (int j = start; j < end; j++)
                         {
-                            AppendCharEvents(chunk, text.Text[j], vkKeyScan);
+                            AppendCharEvents(chunk, normalized[j], vkKeyScan);
                         }
 
                         if (chunk.Count > 0)
@@ -471,6 +476,27 @@ internal static class KeyboardInput
             type = INPUT_TYPE.INPUT_KEYBOARD,
             Anonymous = { ki = new KEYBDINPUT { wVk = 0, wScan = ch, dwFlags = flags } }
         };
+    }
+
+    /// <summary>
+    /// Normalizes newline characters in synthesized text to a carriage return (<c>\r</c>, 0x0D) so a
+    /// line break is actually inserted. Windows edit controls create a new line only on a carriage
+    /// return: it maps to <c>VK_RETURN</c> (a real Enter key for SendInput) and is honored as
+    /// <c>WM_CHAR 0x0D</c> for PostMessage. A bare line feed (<c>\n</c>, 0x0A) does not map to a plain
+    /// Enter — on a US layout <c>VkKeyScan('\n')</c> returns 0x020D (VK_RETURN + Ctrl), so SendInput takes
+    /// the Ctrl/Alt Unicode-packet fallback and PostMessage sends <c>WM_CHAR 0x0A</c>; either way edit
+    /// controls silently ignore the raw 0x0A, so the newline would otherwise vanish (issue #658). Collapsing
+    /// <c>\r\n</c> to a single <c>\r</c> keeps a CRLF as one newline rather than two.
+    /// </summary>
+    internal static string NormalizeNewlines(string text)
+    {
+        // No line feed → nothing to normalize (a lone \r already inserts a newline correctly).
+        if (text.IndexOf('\n') < 0)
+        {
+            return text;
+        }
+
+        return text.Replace("\r\n", "\r").Replace('\n', '\r');
     }
 
     /// <summary>
