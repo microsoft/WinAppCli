@@ -281,6 +281,86 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
+    [DoNotParallelize] // redirects the process-wide Console.Error to capture the JSON error envelope
+    public async Task SendKeys_ViaSendInput_MidInjectionForegroundLoss_MapsToForegroundNotTarget()
+    {
+        // H1 (issue #657 follow-up): the pre-send foreground gate is a single check, but a long payload is
+        // now paced across many SendInput calls, so focus can drift away mid-injection. KeyboardInput aborts
+        // that with a ForegroundLostException; the command must map it to the SAME foreground_not_target
+        // contract as the pre-send gate (not a generic error) so callers get a precise, actionable code.
+        // The command writes the JSON error straight to Console.Error, so capture that stream directly.
+        _fakeSession.SessionResult.WindowHandle = 4242; // resolvable target → reach the send path
+        _fakeKeyboard.SendException = new WinApp.Cli.Helpers.ForegroundLostException("focus drifted mid-injection");
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var previousErr = Console.Error;
+        var errCapture = new StringWriter();
+        Console.SetError(errCapture);
+        int exitCode;
+        try
+        {
+            exitCode = await ParseAndInvokeWithCaptureAsync(command, ["hello", "-a", "TestApp", "--via", "send-input", "--json"]);
+        }
+        finally
+        {
+            Console.SetError(previousErr);
+        }
+
+        Assert.AreEqual(1, exitCode);
+        AssertJsonErrorCodeIn(errCapture.ToString(), WinApp.Cli.Helpers.UiJsonError.CodeForegroundNotTarget);
+    }
+
+    [TestMethod]
+    public async Task SendKeys_ViaSendInput_LongText_WarnsAutoThrottledAndSuggestsSetValue()
+    {
+        // M1 (issue #657 follow-up): a literal-text payload larger than one chunk is auto-throttled (paced)
+        // so it lands reliably, which blocks synchronously for a while. The command surfaces an advisory that
+        // the throttling is intentional and that set-value is faster for bulk text.
+        _fakeSession.SessionResult.WindowHandle = 4242;
+        var longText = new string('a', WinApp.Cli.Helpers.KeyboardInput.DefaultTextChunkChars + 1);
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [longText, "-a", "TestApp", "--via", "send-input", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+        var warnings = ReadWarnings(TestAnsiConsole.Output);
+        Assert.IsTrue(
+            warnings.Any(w => w.Contains("throttl", StringComparison.OrdinalIgnoreCase) && w.Contains("set-value", StringComparison.OrdinalIgnoreCase)),
+            $"expected a throttling advisory mentioning set-value; got: {string.Join(" | ", warnings)}");
+    }
+
+    [TestMethod]
+    public async Task SendKeys_ViaSendInput_TextAtChunkBoundary_DoesNotWarn()
+    {
+        // M1 boundary: a payload of exactly one chunk is a single SendInput call with no added pacing, so the
+        // throttle advisory must NOT fire — it is scoped to payloads that actually get chunked, to avoid
+        // warning on every short send-input.
+        _fakeSession.SessionResult.WindowHandle = 4242;
+        var boundaryText = new string('a', WinApp.Cli.Helpers.KeyboardInput.DefaultTextChunkChars);
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [boundaryText, "-a", "TestApp", "--via", "send-input", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        var warnings = ReadWarnings(TestAnsiConsole.Output);
+        Assert.IsFalse(
+            warnings.Any(w => w.Contains("throttl", StringComparison.OrdinalIgnoreCase)),
+            $"a single-chunk payload must not emit the throttle advisory; got: {string.Join(" | ", warnings)}");
+    }
+
+    private static List<string> ReadWarnings(string json)
+    {
+        var envelope = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(json);
+        if (envelope.TryGetProperty("warnings", out var w) && w.ValueKind == System.Text.Json.JsonValueKind.Array)
+        {
+            return [.. w.EnumerateArray().Select(x => x.GetString() ?? "")];
+        }
+
+        return [];
+    }
+
+    [TestMethod]
     public async Task SendKeys_ViaPostMessage_NoTarget_StillSends()
     {
         // post-message posts straight to the target HWND's message queue and is not OS-wide, so it does
