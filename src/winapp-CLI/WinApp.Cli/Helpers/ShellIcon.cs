@@ -70,32 +70,40 @@ public static class ShellIcon
     {
         // CsWin32 exposes SHGetImageList and IImageList
         var (failed, ppvObj) = acquire();
-        var imageList = ppvObj as IImageList2;
-        // Defensive guard: the system Jumbo image list is always available on a real desktop, so this
-        // failure branch is not reachable from the real acquirer without a broken shell. Kept for safety.
-        if (failed || imageList is null)
-        {
-            return null;
-        }
-
-        // Use ILD_IMAGE to preserve full color depth and alpha channel
-        DestroyIconSafeHandle? hIcon = null;
         try
         {
-            imageList.GetIcon(iconIndex, (uint)IMAGE_LIST_DRAW_STYLE.ILD_IMAGE, out hIcon);
+            var imageList = ppvObj as IImageList2;
+            // Defensive guard: the system Jumbo image list is always available on a real desktop, so this
+            // failure branch is not reachable from the real acquirer without a broken shell. Kept for safety.
+            if (failed || imageList is null)
+            {
+                return null;
+            }
 
-            // Clone the icon to create a copy that owns its own data
-            // Icon.FromHandle doesn't own the handle, so we must clone before disposing hIcon
-            using var tempIcon = Icon.FromHandle(hIcon.DangerousGetHandle());
-            return (Icon)tempIcon.Clone();
+            // Use ILD_IMAGE to preserve full color depth and alpha channel
+            DestroyIconSafeHandle? hIcon = null;
+            try
+            {
+                imageList.GetIcon(iconIndex, (uint)IMAGE_LIST_DRAW_STYLE.ILD_IMAGE, out hIcon);
+
+                // Clone the icon to create a copy that owns its own data
+                // Icon.FromHandle doesn't own the handle, so we must clone before disposing hIcon
+                using var tempIcon = Icon.FromHandle(hIcon.DangerousGetHandle());
+                return (Icon)tempIcon.Clone();
+            }
+            finally
+            {
+                hIcon?.Dispose();
+            }
         }
         finally
         {
+            // Release the acquired COM object on every path, including the guard's early return
+            // above (otherwise a non-null image list obtained in a failure/mismatch case would leak).
             if (ppvObj is System.Runtime.InteropServices.Marshalling.ComObject comObj)
             {
                 comObj.FinalRelease();
             }
-            hIcon?.Dispose();
         }
     }
 
