@@ -28,10 +28,16 @@ internal sealed class FakeProjectRunService : IProjectRunService
     /// <summary>When set, <see cref="BuildAndResolveAsync"/> throws it (simulates a guardrail violation).</summary>
     public ProjectRunException? BuildThrows { get; set; }
 
+    /// <summary>Returned from <see cref="IsDefinitivelyUnpackagedAsync"/>. Default false = indeterminate/packaged (fall through to the post-build gate).</summary>
+    public bool DefinitivelyUnpackaged { get; set; }
+
     public List<FileSystemInfo> ResolveInputCalls { get; } = [];
     public List<string?> ResolveInputSelectors { get; } = [];
     public List<FileInfo> BuildAndResolveCalls { get; } = [];
     public List<ProjectRunOptions> BuildOptions { get; } = [];
+
+    /// <summary>Records each <see cref="IsDefinitivelyUnpackagedAsync"/> invocation (for asserting the pre-flight probe fired or was skipped).</summary>
+    public List<FileInfo> IsDefinitivelyUnpackagedCalls { get; } = [];
 
     public Task<RunInputResolution> ResolveInputAsync(FileSystemInfo input, CancellationToken cancellationToken, string? projectSelector = null)
     {
@@ -70,5 +76,11 @@ internal sealed class FakeProjectRunService : IProjectRunService
 
         return Task.FromResult(BuildOutcome
             ?? throw new InvalidOperationException("FakeProjectRunService.BuildOutcome was not configured."));
+    }
+
+    public Task<bool> IsDefinitivelyUnpackagedAsync(FileInfo csproj, ProjectRunOptions options, CancellationToken cancellationToken)
+    {
+        IsDefinitivelyUnpackagedCalls.Add(csproj);
+        return Task.FromResult(DefinitivelyUnpackaged);
     }
 }

@@ -205,7 +205,7 @@ Principle: **`run` reads the project's *effective* packaging and never mutates i
 3. Launch it **directly** as a child process (inherit stdio; working dir = output dir), capturing the PID.
    - New method on `IAppLauncherService`, e.g. `LaunchExecutable(exePath, args, workingDir) -> pid`.
    - `--debug-output`/`--symbols`, `--detach`, `--args`/`--`, and exit-code propagation all work off this PID.
-   - Identity-only options (`--no-launch`, `--with-alias`, `--unregister-on-exit`, `--clean`, `--manifest`, `--output-appx-directory`) are **rejected with a clear error** in unpackaged mode (§8).
+   - Identity-only options (`--no-launch`, `--with-alias`, `--unregister-on-exit`, `--clean`, `--manifest`, `--output-appx-directory`) are **rejected with a clear error** in unpackaged mode (§8). This rejection is applied in **two places**: a pre-build fast-fail (a cheap evaluate-only `WindowsPackageType` probe rejects the combo *before building* when the project is definitively unpackaged, i.e. `WindowsPackageType=None`), and the authoritative post-build gate (which also catches the indeterminate-then-unpackaged case that only resolves after the build). This avoids making the user pay the full build cost only to have the argument combination rejected afterward.
 
 ---
 

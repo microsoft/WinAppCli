@@ -55,6 +55,25 @@ internal interface IProjectRunService
         FileInfo csproj,
         ProjectRunOptions options,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Cheap, side-effect-free probe (no build) that reports whether the project is DEFINITIVELY
+    /// unpackaged — i.e. it declares an explicit <c>WindowsPackageType=None</c>. Used by the run
+    /// handler to fail fast on identity-only options (e.g. <c>--no-launch</c>) that are meaningless
+    /// for unpackaged apps BEFORE paying the full build cost (issue #676), rather than only rejecting
+    /// them in the authoritative post-build gate.
+    /// </summary>
+    /// <returns>
+    /// <c>true</c> only when <c>WindowsPackageType</c> evaluates to <c>None</c>. Returns <c>false</c>
+    /// for packaged apps AND for the indeterminate cases (unset property, or the evaluation failed) —
+    /// those fall through to the normal build + authoritative packaging determination, which can
+    /// still classify an app as unpackaged via post-build signals (e.g. an emitted recipe). Never
+    /// throws or builds; a failed evaluation is treated as indeterminate.
+    /// </returns>
+    Task<bool> IsDefinitivelyUnpackagedAsync(
+        FileInfo csproj,
+        ProjectRunOptions options,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>

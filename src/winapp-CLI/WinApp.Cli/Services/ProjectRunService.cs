@@ -469,6 +469,36 @@ internal sealed class ProjectRunService(
         return new ProjectBuildOutcome(resolution, 0);
     }
 
+    /// <inheritdoc />
+    public async Task<bool> IsDefinitivelyUnpackagedAsync(
+        FileInfo csproj,
+        ProjectRunOptions options,
+        CancellationToken cancellationToken)
+    {
+        var workingDir = csproj.Directory ?? new DirectoryInfo(Directory.GetCurrentDirectory());
+
+        // Reuse the exact evaluate pass (same -p/RID/Platform/TFM/shim as a real build) so the
+        // WindowsPackageType we read matches what the build would see. It is evaluate-only — no build
+        // is triggered — which is why this is cheap enough to run before deciding to build.
+        var evaluateArgs = BuildEvaluateArguments(csproj, options, ResolveCsWinRTMetadataShim(options));
+        var (exitCode, stdout, _) = await dotNetService.RunDotnetCommandAsync(workingDir, evaluateArgs, cancellationToken);
+        if (exitCode != 0)
+        {
+            // Evaluation failed → indeterminate. Don't fail fast; let the normal build + authoritative
+            // gate surface the real error and classify packaging.
+            return false;
+        }
+
+        var props = MsBuildPropertyReader.Parse(stdout, RequestedProperties);
+
+        // Only an EXPLICIT WindowsPackageType=None is treated as definitive. An unset value is NOT —
+        // a packaged app that declares identity via an emitted recipe (rather than the property) also
+        // evaluates empty here pre-build, so DeterminePackaging's post-build recipe fallback must stay
+        // authoritative. Reporting "unpackaged" on empty would misclassify that app and wrongly reject
+        // its packaged-only options.
+        return string.Equals(GetProp(props, "WindowsPackageType"), "None", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>
     /// Determines packaged vs unpackaged from the evaluated properties (spec §7.1), never from
     /// manifest presence.

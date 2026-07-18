@@ -832,6 +832,71 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public async Task IsDefinitivelyUnpackagedAsync_WindowsPackageTypeNone_ReturnsTrue()
+    {
+        // Issue #676: an explicit WindowsPackageType=None is the one definitive unpackaged signal, so
+        // the pre-build fast-fail probe reports true.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => (0, UnpackagedPropertiesJson(), string.Empty) };
+        var service = NewServiceWith(dotnet, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: []);
+
+        var result = await service.IsDefinitivelyUnpackagedAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsTrue(result);
+        Assert.AreEqual(0, dotnet.StreamingCalls.Count, "the probe must never build — it only evaluates");
+    }
+
+    [TestMethod]
+    public async Task IsDefinitivelyUnpackagedAsync_PackagedType_ReturnsFalse()
+    {
+        // WindowsPackageType=MSIX → packaged → not definitively unpackaged.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => (0, PackagedPropertiesJson(), string.Empty) };
+        var service = NewServiceWith(dotnet, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: []);
+
+        var result = await service.IsDefinitivelyUnpackagedAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsFalse(result);
+    }
+
+    [TestMethod]
+    public async Task IsDefinitivelyUnpackagedAsync_EmptyWindowsPackageType_ReturnsFalseSoRecipeFallbackStaysAuthoritative()
+    {
+        // An unset WindowsPackageType is INDETERMINATE pre-build — a packaged app that declares
+        // identity via an emitted recipe also evaluates empty here. Reporting unpackaged would
+        // misclassify it, so the probe returns false and defers to the authoritative post-build gate.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var emptyJson = $$"""{ "Properties": { "TargetDir": "", "RunCommand": "", "WindowsPackageType": "", "OutputType": "WinExe", "WindowsAppSDKSelfContained": "" } }""";
+        var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => (0, emptyJson, string.Empty) };
+        var service = NewServiceWith(dotnet, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: []);
+
+        var result = await service.IsDefinitivelyUnpackagedAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsFalse(result);
+    }
+
+    [TestMethod]
+    public async Task IsDefinitivelyUnpackagedAsync_EvaluationFails_ReturnsFalse()
+    {
+        // A failed evaluation is treated as indeterminate (never throws), so the normal build path
+        // still runs and surfaces the real error.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => (1, string.Empty, "MSB1009: Project file does not exist.") };
+        var service = NewServiceWith(dotnet, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: []);
+
+        var result = await service.IsDefinitivelyUnpackagedAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsFalse(result);
+    }
+
+    private string UnpackagedPropertiesJson() =>
+        $$"""{ "Properties": { "TargetDir": "{{_tempDir.FullName.Replace("\\", "\\\\")}}", "RunCommand": "", "WindowsPackageType": "None", "OutputType": "WinExe", "WindowsAppSDKSelfContained": "" } }""";
+
+    [TestMethod]
     public async Task BuildAndResolveAsync_JsonMode_DoesNotPrintBuildBannerToConsole()
     {
         // Spec H2: in --json mode stdout must be pure JSON, so the human-readable "Building…" banner

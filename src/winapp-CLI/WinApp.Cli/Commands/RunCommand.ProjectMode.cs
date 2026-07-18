@@ -29,6 +29,48 @@ internal partial class RunCommand
         }
 
         /// <summary>
+        /// Collects the launch/identity options that are only valid for a packaged (MSIX) app and so
+        /// must be rejected for an unpackaged one. Shared by the pre-build fast-fail in
+        /// <see cref="RunProjectModeAsync"/> and the authoritative post-build gate in
+        /// <see cref="RunUnpackagedProjectAsync"/> so both reject the exact same set (issue #676).
+        /// </summary>
+        private static List<string> CollectUnpackagedIncompatibleOptions(
+            bool noLaunch, bool withAlias, bool unregisterOnExit, bool clean, FileInfo? manifest, DirectoryInfo? outputAppXDirectory)
+        {
+            var rejected = new List<string>();
+            if (noLaunch)
+            {
+                rejected.Add("--no-launch");
+            }
+            if (withAlias)
+            {
+                rejected.Add("--with-alias");
+            }
+            if (unregisterOnExit)
+            {
+                rejected.Add("--unregister-on-exit");
+            }
+            if (clean)
+            {
+                rejected.Add("--clean");
+            }
+            if (manifest != null)
+            {
+                rejected.Add("--manifest");
+            }
+            if (outputAppXDirectory != null)
+            {
+                rejected.Add("--output-appx-directory");
+            }
+            return rejected;
+        }
+
+        /// <summary>Builds the user-facing message listing the packaged-only options rejected for an unpackaged app.</summary>
+        private static string BuildUnpackagedIncompatibleMessage(IReadOnlyList<string> rejected, string csprojName)
+            => $"The option(s) {string.Join(", ", rejected)} don't apply to unpackaged apps — they're only valid for packaged (MSIX) apps. " +
+               $"'{csprojName}' resolves to an unpackaged WinUI app (WindowsPackageType=None). Remove them, or make the app packaged to use them.";
+
+        /// <summary>
         /// Project-mode entry point (spec §7/§8): build the <c>.csproj</c>, resolve its MSBuild
         /// output properties, then launch it as packaged (loose-layout register + AUMID, reusing the
         /// shared folder pipeline) or unpackaged (launch the apphost <c>.exe</c> directly). Folder
@@ -92,6 +134,24 @@ internal partial class RunCommand
             // humans, and maps --verbose to dotnet's -v. In --json mode it suppresses the banner and
             // routes build output to stderr to keep stdout pure JSON.
             var buildOptions = new ProjectRunOptions(configuration, architecture, framework, noBuild, noRestore, properties, isJson, solution);
+
+            // Fail fast (issue #676): identity-only options like --no-launch are meaningless for an
+            // unpackaged app, but are only rejected authoritatively AFTER packaging is known (post-build,
+            // in RunUnpackagedProjectAsync). Rather than making the user pay the full build cost only to
+            // be rejected, cheaply evaluate WindowsPackageType first and reject now when the project is
+            // DEFINITIVELY unpackaged (explicit WindowsPackageType=None). Packaged/indeterminate projects
+            // fall through to the build + authoritative gate. Skipped under --no-build (no build cost to
+            // save; that path's evaluate + gate are already fast).
+            if (!noBuild)
+            {
+                var incompatible = CollectUnpackagedIncompatibleOptions(noLaunch, withAlias, unregisterOnExit, clean, manifest, outputAppXDirectory);
+                if (incompatible.Count > 0
+                    && await projectRunService.IsDefinitivelyUnpackagedAsync(csproj, buildOptions, cancellationToken))
+                {
+                    return Fail(BuildUnpackagedIncompatibleMessage(incompatible, csproj.Name), isJson);
+                }
+            }
+
             ProjectBuildOutcome outcome;
             try
             {
@@ -189,39 +249,14 @@ internal partial class RunCommand
             bool isJson,
             CancellationToken cancellationToken)
         {
-            // Reject options that only make sense for a packaged (MSIX identity) app.
-            var rejected = new List<string>();
-            if (noLaunch)
-            {
-                rejected.Add("--no-launch");
-            }
-            if (withAlias)
-            {
-                rejected.Add("--with-alias");
-            }
-            if (unregisterOnExit)
-            {
-                rejected.Add("--unregister-on-exit");
-            }
-            if (clean)
-            {
-                rejected.Add("--clean");
-            }
-            if (manifest != null)
-            {
-                rejected.Add("--manifest");
-            }
-            if (outputAppXDirectory != null)
-            {
-                rejected.Add("--output-appx-directory");
-            }
-
+            // Reject options that only make sense for a packaged (MSIX identity) app. This is the
+            // AUTHORITATIVE gate — it runs once packaging is definitively known. RunProjectModeAsync
+            // additionally fails fast on the definitively-unpackaged case before building (issue #676),
+            // but this gate still catches the indeterminate-then-unpackaged case that only resolves here.
+            var rejected = CollectUnpackagedIncompatibleOptions(noLaunch, withAlias, unregisterOnExit, clean, manifest, outputAppXDirectory);
             if (rejected.Count > 0)
             {
-                var message =
-                    $"The option(s) {string.Join(", ", rejected)} don't apply to unpackaged apps — they're only valid for packaged (MSIX) apps. " +
-                    $"'{csproj.Name}' resolves to an unpackaged WinUI app (WindowsPackageType=None). Remove them, or make the app packaged to use them.";
-                return Fail(message, isJson);
+                return Fail(BuildUnpackagedIncompatibleMessage(rejected, csproj.Name), isJson);
             }
 
             var exePath = resolution.RunCommand!; // guaranteed non-null for unpackaged by BuildAndResolveAsync

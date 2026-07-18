@@ -190,13 +190,70 @@ public class RunCommandProjectModeTests : BaseCommandTests
         var csproj = CreateCsproj();
         var targetDir = CreateTargetDir(withManifest: false);
         SetUnpackagedOutcome(csproj, targetDir, selfContained: false);
+        // Probe defaults to false (indeterminate), so this exercises the AUTHORITATIVE post-build gate:
+        // the app is built + resolved, then --clean is rejected because it resolved unpackaged.
         var command = GetRequiredService<RunCommand>();
 
         // --clean only makes sense for a packaged (MSIX) app.
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, [csproj.FullName, "--clean"]);
 
         Assert.AreEqual(1, exitCode, "Identity-only options must be rejected for unpackaged apps");
+        Assert.AreEqual(1, _fakeProjectRunService.BuildAndResolveCalls.Count, "Indeterminate packaging must build, then reject at the authoritative gate");
         Assert.AreEqual(0, _fakeAppLauncherService.LaunchExecutableCalls.Count, "App must not launch when an invalid option was supplied");
+    }
+
+    [TestMethod]
+    public async Task ProjectMode_DefinitivelyUnpackaged_RejectsIdentityOnlyOptionBeforeBuilding()
+    {
+        // Issue #676: when the project is definitively unpackaged (WindowsPackageType=None), an
+        // identity-only option like --no-launch is rejected by the pre-build probe — the user does
+        // not pay the build cost first.
+        var csproj = CreateCsproj();
+        _fakeProjectRunService.DefinitivelyUnpackaged = true;
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [csproj.FullName, "--no-launch"]);
+
+        Assert.AreEqual(1, exitCode, "An identity-only option on a definitively-unpackaged app must fail");
+        Assert.AreEqual(1, _fakeProjectRunService.IsDefinitivelyUnpackagedCalls.Count, "The pre-build probe must run");
+        Assert.AreEqual(0, _fakeProjectRunService.BuildAndResolveCalls.Count, "The fast-fail must reject before building");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchExecutableCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task ProjectMode_CompatibleOptions_SkipTheFastFailProbe()
+    {
+        // --detach is valid for unpackaged apps, so the pre-build probe should be short-circuited
+        // (no incompatible option to reject) and the app should build + launch normally.
+        var csproj = CreateCsproj();
+        var targetDir = CreateTargetDir(withManifest: false);
+        SetUnpackagedOutcome(csproj, targetDir, selfContained: false);
+        _fakeProjectRunService.DefinitivelyUnpackaged = true;
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [csproj.FullName, "--detach"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(0, _fakeProjectRunService.IsDefinitivelyUnpackagedCalls.Count, "The probe must be skipped when no incompatible option is present");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchExecutableCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task ProjectMode_NoBuild_SkipsTheFastFailProbe()
+    {
+        // Under --no-build there is no build cost to save, so the pre-build probe is skipped; the
+        // authoritative post-build gate still rejects the incompatible option.
+        var csproj = CreateCsproj();
+        var targetDir = CreateTargetDir(withManifest: false);
+        SetUnpackagedOutcome(csproj, targetDir, selfContained: false);
+        _fakeProjectRunService.DefinitivelyUnpackaged = true;
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [csproj.FullName, "--no-build", "--no-launch"]);
+
+        Assert.AreEqual(1, exitCode, "The incompatible option is still rejected at the authoritative gate");
+        Assert.AreEqual(0, _fakeProjectRunService.IsDefinitivelyUnpackagedCalls.Count, "The probe must be skipped under --no-build");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchExecutableCalls.Count);
     }
 
     [TestMethod]
