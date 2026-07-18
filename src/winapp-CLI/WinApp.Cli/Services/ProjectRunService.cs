@@ -357,9 +357,12 @@ internal sealed class ProjectRunService(
             string.Equals(Path.GetFileNameWithoutExtension(p.Name), trimmed, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
-        // A path-based selector may not be rooted at the current directory; fall back to a name match
-        // on the selector's leaf so `--project src/App/App.csproj` still resolves.
-        if (matches.Count == 0)
+        // A *relative* path-style selector may not be rooted where we computed; fall back to a name
+        // match on the selector's leaf so `--project src/App/App.csproj` still resolves. Skip this for a
+        // fully qualified path: the user named an exact location, so silently matching a same-named
+        // project elsewhere would be wrong (e.g. `--project C:\wrong\App.csproj` must not pick the
+        // solution's unrelated `App.csproj`).
+        if (matches.Count == 0 && !Path.IsPathFullyQualified(trimmed))
         {
             var leaf = Path.GetFileName(trimmed);
             if (!string.IsNullOrEmpty(leaf))

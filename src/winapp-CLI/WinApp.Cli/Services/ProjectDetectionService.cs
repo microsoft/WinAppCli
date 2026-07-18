@@ -398,15 +398,7 @@ internal sealed class ProjectDetectionService(
         }
 
         var id = packageId.Trim();
-        foreach (var prefix in TestPackagePrefixes)
-        {
-            if (id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return TestPackagePrefixes.Any(prefix => id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>Scans inline csproj XML for a TestContainer capability or a test-framework package ref.</summary>

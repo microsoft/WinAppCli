@@ -112,13 +112,8 @@ internal static class MsBuildPropertyReader
                             doc.RootElement.TryGetProperty("Items", out var items) &&
                             items.ValueKind == JsonValueKind.Object)
                         {
-                            foreach (var group in items.EnumerateObject())
+                            foreach (var group in items.EnumerateObject().Where(g => g.Value.ValueKind == JsonValueKind.Array))
                             {
-                                if (group.Value.ValueKind != JsonValueKind.Array)
-                                {
-                                    continue;
-                                }
-
                                 var identities = new List<string>();
                                 foreach (var item in group.Value.EnumerateArray())
                                 {

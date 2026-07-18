@@ -803,6 +803,45 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public void MatchProjectSelector_RelativeLeaf_Matches()
+    {
+        var baseDir = _tempDir;
+        var app = new FileInfo(Path.Combine(_tempDir.FullName, "src", "App", "App.csproj"));
+        var other = new FileInfo(Path.Combine(_tempDir.FullName, "src", "Lib", "Lib.csproj"));
+
+        var match = ProjectRunService.MatchProjectSelector(new[] { app, other }, "App", baseDir);
+
+        Assert.IsNotNull(match);
+        Assert.AreEqual(app.FullName, match!.FullName);
+    }
+
+    [TestMethod]
+    public void MatchProjectSelector_FullyQualifiedWrongPath_DoesNotFallBackToName()
+    {
+        // A fully qualified selector that points at a location no project occupies must NOT silently
+        // match a same-named project elsewhere in the solution.
+        var baseDir = _tempDir;
+        var app = new FileInfo(Path.Combine(_tempDir.FullName, "src", "App", "App.csproj"));
+        var wrong = Path.Combine(_tempDir.FullName, "somewhere", "else", "App.csproj");
+
+        var match = ProjectRunService.MatchProjectSelector(new[] { app }, wrong, baseDir);
+
+        Assert.IsNull(match);
+    }
+
+    [TestMethod]
+    public void MatchProjectSelector_FullyQualifiedCorrectPath_Matches()
+    {
+        var baseDir = _tempDir;
+        var app = new FileInfo(Path.Combine(_tempDir.FullName, "src", "App", "App.csproj"));
+
+        var match = ProjectRunService.MatchProjectSelector(new[] { app }, app.FullName, baseDir);
+
+        Assert.IsNotNull(match);
+        Assert.AreEqual(app.FullName, match!.FullName);
+    }
+
+    [TestMethod]
     public async Task ResolveInput_Solution_NoCsprojProjects_Throws()
     {
         var solution = WriteFile("Native.sln", "");
