@@ -12,6 +12,7 @@ namespace WinApp.Cli.Services;
 internal sealed class ProjectRunService(
     IDotNetService dotNetService,
     IProjectDetectionService projectDetectionService,
+    ICsWinRTMetadataShimService csWinRTMetadataShimService,
     IAnsiConsole ansiConsole,
     ILogger<ProjectRunService> logger) : IProjectRunService
 {
@@ -344,6 +345,23 @@ internal sealed class ProjectRunService(
         return null;
     }
 
+    /// <summary>
+    /// SHIM (temporary): resolves the <c>CsWinRTWindowsMetadata</c> folder to inject for SDK-less builds,
+    /// or <c>null</c> when the user already set the property (their value wins) or no injection is
+    /// needed/possible. See <see cref="CsWinRTMetadataShimService"/>.
+    /// </summary>
+    private string? ResolveCsWinRTMetadataShim(ProjectRunOptions options)
+    {
+        var userSetMetadata = options.Properties.Any(p =>
+            p.StartsWith("CsWinRTWindowsMetadata=", StringComparison.OrdinalIgnoreCase));
+        if (userSetMetadata)
+        {
+            return null;
+        }
+
+        return csWinRTMetadataShimService.ResolveMetadataFolder(options.Framework);
+    }
+
     /// <inheritdoc />
     public async Task<ProjectBuildOutcome> BuildAndResolveAsync(
         FileInfo csproj,
@@ -352,6 +370,11 @@ internal sealed class ProjectRunService(
     {
         var workingDir = csproj.Directory ?? new DirectoryInfo(Directory.GetCurrentDirectory());
         WarnOnOverriddenFlags(options);
+
+        // SHIM (temporary): on hosts with no registered Windows SDK, resolve a folder of ref-pack winmds
+        // to inject as -p:CsWinRTWindowsMetadata so C#/WinRT authoring projects build (see
+        // CsWinRTMetadataShimService). Skipped when the user already set the property. null = no injection.
+        var csWinRTMetadata = ResolveCsWinRTMetadataShim(options);
 
         // Two passes (spec §8.2, Change #1): (1) BUILD — a plain `dotnet build` whose console log
         // STREAMS live so the user sees progress (skipped under --no-build); then (2) EVALUATE — a
@@ -363,7 +386,7 @@ internal sealed class ProjectRunService(
         if (!options.NoBuild)
         {
             var useLiveSpinner = ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger);
-            var buildExit = await RunBuildPassAsync(csproj, options, workingDir, useLiveSpinner, cancellationToken);
+            var buildExit = await RunBuildPassAsync(csproj, options, workingDir, useLiveSpinner, csWinRTMetadata, cancellationToken);
             if (buildExit != 0)
             {
                 // dotnet's diagnostics were already streamed live (or dumped on the spinner-failure
@@ -373,7 +396,7 @@ internal sealed class ProjectRunService(
             }
         }
 
-        var evaluateArgs = BuildEvaluateArguments(csproj, options);
+        var evaluateArgs = BuildEvaluateArguments(csproj, options, csWinRTMetadata);
         logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, evaluateArgs);
 
         var (exitCode, stdout, stderr) = await dotNetService.RunDotnetCommandAsync(workingDir, evaluateArgs, cancellationToken);
@@ -500,7 +523,7 @@ internal sealed class ProjectRunService(
     /// P2P references (multi-project apps, CS0006) unless the user set it explicitly; and the
     /// <c>-v</c> verbosity is mapped from the CLI's log level (Change #1, spec §8.3/§8.5).
     /// </summary>
-    internal static string BuildBuildPassArguments(FileInfo csproj, ProjectRunOptions options, string verbosity)
+    internal static string BuildBuildPassArguments(FileInfo csproj, ProjectRunOptions options, string verbosity, string? csWinRTMetadataFolder = null)
     {
         var rid = RunArchHelper.ToRuntimeIdentifier(options.Architecture);
         var platform = RunArchHelper.ToPlatform(options.Architecture);
@@ -561,6 +584,14 @@ internal sealed class ProjectRunService(
             tokens.Add("-p:EnableDynamicPlatformResolution=true");
         }
 
+        // SHIM (temporary): inject the resolved ref-pack winmd folder so cswinrt.exe can find contract
+        // winmds without a registered Windows SDK. Only present when the shim resolved a folder (SDK
+        // absent + ref pack restored) and the user didn't set the property. See CsWinRTMetadataShimService.
+        if (!string.IsNullOrEmpty(csWinRTMetadataFolder))
+        {
+            tokens.Add($"-p:CsWinRTWindowsMetadata={csWinRTMetadataFolder}");
+        }
+
         return WindowsCommandLine.JoinArguments(tokens) ?? string.Empty;
     }
 
@@ -573,7 +604,7 @@ internal sealed class ProjectRunService(
     /// emitted LAST so MSBuild's last-wins makes a dedicated value beat a conflicting user <c>-p</c>
     /// (spec §8.2/M2).
     /// </summary>
-    internal static string BuildEvaluateArguments(FileInfo csproj, ProjectRunOptions options)
+    internal static string BuildEvaluateArguments(FileInfo csproj, ProjectRunOptions options, string? csWinRTMetadataFolder = null)
     {
         var rid = RunArchHelper.ToRuntimeIdentifier(options.Architecture);
         var platform = RunArchHelper.ToPlatform(options.Architecture);
@@ -616,6 +647,13 @@ internal sealed class ProjectRunService(
         if (!userSpecifiesEdpr)
         {
             tokens.Add("-p:EnableDynamicPlatformResolution=true");
+        }
+
+        // SHIM (temporary): keep the evaluate pass's inputs identical to the build pass — inject the same
+        // CsWinRTWindowsMetadata folder when the shim resolved one. See CsWinRTMetadataShimService.
+        if (!string.IsNullOrEmpty(csWinRTMetadataFolder))
+        {
+            tokens.Add($"-p:CsWinRTWindowsMetadata={csWinRTMetadataFolder}");
         }
 
         foreach (var name in RequestedProperties)
@@ -683,10 +721,11 @@ internal sealed class ProjectRunService(
         ProjectRunOptions options,
         DirectoryInfo workingDir,
         bool useLiveSpinner,
+        string? csWinRTMetadataFolder,
         CancellationToken cancellationToken)
     {
         var verbosity = ResolveBuildVerbosity(logger, options.Json);
-        var buildArgs = BuildBuildPassArguments(csproj, options, verbosity);
+        var buildArgs = BuildBuildPassArguments(csproj, options, verbosity, csWinRTMetadataFolder);
         logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, buildArgs);
 
         var banner = $"Building {csproj.Name} ({options.Configuration} | {options.Architecture})...";

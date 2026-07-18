@@ -14,6 +14,7 @@ public class ProjectRunServiceTests
 {
     private DirectoryInfo _tempDir = null!;
     private ProjectRunService _service = null!;
+    private FakeCsWinRTMetadataShimService _shim = null!;
 
     private const string ExecutableCsproj = """
         <Project Sdk="Microsoft.NET.Sdk">
@@ -70,7 +71,8 @@ public class ProjectRunServiceTests
         _tempDir = new DirectoryInfo(Path.Join(Path.GetTempPath(), $"ProjectRunServiceTests_{Guid.NewGuid():N}"));
         _tempDir.Create();
         var fakeDotnet = new FakeDotNetService();
-        _service = new ProjectRunService(fakeDotnet, NewDetection(fakeDotnet), new TestConsole(), NullLogger<ProjectRunService>.Instance);
+        _shim = new FakeCsWinRTMetadataShimService();
+        _service = new ProjectRunService(fakeDotnet, NewDetection(fakeDotnet), _shim, new TestConsole(), NullLogger<ProjectRunService>.Instance);
     }
 
     // Project classification is owned by ProjectDetectionService; build a real one over the same fake
@@ -92,6 +94,44 @@ public class ProjectRunServiceTests
     }
 
     #region BuildBuildPassArguments (streamed build pass, Change #1)
+
+    [TestMethod]
+    public void BuildBuildPassArguments_WithCsWinRTMetadataFolder_InjectsProperty()
+    {
+        // SHIM: a resolved ref-pack winmd folder is injected as -p:CsWinRTWindowsMetadata so cswinrt
+        // can build without a registered Windows SDK.
+        var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: []);
+        var folder = @"C:\cache\microsoft.windows.sdk.net.ref\10.0.26100.57\winmd";
+
+        var args = ProjectRunService.BuildBuildPassArguments(csproj, options, "minimal", folder);
+
+        StringAssert.Contains(args, $"-p:CsWinRTWindowsMetadata={folder}");
+    }
+
+    [TestMethod]
+    public void BuildBuildPassArguments_NoCsWinRTMetadataFolder_OmitsProperty()
+    {
+        var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: []);
+
+        var args = ProjectRunService.BuildBuildPassArguments(csproj, options, "minimal", csWinRTMetadataFolder: null);
+
+        Assert.IsFalse(args.Contains("CsWinRTWindowsMetadata"), "no metadata property should be injected when the shim resolved nothing");
+    }
+
+    [TestMethod]
+    public void BuildEvaluateArguments_WithCsWinRTMetadataFolder_InjectsProperty()
+    {
+        // The evaluate pass must be fed the same inputs as the build pass, so the shim folder flows here too.
+        var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: []);
+        var folder = @"C:\cache\microsoft.windows.sdk.net.ref\10.0.26100.57\winmd";
+
+        var args = ProjectRunService.BuildEvaluateArguments(csproj, options, folder);
+
+        StringAssert.Contains(args, $"-p:CsWinRTWindowsMetadata={folder}");
+    }
 
     [TestMethod]
     public void BuildBuildPassArguments_Default_UsesBuildAndRid_NoGetProperty()
@@ -733,21 +773,63 @@ public class ProjectRunServiceTests
     #region BuildAndResolveAsync (--json banner suppression, spec H2)
 
     private static ProjectRunService NewServiceWith(FakeDotNetService dotnet, out TestConsole console)
+        => NewServiceWith(dotnet, new FakeCsWinRTMetadataShimService(), out console);
+
+    private static ProjectRunService NewServiceWith(FakeDotNetService dotnet, FakeCsWinRTMetadataShimService shim, out TestConsole console)
     {
         console = new TestConsole();
-        return new ProjectRunService(dotnet, NewDetection(dotnet), console, NullLogger<ProjectRunService>.Instance);
+        return new ProjectRunService(dotnet, NewDetection(dotnet), shim, console, NullLogger<ProjectRunService>.Instance);
     }
 
     private static ProjectRunService NewServiceWith(FakeDotNetService dotnet, LogLevel minLevel, out TestConsole console)
     {
         console = new TestConsole();
-        return new ProjectRunService(dotnet, NewDetection(dotnet), console, new LevelLogger<ProjectRunService>(minLevel));
+        return new ProjectRunService(dotnet, NewDetection(dotnet), new FakeCsWinRTMetadataShimService(), console, new LevelLogger<ProjectRunService>(minLevel));
     }
 
     private string PackagedPropertiesJson() =>
         // TargetDir must be non-empty and the packaging must resolve to Packaged (WindowsPackageType=MSIX)
         // so BuildAndResolveAsync succeeds without needing a real apphost .exe on disk.
         $$"""{ "Properties": { "TargetDir": "{{_tempDir.FullName.Replace("\\", "\\\\")}}", "RunCommand": "", "WindowsPackageType": "MSIX", "OutputType": "WinExe", "WindowsAppSDKSelfContained": "" } }""";
+
+    [TestMethod]
+    public async Task BuildAndResolveAsync_ShimResolvesFolder_InjectsMetadataIntoBuildPass()
+    {
+        // SHIM threading: when the shim resolves a folder (SDK absent), the build pass args must carry
+        // -p:CsWinRTWindowsMetadata and the shim must be consulted with the project's target framework.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => (0, PackagedPropertiesJson(), string.Empty) };
+        var folder = @"C:\cache\microsoft.windows.sdk.net.ref\10.0.26100.57\winmd";
+        var shim = new FakeCsWinRTMetadataShimService { FolderToReturn = folder };
+        var service = NewServiceWith(dotnet, shim, out _);
+        var options = new ProjectRunOptions("Debug", "x64", "net10.0-windows10.0.26100.0", NoBuild: false, NoRestore: false, Properties: []);
+
+        var outcome = await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsNotNull(outcome.Resolution);
+        Assert.AreEqual(1, dotnet.StreamingCalls.Count, "exactly one build pass should have run");
+        StringAssert.Contains(dotnet.StreamingCalls[0], $"-p:CsWinRTWindowsMetadata={folder}");
+        CollectionAssert.AreEqual(new[] { "net10.0-windows10.0.26100.0" }, shim.ResolvedMonikers,
+            "the shim should be consulted once with the project's target framework moniker");
+    }
+
+    [TestMethod]
+    public async Task BuildAndResolveAsync_UserSetMetadata_ShimNotConsulted()
+    {
+        // The user's explicit CsWinRTWindowsMetadata wins: the shim must not be consulted or injected.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => (0, PackagedPropertiesJson(), string.Empty) };
+        var shim = new FakeCsWinRTMetadataShimService { FolderToReturn = @"C:\should\not\be\used\winmd" };
+        var service = NewServiceWith(dotnet, shim, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false,
+            Properties: [@"CsWinRTWindowsMetadata=C:\user\choice\winmd"]);
+
+        await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.AreEqual(0, shim.ResolvedMonikers.Count, "the shim must not be consulted when the user set the property");
+        Assert.IsFalse(dotnet.StreamingCalls[0].Contains(@"C:\should\not\be\used\winmd"),
+            "the shim's value must never override the user's explicit property");
+    }
 
     [TestMethod]
     public async Task BuildAndResolveAsync_JsonMode_DoesNotPrintBuildBannerToConsole()
@@ -1086,10 +1168,10 @@ public class ProjectRunServiceTests
             RunDotnetStreamingHandler = (_, onOut, _) => { onOut?.Invoke("hidden-spinner-noise"); return 0; },
         };
         var console = new TestConsole();
-        var service = new ProjectRunService(dotnet, NewDetection(dotnet), console, new LevelLogger<ProjectRunService>(LogLevel.Information));
+        var service = new ProjectRunService(dotnet, NewDetection(dotnet), new FakeCsWinRTMetadataShimService(), console, new LevelLogger<ProjectRunService>(LogLevel.Information));
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
 
-        var exit = await service.RunBuildPassAsync(csproj, options, _tempDir, useLiveSpinner: true, CancellationToken.None);
+        var exit = await service.RunBuildPassAsync(csproj, options, _tempDir, useLiveSpinner: true, csWinRTMetadataFolder: null, CancellationToken.None);
 
         Assert.AreEqual(0, exit);
         Assert.IsFalse(console.Output.Contains("hidden-spinner-noise"),
@@ -1106,10 +1188,10 @@ public class ProjectRunServiceTests
             RunDotnetStreamingHandler = (_, _, onErr) => { onErr?.Invoke("error CS9999: the real failure"); return 1; },
         };
         var console = new TestConsole();
-        var service = new ProjectRunService(dotnet, NewDetection(dotnet), console, new LevelLogger<ProjectRunService>(LogLevel.Information));
+        var service = new ProjectRunService(dotnet, NewDetection(dotnet), new FakeCsWinRTMetadataShimService(), console, new LevelLogger<ProjectRunService>(LogLevel.Information));
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
 
-        var exit = await service.RunBuildPassAsync(csproj, options, _tempDir, useLiveSpinner: true, CancellationToken.None);
+        var exit = await service.RunBuildPassAsync(csproj, options, _tempDir, useLiveSpinner: true, csWinRTMetadataFolder: null, CancellationToken.None);
 
         Assert.AreEqual(1, exit);
         StringAssert.Contains(console.Output, "error CS9999: the real failure",
@@ -1126,10 +1208,10 @@ public class ProjectRunServiceTests
             RunDotnetStreamingHandler = (_, onOut, _) => { onOut?.Invoke("detailed-build-output"); return 0; },
         };
         var console = new TestConsole();
-        var service = new ProjectRunService(dotnet, NewDetection(dotnet), console, new LevelLogger<ProjectRunService>(LogLevel.Debug));
+        var service = new ProjectRunService(dotnet, NewDetection(dotnet), new FakeCsWinRTMetadataShimService(), console, new LevelLogger<ProjectRunService>(LogLevel.Debug));
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
 
-        var exit = await service.RunBuildPassAsync(csproj, options, _tempDir, useLiveSpinner: true, CancellationToken.None);
+        var exit = await service.RunBuildPassAsync(csproj, options, _tempDir, useLiveSpinner: true, csWinRTMetadataFolder: null, CancellationToken.None);
 
         Assert.AreEqual(0, exit);
         StringAssert.Contains(console.Output, "detailed-build-output",

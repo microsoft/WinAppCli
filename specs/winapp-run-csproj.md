@@ -364,6 +364,47 @@ evaluation (§8.3), so custom props that move output paths (e.g. `-p:BaseOutputP
 
 ---
 
+### 8.6 SDK-less CsWinRT metadata auto-injection (temporary shim)
+
+> **This is a temporary shim** pending an upstream fix to the default `CsWinRTWindowsMetadata`
+> value in `Microsoft.Windows.CsWinRT.targets` (a cswinrt change is in flight). Once consumers are
+> on a fixed CsWinRT, this shim can be removed.
+
+**Problem.** C#/WinRT authoring projects — anything importing `Microsoft.Windows.CsWinRT`
+(`CsWinRTComponent=true`, WinUI control libraries that author their own winmds, etc.) — fail to
+build via project mode on hosts with **no registered Windows SDK** (clean CI, containers, SDK-less
+dev boxes). The chain: `Microsoft.Windows.CsWinRT.targets` defaults `CsWinRTWindowsMetadata` to a
+**bare SDK version** (`$(WindowsSDKVersion)` → `$(TargetPlatformVersion)`), which `cswinrt.exe`
+resolves through a **registry lookup** (`HKLM\SOFTWARE\Microsoft\Windows Kits\Installed Roots` →
+`KitsRoot10`). With no SDK installed this fails with `Could not find the Windows SDK in the
+registry`, cascading into a wall of WMC XAML errors.
+
+**Fix.** Point `CsWinRTWindowsMetadata` at a **folder of winmds** instead of a bare version. Those
+winmds already ship via the `Microsoft.Windows.SDK.NET.Ref` NuGet ref pack that is auto-restored
+for any `net*-windows10.0.x` TFM, on disk at
+`<nuget-global>\microsoft.windows.sdk.net.ref\<ver>\winmd\`.
+
+**Behavior.** During the project-mode build/evaluate path, winapp:
+
+1. Checks whether a Windows SDK is registered (mirrors cswinrt's own check: `KitsRoot10` under
+   `HKLM\SOFTWARE\Microsoft\Windows Kits\Installed Roots`, in both the 32-bit and 64-bit registry
+   views). If an SDK **is** registered, it does nothing — SDK-installed builds are untouched.
+2. When **no** SDK is registered, resolves the `Microsoft.Windows.SDK.NET.Ref` winmd folder from the
+   NuGet global packages cache, preferring the ref-pack version whose name matches the project's
+   `TargetPlatformVersion` (e.g. `10.0.19041.*` for `net*-windows10.0.19041.0`), else the highest
+   available. It verifies `Windows.Foundation.FoundationContract.winmd` exists in that folder before
+   using it.
+3. Injects `-p:CsWinRTWindowsMetadata=<folder>` (an MSBuild global property) into both the build and
+   the `--getProperty` evaluation, keeping the two passes fed identical inputs (§8.3).
+
+**Guards.** The injection is **skipped entirely** when the user supplied their own
+`-p:CsWinRTWindowsMetadata=…`. If the ref pack isn't restored, or no version contains the sentinel
+winmd, the shim **no-ops with a debug log** — it never fails the build itself, so the normal error
+surfaces. The property is inert for non-CsWinRT projects (only CsWinRT targets consume it), so no
+project-type detection is needed.
+
+---
+
 ## 9. Option compatibility matrix
 
 | Option | Folder mode | Project · packaged | Project · unpackaged |
