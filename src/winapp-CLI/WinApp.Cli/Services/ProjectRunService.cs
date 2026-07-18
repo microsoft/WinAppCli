@@ -352,15 +352,21 @@ internal sealed class ProjectRunService(
     /// </summary>
     private string? ResolveCsWinRTMetadataShim(ProjectRunOptions options)
     {
-        var userSetMetadata = options.Properties.Any(p =>
-            p.StartsWith("CsWinRTWindowsMetadata=", StringComparison.OrdinalIgnoreCase));
-        if (userSetMetadata)
+        if (UserSetCsWinRTMetadata(options))
         {
             return null;
         }
 
         return csWinRTMetadataShimService.ResolveMetadataFolder(options.Framework);
     }
+
+    /// <summary>
+    /// True when the user supplied their own <c>-p:CsWinRTWindowsMetadata=…</c>; their value wins and the
+    /// shim must not inject (or trigger a restore to resolve) anything.
+    /// </summary>
+    private static bool UserSetCsWinRTMetadata(ProjectRunOptions options) =>
+        options.Properties.Any(p =>
+            p.StartsWith("CsWinRTWindowsMetadata=", StringComparison.OrdinalIgnoreCase));
 
     /// <inheritdoc />
     public async Task<ProjectBuildOutcome> BuildAndResolveAsync(
@@ -375,6 +381,30 @@ internal sealed class ProjectRunService(
         // to inject as -p:CsWinRTWindowsMetadata so C#/WinRT authoring projects build (see
         // CsWinRTMetadataShimService). Skipped when the user already set the property. null = no injection.
         var csWinRTMetadata = ResolveCsWinRTMetadataShim(options);
+        var buildOptions = options;
+
+        // SHIM (temporary) — restore ordering: on a genuinely clean SDK-less host the ref pack
+        // (Microsoft.Windows.SDK.NET.Ref) may not be on disk yet when we first resolve the shim, so the
+        // shim no-ops and the very first `dotnet build` — already handed no CsWinRTWindowsMetadata — fails
+        // even though that same build restores the ref pack; only a SECOND invocation (cache now warm)
+        // would succeed. Pre-populate the ref pack with an explicit restore, then re-resolve so the first
+        // build gets the winmd folder. Only fires when the shim would otherwise inject (no SDK registered)
+        // AND we're actually building AND the user didn't opt out of restore or set the property himself.
+        if (csWinRTMetadata is null
+            && !options.NoBuild
+            && !options.NoRestore
+            && !UserSetCsWinRTMetadata(options)
+            && csWinRTMetadataShimService.IsWindowsSdkAbsent())
+        {
+            var restoreExit = await RunRestorePassAsync(csproj, options, workingDir, cancellationToken);
+            if (restoreExit == 0)
+            {
+                csWinRTMetadata = ResolveCsWinRTMetadataShim(options);
+                // The explicit restore already populated the cache; skip the redundant restore in the
+                // build pass so we don't restore twice.
+                buildOptions = options with { NoRestore = true };
+            }
+        }
 
         // Two passes (spec §8.2, Change #1): (1) BUILD — a plain `dotnet build` whose console log
         // STREAMS live so the user sees progress (skipped under --no-build); then (2) EVALUATE — a
@@ -386,7 +416,7 @@ internal sealed class ProjectRunService(
         if (!options.NoBuild)
         {
             var useLiveSpinner = ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger);
-            var buildExit = await RunBuildPassAsync(csproj, options, workingDir, useLiveSpinner, csWinRTMetadata, cancellationToken);
+            var buildExit = await RunBuildPassAsync(csproj, buildOptions, workingDir, useLiveSpinner, csWinRTMetadata, cancellationToken);
             if (buildExit != 0)
             {
                 // dotnet's diagnostics were already streamed live (or dumped on the spinner-failure
@@ -464,7 +494,8 @@ internal sealed class ProjectRunService(
             string.IsNullOrEmpty(runCommand) ? null : runCommand,
             packaging,
             selfContained,
-            options.Architecture);
+            options.Architecture,
+            options.Framework);
 
         return new ProjectBuildOutcome(resolution, 0);
     }
@@ -544,7 +575,54 @@ internal sealed class ProjectRunService(
     }
 
     /// <summary>
-    /// Builds the argument string for the project-mode BUILD pass: a plain <c>dotnet build</c> that
+    /// SHIM (temporary) — restore ordering: runs an explicit <c>dotnet restore</c> so the
+    /// <c>Microsoft.Windows.SDK.NET.Ref</c> ref pack lands on disk BEFORE the shim resolves its winmd
+    /// folder, fixing the clean-host first-build failure (see <c>BuildAndResolveAsync</c>). Output is
+    /// captured (not streamed) since it's a fast pre-step; the following build pass streams as usual.
+    /// Returns the dotnet exit code so the caller only skips the build's own restore when this succeeded.
+    /// </summary>
+    private async Task<int> RunRestorePassAsync(FileInfo csproj, ProjectRunOptions options, DirectoryInfo workingDir, CancellationToken cancellationToken)
+    {
+        var restoreArgs = BuildRestorePassArguments(csproj, options);
+        logger.LogDebug("{UISymbol} Restoring before SDK-less CsWinRT metadata resolution: dotnet {Arguments}", UiSymbols.Note, restoreArgs);
+        var (exitCode, _, _) = await dotNetService.RunDotnetCommandAsync(workingDir, restoreArgs, cancellationToken);
+        if (exitCode != 0)
+        {
+            // Non-fatal: fall through and let the build pass restore + surface any real error itself.
+            logger.LogDebug("{UISymbol} Pre-shim restore exited {ExitCode}; deferring to the build pass.", UiSymbols.Note, exitCode);
+        }
+        return exitCode;
+    }
+
+    /// <summary>
+    /// Builds the argument string for the SHIM's pre-build <c>dotnet restore</c>. It mirrors the build
+    /// pass's RID / user <c>-p</c> / solution properties so the same graph restores, but omits
+    /// <c>-c</c>/<c>-f</c>/<c>-v</c> (restore is TFM- and config-agnostic for pulling the ref pack) and
+    /// never adds <c>--no-restore</c>. Pure and unit-testable.
+    /// </summary>
+    internal static string BuildRestorePassArguments(FileInfo csproj, ProjectRunOptions options)
+    {
+        var rid = RunArchHelper.ToRuntimeIdentifier(options.Architecture);
+        var tokens = new List<string>
+        {
+            "restore",
+            csproj.FullName,
+            "-r",
+            rid,
+        };
+
+        foreach (var property in options.Properties)
+        {
+            tokens.Add($"-p:{property}");
+        }
+
+        AppendSolutionProperties(tokens, options);
+
+        return WindowsCommandLine.JoinArguments(tokens) ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Builds the argument string for the streaming BUILD pass: a plain <c>dotnet build</c> that
     /// produces the output and STREAMS its console log. It deliberately omits <c>--getProperty</c>
     /// (which suppresses that log) and needs no explicit <c>-t:Build</c> (Build is the default
     /// target). The dedicated <c>-c</c>/<c>-r</c>/<c>-f</c> switches always beat a same-named user

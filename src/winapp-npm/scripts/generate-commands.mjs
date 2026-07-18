@@ -323,7 +323,10 @@ function generate(schema) {
     // passthrough args property
     if (passthrough) {
       L(`  /** ${passthrough.description} */`);
-      L(`  ${passthrough.propName}?: string[];`);
+      // Accept a single string OR an array. A bare string is normalized to a one-element
+      // array before emission (below) so it isn't spread into individual characters — this
+      // preserves the string form callers relied on before `run` moved onto this path.
+      L(`  ${passthrough.propName}?: string | string[];`);
     }
     L('}');
     L();
@@ -386,15 +389,19 @@ function generate(schema) {
       }
     }
 
-    // Passthrough args
+    // Passthrough args. Normalize a single string to a one-element array so a bare-string
+    // argument is forwarded as one token, not spread into individual characters.
     if (passthrough) {
+      L(`  if (options.${passthrough.propName} !== undefined) {`);
+      L(`    const ${passthrough.propName}Arr = Array.isArray(options.${passthrough.propName}) ? options.${passthrough.propName} : [options.${passthrough.propName}];`);
       if (passthrough.separator === ' -- ') {
-        L(`  if (options.${passthrough.propName} && options.${passthrough.propName}.length > 0) {`);
-        L(`    args.push('--', ...options.${passthrough.propName});`);
-        L('  }');
+        L(`    if (${passthrough.propName}Arr.length > 0) {`);
+        L(`      args.push('--', ...${passthrough.propName}Arr);`);
+        L('    }');
       } else {
-        L(`  if (options.${passthrough.propName}) args.push(...options.${passthrough.propName});`);
+        L(`    args.push(...${passthrough.propName}Arr);`);
       }
+      L('  }');
     }
 
     L('  return execCommand(args, options);');

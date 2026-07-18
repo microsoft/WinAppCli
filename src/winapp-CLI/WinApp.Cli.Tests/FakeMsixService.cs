@@ -15,7 +15,7 @@ internal class FakeMsixService : IMsixService
     public MsixIdentityResult FakeIdentityResult { get; set; } = new("TestPackage", "CN=TestPublisher", "TestApp");
     public List<(string ManifestPath, bool Clean)> AddLooseLayoutCalls { get; } = [];
     public List<(string? RuntimeArch, string? ProjectFile)> AddLooseLayoutRuntimeCalls { get; } = [];
-    public List<(string? ProjectFile, string? Architecture)> EnsureRuntimeInstalledCalls { get; } = [];
+    public List<(string? ProjectFile, string? Architecture, string? Framework)> EnsureRuntimeInstalledCalls { get; } = [];
     public List<(string? EntryPoint, string? ManifestPath, bool NoInstall, bool KeepIdentity)> AddSparseIdentityCalls { get; } = [];
     public Exception? ExceptionToThrow { get; set; }
 
@@ -70,10 +70,11 @@ internal class FakeMsixService : IMsixService
     public Task EnsureWindowsAppRuntimeInstalledAsync(
         FileInfo? projectFile,
         string? architecture,
+        string? framework,
         TaskContext taskContext,
         CancellationToken cancellationToken = default)
     {
-        EnsureRuntimeInstalledCalls.Add((projectFile?.FullName, architecture));
+        EnsureRuntimeInstalledCalls.Add((projectFile?.FullName, architecture, framework));
         if (EnsureRuntimeInstalledException != null)
         {
             throw EnsureRuntimeInstalledException;

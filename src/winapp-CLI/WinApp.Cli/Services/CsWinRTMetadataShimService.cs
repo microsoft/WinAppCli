@@ -95,6 +95,9 @@ internal sealed partial class CsWinRTMetadataShimService(
         return winmdFolder;
     }
 
+    /// <inheritdoc />
+    public bool IsWindowsSdkAbsent() => !IsWindowsSdkRegistered();
+
     /// <summary>
     /// Extracts the <c>major.minor.build</c> platform-version prefix (e.g. <c>10.0.19041</c>) from a
     /// target framework moniker such as <c>net10.0-windows10.0.19041.0</c>. Returns <c>null</c> when the

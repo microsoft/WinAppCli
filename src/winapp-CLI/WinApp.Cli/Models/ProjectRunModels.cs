@@ -59,13 +59,19 @@ internal sealed record RunInputResolution(
 /// <param name="Packaging">Packaged vs unpackaged.</param>
 /// <param name="SelfContained">True when <c>WindowsAppSDKSelfContained=true</c> — the runtime install is skipped.</param>
 /// <param name="Architecture">The resolved app architecture (x64 / arm64 / x86) used for build + runtime install.</param>
+/// <param name="Framework">
+/// The effective target framework moniker the app was built for (mirrors <c>ProjectRunOptions.Framework</c>),
+/// or null for a single-targeted project. Threaded into the unpackaged runtime install so a multi-targeted
+/// project's runtime version resolves from the built TFM, not a sibling one.
+/// </param>
 internal sealed record ProjectRunResolution(
     FileInfo Csproj,
     string TargetDir,
     string? RunCommand,
     ProjectPackaging Packaging,
     bool SelfContained,
-    string Architecture);
+    string Architecture,
+    string? Framework = null);
 
 /// <summary>
 /// User-provided build inputs for project mode, forwarded to <c>dotnet build</c> / <c>dotnet msbuild</c>.

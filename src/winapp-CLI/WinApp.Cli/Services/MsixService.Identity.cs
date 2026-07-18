@@ -151,7 +151,7 @@ internal partial class MsixService
             var identity = ParseAppxManifestAsync(manifestContent);
 
             // Install the Windows App Runtime framework packages if not already present
-            var msbuildPackageList = await ResolveDotNetPackageListAsync(projectFile, cancellationToken);
+            var msbuildPackageList = await ResolveDotNetPackageListAsync(projectFile, framework: null, cancellationToken);
             await EnsureWindowsAppRuntimeInstalledAsync(msbuildPackageList, runtimeArch, taskContext, cancellationToken);
 
             // Resolve the manifest that would be registered (issue #537 / TrySkipRegistration).
@@ -218,7 +218,7 @@ internal partial class MsixService
         }
 
         // Fetch dotnet package list once for all downstream operations
-        var dotNetPackageList = await ResolveDotNetPackageListAsync(projectFile, cancellationToken);
+        var dotNetPackageList = await ResolveDotNetPackageListAsync(projectFile, framework: null, cancellationToken);
 
         // If there is a pri file named after the executable, rename it to resources.pri
         var priFilePath = Path.Combine(outputAppXDirectory.FullName, Path.GetFileNameWithoutExtension(executableMatch.Name) + ".pri");
@@ -417,9 +417,9 @@ internal partial class MsixService
     /// list (or falls back to a cwd glob) and installs the Windows App Runtime framework packages for
     /// the given architecture. Callers gate on <c>WindowsAppSDKSelfContained</c> before calling.
     /// </summary>
-    public async Task EnsureWindowsAppRuntimeInstalledAsync(FileInfo? projectFile, string? architecture, TaskContext taskContext, CancellationToken cancellationToken = default)
+    public async Task EnsureWindowsAppRuntimeInstalledAsync(FileInfo? projectFile, string? architecture, string? framework, TaskContext taskContext, CancellationToken cancellationToken = default)
     {
-        var packageList = await ResolveDotNetPackageListAsync(projectFile, cancellationToken);
+        var packageList = await ResolveDotNetPackageListAsync(projectFile, framework, cancellationToken);
 
         // A framework-dependent app needs the Windows App Runtime only if it actually uses the Windows
         // App SDK. A plain console/desktop Exe (no WindowsAppSDK reference) doesn't — preparing the
@@ -469,13 +469,54 @@ internal partial class MsixService
 
     /// <summary>
     /// Resolves the .NET package list from an explicit project file when available (project mode),
-    /// otherwise falls back to the current-directory glob used by folder mode.
+    /// otherwise falls back to the current-directory glob used by folder mode. When an effective
+    /// <paramref name="framework"/> is supplied, the list is narrowed to that TFM so a multi-targeted
+    /// project's other frameworks (which may reference a different Windows App SDK version) don't drive
+    /// the runtime version resolution for the framework we actually built.
     /// </summary>
-    private async Task<DotNetPackageListJson?> ResolveDotNetPackageListAsync(FileInfo? projectFile, CancellationToken cancellationToken)
+    private async Task<DotNetPackageListJson?> ResolveDotNetPackageListAsync(FileInfo? projectFile, string? framework, CancellationToken cancellationToken)
     {
-        return projectFile is not null
+        var packageList = projectFile is not null
             ? await dotNetService.GetPackageListAsync(projectFile, cancellationToken: cancellationToken)
             : await FetchDotNetPackageListAsync(cancellationToken);
+
+        return FilterPackageListToFramework(packageList, framework);
+    }
+
+    /// <summary>
+    /// Restricts each project's <see cref="DotNetProject.Frameworks"/> to the one matching the built
+    /// TFM. <c>dotnet list package</c> has no <c>--framework</c> filter, so a multi-targeted project
+    /// returns every TFM; without this a sibling framework's Windows App SDK version could be picked.
+    /// A null/empty <paramref name="framework"/>, or a project that doesn't list the TFM, is left as-is
+    /// (fail-open) so single-targeted and folder-mode flows are unchanged.
+    /// </summary>
+    internal static DotNetPackageListJson? FilterPackageListToFramework(DotNetPackageListJson? packageList, string? framework)
+    {
+        if (packageList?.Projects is null || string.IsNullOrEmpty(framework))
+        {
+            return packageList;
+        }
+
+        var filteredProjects = packageList.Projects
+            .Select(project =>
+            {
+                var frameworks = project.Frameworks;
+                if (frameworks is null || frameworks.Count <= 1)
+                {
+                    return project;
+                }
+
+                var matched = frameworks
+                    .Where(f => string.Equals(f.Framework, framework, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                // Only narrow when the TFM is actually present; otherwise keep all frameworks so an
+                // unexpected moniker mismatch doesn't blank out the SDK reference entirely.
+                return matched.Count > 0 ? project with { Frameworks = matched } : project;
+            })
+            .ToList();
+
+        return packageList with { Projects = filteredProjects };
     }
 
     /// <summary>

@@ -25,4 +25,12 @@ internal interface ICsWinRTMetadataShimService
     /// available ref-pack version is used.
     /// </param>
     string? ResolveMetadataFolder(string? targetFrameworkMoniker);
+
+    /// <summary>
+    /// True when no Windows SDK is registered on the host — i.e. the situation in which the shim WOULD
+    /// inject the ref-pack winmd folder if it were restored. Callers use this to decide whether an
+    /// explicit <c>dotnet restore</c> (to populate <c>Microsoft.Windows.SDK.NET.Ref</c>) is worth doing
+    /// before resolving the folder, so the FIRST build on a clean host isn't handed a missing folder.
+    /// </summary>
+    bool IsWindowsSdkAbsent();
 }

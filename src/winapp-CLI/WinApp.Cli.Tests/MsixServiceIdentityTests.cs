@@ -872,6 +872,53 @@ public class MsixServiceIdentityTests : BaseCommandTests
         Assert.IsEmpty(_fakeWindowsAppRuntime.InstallRuntimeCalls);
     }
 
+    // ---- FilterPackageListToFramework (C2: TFM-aware runtime resolution) ----------
+
+    private static DotNetPackageListJson MultiTargetedWinAppSdkList() =>
+        new([
+            new DotNetProject([
+                new DotNetFramework(
+                    "net8.0-windows10.0.19041.0",
+                    [new DotNetPackage("Microsoft.WindowsAppSDK", "1.5.240311", "1.5.240311")],
+                    []),
+                new DotNetFramework(
+                    "net10.0-windows10.0.26100.0",
+                    [new DotNetPackage("Microsoft.WindowsAppSDK", "1.7.250101", "1.7.250101")],
+                    [])
+            ])
+        ]);
+
+    [TestMethod]
+    public void FilterPackageListToFramework_MultiTargeted_NarrowsToSelectedTfm()
+    {
+        var filtered = MsixService.FilterPackageListToFramework(MultiTargetedWinAppSdkList(), "net10.0-windows10.0.26100.0");
+
+        var frameworks = filtered!.Projects[0].Frameworks;
+        Assert.HasCount(1, frameworks);
+        Assert.AreEqual("net10.0-windows10.0.26100.0", frameworks[0].Framework);
+        Assert.AreEqual("1.7.250101", frameworks[0].TopLevelPackages[0].ResolvedVersion,
+            "the retained framework must carry the SDK version for the built TFM, not the sibling's");
+    }
+
+    [TestMethod]
+    public void FilterPackageListToFramework_NullFramework_ReturnsListUnchanged()
+    {
+        var list = MultiTargetedWinAppSdkList();
+
+        var filtered = MsixService.FilterPackageListToFramework(list, null);
+
+        Assert.AreSame(list, filtered, "a null TFM must not narrow the list (fail-open for single-target/folder mode)");
+    }
+
+    [TestMethod]
+    public void FilterPackageListToFramework_TfmNotPresent_KeepsAllFrameworks()
+    {
+        // An unexpected moniker mismatch must not blank out the SDK reference — keep every framework.
+        var filtered = MsixService.FilterPackageListToFramework(MultiTargetedWinAppSdkList(), "net9.0-windows10.0.22621.0");
+
+        Assert.HasCount(2, filtered!.Projects[0].Frameworks);
+    }
+
     // ---- ReferencesWindowsAppSdk (runtime-prep skip gate, review NOTE) ------------
 
     [TestMethod]

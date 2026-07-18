@@ -481,7 +481,7 @@ export interface RunOptions extends CommonOptions {
   /** Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. */
   withAlias?: boolean;
   /** Arguments to pass to the launched application (forwarded after --). */
-  appArgs?: string[];
+  appArgs?: string | string[];
 }
 
 /**
@@ -513,8 +513,11 @@ export async function run(options: RunOptions = {}): Promise<WinappResult> {
   if (options.symbols) args.push('--symbols');
   if (options.unregisterOnExit) args.push('--unregister-on-exit');
   if (options.withAlias) args.push('--with-alias');
-  if (options.appArgs && options.appArgs.length > 0) {
-    args.push('--', ...options.appArgs);
+  if (options.appArgs !== undefined) {
+    const appArgsArr = Array.isArray(options.appArgs) ? options.appArgs : [options.appArgs];
+    if (appArgsArr.length > 0) {
+      args.push('--', ...appArgsArr);
+    }
   }
   return execCommand(args, options);
 }
@@ -552,7 +555,7 @@ export async function sign(options: SignOptions): Promise<WinappResult> {
 
 export interface StoreOptions extends CommonOptions {
   /** Arguments to pass through to the Microsoft Store Developer CLI. */
-  storeArgs?: string[];
+  storeArgs?: string | string[];
 }
 
 /**
@@ -560,7 +563,10 @@ export interface StoreOptions extends CommonOptions {
  */
 export async function store(options: StoreOptions = {}): Promise<WinappResult> {
   const args: string[] = ['store'];
-  if (options.storeArgs) args.push(...options.storeArgs);
+  if (options.storeArgs !== undefined) {
+    const storeArgsArr = Array.isArray(options.storeArgs) ? options.storeArgs : [options.storeArgs];
+    args.push(...storeArgsArr);
+  }
   return execCommand(args, options);
 }
 
@@ -570,7 +576,7 @@ export async function store(options: StoreOptions = {}): Promise<WinappResult> {
 
 export interface ToolOptions extends CommonOptions {
   /** Arguments to pass to the SDK tool, e.g. ['makeappx', 'pack', '/d', './folder', '/p', './out.msix']. */
-  toolArgs?: string[];
+  toolArgs?: string | string[];
 }
 
 /**
@@ -578,8 +584,11 @@ export interface ToolOptions extends CommonOptions {
  */
 export async function tool(options: ToolOptions = {}): Promise<WinappResult> {
   const args: string[] = ['tool'];
-  if (options.toolArgs && options.toolArgs.length > 0) {
-    args.push('--', ...options.toolArgs);
+  if (options.toolArgs !== undefined) {
+    const toolArgsArr = Array.isArray(options.toolArgs) ? options.toolArgs : [options.toolArgs];
+    if (toolArgsArr.length > 0) {
+      args.push('--', ...toolArgsArr);
+    }
   }
   return execCommand(args, options);
 }

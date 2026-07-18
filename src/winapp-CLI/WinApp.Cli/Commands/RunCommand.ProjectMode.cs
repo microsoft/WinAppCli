@@ -272,7 +272,7 @@ internal partial class RunCommand
                     {
                         try
                         {
-                            await msixService.EnsureWindowsAppRuntimeInstalledAsync(csproj, resolution.Architecture, taskContext, ct);
+                            await msixService.EnsureWindowsAppRuntimeInstalledAsync(csproj, resolution.Architecture, resolution.Framework, taskContext, ct);
                             return (0, "Windows App Runtime ready");
                         }
                         catch (Exception ex)

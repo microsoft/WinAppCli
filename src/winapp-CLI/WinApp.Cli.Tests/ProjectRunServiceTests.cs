@@ -832,6 +832,98 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public async Task BuildAndResolveAsync_SdkAbsentShimInitiallyNull_RestoresThenReResolvesAndInjects()
+    {
+        // C1 (restore ordering): on a clean SDK-less host the ref pack isn't restored yet, so the first
+        // shim resolve returns null. We must run an explicit `dotnet restore`, re-resolve (now a folder),
+        // inject it into the build, and pass --no-restore to the build so we don't restore twice.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var commandArgs = new List<string>();
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args => { commandArgs.Add(args); return (0, PackagedPropertiesJson(), string.Empty); },
+        };
+        var folder = @"C:\cache\microsoft.windows.sdk.net.ref\10.0.26100.57\winmd";
+        var shim = new FakeCsWinRTMetadataShimService { WindowsSdkAbsent = true };
+        shim.FolderSequence.Enqueue(null);   // first resolve: ref pack not restored yet
+        shim.FolderSequence.Enqueue(folder); // second resolve: after the explicit restore
+        var service = NewServiceWith(dotnet, shim, out _);
+        var options = new ProjectRunOptions("Debug", "x64", "net10.0-windows10.0.26100.0", NoBuild: false, NoRestore: false, Properties: []);
+
+        var outcome = await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsNotNull(outcome.Resolution);
+        Assert.IsTrue(commandArgs.Any(a => a.StartsWith("restore ", StringComparison.Ordinal)),
+            "an explicit restore pass should run before the build when the shim initially resolves null on an SDK-less host");
+        Assert.AreEqual(2, shim.ResolvedMonikers.Count, "the shim should be re-consulted after the restore");
+        Assert.AreEqual(1, dotnet.StreamingCalls.Count, "exactly one build pass should have run");
+        StringAssert.Contains(dotnet.StreamingCalls[0], $"-p:CsWinRTWindowsMetadata={folder}",
+            "the re-resolved folder must be injected into the build");
+        StringAssert.Contains(dotnet.StreamingCalls[0], "--no-restore",
+            "the build pass should skip its own restore since the explicit restore already ran");
+    }
+
+    [TestMethod]
+    public async Task BuildAndResolveAsync_NoRestore_SkipsPreShimRestore()
+    {
+        // C1: --no-restore opts out of the pre-shim restore; the shim is consulted once and no restore runs.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var commandArgs = new List<string>();
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args => { commandArgs.Add(args); return (0, PackagedPropertiesJson(), string.Empty); },
+        };
+        var shim = new FakeCsWinRTMetadataShimService { WindowsSdkAbsent = true, FolderToReturn = null };
+        var service = NewServiceWith(dotnet, shim, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: true, Properties: []);
+
+        await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsFalse(commandArgs.Any(a => a.StartsWith("restore ", StringComparison.Ordinal)),
+            "--no-restore must suppress the pre-shim restore");
+        Assert.AreEqual(1, shim.ResolvedMonikers.Count, "the shim should be consulted exactly once when restore is suppressed");
+    }
+
+    [TestMethod]
+    public async Task BuildAndResolveAsync_SdkPresent_NoPreShimRestore()
+    {
+        // C1: when a Windows SDK is registered the shim no-ops; there is nothing to restore-and-retry.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var commandArgs = new List<string>();
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args => { commandArgs.Add(args); return (0, PackagedPropertiesJson(), string.Empty); },
+        };
+        var shim = new FakeCsWinRTMetadataShimService { WindowsSdkAbsent = false, FolderToReturn = null };
+        var service = NewServiceWith(dotnet, shim, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: []);
+
+        await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsFalse(commandArgs.Any(a => a.StartsWith("restore ", StringComparison.Ordinal)),
+            "no pre-shim restore should run when a Windows SDK is registered");
+        Assert.AreEqual(1, shim.ResolvedMonikers.Count);
+    }
+
+    [TestMethod]
+    public void BuildRestorePassArguments_IncludesRidAndUserPropertiesWithoutNoRestore()
+    {
+        // C1: the pre-shim restore mirrors the build's RID + user -p but never adds --no-restore
+        // (restoring is the whole point) and omits -c/-f/-v.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var options = new ProjectRunOptions("Debug", "arm64", "net10.0-windows10.0.26100.0", NoBuild: false, NoRestore: false,
+            Properties: ["WindowsPackageType=None"]);
+
+        var args = ProjectRunService.BuildRestorePassArguments(csproj, options);
+
+        StringAssert.StartsWith(args, "restore ");
+        StringAssert.Contains(args, "-r win-arm64");
+        StringAssert.Contains(args, "-p:WindowsPackageType=None");
+        Assert.IsFalse(args.Contains("--no-restore", StringComparison.Ordinal), "restore must not carry --no-restore");
+        Assert.IsFalse(args.Contains(" -c ", StringComparison.Ordinal), "restore is config-agnostic for pulling the ref pack");
+    }
+
+    [TestMethod]
     public async Task IsDefinitivelyUnpackagedAsync_WindowsPackageTypeNone_ReturnsTrue()
     {
         // Issue #676: an explicit WindowsPackageType=None is the one definitive unpackaged signal, so
