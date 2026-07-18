@@ -77,7 +77,7 @@ public class ProjectRunServiceTests
 
     // Project classification is owned by ProjectDetectionService; build a real one over the same fake
     // dotnet so evaluated OutputType/IsTestProject resolution behaves exactly as the test configured.
-    private static IProjectDetectionService NewDetection(FakeDotNetService dotnet)
+    private static ProjectDetectionService NewDetection(FakeDotNetService dotnet)
         => new ProjectDetectionService(NullLogger<ProjectDetectionService>.Instance, dotnet);
 
     [TestCleanup]
@@ -809,8 +809,9 @@ public class ProjectRunServiceTests
         Assert.IsNotNull(outcome.Resolution);
         Assert.AreEqual(1, dotnet.StreamingCalls.Count, "exactly one build pass should have run");
         StringAssert.Contains(dotnet.StreamingCalls[0], $"-p:CsWinRTWindowsMetadata={folder}");
-        CollectionAssert.AreEqual(new[] { "net10.0-windows10.0.26100.0" }, shim.ResolvedMonikers,
-            "the shim should be consulted once with the project's target framework moniker");
+        Assert.AreEqual(1, shim.ResolvedMonikers.Count, "the shim should be consulted once");
+        Assert.AreEqual("net10.0-windows10.0.26100.0", shim.ResolvedMonikers[0],
+            "the shim must be consulted with the project's target framework moniker");
     }
 
     [TestMethod]
