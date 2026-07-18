@@ -56,7 +56,7 @@ internal partial class MsixService
             FileInfo? msixPath = null;
             try
             {
-                var packageEntries = await WorkspaceSetupService.ParseMsixInventoryAsync(taskContext, msixDir, cancellationToken);
+                var packageEntries = await WindowsAppRuntimeService.ParseMsixInventoryAsync(taskContext, msixDir, cancellationToken);
                 if (packageEntries != null)
                 {
                     // Look for the base Windows App Runtime package (not Framework, DDLM, or Singleton packages)
@@ -694,7 +694,7 @@ internal partial class MsixService
         }
 
         // Find the MSIX directory with the runtime package
-        var msixDir = workspaceSetupService.FindWindowsAppSdkMsixDirectory(usedVersions);
+        var msixDir = windowsAppRuntimeService.FindWindowsAppSdkMsixDirectory(usedVersions);
         if (msixDir == null)
         {
             taskContext.AddDebugMessage($"{UiSymbols.Warning} Windows App SDK MSIX directory not found for dependent runtime package");
@@ -766,7 +766,7 @@ internal partial class MsixService
         try
         {
             // Use the shared inventory parsing logic (synchronous version)
-            var packageEntries = WorkspaceSetupService.ParseMsixInventoryAsync(taskContext, msixDir, cancellationToken).GetAwaiter().GetResult();
+            var packageEntries = WindowsAppRuntimeService.ParseMsixInventoryAsync(taskContext, msixDir, cancellationToken).GetAwaiter().GetResult();
 
             if (packageEntries == null || packageEntries.Count == 0)
             {

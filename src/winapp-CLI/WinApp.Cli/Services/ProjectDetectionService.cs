@@ -4,6 +4,7 @@
 using System.Text.Json;
 using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
+using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Services;
 
@@ -11,7 +12,9 @@ namespace WinApp.Cli.Services;
 /// Performs breadth-first detection of compatible projects in a directory tree.
 /// Pure detection logic — no UI dependencies. Use <see cref="IProgress{T}"/> for live updates.
 /// </summary>
-internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> logger) : IProjectDetectionService
+internal sealed class ProjectDetectionService(
+    ILogger<ProjectDetectionService> logger,
+    IDotNetService dotNetService) : IProjectDetectionService
 {
     /// <summary>
     /// Directory names that are skipped by default during project search.
@@ -281,8 +284,7 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
                 return false;
             }
 
-            return string.Equals(outputType, "Exe", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(outputType, "WinExe", StringComparison.OrdinalIgnoreCase);
+            return IsExecutableOutputType(outputType);
         }
         catch
         {
@@ -290,6 +292,69 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
             return false;
         }
     }
+
+    /// <inheritdoc />
+    public async Task<bool> IsExecutableNonTestProjectAsync(
+        FileInfo csproj,
+        DirectoryInfo workingDirectory,
+        IReadOnlyList<string>? extraMsbuildProperties,
+        CancellationToken cancellationToken)
+    {
+        // Evaluate-only (no -t:Build): fast and side-effect free. Unlike a build, we only read
+        // static-ish properties, so a stale/absent output is irrelevant here.
+        var argTokens = new List<string>
+        {
+            "msbuild",
+            csproj.FullName,
+            "--getProperty:OutputType",
+            "--getProperty:IsTestProject",
+        };
+
+        // Match what the build pass will see: a project whose OutputType/IsTestProject depends on
+        // $(SolutionDir) (shared prop imports) would otherwise evaluate differently here than at build
+        // time and be misclassified. The caller injects the same Solution* properties when resolving
+        // from a solution.
+        if (extraMsbuildProperties is { Count: > 0 })
+        {
+            argTokens.AddRange(extraMsbuildProperties);
+        }
+
+        var arguments = WindowsCommandLine.JoinArguments(argTokens) ?? string.Empty;
+
+        try
+        {
+            var (exitCode, stdout, _) = await dotNetService.RunDotnetCommandAsync(workingDirectory, arguments, cancellationToken);
+            if (exitCode == 0)
+            {
+                var props = MsBuildPropertyReader.Parse(stdout, ["OutputType", "IsTestProject"]);
+                if (props.Count > 0)
+                {
+                    var outputType = props.TryGetValue("OutputType", out var ot) ? ot.Trim() : null;
+                    var isTest = props.TryGetValue("IsTestProject", out var it)
+                        && string.Equals(it.Trim(), "true", StringComparison.OrdinalIgnoreCase);
+                    return IsExecutableOutputType(outputType) && !isTest;
+                }
+            }
+
+            logger.LogDebug("{UISymbol} Could not evaluate {Project} for disambiguation; falling back to static parse.", UiSymbols.Note, csproj.Name);
+        }
+        catch (Exception ex)
+        {
+            // dotnet not on PATH / evaluation failed → fall back to the static parse below.
+            logger.LogDebug("{UISymbol} Evaluation of {Project} failed ({Message}); falling back to static parse.", UiSymbols.Note, csproj.Name, ex.Message);
+        }
+
+        return IsExecutableNonTestProject(csproj);
+    }
+
+    /// <summary>
+    /// The single source of truth for which <c>OutputType</c> values count as a runnable executable
+    /// (<c>Exe</c> or <c>WinExe</c>). Shared by the static parse and the evaluated classification so the
+    /// rule cannot drift between them.
+    /// </summary>
+    internal static bool IsExecutableOutputType(string? outputType) =>
+        string.Equals(outputType, "Exe", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(outputType, "WinExe", StringComparison.OrdinalIgnoreCase);
 
     private void EnqueueSubdirectories(Queue<DirectoryInfo> queue, DirectoryInfo parent, HashSet<string> ignoredNames)
     {

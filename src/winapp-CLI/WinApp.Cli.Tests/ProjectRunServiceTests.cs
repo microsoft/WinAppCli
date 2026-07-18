@@ -69,8 +69,14 @@ public class ProjectRunServiceTests
     {
         _tempDir = new DirectoryInfo(Path.Join(Path.GetTempPath(), $"ProjectRunServiceTests_{Guid.NewGuid():N}"));
         _tempDir.Create();
-        _service = new ProjectRunService(new FakeDotNetService(), new TestConsole(), NullLogger<ProjectRunService>.Instance);
+        var fakeDotnet = new FakeDotNetService();
+        _service = new ProjectRunService(fakeDotnet, NewDetection(fakeDotnet), new TestConsole(), NullLogger<ProjectRunService>.Instance);
     }
+
+    // Project classification is owned by ProjectDetectionService; build a real one over the same fake
+    // dotnet so evaluated OutputType/IsTestProject resolution behaves exactly as the test configured.
+    private static IProjectDetectionService NewDetection(FakeDotNetService dotnet)
+        => new ProjectDetectionService(NullLogger<ProjectDetectionService>.Instance, dotnet);
 
     [TestCleanup]
     public void Cleanup()
@@ -729,13 +735,13 @@ public class ProjectRunServiceTests
     private static ProjectRunService NewServiceWith(FakeDotNetService dotnet, out TestConsole console)
     {
         console = new TestConsole();
-        return new ProjectRunService(dotnet, console, NullLogger<ProjectRunService>.Instance);
+        return new ProjectRunService(dotnet, NewDetection(dotnet), console, NullLogger<ProjectRunService>.Instance);
     }
 
     private static ProjectRunService NewServiceWith(FakeDotNetService dotnet, LogLevel minLevel, out TestConsole console)
     {
         console = new TestConsole();
-        return new ProjectRunService(dotnet, console, new LevelLogger<ProjectRunService>(minLevel));
+        return new ProjectRunService(dotnet, NewDetection(dotnet), console, new LevelLogger<ProjectRunService>(minLevel));
     }
 
     private string PackagedPropertiesJson() =>
@@ -1080,7 +1086,7 @@ public class ProjectRunServiceTests
             RunDotnetStreamingHandler = (_, onOut, _) => { onOut?.Invoke("hidden-spinner-noise"); return 0; },
         };
         var console = new TestConsole();
-        var service = new ProjectRunService(dotnet, console, new LevelLogger<ProjectRunService>(LogLevel.Information));
+        var service = new ProjectRunService(dotnet, NewDetection(dotnet), console, new LevelLogger<ProjectRunService>(LogLevel.Information));
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
 
         var exit = await service.RunBuildPassAsync(csproj, options, _tempDir, useLiveSpinner: true, CancellationToken.None);
@@ -1100,7 +1106,7 @@ public class ProjectRunServiceTests
             RunDotnetStreamingHandler = (_, _, onErr) => { onErr?.Invoke("error CS9999: the real failure"); return 1; },
         };
         var console = new TestConsole();
-        var service = new ProjectRunService(dotnet, console, new LevelLogger<ProjectRunService>(LogLevel.Information));
+        var service = new ProjectRunService(dotnet, NewDetection(dotnet), console, new LevelLogger<ProjectRunService>(LogLevel.Information));
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
 
         var exit = await service.RunBuildPassAsync(csproj, options, _tempDir, useLiveSpinner: true, CancellationToken.None);
@@ -1120,7 +1126,7 @@ public class ProjectRunServiceTests
             RunDotnetStreamingHandler = (_, onOut, _) => { onOut?.Invoke("detailed-build-output"); return 0; },
         };
         var console = new TestConsole();
-        var service = new ProjectRunService(dotnet, console, new LevelLogger<ProjectRunService>(LogLevel.Debug));
+        var service = new ProjectRunService(dotnet, NewDetection(dotnet), console, new LevelLogger<ProjectRunService>(LogLevel.Debug));
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
 
         var exit = await service.RunBuildPassAsync(csproj, options, _tempDir, useLiveSpinner: true, CancellationToken.None);

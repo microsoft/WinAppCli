@@ -11,6 +11,7 @@ namespace WinApp.Cli.Services;
 /// <inheritdoc cref="IProjectRunService" />
 internal sealed class ProjectRunService(
     IDotNetService dotNetService,
+    IProjectDetectionService projectDetectionService,
     IAnsiConsole ansiConsole,
     ILogger<ProjectRunService> logger) : IProjectRunService
 {
@@ -122,7 +123,7 @@ internal sealed class ProjectRunService(
         var executable = new List<FileInfo>();
         foreach (var csproj in csprojs)
         {
-            if (await IsExecutableNonTestProjectAsync(csproj, dir, null, cancellationToken))
+            if (await projectDetectionService.IsExecutableNonTestProjectAsync(csproj, dir, null, cancellationToken))
             {
                 executable.Add(csproj);
             }
@@ -177,9 +178,10 @@ internal sealed class ProjectRunService(
         }
 
         var executable = new List<FileInfo>();
+        var solutionProps = BuildSolutionPropertyTokens(solution);
         foreach (var project in projects)
         {
-            if (await IsExecutableNonTestProjectAsync(project, solutionDir, solution, cancellationToken))
+            if (await projectDetectionService.IsExecutableNonTestProjectAsync(project, solutionDir, solutionProps, cancellationToken))
             {
                 executable.Add(project);
             }
@@ -299,60 +301,6 @@ internal sealed class ProjectRunService(
         }
 
         return matches.Count == 1 ? matches[0] : null;
-    }
-
-    /// <summary>
-    /// Classifies a candidate project as a runnable non-test executable, preferring an MSBuild
-    /// evaluation of <c>OutputType</c>/<c>IsTestProject</c> (which honors imports) and falling back
-    /// to the static XML parse when evaluation is unavailable (no capable SDK, project not restored).
-    /// </summary>
-    private async Task<bool> IsExecutableNonTestProjectAsync(FileInfo csproj, DirectoryInfo workingDirectory, FileInfo? solution, CancellationToken cancellationToken)
-    {
-        // Evaluate-only (no -t:Build): fast and side-effect free. Unlike a build, we only read
-        // static-ish properties, so a stale/absent output is irrelevant here.
-        var argTokens = new List<string>
-        {
-            "msbuild",
-            csproj.FullName,
-            "--getProperty:OutputType",
-            "--getProperty:IsTestProject",
-        };
-
-        // Match what the build pass will see: a project whose OutputType/IsTestProject depends on
-        // $(SolutionDir) (shared prop imports) would otherwise evaluate differently here than at build
-        // time and be misclassified. Inject the same Solution* properties when resolving from a solution.
-        if (solution is not null)
-        {
-            argTokens.AddRange(BuildSolutionPropertyTokens(solution));
-        }
-
-        var arguments = WindowsCommandLine.JoinArguments(argTokens) ?? string.Empty;
-
-        try
-        {
-            var (exitCode, stdout, _) = await dotNetService.RunDotnetCommandAsync(workingDirectory, arguments, cancellationToken);
-            if (exitCode == 0)
-            {
-                var props = MsBuildPropertyReader.Parse(stdout, ["OutputType", "IsTestProject"]);
-                if (props.Count > 0)
-                {
-                    var outputType = GetProp(props, "OutputType");
-                    var isTest = string.Equals(GetProp(props, "IsTestProject"), "true", StringComparison.OrdinalIgnoreCase);
-                    var isExecutable = string.Equals(outputType, "Exe", StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(outputType, "WinExe", StringComparison.OrdinalIgnoreCase);
-                    return isExecutable && !isTest;
-                }
-            }
-
-            logger.LogDebug("{UISymbol} Could not evaluate {Project} for disambiguation; falling back to static parse.", UiSymbols.Note, csproj.Name);
-        }
-        catch (Exception ex)
-        {
-            // dotnet not on PATH / evaluation failed → fall back to the static parse below.
-            logger.LogDebug("{UISymbol} Evaluation of {Project} failed ({Message}); falling back to static parse.", UiSymbols.Note, csproj.Name, ex.Message);
-        }
-
-        return ProjectDetectionService.IsExecutableNonTestProject(csproj);
     }
 
     /// <inheritdoc />

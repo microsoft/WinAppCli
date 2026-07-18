@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using WinApp.Cli.Services;
+using System.Runtime.InteropServices;
 
 namespace WinApp.Cli.Helpers;
 
@@ -17,9 +17,16 @@ internal static class RunArchHelper
 
     /// <summary>
     /// The default target architecture: the current process arch (mirrors folder-mode behavior and
-    /// what a developer expects when running locally).
+    /// what a developer expects when running locally). Canonicalized to <c>x64</c> / <c>arm64</c> /
+    /// <c>x86</c>, falling back to <c>x64</c> for any unrecognized process architecture.
     /// </summary>
-    public static string DefaultArchitecture() => WorkspaceSetupService.GetSystemArchitecture();
+    public static string DefaultArchitecture() => RuntimeInformation.ProcessArchitecture switch
+    {
+        Architecture.X64 => "x64",
+        Architecture.Arm64 => "arm64",
+        Architecture.X86 => "x86",
+        _ => "x64", // Default fallback
+    };
 
     /// <summary>
     /// Normalizes user input (<c>--arch</c> value or the arch segment of a RID) to canonical

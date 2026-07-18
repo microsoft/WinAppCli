@@ -28,4 +28,27 @@ internal interface IProjectDetectionService
     /// <param name="directory">The directory to check</param>
     /// <returns>The detected project, or null if no project is found</returns>
     DetectedProject? DetectProjectAt(DirectoryInfo directory);
+
+    /// <summary>
+    /// Classifies a candidate <c>.csproj</c> as a runnable non-test executable, preferring an MSBuild
+    /// evaluation of <c>OutputType</c>/<c>IsTestProject</c> (which honors imports such as SDK defaults,
+    /// <c>Directory.Build.props</c>, or the test SDK) and falling back to the static XML parse of
+    /// <see cref="DetectProjectAt"/>'s underlying logic when evaluation is unavailable (no capable SDK,
+    /// project not restored). This is the shared owner of the "runnable app project" rule used by both
+    /// directory detection and <c>winapp run</c> project/solution resolution.
+    /// </summary>
+    /// <param name="csproj">The project file to classify.</param>
+    /// <param name="workingDirectory">Directory the evaluation runs in (the input or solution directory).</param>
+    /// <param name="extraMsbuildProperties">
+    /// Optional additional MSBuild tokens (e.g. <c>-p:SolutionDir=…</c>) so evaluation sees the same
+    /// solution-defined properties the build will, avoiding misclassification of projects that depend
+    /// on <c>$(SolutionDir)</c>. Pass null for a bare project with no solution context.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>True when the project is an executable (<c>Exe</c>/<c>WinExe</c>) non-test project.</returns>
+    Task<bool> IsExecutableNonTestProjectAsync(
+        FileInfo csproj,
+        DirectoryInfo workingDirectory,
+        IReadOnlyList<string>? extraMsbuildProperties,
+        CancellationToken cancellationToken);
 }

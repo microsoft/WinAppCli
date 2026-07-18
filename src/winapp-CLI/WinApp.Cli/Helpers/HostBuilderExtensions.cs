@@ -40,6 +40,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IProjectDetectionService, ProjectDetectionService>()
             .AddSingleton<IProjectRunService, ProjectRunService>()
             .AddSingleton<IWorkspaceSetupService, WorkspaceSetupService>()
+            .AddSingleton<IWindowsAppRuntimeService, WindowsAppRuntimeService>()
             .AddSingleton<IGitignoreService, GitignoreService>()
             .AddSingleton<IFirstRunService, FirstRunService>()
             .AddSingleton<ICodeIntegrityCatalogService, CodeIntegrityCatalogService>()

@@ -457,7 +457,7 @@ internal partial class MsixService
         // SPECIFIC version the app needs (spec R2-M1), so a different (or older-patch) registered version
         // can't mask a failed install. Fail loudly instead so the caller aborts the launch with an
         // actionable error.
-        if (!workspaceSetupService.IsWindowsAppRuntimeRegistered(architecture, expectedRuntimePackages))
+        if (!windowsAppRuntimeService.IsWindowsAppRuntimeRegistered(architecture, expectedRuntimePackages))
         {
             var arch = architecture ?? WorkspaceSetupService.GetSystemArchitecture();
             throw new InvalidOperationException(
@@ -509,7 +509,7 @@ internal partial class MsixService
             return Array.Empty<(string, string)>();
         }
 
-        var (installedCount, errorCount, runtimePackages) = await workspaceSetupService.InstallWindowsAppRuntimeAsync(msixDir, taskContext, cancellationToken, architecture);
+        var (installedCount, errorCount, runtimePackages) = await windowsAppRuntimeService.InstallWindowsAppRuntimeAsync(msixDir, taskContext, cancellationToken, architecture);
 
         if (errorCount > 0)
         {

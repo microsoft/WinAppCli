@@ -35,7 +35,7 @@ public sealed class UpdateCommandTests : BaseCommandTests
             .AddSingleton<INugetService>(_nuget)
             .AddSingleton<IPackageInstallationService>(_pkg)
             .AddSingleton<IBuildToolsService>(_buildTools)
-            .AddSingleton<IWorkspaceSetupService>(_workspace);
+            .AddSingleton<IWindowsAppRuntimeService>(_workspace);
     }
 
     [TestInitialize]
@@ -229,11 +229,11 @@ public sealed class UpdateCommandTests : BaseCommandTests
 }
 
 /// <summary>
-/// Test-local <see cref="IWorkspaceSetupService"/> that records runtime-install calls and can be
+/// Test-local <see cref="IWindowsAppRuntimeService"/> that records runtime-install calls and can be
 /// told to throw, so the update command's runtime-install and top-level catch paths are reachable
 /// deterministically.
 /// </summary>
-internal sealed class UpdateWorkspaceFake : IWorkspaceSetupService
+internal sealed class UpdateWorkspaceFake : IWindowsAppRuntimeService
 {
     public DirectoryInfo? MsixDirectory { get; set; }
     public List<DirectoryInfo> InstallRuntimeCalls { get; } = [];
@@ -241,9 +241,6 @@ internal sealed class UpdateWorkspaceFake : IWorkspaceSetupService
     public Exception? InstallRuntimeException { get; set; }
 
     public DirectoryInfo? FindWindowsAppSdkMsixDirectory(Dictionary<string, string>? usedVersions = null) => MsixDirectory;
-
-    public Task<int> SetupWorkspaceAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken = default)
-        => Task.FromResult(0);
 
     public bool IsRuntimeRegisteredResult { get; set; } = true;
 

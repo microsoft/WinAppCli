@@ -10,7 +10,7 @@ using WinApp.Cli.Services;
 namespace WinApp.Cli.Tests;
 
 /// <summary>
-/// Tests for <see cref="WorkspaceSetupService.ParseMsixInventoryAsync"/> arch selection (spec H1/M7).
+/// Tests for <see cref="WindowsAppRuntimeService.ParseMsixInventoryAsync"/> arch selection (spec H1/M7).
 /// The Windows App Runtime MSIX packages are laid out per-arch under <c>win10-{arch}</c>; project mode
 /// must read the inventory for the app's resolved TARGET architecture, not the CLI host arch, so a
 /// cross-arch run installs the right packages. A missing/empty inventory must return <c>null</c>
@@ -58,7 +58,7 @@ public class WorkspaceSetupServiceInventoryTests
         WriteInventory("x64", "runtime.x64.msix=Microsoft.WindowsAppRuntime.1.7_x64");
         WriteInventory("arm64", "runtime.arm64.msix=Microsoft.WindowsAppRuntime.1.7_arm64");
 
-        var entries = await WorkspaceSetupService.ParseMsixInventoryAsync(
+        var entries = await WindowsAppRuntimeService.ParseMsixInventoryAsync(
             CreateTaskContext(), _tempDir, CancellationToken.None, architecture: "arm64");
 
         Assert.IsNotNull(entries);
@@ -74,7 +74,7 @@ public class WorkspaceSetupServiceInventoryTests
         // false "installed" signal.
         WriteInventory("x64", "runtime.x64.msix=Microsoft.WindowsAppRuntime.1.7_x64");
 
-        var entries = await WorkspaceSetupService.ParseMsixInventoryAsync(
+        var entries = await WindowsAppRuntimeService.ParseMsixInventoryAsync(
             CreateTaskContext(), _tempDir, CancellationToken.None, architecture: "arm64");
 
         Assert.IsNull(entries);
@@ -86,9 +86,10 @@ public class WorkspaceSetupServiceInventoryTests
         // The arch dir exists but the inventory has no valid Name=Value entries → null.
         WriteInventory("x64", "   ", "# comment with no equals");
 
-        var entries = await WorkspaceSetupService.ParseMsixInventoryAsync(
+        var entries = await WindowsAppRuntimeService.ParseMsixInventoryAsync(
             CreateTaskContext(), _tempDir, CancellationToken.None, architecture: "x64");
 
         Assert.IsNull(entries);
     }
 }
+

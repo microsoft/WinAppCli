@@ -8,7 +8,7 @@ namespace WinApp.Cli.Tests;
 
 /// <summary>
 /// Tests for the framework-dependent Windows App Runtime presence gate
-/// (<see cref="IWorkspaceSetupService.IsWindowsAppRuntimeRegistered"/>), added for spec H1. A
+/// (<see cref="IWindowsAppRuntimeService.IsWindowsAppRuntimeRegistered"/>), added for spec H1. A
 /// <see cref="FakePackageRegistrationService"/> models which packages are registered so the gate can
 /// be verified deterministically (no WinRT / real machine state). The gate must require BOTH a
 /// framework package and its matching-arch DDLM, forward the resolved arch, and exclude the CBS
@@ -32,7 +32,7 @@ public class WorkspaceSetupServiceRuntimeGateTests : BaseCommandTests
     public void IsWindowsAppRuntimeRegistered_FrameworkAndDdlmPresent_ReturnsTrue()
     {
         _fakePackageRegistration.IsPackageInstalledPredicate = _ => true;
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         Assert.IsTrue(service.IsWindowsAppRuntimeRegistered("x64"));
     }
@@ -43,7 +43,7 @@ public class WorkspaceSetupServiceRuntimeGateTests : BaseCommandTests
         // The DDLM is what an unpackaged app's bootstrapper resolves; a Framework without the
         // matching DDLM must NOT be reported as registered (would crash at bootstrap).
         _fakePackageRegistration.IsPackageInstalledPredicate = prefix => prefix == FrameworkPrefix;
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         Assert.IsFalse(service.IsWindowsAppRuntimeRegistered("x64"));
     }
@@ -52,7 +52,7 @@ public class WorkspaceSetupServiceRuntimeGateTests : BaseCommandTests
     public void IsWindowsAppRuntimeRegistered_DdlmPresentFrameworkMissing_ReturnsFalse()
     {
         _fakePackageRegistration.IsPackageInstalledPredicate = prefix => prefix == DdlmPrefix;
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         Assert.IsFalse(service.IsWindowsAppRuntimeRegistered("x64"));
     }
@@ -61,7 +61,7 @@ public class WorkspaceSetupServiceRuntimeGateTests : BaseCommandTests
     public void IsWindowsAppRuntimeRegistered_ForwardsArchAndExcludesCbs()
     {
         _fakePackageRegistration.IsPackageInstalledPredicate = _ => true;
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         service.IsWindowsAppRuntimeRegistered("arm64");
 
@@ -81,7 +81,7 @@ public class WorkspaceSetupServiceRuntimeGateTests : BaseCommandTests
         // Folder-mode / legacy callers pass null; the check must still run against a concrete host arch
         // rather than throwing or matching every arch.
         _fakePackageRegistration.IsPackageInstalledPredicate = _ => true;
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         service.IsWindowsAppRuntimeRegistered(null);
 
@@ -98,7 +98,7 @@ public class WorkspaceSetupServiceRuntimeGateTests : BaseCommandTests
         const string expected = "Microsoft.WindowsAppRuntime.1.8";
         _fakePackageRegistration.IsPackageInstalledPredicate = _ => true;
         _fakePackageRegistration.GetInstalledVersionFunc = (name, _) => name == expected ? "8000.144.0.0" : null;
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         Assert.IsTrue(service.IsWindowsAppRuntimeRegistered("arm64", new[] { (expected, "8000.144.0.0") }));
 
@@ -116,7 +116,7 @@ public class WorkspaceSetupServiceRuntimeGateTests : BaseCommandTests
         const string required = "Microsoft.WindowsAppRuntime.1.8";
         _fakePackageRegistration.IsPackageInstalledPredicate = _ => true;
         _fakePackageRegistration.GetInstalledVersionFunc = (_, _) => null; // the required identity isn't registered
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         Assert.IsFalse(service.IsWindowsAppRuntimeRegistered("x64", new[] { (required, "8000.144.0.0") }));
     }
@@ -131,7 +131,7 @@ public class WorkspaceSetupServiceRuntimeGateTests : BaseCommandTests
         const string framework = "Microsoft.WindowsAppRuntime.1.8";
         _fakePackageRegistration.IsPackageInstalledPredicate = _ => true;
         _fakePackageRegistration.GetInstalledVersionFunc = (name, _) => name == framework ? "8000.144.1000.0" : null;
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         // App requires a newer patch (…2000) than what's registered (…1000).
         Assert.IsFalse(service.IsWindowsAppRuntimeRegistered("x64", new[] { (framework, "8000.144.2000.0") }));
@@ -145,7 +145,7 @@ public class WorkspaceSetupServiceRuntimeGateTests : BaseCommandTests
         const string framework = "Microsoft.WindowsAppRuntime.1.8";
         _fakePackageRegistration.IsPackageInstalledPredicate = _ => true;
         _fakePackageRegistration.GetInstalledVersionFunc = (name, _) => name == framework ? "8000.144.2000.0" : null;
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         Assert.IsTrue(service.IsWindowsAppRuntimeRegistered("x64", new[] { (framework, "8000.144.1000.0") }));
     }
@@ -164,7 +164,7 @@ public class WorkspaceSetupServiceRuntimeGateTests : BaseCommandTests
         _fakePackageRegistration.IsPackageInstalledPredicate = _ => true;
         // The Framework is registered at the required version; the app's EXACT DDLM is NOT (returns null).
         _fakePackageRegistration.GetInstalledVersionFunc = (name, _) => name == framework ? "8000.144.2000.0" : null;
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         Assert.IsTrue(service.IsWindowsAppRuntimeRegistered(
             "x64",
@@ -198,9 +198,10 @@ public class WorkspaceSetupServiceRuntimeGateTests : BaseCommandTests
         const string cbsName = "Microsoft.WindowsAppRuntime.CBS.1.8";
         const string frameworkName = "Microsoft.WindowsAppRuntime.1.8";
 
-        Assert.IsTrue(cbsName.Contains(WorkspaceSetupService.WinAppRuntimeCbsInfix, StringComparison.Ordinal),
+        Assert.IsTrue(cbsName.Contains(WindowsAppRuntimeService.WinAppRuntimeCbsInfix, StringComparison.Ordinal),
             "the CBS system component name must contain the exclusion infix");
-        Assert.IsFalse(frameworkName.Contains(WorkspaceSetupService.WinAppRuntimeCbsInfix, StringComparison.Ordinal),
+        Assert.IsFalse(frameworkName.Contains(WindowsAppRuntimeService.WinAppRuntimeCbsInfix, StringComparison.Ordinal),
             "a real Framework package name must NOT contain the exclusion infix (so it isn't wrongly excluded)");
     }
 }
+

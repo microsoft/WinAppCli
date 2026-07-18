@@ -100,7 +100,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
         var msixDir = _tempDirectory.CreateSubdirectory("msix");
         msixDir.CreateSubdirectory("win10-otherarch");
 
-        var result = await WorkspaceSetupService.ParseMsixInventoryAsync(
+        var result = await WindowsAppRuntimeService.ParseMsixInventoryAsync(
             TestTaskContext, msixDir, TestContext.CancellationToken);
 
         Assert.IsNull(result);
@@ -112,7 +112,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
         var msixDir = _tempDirectory.CreateSubdirectory("msix");
         Directory.CreateDirectory(ArchDir(msixDir)); // arch dir but no msix.inventory
 
-        var result = await WorkspaceSetupService.ParseMsixInventoryAsync(
+        var result = await WindowsAppRuntimeService.ParseMsixInventoryAsync(
             TestTaskContext, msixDir, TestContext.CancellationToken);
 
         Assert.IsNull(result);
@@ -128,7 +128,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
             "  ",
             "ddlm.msix=Microsoft.WinAppRuntime.DDLM_6000.0.0.0_x64");
 
-        var result = await WorkspaceSetupService.ParseMsixInventoryAsync(
+        var result = await WindowsAppRuntimeService.ParseMsixInventoryAsync(
             TestTaskContext, msixDir, TestContext.CancellationToken);
 
         Assert.IsNotNull(result);
@@ -143,7 +143,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
         var msixDir = _tempDirectory.CreateSubdirectory("msix");
         WriteInventory(msixDir, "", "   ", "no-equals-sign-here");
 
-        var result = await WorkspaceSetupService.ParseMsixInventoryAsync(
+        var result = await WindowsAppRuntimeService.ParseMsixInventoryAsync(
             TestTaskContext, msixDir, TestContext.CancellationToken);
 
         Assert.IsNull(result);
@@ -170,7 +170,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
     public void FindWindowsAppSdkMsixDirectory_FindsRuntimePackage_FromUsedVersions()
     {
         var expected = CreateNuGetCacheMsixDir(BuildToolsService.WINAPP_SDK_RUNTIME_PACKAGE, "1.6.0");
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         var usedVersions = new Dictionary<string, string>
         {
@@ -187,7 +187,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
     {
         // Only the main package is present in the cache; runtime version is listed but absent.
         var expected = CreateNuGetCacheMsixDir(BuildToolsService.WINAPP_SDK_PACKAGE, "1.6.0");
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         var usedVersions = new Dictionary<string, string>
         {
@@ -207,7 +207,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
         // the VersionStringComparer descending ordering (highest wins).
         CreateNuGetCacheMsixDir(BuildToolsService.WINAPP_SDK_RUNTIME_PACKAGE, "1.6.0");
         var expected = CreateNuGetCacheMsixDir(BuildToolsService.WINAPP_SDK_RUNTIME_PACKAGE, "1.7.0");
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         var result = service.FindWindowsAppSdkMsixDirectory();
 
@@ -220,7 +220,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
     {
         // Runtime package dir absent; only the main package dir present -> main-package fallback scan.
         var expected = CreateNuGetCacheMsixDir(BuildToolsService.WINAPP_SDK_PACKAGE, "1.6.0");
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         var result = service.FindWindowsAppSdkMsixDirectory();
 
@@ -233,7 +233,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
     {
         // Ensure the packages dir exists but contains no SDK packages.
         _fakeNugetService.GetNuGetGlobalPackagesDir();
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         var result = service.FindWindowsAppSdkMsixDirectory();
 
@@ -248,7 +248,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
     public async Task InstallWindowsAppRuntime_ReturnsZero_WhenInventoryMissing()
     {
         var msixDir = _tempDirectory.CreateSubdirectory("msix"); // no inventory at all
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         var (installed, errors, _) = await service.InstallWindowsAppRuntimeAsync(
             msixDir, TestTaskContext, TestContext.CancellationToken);
@@ -264,7 +264,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
         // Inventory lists a file that does not exist on disk -> packagesToCheck ends up empty.
         var msixDir = _tempDirectory.CreateSubdirectory("msix");
         WriteInventory(msixDir, "missing.msix=Microsoft.WindowsAppRuntime.1.6_6000.0.0.0_x64");
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         var (installed, errors, _) = await service.InstallWindowsAppRuntimeAsync(
             msixDir, TestTaskContext, TestContext.CancellationToken);
@@ -282,7 +282,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
         CreateMsixWithManifest(msixDir, "runtime.msix", "Microsoft.WindowsAppRuntime.1.6", "6000.0.0.0");
 
         _fakePackageRegistrationService.FakeInstalledVersion = null; // not installed
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         var (installed, errors, _) = await service.InstallWindowsAppRuntimeAsync(
             msixDir, TestTaskContext, TestContext.CancellationToken);
@@ -301,7 +301,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
         CreateMsixWithManifest(msixDir, "runtime.msix", "Microsoft.WindowsAppRuntime.1.6", "6000.0.0.0");
 
         _fakePackageRegistrationService.FakeInstalledVersion = "9999.0.0.0"; // newer already installed
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         var (installed, errors, _) = await service.InstallWindowsAppRuntimeAsync(
             msixDir, TestTaskContext, TestContext.CancellationToken);
@@ -320,7 +320,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
 
         _fakePackageRegistrationService.FakeInstalledVersion = null;
         _fakePackageRegistrationService.InstallPackageThrows = new InvalidOperationException("boom");
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         var (installed, errors, _) = await service.InstallWindowsAppRuntimeAsync(
             msixDir, TestTaskContext, TestContext.CancellationToken);
@@ -339,7 +339,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
         CreateMsixWithoutManifest(msixDir, "runtime.msix");
 
         _fakePackageRegistrationService.FakeInstalledVersion = null;
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         var (installed, errors, _) = await service.InstallWindowsAppRuntimeAsync(
             msixDir, TestTaskContext, TestContext.CancellationToken);
@@ -362,7 +362,7 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
         CreateCorruptMsix(msixDir, "runtime.msix");
 
         _fakePackageRegistrationService.FakeInstalledVersion = null;
-        var service = GetRequiredService<IWorkspaceSetupService>();
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
 
         var (installed, errors, _) = await service.InstallWindowsAppRuntimeAsync(
             msixDir, TestTaskContext, TestContext.CancellationToken);
@@ -373,3 +373,4 @@ public class WorkspaceSetupServiceMsixTests : BaseCommandTests
 
     #endregion
 }
+

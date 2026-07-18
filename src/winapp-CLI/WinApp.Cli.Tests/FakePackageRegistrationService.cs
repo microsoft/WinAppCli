@@ -105,7 +105,7 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
     /// When set to a non-null exception, <see cref="InstallPackageAsync"/> throws it
     /// (after recording the call) instead of completing. Used to exercise the per-package
     /// install-failure/error-count path in
-    /// <c>WorkspaceSetupService.InstallWindowsAppRuntimeAsync</c>.
+    /// <c>WindowsAppRuntimeService.InstallWindowsAppRuntimeAsync</c>.
     /// </summary>
     public Exception? InstallPackageThrows { get; set; }
 

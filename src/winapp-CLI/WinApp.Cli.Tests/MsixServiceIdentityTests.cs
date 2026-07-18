@@ -24,7 +24,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
     private FakePackageRegistrationService _fakeRegistration = null!;
     private FakeDevModeService _fakeDevMode = null!;
     private ScriptedMtBuildToolsService _fakeBuildTools = null!;
-    private FakeWorkspaceSetupService _fakeWorkspaceSetup = null!;
+    private FakeWindowsAppRuntimeService _fakeWindowsAppRuntime = null!;
 
     private static readonly MethodInfo CopyFilesFromRecipeMethod =
         typeof(MsixService).GetMethod("CopyFilesFromRecipeAsync", BindingFlags.NonPublic | BindingFlags.Static)!;
@@ -43,13 +43,13 @@ public class MsixServiceIdentityTests : BaseCommandTests
         _fakeRegistration = new FakePackageRegistrationService();
         _fakeDevMode = new FakeDevModeService();
         _fakeBuildTools = new ScriptedMtBuildToolsService();
-        _fakeWorkspaceSetup = new FakeWorkspaceSetupService();
+        _fakeWindowsAppRuntime = new FakeWindowsAppRuntimeService();
 
         return services
             .AddSingleton<IPackageRegistrationService>(_fakeRegistration)
             .AddSingleton<IDevModeService>(_fakeDevMode)
             .AddSingleton<IBuildToolsService>(_fakeBuildTools)
-            .AddSingleton<IWorkspaceSetupService>(_fakeWorkspaceSetup)
+            .AddSingleton<IWindowsAppRuntimeService>(_fakeWindowsAppRuntime)
             .AddSingleton<INugetService, FakeNugetService>();
     }
 
@@ -834,12 +834,12 @@ public class MsixServiceIdentityTests : BaseCommandTests
     [TestMethod]
     public async Task EnsureWindowsAppRuntimeInstalledAsync_InstallsMissingPackages()
     {
-        _fakeWorkspaceSetup.MsixDirectory = _tempDirectory.CreateSubdirectory("runtime-msix");
-        _fakeWorkspaceSetup.InstallRuntimeResult = (InstalledCount: 3, ErrorCount: 0);
+        _fakeWindowsAppRuntime.MsixDirectory = _tempDirectory.CreateSubdirectory("runtime-msix");
+        _fakeWindowsAppRuntime.InstallRuntimeResult = (InstalledCount: 3, ErrorCount: 0);
 
         await InvokeEnsureWindowsAppRuntimeInstalledAsync(WinAppSdkPackageList());
 
-        Assert.HasCount(1, _fakeWorkspaceSetup.InstallRuntimeCalls);
+        Assert.HasCount(1, _fakeWindowsAppRuntime.InstallRuntimeCalls);
         var messages = TestTask.SubTasks.OfType<StatusMessageTask>().Select(t => t.CompletedMessage ?? string.Empty).ToList();
         Assert.IsTrue(
             messages.Any(m => m.Contains("Installed 3 Windows App Runtime package(s)", StringComparison.OrdinalIgnoreCase)),
@@ -849,12 +849,12 @@ public class MsixServiceIdentityTests : BaseCommandTests
     [TestMethod]
     public async Task EnsureWindowsAppRuntimeInstalledAsync_ReportsInstallErrors()
     {
-        _fakeWorkspaceSetup.MsixDirectory = _tempDirectory.CreateSubdirectory("runtime-msix");
-        _fakeWorkspaceSetup.InstallRuntimeResult = (InstalledCount: 0, ErrorCount: 2);
+        _fakeWindowsAppRuntime.MsixDirectory = _tempDirectory.CreateSubdirectory("runtime-msix");
+        _fakeWindowsAppRuntime.InstallRuntimeResult = (InstalledCount: 0, ErrorCount: 2);
 
         await InvokeEnsureWindowsAppRuntimeInstalledAsync(WinAppSdkPackageList());
 
-        Assert.HasCount(1, _fakeWorkspaceSetup.InstallRuntimeCalls);
+        Assert.HasCount(1, _fakeWindowsAppRuntime.InstallRuntimeCalls);
         var messages = TestTask.SubTasks.OfType<StatusMessageTask>().Select(t => t.CompletedMessage ?? string.Empty).ToList();
         Assert.IsTrue(
             messages.Any(m => m.Contains("2 runtime package(s) failed to install", StringComparison.OrdinalIgnoreCase)),
@@ -865,11 +865,11 @@ public class MsixServiceIdentityTests : BaseCommandTests
     public async Task EnsureWindowsAppRuntimeInstalledAsync_RuntimeDirNotFound_SkipsInstall()
     {
         // FindWindowsAppSdkMsixDirectory returns null -> nothing to install.
-        _fakeWorkspaceSetup.MsixDirectory = null;
+        _fakeWindowsAppRuntime.MsixDirectory = null;
 
         await InvokeEnsureWindowsAppRuntimeInstalledAsync(WinAppSdkPackageList());
 
-        Assert.IsEmpty(_fakeWorkspaceSetup.InstallRuntimeCalls);
+        Assert.IsEmpty(_fakeWindowsAppRuntime.InstallRuntimeCalls);
     }
 
     // ---- ReferencesWindowsAppSdk (runtime-prep skip gate, review NOTE) ------------
@@ -1003,3 +1003,4 @@ internal sealed class ScriptedMtBuildToolsService : IBuildToolsService
         return _inner.RunBuildToolAsync(tool, arguments, taskContext, printErrors, cancellationToken);
     }
 }
+
