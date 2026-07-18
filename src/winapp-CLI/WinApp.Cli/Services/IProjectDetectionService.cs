@@ -4,6 +4,28 @@
 namespace WinApp.Cli.Services;
 
 /// <summary>
+/// How a candidate <c>.csproj</c> relates to <c>winapp run</c>'s notion of a launch target.
+/// </summary>
+internal enum ProjectRunnability
+{
+    /// <summary>Not an executable (e.g. a <c>Library</c> or source generator) — never a launch target.</summary>
+    NotRunnable,
+
+    /// <summary>An executable (<c>Exe</c>/<c>WinExe</c>) that is not a test project — the preferred launch target.</summary>
+    App,
+
+    /// <summary>
+    /// An executable that is a test project — detected via <c>IsTestProject</c>, the VS
+    /// <c>TestContainer</c> project capability, or a test-framework package reference. WinUI MSTest
+    /// projects are themselves packaged <c>WinExe</c> apps that omit <c>IsTestProject</c>, so
+    /// <c>OutputType</c> alone cannot distinguish them from the real app. Launched only when explicitly
+    /// selected or when it is the sole runnable project, so a test host never shadows a real app during
+    /// auto-selection.
+    /// </summary>
+    Test,
+}
+
+/// <summary>
 /// Service for detecting compatible projects in a directory tree.
 /// </summary>
 internal interface IProjectDetectionService
@@ -30,12 +52,14 @@ internal interface IProjectDetectionService
     DetectedProject? DetectProjectAt(DirectoryInfo directory);
 
     /// <summary>
-    /// Classifies a candidate <c>.csproj</c> as a runnable non-test executable, preferring an MSBuild
-    /// evaluation of <c>OutputType</c>/<c>IsTestProject</c> (which honors imports such as SDK defaults,
+    /// Classifies a candidate <c>.csproj</c> as a runnable app, a runnable test project, or not
+    /// runnable, preferring an MSBuild evaluation of <c>OutputType</c>/<c>IsTestProject</c> plus the
+    /// <c>ProjectCapability</c>/<c>PackageReference</c> items (which honor imports such as SDK defaults,
     /// <c>Directory.Build.props</c>, or the test SDK) and falling back to the static XML parse of
     /// <see cref="DetectProjectAt"/>'s underlying logic when evaluation is unavailable (no capable SDK,
-    /// project not restored). This is the shared owner of the "runnable app project" rule used by both
-    /// directory detection and <c>winapp run</c> project/solution resolution.
+    /// project not restored). This is the shared owner of the "runnable project" rule used by both
+    /// directory detection and <c>winapp run</c> project/solution resolution. Test projects are
+    /// distinguished so auto-selection can prefer a real app yet still run a lone test project.
     /// </summary>
     /// <param name="csproj">The project file to classify.</param>
     /// <param name="workingDirectory">Directory the evaluation runs in (the input or solution directory).</param>
@@ -45,8 +69,8 @@ internal interface IProjectDetectionService
     /// on <c>$(SolutionDir)</c>. Pass null for a bare project with no solution context.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>True when the project is an executable (<c>Exe</c>/<c>WinExe</c>) non-test project.</returns>
-    Task<bool> IsExecutableNonTestProjectAsync(
+    /// <returns>The project's <see cref="ProjectRunnability"/> classification.</returns>
+    Task<ProjectRunnability> ClassifyRunnableAsync(
         FileInfo csproj,
         DirectoryInfo workingDirectory,
         IReadOnlyList<string>? extraMsbuildProperties,

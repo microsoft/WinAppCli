@@ -635,8 +635,73 @@ public class ProjectRunServiceTests
         Assert.AreEqual("App.csproj", resolution.Csproj!.Name);
     }
 
+    [TestMethod]
+    public async Task ResolveInput_MultipleCsproj_TestContainerCapability_PicksApp()
+    {
+        // The AI Dev Gallery / WinUI Gallery shape: the test project is itself a packaged WinUI app
+        // (WinExe, EnableMsixTooling) that never sets IsTestProject, so OutputType alone can't tell it
+        // apart from the real app. The VS `TestContainer` project capability marks it as a test, so the
+        // real app is selected without an explicit --project.
+        var app = WriteFile("Gallery.csproj", ExecutableCsproj);
+        var tests = WriteFile("Gallery.Tests.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                args.Contains(tests.FullName, StringComparison.OrdinalIgnoreCase) ? (0, EvalJsonWithItems("WinExe", capabilities: ["TestContainer"]), string.Empty)
+                : args.Contains(app.FullName, StringComparison.OrdinalIgnoreCase) ? (0, EvalJsonWithItems("WinExe"), string.Empty)
+                : (0, string.Empty, string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+
+        var resolution = await service.ResolveInputAsync(_tempDir, CancellationToken.None);
+
+        Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
+        Assert.AreEqual("Gallery.csproj", resolution.Csproj!.Name);
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_MultipleCsproj_TestFrameworkPackageReference_PicksApp()
+    {
+        // Same shape as above but detected via a test-framework PackageReference (MSTest.TestAdapter),
+        // since WinUI MSTest projects reference MSTest.* / Microsoft.TestPlatform.TestHost yet omit
+        // Microsoft.NET.Test.Sdk (which is what would set IsTestProject).
+        var app = WriteFile("Gallery.csproj", ExecutableCsproj);
+        var tests = WriteFile("Gallery.Tests.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                args.Contains(tests.FullName, StringComparison.OrdinalIgnoreCase) ? (0, EvalJsonWithItems("WinExe", packageReferences: ["MSTest.TestAdapter", "MSTest.TestFramework"]), string.Empty)
+                : args.Contains(app.FullName, StringComparison.OrdinalIgnoreCase) ? (0, EvalJsonWithItems("WinExe", packageReferences: ["CommunityToolkit.WinUI"]), string.Empty)
+                : (0, string.Empty, string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+
+        var resolution = await service.ResolveInputAsync(_tempDir, CancellationToken.None);
+
+        Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
+        Assert.AreEqual("Gallery.csproj", resolution.Csproj!.Name);
+    }
+
     private static string EvalJson(string outputType, string isTestProject = "") =>
         $$"""{ "Properties": { "OutputType": "{{outputType}}", "IsTestProject": "{{isTestProject}}" } }""";
+
+    // Adds an "Items" object alongside "Properties" so the evaluated classifier can see a project's
+    // ProjectCapability / PackageReference items — the markers that identify a WinUI MSTest app that is
+    // a WinExe with no IsTestProject (AI Dev Gallery / WinUI Gallery test project shape).
+    private static string EvalJsonWithItems(
+        string outputType,
+        string[]? capabilities = null,
+        string[]? packageReferences = null,
+        string isTestProject = "")
+    {
+        static string ItemArray(string[]? ids) =>
+            "[ " + string.Join(", ", (ids ?? []).Select(id => $$"""{ "Identity": "{{id}}" }""")) + " ]";
+
+        return $$"""
+            { "Properties": { "OutputType": "{{outputType}}", "IsTestProject": "{{isTestProject}}" },
+              "Items": { "ProjectCapability": {{ItemArray(capabilities)}}, "PackageReference": {{ItemArray(packageReferences)}} } }
+            """;
+    }
 
     // Reproduces `dotnet sln <sln> list` output: a "Project(s)" header, a dashed underline, then one
     // project path per line (relative to the solution directory).
@@ -751,6 +816,101 @@ public class ProjectRunServiceTests
 
         var ex = await Assert.ThrowsExactlyAsync<ProjectRunException>(() => service.ResolveInputAsync(solution, CancellationToken.None));
         StringAssert.Contains(ex.Message, "No .csproj projects");
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_Solution_AppPlusTestContainer_PicksApp()
+    {
+        // The real gallery scenario at the solution level: a solution with the app plus a WinUI MSTest
+        // project (WinExe + TestContainer capability, no IsTestProject). The app is auto-selected — no
+        // ambiguity error and no --project needed.
+        var solution = WriteFile("Gallery.sln", "");
+        var app = WriteFile("Gallery.csproj", ExecutableCsproj);
+        var tests = WriteFile("Gallery.Tests.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                IsSlnListCall(args) ? (0, SlnListOutput("Gallery.csproj", "Gallery.Tests.csproj"), string.Empty)
+                : args.Contains(tests.FullName, StringComparison.OrdinalIgnoreCase) ? (0, EvalJsonWithItems("WinExe", capabilities: ["TestContainer"]), string.Empty)
+                : args.Contains(app.FullName, StringComparison.OrdinalIgnoreCase) ? (0, EvalJsonWithItems("WinExe"), string.Empty)
+                : (0, string.Empty, string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+
+        var resolution = await service.ResolveInputAsync(solution, CancellationToken.None);
+
+        Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
+        Assert.AreEqual(app.FullName, resolution.Csproj!.FullName);
+        Assert.AreEqual(solution.FullName, resolution.Solution!.FullName);
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_Solution_OnlyTestProject_RunsIt()
+    {
+        // A solution whose only runnable project is a test project (no real app) still runs — a
+        // tests-only solution is a legitimate `winapp run` target. We note that we're running a test.
+        var solution = WriteFile("Tests.sln", "");
+        var tests = WriteFile("App.Tests.csproj", ExecutableCsproj);
+        var lib = WriteFile("App.csproj", LibraryCsproj);
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                IsSlnListCall(args) ? (0, SlnListOutput("App.csproj", "App.Tests.csproj"), string.Empty)
+                : args.Contains(tests.FullName, StringComparison.OrdinalIgnoreCase) ? (0, EvalJsonWithItems("Exe", capabilities: ["TestContainer"]), string.Empty)
+                : args.Contains(lib.FullName, StringComparison.OrdinalIgnoreCase) ? (0, EvalJson("Library"), string.Empty)
+                : (0, string.Empty, string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out var console);
+
+        var resolution = await service.ResolveInputAsync(solution, CancellationToken.None);
+
+        Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
+        Assert.AreEqual(tests.FullName, resolution.Csproj!.FullName);
+        StringAssert.Contains(console.Output, "test project");
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_Solution_OnlyMultipleTestProjects_RequiresProjectSelector()
+    {
+        // Several test projects and no app → we can't guess which test host to launch; require --project
+        // and say the solution contains only test projects so the message is actionable.
+        var solution = WriteFile("Tests.sln", "");
+        var t1 = WriteFile("A.Tests.csproj", ExecutableCsproj);
+        var t2 = WriteFile("B.Tests.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                IsSlnListCall(args) ? (0, SlnListOutput("A.Tests.csproj", "B.Tests.csproj"), string.Empty)
+                : args.Contains(t1.FullName, StringComparison.OrdinalIgnoreCase) ? (0, EvalJsonWithItems("Exe", capabilities: ["TestContainer"]), string.Empty)
+                : args.Contains(t2.FullName, StringComparison.OrdinalIgnoreCase) ? (0, EvalJsonWithItems("Exe", capabilities: ["TestContainer"]), string.Empty)
+                : (0, string.Empty, string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+
+        var ex = await Assert.ThrowsExactlyAsync<ProjectRunException>(() => service.ResolveInputAsync(solution, CancellationToken.None));
+        StringAssert.Contains(ex.Message, "only test projects");
+        StringAssert.Contains(ex.Message, "--project");
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_Solution_ProjectSelectorPicksTestProject_NoFiltering()
+    {
+        // An explicit --project selector is always honored, even when it names a test project: the user
+        // asked for it, so no test filtering and no evaluation is applied.
+        var solution = WriteFile("Gallery.sln", "");
+        WriteFile("Gallery.csproj", ExecutableCsproj);
+        var tests = WriteFile("Gallery.Tests.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                IsSlnListCall(args) ? (0, SlnListOutput("Gallery.csproj", "Gallery.Tests.csproj"), string.Empty) : (0, string.Empty, string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+
+        var resolution = await service.ResolveInputAsync(solution, CancellationToken.None, "Gallery.Tests");
+
+        Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
+        Assert.AreEqual(tests.FullName, resolution.Csproj!.FullName);
     }
 
     [TestMethod]

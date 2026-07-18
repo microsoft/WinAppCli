@@ -121,18 +121,17 @@ internal sealed class ProjectRunService(
         // Directory.Build.props, the test SDK) rather than inline XML. A static parse cannot see those
         // and could silently pick the wrong project (spec M5). Evaluation falls back to the static
         // parse per-project when the SDK/restore is unavailable, so behavior never regresses.
-        var executable = new List<FileInfo>();
-        foreach (var csproj in csprojs)
-        {
-            if (await projectDetectionService.IsExecutableNonTestProjectAsync(csproj, dir, null, cancellationToken))
-            {
-                executable.Add(csproj);
-            }
-        }
+        var (dirApps, dirTests) = await ClassifyRunnablesAsync(csprojs, dir, null, cancellationToken);
 
-        if (executable.Count == 1)
+        var dirPick = PickRunnableProject(dirApps, dirTests, out var dirPickedTest);
+        if (dirPick is not null)
         {
-            return new RunInputResolution(WinAppRunMode.Project, executable[0], dir);
+            if (dirPickedTest)
+            {
+                LogRunningLoneTestProject(dirPick, dir.FullName);
+            }
+
+            return new RunInputResolution(WinAppRunMode.Project, dirPick, dir);
         }
 
         // Zero or several runnable candidates → we cannot safely guess; require explicit selection.
@@ -178,33 +177,104 @@ internal sealed class ProjectRunService(
             return new RunInputResolution(WinAppRunMode.Project, selected, selected.Directory ?? solutionDir, solution);
         }
 
-        var executable = new List<FileInfo>();
         var solutionProps = BuildSolutionPropertyTokens(solution);
-        foreach (var project in projects)
-        {
-            if (await projectDetectionService.IsExecutableNonTestProjectAsync(project, solutionDir, solutionProps, cancellationToken))
-            {
-                executable.Add(project);
-            }
-        }
+        var (apps, tests) = await ClassifyRunnablesAsync(projects, solutionDir, solutionProps, cancellationToken);
 
-        if (executable.Count == 1)
+        var pick = PickRunnableProject(apps, tests, out var pickedTest);
+        if (pick is not null)
         {
-            var startup = executable[0];
-            return new RunInputResolution(WinAppRunMode.Project, startup, startup.Directory ?? solutionDir, solution);
+            if (pickedTest)
+            {
+                LogRunningLoneTestProject(pick, solution.Name);
+            }
+
+            return new RunInputResolution(WinAppRunMode.Project, pick, pick.Directory ?? solutionDir, solution);
         }
 
         // Zero or several runnable app projects → we don't emulate VS's startup-project selection;
         // require an explicit --project so the wrong app is never launched behind the user's back.
-        var candidates = (executable.Count > 0 ? executable : projects)
+        // A lone test project auto-runs above; here we only reach the ambiguous/empty cases.
+        var candidatePool = apps.Count > 0 ? apps : (tests.Count > 0 ? tests : projects);
+        var candidateList = string.Join(", ", candidatePool
             .Select(p => p.Name)
-            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase);
-        var candidateList = string.Join(", ", candidates);
-        var reason = executable.Count == 0
-            ? $"No single runnable app project was found in '{solution.Name}'"
-            : $"'{solution.Name}' contains multiple runnable app projects ({candidateList})";
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+        string reason;
+        if (apps.Count > 1)
+        {
+            reason = $"'{solution.Name}' contains multiple runnable app projects ({candidateList})";
+        }
+        else if (tests.Count > 1)
+        {
+            reason = $"'{solution.Name}' contains only test projects ({candidateList})";
+        }
+        else
+        {
+            reason = $"No runnable app project was found in '{solution.Name}'";
+        }
+
         throw new ProjectRunException(
             $"{reason}. Specify which project to run with --project <name>. Projects: {candidateList}.");
+    }
+
+    /// <summary>
+    /// Classifies each candidate project into runnable apps and runnable test projects via
+    /// <see cref="IProjectDetectionService.ClassifyRunnableAsync"/>. Non-runnable projects (libraries,
+    /// etc.) are dropped. Test projects are kept separate so <see cref="PickRunnableProject"/> can prefer
+    /// a real app but still fall back to a lone test project.
+    /// </summary>
+    private async Task<(List<FileInfo> Apps, List<FileInfo> Tests)> ClassifyRunnablesAsync(
+        IReadOnlyList<FileInfo> projects,
+        DirectoryInfo workingDirectory,
+        IReadOnlyList<string>? extraMsbuildProperties,
+        CancellationToken cancellationToken)
+    {
+        var apps = new List<FileInfo>();
+        var tests = new List<FileInfo>();
+        foreach (var project in projects)
+        {
+            var kind = await projectDetectionService.ClassifyRunnableAsync(project, workingDirectory, extraMsbuildProperties, cancellationToken);
+            switch (kind)
+            {
+                case ProjectRunnability.App:
+                    apps.Add(project);
+                    break;
+                case ProjectRunnability.Test:
+                    tests.Add(project);
+                    break;
+            }
+        }
+
+        return (apps, tests);
+    }
+
+    /// <summary>
+    /// Picks the project to run from the classified candidates without emulating VS's startup-project
+    /// selection: a single real app wins; test projects are skipped when any app exists; a lone test
+    /// project (tests-only solution) is run as a convenience. Any other shape (several apps, several
+    /// tests-only, none) returns null so the caller can require an explicit <c>--project</c>.
+    /// </summary>
+    private static FileInfo? PickRunnableProject(List<FileInfo> apps, List<FileInfo> tests, out bool pickedTestProject)
+    {
+        pickedTestProject = false;
+
+        if (apps.Count == 1)
+        {
+            return apps[0];
+        }
+
+        if (apps.Count == 0 && tests.Count == 1)
+        {
+            pickedTestProject = true;
+            return tests[0];
+        }
+
+        return null;
+    }
+
+    private void LogRunningLoneTestProject(FileInfo project, string sourceName)
+    {
+        ansiConsole.MarkupLineInterpolated(
+            $"{UiSymbols.Note} No runnable app project found in '{sourceName}'; running the only runnable project '{project.Name}', which is a test project.");
     }
 
     /// <summary>

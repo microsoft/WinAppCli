@@ -246,6 +246,15 @@ internal sealed class ProjectDetectionService(
     }
 
     internal static bool IsExecutableNonTestProject(FileInfo csprojFile)
+        => ClassifyRunnableStatic(csprojFile) == ProjectRunnability.App;
+
+    /// <summary>
+    /// Static (XML-only) classification used by directory detection and as the fallback when MSBuild
+    /// evaluation is unavailable. Reads <c>OutputType</c>/<c>IsTestProject</c> plus inline
+    /// <c>ProjectCapability</c>/<c>PackageReference</c> items. Cannot see imported values (SDK defaults,
+    /// the test SDK) — that is what <see cref="ClassifyRunnableAsync"/>'s evaluation adds.
+    /// </summary>
+    internal static ProjectRunnability ClassifyRunnableStatic(FileInfo csprojFile)
     {
         try
         {
@@ -272,42 +281,46 @@ internal sealed class ProjectDetectionService(
                 }
             }
 
-            // Exclude test projects
-            if (isTestProject == true)
+            // Only executable projects (Exe or WinExe) are ever runnable.
+            if (!IsExecutableOutputType(outputType))
             {
-                return false;
+                return ProjectRunnability.NotRunnable;
             }
 
-            // Only include executable projects (Exe or WinExe)
-            if (outputType == null)
+            // Test signals: explicit IsTestProject, the VS TestContainer capability, or a test-framework
+            // package reference. WinUI MSTest projects are WinExe apps that omit IsTestProject, so
+            // OutputType alone cannot tell them apart from the real app.
+            if (isTestProject == true || HasInlineTestMarkers(doc))
             {
-                return false;
+                return ProjectRunnability.Test;
             }
 
-            return IsExecutableOutputType(outputType);
+            return ProjectRunnability.App;
         }
         catch
         {
             // If we can't parse the csproj, skip it
-            return false;
+            return ProjectRunnability.NotRunnable;
         }
     }
 
     /// <inheritdoc />
-    public async Task<bool> IsExecutableNonTestProjectAsync(
+    public async Task<ProjectRunnability> ClassifyRunnableAsync(
         FileInfo csproj,
         DirectoryInfo workingDirectory,
         IReadOnlyList<string>? extraMsbuildProperties,
         CancellationToken cancellationToken)
     {
-        // Evaluate-only (no -t:Build): fast and side-effect free. Unlike a build, we only read
-        // static-ish properties, so a stale/absent output is irrelevant here.
+        // Evaluate-only (no -t:Build): fast and side-effect free. We read static-ish properties plus the
+        // ProjectCapability/PackageReference items, which are all evaluation-time (no restore needed).
         var argTokens = new List<string>
         {
             "msbuild",
             csproj.FullName,
             "--getProperty:OutputType",
             "--getProperty:IsTestProject",
+            "--getItem:ProjectCapability",
+            "--getItem:PackageReference",
         };
 
         // Match what the build pass will see: a project whose OutputType/IsTestProject depends on
@@ -330,9 +343,20 @@ internal sealed class ProjectDetectionService(
                 if (props.Count > 0)
                 {
                     var outputType = props.TryGetValue("OutputType", out var ot) ? ot.Trim() : null;
+                    if (!IsExecutableOutputType(outputType))
+                    {
+                        return ProjectRunnability.NotRunnable;
+                    }
+
                     var isTest = props.TryGetValue("IsTestProject", out var it)
                         && string.Equals(it.Trim(), "true", StringComparison.OrdinalIgnoreCase);
-                    return IsExecutableOutputType(outputType) && !isTest;
+                    if (isTest)
+                    {
+                        return ProjectRunnability.Test;
+                    }
+
+                    var items = MsBuildPropertyReader.ParseItems(stdout);
+                    return HasEvaluatedTestMarkers(items) ? ProjectRunnability.Test : ProjectRunnability.App;
                 }
             }
 
@@ -344,7 +368,73 @@ internal sealed class ProjectDetectionService(
             logger.LogDebug("{UISymbol} Evaluation of {Project} failed ({Message}); falling back to static parse.", UiSymbols.Note, csproj.Name, ex.Message);
         }
 
-        return IsExecutableNonTestProject(csproj);
+        return ClassifyRunnableStatic(csproj);
+    }
+
+    /// <summary>
+    /// Package-id prefixes (case-insensitive) that mark a project as a test project: the .NET test SDK
+    /// and test host plus the MSTest/xUnit/NUnit families. A WinUI MSTest app references these but does
+    /// not set <c>IsTestProject</c>, so this is how it is told apart from a real app.
+    /// </summary>
+    private static readonly string[] TestPackagePrefixes =
+    [
+        "microsoft.net.test.sdk",
+        "microsoft.testplatform.testhost",
+        "mstest",
+        "xunit",
+        "nunit",
+    ];
+
+    /// <summary>True when a project capability marks a test container (the VS/WinUI test marker).</summary>
+    internal static bool IsTestContainerCapability(string? capability) =>
+        string.Equals(capability?.Trim(), "TestContainer", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>True when a package id belongs to a known test framework / test host.</summary>
+    internal static bool IsKnownTestPackage(string? packageId)
+    {
+        if (string.IsNullOrWhiteSpace(packageId))
+        {
+            return false;
+        }
+
+        var id = packageId.Trim();
+        foreach (var prefix in TestPackagePrefixes)
+        {
+            if (id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Scans inline csproj XML for a TestContainer capability or a test-framework package ref.</summary>
+    private static bool HasInlineTestMarkers(XDocument doc)
+    {
+        var capabilities = doc.Descendants()
+            .Where(e => e.Name.LocalName == "ProjectCapability")
+            .Select(e => (string?)e.Attribute("Include"));
+        if (capabilities.Any(IsTestContainerCapability))
+        {
+            return true;
+        }
+
+        var packageRefs = doc.Descendants()
+            .Where(e => e.Name.LocalName == "PackageReference")
+            .Select(e => (string?)e.Attribute("Include") ?? (string?)e.Attribute("Update"));
+        return packageRefs.Any(IsKnownTestPackage);
+    }
+
+    /// <summary>Scans evaluated MSBuild items for a TestContainer capability or a test-framework package ref.</summary>
+    private static bool HasEvaluatedTestMarkers(IReadOnlyDictionary<string, IReadOnlyList<string>> items)
+    {
+        if (items.TryGetValue("ProjectCapability", out var caps) && caps.Any(IsTestContainerCapability))
+        {
+            return true;
+        }
+
+        return items.TryGetValue("PackageReference", out var pkgs) && pkgs.Any(IsKnownTestPackage);
     }
 
     /// <summary>

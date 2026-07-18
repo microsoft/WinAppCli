@@ -63,6 +63,95 @@ internal static class MsBuildPropertyReader
     }
 
     /// <summary>
+    /// Parses the stdout of <c>dotnet build/msbuild --getItem:...</c> into a map of item name to the
+    /// list of item identities (the <c>Include</c> values). The SDK emits
+    /// <c>{ "Items": { "ItemName": [ { "Identity": "…", … }, … ], … } }</c> (combined with
+    /// <c>{ "Properties": … }</c> when properties are requested too). Tolerant of a diagnostic preamble
+    /// before the object and trailing content after it, mirroring <see cref="Parse"/>. Pure and
+    /// side-effect free so it can be unit tested without a build. Missing item groups are simply absent.
+    /// </summary>
+    public static IReadOnlyDictionary<string, IReadOnlyList<string>> ParseItems(string stdout)
+    {
+        var result = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(stdout))
+        {
+            return result;
+        }
+
+        TryReadItemsObject(stdout.Trim(), result);
+        return result;
+    }
+
+    /// <summary>
+    /// Scans <paramref name="text"/> for the first JSON object that carries an <c>"Items"</c> object and,
+    /// if found, fills <paramref name="result"/> with each item group's identities. Uses the same
+    /// candidate-brace scan as <see cref="TryReadPropertiesObject"/> so a diagnostic preamble/trailer
+    /// cannot defeat parsing.
+    /// </summary>
+    private static void TryReadItemsObject(string text, Dictionary<string, IReadOnlyList<string>> result)
+    {
+        var searchStart = 0;
+        while (searchStart < text.Length)
+        {
+            var braceIndex = text.IndexOf('{', searchStart);
+            if (braceIndex < 0)
+            {
+                return;
+            }
+
+            var candidate = text[braceIndex..];
+            var bytes = System.Text.Encoding.UTF8.GetBytes(candidate);
+            var reader = new Utf8JsonReader(bytes, isFinalBlock: true, state: default);
+            try
+            {
+                if (JsonDocument.TryParseValue(ref reader, out var doc))
+                {
+                    using (doc)
+                    {
+                        if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                            doc.RootElement.TryGetProperty("Items", out var items) &&
+                            items.ValueKind == JsonValueKind.Object)
+                        {
+                            foreach (var group in items.EnumerateObject())
+                            {
+                                if (group.Value.ValueKind != JsonValueKind.Array)
+                                {
+                                    continue;
+                                }
+
+                                var identities = new List<string>();
+                                foreach (var item in group.Value.EnumerateArray())
+                                {
+                                    if (item.ValueKind == JsonValueKind.Object &&
+                                        item.TryGetProperty("Identity", out var id) &&
+                                        id.ValueKind == JsonValueKind.String)
+                                    {
+                                        var value = id.GetString();
+                                        if (!string.IsNullOrEmpty(value))
+                                        {
+                                            identities.Add(value);
+                                        }
+                                    }
+                                }
+
+                                result[group.Name] = identities;
+                            }
+
+                            return;
+                        }
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+                // This '{' did not begin a valid JSON value — try the next one (preamble brace).
+            }
+
+            searchStart = braceIndex + 1;
+        }
+    }
+
+    /// <summary>
     /// Scans <paramref name="text"/> for the first JSON object that is a <c>{ "Properties": {...} }</c>
     /// envelope and, if found, fills <paramref name="result"/> and returns <c>true</c>. Each <c>'{'</c>
     /// is tried as a candidate start (skipping a non-JSON preamble brace), and a single JSON value is
