@@ -93,6 +93,31 @@ public class ProjectRunServiceTests
         return new FileInfo(path);
     }
 
+    // Writes a file at a (possibly nested) path relative to _tempDir, creating intermediate dirs.
+    private FileInfo WriteFileAt(string relativePath, string content)
+    {
+        var path = Path.Combine(_tempDir.FullName, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, content);
+        return new FileInfo(path);
+    }
+
+    // Minimal classic .sln listing the given project paths (relative to the solution dir, backslashes).
+    private static string SlnListing(params string[] relativeProjectPaths)
+    {
+        var entries = relativeProjectPaths.Select((p, i) =>
+            $"Project(\"{{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}}\") = \"P{i}\", \"{p}\", \"{{{Guid.NewGuid():D}}}\"" +
+            Environment.NewLine + "EndProject");
+        return "Microsoft Visual Studio Solution File, Format Version 12.00" + Environment.NewLine +
+            string.Join(Environment.NewLine, entries);
+    }
+
+    // Minimal XML .slnx listing the given project paths (relative to the solution dir, forward slashes).
+    private static string SlnxListing(params string[] relativeProjectPaths) =>
+        "<Solution>" + Environment.NewLine +
+        string.Join(Environment.NewLine, relativeProjectPaths.Select(p => $"  <Project Path=\"{p}\" />")) +
+        Environment.NewLine + "</Solution>";
+
     #region BuildBuildPassArguments (streamed build pass, Change #1)
 
     [TestMethod]
@@ -380,6 +405,27 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public void BuildBuildPassArguments_UserSolutionDir_NotOverridden()
+    {
+        // When the user passes their own -p:SolutionDir, winapp must not re-emit a second (winning,
+        // last-wins) SolutionDir that clobbers it — the user's value stays authoritative. The sibling
+        // Solution* properties are still defined.
+        var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "src", "App", "App.csproj"));
+        var solution = new FileInfo(Path.Combine(_tempDir.FullName, "MyApp.sln"));
+        var options = new ProjectRunOptions(
+            "Debug", "x64", null, NoBuild: false, NoRestore: false,
+            Properties: ["SolutionDir=Z:\\Custom\\"], Solution: solution);
+
+        var args = ProjectRunService.BuildBuildPassArguments(csproj, options, "minimal");
+
+        StringAssert.Contains(args, "-p:SolutionDir=Z:\\Custom\\");
+        Assert.IsFalse(
+            args.Contains($"-p:SolutionDir={_tempDir.FullName}\\"),
+            "winapp must not add a second SolutionDir that overrides the user's value");
+        StringAssert.Contains(args, "-p:SolutionName=MyApp");
+    }
+
+    [TestMethod]
     public void BuildEvaluateArguments_WithSolution_EmitsSolutionProperties()
     {
         // The evaluate pass must define the same $(SolutionDir) family as the build pass so
@@ -494,6 +540,78 @@ public class ProjectRunServiceTests
 
         Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
         Assert.AreEqual(csproj.FullName, resolution.Csproj!.FullName);
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_CsprojFile_OwningSolutionOneLevelUp_AttachesSolution()
+    {
+        // A bare .csproj input must discover its owning solution (walking up) so $(SolutionDir) is
+        // defined for the build — the AI-Dev-Gallery/Richasy class where a project imports shared props
+        // via $(SolutionDir). The solution sits above the project and lists it.
+        var csproj = WriteFileAt(Path.Combine("src", "App", "App.csproj"), ExecutableCsproj);
+        var solution = WriteFile("MyApp.sln", SlnListing(Path.Combine("src", "App", "App.csproj")));
+
+        var resolution = await _service.ResolveInputAsync(csproj, CancellationToken.None);
+
+        Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
+        Assert.IsNotNull(resolution.Solution, "the owning solution must be discovered so $(SolutionDir) is defined");
+        Assert.AreEqual(solution.FullName, resolution.Solution!.FullName);
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_CsprojFile_OwningSlnxListsProject_AttachesSolution()
+    {
+        // Same discovery for the newer XML .slnx format (forward-slash project paths).
+        var csproj = WriteFileAt(Path.Combine("src", "App", "App.csproj"), ExecutableCsproj);
+        var solution = WriteFile("MyApp.slnx", SlnxListing("src/App/App.csproj"));
+
+        var resolution = await _service.ResolveInputAsync(csproj, CancellationToken.None);
+
+        Assert.IsNotNull(resolution.Solution);
+        Assert.AreEqual(solution.FullName, resolution.Solution!.FullName);
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_CsprojFile_PrefersSolutionThatListsProject()
+    {
+        // Two solutions at the same level: the one that actually lists the project wins over the one
+        // that doesn't (so we attach the real owner, not an unrelated sibling solution).
+        var csproj = WriteFileAt(Path.Combine("src", "App", "App.csproj"), ExecutableCsproj);
+        WriteFile("Unrelated.sln", SlnListing(Path.Combine("src", "Other", "Other.csproj")));
+        var owner = WriteFile("Owner.sln", SlnListing(Path.Combine("src", "App", "App.csproj")));
+
+        var resolution = await _service.ResolveInputAsync(csproj, CancellationToken.None);
+
+        Assert.IsNotNull(resolution.Solution);
+        Assert.AreEqual(owner.FullName, resolution.Solution!.FullName);
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_CsprojFile_MultipleSolutionsNoneList_LeavesSolutionNull()
+    {
+        // Several solutions at the nearest ancestor, none of which lists the project → we don't guess.
+        var csproj = WriteFileAt(Path.Combine("src", "App", "App.csproj"), ExecutableCsproj);
+        WriteFile("One.sln", SlnListing(Path.Combine("src", "Other", "Other.csproj")));
+        WriteFile("Two.sln", SlnListing(Path.Combine("src", "Another", "Another.csproj")));
+
+        var resolution = await _service.ResolveInputAsync(csproj, CancellationToken.None);
+
+        Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
+        Assert.IsNull(resolution.Solution, "ambiguous solutions that don't list the project must not be guessed");
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_CsprojFile_SingleSolutionNotListing_AttachesByLocality()
+    {
+        // Exactly one solution at the nearest ancestor: attach it even when we can't confirm the listing
+        // (e.g. an as-yet-empty/opaque solution), matching how a developer opens that lone solution in VS.
+        var csproj = WriteFileAt(Path.Combine("src", "App", "App.csproj"), ExecutableCsproj);
+        var solution = WriteFile("Lonely.sln", "");
+
+        var resolution = await _service.ResolveInputAsync(csproj, CancellationToken.None);
+
+        Assert.IsNotNull(resolution.Solution);
+        Assert.AreEqual(solution.FullName, resolution.Solution!.FullName);
     }
 
     [TestMethod]

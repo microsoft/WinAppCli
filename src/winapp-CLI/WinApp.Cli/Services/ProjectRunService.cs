@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using WinApp.Cli.Helpers;
@@ -9,7 +11,7 @@ using WinApp.Cli.Models;
 namespace WinApp.Cli.Services;
 
 /// <inheritdoc cref="IProjectRunService" />
-internal sealed class ProjectRunService(
+internal sealed partial class ProjectRunService(
     IDotNetService dotNetService,
     IProjectDetectionService projectDetectionService,
     ICsWinRTMetadataShimService csWinRTMetadataShimService,
@@ -48,7 +50,14 @@ internal sealed class ProjectRunService(
             }
 
             var projectDir = file.Directory ?? new DirectoryInfo(Directory.GetCurrentDirectory());
-            return new RunInputResolution(WinAppRunMode.Project, file, projectDir);
+
+            // A bare .csproj input has no solution context, so $(SolutionDir) and the sibling Solution*
+            // properties are undefined — projects that reference them in imports/AdditionalFiles then
+            // fail to build (e.g. a source generator reading $(SolutionDir)…\Resources.resw). Discover
+            // the owning solution by walking up so the build defines them exactly as `dotnet build <sln>`
+            // / Visual Studio does. Null when none is found → behavior is identical to before.
+            var owningSolution = FindOwningSolution(file);
+            return new RunInputResolution(WinAppRunMode.Project, file, projectDir, owningSolution);
         }
 
         var dir = (DirectoryInfo)input;
@@ -144,6 +153,127 @@ internal sealed class ProjectRunService(
     private static bool IsSolutionFile(FileInfo file) =>
         string.Equals(file.Extension, ".sln", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(file.Extension, ".slnx", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Matches a classic <c>.sln</c> project entry, capturing the (relative) <c>.csproj</c> path.</summary>
+    [GeneratedRegex(
+        "Project\\(\"\\{[^\"}]*\\}\"\\)\\s*=\\s*\"[^\"]*\",\\s*\"([^\"]+\\.csproj)\"",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex SlnProjectPathRegex();
+
+    /// <summary>
+    /// Finds the solution that owns a bare <c>.csproj</c> so a direct-file run defines <c>$(SolutionDir)</c>
+    /// the same way <c>dotnet build &lt;sln&gt;</c> / Visual Studio do. Walks up from the project directory;
+    /// at the nearest ancestor that contains any <c>.sln</c>/<c>.slnx</c>, prefers a solution that actually
+    /// lists this project, else uses it when there is exactly one, else returns null (several solutions,
+    /// none demonstrably owning → don't guess). Returns null when no solution is found at all.
+    /// </summary>
+    private static FileInfo? FindOwningSolution(FileInfo csproj)
+    {
+        for (var dir = csproj.Directory; dir is not null; dir = dir.Parent)
+        {
+            List<FileInfo> solutions;
+            try
+            {
+                solutions = dir.EnumerateFiles("*.sln", SearchOption.TopDirectoryOnly)
+                    .Concat(dir.EnumerateFiles("*.slnx", SearchOption.TopDirectoryOnly))
+                    .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+            {
+                continue;
+            }
+
+            if (solutions.Count == 0)
+            {
+                continue;
+            }
+
+            // Prefer a solution at this level that actually lists the project (deterministic: alpha order).
+            var owning = solutions.FirstOrDefault(s => SolutionListsProject(s, csproj));
+            if (owning is not null)
+            {
+                return owning;
+            }
+
+            // Exactly one solution here and we couldn't confirm it lists the project (empty/unreadable) —
+            // it is still the owning solution by locality. Several with no listing match → don't guess.
+            return solutions.Count == 1 ? solutions[0] : null;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// True when a solution file lists the given project. Parses the solution text directly (no
+    /// <c>dotnet</c> shell-out): classic <c>.sln</c> via the project-entry regex, <c>.slnx</c> via XML.
+    /// Each listed path is resolved relative to the solution directory and compared to the project's
+    /// full path. Returns false when the file cannot be read or lists nothing matching.
+    /// </summary>
+    private static bool SolutionListsProject(FileInfo solution, FileInfo project)
+    {
+        string text;
+        try
+        {
+            text = File.ReadAllText(solution.FullName);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        var solutionDir = solution.Directory?.FullName ?? Directory.GetCurrentDirectory();
+        var relativePaths = string.Equals(solution.Extension, ".slnx", StringComparison.OrdinalIgnoreCase)
+            ? ExtractSlnxProjectPaths(text)
+            : ExtractSlnProjectPaths(text);
+
+        foreach (var relative in relativePaths)
+        {
+            string full;
+            try
+            {
+                var normalized = relative.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+                full = Path.GetFullPath(Path.Combine(solutionDir, normalized));
+            }
+            catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException)
+            {
+                continue;
+            }
+
+            if (string.Equals(full, project.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Extracts the relative <c>.csproj</c> paths listed in a classic <c>.sln</c> file.</summary>
+    private static List<string> ExtractSlnProjectPaths(string text) =>
+        SlnProjectPathRegex().Matches(text).Select(m => m.Groups[1].Value).ToList();
+
+    /// <summary>Extracts the relative <c>.csproj</c> paths from an XML <c>.slnx</c> solution.</summary>
+    private static List<string> ExtractSlnxProjectPaths(string text)
+    {
+        XDocument doc;
+        try
+        {
+            doc = XDocument.Parse(text);
+        }
+        catch (System.Xml.XmlException)
+        {
+            return [];
+        }
+
+        return doc.Descendants()
+            .Where(e => string.Equals(e.Name.LocalName, "Project", StringComparison.OrdinalIgnoreCase))
+            .Select(e => e.Attributes()
+                .FirstOrDefault(a => string.Equals(a.Name.LocalName, "Path", StringComparison.OrdinalIgnoreCase))?.Value)
+            .Where(p => !string.IsNullOrWhiteSpace(p) && p!.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            .Select(p => p!)
+            .ToList();
+    }
 
     /// <summary>
     /// Resolves the runnable app project out of a solution and records the solution on the result so
@@ -859,7 +989,31 @@ internal sealed class ProjectRunService(
             return;
         }
 
-        tokens.AddRange(BuildSolutionPropertyTokens(solution));
+        // User -p properties are emitted before this call, and MSBuild is last-wins, so re-emitting a
+        // Solution* property the user already set would clobber their value. Skip any the user specified
+        // so an explicit `-p:SolutionDir=…` (or sibling) always wins. Covers every solution-attached
+        // target — bare-.csproj-with-owning-sln, directory-resolved, and explicit-solution alike.
+        foreach (var token in BuildSolutionPropertyTokens(solution))
+        {
+            if (UserSpecifiesProperty(options.Properties, SolutionPropertyName(token)))
+            {
+                continue;
+            }
+
+            tokens.Add(token);
+        }
+    }
+
+    /// <summary>True when the user passed a <c>-p Name=Value</c> for <paramref name="name"/> (case-insensitive).</summary>
+    private static bool UserSpecifiesProperty(IReadOnlyList<string> properties, string name) =>
+        properties.Any(p => p.StartsWith(name + "=", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Extracts the property name from a <c>-p:Name=Value</c> token (e.g. <c>SolutionDir</c>).</summary>
+    private static string SolutionPropertyName(string token)
+    {
+        var start = token.StartsWith("-p:", StringComparison.Ordinal) ? 3 : 0;
+        var equals = token.IndexOf('=', start);
+        return equals > start ? token[start..equals] : token[start..];
     }
 
     /// <summary>
