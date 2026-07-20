@@ -37,6 +37,88 @@ public class FindUiCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task Id_CodeWithBrackets_RendersVerbatim_Exit0()
+    {
+        // Code and headers containing '[' / ']' must be escaped/written verbatim, not
+        // interpreted as Spectre markup (which would throw or mangle the snippet).
+        var engine = new SearchEngine(
+            [
+                new Scenario
+                {
+                    Id = "tabview-1",
+                    ControlId = "tabview",
+                    ControlName = "TabView",
+                    HeaderText = "Brackets [test]",
+                    Source = "gallery",
+                    Xaml = "<Grid Tag=\"[binding]\" />",
+                    CSharp = "var first = items[0];",
+                },
+            ],
+            corePatterns: [],
+            enrichmentTags: new(),
+            curatedKeywords: new());
+        _fakeService = FakeControlsSearchService.WithEngine(engine);
+
+        var exit = await ParseAndInvokeWithCaptureAsync(Command(), ["--id", "gallery-tabview-1"]);
+
+        Assert.AreEqual(0, exit);
+        StringAssert.Contains(TestAnsiConsole.Output, "items[0]", "C# code must survive verbatim");
+        StringAssert.Contains(TestAnsiConsole.Output, "[binding]", "XAML brackets must survive verbatim");
+        StringAssert.Contains(TestAnsiConsole.Output, "Brackets [test]", "heading brackets must survive verbatim");
+    }
+
+    [TestMethod]
+    public async Task Id_LabelWithBackticks_RendersVerbatim_Exit0()
+    {
+        // A reactor scenario emits "**Setup:** NuGet `Microsoft.UI.Reactor`". The label is
+        // tinted and the backticked trailing content is escaped and rendered verbatim.
+        var engine = new SearchEngine(
+            [
+                new Scenario
+                {
+                    Id = "flex-1",
+                    ControlId = "flex",
+                    ControlName = "Flex",
+                    HeaderText = "Flex container",
+                    Source = "reactor",
+                    CSharp = "new FlexElement()",
+                    NuGetPackage = "Microsoft.UI.Reactor",
+                    ApiNamespace = "Microsoft.UI.Reactor",
+                },
+            ],
+            corePatterns: [],
+            enrichmentTags: new(),
+            curatedKeywords: new());
+        _fakeService = FakeControlsSearchService.WithEngine(engine);
+
+        var exit = await ParseAndInvokeWithCaptureAsync(Command(), ["--id", "reactor-flex-1"]);
+
+        Assert.AreEqual(0, exit);
+        StringAssert.Contains(TestAnsiConsole.Output, "**Setup:**", "the metadata label must survive");
+        StringAssert.Contains(TestAnsiConsole.Output, "NuGet `Microsoft.UI.Reactor`", "backticked trailing content must render verbatim");
+    }
+
+    [TestMethod]
+    public async Task Search_NonJson_PassesFetchNoticeCallback()
+    {
+        var fake = FakeControlsSearchService.WithEngine(BuildEngine());
+        _fakeService = fake;
+        var exit = await ParseAndInvokeWithCaptureAsync(Command(), ["tabview"]);
+        Assert.AreEqual(0, exit);
+        Assert.IsNotNull(fake.LastOnFetchStarting, "interactive (non-json) runs should supply a fetching-notice callback");
+    }
+
+    [TestMethod]
+    public async Task Search_Json_SuppressesFetchNoticeCallback()
+    {
+        var fake = FakeControlsSearchService.WithEngine(BuildEngine());
+        _fakeService = fake;
+        var exit = await ParseAndInvokeWithCaptureAsync(Command(), ["tabview", "--json"]);
+        Assert.AreEqual(0, exit);
+        Assert.IsNull(fake.LastOnFetchStarting, "--json must suppress the fetching notice so stdout stays clean");
+    }
+
+    [TestMethod]
     public async Task NoArgs_PrintsGuidance_Exit1()
     {
         _fakeService = FakeControlsSearchService.WithEngine(BuildEngine());

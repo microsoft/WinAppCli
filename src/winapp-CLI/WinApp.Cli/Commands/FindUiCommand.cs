@@ -130,7 +130,7 @@ internal sealed class FindUiCommand : Command, IShortDescription
             SearchEngine engine;
             try
             {
-                engine = await searchService.GetEngineAsync(refresh, cancellationToken).ConfigureAwait(false);
+                engine = await searchService.GetEngineAsync(refresh, BuildFetchNotice(json), cancellationToken).ConfigureAwait(false);
             }
             catch (ControlsDataUnavailableException ex)
             {
@@ -223,9 +223,117 @@ internal sealed class FindUiCommand : Command, IShortDescription
                 {
                     console.WriteLine();
                 }
-                console.WriteLine(entries[i].Content);
+
+                var entry = entries[i];
+                if (!entry.Found)
+                {
+                    // Not-found message (e.g. "Pattern 'x' not found.") — flag it clearly.
+                    console.MarkupLine($"[red]{Markup.Escape(entry.Content)}[/]");
+                }
+                else
+                {
+                    WriteScenarioContent(entry.Content);
+                }
             }
             return entries.All(e => e.Found) ? 0 : 1;
+        }
+
+        /// <summary>
+        /// Render a formatted scenario to the console with light color to break up the
+        /// wall of code (headings, metadata labels, and code-fence markers), while
+        /// keeping code bodies byte-for-byte verbatim. Structural lines go through
+        /// <see cref="IAnsiConsole"/> markup (escaped, so brackets in headers are safe);
+        /// code and free text are written literally with <c>WriteLine</c> so markup is
+        /// never interpreted and snippets stay copy-pasteable. When output is redirected
+        /// or color is unavailable, Spectre strips the styling and the plain markdown is
+        /// reproduced unchanged. The JSON <c>content</c> field is never touched.
+        /// </summary>
+        private void WriteScenarioContent(string content)
+        {
+            foreach (var rawLine in content.Split('\n'))
+            {
+                var line = rawLine.TrimEnd('\r');
+
+                // "## Control: Header [Source]" — the scenario heading.
+                if (line.StartsWith("## ", StringComparison.Ordinal))
+                {
+                    console.MarkupLine($"[bold cyan]{Markup.Escape(line)}[/]");
+                }
+                // Metadata labels: **Setup:**, **Namespace:**, **XAML:**, **C#:**, **Important:**
+                else if (TryFormatLabelLine(line, out var labelMarkup))
+                {
+                    console.MarkupLine(labelMarkup);
+                }
+                // Code-fence markers (```xml / ```csharp / ```) — dim so they quietly delimit blocks.
+                else if (line.StartsWith("```", StringComparison.Ordinal))
+                {
+                    console.MarkupLine($"[grey]{Markup.Escape(line)}[/]");
+                }
+                else
+                {
+                    // Code and free text: write literally (no markup parsing) so brackets
+                    // and other markup-significant characters survive untouched.
+                    console.WriteLine(line);
+                }
+            }
+        }
+
+        /// <summary>
+        /// If <paramref name="line"/> opens with a bold markdown label such as
+        /// <c>**Setup:**</c>, produce console markup that tints just the label and leaves
+        /// any trailing content (e.g. <c>NuGet `pkg`</c>) in the default color. Returns
+        /// false for non-label lines. Both segments are escaped so backticks/brackets are literal.
+        /// </summary>
+        private static bool TryFormatLabelLine(string line, out string markup)
+        {
+            markup = "";
+            if (!line.StartsWith("**", StringComparison.Ordinal))
+            {
+                return false;
+            }
+            var close = line.IndexOf(":**", StringComparison.Ordinal);
+            if (close < 0)
+            {
+                return false;
+            }
+            var label = line[..(close + 3)];   // includes the trailing ":**"
+            var rest = line[(close + 3)..];    // may be empty (standalone label line)
+            markup = $"[yellow]{Markup.Escape(label)}[/]{Markup.Escape(rest)}";
+            return true;
+        }
+
+        /// <summary>
+        /// Build the one-time "fetching…" notice callback handed to the search service.
+        /// The service invokes it (once) only when a provider actually starts a network
+        /// fetch — a warm cache never triggers it. The notice is written to a dedicated
+        /// <b>stderr</b> console so stdout (and <c>--json</c> payloads in particular) stay
+        /// clean, and it is suppressed entirely when info-level output is off
+        /// (<c>--json</c> / <c>--quiet</c>). Returns null in those suppressed modes so no
+        /// stderr console is even created.
+        /// </summary>
+        private Action<string>? BuildFetchNotice(bool json)
+        {
+            // --json/--quiet drop info-level output; skip the notice (and its stderr console).
+            if (json || !logger.IsEnabled(LogLevel.Information))
+            {
+                return null;
+            }
+
+            IAnsiConsole? stderrConsole = null;
+            var shown = false;
+            // Providers load sequentially in ControlsSearchService, so this callback is
+            // never invoked concurrently; a plain latch is sufficient.
+            return _ =>
+            {
+                if (shown)
+                {
+                    return;
+                }
+                shown = true;
+                stderrConsole ??= AnsiConsole.Create(
+                    new AnsiConsoleSettings { Out = new AnsiConsoleOutput(Console.Error) });
+                stderrConsole.MarkupLine("[grey]Fetching WinUI controls from GitHub...[/]");
+            };
         }
 
         private int EmitList(SearchEngine engine, bool json)

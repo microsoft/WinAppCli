@@ -42,9 +42,12 @@ internal interface ISearchProvider
     /// fetches from GitHub (network required) and primes the cache. Unlike the
     /// upstream tool, find-ui embeds no scenario snapshot, so a cold cache MUST
     /// reach the network — callers surface a clear "run online once" error when
-    /// the fetch yields nothing.
+    /// the fetch yields nothing. <paramref name="onFetchStarting"/> is invoked
+    /// (with <see cref="DisplayName"/>) immediately before a network fetch begins,
+    /// so callers can show a one-time "fetching…" notice; a warm-cache load never
+    /// invokes it.
     /// </summary>
-    Task<ProviderData> LoadAsync(bool forceRefresh = false, CancellationToken cancellationToken = default);
+    Task<ProviderData> LoadAsync(bool forceRefresh = false, Action<string>? onFetchStarting = null, CancellationToken cancellationToken = default);
 
     /// <summary>Delete this provider's cache directory so the next load re-fetches.</summary>
     void ClearCache();
@@ -82,7 +85,7 @@ internal abstract class CachedProviderBase : ISearchProvider
     protected virtual Dictionary<string, string[]> NormalizeTagsOnRead(
         Dictionary<string, string[]> tags) => tags;
 
-    public async Task<ProviderData> LoadAsync(bool forceRefresh = false, CancellationToken cancellationToken = default)
+    public async Task<ProviderData> LoadAsync(bool forceRefresh = false, Action<string>? onFetchStarting = null, CancellationToken cancellationToken = default)
     {
         if (!forceRefresh)
         {
@@ -97,6 +100,13 @@ internal abstract class CachedProviderBase : ISearchProvider
         ProviderData fetched;
         try
         {
+            // About to hit the network — signal the caller so it can show a
+            // one-time "fetching…" notice. Warm-cache loads return above and
+            // never reach here, so the notice only appears on a real fetch.
+            // Best-effort: a throwing observer must never abort the fetch itself.
+            try { onFetchStarting?.Invoke(DisplayName); }
+            catch { /* the fetching notice is cosmetic; ignore observer failures */ }
+
             fetched = await FetchAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)

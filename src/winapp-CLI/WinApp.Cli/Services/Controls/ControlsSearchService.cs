@@ -24,8 +24,12 @@ internal interface IControlsSearchService
     /// Returns a configured engine, building it lazily on first use and memoizing
     /// it thereafter. Pass <paramref name="forceRefresh"/> to bypass both the
     /// in-memory engine and the on-disk cache and re-fetch from GitHub.
+    /// <paramref name="onFetchStarting"/> is invoked (with a provider display name)
+    /// the first time any provider starts a network fetch, so the caller can show
+    /// a one-time "fetching…" notice; it is never invoked when everything is served
+    /// from cache or the memoized engine.
     /// </summary>
-    Task<SearchEngine> GetEngineAsync(bool forceRefresh = false, CancellationToken cancellationToken = default);
+    Task<SearchEngine> GetEngineAsync(bool forceRefresh = false, Action<string>? onFetchStarting = null, CancellationToken cancellationToken = default);
 
     /// <summary>Delete every provider's per-user cache so the next load re-fetches.</summary>
     void ClearCache();
@@ -58,7 +62,7 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
         _providers = providers;
     }
 
-    public async Task<SearchEngine> GetEngineAsync(bool forceRefresh = false, CancellationToken cancellationToken = default)
+    public async Task<SearchEngine> GetEngineAsync(bool forceRefresh = false, Action<string>? onFetchStarting = null, CancellationToken cancellationToken = default)
     {
         if (_engine != null && !forceRefresh)
         {
@@ -83,7 +87,7 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
 
             foreach (var provider in _providers)
             {
-                var data = await provider.LoadAsync(forceRefresh, cancellationToken).ConfigureAwait(false);
+                var data = await provider.LoadAsync(forceRefresh, onFetchStarting, cancellationToken).ConfigureAwait(false);
                 if (data.Scenarios.Length == 0)
                 {
                     anyProviderEmpty = true;
