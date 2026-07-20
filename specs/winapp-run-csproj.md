@@ -442,6 +442,11 @@ Legend: ✅ supported · ❌ rejected with a clear message · ⚪ not applicable
 - **Project · unpackaged:** a WinUI csproj with `<WindowsPackageType>None</WindowsPackageType>`
   → `winapp run <csproj>` builds and launches the exe directly; assert PID, no package registered.
 - **Disambiguation:** file vs dir-with-one-csproj vs dir-with-many vs build-output-dir.
+- **Solution · auto-selection:** `samples/winui-solution` (a `.sln` with a packaged app `App`
+  and a test-shaped `App.Tests` that sets `TestContainer`/MSTest but not `IsTestProject`)
+  → `winapp run <sln>` auto-selects `App` and skips the test project with no ambiguity error;
+  `--project App.Tests` reaches the explicitly selected project. Covered by the sample's
+  `test.Tests.ps1` (run via `scripts/test-samples.ps1 -Samples winui-solution`).
 - **dotnet handling:** SDK-missing error; build-failure exit-code propagation; `--no-build`;
   `--arch`/`--configuration` output resolution; multi-targeted `--framework`.
 - **E2E:** extend `scripts/test-e2e-winui-ui.ps1` to cover a project-mode launch.

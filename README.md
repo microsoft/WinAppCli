@@ -252,6 +252,7 @@ This repository includes samples demonstrating how to use the CLI with various f
 | [WPF App](/samples/wpf-app/README.md) | WPF desktop application |
 | [WinUI App](/samples/winui-app/README.md) | Packaged WinUI 3 app registered and launched via `winapp run <csproj>` |
 | [WinUI Unpackaged App](/samples/winui-unpackaged-app/README.md) | Unpackaged WinUI 3 app launched via `winapp run <csproj>` |
+| [WinUI Solution](/samples/winui-solution/README.md) | Multi-project `.sln` (app + test project) demonstrating `winapp run` solution-mode auto-selection |
 | [Electron](/samples/electron/README.md) | Electron Forge app with appxmanifest, assets, native C++ addon, and C# addon |
 | [Electron WinML](/samples/electron-winml/README.md) | Electron app using Windows ML for image classification |
 | [Rust App](/samples/rust-app/README.md) | Rust application using Windows APIs |

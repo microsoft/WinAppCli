@@ -21,6 +21,7 @@ on:
           - tauri-app
           - wpf-app
           - winui-app
+          - winui-solution
           - winui-unpackaged-app
 
 permissions:
@@ -59,7 +60,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sample: [cpp-app, dotnet-app, electron, flutter-app, packaging-cli, rust-app, tauri-app, wpf-app, winui-app, winui-unpackaged-app]
+        sample: [cpp-app, dotnet-app, electron, flutter-app, packaging-cli, rust-app, tauri-app, wpf-app, winui-app, winui-solution, winui-unpackaged-app]
     runs-on: windows-latest
     name: ${{ matrix.sample }}
 
@@ -118,7 +119,7 @@ jobs:
     - name: Setup .NET
       if: >-
         steps.check.outputs.skip != 'true' &&
-        contains(fromJson('["dotnet-app", "wpf-app", "packaging-cli", "electron", "winui-app", "winui-unpackaged-app"]'), matrix.sample)
+        contains(fromJson('["dotnet-app", "wpf-app", "packaging-cli", "electron", "winui-app", "winui-solution", "winui-unpackaged-app"]'), matrix.sample)
       uses: actions/setup-dotnet@v5
       with:
         dotnet-version: '10.0.x'
@@ -126,7 +127,7 @@ jobs:
     - name: Setup Node.js
       if: >-
         steps.check.outputs.skip != 'true' &&
-        contains(fromJson('["electron", "tauri-app", "cpp-app", "dotnet-app", "wpf-app", "rust-app", "flutter-app", "packaging-cli", "winui-app", "winui-unpackaged-app"]'), matrix.sample)
+        contains(fromJson('["electron", "tauri-app", "cpp-app", "dotnet-app", "wpf-app", "rust-app", "flutter-app", "packaging-cli", "winui-app", "winui-solution", "winui-unpackaged-app"]'), matrix.sample)
       uses: actions/setup-node@v5
       with:
         node-version: '22'

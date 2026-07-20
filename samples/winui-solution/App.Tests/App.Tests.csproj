@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    This project intentionally reproduces the "test project" shape found in real
+    multi-project solutions like the WinUI Gallery and the AI Dev Gallery:
+      * OutputType=WinExe on a net*-windows target framework
+      * a TestContainer project capability
+      * a test framework package reference (MSTest)
+      * IsTestProject is deliberately NOT set
+
+    winapp run's solution mode must classify this as a test project (and therefore
+    skip it when auto-selecting the runnable app) using these evaluated signals,
+    not a naive "does the name end in .Tests" heuristic.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>winui_solution_app_tests</RootNamespace>
+    <Platforms>x86;x64;ARM64</Platforms>
+    <RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectCapability Include="TestContainer" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MSTest.TestFramework" Version="3.6.4" />
+  </ItemGroup>
+
+</Project>
