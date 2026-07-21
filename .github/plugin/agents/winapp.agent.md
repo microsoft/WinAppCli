@@ -38,6 +38,8 @@ Does the project already have an appxmanifest.xml?
    │  └─ winapp package <build-output-dir>
    │     (add --cert ./devcert.pfx to sign in one step)
    ├─ Need package identity for debugging Windows APIs?
+   │  ├─ Have a .NET/WinUI .csproj or .sln/.slnx (or a folder with one)? (build + run in one step)
+   │  │  └─ winapp run <project-or-solution>  (dotnet build + provision runtime + launch)
    │  ├─ Is the exe in the same folder as your build output? (most frameworks)
    │  │  └─ winapp run <build-output-dir>  (registers loose layout + launches)
    │  └─ Is the exe separate from your app code? (Electron, sparse package testing)

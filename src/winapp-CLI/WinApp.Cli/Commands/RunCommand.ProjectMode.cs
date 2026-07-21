@@ -35,7 +35,7 @@ internal partial class RunCommand
         /// <see cref="RunUnpackagedProjectAsync"/> so both reject the exact same set (issue #676).
         /// </summary>
         private static List<string> CollectUnpackagedIncompatibleOptions(
-            bool noLaunch, bool withAlias, bool unregisterOnExit, bool clean, FileInfo? manifest, DirectoryInfo? outputAppXDirectory)
+            bool noLaunch, bool withAlias, bool unregisterOnExit, bool clean, FileInfo? manifest, DirectoryInfo? outputAppXDirectory, string? executable)
         {
             var rejected = new List<string>();
             if (noLaunch)
@@ -61,6 +61,13 @@ internal partial class RunCommand
             if (outputAppXDirectory != null)
             {
                 rejected.Add("--output-appx-directory");
+            }
+            if (!string.IsNullOrWhiteSpace(executable))
+            {
+                // --executable selects an entry within an MSIX layout; an unpackaged app is launched
+                // from the project's own build output (RunCommand), so honoring it is impossible — reject
+                // rather than silently ignore.
+                rejected.Add("--executable");
             }
             return rejected;
         }
@@ -144,7 +151,7 @@ internal partial class RunCommand
             // save; that path's evaluate + gate are already fast).
             if (!noBuild)
             {
-                var incompatible = CollectUnpackagedIncompatibleOptions(noLaunch, withAlias, unregisterOnExit, clean, manifest, outputAppXDirectory);
+                var incompatible = CollectUnpackagedIncompatibleOptions(noLaunch, withAlias, unregisterOnExit, clean, manifest, outputAppXDirectory, executable);
                 if (incompatible.Count > 0
                     && await projectRunService.IsDefinitivelyUnpackagedAsync(csproj, buildOptions, cancellationToken))
                 {
@@ -224,7 +231,7 @@ internal partial class RunCommand
             return await ExecuteRunPipelineAsync(
                 targetDir, manifest, outputAppXDirectory, appArgs,
                 noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, isJson,
-                runtimeArch: resolution.Architecture, projectFile: csproj, cancellationToken);
+                runtimeArch: resolution.Architecture, projectFile: csproj, framework: resolution.Framework, cancellationToken);
         }
 
         /// <summary>
@@ -253,7 +260,7 @@ internal partial class RunCommand
             // AUTHORITATIVE gate — it runs once packaging is definitively known. RunProjectModeAsync
             // additionally fails fast on the definitively-unpackaged case before building (issue #676),
             // but this gate still catches the indeterminate-then-unpackaged case that only resolves here.
-            var rejected = CollectUnpackagedIncompatibleOptions(noLaunch, withAlias, unregisterOnExit, clean, manifest, outputAppXDirectory);
+            var rejected = CollectUnpackagedIncompatibleOptions(noLaunch, withAlias, unregisterOnExit, clean, manifest, outputAppXDirectory, executable);
             if (rejected.Count > 0)
             {
                 return Fail(BuildUnpackagedIncompatibleMessage(rejected, csproj.Name), isJson);

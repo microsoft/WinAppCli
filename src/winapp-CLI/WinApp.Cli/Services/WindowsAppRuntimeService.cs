@@ -94,13 +94,8 @@ internal class WindowsAppRuntimeService(
             }
 
             using var stream = manifestEntry.Open();
-            var doc = System.Xml.Linq.XDocument.Load(stream);
-            var identityElement = doc.Root?.Elements()
-                .FirstOrDefault(e => e.Name.LocalName == "Identity");
-
-            var name = identityElement?.Attribute("Name")?.Value;
-            var version = identityElement?.Attribute("Version")?.Value;
-            return (name, version);
+            var doc = AppxManifestDocument.Load(stream);
+            return (doc.IdentityName, doc.IdentityVersion);
         }
         catch (Exception ex)
         {
@@ -392,14 +387,10 @@ internal class WindowsAppRuntimeService(
         var mainDir = new DirectoryInfo(Path.Combine(nugetCacheDir.FullName, BuildToolsService.WINAPP_SDK_PACKAGE.ToLowerInvariant()));
         if (mainDir.Exists)
         {
-            foreach (var versionDir in mainDir.GetDirectories().OrderByDescending(d => d.Name, new VersionStringComparer()))
-            {
-                var msixDir = TryGetMsixDirectoryFromPath(versionDir);
-                if (msixDir != null)
-                {
-                    return msixDir;
-                }
-            }
+            return mainDir.GetDirectories()
+                .OrderByDescending(d => d.Name, new VersionStringComparer())
+                .Select(TryGetMsixDirectoryFromPath)
+                .FirstOrDefault(msixDir => msixDir != null);
         }
 
         return null;

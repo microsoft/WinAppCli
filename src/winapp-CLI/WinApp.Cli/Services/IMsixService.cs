@@ -59,6 +59,7 @@ internal interface IMsixService
         string? executable = null,
         string? runtimeArch = null,
         FileInfo? projectFile = null,
+        string? framework = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

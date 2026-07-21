@@ -65,6 +65,18 @@ public class ProjectRunServiceTests
         </Project>
         """;
 
+    // Multi-targeted executable: <TargetFrameworks> (plural). With no --framework, project mode must pin
+    // the FIRST declared TFM (H1) so build/evaluate/provision agree; without pinning the evaluate pass
+    // hits the empty cross-targeting outer node and throws after a successful build.
+    private const string MultiTargetedExeCsproj = """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>WinExe</OutputType>
+            <TargetFrameworks>net10.0-windows10.0.26100.0;net8.0-windows10.0.26100.0</TargetFrameworks>
+          </PropertyGroup>
+        </Project>
+        """;
+
     [TestInitialize]
     public void Setup()
     {
@@ -432,6 +444,23 @@ public class ProjectRunServiceTests
             args.Contains($"-p:SolutionDir={_tempDir.FullName}\\"),
             "winapp must not add a second SolutionDir that overrides the user's value");
         StringAssert.Contains(args, "-p:SolutionName=MyApp");
+    }
+
+    [TestMethod]
+    public void BuildBuildPassArguments_SolutionDirWithSpecialChars_IsMsBuildEscaped()
+    {
+        // M3: a legal NTFS path containing ';' or '%' must be MSBuild-escaped in -p:Name=Value so it is
+        // not misread as a property separator (';') or escape sequence ('%'). Order matters: '%'→%25
+        // first, then ';'→%3B, so "a;b%c" becomes "a%3Bb%25c".
+        var solution = new FileInfo(Path.Combine("C:\\", "a;b%c", "MyApp.sln"));
+        var csproj = new FileInfo(Path.Combine("C:\\", "a;b%c", "src", "App", "App.csproj"));
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Solution: solution);
+
+        var args = ProjectRunService.BuildBuildPassArguments(csproj, options, "minimal");
+
+        StringAssert.Contains(args, "-p:SolutionDir=C:\\a%3Bb%25c\\", "SolutionDir must be MSBuild-escaped");
+        StringAssert.Contains(args, "-p:SolutionName=MyApp", "SolutionName has no special chars and stays literal");
+        Assert.IsFalse(args.Contains("-p:SolutionDir=C:\\a;b%c\\"), "the raw unescaped SolutionDir property value must not be emitted");
     }
 
     [TestMethod]
@@ -1816,6 +1845,53 @@ public class ProjectRunServiceTests
         Assert.IsNull(outcome.Resolution, "a failed build must not resolve");
         Assert.AreEqual(7, outcome.ExitCode, "the build exit code must propagate");
         Assert.IsFalse(evaluated, "a failed build must short-circuit before the evaluate pass");
+    }
+
+    [TestMethod]
+    public async Task BuildAndResolveAsync_MultiTargetedNoFramework_PinsFirstTfmIntoBuild()
+    {
+        // H1: a plural-<TargetFrameworks> project with no --framework must pin the FIRST declared TFM
+        // so the build pass (and the subsequent evaluate pass) target one inner build, not the empty
+        // cross-targeting outer node.
+        var csproj = WriteFile("App.csproj", MultiTargetedExeCsproj);
+        var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => (0, PackagedPropertiesJson(), string.Empty) };
+        var service = NewServiceWith(dotnet, LogLevel.Information, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
+
+        var outcome = await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsNotNull(outcome.Resolution, "a multi-targeted project should resolve after pinning a TFM");
+        StringAssert.Contains(dotnet.StreamingCalls[0], "-f net10.0-windows10.0.26100.0", "the first declared TFM must be pinned into the build pass");
+        Assert.IsFalse(dotnet.StreamingCalls[0].Contains("net8.0-windows10.0.26100.0"), "only the first TFM should be pinned");
+    }
+
+    [TestMethod]
+    public async Task BuildAndResolveAsync_SingleTargetedNoFramework_DoesNotInjectFramework()
+    {
+        // H1 no-op: a single-<TargetFramework> project already resolves one TFM in both passes, so no
+        // -f should be injected (the build stays exactly as before this fix).
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => (0, PackagedPropertiesJson(), string.Empty) };
+        var service = NewServiceWith(dotnet, LogLevel.Information, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
+
+        await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsFalse(dotnet.StreamingCalls[0].Contains("-f "), "a single-targeted project must not have a framework injected");
+    }
+
+    [TestMethod]
+    public async Task BuildAndResolveAsync_MultiTargetedExplicitFramework_HonorsUserChoice()
+    {
+        // H1 must never override an explicit --framework on a multi-targeted project.
+        var csproj = WriteFile("App.csproj", MultiTargetedExeCsproj);
+        var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => (0, PackagedPropertiesJson(), string.Empty) };
+        var service = NewServiceWith(dotnet, LogLevel.Information, out _);
+        var options = new ProjectRunOptions("Debug", "x64", "net8.0-windows10.0.26100.0", NoBuild: false, NoRestore: false, Properties: [], Json: false);
+
+        await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        StringAssert.Contains(dotnet.StreamingCalls[0], "-f net8.0-windows10.0.26100.0", "an explicit --framework must be honored, not replaced by the first TFM");
     }
 
     [TestMethod]

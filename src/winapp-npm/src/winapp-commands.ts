@@ -52,8 +52,15 @@ export interface WinappResult {
 // ---------------------------------------------------------------------------
 
 function pushCommon(args: string[], opts: CommonOptions): void {
-  if (opts.quiet) args.push('--quiet');
-  if (opts.verbose) args.push('--verbose');
+  // Insert global flags before any "--" passthrough separator so winapp consumes them rather
+  // than forwarding them to the launched app/tool (e.g. run ... -- appArgs).
+  const flags: string[] = [];
+  if (opts.quiet) flags.push('--quiet');
+  if (opts.verbose) flags.push('--verbose');
+  if (flags.length === 0) return;
+  const sep = args.indexOf('--');
+  if (sep === -1) args.push(...flags);
+  else args.splice(sep, 0, ...flags);
 }
 
 function captureOpts(opts: CommonOptions): CallWinappCliCaptureOptions {

@@ -251,8 +251,15 @@ function generate(schema) {
   L('// ---------------------------------------------------------------------------');
   L();
   L('function pushCommon(args: string[], opts: CommonOptions): void {');
-  L("  if (opts.quiet) args.push('--quiet');");
-  L("  if (opts.verbose) args.push('--verbose');");
+  L('  // Insert global flags before any "--" passthrough separator so winapp consumes them rather');
+  L('  // than forwarding them to the launched app/tool (e.g. run ... -- appArgs).');
+  L('  const flags: string[] = [];');
+  L("  if (opts.quiet) flags.push('--quiet');");
+  L("  if (opts.verbose) flags.push('--verbose');");
+  L('  if (flags.length === 0) return;');
+  L("  const sep = args.indexOf('--');");
+  L('  if (sep === -1) args.push(...flags);');
+  L('  else args.splice(sep, 0, ...flags);');
   L('}');
   L();
   L('function captureOpts(opts: CommonOptions): CallWinappCliCaptureOptions {');

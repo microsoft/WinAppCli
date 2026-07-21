@@ -99,7 +99,7 @@ internal partial class MsixService
         return new MsixIdentityResult(debugIdentity.PackageName, debugIdentity.Publisher, debugIdentity.ApplicationId);
     }
 
-    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, string? executable = null, string? runtimeArch = null, FileInfo? projectFile = null, CancellationToken cancellationToken = default)
+    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, string? executable = null, string? runtimeArch = null, FileInfo? projectFile = null, string? framework = null, CancellationToken cancellationToken = default)
     {
         // Validate inputs
         if (!appxManifestPath.Exists)
@@ -150,8 +150,10 @@ internal partial class MsixService
 
             var identity = ParseAppxManifestAsync(manifestContent);
 
-            // Install the Windows App Runtime framework packages if not already present
-            var msbuildPackageList = await ResolveDotNetPackageListAsync(projectFile, framework: null, cancellationToken);
+            // Install the Windows App Runtime framework packages if not already present. Pin the package
+            // list to the effective built TFM so a multi-targeted app doesn't pick a sibling framework's
+            // divergent Windows App SDK version (M2).
+            var msbuildPackageList = await ResolveDotNetPackageListAsync(projectFile, framework, cancellationToken);
             await EnsureWindowsAppRuntimeInstalledAsync(msbuildPackageList, runtimeArch, taskContext, cancellationToken);
 
             // Resolve the manifest that would be registered (issue #537 / TrySkipRegistration).
@@ -217,8 +219,9 @@ internal partial class MsixService
                 "Ensure the build output contains the exe, or pass --executable with the correct relative path.");
         }
 
-        // Fetch dotnet package list once for all downstream operations
-        var dotNetPackageList = await ResolveDotNetPackageListAsync(projectFile, framework: null, cancellationToken);
+        // Fetch dotnet package list once for all downstream operations. Pin to the effective built TFM
+        // (M2) so a multi-targeted app resolves the runtime for the framework it was actually built for.
+        var dotNetPackageList = await ResolveDotNetPackageListAsync(projectFile, framework, cancellationToken);
 
         // If there is a pri file named after the executable, rename it to resources.pri
         var priFilePath = Path.Combine(outputAppXDirectory.FullName, Path.GetFileNameWithoutExtension(executableMatch.Name) + ".pri");

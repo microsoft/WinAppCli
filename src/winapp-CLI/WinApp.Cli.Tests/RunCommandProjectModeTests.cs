@@ -203,6 +203,22 @@ public class RunCommandProjectModeTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task ProjectMode_Unpackaged_RejectsExecutableOption()
+    {
+        // M6: --executable selects an entry inside an MSIX layout; it is meaningless for an unpackaged
+        // app (which launches the built apphost directly). It must be rejected, not silently ignored.
+        var csproj = CreateCsproj();
+        var targetDir = CreateTargetDir(withManifest: false);
+        SetUnpackagedOutcome(csproj, targetDir, selfContained: false);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [csproj.FullName, "--executable", "Other.exe"]);
+
+        Assert.AreEqual(1, exitCode, "--executable must be rejected for unpackaged apps");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchExecutableCalls.Count, "App must not launch when --executable was supplied to an unpackaged app");
+    }
+
+    [TestMethod]
     public async Task ProjectMode_DefinitivelyUnpackaged_RejectsIdentityOnlyOptionBeforeBuilding()
     {
         // Issue #676: when the project is definitively unpackaged (WindowsPackageType=None), an
@@ -296,6 +312,26 @@ public class RunCommandProjectModeTests : BaseCommandTests
         Assert.AreEqual(csproj.FullName, _fakeMsixService.AddLooseLayoutRuntimeCalls[0].ProjectFile);
         Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Packaged app should launch via AUMID");
         Assert.AreEqual(0, _fakeAppLauncherService.LaunchExecutableCalls.Count, "Packaged app must NOT launch the apphost exe directly");
+    }
+
+    [TestMethod]
+    public async Task ProjectMode_Packaged_ThreadsResolvedFrameworkIntoRuntimeProvisioning()
+    {
+        // M2: for a multi-targeted packaged app the resolved TFM must reach loose-layout runtime
+        // provisioning so the WASDK runtime is narrowed to that framework's package set (not an
+        // arbitrary FirstOrDefault across all TFMs, which can install the wrong runtime version).
+        var csproj = CreateCsproj();
+        var targetDir = CreateTargetDir(withManifest: true);
+        const string tfm = "net10.0-windows10.0.26100.0";
+        _fakeProjectRunService.BuildOutcome = new ProjectBuildOutcome(
+            new ProjectRunResolution(csproj, targetDir.FullName, null, ProjectPackaging.Packaged, false, "x64", tfm), 0);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [csproj.FullName, "--detach"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutRuntimeCalls.Count);
+        Assert.AreEqual(tfm, _fakeMsixService.AddLooseLayoutRuntimeCalls[0].Framework, "The resolved target framework must be threaded into runtime provisioning");
     }
 
     [TestMethod]
