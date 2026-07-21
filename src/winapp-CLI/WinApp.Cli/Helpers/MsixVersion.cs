@@ -3,6 +3,7 @@
 
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace WinApp.Cli.Helpers;
 
@@ -43,20 +44,20 @@ internal readonly record struct MsixVersion
             return false;
         }
 
-        var trimmed = versionString.Trim();
-        var parts = trimmed.Split('.');
-        if (parts.Length != 4)
+        // ST_VersionQuad XSD pattern validates exactly 4 parts separated by dots, from 0 to 65535, no leading zeroes except for 0 itself.
+        const string pattern = @"^(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])(\.(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])){3}$";
+
+        if (!Regex.IsMatch(versionString, pattern, RegexOptions.None, TimeSpan.FromMilliseconds(100)))
         {
             return false;
         }
 
-        if (!ushort.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var major) ||
-            !ushort.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var minor) ||
-            !ushort.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var build) ||
-            !ushort.TryParse(parts[3], NumberStyles.None, CultureInfo.InvariantCulture, out var revision))
-        {
-            return false;
-        }
+        // The regex from above ensures we have exactly 4 parts, and each part is a valid ushort, so we can safely parse them.
+        var parts = versionString.Split('.');
+        var major = ushort.Parse(parts[0], CultureInfo.InvariantCulture);
+        var minor = ushort.Parse(parts[1], CultureInfo.InvariantCulture);
+        var build = ushort.Parse(parts[2], CultureInfo.InvariantCulture);
+        var revision = ushort.Parse(parts[3], CultureInfo.InvariantCulture);
 
         if (major == 0 && minor == 0 && build == 0 && revision == 0)
         {

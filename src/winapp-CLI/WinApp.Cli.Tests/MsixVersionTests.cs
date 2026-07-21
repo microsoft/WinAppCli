@@ -11,9 +11,8 @@ public class MsixVersionTests
     [TestMethod]
     [DataRow("1.2.3.4", (ushort)1, (ushort)2, (ushort)3, (ushort)4)]
     [DataRow("65535.65535.65535.65535", (ushort)65535, (ushort)65535, (ushort)65535, (ushort)65535)]
-    [DataRow("  1.2.3.4  ", (ushort)1, (ushort)2, (ushort)3, (ushort)4)]
-    [DataRow(" 1.2.3.4", (ushort)1, (ushort)2, (ushort)3, (ushort)4)]
-    [DataRow("1.2.3.4 ", (ushort)1, (ushort)2, (ushort)3, (ushort)4)]
+    [DataRow("0.0.0.1", (ushort)0, (ushort)0, (ushort)0, (ushort)1)]
+    [DataRow("9.9.9.9", (ushort)9, (ushort)9, (ushort)9, (ushort)9)]
     public void TryParse_ValidInput_ReturnsVersion(
         string input, ushort major, ushort minor, ushort build, ushort revision)
     {
@@ -26,6 +25,12 @@ public class MsixVersionTests
     [DataRow("")]
     [DataRow("   ")]
     [DataRow("1.2.3")]
+    [DataRow(" 1.2.3")]
+    [DataRow("1.2.3 ")]
+    [DataRow(" 1.2.3.4 ")]
+    [DataRow("1.02.3.4")]
+    [DataRow("1.2.3.04")]
+    [DataRow("01.02.03.04")]
     [DataRow("1.2.3.4.5")]
     [DataRow("1.0\" malicious")]
     [DataRow("1.2.-1.4")]
