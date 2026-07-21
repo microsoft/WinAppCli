@@ -1047,6 +1047,38 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public async Task ResolveInput_SlnxFile_ResolvesLocally_WithoutDotnetSlnList()
+    {
+        // C18: `dotnet sln list` only understands .slnx on SDK 9.0.200+, but our floor is 8.0.100. A .slnx
+        // must be enumerated by the local XML parser instead, so a valid .slnx resolves on the 8.0.100 floor.
+        var solution = WriteFile("MyApp.slnx", SlnxListing("App.csproj"));
+        WriteFile("App.csproj", ExecutableCsproj);
+        var slnListCalled = false;
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+            {
+                if (IsSlnListCall(args))
+                {
+                    // A .slnx must never be handed to `dotnet sln list`; fail loudly if it is.
+                    slnListCalled = true;
+                    return (1, string.Empty, "unexpected 'dotnet sln list' for a .slnx");
+                }
+                return (0, string.Empty, string.Empty);
+            },
+        };
+        var service = NewServiceWith(dotnet, out _);
+
+        var resolution = await service.ResolveInputAsync(solution, CancellationToken.None);
+
+        Assert.IsFalse(slnListCalled, "a .slnx must be parsed locally, never via 'dotnet sln list'");
+        Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
+        Assert.AreEqual(Path.Combine(_tempDir.FullName, "App.csproj"), resolution.Csproj!.FullName);
+        Assert.IsNotNull(resolution.Solution, "solution mode must record the .slnx so $(SolutionDir) is defined");
+        Assert.AreEqual(solution.FullName, resolution.Solution!.FullName);
+    }
+
+    [TestMethod]
     public async Task ResolveInput_DirectoryWithSolution_PrefersSolutionOverLooseCsproj()
     {
         WriteFile("MyApp.sln", "");

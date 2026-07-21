@@ -360,8 +360,9 @@ internal sealed partial class ProjectRunService
 
     /// <summary>
     /// Resolves the runnable app project out of a solution and records the solution on the result so
-    /// the build defines <c>$(SolutionDir)</c>. The solution's project list comes from
-    /// <c>dotnet sln &lt;sln&gt; list</c>; each candidate is classified with the same MSBuild
+    /// the build defines <c>$(SolutionDir)</c>. A classic <c>.sln</c>'s project list comes from
+    /// <c>dotnet sln &lt;sln&gt; list</c>; an XML <c>.slnx</c> is parsed locally (see
+    /// <see cref="GetSolutionProjectsAsync"/>). Each candidate is classified with the same MSBuild
     /// evaluation used for a multi-<c>.csproj</c> directory. Exactly one launchable (non-test
     /// executable) project is required unless a matching <c>--project</c> selector is supplied.
     /// </summary>
@@ -491,18 +492,29 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
-    /// Lists the C# projects in a solution via <c>dotnet sln &lt;sln&gt; list</c>, resolving each to an
-    /// absolute <see cref="FileInfo"/>. Non-<c>.csproj</c> projects (e.g. <c>.vcxproj</c>) are excluded
-    /// because <c>winapp run</c> builds and launches managed app projects.
+    /// Lists the C# projects in a solution, resolving each to an absolute <see cref="FileInfo"/>.
+    /// Non-<c>.csproj</c> projects (e.g. <c>.vcxproj</c>) are excluded because <c>winapp run</c> builds and
+    /// launches managed app projects. A classic <c>.sln</c> is enumerated via <c>dotnet sln &lt;sln&gt;
+    /// list</c>; an XML <c>.slnx</c> is parsed directly with the local XML helper because <c>dotnet sln
+    /// list</c> only understands <c>.slnx</c> on SDK 9.0.200+, whereas the run target's own <c>.csproj</c>
+    /// (not the solution) is what gets built, so no <c>.slnx</c>-aware SDK is actually required.
     /// </summary>
     private async Task<List<FileInfo>> GetSolutionProjectsAsync(FileInfo solution, DirectoryInfo solutionDir, CancellationToken cancellationToken)
     {
-        // Check for a capable SDK first: 'dotnet sln list' below also needs the SDK, and its failure
+        // Check for a capable SDK first: the build/evaluate passes below need it, and its failure
         // message ("could not read the solution") is far less actionable than the SDK guidance.
         var sdkError = await CheckSdkAsync(solutionDir, cancellationToken);
         if (sdkError != null)
         {
             throw new ProjectRunException(sdkError);
+        }
+
+        // .slnx: parse locally (dotnet sln list needs SDK 9.0.200+ for .slnx; the 8.0.100 floor we just
+        // verified does not cover it). We build the resolved .csproj directly, so a .slnx-aware SDK is
+        // not required — only the local XML parse.
+        if (string.Equals(solution.Extension, ".slnx", StringComparison.OrdinalIgnoreCase))
+        {
+            return ReadSolutionProjectsFromText(solution, solutionDir, ExtractSlnxProjectPaths);
         }
 
         var arguments = WindowsCommandLine.JoinArguments(["sln", solution.FullName, "list"]) ?? string.Empty;
@@ -549,6 +561,52 @@ internal sealed partial class ProjectRunService
             }
 
             var full = Path.GetFullPath(Path.Combine(solutionDir.FullName, raw));
+            if (seen.Add(full))
+            {
+                projects.Add(new FileInfo(full));
+            }
+        }
+
+        return projects;
+    }
+
+    /// <summary>
+    /// Reads a solution file's text and resolves the relative <c>.csproj</c> paths (extracted by
+    /// <paramref name="extractProjectPaths"/>) to absolute, de-duplicated <see cref="FileInfo"/> entries
+    /// relative to the solution directory. Used for the pure-text solution formats (<c>.slnx</c>). Throws
+    /// <see cref="ProjectRunException"/> when the solution cannot be read.
+    /// </summary>
+    private static List<FileInfo> ReadSolutionProjectsFromText(
+        FileInfo solution,
+        DirectoryInfo solutionDir,
+        Func<string, List<string>> extractProjectPaths)
+    {
+        string text;
+        try
+        {
+            text = File.ReadAllText(solution.FullName);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new ProjectRunException(
+                $"Could not read the solution '{solution.Name}': {ex.Message}");
+        }
+
+        var projects = new List<FileInfo>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var relative in extractProjectPaths(text))
+        {
+            string full;
+            try
+            {
+                var normalized = relative.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+                full = Path.GetFullPath(Path.Combine(solutionDir.FullName, normalized));
+            }
+            catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException)
+            {
+                continue;
+            }
+
             if (seen.Add(full))
             {
                 projects.Add(new FileInfo(full));

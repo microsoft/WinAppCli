@@ -1331,7 +1331,7 @@
       "hidden": false,
       "arguments": {
         "input-folder": {
-          "description": "Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one (default: current directory).",
+          "description": "Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory).",
           "order": 0,
           "hidden": false,
           "valueType": "System.IO.FileSystemInfo",

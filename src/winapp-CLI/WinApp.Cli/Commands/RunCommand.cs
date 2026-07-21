@@ -54,7 +54,7 @@ internal partial class RunCommand : Command, IShortDescription
     {
         InputFolderArgument = new Argument<FileSystemInfo>("input-folder")
         {
-            Description = "Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one (default: current directory).",
+            Description = "Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory).",
             Arity = ArgumentArity.ZeroOrOne
         };
 

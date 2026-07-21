@@ -88,6 +88,16 @@ internal sealed partial class CsWinRTMetadataShimService(
             return null;
         }
 
+        // 'chosen' is a directory name enumerated from refPackRoot, so it is never rooted in practice; guard
+        // anyway so a rooted value can't silently discard refPackRoot and 'winmd' in Path.Combine below.
+        if (Path.IsPathRooted(chosen))
+        {
+            logger.LogDebug(
+                "Chosen {RefPackId} version directory '{Version}' is unexpectedly rooted; skipping CsWinRTWindowsMetadata shim.",
+                RefPackId, chosen);
+            return null;
+        }
+
         var winmdFolder = Path.Combine(refPackRoot.FullName, chosen, "winmd");
         logger.LogDebug(
             "No Windows SDK registered; injecting CsWinRTWindowsMetadata={Folder} (ref pack {Version}) for SDK-less build.",

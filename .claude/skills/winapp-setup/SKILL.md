@@ -134,7 +134,7 @@ winapp run . -p WindowsPackageType=None
 winapp run . --verbose
 ```
 
-Project mode supports both **packaged** and **unpackaged** WinUI apps. It detects which from the project's effective `WindowsPackageType` MSBuild property (`MSIX` ⇒ packaged loose-layout + AUMID launch; `None` ⇒ launch the built `.exe` directly), and installs the matching-architecture Windows App Runtime the app needs before launching. Build inputs: `-c/--configuration`, `--arch`, `-r/--runtime`, `-f/--framework`, `--no-build`, `--no-restore`, `-p/--property` (repeatable). Requires the .NET SDK 8.0.100+. Identity-only options (`--manifest`, `--no-launch`, `--with-alias`, `--clean`, `--unregister-on-exit`, `--output-appx-directory`) apply to packaged apps only and are rejected for unpackaged ones. The build output **streams live** as it runs (with a progress spinner in interactive terminals, and the full log shown on failure); `--verbose` maps to dotnet's `-v` for the full build log, and under `--json` build output goes to stderr so stdout stays pure JSON.
+Project mode supports both **packaged** and **unpackaged** WinUI apps. It detects which from the project's effective `WindowsPackageType` MSBuild property (`MSIX` ⇒ packaged loose-layout + AUMID launch; `None` ⇒ launch the built `.exe` directly), and installs the matching-architecture Windows App Runtime the app needs before launching. Build inputs: `-c/--configuration`, `--arch`, `-r/--runtime`, `-f/--framework`, `--no-build`, `--no-restore`, `-p/--property` (repeatable). Requires the .NET SDK 8.0.100+. Identity-only options (`--manifest`, `--no-launch`, `--with-alias`, `--clean`, `--unregister-on-exit`, `--output-appx-directory`, `--executable`) apply to packaged apps only and are rejected for unpackaged ones. The build output **streams live** as it runs (with a progress spinner in interactive terminals, and the full log shown on failure); `--verbose` maps to dotnet's `-v` for the full build log, and under `--json` build output goes to stderr so stdout stays pure JSON.
 
 #### Choosing between `run` and `create-debug-identity`
 
@@ -241,7 +241,7 @@ Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In p
 <!-- auto-generated from cli-schema.json -->
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `<input-folder>` | No | Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one (default: current directory). |
+| `<input-folder>` | No | Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory). |
 | `<app-args>` | No | Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). |
 
 #### Options

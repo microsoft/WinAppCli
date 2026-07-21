@@ -49,6 +49,10 @@ internal interface IProjectRunService
 
     /// <summary>
     /// Verifies that a capable .NET SDK (≥ 8.0.100, which supports <c>--getProperty</c>) is available.
+    /// This floor also covers <c>.slnx</c> input: its project list is parsed directly from the XML rather
+    /// than via <c>dotnet sln list</c> (which understands <c>.slnx</c> only on SDK 9.0.200+), and the
+    /// resolved <c>.csproj</c> — not the solution — is what gets built, so no <c>.slnx</c>-aware SDK is
+    /// required.
     /// </summary>
     /// <returns>An actionable error message if the SDK is missing/too old, otherwise <c>null</c>.</returns>
     Task<string?> CheckSdkAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken);

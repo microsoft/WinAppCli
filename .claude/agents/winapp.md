@@ -139,7 +139,7 @@ Want to inspect or interact with a running app's UI?
 - **Project mode** — input is a `.csproj`, a `.sln`/`.slnx` solution, or a directory containing one (including `.`). Builds the project with `dotnet build`, installs the matching-architecture Windows App Runtime if the app uses the Windows App SDK, then launches it. Supports both **packaged** (`WindowsPackageType=MSIX` → loose-layout + AUMID) and **unpackaged** (`WindowsPackageType=None` → launch the built `.exe` directly) WinUI apps, detected from the effective `WindowsPackageType` MSBuild property. Input defaults to the current directory when omitted (like `dotnet run`). Requires .NET SDK 8.0.100+.
 **When to use:** The **preferred command** for iterative development and debugging with package identity (.NET, C++, Rust, Flutter, Tauri). Point it at a project/solution to build-and-run in one step, or at a build-output folder to package-and-run existing output.
 **Key options:**
-- `--manifest <path>` — path to `appxmanifest.xml` (folder mode; default: auto-detect)
+- `--manifest <path>` — path to `appxmanifest.xml` (folder mode and packaged project mode; default: auto-detect)
 - `--args <string>` — command-line arguments to pass to the app. Alternatively pass app args after `--` (e.g., `winapp run . -- --flag value`)
 - `--no-launch` — register/prepare without launching
 - `--with-alias` — launch via execution alias (console apps run in current terminal)
