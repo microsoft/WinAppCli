@@ -111,7 +111,7 @@ Set `<ApplicationPublisher>CN=Your Company</ApplicationPublisher>` (or the `Appl
 
 ## CI/CD (GitHub Actions)
 
-Build each architecture, then pack its resolved manifest. Store a self-signed (or CA-issued) PFX as a base64 secret.
+Example for x64 — pack the resolved manifest and sign. Store a self-signed (or CA-issued) PFX as a base64 secret. For arm64, add a second set of publish/sign/pack steps with `-r win-arm64` and the corresponding manifest path.
 
 ```yaml
 - uses: microsoft/setup-winapp@v1
@@ -157,8 +157,6 @@ Build each architecture, then pack its resolved manifest. Store a self-signed (o
       Remove-Item -Path $env:SIGN_PFX_PATH -Force
     }
 ```
-
-Repeat the publish + sign + pack steps for `win-arm64` (swap `-r win-arm64` and the `win-arm64` manifest path).
 
 **Tips:**
 - Use `-q`/`--quiet` to reduce log noise.
