@@ -59,6 +59,11 @@ Want to inspect or interact with a running app's UI?
 ├─ Inject touch gestures (tap/swipe/pinch/long-press) → winapp ui touch <selector> -a <appname> --gesture swipe --direction right --distance 200
 ├─ Inject pen/stylus ink stroke or tap → winapp ui pen <selector> -a <appname> --path "10,10 200,200"
 └─ List app windows → winapp ui list-windows -a <appname> [--show-hidden]
+
+Building a WinUI 3 UI and need to find the right control or a working sample?
+└─ winapp find-ui "<what you want>"   (search WinUI 3 Gallery + Community Toolkit + Reactor)
+   ├─ Then fetch full code for a match → winapp find-ui --id <scenario-id>
+   └─ WinUI-only (not WPF/WinForms); distinct from `ui search`, which inspects a *running* app
 ```
 
 ## Critical rules — always follow these
