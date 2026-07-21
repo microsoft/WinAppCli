@@ -100,6 +100,24 @@ internal sealed record ProjectRunOptions(
     FileInfo? Solution = null);
 
 /// <summary>
+/// The effective build inputs used to classify runnable candidates (multi-<c>.csproj</c> directory or
+/// solution) under the SAME MSBuild globals the subsequent build/evaluate passes use. Threading these
+/// in means a project whose <c>OutputType</c> or test markers are conditional on Configuration/arch/
+/// TargetFramework/user <c>-p</c> is classified the way it will actually build, so
+/// <c>winapp run App.sln -c Release</c> never selects a Debug-only app (or reports none) and then
+/// builds Release. Null preserves the pre-existing behavior (classification against MSBuild defaults).
+/// </summary>
+/// <param name="Configuration">The effective <c>-c</c> Configuration (e.g. <c>Debug</c>/<c>Release</c>).</param>
+/// <param name="Architecture">The resolved target architecture, mapped to a RID for the evaluate.</param>
+/// <param name="Framework">The explicit <c>--framework</c> TargetFramework, or null when unset.</param>
+/// <param name="Properties">The raw user <c>-p Name=Value</c> properties (dedicated-switch dupes filtered).</param>
+internal sealed record ProjectClassificationInputs(
+    string Configuration,
+    string Architecture,
+    string? Framework,
+    IReadOnlyList<string> Properties);
+
+/// <summary>
 /// Outcome of <see cref="Services.IProjectRunService.BuildAndResolveAsync"/>. On success,
 /// <see cref="Resolution"/> is set and <see cref="ExitCode"/> is 0. On a build failure, the dotnet
 /// errors have already been surfaced and <see cref="ExitCode"/> is the non-zero dotnet exit code.

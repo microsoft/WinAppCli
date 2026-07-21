@@ -387,7 +387,12 @@ internal partial class RunCommand : Command, IShortDescription
             try
             {
                 var projectSelector = parseResult.GetValue(ProjectOption);
-                inputResolution = await projectRunService.ResolveInputAsync(inputFsi, cancellationToken, projectSelector);
+                // Classify candidates (multi-.csproj / solution) under the SAME effective build inputs
+                // the subsequent build uses, so a project whose OutputType/test markers are conditional
+                // on Configuration/arch/TFM/user -p is picked the way it will build (e.g.
+                // `winapp run App.sln -c Release` must not select a Debug-only app then build Release).
+                var classificationInputs = BuildClassificationInputs(parseResult);
+                inputResolution = await projectRunService.ResolveInputAsync(inputFsi, cancellationToken, projectSelector, classificationInputs);
             }
             catch (ProjectRunException ex)
             {

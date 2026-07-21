@@ -17,14 +17,14 @@ namespace WinApp.Cli.Services;
 internal sealed partial class ProjectRunService
 {
     /// <inheritdoc />
-    public async Task<RunInputResolution> ResolveInputAsync(FileSystemInfo input, CancellationToken cancellationToken, string? projectSelector = null)
+    public async Task<RunInputResolution> ResolveInputAsync(FileSystemInfo input, CancellationToken cancellationToken, string? projectSelector = null, ProjectClassificationInputs? classificationInputs = null)
     {
         // Explicit file input: a .csproj (project mode) or a .sln/.slnx (solution mode).
         if (input is FileInfo file)
         {
             if (IsSolutionFile(file))
             {
-                return await ResolveSolutionAsync(file, projectSelector, cancellationToken);
+                return await ResolveSolutionAsync(file, projectSelector, classificationInputs, cancellationToken);
             }
 
             if (!string.Equals(file.Extension, ".csproj", StringComparison.OrdinalIgnoreCase))
@@ -63,7 +63,7 @@ internal sealed partial class ProjectRunService
 
         if (solutions.Count == 1)
         {
-            return await ResolveSolutionAsync(solutions[0], projectSelector, cancellationToken);
+            return await ResolveSolutionAsync(solutions[0], projectSelector, classificationInputs, cancellationToken);
         }
 
         if (solutions.Count > 1)
@@ -124,8 +124,11 @@ internal sealed partial class ProjectRunService
         // is detected even when OutputType/IsTestProject come from an import (SDK defaults,
         // Directory.Build.props, the test SDK) rather than inline XML. A static parse cannot see those
         // and could silently pick the wrong project (spec M5). Evaluation falls back to the static
-        // parse per-project when the SDK/restore is unavailable, so behavior never regresses.
-        var (dirApps, dirTests) = await ClassifyRunnablesAsync(csprojs, dir, null, cancellationToken);
+        // parse per-project when the SDK/restore is unavailable, so behavior never regresses. The
+        // effective build inputs (Configuration/arch/TFM/user -p) are threaded in so a candidate whose
+        // OutputType/test markers are conditional on them classifies as it will build.
+        var dirClassificationProps = BuildClassificationPropertyTokens(classificationInputs, solution: null);
+        var (dirApps, dirTests) = await ClassifyRunnablesAsync(csprojs, dir, dirClassificationProps, cancellationToken);
 
         var dirPick = PickRunnableProject(dirApps, dirTests, out var dirPickedTest);
         if (dirPick is not null)
@@ -362,7 +365,7 @@ internal sealed partial class ProjectRunService
     /// evaluation used for a multi-<c>.csproj</c> directory. Exactly one launchable (non-test
     /// executable) project is required unless a matching <c>--project</c> selector is supplied.
     /// </summary>
-    private async Task<RunInputResolution> ResolveSolutionAsync(FileInfo solution, string? projectSelector, CancellationToken cancellationToken)
+    private async Task<RunInputResolution> ResolveSolutionAsync(FileInfo solution, string? projectSelector, ProjectClassificationInputs? classificationInputs, CancellationToken cancellationToken)
     {
         var solutionDir = solution.Directory ?? new DirectoryInfo(Directory.GetCurrentDirectory());
         var projects = await GetSolutionProjectsAsync(solution, solutionDir, cancellationToken);
@@ -387,7 +390,7 @@ internal sealed partial class ProjectRunService
             return new RunInputResolution(WinAppRunMode.Project, selected, selected.Directory ?? solutionDir, solution);
         }
 
-        var solutionProps = BuildSolutionPropertyTokens(solution);
+        var solutionProps = BuildClassificationPropertyTokens(classificationInputs, solution);
         var (apps, tests) = await ClassifyRunnablesAsync(projects, solutionDir, solutionProps, cancellationToken);
 
         var pick = PickRunnableProject(apps, tests, out var pickedTest);

@@ -666,6 +666,55 @@ internal sealed partial class ProjectRunService(
         }
     }
 
+    /// <summary>
+    /// Builds the MSBuild <c>-p:</c> property tokens used to classify runnable candidates so the
+    /// evaluate reads <c>OutputType</c>/test markers under the SAME globals the build will use. Mirrors
+    /// the property section of <see cref="BuildEvaluateArguments"/>: forwardable user <c>-p</c> first,
+    /// then the <c>Solution*</c> props (solution targets only, skipping any the user set so their value
+    /// wins), then Configuration/RID/TargetFramework LAST so MSBuild's last-wins makes a dedicated value
+    /// beat a conflicting user <c>-p</c>. When <paramref name="inputs"/> is null, preserves the prior
+    /// behavior: solution props only (or nothing for a directory), letting classification use MSBuild's
+    /// defaults for Configuration/Platform/RID/TFM.
+    /// </summary>
+    private static IReadOnlyList<string> BuildClassificationPropertyTokens(
+        ProjectClassificationInputs? inputs,
+        FileInfo? solution)
+    {
+        if (inputs is null)
+        {
+            return solution is null ? [] : BuildSolutionPropertyTokens(solution);
+        }
+
+        var tokens = new List<string>();
+
+        foreach (var property in ForwardableProperties(inputs.Properties))
+        {
+            tokens.Add($"-p:{property}");
+        }
+
+        if (solution is not null)
+        {
+            foreach (var token in BuildSolutionPropertyTokens(solution))
+            {
+                if (UserSpecifiesProperty(inputs.Properties, SolutionPropertyName(token)))
+                {
+                    continue;
+                }
+
+                tokens.Add(token);
+            }
+        }
+
+        tokens.Add($"-p:Configuration={inputs.Configuration}");
+        tokens.Add($"-p:RuntimeIdentifier={RunArchHelper.ToRuntimeIdentifier(inputs.Architecture)}");
+        if (!string.IsNullOrWhiteSpace(inputs.Framework))
+        {
+            tokens.Add($"-p:TargetFramework={inputs.Framework}");
+        }
+
+        return tokens;
+    }
+
     /// <summary>True when the user passed a <c>-p Name=Value</c> for <paramref name="name"/> (case-insensitive).</summary>
     private static bool UserSpecifiesProperty(IReadOnlyList<string> properties, string name) =>
         properties.Any(p => p.StartsWith(name + "=", StringComparison.OrdinalIgnoreCase));

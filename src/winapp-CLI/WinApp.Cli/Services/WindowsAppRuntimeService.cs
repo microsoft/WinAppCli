@@ -191,6 +191,13 @@ internal class WindowsAppRuntimeService(
                 installedCount++;
                 taskContext.AddDebugMessage($"{UiSymbols.Check} {fileName}: Installation successful");
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Ctrl+C — stop provisioning immediately instead of counting cancellation as an install
+                // failure and hammering the remaining packages with an already-cancelled token (which a
+                // direct caller like `update` would otherwise report as a completed runtime install).
+                throw;
+            }
             catch (Exception ex)
             {
                 errorCount++;

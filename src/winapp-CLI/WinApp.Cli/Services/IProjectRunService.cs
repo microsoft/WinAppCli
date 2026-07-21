@@ -23,6 +23,13 @@ internal interface IProjectRunService
     /// one launchable app project. Matched by project name (with or without the <c>.csproj</c>
     /// extension) or full path. Ignored when the target is unambiguous.
     /// </param>
+    /// <param name="classificationInputs">
+    /// Optional effective build inputs (Configuration, architecture, TargetFramework, user <c>-p</c>)
+    /// threaded into candidate classification so a project whose <c>OutputType</c>/test markers are
+    /// conditional on those globals is classified the way it will build. Null classifies against
+    /// MSBuild defaults (prior behavior). Only consulted when the input is a solution or a directory
+    /// with multiple <c>.csproj</c> candidates; ignored on unambiguous targets.
+    /// </param>
     /// <returns>The resolved mode + project file (when project mode).</returns>
     /// <remarks>
     /// A <c>.sln</c>/<c>.slnx</c> file (or a directory containing exactly one) resolves to project
@@ -38,7 +45,7 @@ internal interface IProjectRunService
     /// Thrown when the input is an unsupported file type, or a solution/directory exposes multiple
     /// runnable candidates and the intended one is ambiguous (and no matching selector was given).
     /// </exception>
-    Task<RunInputResolution> ResolveInputAsync(FileSystemInfo input, CancellationToken cancellationToken, string? projectSelector = null);
+    Task<RunInputResolution> ResolveInputAsync(FileSystemInfo input, CancellationToken cancellationToken, string? projectSelector = null, ProjectClassificationInputs? classificationInputs = null);
 
     /// <summary>
     /// Verifies that a capable .NET SDK (≥ 8.0.100, which supports <c>--getProperty</c>) is available.

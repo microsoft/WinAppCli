@@ -807,6 +807,84 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public async Task ResolveInput_MultipleCsproj_ClassificationThreadsEffectiveConfigurationRidAndUserProperty()
+    {
+        // Copilot review (RunCommand.cs:390): candidate classification must evaluate under the SAME
+        // effective build inputs the subsequent build uses. Capture the classify commands and assert the
+        // threaded Configuration/RID/user -p reach every one, so a project whose OutputType/test markers
+        // are conditional on them is classified the way it will build (e.g. `run App.sln -c Release`).
+        WriteFile("App.csproj", ExecutableCsproj);
+        WriteFile("Lib.csproj", ExecutableCsproj);
+        var commandArgs = new List<string>();
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args => { commandArgs.Add(args); return (0, EvalJson("Library"), string.Empty); },
+        };
+        var service = NewServiceWith(dotnet, out _);
+        var classificationInputs = new ProjectClassificationInputs("Release", "arm64", Framework: null, Properties: ["Foo=Bar"]);
+
+        // Both classify as Library → no runnable app → the ambiguity path; we only assert the args here.
+        await Assert.ThrowsExactlyAsync<ProjectRunException>(() =>
+            service.ResolveInputAsync(_tempDir, CancellationToken.None, projectSelector: null, classificationInputs));
+
+        Assert.IsTrue(commandArgs.Count > 0, "expected classification to evaluate at least one project");
+        Assert.IsTrue(commandArgs.All(a => a.Contains("-p:Configuration=Release", StringComparison.Ordinal)),
+            $"classify command missing -p:Configuration=Release: {string.Join(" | ", commandArgs)}");
+        Assert.IsTrue(commandArgs.All(a => a.Contains("-p:RuntimeIdentifier=win-arm64", StringComparison.Ordinal)),
+            $"classify command missing -p:RuntimeIdentifier=win-arm64: {string.Join(" | ", commandArgs)}");
+        Assert.IsTrue(commandArgs.All(a => a.Contains("-p:Foo=Bar", StringComparison.Ordinal)),
+            $"forwardable user -p should reach classification: {string.Join(" | ", commandArgs)}");
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_MultipleCsproj_ConditionalOutputType_ClassifiesUnderEffectiveConfiguration()
+    {
+        // A candidate whose OutputType is conditional on Configuration (e.g.
+        // `<OutputType Condition="'$(Configuration)'=='Release'">WinExe</OutputType>`): App is WinExe
+        // under Release but a Library otherwise. With the effective -c Release threaded into
+        // classification, App is correctly the single runnable app.
+        var app = WriteFile("App.csproj", ExecutableCsproj);
+        WriteFile("Lib.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                !args.Contains(app.FullName, StringComparison.OrdinalIgnoreCase) ? (0, EvalJson("Library"), string.Empty)
+                : args.Contains("-p:Configuration=Release", StringComparison.Ordinal) ? (0, EvalJson("WinExe"), string.Empty)
+                : (0, EvalJson("Library"), string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+        var releaseInputs = new ProjectClassificationInputs("Release", "x64", Framework: null, Properties: []);
+
+        var resolution = await service.ResolveInputAsync(_tempDir, CancellationToken.None, projectSelector: null, releaseInputs);
+
+        Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
+        Assert.AreEqual("App.csproj", resolution.Csproj!.Name);
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_MultipleCsproj_ConditionalOutputType_DefaultConfigurationMisses()
+    {
+        // Negative control for the test above: the same App is only WinExe under Release. With no
+        // classification inputs (the prior behavior — MSBuild defaults), it evaluates as a Library, so
+        // NO runnable app is found and resolution requires explicit selection. This proves threading the
+        // effective Configuration is load-bearing, not incidental.
+        var app = WriteFile("App.csproj", ExecutableCsproj);
+        WriteFile("Lib.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                !args.Contains(app.FullName, StringComparison.OrdinalIgnoreCase) ? (0, EvalJson("Library"), string.Empty)
+                : args.Contains("-p:Configuration=Release", StringComparison.Ordinal) ? (0, EvalJson("WinExe"), string.Empty)
+                : (0, EvalJson("Library"), string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+
+        var ex = await Assert.ThrowsExactlyAsync<ProjectRunException>(() =>
+            service.ResolveInputAsync(_tempDir, CancellationToken.None));
+        StringAssert.Contains(ex.Message, "Multiple .csproj files");
+    }
+
+    [TestMethod]
     public async Task ResolveInput_MultipleCsproj_TestContainerCapability_PicksApp()
     {
         // The AI Dev Gallery / WinUI Gallery shape: the test project is itself a packaged WinUI app

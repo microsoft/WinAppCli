@@ -390,6 +390,29 @@ internal partial class RunCommand
         }
 
         /// <summary>
+        /// Computes the effective build inputs threaded into candidate classification so a multi-
+        /// <c>.csproj</c> directory or solution is resolved under the SAME Configuration/arch/TFM/user
+        /// <c>-p</c> the build will use (not MSBuild defaults). Returns null when the architecture can't
+        /// be resolved — classification then uses defaults and <see cref="RunProjectModeAsync"/> surfaces
+        /// the arch error. Reads only project-mode options and is a no-op for folder mode (which never
+        /// classifies), so evaluating it before mode is known is harmless.
+        /// </summary>
+        internal static ProjectClassificationInputs? BuildClassificationInputs(ParseResult parseResult)
+        {
+            var archOption = parseResult.GetValue(ArchOption);
+            var runtimeOption = parseResult.GetValue(RuntimeOption);
+            if (!TryResolveArchitecture(archOption, runtimeOption, out var architecture, out _))
+            {
+                return null;
+            }
+
+            var configuration = parseResult.GetValue(ConfigurationOption) ?? "Debug";
+            var framework = parseResult.GetValue(FrameworkOption);
+            var properties = parseResult.GetValue(PropertyOption) ?? [];
+            return new ProjectClassificationInputs(configuration, architecture, framework, properties);
+        }
+
+        /// <summary>
         /// Resolves the canonical target architecture from <c>--arch</c> / <c>--runtime</c>.
         /// <c>--runtime</c>'s architecture wins over <c>--arch</c> (mirrors dotnet, where a RID is
         /// more specific); when neither is given, the current process architecture is used.

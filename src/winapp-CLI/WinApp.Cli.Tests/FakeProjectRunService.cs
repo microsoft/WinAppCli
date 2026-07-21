@@ -33,16 +33,18 @@ internal sealed class FakeProjectRunService : IProjectRunService
 
     public List<FileSystemInfo> ResolveInputCalls { get; } = [];
     public List<string?> ResolveInputSelectors { get; } = [];
+    public List<ProjectClassificationInputs?> ResolveInputClassificationInputs { get; } = [];
     public List<FileInfo> BuildAndResolveCalls { get; } = [];
     public List<ProjectRunOptions> BuildOptions { get; } = [];
 
     /// <summary>Records each <see cref="IsDefinitivelyUnpackagedAsync"/> invocation (for asserting the pre-flight probe fired or was skipped).</summary>
     public List<FileInfo> IsDefinitivelyUnpackagedCalls { get; } = [];
 
-    public Task<RunInputResolution> ResolveInputAsync(FileSystemInfo input, CancellationToken cancellationToken, string? projectSelector = null)
+    public Task<RunInputResolution> ResolveInputAsync(FileSystemInfo input, CancellationToken cancellationToken, string? projectSelector = null, ProjectClassificationInputs? classificationInputs = null)
     {
         ResolveInputCalls.Add(input);
         ResolveInputSelectors.Add(projectSelector);
+        ResolveInputClassificationInputs.Add(classificationInputs);
         if (ResolveInputThrows != null)
         {
             throw ResolveInputThrows;
