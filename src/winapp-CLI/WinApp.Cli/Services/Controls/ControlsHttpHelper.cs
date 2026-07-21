@@ -86,6 +86,9 @@ internal static class ControlsHttpHelper
         }
         catch (IOException)
         {
+            // Stream disconnected mid-read — treat as a best-effort miss (per this
+            // method's "transport failure returns null" contract) so one flaky
+            // sample body doesn't discard an entire control page.
             return null;
         }
     }
