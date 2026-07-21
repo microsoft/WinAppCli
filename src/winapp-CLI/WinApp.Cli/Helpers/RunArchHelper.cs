@@ -6,9 +6,9 @@ using System.Runtime.InteropServices;
 namespace WinApp.Cli.Helpers;
 
 /// <summary>
-/// Pure mapping between a target architecture, a .NET runtime identifier (RID), and the MSBuild
-/// <c>Platform</c> value used by WinUI projects. Project mode passes these on the build command line
-/// (never written to the csproj). See spec §8.2.
+/// Pure mapping between a target architecture and a .NET runtime identifier (RID). Project mode passes
+/// the RID on the build command line (never written to the csproj) and conveys the target architecture
+/// through it alone — it does not force an MSBuild <c>Platform</c>. See spec §8.2.
 /// </summary>
 internal static class RunArchHelper
 {
@@ -51,16 +51,6 @@ internal static class RunArchHelper
 
     /// <summary>Maps a canonical arch to its .NET RID (e.g. <c>x64</c> → <c>win-x64</c>).</summary>
     public static string ToRuntimeIdentifier(string architecture) => $"win-{architecture}";
-
-    /// <summary>
-    /// Maps a canonical arch to the WinUI MSBuild <c>Platform</c> value (<c>x64</c> / <c>ARM64</c> / <c>x86</c>).
-    /// </summary>
-    public static string ToPlatform(string architecture) => architecture switch
-    {
-        "arm64" => "ARM64",
-        "x86" => "x86",
-        _ => "x64",
-    };
 
     /// <summary>
     /// Extracts the canonical arch from a RID such as <c>win-x64</c> or <c>win10-arm64</c>.

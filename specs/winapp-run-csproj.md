@@ -228,23 +228,31 @@ Principle: **`run` reads the project's *effective* packaging and never mutates i
 - Use `dotnet build` (fast inner loop) — **not** `publish`.
 - Arch/RID is passed **on the command line** (`-r win-<arch>`), **never written to the csproj**
   (do *not* call `EnsureRuntimeIdentifierAsync`, which mutates).
-- For WinUI, derive `-p:Platform=<x64|ARM64|x86>` from the target arch so the output path
-  and manifest generation line up.
-- **Multi-project platform negotiation.** Because the forced `-p:Platform=<arch>` is a *global*
-  MSBuild property, it would otherwise flow across `ProjectReference`s into `AnyCPU`/`netstandard2.0`
-  libraries: the referenced library builds under `bin\<arch>\…` while the app's compiler resolves the
-  reference to the `AnyCPU` path, producing `CS0006` "metadata file could not be found". A `.sln`
-  normally prevents this via its `ProjectConfigurationPlatforms` map (App `x64`→`x64`, Lib `x64`→
-  `AnyCPU`), but a bare-`.csproj` build doesn't see that map. So project mode also passes
-  **`-p:EnableDynamicPlatformResolution=true`** (MSBuild platform negotiation, .NET 6+), which makes
-  each reference negotiate its own platform — the same result the `.sln` map gives by hand. It is a
-  **no-op for single-project apps**, does not change the app's own `TargetDir`, and is added to
-  **both** the build and the `--getProperty` evaluation (§8.3/§8.5) so both passes see an identical
-  project graph. It is **suppressed when the user supplies their own** `-p:EnableDynamicPlatformResolution`
-  (mirroring the `-p:Platform` override rule) so an intentional value is respected.
+- **Arch is conveyed by the RID alone — project mode does *not* inject `-p:Platform`.** The RID
+  (`-r win-<arch>` on the build pass, `-p:RuntimeIdentifier=win-<arch>` on the evaluate pass) fully
+  determines the target architecture, including the packaged `AppxManifest.xml`
+  `ProcessorArchitecture` (empirically verified on SDK 10.0.302: `dotnet build -r win-arm64` with **no**
+  `-p:Platform` produces `ProcessorArchitecture="arm64"` and `WindowsPackageType=MSIX`). This matches
+  how Visual Studio and a plain `dotnet build -r win-<arch>` behave.
+- **Why the earlier forced `-p:Platform` + EDPR was removed (PRI252/MSB3030 fix).** Project mode used
+  to derive `-p:Platform=<x64|ARM64|x86>` from the target arch (to line up output/manifest paths) and,
+  because that global property leaked across `ProjectReference`s, added
+  `-p:EnableDynamicPlatformResolution=true` (EDPR) to let each reference negotiate its own platform.
+  That combination is actively broken for a **multi-project WinUI app with a no-`<Platforms>` library
+  reference**: EDPR negotiates the library's *compile* back down to `AnyCPU` (outputs land in
+  `bin\Debug\…\win-<arch>\` / `obj\Debug\…`), while the still-forced global `Platform=<arch>` drives the
+  consuming app's XAML/MRT *lookup* to `bin\<arch>\Debug\…` / `obj\<arch>\Debug\…`. The two sides
+  de-synchronize and the app can't find the library's `.xbf`/`.pri` →
+  `MSB3030: Could not copy … Generic.xbf … it was not found` / `PRI252: … .pri not found`. Each flag
+  *alone* is harmless; only the pair winapp injected fails. Neither VS nor a plain `dotnet build
+  -r win-<arch>` forces `Platform`, so both stay consistent. Conveying arch via the RID only removes the
+  split condition entirely and is the Visual Studio / `dotnet build -r` parity choice.
+- A **user-supplied** `-p:Platform` or `-p:EnableDynamicPlatformResolution` is still forwarded
+  unchanged (project mode never injects its own, so there is nothing to override). `WarnOnOverriddenFlags`
+  notes that a user `-p:Platform` must stay consistent with the `--arch`-driven RID.
 - Sketch:
   ```
-  dotnet build "<csproj>" -c <Config> -r win-<arch> [-p:Platform=<Plat>] [-p:EnableDynamicPlatformResolution=true] [--no-restore] [-f <tfm>]
+  dotnet build "<csproj>" -c <Config> -r win-<arch> [--no-restore] [-f <tfm>] <user -p:…>
   ```
 - `--no-build` skips the build and goes straight to *evaluate-only* resolution + launch (§8.3).
 - ⚠️ **Verified caveat:** when the build and property retrieval are combined in one call, an explicit
@@ -261,7 +269,7 @@ mechanics below** — the earlier sketch would not have worked.
 
 - **Build + resolve (default) — one call, with an explicit `-t:Build`:**
   ```
-  dotnet build "<csproj>" -t:Build -c <Config> -r win-<arch> [-p:Platform=<Plat>] [-p:EnableDynamicPlatformResolution=true] <user -p:…> \
+  dotnet build "<csproj>" -t:Build -c <Config> -r win-<arch> <user -p:…> \
     --getProperty:TargetDir --getProperty:RunCommand \
     --getProperty:WindowsPackageType --getProperty:WindowsAppSDKSelfContained
   ```
@@ -269,7 +277,7 @@ mechanics below** — the earlier sketch would not have worked.
   output assembly did not exist afterward) — it would "succeed" against stale/absent output.
 - **`--no-build` — evaluate only (no build):**
   ```
-  dotnet msbuild "<csproj>" -p:Configuration=<Config> -p:RuntimeIdentifier=win-<arch> [-p:Platform=<Plat>] [-p:EnableDynamicPlatformResolution=true] <user -p:…> \
+  dotnet msbuild "<csproj>" -p:Configuration=<Config> -p:RuntimeIdentifier=win-<arch> <user -p:…> \
     --getProperty:TargetDir --getProperty:RunCommand \
     --getProperty:WindowsPackageType --getProperty:WindowsAppSDKSelfContained
   ```
@@ -487,12 +495,15 @@ Legend: ✅ supported · ❌ rejected with a clear message · ⚪ not applicable
 - **D-P — `-p` vs first-class flag?** Mirror `dotnet`: the dedicated flag wins over a same-named `-p`
   regardless of order; duplicate `-p` last-wins. Verified empirically; free because we invoke `dotnet`
   (§8.5).
-- **Multi-project builds (`CS0006`)?** Project mode passes **`-p:EnableDynamicPlatformResolution=true`**
-  alongside the forced `-p:Platform` so a global platform doesn't leak across `ProjectReference`s into
-  `AnyCPU`/`netstandard2.0` libraries (which caused `CS0006` "metadata file could not be found" for
-  solution-style apps such as AI Dev Gallery). Empirically verified: fixes the multi-project failure and
-  is a no-op for single-project apps. Added to the build **and** evaluate passes; suppressed when the
-  user supplies their own `EnableDynamicPlatformResolution` (§8.2).
+- **Multi-project builds (`CS0006` / `PRI252` / `MSB3030`)?** Arch is conveyed by the **RID only**;
+  project mode does **not** force `-p:Platform` and does **not** add `-p:EnableDynamicPlatformResolution`.
+  The earlier forced-`Platform` + EDPR combination broke multi-project WinUI apps with a no-`<Platforms>`
+  library reference: EDPR negotiated the library's compile down to `AnyCPU` (`bin\Debug\…`) while the
+  forced global `Platform` kept the app's XAML/MRT lookup at `bin\<arch>\Debug\…`, yielding `PRI252`/
+  `MSB3030` "not found" (and, without EDPR, `CS0006`). RID-only removes the split entirely and matches
+  Visual Studio / `dotnet build -r win-<arch>`. Empirically verified (SDK 10.0.302): RID alone yields the
+  correct packaged `arm64` manifest and a green multi-project build; a user-supplied `-p:Platform`/EDPR is
+  still forwarded verbatim (§8.2).
 - **Mode-force flags?** Dropped, per your call. No `--packaged`/`--unpackaged`; the user configures the
   project (or uses `-p`) and `run` surfaces obvious misconfig (e.g. packaged but no manifest) as errors.
 

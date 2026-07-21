@@ -169,8 +169,11 @@ public class ProjectRunServiceTests
         StringAssert.StartsWith(args, "build ");
         StringAssert.Contains(args, "-c Debug");
         StringAssert.Contains(args, "-r win-x64");
-        StringAssert.Contains(args, "-p:Platform=x64");
         StringAssert.Contains(args, "-v minimal");
+        // Project mode conveys arch via the RID only — it must NOT force a global -p:Platform (which
+        // de-synchronizes no-<Platforms> WinUI library references → MSB3030/PRI252).
+        Assert.IsFalse(args.Contains("-p:Platform="), "project mode must not inject a forced -p:Platform");
+        Assert.IsFalse(args.Contains("EnableDynamicPlatformResolution"), "project mode must not inject EDPR");
         // The build pass must NOT request properties: --getProperty SUPPRESSES MSBuild's console log,
         // which is exactly the streamed output we want the user to see (Change #1). Nor does it need
         // an explicit -t:Build (Build is the default target when no --getProperty is present).
@@ -179,7 +182,7 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
-    public void BuildBuildPassArguments_Arm64_UsesArmRidAndPlatform()
+    public void BuildBuildPassArguments_Arm64_UsesArmRid_NoForcedPlatform()
     {
         var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
         var options = new ProjectRunOptions("Release", "arm64", null, NoBuild: false, NoRestore: false, Properties: []);
@@ -188,7 +191,7 @@ public class ProjectRunServiceTests
 
         StringAssert.Contains(args, "-c Release");
         StringAssert.Contains(args, "-r win-arm64");
-        StringAssert.Contains(args, "-p:Platform=ARM64");
+        Assert.IsFalse(args.Contains("-p:Platform="), "arch is conveyed by the RID only; no forced Platform");
     }
 
     [TestMethod]
@@ -203,37 +206,40 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
-    public void BuildBuildPassArguments_UserPlatformProperty_SuppressesDerivedPlatform()
+    public void BuildBuildPassArguments_UserPlatformProperty_ForwardedAsIs()
     {
+        // Project mode never injects Platform, but a user-supplied -p:Platform still flows through the
+        // user -p loop and is respected (the only -p:Platform present is the user's).
         var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: ["Platform=ARM64"]);
 
         var args = ProjectRunService.BuildBuildPassArguments(csproj, options, "minimal");
 
         StringAssert.Contains(args, "-p:Platform=ARM64");
-        Assert.IsFalse(args.Contains("-p:Platform=x64"), "derived Platform must not override a user-specified one");
+        Assert.IsFalse(args.Contains("-p:Platform=x64"), "winapp must not inject a Platform derived from --arch");
     }
 
     [TestMethod]
-    public void BuildBuildPassArguments_Default_EnablesDynamicPlatformResolution()
+    public void BuildBuildPassArguments_Default_DoesNotEnableDynamicPlatformResolution()
     {
-        // A forced global -p:Platform=<arch> leaks into AnyCPU/netstandard2.0 ProjectReferences and
-        // breaks multi-project apps (CS0006). EnableDynamicPlatformResolution negotiates each
-        // reference's own platform; it must be enabled by default in project mode (no-op for
-        // single-project apps).
+        // Historically project mode forced -p:Platform=<arch> and then added EDPR to stop that global
+        // Platform from breaking P2P references. RID-only removes the forced Platform, so EDPR is no
+        // longer needed AND is actively harmful: with a no-<Platforms> WinUI library, the Platform×EDPR
+        // split sends the library's XAML/MRT outputs to bin\Debug\ while the app looks in bin\<arch>\
+        // → MSB3030/PRI252. So neither is injected by default.
         var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: []);
 
         var args = ProjectRunService.BuildBuildPassArguments(csproj, options, "minimal");
 
-        StringAssert.Contains(args, "-p:EnableDynamicPlatformResolution=true");
+        Assert.IsFalse(args.Contains("EnableDynamicPlatformResolution"), "project mode must not inject EDPR by default");
     }
 
     [TestMethod]
-    public void BuildBuildPassArguments_UserEnableDynamicPlatformResolution_NotOverridden()
+    public void BuildBuildPassArguments_UserEnableDynamicPlatformResolution_Forwarded()
     {
-        // An explicit user value (even =false) must be respected: winapp must NOT append its own
-        // =true, which as a command-line global would override a project that deliberately opted out.
+        // An explicit user value is respected: it flows through the user -p loop and winapp adds no EDPR
+        // of its own.
         var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false,
             Properties: ["EnableDynamicPlatformResolution=false"]);
@@ -242,7 +248,7 @@ public class ProjectRunServiceTests
 
         StringAssert.Contains(args, "-p:EnableDynamicPlatformResolution=false");
         Assert.IsFalse(args.Contains("-p:EnableDynamicPlatformResolution=true"),
-            "winapp must not override an explicit user EnableDynamicPlatformResolution value");
+            "winapp must not append its own EnableDynamicPlatformResolution value");
     }
 
     [TestMethod]
@@ -289,7 +295,8 @@ public class ProjectRunServiceTests
         Assert.IsFalse(args.Contains("-r win-x64"), "evaluate pass must not pass -r");
         StringAssert.Contains(args, "-p:Configuration=Debug");
         StringAssert.Contains(args, "-p:RuntimeIdentifier=win-x64");
-        StringAssert.Contains(args, "-p:Platform=x64");
+        Assert.IsFalse(args.Contains("-p:Platform="), "evaluate pass must not inject a forced -p:Platform");
+        Assert.IsFalse(args.Contains("EnableDynamicPlatformResolution"), "evaluate pass must not inject EDPR");
         StringAssert.Contains(args, "--getProperty:TargetDir");
         StringAssert.Contains(args, "--getProperty:RunCommand");
         StringAssert.Contains(args, "--getProperty:WindowsPackageType");
@@ -335,33 +342,35 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
-    public void BuildEvaluateArguments_UserPlatformProperty_SuppressesDerivedPlatform()
+    public void BuildEvaluateArguments_UserPlatformProperty_ForwardedAsIs()
     {
+        // The evaluate pass never injects Platform either; a user -p:Platform flows through and is the
+        // only Platform present.
         var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: ["Platform=ARM64"]);
 
         var args = ProjectRunService.BuildEvaluateArguments(csproj, options);
 
         StringAssert.Contains(args, "-p:Platform=ARM64");
-        Assert.IsFalse(args.Contains("-p:Platform=x64"), "derived Platform must not override a user-specified one");
+        Assert.IsFalse(args.Contains("-p:Platform=x64"), "winapp must not inject a Platform derived from --arch");
     }
 
     [TestMethod]
-    public void BuildEvaluateArguments_Default_EnablesDynamicPlatformResolution()
+    public void BuildEvaluateArguments_Default_DoesNotEnableDynamicPlatformResolution()
     {
-        // The evaluate pass must see the SAME project graph as the build pass so TargetDir/RunCommand
-        // resolve against the same P2P references — so EDPR is enabled here too (spec: safe, doesn't
-        // change the app's own TargetDir).
+        // RID-only: the evaluate pass mirrors the build pass. Neither a forced Platform nor EDPR is
+        // injected, so the evaluated TargetDir/RunCommand resolve against the same RID-driven output
+        // paths as the build (bin\Debug\...\win-<arch>\), keeping both passes consistent.
         var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: []);
 
         var args = ProjectRunService.BuildEvaluateArguments(csproj, options);
 
-        StringAssert.Contains(args, "-p:EnableDynamicPlatformResolution=true");
+        Assert.IsFalse(args.Contains("EnableDynamicPlatformResolution"), "evaluate pass must not inject EDPR by default");
     }
 
     [TestMethod]
-    public void BuildEvaluateArguments_UserEnableDynamicPlatformResolution_NotOverridden()
+    public void BuildEvaluateArguments_UserEnableDynamicPlatformResolution_Forwarded()
     {
         var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false,
@@ -371,7 +380,7 @@ public class ProjectRunServiceTests
 
         StringAssert.Contains(args, "-p:EnableDynamicPlatformResolution=false");
         Assert.IsFalse(args.Contains("-p:EnableDynamicPlatformResolution=true"),
-            "winapp must not override an explicit user EnableDynamicPlatformResolution value");
+            "winapp must not append its own EnableDynamicPlatformResolution value");
     }
 
     [TestMethod]
@@ -636,14 +645,13 @@ public class ProjectRunServiceTests
     {
         // Folder mode must stay byte-identical: a folder without a top-level .csproj routes to folder
         // mode, which never resolves a project and never invokes the project-mode build. The
-        // project-mode build args — including the EnableDynamicPlatformResolution negotiation added for
-        // multi-project builds — are emitted ONLY by BuildBuildPassArguments/BuildEvaluateArguments,
-        // both of which are unreachable in folder mode. This guards against those args ever leaking
-        // into a folder-mode run.
+        // project-mode build args — including the RID-driven arch conveyance — are emitted ONLY by
+        // BuildBuildPassArguments/BuildEvaluateArguments, both of which are unreachable in folder mode.
+        // This guards against those args ever leaking into a folder-mode run.
         var resolution = await _service.ResolveInputAsync(_tempDir, CancellationToken.None);
 
         Assert.AreEqual(WinAppRunMode.Folder, resolution.Mode, "a manifest/output folder must route to folder mode");
-        Assert.IsNull(resolution.Csproj, "folder mode must not resolve a project to build (so no EDPR build args)");
+        Assert.IsNull(resolution.Csproj, "folder mode must not resolve a project to build (so no project-mode build args)");
     }
 
     [TestMethod]

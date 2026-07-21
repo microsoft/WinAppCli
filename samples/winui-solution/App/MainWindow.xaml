@@ -24,5 +24,9 @@
             AutomationProperties.AutomationId="PageSubtitle"
             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
             Text="The runnable app in a multi-project solution used to test winapp run solution mode." />
+        <TextBlock
+            x:Name="CoreGreetingText"
+            AutomationProperties.AutomationId="CoreGreeting"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
     </StackPanel>
 </Window>

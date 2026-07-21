@@ -987,17 +987,20 @@ internal sealed partial class ProjectRunService(
     /// produces the output and STREAMS its console log. It deliberately omits <c>--getProperty</c>
     /// (which suppresses that log) and needs no explicit <c>-t:Build</c> (Build is the default
     /// target). The dedicated <c>-c</c>/<c>-r</c>/<c>-f</c> switches always beat a same-named user
-    /// <c>-p</c>; Platform is derived from <c>--arch</c> only when the user didn't set it;
-    /// <c>EnableDynamicPlatformResolution</c> is enabled so a forced global Platform doesn't leak into
-    /// P2P references (multi-project apps, CS0006) unless the user set it explicitly; and the
-    /// <c>-v</c> verbosity is mapped from the CLI's log level (Change #1, spec §8.3/§8.5).
+    /// <c>-p</c>. Architecture is conveyed by the RID (<c>-r win-&lt;arch&gt;</c>) ONLY — project mode
+    /// does NOT force a global <c>-p:Platform</c> (nor its <c>EnableDynamicPlatformResolution</c>
+    /// companion), matching how Visual Studio and a plain <c>dotnet build -r win-&lt;arch&gt;</c> convey
+    /// arch. A forced global Platform de-synchronizes a no-<c>&lt;Platforms&gt;</c> WinUI library
+    /// reference (its XAML/MRT outputs compile to the AnyCPU <c>bin\Debug\…</c> path while the app's
+    /// Platform-driven lookup expects <c>bin\&lt;arch&gt;\Debug\…</c>) → MSB3030/PRI252. The RID alone
+    /// still yields the correct packaged manifest <c>ProcessorArchitecture</c> and apphost arch. A user
+    /// who explicitly passes <c>-p:Platform=…</c>/<c>-p:EnableDynamicPlatformResolution=…</c> still has
+    /// it forwarded (via the user <c>-p</c> loop). The <c>-v</c> verbosity is mapped from the CLI's log
+    /// level (Change #1, spec §8.3/§8.5).
     /// </summary>
     internal static string BuildBuildPassArguments(FileInfo csproj, ProjectRunOptions options, string verbosity, string? csWinRTMetadataFolder = null)
     {
         var rid = RunArchHelper.ToRuntimeIdentifier(options.Architecture);
-        var platform = RunArchHelper.ToPlatform(options.Architecture);
-        var userSpecifiesPlatform = options.Properties.Any(p => p.StartsWith("Platform=", StringComparison.OrdinalIgnoreCase));
-        var userSpecifiesEdpr = options.Properties.Any(p => p.StartsWith("EnableDynamicPlatformResolution=", StringComparison.OrdinalIgnoreCase));
 
         var tokens = new List<string>
         {
@@ -1024,7 +1027,8 @@ internal sealed partial class ProjectRunService(
         tokens.Add(verbosity);
 
         // User -p properties come FIRST; the dedicated -c/-r/-f switches above always beat a
-        // same-named -p (see WarnOnOverriddenFlags).
+        // same-named -p (see WarnOnOverriddenFlags). A user-supplied -p:Platform / EDPR flows through
+        // here and is respected — project mode itself never injects them.
         foreach (var property in options.Properties)
         {
             tokens.Add($"-p:{property}");
@@ -1033,25 +1037,6 @@ internal sealed partial class ProjectRunService(
         // When the target was resolved from a solution, define $(SolutionDir) and its siblings so
         // projects that reference them build exactly as they do under `dotnet build <sln>` / VS.
         AppendSolutionProperties(tokens, options);
-
-        // Derived Platform only when the user didn't specify one (a user -p:Platform wins, spec R2-L2).
-        if (!userSpecifiesPlatform)
-        {
-            tokens.Add($"-p:Platform={platform}");
-        }
-
-        // Negotiate each ProjectReference's own platform instead of leaking the forced global Platform
-        // into them. A global -p:Platform=<arch> (forced above, or supplied by the user) otherwise flows
-        // into AnyCPU/netstandard2.0 P2P references, so a multi-project app resolves its reference to the
-        // AnyCPU output path while the reference was built under bin\<arch>\... → CS0006 "metadata file
-        // could not be found". EnableDynamicPlatformResolution (MSBuild platform negotiation, .NET 6+)
-        // does automatically what a .sln's ProjectConfigurationPlatforms map does by hand; it is a no-op
-        // for single-project apps and does not change the app's own TargetDir. Suppressed when the user
-        // set it explicitly so an intentional project/user value is respected.
-        if (!userSpecifiesEdpr)
-        {
-            tokens.Add("-p:EnableDynamicPlatformResolution=true");
-        }
 
         // SHIM (temporary): inject the resolved ref-pack winmd folder so cswinrt.exe can find contract
         // winmds without a registered Windows SDK. Only present when the shim resolved a folder (SDK
@@ -1076,9 +1061,6 @@ internal sealed partial class ProjectRunService(
     internal static string BuildEvaluateArguments(FileInfo csproj, ProjectRunOptions options, string? csWinRTMetadataFolder = null)
     {
         var rid = RunArchHelper.ToRuntimeIdentifier(options.Architecture);
-        var platform = RunArchHelper.ToPlatform(options.Architecture);
-        var userSpecifiesPlatform = options.Properties.Any(p => p.StartsWith("Platform=", StringComparison.OrdinalIgnoreCase));
-        var userSpecifiesEdpr = options.Properties.Any(p => p.StartsWith("EnableDynamicPlatformResolution=", StringComparison.OrdinalIgnoreCase));
 
         var tokens = new List<string>
         {
@@ -1087,6 +1069,8 @@ internal sealed partial class ProjectRunService(
         };
 
         // User -p first so the dedicated equivalents below win on a conflict (MSBuild is last-wins).
+        // A user-supplied -p:Platform / EDPR flows through here and is respected; project mode never
+        // injects them (arch is conveyed by RuntimeIdentifier only — see BuildBuildPassArguments).
         foreach (var property in options.Properties)
         {
             tokens.Add($"-p:{property}");
@@ -1101,21 +1085,6 @@ internal sealed partial class ProjectRunService(
         if (!string.IsNullOrWhiteSpace(options.Framework))
         {
             tokens.Add($"-p:TargetFramework={options.Framework}");
-        }
-
-        if (!userSpecifiesPlatform)
-        {
-            tokens.Add($"-p:Platform={platform}");
-        }
-
-        // Keep the evaluate pass's project graph identical to the build pass so TargetDir/RunCommand
-        // resolve against the same P2P references. See BuildBuildPassArguments for the full rationale
-        // (forced global Platform leaks into AnyCPU/netstandard2.0 references → CS0006 without this).
-        // EDPR doesn't change the app's own TargetDir, so it is safe to add on the evaluate/--no-build
-        // path too. Suppressed when the user set it explicitly.
-        if (!userSpecifiesEdpr)
-        {
-            tokens.Add("-p:EnableDynamicPlatformResolution=true");
         }
 
         // SHIM (temporary): keep the evaluate pass's inputs identical to the build pass — inject the same
@@ -1339,12 +1308,13 @@ internal sealed partial class ProjectRunService(
             }
             else if (name.Equals("Platform", StringComparison.OrdinalIgnoreCase))
             {
-                // Opposite precedence to Configuration/RID (spec R2-L2): a user -p:Platform WINS over the
-                // --arch-derived Platform (which is suppressed). The RuntimeIdentifier still follows
-                // --arch, so an inconsistent pair (e.g. --arch x86 -p:Platform=ARM64) builds a mismatched
-                // app — warn so the divergence isn't silent.
+                // Project mode conveys arch via the RuntimeIdentifier only and does NOT inject a global
+                // Platform, so a user -p:Platform is forwarded as-is. The RID still follows --arch, so an
+                // inconsistent pair (e.g. --arch x86 -p:Platform=ARM64) builds a mismatched app — warn so
+                // the divergence isn't silent. Note: forcing -p:Platform on a multi-project WinUI app can
+                // reintroduce the MSB3030/PRI252 split with no-<Platforms> library references.
                 logger.LogDebug(
-                    "{UISymbol} -p:{Property} overrides the --arch-derived Platform; the RuntimeIdentifier still follows --arch, so ensure they are consistent.",
+                    "{UISymbol} -p:{Property} is forwarded as-is; the RuntimeIdentifier still follows --arch, so ensure they are consistent.",
                     UiSymbols.Note, property);
             }
         }

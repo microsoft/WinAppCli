@@ -46,15 +46,6 @@ public class RunArchHelperTests
     }
 
     [TestMethod]
-    [DataRow("x64", "x64")]
-    [DataRow("arm64", "ARM64")]
-    [DataRow("x86", "x86")]
-    public void ToPlatform_MapsToMsBuildPlatform(string arch, string expected)
-    {
-        Assert.AreEqual(expected, RunArchHelper.ToPlatform(arch));
-    }
-
-    [TestMethod]
     [DataRow("win-x64", "x64")]
     [DataRow("win10-arm64", "arm64")]
     [DataRow("win-x86", "x86")]
