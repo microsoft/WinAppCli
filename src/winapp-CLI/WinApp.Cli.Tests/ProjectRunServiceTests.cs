@@ -1486,6 +1486,223 @@ public class ProjectRunServiceTests
 
     #endregion
 
+    #region ComputeSolutionRestorePlan (ISSUE-1: build-dependency sibling restore, NETSDK1004 parity)
+
+    [TestMethod]
+    public void ComputeSolutionRestorePlan_SlnxListedSibling_IncludedTargetExcludedAllManaged()
+    {
+        // The out-of-process server (Files.App.Server class) is a first-class <Project> in the .slnx even
+        // though it's only a <BuildDependency> — not a ProjectReference — of the target. It must land in
+        // the restore set; the target itself must not.
+        var target = WriteFileAt(@"src\App\App.csproj", ExecutableCsproj);
+        var solution = WriteFile("App.slnx", SlnxListing("src/App/App.csproj", "src/Server/Server.csproj"));
+
+        var (allManaged, siblings) = ProjectRunService.ComputeSolutionRestorePlan(solution, target);
+
+        Assert.IsTrue(allManaged, "every listed project is a managed .csproj");
+        Assert.AreEqual(1, siblings.Count);
+        Assert.AreEqual(Path.Combine(_tempDir.FullName, "src", "Server", "Server.csproj"), siblings[0].FullName);
+        Assert.IsFalse(siblings.Any(s => string.Equals(s.FullName, target.FullName, StringComparison.OrdinalIgnoreCase)),
+            "the target must never be listed as its own sibling");
+    }
+
+    [TestMethod]
+    public void ComputeSolutionRestorePlan_SlnxBuildDependencyElement_NotDoubleCountedButListedSiblingIncluded()
+    {
+        // A nested <BuildDependency Project="..."/> element must NOT be treated as a project-list entry
+        // (its element name is BuildDependency, not Project). The sibling still appears because it is ALSO
+        // listed as a top-level <Project Path=...>, and it must be de-duplicated to a single entry.
+        var target = WriteFileAt(@"src\App\App.csproj", ExecutableCsproj);
+        var slnx =
+            "<Solution>" + Environment.NewLine +
+            "  <Project Path=\"src/App/App.csproj\">" + Environment.NewLine +
+            "    <BuildDependency Project=\"src/Server/Server.csproj\" />" + Environment.NewLine +
+            "  </Project>" + Environment.NewLine +
+            "  <Project Path=\"src/Server/Server.csproj\" />" + Environment.NewLine +
+            "</Solution>";
+        var solution = WriteFile("App.slnx", slnx);
+
+        var (allManaged, siblings) = ProjectRunService.ComputeSolutionRestorePlan(solution, target);
+
+        Assert.IsTrue(allManaged);
+        Assert.AreEqual(1, siblings.Count, "the BuildDependency element must not add a second Server entry");
+        Assert.AreEqual(Path.Combine(_tempDir.FullName, "src", "Server", "Server.csproj"), siblings[0].FullName);
+    }
+
+    [TestMethod]
+    public void ComputeSolutionRestorePlan_ClassicSlnListedSibling_Included()
+    {
+        var target = WriteFileAt(@"src\App\App.csproj", ExecutableCsproj);
+        var solution = WriteFile("App.sln", SlnListing(@"src\App\App.csproj", @"src\Server\Server.csproj"));
+
+        var (allManaged, siblings) = ProjectRunService.ComputeSolutionRestorePlan(solution, target);
+
+        Assert.IsTrue(allManaged);
+        Assert.AreEqual(1, siblings.Count);
+        Assert.AreEqual(Path.Combine(_tempDir.FullName, "src", "Server", "Server.csproj"), siblings[0].FullName);
+    }
+
+    [TestMethod]
+    public void ComputeSolutionRestorePlan_NativeSibling_ExcludedAndNotAllManaged()
+    {
+        // A native .vcxproj can't be `dotnet restore`d on a VS-less box, so it's excluded from the set and
+        // flips AllManaged to false (the caller then restores managed siblings individually).
+        var target = WriteFileAt(@"src\App\App.csproj", ExecutableCsproj);
+        var solution = WriteFile("App.slnx",
+            SlnxListing("src/App/App.csproj", "src/Managed/Managed.csproj", "src/Native/Native.vcxproj"));
+
+        var (allManaged, siblings) = ProjectRunService.ComputeSolutionRestorePlan(solution, target);
+
+        Assert.IsFalse(allManaged, "a native .vcxproj must flip AllManaged to false");
+        Assert.AreEqual(1, siblings.Count, "only the managed sibling is restorable");
+        Assert.AreEqual(Path.Combine(_tempDir.FullName, "src", "Managed", "Managed.csproj"), siblings[0].FullName);
+        Assert.IsFalse(siblings.Any(s => s.FullName.EndsWith(".vcxproj", StringComparison.OrdinalIgnoreCase)),
+            "the native project must be excluded from the restore set");
+    }
+
+    [TestMethod]
+    public void ComputeSolutionRestorePlan_OnlyTarget_EmptySiblingsAllManaged()
+    {
+        var target = WriteFileAt(@"src\App\App.csproj", ExecutableCsproj);
+        var solution = WriteFile("App.slnx", SlnxListing("src/App/App.csproj"));
+
+        var (allManaged, siblings) = ProjectRunService.ComputeSolutionRestorePlan(solution, target);
+
+        Assert.IsTrue(allManaged);
+        Assert.AreEqual(0, siblings.Count, "a solution that lists only the target has no extra siblings to restore");
+    }
+
+    [TestMethod]
+    public void ComputeSolutionRestorePlan_VbprojAndFsprojSiblings_TreatedAsManaged()
+    {
+        // .vbproj/.fsproj are dotnet-restorable managed types too, so they stay in the set and keep
+        // AllManaged true.
+        var target = WriteFileAt(@"src\App\App.csproj", ExecutableCsproj);
+        var solution = WriteFile("App.slnx",
+            SlnxListing("src/App/App.csproj", "src/Vb/Vb.vbproj", "src/Fs/Fs.fsproj"));
+
+        var (allManaged, siblings) = ProjectRunService.ComputeSolutionRestorePlan(solution, target);
+
+        Assert.IsTrue(allManaged);
+        Assert.AreEqual(2, siblings.Count);
+        CollectionAssert.AreEquivalent(
+            new[]
+            {
+                Path.Combine(_tempDir.FullName, "src", "Vb", "Vb.vbproj"),
+                Path.Combine(_tempDir.FullName, "src", "Fs", "Fs.fsproj"),
+            },
+            siblings.Select(s => s.FullName).ToList());
+    }
+
+    [TestMethod]
+    public void ComputeSolutionRestorePlan_ClassicSlnSolutionFolder_Ignored()
+    {
+        // A classic .sln solution-folder entry has a "path" equal to its name (no ...proj extension). It
+        // must not be counted as a project — otherwise it would spuriously flip AllManaged.
+        var target = WriteFileAt(@"src\App\App.csproj", ExecutableCsproj);
+        var solution = WriteFile("App.sln", SlnListing(@"src\App\App.csproj", "Solution Items", @"src\Server\Server.csproj"));
+
+        var (allManaged, siblings) = ProjectRunService.ComputeSolutionRestorePlan(solution, target);
+
+        Assert.IsTrue(allManaged, "the solution-folder entry is not a project and must not flip AllManaged");
+        Assert.AreEqual(1, siblings.Count);
+        Assert.AreEqual(Path.Combine(_tempDir.FullName, "src", "Server", "Server.csproj"), siblings[0].FullName);
+    }
+
+    [TestMethod]
+    public async Task BuildAndResolveAsync_SolutionAllManaged_RestoresWholeSolutionThenBuildsNoRestore()
+    {
+        // ISSUE-1: when the owning solution is all-managed, one `dotnet restore <sln>` restores the target
+        // and every build-dependency sibling before the build, and the build pass skips its own restore.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var solution = WriteFile("App.slnx", SlnxListing("App.csproj", "Server/Server.csproj"));
+        var commandArgs = new List<string>();
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = a => { commandArgs.Add(a); return (0, PackagedPropertiesJson(), string.Empty); },
+        };
+        var service = NewServiceWith(dotnet, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Solution: solution);
+
+        var outcome = await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsNotNull(outcome.Resolution);
+        Assert.IsTrue(commandArgs.Any(a => a.StartsWith($"restore {solution.FullName}", StringComparison.Ordinal)),
+            "the whole solution should be restored up front for build-dependency parity");
+        StringAssert.Contains(dotnet.StreamingCalls[0], "--no-restore",
+            "the build pass should skip its own restore since the solution restore already covered the target");
+    }
+
+    [TestMethod]
+    public async Task BuildAndResolveAsync_SolutionWithNativeSibling_RestoresManagedSiblingNotVcxproj()
+    {
+        // ISSUE-1: with a native sibling present, `dotnet restore <sln>` would fail on a VS-less box, so
+        // the managed sibling is restored individually and the .vcxproj is never handed to dotnet restore.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var solution = WriteFile("App.slnx",
+            SlnxListing("App.csproj", "Managed/Managed.csproj", "Native/Native.vcxproj"));
+        var managedSibling = Path.Combine(_tempDir.FullName, "Managed", "Managed.csproj");
+        var commandArgs = new List<string>();
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = a => { commandArgs.Add(a); return (0, PackagedPropertiesJson(), string.Empty); },
+        };
+        var service = NewServiceWith(dotnet, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Solution: solution);
+
+        await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsTrue(commandArgs.Any(a => a.StartsWith("restore ", StringComparison.Ordinal) && a.Contains(managedSibling)),
+            "the managed sibling must be restored individually when a native project is present");
+        Assert.IsFalse(commandArgs.Any(a => a.Contains("Native.vcxproj", StringComparison.OrdinalIgnoreCase)),
+            "a native .vcxproj must never be handed to dotnet restore");
+        Assert.IsFalse(commandArgs.Any(a => a.StartsWith($"restore {solution.FullName}", StringComparison.Ordinal)),
+            "the whole-solution restore must not run (the solution must not be the restore target) when a native project is present");
+    }
+
+    [TestMethod]
+    public async Task BuildAndResolveAsync_SolutionListsOnlyTarget_NoSiblingRestore()
+    {
+        // Negative control: a solution that lists only the target adds no extra restore — behaviour is
+        // identical to a bare-csproj run.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var solution = WriteFile("App.slnx", SlnxListing("App.csproj"));
+        var commandArgs = new List<string>();
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = a => { commandArgs.Add(a); return (0, PackagedPropertiesJson(), string.Empty); },
+        };
+        var service = NewServiceWith(dotnet, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Solution: solution);
+
+        await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsFalse(commandArgs.Any(a => a.StartsWith("restore ", StringComparison.Ordinal)),
+            "a solution with no extra siblings must not trigger a sibling restore");
+    }
+
+    [TestMethod]
+    public async Task BuildAndResolveAsync_NoRestore_SkipsSolutionSiblingRestore()
+    {
+        // Negative control: --no-restore opts out of the up-front solution-sibling restore entirely.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var solution = WriteFile("App.slnx", SlnxListing("App.csproj", "Server/Server.csproj"));
+        var commandArgs = new List<string>();
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = a => { commandArgs.Add(a); return (0, PackagedPropertiesJson(), string.Empty); },
+        };
+        var service = NewServiceWith(dotnet, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: true, Properties: [], Solution: solution);
+
+        await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsFalse(commandArgs.Any(a => a.StartsWith("restore ", StringComparison.Ordinal)),
+            "--no-restore must suppress the solution-sibling restore");
+    }
+
+    #endregion
+
     #region Two-pass build + verbosity + spinner (Change #1 / #4)
 
     [TestMethod]

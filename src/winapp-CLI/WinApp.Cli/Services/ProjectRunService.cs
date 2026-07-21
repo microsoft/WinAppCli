@@ -154,11 +154,11 @@ internal sealed partial class ProjectRunService(
         string.Equals(file.Extension, ".sln", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(file.Extension, ".slnx", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Matches a classic <c>.sln</c> project entry, capturing the (relative) <c>.csproj</c> path.</summary>
+    /// <summary>Matches any project entry in a classic <c>.sln</c>, capturing the (relative) project path (any type).</summary>
     [GeneratedRegex(
-        "Project\\(\"\\{[^\"}]*\\}\"\\)\\s*=\\s*\"[^\"]*\",\\s*\"([^\"]+\\.csproj)\"",
+        "Project\\(\"\\{[^\"}]*\\}\"\\)\\s*=\\s*\"[^\"]*\",\\s*\"([^\"]+)\"",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex SlnProjectPathRegex();
+    private static partial Regex SlnAnyProjectPathRegex();
 
     /// <summary>
     /// Finds the solution that owns a bare <c>.csproj</c> so a direct-file run defines <c>$(SolutionDir)</c>
@@ -249,12 +249,18 @@ internal sealed partial class ProjectRunService(
         return false;
     }
 
+    /// <summary>Extracts every listed project path (any type) from a classic <c>.sln</c> file.</summary>
+    private static List<string> ExtractSlnAllProjectPaths(string text) =>
+        SlnAnyProjectPathRegex().Matches(text).Select(m => m.Groups[1].Value).ToList();
+
     /// <summary>Extracts the relative <c>.csproj</c> paths listed in a classic <c>.sln</c> file.</summary>
     private static List<string> ExtractSlnProjectPaths(string text) =>
-        SlnProjectPathRegex().Matches(text).Select(m => m.Groups[1].Value).ToList();
+        ExtractSlnAllProjectPaths(text)
+            .Where(p => p.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
-    /// <summary>Extracts the relative <c>.csproj</c> paths from an XML <c>.slnx</c> solution.</summary>
-    private static List<string> ExtractSlnxProjectPaths(string text)
+    /// <summary>Extracts every listed project path (any type) from an XML <c>.slnx</c> solution.</summary>
+    private static List<string> ExtractSlnxAllProjectPaths(string text)
     {
         XDocument doc;
         try
@@ -270,9 +276,88 @@ internal sealed partial class ProjectRunService(
             .Where(e => string.Equals(e.Name.LocalName, "Project", StringComparison.OrdinalIgnoreCase))
             .Select(e => e.Attributes()
                 .FirstOrDefault(a => string.Equals(a.Name.LocalName, "Path", StringComparison.OrdinalIgnoreCase))?.Value)
-            .Where(p => !string.IsNullOrWhiteSpace(p) && p!.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            .Where(p => !string.IsNullOrWhiteSpace(p))
             .Select(p => p!)
             .ToList();
+    }
+
+    /// <summary>Extracts the relative <c>.csproj</c> paths from an XML <c>.slnx</c> solution.</summary>
+    private static List<string> ExtractSlnxProjectPaths(string text) =>
+        ExtractSlnxAllProjectPaths(text)
+            .Where(p => p.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+    /// <summary>Managed project types that <c>dotnet restore</c> handles on a VS-less host.</summary>
+    private static readonly string[] ManagedProjectExtensions = [".csproj", ".vbproj", ".fsproj"];
+
+    /// <summary>True when the project path is a dotnet-restorable managed type (<c>.csproj</c>/<c>.vbproj</c>/<c>.fsproj</c>).</summary>
+    private static bool IsManagedProjectPath(string path) =>
+        ManagedProjectExtensions.Any(ext => path.EndsWith(ext, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Computes the restore plan for a solution build. Visual Studio (and <c>dotnet build &lt;sln&gt;</c>)
+    /// restore the <em>whole solution</em> before building — including projects that are build-dependencies
+    /// but not <c>ProjectReference</c>s of the target (e.g. an out-of-process COM server invoked by a custom
+    /// MSBuild target). <c>winapp run</c> restores only the single target, so those siblings have no
+    /// <c>project.assets.json</c> and the build fails with <c>NETSDK1004</c>. This enumerates the solution's
+    /// listed projects (a pure text parse — no <c>dotnet</c> shell-out, no <c>File.Exists</c> gating) and
+    /// returns the managed siblings to restore, excluding the target itself.
+    /// <para>
+    /// <paramref name="AllManaged"/> is true when every listed project is a restorable managed type. When it
+    /// is false (a native <c>.vcxproj</c>/<c>.wapproj</c>/<c>.shproj</c> is present), a single
+    /// <c>dotnet restore &lt;sln&gt;</c> would error on a VS-less box, so the caller restores the managed
+    /// siblings individually and skips the natives.
+    /// </para>
+    /// </summary>
+    internal static (bool AllManaged, List<FileInfo> ManagedSiblings) ComputeSolutionRestorePlan(FileInfo solution, FileInfo target)
+    {
+        string text;
+        try
+        {
+            text = File.ReadAllText(solution.FullName);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return (true, []);
+        }
+
+        var solutionDir = solution.Directory?.FullName ?? Directory.GetCurrentDirectory();
+        var projectPaths = (string.Equals(solution.Extension, ".slnx", StringComparison.OrdinalIgnoreCase)
+                ? ExtractSlnxAllProjectPaths(text)
+                : ExtractSlnAllProjectPaths(text))
+            // Drop classic-.sln solution-folder entries (their "path" is the folder name, no ...proj extension).
+            .Where(p => p.EndsWith("proj", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var allManaged = projectPaths.All(IsManagedProjectPath);
+
+        var siblings = new List<FileInfo>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var relative in projectPaths.Where(IsManagedProjectPath))
+        {
+            string full;
+            try
+            {
+                var normalized = relative.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+                full = Path.GetFullPath(Path.Combine(solutionDir, normalized));
+            }
+            catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException)
+            {
+                continue;
+            }
+
+            if (string.Equals(full, target.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (seen.Add(full))
+            {
+                siblings.Add(new FileInfo(full));
+            }
+        }
+
+        return (allManaged, siblings);
     }
 
     /// <summary>
@@ -586,25 +671,43 @@ internal sealed partial class ProjectRunService(
         var csWinRTMetadata = ResolveCsWinRTMetadataShim(options);
         var buildOptions = options;
 
-        // SHIM (temporary) — restore ordering: on a genuinely clean SDK-less host the ref pack
-        // (Microsoft.Windows.SDK.NET.Ref) may not be on disk yet when we first resolve the shim, so the
-        // shim no-ops and the very first `dotnet build` — already handed no CsWinRTWindowsMetadata — fails
-        // even though that same build restores the ref pack; only a SECOND invocation (cache now warm)
-        // would succeed. Pre-populate the ref pack with an explicit restore, then re-resolve so the first
-        // build gets the winmd folder. Only fires when the shim would otherwise inject (no SDK registered)
-        // AND we're actually building AND the user didn't opt out of restore or set the property himself.
-        if (csWinRTMetadata is null
-            && !options.NoBuild
-            && !options.NoRestore
-            && !UserSetCsWinRTMetadata(options)
-            && csWinRTMetadataShimService.IsWindowsSdkAbsent())
+        // Restore ordering: when the target lives in a solution, restore the whole solution's managed
+        // projects up front so build-dependency siblings that are NOT ProjectReferences of the target
+        // (e.g. an out-of-process COM server built by a custom MSBuild target) have a project.assets.json
+        // and the build doesn't fail with NETSDK1004 — matching what VS / `dotnet build <sln>` do. The
+        // SHIM restore below then covers the ref pack on genuinely clean SDK-less hosts. Both are gated on
+        // actually building AND the user not opting out of restore.
+        if (!options.NoBuild && !options.NoRestore)
         {
-            var restoreExit = await RunRestorePassAsync(csproj, options, workingDir, cancellationToken);
-            if (restoreExit == 0)
+            // (1) Restore the owning solution's managed siblings. When it restores the whole solution
+            // (all-managed) it also restored the target, so the passes below can skip their own restore.
+            var restoredWholeSolution = await RestoreSolutionSiblingsAsync(csproj, options, workingDir, cancellationToken);
+
+            // (2) SHIM (temporary) — ref-pack ordering: on a genuinely clean SDK-less host the ref pack
+            // (Microsoft.Windows.SDK.NET.Ref) may not be on disk yet when we first resolve the shim, so the
+            // shim no-ops and the very first `dotnet build` — handed no CsWinRTWindowsMetadata — fails even
+            // though that same build restores the ref pack; only a SECOND invocation (cache warm) succeeds.
+            // Pre-populate the ref pack with an explicit restore, then re-resolve so the first build gets the
+            // winmd folder. Only fires when the shim would otherwise inject (no SDK registered) and the user
+            // didn't set the property himself.
+            if (csWinRTMetadata is null
+                && !UserSetCsWinRTMetadata(options)
+                && csWinRTMetadataShimService.IsWindowsSdkAbsent())
             {
-                csWinRTMetadata = ResolveCsWinRTMetadataShim(options);
-                // The explicit restore already populated the cache; skip the redundant restore in the
-                // build pass so we don't restore twice.
+                var restoreExit = restoredWholeSolution
+                    ? 0
+                    : await RunRestorePassAsync(csproj, options, workingDir, cancellationToken);
+                if (restoreExit == 0)
+                {
+                    csWinRTMetadata = ResolveCsWinRTMetadataShim(options);
+                    // The explicit restore already populated the cache; skip the redundant restore in the
+                    // build pass so we don't restore twice.
+                    buildOptions = options with { NoRestore = true };
+                }
+            }
+            else if (restoredWholeSolution)
+            {
+                // The whole-solution restore already covered the target; skip the build pass's own restore.
                 buildOptions = options with { NoRestore = true };
             }
         }
@@ -797,6 +900,61 @@ internal sealed partial class ProjectRunService(
         return exitCode;
     }
 
+    /// <summary>
+    /// Restores the owning solution's managed sibling projects before the target build so build-dependency
+    /// siblings that are not <c>ProjectReference</c>s of the target still have a <c>project.assets.json</c>
+    /// (NETSDK1004 parity with VS / <c>dotnet build &lt;sln&gt;</c>). Only fires for a solution-resolved run
+    /// (<see cref="ProjectRunOptions.Solution"/> non-null). When every listed project is managed, a single
+    /// <c>dotnet restore &lt;sln&gt;</c> restores the whole graph (including the target) and this returns
+    /// <see langword="true"/> so the caller can skip the build pass's own restore. When a native project
+    /// (<c>.vcxproj</c>/<c>.wapproj</c>/<c>.shproj</c>) is present — which <c>dotnet restore</c> can't handle
+    /// on a VS-less box — the managed siblings are restored individually (the target is left to the normal
+    /// restore) and this returns <see langword="false"/>. All restores are non-fatal (best-effort); the
+    /// build pass surfaces any real error.
+    /// </summary>
+    private async Task<bool> RestoreSolutionSiblingsAsync(FileInfo target, ProjectRunOptions options, DirectoryInfo workingDir, CancellationToken cancellationToken)
+    {
+        if (options.Solution is null)
+        {
+            return false;
+        }
+
+        var (allManaged, siblings) = ComputeSolutionRestorePlan(options.Solution, target);
+        if (siblings.Count == 0)
+        {
+            // Solution lists only the target (or only native siblings) — nothing extra to restore; the
+            // normal target restore is unchanged.
+            return false;
+        }
+
+        if (allManaged)
+        {
+            // Closest to VS: one restore over the whole solution pulls the target and every sibling.
+            var args = BuildRestorePassArguments(options.Solution, options);
+            logger.LogDebug("{UISymbol} Restoring solution before build (build-dependency parity): dotnet {Arguments}", UiSymbols.Note, args);
+            var (exitCode, _, _) = await dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken);
+            if (exitCode != 0)
+            {
+                logger.LogDebug("{UISymbol} Solution restore exited {ExitCode}; deferring to per-project restore.", UiSymbols.Note, exitCode);
+            }
+            return exitCode == 0;
+        }
+
+        // A native project is present, so `dotnet restore <sln>` would error on a VS-less host. Restore the
+        // managed siblings individually and skip the natives; the target is restored by the normal pass.
+        foreach (var sibling in siblings)
+        {
+            var args = BuildRestorePassArguments(sibling, options);
+            logger.LogDebug("{UISymbol} Restoring solution sibling before build (build-dependency parity): dotnet {Arguments}", UiSymbols.Note, args);
+            var (exitCode, _, _) = await dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken);
+            if (exitCode != 0)
+            {
+                logger.LogDebug("{UISymbol} Sibling restore of {Sibling} exited {ExitCode}; continuing.", UiSymbols.Note, sibling.Name, exitCode);
+            }
+        }
+
+        return false;
+    }
     /// <summary>
     /// Builds the argument string for the SHIM's pre-build <c>dotnet restore</c>. It mirrors the build
     /// pass's RID / user <c>-p</c> / solution properties so the same graph restores, but omits
