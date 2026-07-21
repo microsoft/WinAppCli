@@ -1,6 +1,6 @@
 ---
 name: winapp-find-ui
-description: Search WinUI 3 controls and samples for a working code example. Use when building a WinUI 3 UI and you need to discover which control fits an intent (e.g. 'tabbed layout', 'a card with an image and title', 'swipeable list rows') and get a real code example from the WinUI Gallery, the Windows Community Toolkit, or the microsoft-ui-reactor ReactorGallery (Gallery/Toolkit return XAML + C#; Reactor is C#-only declarative WinUI). WinUI-only — not WPF/WinForms. Distinct from 'winapp ui', which automates a running app's UI.
+description: Search WinUI 3 controls and samples for a working code example. Use when building a WinUI 3 UI and you need to discover which control fits an intent (e.g. 'tabbed layout', 'a card with an image and title', 'swipeable list rows') and get a real code example from the WinUI Gallery, the Windows Community Toolkit, or the microsoft-ui-reactor ReactorGallery (Gallery/Toolkit return XAML and/or C#; Reactor is C#-only declarative WinUI). WinUI-only — not WPF/WinForms. Distinct from 'winapp ui', which automates a running app's UI.
 version: 0.4.1
 ---
 ## When to use
@@ -15,8 +15,9 @@ core patterns) and returns a working code snippet plus where it came from.
 
 - **WinUI-only.** The corpus is WinUI 3 Gallery + Windows Community Toolkit +
   Reactor. It does **not** cover WPF, WinForms, or other UI frameworks.
-- **Result shape varies by source.** Gallery and Toolkit scenarios return XAML +
-  C#; Reactor scenarios are C#-only declarative WinUI (no XAML).
+- **Result shape varies by source.** Gallery and Toolkit scenarios return XAML,
+  C#, or both (one-sided samples are kept); Reactor scenarios are C#-only
+  declarative WinUI (no XAML).
 - Distinct from `winapp ui search`, which searches a *running app's* UI tree via
   UI Automation — unrelated to control/sample discovery.
 
@@ -68,7 +69,7 @@ winapp find-ui "color picker" --json
 ```
 
 - **Search** → `{ query, matchCount, matches: [ { source, control, score, description?, scenarios: [ { id, header } ] } ] }` — compact; use the `id` values to fetch code.
-- **`--id`** → `{ results: [ { id, found, content } ] }` — `content` is the full code markdown block (XAML + C# for Gallery/Toolkit; C# only for Reactor).
+- **`--id`** → `{ results: [ { id, found, content } ] }` — `content` is the full code markdown block (XAML and/or C# for Gallery/Toolkit; C# only for Reactor).
 - **`--list`** → `{ count, items: [ { id, header } ] }`.
 - On error, `--json` emits `{ "error": "..." }` on stdout with a non-zero exit code.
 
@@ -106,7 +107,7 @@ Search WinUI controls and samples for a working code example. WinUI-only: covers
 <!-- auto-generated from cli-schema.json -->
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--id` | Fetch the full available code (Gallery/Toolkit return XAML + C#; Reactor is C#-only) plus prerequisite notes for one or more scenario ids from a prior search (e.g. gallery-tabview-1). | (none) |
+| `--id` | Fetch the full available code (Gallery/Toolkit return XAML and/or C#; Reactor is C#-only) plus prerequisite notes for one or more scenario ids from a prior search (e.g. gallery-tabview-1). | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--list` | List every discoverable control/sample id instead of searching. | (none) |
 | `--max` | Maximum number of matched controls to return. | `3` |

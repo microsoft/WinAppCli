@@ -10,8 +10,9 @@ core patterns) and returns a working code snippet plus where it came from.
 
 - **WinUI-only.** The corpus is WinUI 3 Gallery + Windows Community Toolkit +
   Reactor. It does **not** cover WPF, WinForms, or other UI frameworks.
-- **Result shape varies by source.** Gallery and Toolkit scenarios return XAML +
-  C#; Reactor scenarios are C#-only declarative WinUI (no XAML).
+- **Result shape varies by source.** Gallery and Toolkit scenarios return XAML,
+  C#, or both (one-sided samples are kept); Reactor scenarios are C#-only
+  declarative WinUI (no XAML).
 - Distinct from `winapp ui search`, which searches a *running app's* UI tree via
   UI Automation — unrelated to control/sample discovery.
 
@@ -63,7 +64,7 @@ winapp find-ui "color picker" --json
 ```
 
 - **Search** → `{ query, matchCount, matches: [ { source, control, score, description?, scenarios: [ { id, header } ] } ] }` — compact; use the `id` values to fetch code.
-- **`--id`** → `{ results: [ { id, found, content } ] }` — `content` is the full code markdown block (XAML + C# for Gallery/Toolkit; C# only for Reactor).
+- **`--id`** → `{ results: [ { id, found, content } ] }` — `content` is the full code markdown block (XAML and/or C# for Gallery/Toolkit; C# only for Reactor).
 - **`--list`** → `{ count, items: [ { id, header } ] }`.
 - On error, `--json` emits `{ "error": "..." }` on stdout with a non-zero exit code.
 

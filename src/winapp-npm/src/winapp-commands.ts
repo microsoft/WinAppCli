@@ -223,7 +223,7 @@ export async function createExternalCatalog(options: CreateExternalCatalogOption
 export interface FindUiOptions extends CommonOptions {
   /** What you're looking for, e.g. "tabbed layout" or "color picker". Matched lexically against WinUI control names, sample headers, and tags. */
   query?: string;
-  /** Fetch the full available code (Gallery/Toolkit return XAML + C#; Reactor is C#-only) plus prerequisite notes for one or more scenario ids from a prior search (e.g. gallery-tabview-1). */
+  /** Fetch the full available code (Gallery/Toolkit return XAML and/or C#; Reactor is C#-only) plus prerequisite notes for one or more scenario ids from a prior search (e.g. gallery-tabview-1). */
   id?: string | string[];
   /** Format output as JSON */
   json?: boolean;
