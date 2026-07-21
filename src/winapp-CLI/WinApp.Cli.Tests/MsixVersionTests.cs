@@ -10,6 +10,7 @@ public class MsixVersionTests
 {
     [TestMethod]
     [DataRow("1.2.3.4", (ushort)1, (ushort)2, (ushort)3, (ushort)4)]
+    [DataRow("0.0.0.0", (ushort)0, (ushort)0, (ushort)0, (ushort)0)]
     [DataRow("65535.65535.65535.65535", (ushort)65535, (ushort)65535, (ushort)65535, (ushort)65535)]
     [DataRow("0.0.0.1", (ushort)0, (ushort)0, (ushort)0, (ushort)1)]
     [DataRow("9.9.9.9", (ushort)9, (ushort)9, (ushort)9, (ushort)9)]
@@ -37,7 +38,6 @@ public class MsixVersionTests
     [DataRow("-1.2.3.4")]
     [DataRow("not.a.version")]
     [DataRow("65536.0.0.0")]
-    [DataRow("0.0.0.0")]
     [DataRow("1.0.0.0\n")]
     public void TryParse_InvalidInput_ReturnsFalse(string? input)
     {
