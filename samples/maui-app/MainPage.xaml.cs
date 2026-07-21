@@ -2,17 +2,22 @@ namespace MauiSample;
 
 public partial class MainPage : ContentPage
 {
-    private int _count;
+	int count = 0;
 
-    public MainPage()
-    {
-        InitializeComponent();
-    }
+	public MainPage()
+	{
+		InitializeComponent();
+	}
 
-    private void OnCounterClicked(object sender, EventArgs e)
-    {
-        _count++;
-        CounterBtn.Text = _count == 1 ? $"Clicked {_count} time" : $"Clicked {_count} times";
-        SemanticScreenReader.Announce(CounterBtn.Text);
-    }
+	private void OnCounterClicked(object? sender, EventArgs e)
+	{
+		count++;
+
+		if (count == 1)
+			CounterBtn.Text = $"Clicked {count} time";
+		else
+			CounterBtn.Text = $"Clicked {count} times";
+
+		SemanticScreenReader.Announce(CounterBtn.Text);
+	}
 }
