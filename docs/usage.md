@@ -884,7 +884,7 @@ The corpus is fetched from GitHub on first use and cached per-user under `<globa
 
 **Options:**
 
-- `--id <id>` - Fetch the full available code (Gallery/Toolkit return XAML and/or C#; Reactor is C#-only) plus prerequisite notes for one or more scenario ids from a prior search (e.g. `gallery-tabview-1`). Repeatable.
+- `--id <id>` - Fetch the code (Gallery/Toolkit return XAML and/or C#; Reactor is C#-only) plus prerequisite notes for one or more scenario ids from a prior search (e.g. `gallery-tabview-1`). Repeatable.
 - `--list` - List every discoverable control/sample id instead of searching.
 - `--source <gallery|toolkit|reactor|core>` - Restrict search results to a single source. (Search only — not valid with `--list`/`--id`.)
 - `--max <N>` - Maximum number of matched controls to return (default: 3).

@@ -124,18 +124,17 @@ internal abstract class CachedProviderBase : ISearchProvider
             return fetched;
         }
 
-        // Fetch failed (offline / upstream error). For a forced refresh, fall
-        // back to any existing cache rather than dropping the provider entirely
-        // — a stale corpus beats no corpus. Ignore the TTL here: the whole point
-        // of the fallback is to serve data that is (by definition) past its
-        // freshness window when the network is unreachable. On a cold cache there
-        // is nothing to fall back to, so return Empty and let the caller surface
-        // the error.
-        if (forceRefresh)
-        {
-            var cached = TryReadCache(ignoreTtl: true);
-            if (cached != null) return cached;
-        }
+        // Fetch failed (offline / upstream error). Fall back to any existing cache
+        // rather than dropping the provider entirely — a stale corpus beats no
+        // corpus. Ignore the TTL here: the whole point of the fallback is to serve
+        // data that is (by definition) past its freshness window when the network is
+        // unreachable. This applies whether the refresh was forced OR a normal load
+        // whose cache simply aged out past the TTL — otherwise an offline user loses
+        // find-ui seven days after their last successful fetch. A cold or
+        // schema-incompatible cache still returns null, so the caller surfaces the
+        // "connect and run once" error only when there is genuinely nothing cached.
+        var staleCached = TryReadCache(ignoreTtl: true);
+        if (staleCached != null) return staleCached;
         return ProviderData.Empty;
     }
 

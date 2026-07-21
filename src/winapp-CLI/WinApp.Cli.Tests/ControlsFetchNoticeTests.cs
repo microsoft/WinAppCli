@@ -191,6 +191,34 @@ public class ControlsFetchNoticeTests
         }
     }
 
+    [TestMethod]
+    public async Task Provider_ExpiredCache_OfflineNonForcedRefetch_ServesStale()
+    {
+        var root = NewTempCacheRoot();
+        try
+        {
+            // Prime a cache, then backdate its timestamp past the 7-day TTL.
+            var seed = new StubProvider(root, "gallery", "Gallery (WinUI 3)", SampleData("gallery"));
+            await seed.LoadAsync();
+            var tsPath = Path.Combine(root, "gallery", "last-updated.txt");
+            Assert.IsTrue(File.Exists(tsPath), "priming load should have written the cache");
+            File.WriteAllText(tsPath, DateTime.UtcNow.AddDays(-30).ToString("o"));
+
+            // A NON-forced load now misses on the TTL, attempts a fetch, and the fetch
+            // fails (offline). It must fall back to the stale cache rather than returning
+            // Empty — otherwise an offline user loses find-ui 7 days after their last fetch.
+            var offline = new ThrowingProvider(root, "gallery", "Gallery (WinUI 3)");
+            var data = await offline.LoadAsync(forceRefresh: false);
+
+            Assert.AreEqual(1, data.Scenarios.Length,
+                "an expired cache must be served when an offline non-forced refetch fails");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     /// <summary>A provider whose fetch always throws — models an offline cold start.</summary>
     private sealed class ThrowingProvider : CachedProviderBase
     {
