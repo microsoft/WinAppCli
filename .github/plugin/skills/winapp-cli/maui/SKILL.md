@@ -15,24 +15,24 @@ MAUI is **not** a "run `winapp init`" framework — the Windows head already has
 
 ## The resizetizer dependency (root cause)
 
-A .NET MAUI project has a **source** manifest at `Platforms/Windows/Package.appxmanifest` that contains literal placeholder defaults for identity and MAUI-specific `$placeholder$` tokens for logos and display names:
+A .NET MAUI project has a **source** manifest at `Platforms/Windows/Package.appxmanifest` with placeholder tokens that the MAUI build pipeline resolves:
 
 ```xml
 <Identity Name="maui-package-name-placeholder" Publisher="CN=User Name" Version="0.0.0.0" />
 <Properties>
   <DisplayName>$placeholder$</DisplayName>
-  <PublisherDisplayName>$placeholder$</PublisherDisplayName>
+  <PublisherDisplayName>User Name</PublisherDisplayName>
   <Logo>$placeholder$.png</Logo>
 </Properties>
 ...
 <uap:VisualElements DisplayName="$placeholder$" ... Square150x150Logo="$placeholder$.png" Square44x44Logo="$placeholder$.png">
 ```
 
-These are resolved at **build/publish time** by MAUI's single-project build pipeline: the `<Identity>` attributes (`Name`, `Publisher`, `Version`) use literal placeholder defaults that MAUI's MSBuild targets overwrite from `ApplicationId`, `ApplicationPublisher`, and `ApplicationDisplayVersion`; meanwhile **`Microsoft.Maui.Resizetizer`** handles the display-name, logo, and splash `$placeholder$` tokens by reading `MauiIcon`/`MauiSplashScreen` items and generating the corresponding image assets.
+These are resolved at **build/publish time** by **`Microsoft.Maui.Resizetizer`** (bundled with the MAUI workload), which reads MSBuild properties (`ApplicationTitle`, `ApplicationId`, `ApplicationDisplayVersion`, `ApplicationPublisher`, the `MauiIcon`/`MauiSplashScreen` items, etc.), generates the app icon/tile/splash assets, and writes a **resolved** manifest into the intermediate output.
 
 **Why winapp trips on this:** `winapp package` only auto-resolves its own entry-point tokens — `$targetnametoken$` and `$targetentrypoint$` (via `--executable`). It does **not** understand MAUI's `$placeholder$` tokens. If you point winapp at the raw `Platforms/Windows/Package.appxmanifest`, packaging fails because those placeholders are still literal `$placeholder$` strings.
 
-> **Never edit `Platforms/Windows/Package.appxmanifest` to hard-code values.** The resizetizer overwrites the generated copy on every build, and hand-editing the source breaks the MAUI tooling contract. The fix is to point winapp at the generated manifest instead.
+> **Do not replace MAUI's placeholders in `Platforms/Windows/Package.appxmanifest` just to satisfy winapp.** Keep framework-managed tokens in the source manifest and point winapp at the generated manifest. Files under `obj`/`bin` are regenerated on every build, so never edit those generated copies.
 
 ## Where the resolved manifest lives
 
@@ -116,7 +116,7 @@ Set `<ApplicationPublisher>CN=Your Company</ApplicationPublisher>` (or the `Appl
 
 ## CI/CD (GitHub Actions)
 
-Build each architecture, then pack its resolved manifest. Store a self-signed (or CA-issued) PFX as a base64 secret.
+Example for x64 — pack the resolved manifest and sign. Store a self-signed (or CA-issued) PFX as a base64 secret. For arm64, add a second set of publish/sign/pack steps with `-r win-arm64` and the corresponding manifest path.
 
 ```yaml
 - uses: microsoft/setup-winapp@v1
@@ -162,8 +162,6 @@ Build each architecture, then pack its resolved manifest. Store a self-signed (o
       Remove-Item -Path $env:SIGN_PFX_PATH -Force
     }
 ```
-
-Repeat the publish + sign + pack steps for `win-arm64` (swap `-r win-arm64` and the `win-arm64` manifest path).
 
 **Tips:**
 - Use `-q`/`--quiet` to reduce log noise.
