@@ -39,6 +39,7 @@ Does the project already have an appxmanifest.xml?
    ├─ Need package identity for debugging Windows APIs?
    │  ├─ Have a .NET/WinUI .csproj or .sln/.slnx (or a folder with one)? (build + run in one step)
    │  │  └─ winapp run <project-or-solution>  (dotnet build + provision runtime + launch)
+   │  │     (packaged apps launch with identity; unpackaged apps launch the .exe directly, no identity)
    │  ├─ Is the exe in the same folder as your build output? (most frameworks)
    │  │  └─ winapp run <build-output-dir>  (registers loose layout + launches)
    │  └─ Is the exe separate from your app code? (Electron, sparse package testing)
@@ -133,7 +134,7 @@ Want to inspect or interact with a running app's UI?
 **Requires:** `appxmanifest.xml` + path to your built `.exe`
 
 ### `winapp run [<input>]`
-**Purpose:** Build and/or package a Windows app and launch it with package identity — simulating a full MSIX install for debugging. Returns the launched process ID for debugger attachment. Operates in one of two modes, auto-selected from the input:
+**Purpose:** Build and/or package a Windows app and launch it — for **packaged** apps this simulates a full MSIX install with package identity; for **unpackaged** apps it launches the built `.exe` directly (no package identity). Returns the launched process ID for debugger attachment. Operates in one of two modes, auto-selected from the input:
 - **Folder mode** — input is a build-output folder (contains `Package.appxmanifest`/`AppxManifest.xml`). Creates a loose-layout package, registers it with Windows, and launches it. Original behavior, unchanged.
 - **Project mode** — input is a `.csproj`, a `.sln`/`.slnx` solution, or a directory containing one (including `.`). Builds the project with `dotnet build`, installs the matching-architecture Windows App Runtime if the app uses the Windows App SDK, then launches it. Supports both **packaged** (`WindowsPackageType=MSIX` → loose-layout + AUMID) and **unpackaged** (`WindowsPackageType=None` → launch the built `.exe` directly) WinUI apps, detected from the effective `WindowsPackageType` MSBuild property. Input defaults to the current directory when omitted (like `dotnet run`). Requires .NET SDK 8.0.100+.
 **When to use:** The **preferred command** for iterative development and debugging with package identity (.NET, C++, Rust, Flutter, Tauri). Point it at a project/solution to build-and-run in one step, or at a build-output folder to package-and-run existing output.

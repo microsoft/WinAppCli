@@ -32,6 +32,16 @@ internal sealed partial class ProjectRunService(
     /// <summary>Upper bound on build-output lines retained for the spinner failure dump (bounded tail).</summary>
     private const int MaxBuildTailLines = 500;
 
+    /// <summary>
+    /// Property names owned by a dedicated <c>-c</c>/<c>-r</c>/<c>-f</c> switch. A same-named user
+    /// <c>-p</c> is dropped from BOTH the build and evaluate passes so they can never resolve a different
+    /// Configuration/RID/TFM from each other (otherwise <c>-c Debug -p Configuration=Release</c> would
+    /// build one output and evaluate/launch another). Matches the documented "dedicated flag wins"
+    /// contract (see <see cref="WarnOnOverriddenFlags"/>). <c>Platform</c> is intentionally NOT reserved:
+    /// project mode forwards it as-is and conveys arch via the RuntimeIdentifier only.
+    /// </summary>
+    private static readonly string[] DedicatedFlagProperties = ["Configuration", "RuntimeIdentifier", "TargetFramework"];
+
     /// <inheritdoc />
     public async Task<string?> CheckSdkAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken)
     {
@@ -478,10 +488,11 @@ internal sealed partial class ProjectRunService(
         tokens.Add("-v");
         tokens.Add(verbosity);
 
-        // User -p properties come FIRST; the dedicated -c/-r/-f switches above always beat a
-        // same-named -p (see WarnOnOverriddenFlags). A user-supplied -p:Platform / EDPR flows through
-        // here and is respected — project mode itself never injects them.
-        foreach (var property in options.Properties)
+        // Forward user -p properties, but drop any that duplicate a dedicated -c/-r/-f switch so this
+        // build pass and the evaluate pass can never resolve a different Configuration/RID/TFM (see
+        // DedicatedFlagProperties / WarnOnOverriddenFlags). A user-supplied -p:Platform / EDPR still
+        // flows through and is respected — project mode itself never injects them.
+        foreach (var property in ForwardableProperties(options.Properties))
         {
             tokens.Add($"-p:{property}");
         }
@@ -520,10 +531,11 @@ internal sealed partial class ProjectRunService(
             csproj.FullName,
         };
 
-        // User -p first so the dedicated equivalents below win on a conflict (MSBuild is last-wins).
-        // A user-supplied -p:Platform / EDPR flows through here and is respected; project mode never
-        // injects them (arch is conveyed by RuntimeIdentifier only — see BuildBuildPassArguments).
-        foreach (var property in options.Properties)
+        // Forward user -p, dropping any that duplicate a dedicated switch (same filter as the build pass)
+        // so the two passes stay in lock-step on Configuration/RID/TFM; the dedicated -p: equivalents are
+        // then emitted below. A user-supplied -p:Platform / EDPR flows through here and is respected;
+        // project mode never injects them (arch is conveyed by RuntimeIdentifier only).
+        foreach (var property in ForwardableProperties(options.Properties))
         {
             tokens.Add($"-p:{property}");
         }
@@ -622,6 +634,22 @@ internal sealed partial class ProjectRunService(
     /// <summary>True when the user passed a <c>-p Name=Value</c> for <paramref name="name"/> (case-insensitive).</summary>
     private static bool UserSpecifiesProperty(IReadOnlyList<string> properties, string name) =>
         properties.Any(p => p.StartsWith(name + "=", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// User <c>Name=Value</c> properties with any that duplicate a dedicated <c>-c</c>/<c>-r</c>/<c>-f</c>
+    /// switch removed (see <see cref="DedicatedFlagProperties"/>). Applied to BOTH the build and evaluate
+    /// passes so the dedicated switch is the single source of Configuration/RID/TFM in each — a conflicting
+    /// user <c>-p</c> is already surfaced by <see cref="WarnOnOverriddenFlags"/>.
+    /// </summary>
+    private static IEnumerable<string> ForwardableProperties(IReadOnlyList<string> properties) =>
+        properties.Where(p => !IsDedicatedFlagProperty(p));
+
+    /// <summary>True when a <c>Name=Value</c> property names a dedicated-switch property (case-insensitive).</summary>
+    private static bool IsDedicatedFlagProperty(string property)
+    {
+        var name = property.Split('=', 2)[0].Trim();
+        return DedicatedFlagProperties.Any(d => name.Equals(d, StringComparison.OrdinalIgnoreCase));
+    }
 
     /// <summary>Extracts the property name from a <c>-p:Name=Value</c> token (e.g. <c>SolutionDir</c>).</summary>
     private static string SolutionPropertyName(string token)

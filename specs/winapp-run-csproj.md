@@ -255,9 +255,14 @@ Principle: **`run` reads the project's *effective* packaging and never mutates i
   dotnet build "<csproj>" -c <Config> -r win-<arch> [--no-restore] [-f <tfm>] <user -p:…>
   ```
 - `--no-build` skips the build and goes straight to *evaluate-only* resolution + launch (§8.3).
-- ⚠️ **Verified caveat:** when the build and property retrieval are combined in one call, an explicit
-  **`-t:Build`** target is required — `dotnet build --getProperty:…` **evaluates only and does not
-  build** (reproduced on SDK 10.0.301: the output assembly did not exist afterward). Details in §8.3.
+- ⚠️ **Verified caveat / why two passes:** build and property retrieval are **not** combined in one call.
+  A combined `dotnet build --getProperty:…` **evaluates only and does not build** unless an explicit
+  **`-t:Build`** target is added (reproduced on SDK 10.0.301: the output assembly did not exist
+  afterward); and even with `-t:Build`, build **warnings print before the JSON** and corrupt single-call
+  `--getProperty` parsing. The implementation therefore runs a **streaming build pass** (`dotnet build`,
+  no `--getProperty`) followed by a **separate evaluate-only pass** (`dotnet msbuild --getProperty`, §8.3).
+  Both passes are fed the SAME effective inputs so the evaluated `TargetDir`/`RunCommand` match what was
+  built.
 - Build output should be **streamed/surfaced**; on non-zero exit, print dotnet's errors and
   return that exit code (don't attempt to launch).
 
@@ -267,22 +272,22 @@ Resolve output by asking MSBuild for evaluated properties, using the **same** pr
 used — never by globbing. **Cross-model review + local experiments (SDK 10.0.301) corrected the
 mechanics below** — the earlier sketch would not have worked.
 
-- **Build + resolve (default) — one call, with an explicit `-t:Build`:**
+- **Build + resolve (default) — two passes:** a streaming **build pass** followed by a separate
+  **evaluate-only pass** (see the §8.2 caveat for why they are not combined):
   ```
-  dotnet build "<csproj>" -t:Build -c <Config> -r win-<arch> <user -p:…> \
-    --getProperty:TargetDir --getProperty:RunCommand \
-    --getProperty:WindowsPackageType --getProperty:WindowsAppSDKSelfContained
-  ```
-  Without `-t:Build`, `dotnet build --getProperty` **evaluates only and does not build** (verified: the
-  output assembly did not exist afterward) — it would "succeed" against stale/absent output.
-- **`--no-build` — evaluate only (no build):**
-  ```
+  # Pass 1 — build (streamed; no --getProperty):
+  dotnet build "<csproj>" -c <Config> -r win-<arch> <user -p:…>
+
+  # Pass 2 — evaluate only (resolve output paths against the same inputs):
   dotnet msbuild "<csproj>" -p:Configuration=<Config> -p:RuntimeIdentifier=win-<arch> <user -p:…> \
     --getProperty:TargetDir --getProperty:RunCommand \
     --getProperty:WindowsPackageType --getProperty:WindowsAppSDKSelfContained
   ```
-  Note `dotnet msbuild` does **not** accept `-c`/`-r` (they are `dotnet build` aliases → `MSB1001`); use
-  raw `-p:Configuration=` / `-p:RuntimeIdentifier=` instead.
+  A single combined `dotnet build --getProperty` would need an explicit `-t:Build` to build at all, and
+  its build warnings print before the JSON and corrupt parsing — hence the split. `dotnet msbuild` does
+  **not** accept `-c`/`-r` (they are `dotnet build` aliases → `MSB1001`); the evaluate pass uses raw
+  `-p:Configuration=` / `-p:RuntimeIdentifier=` instead.
+- **`--no-build` — evaluate only (no build):** same evaluate-only pass as Pass 2 above.
 
 This yields, with **no path guessing**:
 - **`TargetDir`** → the **absolute** output folder handed to the packaged loose-layout pipeline (manifest/

@@ -329,28 +329,44 @@ public class ProjectRunServiceTests
     [TestMethod]
     public void BuildEvaluateArguments_DedicatedConfigAndRidWinOverUserProperty()
     {
-        // Spec M2: the dedicated Configuration/RID are emitted as -p: on the evaluate pass. A conflicting
-        // user -p must NOT override them — the dedicated value is emitted LAST so MSBuild's last-wins
-        // makes the dedicated flag win, matching the build path and WarnOnOverriddenFlags.
+        // The dedicated Configuration/RID own their values on the evaluate pass. A conflicting user -p is
+        // FILTERED OUT (see DedicatedFlagProperties) so the evaluate pass can never resolve a different
+        // Configuration/RID than the build pass; the dedicated -p: equivalents remain the sole source.
         var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false,
             Properties: ["Configuration=Release", "RuntimeIdentifier=win-arm64"]);
 
         var args = ProjectRunService.BuildEvaluateArguments(csproj, options);
 
-        var userConfigIdx = args.IndexOf("-p:Configuration=Release", StringComparison.Ordinal);
-        var dedicatedConfigIdx = args.IndexOf("-p:Configuration=Debug", StringComparison.Ordinal);
-        Assert.IsTrue(userConfigIdx >= 0, "user -p:Configuration must still be forwarded to the evaluation");
-        Assert.IsTrue(dedicatedConfigIdx >= 0, "dedicated Configuration must be emitted");
-        Assert.IsTrue(dedicatedConfigIdx > userConfigIdx,
-            "dedicated -p:Configuration must come AFTER the user -p so last-wins makes it win");
+        Assert.IsFalse(args.Contains("-p:Configuration=Release", StringComparison.Ordinal),
+            "conflicting user -p:Configuration must be dropped, not forwarded");
+        Assert.IsFalse(args.Contains("-p:RuntimeIdentifier=win-arm64", StringComparison.Ordinal),
+            "conflicting user -p:RuntimeIdentifier must be dropped, not forwarded");
+        StringAssert.Contains(args, "-p:Configuration=Debug");
+        StringAssert.Contains(args, "-p:RuntimeIdentifier=win-x64");
+    }
 
-        var userRidIdx = args.IndexOf("-p:RuntimeIdentifier=win-arm64", StringComparison.Ordinal);
-        var dedicatedRidIdx = args.IndexOf("-p:RuntimeIdentifier=win-x64", StringComparison.Ordinal);
-        Assert.IsTrue(userRidIdx >= 0, "user -p:RuntimeIdentifier must still be forwarded");
-        Assert.IsTrue(dedicatedRidIdx >= 0, "dedicated RuntimeIdentifier must be emitted");
-        Assert.IsTrue(dedicatedRidIdx > userRidIdx,
-            "dedicated -p:RuntimeIdentifier must come AFTER the user -p so last-wins makes it win");
+    [TestMethod]
+    public void BuildBuildPassArguments_DedicatedConfigAndRidWinOverUserProperty()
+    {
+        // Mirror of the evaluate-pass test: a user -p that duplicates a dedicated -c/-r switch is dropped
+        // from the build pass too, so `-c Debug -p Configuration=Release` builds Debug (the dedicated
+        // switch), keeping the build and evaluate passes in lock-step (Copilot review C1).
+        var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false,
+            Properties: ["Configuration=Release", "RuntimeIdentifier=win-arm64", "TargetFramework=net10.0-windows10.0.9999.0"]);
+
+        var args = ProjectRunService.BuildBuildPassArguments(csproj, options, "minimal");
+
+        Assert.IsFalse(args.Contains("-p:Configuration=Release", StringComparison.Ordinal),
+            "conflicting user -p:Configuration must be dropped from the build pass");
+        Assert.IsFalse(args.Contains("-p:RuntimeIdentifier=win-arm64", StringComparison.Ordinal),
+            "conflicting user -p:RuntimeIdentifier must be dropped from the build pass");
+        Assert.IsFalse(args.Contains("-p:TargetFramework=net10.0-windows10.0.9999.0", StringComparison.Ordinal),
+            "conflicting user -p:TargetFramework must be dropped from the build pass");
+        // The dedicated -c/-r switches remain authoritative.
+        StringAssert.Contains(args, "-c Debug");
+        StringAssert.Contains(args, "-r win-x64");
     }
 
     [TestMethod]

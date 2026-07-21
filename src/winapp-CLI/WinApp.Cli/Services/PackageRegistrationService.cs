@@ -200,6 +200,12 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
     {
         var wantedArch = MapArchitecture(architecture);
 
+        // Multiple servicing versions of the same package can be registered at once and the enumeration
+        // order is not guaranteed newest-first, so track the HIGHEST matching version. Returning an
+        // arbitrary (possibly older) match could make the runtime gate reinstall or fail even when a
+        // newer, sufficient version is already present.
+        (ushort Major, ushort Minor, ushort Build, ushort Revision)? best = null;
+
         foreach (var pkg in EnumerateUserPackagesImpl())
         {
             if (!string.Equals(pkg.Name, packageName, StringComparison.OrdinalIgnoreCase))
@@ -215,10 +221,14 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
                 continue;
             }
 
-            return $"{pkg.VersionMajor}.{pkg.VersionMinor}.{pkg.VersionBuild}.{pkg.VersionRevision}";
+            var candidate = (pkg.VersionMajor, pkg.VersionMinor, pkg.VersionBuild, pkg.VersionRevision);
+            if (best is null || candidate.CompareTo(best.Value) > 0)
+            {
+                best = candidate;
+            }
         }
 
-        return null;
+        return best is { } v ? $"{v.Major}.{v.Minor}.{v.Build}.{v.Revision}" : null;
     }
 
     /// <inheritdoc />

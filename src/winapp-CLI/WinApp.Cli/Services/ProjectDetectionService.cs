@@ -362,6 +362,12 @@ internal sealed class ProjectDetectionService(
 
             logger.LogDebug("{UISymbol} Could not evaluate {Project} for disambiguation; falling back to static parse.", UiSymbols.Note, csproj.Name);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Caller requested cancellation (e.g. Ctrl+C) — propagate instead of masking it as an
+            // evaluation failure and silently continuing with the static fallback.
+            throw;
+        }
         catch (Exception ex)
         {
             // dotnet not on PATH / evaluation failed → fall back to the static parse below.

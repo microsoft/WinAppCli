@@ -390,7 +390,24 @@ public class PackageRegistrationServiceTests
         Assert.IsNull(svc.GetInstalledVersion("Contoso.App"));
     }
 
-    // ---- FindDevPackages ----------------------------------------------------
+    [TestMethod]
+    public void GetInstalledVersion_MultipleVersions_ReturnsHighest()
+    {
+        // Multiple servicing versions of the same package can be registered at once and enumeration
+        // order is not newest-first. GetInstalledVersion must return the HIGHEST so the runtime gate
+        // doesn't reinstall/fail when a newer sufficient version is already present (Copilot review C2).
+        var (svc, _) = NewService();
+        svc.EnumerateUserPackagesImpl = () =>
+        [
+            View("Contoso.App", maj: 1, min: 2, bld: 0, rev: 5),
+            View("Contoso.App", maj: 1, min: 10, bld: 0, rev: 0),  // highest — but not last
+            View("Contoso.App", maj: 1, min: 2, bld: 9, rev: 9),
+        ];
+
+        Assert.AreEqual("1.10.0.0", svc.GetInstalledVersion("Contoso.App"));
+    }
+
+
 
     [TestMethod]
     public void FindDevPackages_MapsMatchingPackages()

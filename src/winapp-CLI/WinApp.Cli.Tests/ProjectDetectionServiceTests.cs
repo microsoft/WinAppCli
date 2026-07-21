@@ -697,6 +697,31 @@ public class ProjectDetectionServiceTests
         Assert.AreEqual(1, results.Count, "Only the non-junction project should be found");
         Assert.AreEqual(DetectedProjectType.CPP, results[0].Type);
     }
+
+    [TestMethod]
+    public async Task ClassifyRunnableAsync_Cancellation_RethrowsInsteadOfFallback()
+    {
+        // A user Ctrl+C surfaces as OperationCanceledException from the token-aware dotnet call. It must
+        // propagate — not be swallowed and downgraded to the static fallback (Copilot review C3). Without
+        // the re-throw this would return a runnability from the static parse and the test would fail.
+        CreateFile("App.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+        </Project>
+        """);
+        var csproj = new FileInfo(Path.Combine(_tempDir, "App.csproj"));
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = _ => throw new OperationCanceledException(cts.Token),
+        };
+        var sut = new ProjectDetectionService(NullLogger<ProjectDetectionService>.Instance, dotnet);
+
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(
+            () => sut.ClassifyRunnableAsync(csproj, Root, null, cts.Token));
+    }
 }
 
 /// <summary>
