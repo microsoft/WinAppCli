@@ -518,6 +518,33 @@ public class RunCommandProjectModeTests : BaseCommandTests
         Assert.AreEqual(1, _fakeProjectRunService.BuildAndResolveCalls.Count, "The project must still build");
     }
 
+    [TestMethod]
+    public async Task ProjectMode_SemicolonPackedProperty_IsRejectedBeforeBuilding()
+    {
+        // C29 (Copilot review): MSBuild's /p splits a single token on ';' into MULTIPLE properties, so a
+        // packed -p like "Foo=bar;RuntimeIdentifier=win-arm64" would smuggle a dedicated-flag property
+        // (RuntimeIdentifier) past the ForwardableProperties filter — which only inspects the name before
+        // the FIRST '=' — and override the arch winapp conveys via the RID. It must be rejected up front.
+        var csproj = CreateCsproj();
+        SetUnpackagedOutcome(csproj, CreateTargetDir(withManifest: false), selfContained: false);
+        var command = GetRequiredService<RunCommand>();
+        // Widen the console so Spectre does not word-wrap the (long) JSON error line.
+        TestAnsiConsole.Profile.Width = 1000;
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, [csproj.FullName, "--json", "-p", "Foo=bar;RuntimeIdentifier=win-arm64"]);
+
+        Assert.AreEqual(1, exitCode, "A ';'-packed -p must fail");
+        Assert.AreEqual(0, _fakeProjectRunService.BuildAndResolveCalls.Count, "The pack must be rejected before building");
+        var output = TestAnsiConsole.Output;
+        var jsonStart = output.IndexOf('{');
+        var jsonEnd = output.LastIndexOf('}');
+        Assert.IsTrue(jsonStart >= 0 && jsonEnd > jsonStart, "Output should contain a JSON object");
+        var doc = System.Text.Json.JsonDocument.Parse(output[jsonStart..(jsonEnd + 1)]);
+        Assert.IsTrue(doc.RootElement.TryGetProperty("Error", out var error), "JSON must carry an 'Error' field");
+        StringAssert.Contains(error.GetString(), "';'", "Error must explain the ';' packing is not allowed");
+    }
+
     #endregion
 
     #region Folder mode (regression)

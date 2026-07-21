@@ -91,6 +91,20 @@ internal interface IPackageRegistrationService
     bool IsPackageInstalled(string namePrefix, string? architecture = null, string? excludeNameSubstring = null);
 
     /// <summary>
+    /// Returns the <em>highest</em> installed package Version among all packages whose identity Name
+    /// starts with <paramref name="namePrefix"/> (ordinal, case-insensitive), optionally filtered by
+    /// architecture and excluding names that contain <paramref name="excludeNameSubstring"/>; or
+    /// <c>null</c> when none match. Unlike <see cref="GetInstalledVersion"/> (exact-name), this matches a
+    /// family by prefix — used to gate a side-by-side runtime (e.g. the DDLM, whose name embeds its full
+    /// version) on the newest registered release without knowing its exact versioned identity.
+    /// </summary>
+    /// <param name="namePrefix">The package-name prefix to match (e.g. <c>Microsoft.WinAppRuntime.DDLM.</c>).</param>
+    /// <param name="architecture">Optional architecture filter (<c>x64</c> / <c>arm64</c> / <c>x86</c>); <c>null</c> matches any.</param>
+    /// <param name="excludeNameSubstring">Optional substring; matching names that contain it are ignored.</param>
+    /// <returns>The highest matching installed version, or null if none match.</returns>
+    string? GetHighestInstalledVersion(string namePrefix, string? architecture = null, string? excludeNameSubstring = null);
+
+    /// <summary>
     /// Finds all installed packages matching the given name that were registered in
     /// development mode (sideloaded). Returns package metadata including the full name
     /// and install location for safety checks.

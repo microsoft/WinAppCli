@@ -176,6 +176,73 @@ public class WorkspaceSetupServiceRuntimeGateTests : BaseCommandTests
     }
 
     [TestMethod]
+    public void IsWindowsAppRuntimeRegistered_OnlyOlderDdlmRegistered_ReturnsFalse()
+    {
+        // Spec R4-L1 (C29): the generic DDLM presence check accepts ANY DDLM for the arch, so if the app's
+        // release-specific DDLM install silently failed while only an OLDER DDLM is registered side-by-side,
+        // a presence-only gate would false-pass and the app would still crash resolving its runtime. The
+        // release gate must reject when the HIGHEST installed DDLM is older than the required release.
+        const string framework = "Microsoft.WindowsAppRuntime.1.8";
+        const string expectedDdlm = "Microsoft.WinAppRuntime.DDLM.8000.144.2000.0-x64";
+        _fakePackageRegistration.IsPackageInstalledPredicate = _ => true;
+        _fakePackageRegistration.GetInstalledVersionFunc = (name, _) => name == framework ? "8000.144.2000.0" : null;
+        // Highest DDLM registered for the arch is an OLDER release than the app requires.
+        _fakePackageRegistration.GetHighestInstalledVersionFunc = (prefix, _) =>
+            prefix == DdlmPrefix ? "8000.144.1000.0" : null;
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
+
+        Assert.IsFalse(service.IsWindowsAppRuntimeRegistered(
+            "x64",
+            new[] { (framework, "8000.144.2000.0"), (expectedDdlm, "8000.144.2000.0") }),
+            "an older-only registered DDLM must fail the gate when the app needs a newer DDLM release");
+    }
+
+    [TestMethod]
+    public void IsWindowsAppRuntimeRegistered_NewerDdlmRegistered_ReturnsTrue()
+    {
+        // The DDLM release gate is a >= compare against the NEWEST installed DDLM, so a DDLM newer than the
+        // app was built against still satisfies it — preserving the side-by-side newer-compatible behavior
+        // (a forced exact-identity match would over-strictly false-fail this case).
+        const string framework = "Microsoft.WindowsAppRuntime.1.8";
+        const string expectedDdlm = "Microsoft.WinAppRuntime.DDLM.8000.144.1000.0-x64";
+        _fakePackageRegistration.IsPackageInstalledPredicate = _ => true;
+        _fakePackageRegistration.GetInstalledVersionFunc = (name, _) => name == framework ? "8000.144.1000.0" : null;
+        // A NEWER DDLM than required is registered side-by-side.
+        _fakePackageRegistration.GetHighestInstalledVersionFunc = (prefix, _) =>
+            prefix == DdlmPrefix ? "8000.144.2000.0" : null;
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
+
+        Assert.IsTrue(service.IsWindowsAppRuntimeRegistered(
+            "x64",
+            new[] { (framework, "8000.144.1000.0"), (expectedDdlm, "8000.144.1000.0") }),
+            "a newer registered DDLM must satisfy the release gate");
+
+        var ddlmVersionCall = _fakePackageRegistration.GetHighestInstalledVersionCalls
+            .Single(c => c.NamePrefix == DdlmPrefix);
+        Assert.AreEqual("x64", ddlmVersionCall.Architecture, "the DDLM release gate must be arch-scoped");
+    }
+
+    [TestMethod]
+    public void IsWindowsAppRuntimeRegistered_UnparseableInstalledDdlmVersion_FallsBackToPresence()
+    {
+        // If the required DDLM release is known but the installed DDLM version can't be parsed (unexpected
+        // string), don't block a launch on it — a DDLM IS present (caller confirmed), so fall back to the
+        // generic presence rather than failing the gate on a version we can't interpret.
+        const string framework = "Microsoft.WindowsAppRuntime.1.8";
+        const string expectedDdlm = "Microsoft.WinAppRuntime.DDLM.8000.144.1000.0-x64";
+        _fakePackageRegistration.IsPackageInstalledPredicate = _ => true;
+        _fakePackageRegistration.GetInstalledVersionFunc = (name, _) => name == framework ? "8000.144.1000.0" : null;
+        _fakePackageRegistration.GetHighestInstalledVersionFunc = (prefix, _) =>
+            prefix == DdlmPrefix ? "not-a-version" : null;
+        var service = GetRequiredService<IWindowsAppRuntimeService>();
+
+        Assert.IsTrue(service.IsWindowsAppRuntimeRegistered(
+            "x64",
+            new[] { (framework, "8000.144.1000.0"), (expectedDdlm, "8000.144.1000.0") }),
+            "an unparseable installed DDLM version must fall back to the generic DDLM presence check");
+    }
+
+    [TestMethod]
     public void WinAppRuntimeFrameworkPrefix_MatchesFrameworkNotDdlm()
     {
         // Guard the Framework-vs-DDLM discrimination the gate relies on to decide which expected identities

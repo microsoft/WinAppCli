@@ -273,12 +273,16 @@ internal class WindowsAppRuntimeService(
     /// closes the false-pass where a version-specific install silently failed but a DIFFERENT WinAppSDK
     /// version — or a stale OLDER patch of the same Framework family (whose family name is only
     /// <c>major.minor</c>) — is registered for the arch (common on dev boxes); without it the generic
-    /// prefix check would pass and the app would still crash at bootstrap (spec R2-M1). The DDLM identities
-    /// are intentionally NOT exact-matched here — their names embed the full version and they install
-    /// side-by-side, so the generic DDLM presence check above suffices and demanding the app's exact DDLM
-    /// would over-strictly false-fail when a newer compatible DDLM is present (spec R4-L1). When empty or
-    /// null (folder mode / legacy callers), only the generic presence check runs — byte-identical to the
-    /// previous behavior.
+    /// prefix check would pass and the app would still crash at bootstrap (spec R2-M1). The <b>DDLM</b> is
+    /// likewise release-gated: the highest registered DDLM for the arch must be <b>greater than or equal
+    /// to</b> the required DDLM release. DDLM names embed the full version and install side-by-side, so an
+    /// exact-identity match would over-strictly false-FAIL when a NEWER compatible DDLM is present — a
+    /// <c>&gt;=</c> compare on the newest installed DDLM preserves that newer-compatible acceptance while
+    /// still rejecting the false-pass where the app's release-specific DDLM failed to install but only an
+    /// OLDER DDLM is registered (spec R4-L1). If either the required or installed version is unparseable,
+    /// the check falls back to the generic presence already confirmed above. When empty or null (folder
+    /// mode / legacy callers), only the generic presence check runs — byte-identical to the previous
+    /// behavior.
     /// </para>
     /// </summary>
     public bool IsWindowsAppRuntimeRegistered(string? architecture, IReadOnlyList<(string Name, string Version)>? expectedRuntimePackages = null)
@@ -298,14 +302,10 @@ internal class WindowsAppRuntimeService(
         {
             foreach (var (name, requiredVersion) in expectedRuntimePackages)
             {
-                // Only the app-facing Framework family gets an exact-identity + version check. The DDLM is
-                // deliberately NOT exact-matched here — it's already covered by the generic hasDdlm presence
-                // check above. DDLM package names embed the FULL version (e.g.
-                // Microsoft.WinAppRuntime.DDLM.8000.806.2252.0-x64) and install side-by-side, so demanding
-                // the app's EXACT DDLM would over-strictly false-FAIL a launch when a newer compatible DDLM
-                // is registered but that specific one failed to install (spec R4-L1). The Framework version
-                // compare below is the authoritative patch-level guard; DDLMs track the Framework, so a
-                // present DDLM plus the correct Framework version is sufficient.
+                // Only the app-facing Framework family gets an exact-identity + version check here; the
+                // DDLM is release-gated separately below (its name embeds the full version and it installs
+                // side-by-side, so an exact-identity match would over-strictly false-fail a newer
+                // compatible DDLM — see IsDdlmReleaseSatisfied).
                 if (!IsFrameworkGatePackageName(name))
                 {
                     continue;
@@ -332,9 +332,57 @@ internal class WindowsAppRuntimeService(
                     return false;
                 }
             }
+
+            if (!IsDdlmReleaseSatisfied(arch, expectedRuntimePackages))
+            {
+                return false;
+            }
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Verifies that the highest DDLM registered for <paramref name="arch"/> is at least the required DDLM
+    /// release drawn from <paramref name="expectedRuntimePackages"/>. Returns <c>true</c> (accept) when no
+    /// required DDLM version can be parsed from the expected identities, or when the installed version is
+    /// unparseable — those fall back to the generic DDLM presence already confirmed by the caller. Using a
+    /// <c>&gt;=</c> compare against the NEWEST installed DDLM keeps a newer-than-required DDLM compatible
+    /// while rejecting the case where only an OLDER DDLM is registered because the app's release-specific
+    /// DDLM install silently failed.
+    /// </summary>
+    private bool IsDdlmReleaseSatisfied(string arch, IReadOnlyList<(string Name, string Version)> expectedRuntimePackages)
+    {
+        Version? required = null;
+        foreach (var (name, version) in expectedRuntimePackages)
+        {
+            if (!name.StartsWith(WinAppRuntimeDdlmPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (Version.TryParse(version, out var parsed) && (required is null || parsed > required))
+            {
+                required = parsed;
+            }
+        }
+
+        if (required is null)
+        {
+            // No parseable required DDLM release in the expected identities — nothing to gate beyond the
+            // presence check the caller already confirmed.
+            return true;
+        }
+
+        var installedRaw = packageRegistrationService.GetHighestInstalledVersion(WinAppRuntimeDdlmPrefix, arch);
+        if (!Version.TryParse(installedRaw, out var installed))
+        {
+            // A DDLM is present (caller confirmed) but its version string is unexpected — don't block a
+            // launch on an unparseable version.
+            return true;
+        }
+
+        return installed >= required;
     }
 
     /// <summary>

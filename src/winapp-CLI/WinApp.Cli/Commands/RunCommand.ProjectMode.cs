@@ -105,6 +105,19 @@ internal partial class RunCommand
             // MSBuild argument.
             foreach (var property in properties)
             {
+                // MSBuild's /p splits a single token on ';' into MULTIPLE properties, so a raw ';' here
+                // packs more than one property into one -p. That smuggles a dedicated-flag property (e.g.
+                // RuntimeIdentifier=win-arm64) past the ForwardableProperties filter — which only inspects
+                // the name before the FIRST '=' — and lets it override the arch winapp conveys via the RID.
+                // The option is repeatable, so reject packing and point at the escape for a literal ';'.
+                if (property.Contains(';'))
+                {
+                    return Fail(
+                        $"Invalid --property '{property}'. A single -p cannot pack multiple properties with ';'. " +
+                        "Pass one property per repeatable -p (for example: -p A=1 -p B=2), or escape a literal ';' in a value as '%3B'.",
+                        isJson);
+                }
+
                 var separator = property.IndexOf('=');
                 if (separator <= 0 || string.IsNullOrWhiteSpace(property[..separator]))
                 {

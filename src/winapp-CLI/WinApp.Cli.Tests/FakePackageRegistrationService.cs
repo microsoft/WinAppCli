@@ -150,6 +150,31 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
     }
 
     /// <summary>
+    /// Records (namePrefix, architecture, excludeNameSubstring) calls. Returns
+    /// <see cref="GetHighestInstalledVersionFunc"/> (keyed on the name prefix) when set, otherwise
+    /// <see cref="FakeHighestInstalledVersion"/> (default null).
+    /// </summary>
+    public List<(string NamePrefix, string? Architecture, string? ExcludeNameSubstring)> GetHighestInstalledVersionCalls { get; } = [];
+
+    /// <summary>When set, <see cref="GetHighestInstalledVersion"/> returns this value. Defaults to null.</summary>
+    public string? FakeHighestInstalledVersion { get; set; }
+
+    /// <summary>
+    /// When set, <see cref="GetHighestInstalledVersion"/> resolves the highest installed version per
+    /// (namePrefix, arch), so a test can model e.g. "only an OLDER DDLM than required is registered".
+    /// Falls back to <see cref="FakeHighestInstalledVersion"/> when null.
+    /// </summary>
+    public Func<string, string?, string?>? GetHighestInstalledVersionFunc { get; set; }
+
+    public string? GetHighestInstalledVersion(string namePrefix, string? architecture = null, string? excludeNameSubstring = null)
+    {
+        GetHighestInstalledVersionCalls.Add((namePrefix, architecture, excludeNameSubstring));
+        return GetHighestInstalledVersionFunc is not null
+            ? GetHighestInstalledVersionFunc(namePrefix, architecture)
+            : FakeHighestInstalledVersion;
+    }
+
+    /// <summary>
     /// When set to a non-null exception, <see cref="FindDevPackages"/> throws it
     /// instead of returning <see cref="FakeDevPackages"/>. Use to exercise the
     /// non-fatal catch path (and OperationCanceled propagation) in

@@ -712,12 +712,18 @@ internal sealed partial class ProjectRunService(
     private static IEnumerable<string> ForwardableProperties(IReadOnlyList<string> properties) =>
         properties.Where(p => !IsDedicatedFlagProperty(p));
 
-    /// <summary>True when a <c>Name=Value</c> property names a dedicated-switch property (case-insensitive).</summary>
-    private static bool IsDedicatedFlagProperty(string property)
-    {
-        var name = property.Split('=', 2)[0].Trim();
-        return DedicatedFlagProperties.Any(d => name.Equals(d, StringComparison.OrdinalIgnoreCase));
-    }
+    /// <summary>
+    /// True when a <c>Name=Value</c> property names a dedicated-switch property (case-insensitive).
+    /// Defense-in-depth: even though project-mode validation rejects a ';'-packed <c>-p</c> up front (a
+    /// single MSBuild <c>/p</c> token splits on ';' into multiple properties), split on ';' here too and
+    /// treat the token as dedicated if ANY packed segment is a dedicated-flag property — so a smuggled
+    /// <c>RuntimeIdentifier</c>/<c>Configuration</c>/<c>TargetFramework</c> can never slip through
+    /// forwarding and override the switch winapp sets.
+    /// </summary>
+    private static bool IsDedicatedFlagProperty(string property) =>
+        property.Split(';')
+            .Select(segment => segment.Split('=', 2)[0].Trim())
+            .Any(name => DedicatedFlagProperties.Any(d => name.Equals(d, StringComparison.OrdinalIgnoreCase)));
 
     /// <summary>Extracts the property name from a <c>-p:Name=Value</c> token (e.g. <c>SolutionDir</c>).</summary>
     private static string SolutionPropertyName(string token)

@@ -260,6 +260,44 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
         return false;
     }
 
+    /// <inheritdoc />
+    public string? GetHighestInstalledVersion(string namePrefix, string? architecture = null, string? excludeNameSubstring = null)
+    {
+        var wantedArch = MapArchitecture(architecture);
+
+        // Track the HIGHEST matching version across every side-by-side servicing package whose name
+        // starts with the prefix (enumeration order is not guaranteed newest-first), so a stale older
+        // release can never mask a newer one that satisfies the caller's gate.
+        (ushort Major, ushort Minor, ushort Build, ushort Revision)? best = null;
+
+        foreach (var pkg in EnumerateUserPackagesImpl())
+        {
+            if (!pkg.Name.StartsWith(namePrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (excludeNameSubstring is not null &&
+                pkg.Name.Contains(excludeNameSubstring, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (wantedArch is not null && pkg.Architecture != wantedArch.Value)
+            {
+                continue;
+            }
+
+            var candidate = (pkg.VersionMajor, pkg.VersionMinor, pkg.VersionBuild, pkg.VersionRevision);
+            if (best is null || candidate.CompareTo(best.Value) > 0)
+            {
+                best = candidate;
+            }
+        }
+
+        return best is { } v ? $"{v.Major}.{v.Minor}.{v.Build}.{v.Revision}" : null;
+    }
+
     /// <summary>
     /// Maps a winapp architecture string (<c>x64</c> / <c>arm64</c> / <c>x86</c>) to the WinRT
     /// <see cref="Windows.System.ProcessorArchitecture"/> used by installed package identities.
