@@ -39,15 +39,37 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
 
     public Task RegisterLooseLayoutAsync(string manifestPath, CancellationToken cancellationToken = default)
     {
+        if (RegisterLooseLayoutThrows is not null)
+        {
+            throw RegisterLooseLayoutThrows;
+        }
         RegisterLooseLayoutCalls.Add(manifestPath);
         return Task.CompletedTask;
     }
 
     public Task RegisterSparseAsync(string manifestPath, string externalLocation, CancellationToken cancellationToken = default)
     {
+        if (RegisterSparseThrows is not null)
+        {
+            throw RegisterSparseThrows;
+        }
         RegisterSparseCalls.Add((manifestPath, externalLocation));
         return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// When set to a non-null exception, <see cref="RegisterLooseLayoutAsync"/> throws it.
+    /// Used to exercise the exception-wrapping path in
+    /// <c>MsixService.RegisterLooseLayoutPackageAsync</c>.
+    /// </summary>
+    public Exception? RegisterLooseLayoutThrows { get; set; }
+
+    /// <summary>
+    /// When set to a non-null exception, <see cref="RegisterSparseAsync"/> throws it.
+    /// Used to exercise the exception-wrapping path in
+    /// <c>MsixService.RegisterSparsePackageAsync</c>.
+    /// </summary>
+    public Exception? RegisterSparseThrows { get; set; }
 
     public Task<bool> UnregisterAsync(string packageName, bool preserveAppData = true, CancellationToken cancellationToken = default)
     {
@@ -72,9 +94,21 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// When set to a non-null exception, <see cref="InstallPackageAsync"/> throws it
+    /// (after recording the call) instead of completing. Used to exercise the per-package
+    /// install-failure/error-count path in
+    /// <c>WorkspaceSetupService.InstallWindowsAppRuntimeAsync</c>.
+    /// </summary>
+    public Exception? InstallPackageThrows { get; set; }
+
     public Task InstallPackageAsync(string packagePath, CancellationToken cancellationToken = default)
     {
         InstallPackageCalls.Add(packagePath);
+        if (InstallPackageThrows is not null)
+        {
+            throw InstallPackageThrows;
+        }
         return Task.CompletedTask;
     }
 

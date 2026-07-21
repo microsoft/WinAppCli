@@ -1,11 +1,32 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+import { isDeepStrictEqual } from 'node:util';
+
 import { AdditionalWinmd } from './additional-winmds';
 import { readPackageJsonDoc, mutatePackageJsonDoc, packageJsonExists } from './package-json-doc';
 
 // Fixed codegen output dir, mirroring C++ `.winapp/include` and auto-gitignored by init.
 export const JS_BINDINGS_OUTPUT_DIR = '.winapp/bindings';
+export const JS_BINDINGS_IMPORT = '#winapp/bindings';
+export const JS_BINDINGS_SUBPATH_IMPORT = '#winapp/bindings/*';
+
+// `package.json#imports` targets. Kept relative to package.json (co-located with
+// `.winapp/bindings` by construction: both anchor on the same workspace dir),
+// derived from `JS_BINDINGS_OUTPUT_DIR` so the paths can't drift.
+const JS_BINDINGS_OUTPUT_REL = `./${JS_BINDINGS_OUTPUT_DIR}`;
+
+const JS_BINDINGS_IMPORT_TARGET = {
+  types: `${JS_BINDINGS_OUTPUT_REL}/index.d.ts`,
+  import: `${JS_BINDINGS_OUTPUT_REL}/index.mjs`,
+  require: `${JS_BINDINGS_OUTPUT_REL}/index.js`,
+  default: `${JS_BINDINGS_OUTPUT_REL}/index.js`,
+};
+
+const JS_BINDINGS_SUBPATH_IMPORT_TARGET = {
+  types: `${JS_BINDINGS_OUTPUT_REL}/*.d.ts`,
+  default: `${JS_BINDINGS_OUTPUT_REL}/*.js`,
+};
 
 export interface JsBindingsConfig {
   // Extra .winmds to bulk-emit or cherry-pick.
@@ -101,6 +122,36 @@ export function writeJsBindingsConfig(workspaceDir: string, config: JsBindingsCo
   });
 }
 
+export type EnsureJsBindingsImportsOutcome = 'added' | 'unchanged';
+
+export interface EnsureJsBindingsImportsResult {
+  outcome: EnsureJsBindingsImportsOutcome;
+  /** Alias names that already exist in `imports` but point at a different target than
+   *  the winapp defaults. Preserved as-is; the caller decides whether to warn. */
+  diverged: readonly string[];
+}
+
+/** Add `#winapp/bindings` + `#winapp/bindings/*` to `package.json` `imports`. Existing
+ *  aliases with a different target are preserved and reported via `diverged`. */
+export function ensureJsBindingsImports(workspaceDir: string): EnsureJsBindingsImportsResult {
+  const doc = readPackageJsonDoc(workspaceDir);
+  if (!doc) {
+    throw new Error(
+      `package.json not found in ${workspaceDir}. ` + 'Run `npm init -y` (or equivalent) before mutating package.json.'
+    );
+  }
+  const applied = withJsBindingsImports(doc.parsed.imports);
+  if (!applied.changed) {
+    // Nothing to add — skip the write so we don't renormalize formatting or
+    // trigger file watchers just to report divergence.
+    return { outcome: 'unchanged', diverged: applied.diverged };
+  }
+  mutatePackageJsonDoc(workspaceDir, (parsed) => {
+    parsed.imports = withJsBindingsImports(parsed.imports).imports;
+  });
+  return { outcome: 'added', diverged: applied.diverged };
+}
+
 /** Render the JSON-serializable config shape embedded in package.json. */
 export function renderJsBindingsConfig(config: JsBindingsConfig): unknown {
   return serializeConfig(config);
@@ -181,6 +232,40 @@ function serializeConfig(config: JsBindingsConfig): Record<string, unknown> {
     }),
     additionalRefs: [...config.additionalRefs],
   };
+}
+
+function withJsBindingsImports(existing: unknown): {
+  imports: Record<string, unknown>;
+  changed: boolean;
+  diverged: string[];
+} {
+  if (existing !== undefined && (!existing || typeof existing !== 'object' || Array.isArray(existing))) {
+    throw new Error(
+      'package.json "imports" must be an object before adding JS bindings aliases. ' +
+        'Edit package.json so "imports" is an object (or remove the field), then rerun ' +
+        '`npx winapp init --add-js-bindings`.'
+    );
+  }
+
+  const imports: Record<string, unknown> = { ...((existing as Record<string, unknown> | undefined) ?? {}) };
+  const diverged: string[] = [];
+  let changed = false;
+
+  const entries: ReadonlyArray<readonly [string, Record<string, string>]> = [
+    [JS_BINDINGS_IMPORT, JS_BINDINGS_IMPORT_TARGET],
+    [JS_BINDINGS_SUBPATH_IMPORT, JS_BINDINGS_SUBPATH_IMPORT_TARGET],
+  ];
+  for (const [key, target] of entries) {
+    const current = imports[key];
+    if (current === undefined) {
+      imports[key] = target;
+      changed = true;
+    } else if (!isDeepStrictEqual(current, target)) {
+      // Preserve user-customized aliases; caller warns via `diverged`.
+      diverged.push(key);
+    }
+  }
+  return { imports, changed, diverged };
 }
 
 export { PACKAGE_JSON_FILENAME } from './package-json-doc';

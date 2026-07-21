@@ -91,6 +91,7 @@ public class PublisherDnHelperTests
     [DataRow("OU=Finance, DC=corp, DC=com", "OU=Finance, DC=corp, DC=com", DisplayName = "Non-CN multi → full DN")]
     [DataRow("OU=Finance", "OU=Finance", DisplayName = "Non-CN single → full DN")]
     [DataRow("CN=\"Company, Inc.\"", "Company, Inc.", DisplayName = "Quoted CN → unquoted value")]
+    [DataRow("CN=a\\,b", "a\\,b", DisplayName = "Backslash-escaped comma is not a component separator")]
     public void GetDisplayName_ReturnsExpected(string dn, string expected)
     {
         Assert.AreEqual(expected, PublisherDnHelper.GetDisplayName(dn));
@@ -115,9 +116,17 @@ public class PublisherDnHelperTests
     [DataRow("CN=\"Company, Inc.\"", "CN=&quot;Company, Inc.&quot;", DisplayName = "Quotes escaped")]
     [DataRow("CN=A&B", "CN=A&amp;B", DisplayName = "Ampersand escaped")]
     [DataRow("CN=<Test>", "CN=&lt;Test&gt;", DisplayName = "Angle brackets escaped")]
+    [DataRow("O=Tom's Co", "O=Tom&apos;s Co", DisplayName = "Apostrophe escaped")]
+    [DataRow("", "", DisplayName = "Empty string passes through")]
     public void XmlEscape_ReturnsExpected(string input, string expected)
     {
         Assert.AreEqual(expected, PublisherDnHelper.XmlEscape(input));
+    }
+
+    [TestMethod]
+    public void XmlEscape_NullInput_ReturnsNull()
+    {
+        Assert.IsNull(PublisherDnHelper.XmlEscape(null!));
     }
 
     #endregion

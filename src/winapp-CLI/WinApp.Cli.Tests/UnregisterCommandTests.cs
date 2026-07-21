@@ -198,4 +198,21 @@ public class UnregisterCommandTests : BaseCommandTests
         // Assert
         Assert.AreEqual(1, exitCode);
     }
+
+    [TestMethod]
+    public async Task UnregisterCommand_NoManifest_WithJson_EmitsJsonError()
+    {
+        // No manifest in the current directory + --json should emit a structured JSON error
+        // (rather than a plain log line) and still fail.
+        TestAnsiConsole.Profile.Width = 1000; // avoid line-wrapping that would corrupt the JSON
+        var command = GetRequiredService<UnregisterCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        var output = TestAnsiConsole.Output.Trim();
+        var root = System.Text.Json.JsonDocument.Parse(output).RootElement;
+        Assert.IsTrue(root.TryGetProperty("Error", out var error), "JSON output should carry an Error property");
+        StringAssert.Contains(error.GetString(), "No manifest found");
+    }
 }

@@ -211,22 +211,6 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
                deps.TryGetProperty("electron", out _);
     }
 
-    private static bool HasFileWithExtension(DirectoryInfo directory, string pattern)
-    {
-        try
-        {
-            return directory.EnumerateFiles(pattern).Any();
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-    }
-
     /// <summary>
     /// Returns the file name of the first executable .csproj in the directory,
     /// or null if none is found. Only executable (OutputType = Exe or WinExe), non-test projects qualify.

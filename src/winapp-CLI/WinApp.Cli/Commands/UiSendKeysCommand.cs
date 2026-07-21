@@ -4,7 +4,6 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
-using System.Linq;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
@@ -39,7 +38,10 @@ internal class UiSendKeysCommand : Command, IShortDescription
         Description = "Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged " +
                       "but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character " +
                       "KeyDown + TextChanged). Named keys and combos raise KeyDown on both, but keyboard " +
-                      "accelerators/shortcuts (KeyboardAccelerator, e.g. ctrl+t) only fire via send-input.",
+                      "accelerators/shortcuts (KeyboardAccelerator, e.g. ctrl+t) only fire via send-input. " +
+                      "post-message targets the focused child control and works for classic Win32/WinForms controls, " +
+                      "but WinUI 3 / UWP / XAML controls are windowless and ignore posted messages — use send-input " +
+                      "for those (a warning is emitted when the target looks like a XAML app).",
         DefaultValueFactory = _ => "post-message"
     };
 
@@ -48,6 +50,18 @@ internal class UiSendKeysCommand : Command, IShortDescription
         Description = "Type the entire keys argument as literal text — no named-key, combo, or vk= interpretation, " +
                       "and exact whitespace preserved. The whole-argument form of the per-token text= escape: " +
                       "--verbatim \"down down enter\" types the words instead of pressing Down, Down, Enter."
+    };
+
+    public static Option<bool> AllowSystemKeysOption { get; } = new("--allow-system-keys")
+    {
+        Description = "Allow synthesizing system-/shell-reserved combos (win+<key>, alt+f4, alt+tab, ctrl+esc, …) via " +
+                      "--via send-input, which are refused by default because they act on the OS/shell beyond the " +
+                      "target app. Opt in to drive global hotkeys (e.g. PowerToys' win+shift+v, win+r). " +
+                      "No effect on --via post-message (already window-scoped; a warning is emitted if set without send-input). " +
+                      "Note: win+l and ctrl+alt+del stay blocked even with this flag — win+l locks the workstation " +
+                      "(LockWorkStation() via the shell hook), which is unrecoverable from automation, and ctrl+alt+del " +
+                      "is a Secure Attention Sequence (SAS) that Windows drops from injected input regardless of this flag, " +
+                      "so it can never take effect."
     };
 
     public UiSendKeysCommand()
@@ -63,6 +77,7 @@ internal class UiSendKeysCommand : Command, IShortDescription
         Options.Add(TargetOption);
         Options.Add(ViaOption);
         Options.Add(VerbatimOption);
+        Options.Add(AllowSystemKeysOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -72,6 +87,7 @@ internal class UiSendKeysCommand : Command, IShortDescription
         ISelectorService selectorService,
         IKeyboardInput keyboardInput,
         IForegroundGuard foregroundGuard,
+        ISystemUiQuery systemQuery,
         IAnsiConsole ansiConsole,
         ILogger<UiSendKeysCommand> logger) : AsynchronousCommandLineAction
     {
@@ -84,6 +100,7 @@ internal class UiSendKeysCommand : Command, IShortDescription
             var target = parseResult.GetValue(TargetOption);
             var viaStr = parseResult.GetValue(ViaOption) ?? "post-message";
             var verbatim = parseResult.GetValue(VerbatimOption);
+            var allowSystemKeys = parseResult.GetValue(AllowSystemKeysOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
@@ -109,6 +126,20 @@ internal class UiSendKeysCommand : Command, IShortDescription
                 UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
                     $"Invalid --via value '{viaStr}'. Use post-message or send-input.");
                 return 1;
+            }
+
+            // SEC-02: --allow-system-keys only applies to send-input; with post-message the transport is
+            // already window-scoped so system combos are never blocked and the flag has no effect.
+            var warnings = new List<string>();
+            if (allowSystemKeys && transport != KeyTransport.SendInput)
+            {
+                logger.LogWarning(
+                    "{Symbol} --allow-system-keys only applies to --via send-input and has no effect with " +
+                    "--via post-message (post-message is already window-scoped and never blocks system combos).",
+                    UiSymbols.Warning);
+                warnings.Add(
+                    "--allow-system-keys only applies to --via send-input and has no effect with " +
+                    "--via post-message (post-message is already window-scoped and never blocks system combos).");
             }
 
             IReadOnlyList<KeyAction> actions;
@@ -154,6 +185,42 @@ internal class UiSendKeysCommand : Command, IShortDescription
                     await Task.Delay(100, cancellationToken);
                 }
 
+                // PostMessage posts to a specific HWND's message queue; a top-level window does NOT
+                // forward keyboard messages to its focused child control, so posting there silently
+                // drops the input for classic Win32 child controls (e.g. an edit box) — the resolved
+                // target is usually the top-level window, not the control. Retarget to the thread's
+                // actually-focused window (populated now that the target is foreground) so the keys
+                // reach the control the user sees focused. Falls back to the passed HWND when focus
+                // can't be resolved. send-input is OS-wide and unaffected, so leave it alone.
+                var effectiveHwnd = targetHwnd;
+                if (transport == KeyTransport.PostMessage && targetHwnd != 0)
+                {
+                    var focused = systemQuery.GetFocusedWindow(targetHwnd);
+                    if (focused != 0 && focused != targetHwnd)
+                    {
+                        // GetGUIThreadInfo reports focus for the entire GUI thread, and one thread can
+                        // own several top-level windows. If SetForegroundWindow was denied (focus-stealing
+                        // prevention, a UAC prompt, etc.), the focused HWND may belong to a *different*
+                        // window on that thread — posting there would deliver the keys to the wrong window
+                        // despite an explicit target. Only retarget when the focused HWND shares the
+                        // target's top-level root; otherwise keep the passed target.
+                        var targetRoot = systemQuery.GetRootWindow(targetHwnd);
+                        if (targetRoot != 0 && systemQuery.GetRootWindow(focused) == targetRoot)
+                        {
+                            logger.LogDebug(
+                                "post-message: retargeting from HWND {Target} to focused child HWND {Focused}",
+                                targetHwnd, focused);
+                            effectiveHwnd = focused;
+                        }
+                        else
+                        {
+                            logger.LogDebug(
+                                "post-message: focused HWND {Focused} is not within target {Target}'s top-level window; keeping target",
+                                focused, targetHwnd);
+                        }
+                    }
+                }
+
                 // send-input is OS-wide: it lands on whatever window is actually in the foreground. If
                 // SetForegroundWindow didn't take (focus-stealing prevention, a UAC prompt, another app
                 // grabbing focus, or a locked/secure desktop), injecting now would type into the wrong
@@ -181,18 +248,26 @@ internal class UiSendKeysCommand : Command, IShortDescription
                     }
                 }
 
-                // WM_CHAR posted to a WinUI 3 / XAML host window is not turned into text by the XAML input
-                // pipeline, so typed literal text silently no-ops there. Warn — but only when the target
-                // actually looks like a XAML window — rather than false-alarming on Win32/WPF/Electron
-                // apps that do consume WM_CHAR. (Named keys/combos still post KeyDown regardless.)
-                if (ShouldWarnPostMessageTextDropped(
-                        transport == KeyTransport.PostMessage,
-                        actions.Any(a => a is TextInput),
-                        FrameworkHint.IsLikelyXaml(targetHwnd)))
+                // WM_CHAR / WM_KEYDOWN posted to a WinUI 3 / UWP / XAML window is not routed to the
+                // windowless focused control by the XAML input pipeline, so posted keys — typed literal
+                // text AND named keys/combos (Enter, digits, …) — silently no-op there even though
+                // PostMessage reports success. Warn, but only when the target actually looks like a XAML
+                // host, rather than false-alarming on Win32/WPF/Electron apps that do consume posted
+                // messages. Check both the top-level target and the resolved focused child (either
+                // looking XAML is enough). Class names are read through ISystemUiQuery so this branch is
+                // exercisable with a fake.
+                var targetLooksXaml =
+                    (targetHwnd != 0 && FrameworkHint.IsXamlClassName(systemQuery.GetWindowClassName(targetHwnd)))
+                    || (effectiveHwnd != 0 && effectiveHwnd != targetHwnd
+                        && FrameworkHint.IsXamlClassName(systemQuery.GetWindowClassName(effectiveHwnd)));
+                if (ShouldWarnPostMessageMayNotDeliver(transport == KeyTransport.PostMessage, targetLooksXaml))
                 {
-                    logger.LogWarning(
-                        "{Symbol} Literal text via --via post-message may not be delivered to WinUI 3 / XAML apps (WM_CHAR is dropped by the input pipeline). Use --via send-input if the text does not appear.",
-                        UiSymbols.Warning);
+                    const string postMessageXamlWarning =
+                        "Input via --via post-message may not reach WinUI 3 / UWP / XAML controls — they are " +
+                        "windowless and ignore posted WM_CHAR/WM_KEYDOWN, so keys can be silently dropped even " +
+                        "though this command reports success. Use --via send-input if the input does not take effect.";
+                    logger.LogWarning("{Symbol} {Message}", UiSymbols.Warning, postMessageXamlWarning);
+                    warnings.Add(postMessageXamlWarning);
                 }
 
                 // send-input is OS-wide, so a system-reserved combo (win+l, alt+f4, ctrl+shift+esc, …)
@@ -201,23 +276,81 @@ internal class UiSendKeysCommand : Command, IShortDescription
                 // beyond the target window makes silently sending them too dangerous for an automation run.
                 if (transport == KeyTransport.SendInput)
                 {
+                    // win+l (LockWorkStation) and ctrl+alt+del (SAS) are unconditionally blocked even
+                    // with --allow-system-keys: win+l locks the interactive session with no recovery
+                    // path from automation, and ctrl+alt+del is a Secure Attention Sequence that Windows
+                    // drops from injected input regardless of the flag — reporting success for it would
+                    // be misleading. Each carries its own reason so the message explains why. Return
+                    // early so they don't fall through into the soft-combo / allow path below.
+                    var neverBypassable = SystemKeyGuard.FindNeverBypassableCombos(actions);
+                    if (neverBypassable.Count > 0)
+                    {
+                        var names = string.Join(", ", neverBypassable.Select(c => c.Name));
+                        var reasons = string.Join(" ", neverBypassable.Select(c => $"{c.Name} {c.Reason}."));
+                        logger.LogError(
+                            "{Symbol} Refusing to synthesize {Combos} via --via send-input. {Reasons} " +
+                            "This stays blocked even with --allow-system-keys, which is for app-registered " +
+                            "global hotkeys (e.g. win+r, win+shift+v), not combos that can't be driven from automation.",
+                            UiSymbols.Error, names, reasons);
+                        UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
+                            $"Refusing to synthesize {names} via --via send-input. {reasons} " +
+                            "This stays blocked even with --allow-system-keys, which is for app-registered " +
+                            "global hotkeys (e.g. win+r, win+shift+v), not combos that can't be driven from automation.",
+                            errorOut: parseResult.InvocationConfiguration.Error);
+                        return 1;
+                    }
+
                     var systemCombos = SystemKeyGuard.FindSystemCombos(actions);
                     if (systemCombos.Count > 0)
                     {
-                        logger.LogError(
-                            "{Symbol} Refusing to synthesize system-reserved key(s) via --via send-input: {Combos}. " +
-                            "These act on the OS/shell (e.g. win+l locks the session, alt+f4 closes the window, ctrl+alt+del is intercepted by Windows), not just the target app.",
-                            UiSymbols.Error, string.Join(", ", systemCombos));
-                        UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
-                            $"Refusing to synthesize system-reserved key(s) via --via send-input: {string.Join(", ", systemCombos)}. " +
-                            "These act on the OS/shell rather than just the target app.");
-                        return 1;
+                        if (!allowSystemKeys)
+                        {
+                            logger.LogError(
+                                "{Symbol} Refusing to synthesize system-reserved key(s) via --via send-input: {Combos}. " +
+                                "These act on the OS/shell (e.g. win+l locks the session, alt+f4 closes the window, ctrl+alt+del is intercepted by Windows), not just the target app. " +
+                                "Pass --allow-system-keys to opt in (e.g. to drive a global hotkey).",
+                                UiSymbols.Error, string.Join(", ", systemCombos));
+                            UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
+                                $"Refusing to synthesize system-reserved key(s) via --via send-input: {string.Join(", ", systemCombos)}. " +
+                                "These act on the OS/shell rather than just the target app. Pass --allow-system-keys to opt in.");
+                            return 1;
+                        }
+
+                        // Caller explicitly opted in with --allow-system-keys (e.g. to fire a global hotkey such as
+                        // PowerToys' win+shift+v). Record the bypass so it's auditable in persisted logs, then fall
+                        // through and inject. (win+l and ctrl+alt+del never reach here — they're hard-blocked above.)
+                        var systemCombosStr = string.Join(", ", systemCombos);
+                        logger.LogWarning(
+                            "{Symbol} Injecting system-reserved key(s) via --via send-input because --allow-system-keys was set: {Combos}. " +
+                            "These act on the OS/shell beyond the target app.",
+                            UiSymbols.Warning, systemCombosStr);
+                        warnings.Add(
+                            $"Injecting system-reserved key(s) via --via send-input because --allow-system-keys was set: {systemCombosStr}. " +
+                            "These act on the OS/shell beyond the target app.");
                     }
-                }
+               }
 
-                keyboardInput.Send(targetHwnd, actions, transport);
+               // Long literal text via send-input is auto-throttled into paced chunks (issue #657) so the
+               // target's input queue never overruns and no characters are silently dropped. That pacing
+               // adds a little wall-clock time for big payloads, so let the caller know the throttling is
+               // intentional — and that 'ui set-value' lands bulk text in one shot — when the payload is
+               // large enough to be chunked (more than one chunk's worth of characters).
+               if (transport == KeyTransport.SendInput)
+               {
+                   int textChars = actions.OfType<TextInput>().Sum(t => t.Text.Length);
+                   if (textChars > KeyboardInput.DefaultTextChunkChars)
+                   {
+                       logger.LogWarning(
+                           "{Symbol} {Count} characters via --via send-input are auto-throttled into paced chunks for reliable delivery, so this may take a moment. For bulk text, 'ui set-value' is faster and more reliable.",
+                           UiSymbols.Warning, textChars);
+                       warnings.Add(
+                           $"{textChars} characters via send-input are auto-throttled into paced chunks for reliable delivery, so this may take a moment. For bulk text, 'ui set-value' is faster and more reliable.");
+                   }
+               }
 
-                if (json)
+               keyboardInput.Send(effectiveHwnd, actions, transport);
+
+               if (json)
                 {
                     var result = new UiSendKeysResult
                     {
@@ -225,7 +358,8 @@ internal class UiSendKeysCommand : Command, IShortDescription
                         Via = transport == KeyTransport.PostMessage ? "post-message" : "send-input",
                         ActionCount = actions.Count,
                         Target = target,
-                        Hwnd = targetHwnd
+                        Hwnd = effectiveHwnd,
+                        Warnings = warnings
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiSendKeysResult));
@@ -236,11 +370,29 @@ internal class UiSendKeysCommand : Command, IShortDescription
                     // shared, and key sequences may carry passwords / tokens being typed into a field. The
                     // structured --json result still includes `keys` for callers that opt in (and it's
                     // already on the command line); the plain log reports only the action count.
-                    logger.LogInformation("{Symbol} Sent {ActionCount} key action(s) via {Via}",
-                        UiSymbols.Check, actions.Count, transport == KeyTransport.PostMessage ? "post-message" : "send-input");
+                    // PostMessage is fire-and-forget — it only queues the message and can't confirm the
+                    // target consumed it — so report it as "Posted" rather than overstating with "Sent";
+                    // send-input is real synthesized input and stays "Sent".
+                    logger.LogInformation("{Symbol} {Verb} {ActionCount} key action(s) via {Via}",
+                        UiSymbols.Check,
+                        transport == KeyTransport.PostMessage ? "Posted" : "Sent",
+                        actions.Count,
+                        transport == KeyTransport.PostMessage ? "post-message" : "send-input");
                 }
 
                 return 0;
+            }
+            catch (ForegroundLostException)
+            {
+                // Focus left the target partway through a throttled --via send-input injection; the rest of
+                // the keystrokes were withheld rather than sprayed into whatever window grabbed focus (issue
+                // #657 follow-up H1). Surface the same foreground_not_target contract as the pre-send check.
+                logger.LogError(
+                    "{Symbol} Target window lost the foreground partway through --via send-input — aborted to avoid typing the rest into the wrong window. Keep the target focused (avoid clicking away or focus-stealing popups) and retry; for bulk text prefer 'ui set-value'.",
+                    UiSymbols.Error);
+                UiJsonError.Emit(json, UiJsonError.CodeForegroundNotTarget,
+                    "Target window lost the foreground partway through --via send-input — aborted to avoid injecting the rest into the wrong window. Keep the target focused and retry, or use 'ui set-value' for bulk text.");
+                return 1;
             }
             catch (System.Runtime.InteropServices.COMException comEx)
             {
@@ -256,14 +408,15 @@ internal class UiSendKeysCommand : Command, IShortDescription
         }
 
         /// <summary>
-        /// Whether to warn that literal typed text may be silently dropped: only when posting WM_CHAR
-        /// (<paramref name="isPostMessage"/>) AND the payload actually contains literal text AND the
-        /// target looks like a XAML window (WinUI 3 / UWP), which drops posted WM_CHAR text. Pure so
-        /// the gate is unit-testable without a live XAML window; the command computes the three inputs
-        /// (the third via <see cref="FrameworkHint.IsLikelyXaml"/>) and routes the warning through here.
+        /// Whether to warn that post-message input may be silently dropped: only when posting
+        /// (<paramref name="isPostMessage"/>) AND the target looks like a XAML window (WinUI 3 / UWP),
+        /// whose windowless controls ignore posted WM_CHAR/WM_KEYDOWN — so typed text AND named
+        /// keys/combos can no-op there. Pure so the gate is unit-testable without a live XAML window;
+        /// the command computes <paramref name="targetLooksXaml"/> via FrameworkHint.IsXamlClassName
+        /// over the seam-read class name(s) and routes the warning through here.
         /// </summary>
-        internal static bool ShouldWarnPostMessageTextDropped(bool isPostMessage, bool hasLiteralText, bool targetLooksXaml)
-            => isPostMessage && hasLiteralText && targetLooksXaml;
+        internal static bool ShouldWarnPostMessageMayNotDeliver(bool isPostMessage, bool targetLooksXaml)
+            => isPostMessage && targetLooksXaml;
 
         private static bool TryParseTransport(string via, out KeyTransport transport)
         {

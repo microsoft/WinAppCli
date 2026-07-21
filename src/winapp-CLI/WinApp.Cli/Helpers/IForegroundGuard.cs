@@ -20,4 +20,11 @@ internal interface IForegroundGuard
     /// </summary>
     /// <param name="action">Verb used in the message, e.g. "click", "drag", "scroll --wheel".</param>
     bool TryEnsureForeground(long targetHwnd, ILogger logger, bool json, string action);
+
+    /// <summary>
+    /// Returns <see langword="true"/> when running in a remote (RDP / Terminal Services) session, where
+    /// synthetic touch/pen injection may report success without actually reaching the target so callers
+    /// attach a delivery-uncertainty warning. See <see cref="ForegroundGuard.IsRemoteSession"/>.
+    /// </summary>
+    bool IsRemoteSession();
 }
