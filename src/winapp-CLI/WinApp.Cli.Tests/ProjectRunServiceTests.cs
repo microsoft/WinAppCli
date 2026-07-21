@@ -974,6 +974,25 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public async Task ResolveInput_Solution_CancellationDuringListing_RethrowsInsteadOfReadFailure()
+    {
+        // C7: a caller-requested cancellation during `dotnet sln list` must surface as
+        // OperationCanceledException, not be swallowed and reported as an unreadable solution.
+        var solution = WriteFile("MyApp.sln", "");
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                IsSlnListCall(args) ? throw new OperationCanceledException() : (0, string.Empty, string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(
+            () => service.ResolveInputAsync(solution, cts.Token));
+    }
+
+    [TestMethod]
     public void MatchProjectSelector_RelativeLeaf_Matches()
     {
         var baseDir = _tempDir;
@@ -1277,10 +1296,11 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
-    public void BuildRestorePassArguments_IncludesRidAndUserPropertiesWithoutNoRestore()
+    public void BuildRestorePassArguments_IncludesRidConfigurationAndUserPropertiesWithoutNoRestore()
     {
-        // C1: the pre-shim restore mirrors the build's RID + user -p but never adds --no-restore
-        // (restoring is the whole point) and omits -c/-f/-v.
+        // C6: the pre-build restore mirrors the build's effective RID + configuration (as
+        // -p:Configuration=, since 'dotnet restore' has no -c switch) + user -p, but never adds
+        // --no-restore (restoring is the whole point) and omits -v.
         var csproj = WriteFile("App.csproj", ExecutableCsproj);
         var options = new ProjectRunOptions("Debug", "arm64", "net10.0-windows10.0.26100.0", NoBuild: false, NoRestore: false,
             Properties: ["WindowsPackageType=None"]);
@@ -1289,9 +1309,30 @@ public class ProjectRunServiceTests
 
         StringAssert.StartsWith(args, "restore ");
         StringAssert.Contains(args, "-r win-arm64");
+        StringAssert.Contains(args, "-p:Configuration=Debug");
         StringAssert.Contains(args, "-p:WindowsPackageType=None");
         Assert.IsFalse(args.Contains("--no-restore", StringComparison.Ordinal), "restore must not carry --no-restore");
-        Assert.IsFalse(args.Contains(" -c ", StringComparison.Ordinal), "restore is config-agnostic for pulling the ref pack");
+        Assert.IsFalse(args.Contains(" -c ", StringComparison.Ordinal), "restore has no -c switch; configuration flows via -p:Configuration=");
+    }
+
+    [TestMethod]
+    public void BuildRestorePassArguments_DropsDedicatedFlagPropertiesSoRidWins()
+    {
+        // C6: a conflicting user -p RuntimeIdentifier/Configuration/TargetFramework must NOT reach the
+        // restore command — otherwise (MSBuild last-wins) it would restore a different RID/config graph
+        // than the subsequent --no-restore build consumes, leaving no matching target in the assets file.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var options = new ProjectRunOptions("Debug", "x64", "net10.0-windows10.0.26100.0", NoBuild: false, NoRestore: false,
+            Properties: ["RuntimeIdentifier=win-arm64", "Configuration=Release", "TargetFramework=net8.0", "WindowsPackageType=None"]);
+
+        var args = ProjectRunService.BuildRestorePassArguments(csproj, options);
+
+        StringAssert.Contains(args, "-r win-x64");
+        StringAssert.Contains(args, "-p:Configuration=Debug");
+        StringAssert.Contains(args, "-p:WindowsPackageType=None");
+        Assert.IsFalse(args.Contains("win-arm64", StringComparison.Ordinal), "conflicting user -p:RuntimeIdentifier must be dropped so -r wins");
+        Assert.IsFalse(args.Contains("Configuration=Release", StringComparison.Ordinal), "conflicting user -p:Configuration must be dropped");
+        Assert.IsFalse(args.Contains("net8.0", StringComparison.Ordinal), "conflicting user -p:TargetFramework must be dropped");
     }
 
     [TestMethod]

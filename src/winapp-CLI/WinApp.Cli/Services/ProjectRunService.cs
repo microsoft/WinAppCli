@@ -419,9 +419,15 @@ internal sealed partial class ProjectRunService(
     }
     /// <summary>
     /// Builds the argument string for the SHIM's pre-build <c>dotnet restore</c>. It mirrors the build
-    /// pass's RID / user <c>-p</c> / solution properties so the same graph restores, but omits
-    /// <c>-c</c>/<c>-f</c>/<c>-v</c> (restore is TFM- and config-agnostic for pulling the ref pack) and
-    /// never adds <c>--no-restore</c>. Pure and unit-testable.
+    /// pass's effective values — the RID (<c>-r win-&lt;arch&gt;</c>), the configuration (as
+    /// <c>-p:Configuration=</c>, since <c>dotnet restore</c> has no <c>-c</c> switch), user <c>-p</c>, and
+    /// solution properties — so the same graph resolves into <c>project.assets.json</c> that the
+    /// subsequent <c>--no-restore</c> build consumes. Dedicated-flag user <c>-p</c>
+    /// (Configuration/RuntimeIdentifier/TargetFramework) are filtered out via
+    /// <see cref="ForwardableProperties"/> so a conflicting <c>-p:RuntimeIdentifier</c> can't (MSBuild
+    /// last-wins) restore a different RID's assets than the build needs. Verbosity (<c>-v</c>) is omitted
+    /// (restore output is captured, not streamed) and it never adds <c>--no-restore</c> (restoring is the
+    /// whole point). Pure and unit-testable.
     /// </summary>
     internal static string BuildRestorePassArguments(FileInfo csproj, ProjectRunOptions options)
     {
@@ -432,9 +438,16 @@ internal sealed partial class ProjectRunService(
             csproj.FullName,
             "-r",
             rid,
+            // 'dotnet restore' has no -c switch, so the configuration flows as an MSBuild property. This
+            // makes config-conditional <PackageReference Condition="'$(Configuration)'=='Release'"> land
+            // in project.assets.json BEFORE the --no-restore build consumes them.
+            $"-p:Configuration={options.Configuration}",
         };
 
-        foreach (var property in options.Properties)
+        // Forward user -p EXCEPT the dedicated-flag properties the -r / -p:Configuration above own — a
+        // conflicting user -p:RuntimeIdentifier/TargetFramework/Configuration would otherwise diverge the
+        // restored graph from what the --no-restore build resolves. WarnOnOverriddenFlags surfaces it.
+        foreach (var property in ForwardableProperties(options.Properties))
         {
             tokens.Add($"-p:{property}");
         }

@@ -511,6 +511,11 @@ internal sealed partial class ProjectRunService
         {
             (exitCode, stdout, stderr) = await dotNetService.RunDotnetCommandAsync(solutionDir, arguments, cancellationToken);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Honor Ctrl+C during solution discovery instead of reporting it as an unreadable solution.
+            throw;
+        }
         catch (Exception ex)
         {
             throw new ProjectRunException(
