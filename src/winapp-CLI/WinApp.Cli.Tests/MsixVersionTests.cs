@@ -70,11 +70,16 @@ public class MsixVersionTests
     }
 
     [TestMethod]
-    public void CompareTo_DifferentValues_OrdersCorrectly()
+    [DataRow("0.2.3.4", "7.2.3.4")]
+    [DataRow("1.2.3.4", "1.7.3.4")]
+    [DataRow("1.2.3.4", "1.2.7.4")]
+    [DataRow("1.2.3.4", "1.2.4.7")]
+    public void Equals_DifferentValues_AreNotEqual(string aString, string bString)
     {
-        var a = new MsixVersion(1, 2, 3, 4);
-        var b = new MsixVersion(1, 2, 3, 5);
-        Assert.IsTrue(a < b);
-        Assert.IsTrue(b > a);
+        var a = MsixVersion.Parse(aString);
+        var b = MsixVersion.Parse(bString);
+        Assert.AreNotEqual(a, b);
+        Assert.IsFalse(a == b);
+        Assert.IsTrue(a != b);
     }
 }

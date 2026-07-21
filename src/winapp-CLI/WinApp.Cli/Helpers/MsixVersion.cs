@@ -10,7 +10,7 @@ namespace WinApp.Cli.Helpers;
 /// Represents a canonical four-part MSIX identity version where each component is an unsigned
 /// 16-bit integer (<c>Major.Minor.Build.Revision</c>).
 /// </summary>
-internal readonly struct MsixVersion : IEquatable<MsixVersion>, IComparable<MsixVersion>, IComparable
+internal readonly record struct MsixVersion
 {
     public ushort Major { get; }
     public ushort Minor { get; }
@@ -75,54 +75,4 @@ internal readonly struct MsixVersion : IEquatable<MsixVersion>, IComparable<Msix
     }
 
     public override string ToString() => $"{Major}.{Minor}.{Build}.{Revision}";
-
-    public override bool Equals(object? obj) => obj is MsixVersion other && Equals(other);
-
-    public bool Equals(MsixVersion other) =>
-        Major == other.Major &&
-        Minor == other.Minor &&
-        Build == other.Build &&
-        Revision == other.Revision;
-
-    public override int GetHashCode() => HashCode.Combine(Major, Minor, Build, Revision);
-
-    public int CompareTo(MsixVersion other)
-    {
-        var majorComparison = Major.CompareTo(other.Major);
-        if (majorComparison != 0)
-        {
-            return majorComparison;
-        }
-
-        var minorComparison = Minor.CompareTo(other.Minor);
-        if (minorComparison != 0)
-        {
-            return minorComparison;
-        }
-
-        var buildComparison = Build.CompareTo(other.Build);
-        if (buildComparison != 0)
-        {
-            return buildComparison;
-        }
-
-        return Revision.CompareTo(other.Revision);
-    }
-
-    public int CompareTo(object? obj)
-    {
-        if (obj is null)
-        {
-            return 1;
-        }
-
-        return obj is MsixVersion other ? CompareTo(other) : throw new ArgumentException("Object must be of type MsixVersion.", nameof(obj));
-    }
-
-    public static bool operator ==(MsixVersion left, MsixVersion right) => left.Equals(right);
-    public static bool operator !=(MsixVersion left, MsixVersion right) => !left.Equals(right);
-    public static bool operator <(MsixVersion left, MsixVersion right) => left.CompareTo(right) < 0;
-    public static bool operator <=(MsixVersion left, MsixVersion right) => left.CompareTo(right) <= 0;
-    public static bool operator >(MsixVersion left, MsixVersion right) => left.CompareTo(right) > 0;
-    public static bool operator >=(MsixVersion left, MsixVersion right) => left.CompareTo(right) >= 0;
 }
