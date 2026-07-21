@@ -15,6 +15,10 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class ControlsFetchNoticeTests
 {
+    private static readonly string[] GalleryOnly = ["Gallery (WinUI 3)"];
+    private static readonly string[] ToolkitOnly = ["CommunityToolkit"];
+    private static readonly string[] GalleryAndToolkit = ["Gallery (WinUI 3)", "CommunityToolkit"];
+
     /// <summary>A real <see cref="CachedProviderBase"/> backed by a temp cache dir and a
     /// canned payload, so the base class's cache-vs-fetch decision (and thus the notice)
     /// is exercised for real.</summary>
@@ -67,7 +71,7 @@ public class ControlsFetchNoticeTests
             var data = await provider.LoadAsync(onFetchStarting: cold.Add);
             Assert.AreEqual(1, provider.FetchCalls);
             Assert.AreEqual(1, data.Scenarios.Length);
-            CollectionAssert.AreEqual(new[] { "Gallery (WinUI 3)" }, cold);
+            CollectionAssert.AreEqual(GalleryOnly, cold);
 
             // Warm cache (the cold load primed it) → served from disk → no fetch, no notice.
             var warm = new List<string>();
@@ -94,7 +98,7 @@ public class ControlsFetchNoticeTests
             await provider.LoadAsync(forceRefresh: true, onFetchStarting: notices.Add);
 
             Assert.AreEqual(2, provider.FetchCalls, "forceRefresh must re-fetch even with a warm cache");
-            CollectionAssert.AreEqual(new[] { "Gallery (WinUI 3)" }, notices);
+            CollectionAssert.AreEqual(GalleryOnly, notices);
         }
         finally
         {
@@ -116,7 +120,7 @@ public class ControlsFetchNoticeTests
             // First (cold) build: both providers fetch → notice fires for each.
             var cold = new List<string>();
             await service.GetEngineAsync(onFetchStarting: cold.Add);
-            CollectionAssert.AreEquivalent(new[] { "Gallery (WinUI 3)", "CommunityToolkit" }, cold);
+            CollectionAssert.AreEquivalent(GalleryAndToolkit, cold);
 
             // Second call: complete corpus was memoized → providers aren't reloaded → silent.
             var second = new List<string>();
@@ -146,13 +150,13 @@ public class ControlsFetchNoticeTests
 
             var first = new List<string>();
             await service.GetEngineAsync(onFetchStarting: first.Add);
-            CollectionAssert.AreEquivalent(new[] { "Gallery (WinUI 3)", "CommunityToolkit" }, first);
+            CollectionAssert.AreEquivalent(GalleryAndToolkit, first);
 
             // Not memoized (partial) → second call reloads. gallery is now warm (silent), but
             // the empty toolkit re-fetches → the notice is raised again for it.
             var second = new List<string>();
             await service.GetEngineAsync(onFetchStarting: second.Add);
-            CollectionAssert.AreEqual(new[] { "CommunityToolkit" }, second,
+            CollectionAssert.AreEqual(ToolkitOnly, second,
                 "the still-empty provider must re-fetch and re-raise the notice; the warm one stays silent");
             Assert.AreEqual(1, gallery.FetchCalls, "gallery served from warm cache on the second call");
             Assert.AreEqual(2, toolkit.FetchCalls, "empty toolkit re-fetched on the second call");
@@ -178,7 +182,7 @@ public class ControlsFetchNoticeTests
             var data = await provider.LoadAsync(onFetchStarting: notices.Add);
 
             Assert.AreEqual(0, data.Scenarios.Length, "an offline cold fetch yields no data");
-            CollectionAssert.AreEqual(new[] { "Gallery (WinUI 3)" }, notices,
+            CollectionAssert.AreEqual(GalleryOnly, notices,
                 "the notice fires even when the fetch itself fails");
         }
         finally

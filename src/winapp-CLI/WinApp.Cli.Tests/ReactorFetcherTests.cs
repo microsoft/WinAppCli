@@ -15,6 +15,9 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class ReactorFetcherTests
 {
+    private static readonly string[] FlexKeywords = ["css layout", "flex", "flexbox"];
+    private static readonly string[] AcrylicKeywords = ["material", "blur"];
+
     private const string SampleIndex = """
     {
       "controls": [
@@ -93,8 +96,8 @@ public class ReactorFetcherTests
     {
         var (_, tags) = ReactorFetcher.Parse(SampleIndex);
 
-        CollectionAssert.AreEqual(new[] { "css layout", "flex", "flexbox" }, tags["flex"]);
-        CollectionAssert.AreEqual(new[] { "material", "blur" }, tags["acrylic"]);
+        CollectionAssert.AreEqual(FlexKeywords, tags["flex"]);
+        CollectionAssert.AreEqual(AcrylicKeywords, tags["acrylic"]);
     }
 
     [TestMethod]

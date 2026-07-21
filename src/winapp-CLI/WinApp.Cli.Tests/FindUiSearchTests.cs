@@ -12,6 +12,8 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class FindUiSearchTests
 {
+    private static readonly string[] ExpectedProviderIds = ["gallery", "toolkit", "reactor"];
+
     private static Scenario Scn(string source, string controlId, string controlName, string id, string header, string? desc = null)
         => new()
         {
@@ -159,9 +161,9 @@ public class FindUiSearchTests
     {
         var providers = ProviderRegistry.CreateProviders(Path.Combine(Path.GetTempPath(), "find-ui-test-cache"));
         var ids = providers.Select(p => p.Id).ToList();
-        CollectionAssert.AreEqual(new[] { "gallery", "toolkit", "reactor" }, ids,
+        CollectionAssert.AreEqual(ExpectedProviderIds, ids,
             "the live provider factory must wire gallery, toolkit, and reactor in display order");
-        Assert.IsInstanceOfType(providers.Single(p => p.Id == "reactor"), typeof(ReactorProvider));
+        Assert.IsInstanceOfType<ReactorProvider>(providers.Single(p => p.Id == "reactor"));
     }
 
     [TestMethod]
