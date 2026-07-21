@@ -45,7 +45,7 @@ internal readonly record struct MsixVersion
         }
 
         // ST_VersionQuad XSD pattern validates exactly 4 parts separated by dots, from 0 to 65535, no leading zeroes except for 0 itself.
-        const string pattern = @"^(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])(\.(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])){3}$";
+        const string pattern = @"\A(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])(\.(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])){3}\z";
 
         if (!Regex.IsMatch(versionString, pattern, RegexOptions.None, TimeSpan.FromMilliseconds(100)))
         {

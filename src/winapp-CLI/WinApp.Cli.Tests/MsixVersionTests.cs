@@ -38,6 +38,7 @@ public class MsixVersionTests
     [DataRow("not.a.version")]
     [DataRow("65536.0.0.0")]
     [DataRow("0.0.0.0")]
+    [DataRow("1.0.0.0\n")]
     public void TryParse_InvalidInput_ReturnsFalse(string? input)
     {
         Assert.IsFalse(MsixVersion.TryParse(input, out var version));
