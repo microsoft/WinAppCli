@@ -1397,6 +1397,37 @@ public class ProjectRunServiceTests
         Assert.IsFalse(result);
     }
 
+    [TestMethod]
+    public async Task IsDefinitivelyUnpackagedAsync_CancellationDuringEvaluation_Rethrows()
+    {
+        // C9: a caller-requested cancellation during the evaluate probe must surface as
+        // OperationCanceledException, not be swallowed and reported as an indeterminate (false) result.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => throw new OperationCanceledException() };
+        var service = NewServiceWith(dotnet, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: []);
+
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(
+            () => service.IsDefinitivelyUnpackagedAsync(csproj, options, cts.Token));
+    }
+
+    [TestMethod]
+    public async Task IsDefinitivelyUnpackagedAsync_NonCancellationProcessException_ReturnsFalse()
+    {
+        // A transient process-launch failure (e.g. Win32Exception) is indeterminate — the probe must
+        // not crash the run before the authoritative post-build gate, so it returns false.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => throw new System.ComponentModel.Win32Exception("dotnet spawn failed") };
+        var service = NewServiceWith(dotnet, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: []);
+
+        var result = await service.IsDefinitivelyUnpackagedAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsFalse(result);
+    }
+
     private string UnpackagedPropertiesJson() =>
         $$"""{ "Properties": { "TargetDir": "{{_tempDir.FullName.Replace("\\", "\\\\")}}", "RunCommand": "", "WindowsPackageType": "None", "OutputType": "WinExe", "WindowsAppSDKSelfContained": "" } }""";
 
@@ -2119,6 +2150,20 @@ public class ProjectRunServiceTests
         var service = NewServiceWith(dotnet, out _);
 
         Assert.IsNull(await service.CheckSdkAsync(_tempDir, CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task CheckSdkAsync_CancellationDuringProbe_Rethrows()
+    {
+        // C8: a caller-requested cancellation during the `dotnet --version` probe must surface as
+        // OperationCanceledException, not be swallowed and reported as a missing SDK.
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => throw new OperationCanceledException() };
+        var service = NewServiceWith(dotnet, out _);
+
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(
+            () => service.CheckSdkAsync(_tempDir, cts.Token));
     }
 
     #endregion

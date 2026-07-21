@@ -54,6 +54,11 @@ internal sealed partial class ProjectRunService(
         {
             (exitCode, output, _) = await dotNetService.RunDotnetCommandAsync(workingDirectory, "--version", cancellationToken);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Honor Ctrl+C during the SDK probe instead of reporting it as a missing SDK.
+            throw;
+        }
         catch (Exception)
         {
             // dotnet not on PATH → Process.Start throws.
@@ -280,7 +285,24 @@ internal sealed partial class ProjectRunService(
         // WindowsPackageType we read matches what the build would see. It is evaluate-only — no build
         // is triggered — which is why this is cheap enough to run before deciding to build.
         var evaluateArgs = BuildEvaluateArguments(csproj, options, csWinRTMetadata);
-        var (exitCode, stdout, _) = await dotNetService.RunDotnetCommandAsync(workingDir, evaluateArgs, cancellationToken);
+        int exitCode;
+        string stdout;
+        try
+        {
+            (exitCode, stdout, _) = await dotNetService.RunDotnetCommandAsync(workingDir, evaluateArgs, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // Starting or communicating with dotnet failed (e.g. a transient Win32Exception) →
+            // indeterminate. Don't crash the run before the authoritative build; let the normal build +
+            // gate surface the real error and classify packaging.
+            return false;
+        }
+
         if (exitCode != 0)
         {
             // Evaluation failed → indeterminate. Don't fail fast; let the normal build + authoritative

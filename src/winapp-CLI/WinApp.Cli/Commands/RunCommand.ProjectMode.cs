@@ -282,12 +282,24 @@ internal partial class RunCommand
                             await msixService.EnsureWindowsAppRuntimeInstalledAsync(csproj, resolution.Architecture, resolution.Framework, taskContext, ct);
                             return (0, "Windows App Runtime ready");
                         }
+                        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                        {
+                            // Honor Ctrl+C instead of translating it into a runtime-prep failure message.
+                            throw;
+                        }
                         catch (Exception ex)
                         {
                             return (1, $"{UiSymbols.Error} Failed to prepare the Windows App Runtime: {ex.Message}");
                         }
                     },
                     cancellationToken);
+
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    // Ctrl+C during runtime prep — exit as cancelled (matching the launched-process wait)
+                    // rather than reporting a genuine "Failed to prepare the Windows App Runtime" error.
+                    return -1;
+                }
 
                 if (runtimeResult != 0)
                 {
