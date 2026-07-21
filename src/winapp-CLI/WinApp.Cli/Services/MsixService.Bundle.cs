@@ -157,8 +157,7 @@ internal partial class MsixService
             var sortedArches = detectedArchitectures.OrderBy(a => a, StringComparer.OrdinalIgnoreCase).ToList();
             var archSuffix = string.Join("_", sortedArches);
 
-            // Still uses the (now validated) `extractedVersion` string for the filename to preserve the original manifest
-            // value, preserving compatibility with existing scripts globbing filenames where leading zeroes are expected.
+            // Keep using the `extractedVersion` string for the filename to preserve the existing naming convention.
             var defaultBundleFileName = $"{finalPackageName}_{extractedVersion}_{archSuffix}.msixbundle";
 
             FileInfo outputBundlePath;
