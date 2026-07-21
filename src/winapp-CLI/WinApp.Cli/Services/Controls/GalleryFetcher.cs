@@ -539,7 +539,7 @@ internal static partial class GalleryFetcher
     /// prefers the most recent depth=0 cut. When none exists in the prefix, cuts at
     /// the last newline and appends synthetic `}` braces equal to the open depth so
     /// agents can copy the snippet without the build breaking on unbalanced braces.</summary>
-    private static string TruncateCode(string code, int maxChars, string marker)
+    internal static string TruncateCode(string code, int maxChars, string marker)
     {
         if (code.Length <= maxChars) return code;
 
@@ -548,10 +548,15 @@ internal static partial class GalleryFetcher
             int depth = 0, lastZeroPos = -1, finalDepth = 0;
             bool inStr = false, inChr = false, inLine = false, inBlk = false, inVerb = false;
             int lastBeforeMax = 0;
+            // Track the last newline boundary reached at a known brace depth, so that
+            // when we have to cut back to a line we append exactly the closers that
+            // line needs — measured AT the cut, not at maxChars (braces between the cut
+            // and maxChars would otherwise skew the closer count and emit broken C#).
+            int safeCutPos = 0, depthAtSafeCut = 0;
             for (int i = 0; i < code.Length && i < maxChars; i++)
             {
                 char c = code[i]; char prev = i > 0 ? code[i - 1] : '\0';
-                if (inLine) { if (c == '\n') inLine = false; continue; }
+                if (inLine) { if (c == '\n') { inLine = false; safeCutPos = i + 1; depthAtSafeCut = depth; } continue; }
                 if (inBlk)  { if (c == '/' && prev == '*') inBlk = false; continue; }
                 if (inStr)
                 {
@@ -567,14 +572,23 @@ internal static partial class GalleryFetcher
                 if (c == '\'') { inChr = true; continue; }
                 if (c == '{') depth++;
                 else if (c == '}') { depth--; if (depth == 0) lastZeroPos = i + 1; }
+                else if (c == '\n') { safeCutPos = i + 1; depthAtSafeCut = depth; }
                 lastBeforeMax = i + 1;
                 finalDepth = depth;
             }
             if (lastZeroPos > 0)
                 return code.Substring(0, lastZeroPos).TrimEnd() + "\n" + marker;
-            int cut1 = code.LastIndexOf('\n', Math.Min(lastBeforeMax, code.Length) - 1);
-            if (cut1 < 0) cut1 = lastBeforeMax;
-            var prefix = code.Substring(0, cut1).TrimEnd();
+            // No clean top-level close within the cap. Prefer cutting at the last
+            // recorded newline boundary and closing to the depth measured there.
+            if (safeCutPos > 0)
+            {
+                var prefixSafe = code.Substring(0, safeCutPos).TrimEnd();
+                var closersSafe = depthAtSafeCut > 0 ? "\n" + new string('}', depthAtSafeCut) : "";
+                return prefixSafe + closersSafe + "\n" + marker;
+            }
+            // No newline boundary at all (single very long line): fall back to the raw
+            // prefix with the depth measured at that same cut point.
+            var prefix = code.Substring(0, Math.Min(lastBeforeMax, code.Length)).TrimEnd();
             var closers = finalDepth > 0 ? "\n" + new string('}', finalDepth) : "";
             return prefix + closers + "\n" + marker;
         }
