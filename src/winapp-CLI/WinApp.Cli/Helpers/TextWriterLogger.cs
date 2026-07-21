@@ -128,6 +128,12 @@ public sealed class TextWriterLoggerProvider : ILoggerProvider, ISupportExternal
 
 internal sealed class OutputCapture : StringWriter, IDisposable
 {
+    // _stdOutWriter is intentionally not disposed: it is a borrowed reference whose lifetime
+    // is managed externally (Console.Error / TestConsole writer). Disposing it in a parallel-test
+    // environment closes the shared stderr stream and breaks other concurrently-running tests.
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Usage", "CA2213:Disposable fields should be disposed",
+        Justification = "Borrowed reference — caller owns the lifetime; we must not close it.")]
     private readonly TextWriter _stdOutWriter;
     public override Encoding Encoding => Encoding.ASCII;
 
@@ -150,10 +156,7 @@ internal sealed class OutputCapture : StringWriter, IDisposable
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing)
-        {
-            _stdOutWriter.Dispose();
-        }
+        // Do NOT dispose _stdOutWriter — see field declaration comment.
         base.Dispose(disposing);
     }
 

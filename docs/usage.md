@@ -138,33 +138,6 @@ winapp restore [options]
 winapp restore
 ```
 
-**Custom and private NuGet feeds:**
-
-`winapp init`, `restore`, and `update` download the Windows SDK and Windows App SDK packages through NuGet, honoring your standard [`nuget.config`](https://learn.microsoft.com/nuget/reference/nuget-config-file) hierarchy (project, user, and machine level). This lets you:
-
-- **Use a private feed or mirror** — add it under `<packageSources>` (for example, an internal Azure Artifacts feed that mirrors the SDK packages). winapp queries every enabled source — over HTTPS, or a local folder path — and, for `init`/`update`, selects the highest listed version across all of them. A plain-**HTTP** feed is refused unless it explicitly opts in with `allowInsecureConnections="true"` on the `<add>` entry, because the SDK packages are executables and an unencrypted feed is a code-substitution vector; switch the mirror to HTTPS or set that attribute. If your `nuget.config` defines a [`<packageSourceMapping>`](https://learn.microsoft.com/nuget/consume-packages/package-source-mapping), only the sources mapped to a given package are queried for it — an enabled feed that the mapping excludes is intentionally skipped, so a package that is not mapped to any source fails to resolve rather than falling back to an unmapped feed. To make winapp use *only* your feed (e.g., an air-gapped mirror), `<clear />` the inherited sources and add just yours.
-- **Authenticate to private feeds** — credentials stored in `nuget.config` (`<packageSourceCredentials>`), environment-based credentials, and NuGet credential-provider plugins (such as the Azure Artifacts provider) are all used automatically. Interactive prompts appear only on interactive terminals; CI and other non-interactive runs rely on pre-configured or environment credentials.
-- **Control the package cache location** — the global packages folder is resolved from the `NUGET_PACKAGES` environment variable or the `globalPackagesFolder` setting in `nuget.config`, falling back to `~/.nuget/packages`.
-
-Example `nuget.config` that restores the SDK packages exclusively from a private mirror:
-
-```xml
-<?xml version="1.0" encoding="utf-8"?>
-<configuration>
-  <packageSources>
-    <clear />
-    <add key="contoso" value="https://pkgs.dev.azure.com/contoso/_packaging/winsdk-mirror/nuget/v3/index.json" />
-  </packageSources>
-</configuration>
-```
-
-> **Security note:** winapp honors the `nuget.config` in the selected project/config directory — the working directory by default, or the directory you pass to `winapp init <dir>` / `restore --config-dir <dir>` — so it restores SDK packages from whatever feeds, and into whatever `globalPackagesFolder`, that config specifies. Only run `winapp init`/`restore`/`update` against directories you trust, the same caution that applies to `dotnet restore`/`dotnet build`. When more than one source is configured, use [Package Source Mapping](https://learn.microsoft.com/nuget/consume-packages/package-source-mapping) (`<packageSourceMapping>`) to pin each package to a specific feed and mitigate dependency-confusion attacks. Note that mapping governs where a package is *downloaded from*, not one already present in the global packages folder: NuGet — and winapp's cache check that reuses a completed package — restores an already-cached package regardless of which feed first populated it. If you rely on mapping for source *trust*, restore into a clean or repository-scoped global packages folder (set `NUGET_PACKAGES` or `globalPackagesFolder`) so a package can't be reused from a copy a different feed populated earlier.
-
-> **Resolution limitations:** winapp targets the curated Windows App SDK dependency graphs and resolves them as it installs, so it does **not** implement NuGet's full graph unification. Two consequences to be aware of when pointing it at arbitrary private feeds:
->
-> - **Diamond dependencies keep the first-selected version.** When two branches of the graph require the same package at *different lower bounds* (for example `[1.0,)` on one path and `[2.0,)` on another), winapp keeps the version chosen by the first branch it resolved rather than upgrading to a version that satisfies both. A graph whose ranges are genuinely *incompatible* (for example `[1.0,2.0)` and `[2.0,3.0)`, which no single version can satisfy) still fails the restore.
-> - **Flat-container-only feeds can't hide unlisted versions.** A v3 feed that exposes only a `PackageBaseAddress` (flat container) resource with **no** registration resource carries no listed/unlisted flag, so `init`/`update` may select an unlisted version as "latest". Registration-backed feeds — nuget.org and most Azure Artifacts feeds — are unaffected.
-
 ---
 
 ### update
@@ -1107,10 +1080,13 @@ winapp ui [command] [options]
 - `get-property` - Read element properties
 - `get-text` / `get-value` - Read value/text from element (TextPattern, ValuePattern, or Name)
 - `screenshot` - Capture window/element as PNG (auto-captures dialogs separately)
+- `record` - Record a window/element region to an H.264 MP4 video (Windows Graphics Capture + Media Foundation)
 - `invoke` - Activate element (click, toggle, expand)
 - `click` - Click element via mouse simulation (for controls that don't support invoke)
 - `hover` - Move mouse to element to trigger tooltips, flyouts, and hover states (default dwell: 800ms)
-- `drag` - Drag the mouse from one point to another, by element selector or app `x,y` coordinates (reorder, resize, sliders, drag-and-drop)
+- `drag` - Drag the mouse from one point to another, by element selector or screen `x,y` coordinates (reorder, resize, sliders, drag-and-drop)
+- `touch` - Inject synthetic touch gestures (tap, double-tap, long-press, swipe, pinch, stretch) at an element center or screen `x,y` coordinates
+- `pen` - Inject synthetic pen/stylus input — taps and ink strokes with configurable pressure, tilt, and eraser mode
 - `send-keys` - Send synthetic keyboard input (named keys, combos, raw vk=0xNN, or literal text) to a window
 - `set-value` - Set value on editable element (text, number); falls back to LegacyIAccessible `put_accValue` for TextPattern-only rich-edit controls
 - `focus` - Move keyboard focus
@@ -1122,5 +1098,38 @@ winapp ui [command] [options]
 **Options:**
 - `-a, --app <app>` - Target app (name, title, or PID)
 - `-w, --window <hwnd>` - Target window by HWND (stable)
+
+#### ui record
+
+Record the target window — or a single element's region — to an H.264 MP4 video. Frames are
+captured via Windows Graphics Capture (with a PrintWindow fallback) and encoded incrementally with
+Media Foundation, so long recordings never buffer in memory.
+
+```bash
+# Record a window for 10 seconds at 15 fps
+winapp ui record -a Calculator --duration-sec 10 --fps 15 -o demo.mp4
+
+# Record until Ctrl+C, downscaled so the longest edge is 1280px
+winapp ui record -a "My App" --duration-sec 0 --max-edge 1280 -o capture.mp4
+
+# Record just one element's region
+winapp ui record -a "My App" btn-save-1234 -o button.mp4
+```
+
+**Record options:**
+- `--duration-sec <n>` - Recording length in seconds. `0` records until Ctrl+C (default `0`).
+- `--fps <n>` - Frames per second to capture (default `15`).
+- `--max-edge <px>` - Downscale so the longest edge is at most this many pixels (`0` = no downscale).
+- `--capture-screen` - Capture from the screen so overlays/popups are included (may capture occluding windows).
+- `-o, --output <path>` - Output `.mp4` path (defaults to `recording-<timestamp>-<guid>.mp4`).
+
+With `--json`, emits a `UiRecordResult` envelope including the output `path`, `frames`, `width`,
+`height`, `fileSize`, `codec` (`"h264"`), and `mode` — the capture path actually used
+(`wgc`, `printwindow`, or `screen`).
+
+> **Known limitation:** recording a *specific element* inside a popup that renders in its own
+> top-level window (WinUI/XAML flyout, teaching tip, tooltip) may capture the underlying main
+> window instead. Record the whole window, or use `ui screenshot --capture-screen` for popup
+> stills. Tracked in [#646](https://github.com/microsoft/winappCli/issues/646).
 
 For full documentation, see [docs/ui-automation.md](ui-automation.md).

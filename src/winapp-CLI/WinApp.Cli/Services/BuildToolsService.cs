@@ -97,14 +97,9 @@ internal partial class BuildToolsService(
         // Check if we have a pinned version
         if (!string.IsNullOrWhiteSpace(pinnedVersion))
         {
-            // A pin may be shorthand (e.g. "1.0"); the cache uses NuGet's canonical folder name ("1.0.0"),
-            // so normalize before matching directory names — otherwise a valid shorthand pin would never
-            // match and would fall through to the strict null return below.
-            var normalizedPin = NugetService.NormalizeVersion(pinnedVersion);
-
             // Look for the specific pinned version directory
             selectedVersionDir = versionDirs
-                .FirstOrDefault(d => string.Equals(d.Name, normalizedPin, StringComparison.OrdinalIgnoreCase));
+                .FirstOrDefault(d => string.Equals(d.Name, pinnedVersion, StringComparison.OrdinalIgnoreCase));
 
             // If pinned version is specified but not found, return null (strict requirement).
             if (selectedVersionDir == null)

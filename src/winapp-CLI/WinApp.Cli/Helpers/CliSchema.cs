@@ -22,6 +22,7 @@ namespace WinApp.Cli.Helpers;
 [JsonSerializable(typeof(Dictionary<string, CliSchema.CommandDetails>))]
 [JsonSerializable(typeof(IfExists))]
 [JsonSerializable(typeof(ManifestTemplates))]
+[JsonSerializable(typeof(float))]
 [JsonSourceGenerationOptions(
     WriteIndented = true,
     NewLine = "\n",

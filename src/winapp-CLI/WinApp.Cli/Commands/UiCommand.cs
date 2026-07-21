@@ -16,9 +16,12 @@ internal class UiCommand : Command, IShortDescription
         UiGetPropertyCommand getPropertyCommand,
         UiGetValueCommand getValueCommand,
         UiScreenshotCommand screenshotCommand,
+        UiRecordCommand recordCommand,
         UiInvokeCommand invokeCommand,
         UiClickCommand clickCommand,
         UiDragCommand dragCommand,
+        UiTouchCommand touchCommand,
+        UiPenCommand penCommand,
         UiHoverCommand hoverCommand,
         UiSendKeysCommand sendKeysCommand,
         UiSetValueCommand setValueCommand,
@@ -37,9 +40,12 @@ internal class UiCommand : Command, IShortDescription
         Subcommands.Add(getPropertyCommand);
         Subcommands.Add(getValueCommand);
         Subcommands.Add(screenshotCommand);
+        Subcommands.Add(recordCommand);
         Subcommands.Add(invokeCommand);
         Subcommands.Add(clickCommand);
         Subcommands.Add(dragCommand);
+        Subcommands.Add(touchCommand);
+        Subcommands.Add(penCommand);
         Subcommands.Add(hoverCommand);
         Subcommands.Add(sendKeysCommand);
         Subcommands.Add(setValueCommand);

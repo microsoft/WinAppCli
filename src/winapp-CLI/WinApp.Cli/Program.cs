@@ -76,6 +76,30 @@ internal static class Program
             {
                 Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", caller);
             }
+
+            // Reject an invalid '='-attached value on ANY boolean option reachable by the selected
+            // command — a global flag like --json=bogus or a command flag like --eraser=bogus.
+            // System.CommandLine silently coerces such a value to TRUE with no parse error, which
+            // would (a) silently enable a flag the user never set (e.g. the pen eraser) and (b) for
+            // --json leave logging un-suppressed, so the human ❌ line and the JSON envelope BOTH hit
+            // stderr and corrupt machine-readable output. Fail fast HERE — before the first-run /
+            // update notice can print anything (M1) — with a single clean invalid_arguments error,
+            // mirroring how the parser already rejects other malformed values (e.g. --pressure nope).
+            if (TryFindInvalidBooleanOption(parseResult, args, out var invalidBoolOption, out var invalidBoolValue))
+            {
+                var message =
+                    $"Cannot parse argument '{invalidBoolValue}' for option '{invalidBoolOption}' as expected type 'System.Boolean'.";
+                if (ResolveEffectiveJson(parseResult) && IsUiDescendant(parseResult))
+                {
+                    UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments, message);
+                }
+                else
+                {
+                    Console.Error.WriteLine(message);
+                }
+
+                return 1;
+            }
         }
 
         // Skip first-run notice for machine-readable output modes and completions
@@ -109,6 +133,11 @@ internal static class Program
 
         var parsedArgs = parseResult!;
 
+        // Derive the effective JSON mode from the SELECTED command's PARSED --json value (M1).
+        // The pre-scan (json) is value-aware but still a heuristic; the parsed value is the truth.
+        // Reading the parsed bool works even when a different option (e.g. --pressure) failed parse.
+        bool effectiveJson = ResolveEffectiveJson(parsedArgs);
+
         // Catch single-dash typos like "-app" before invocation so the user gets a clear
         // "Did you mean --app?" message instead of System.CommandLine's confusing
         // "Unrecognized command or argument" pointing at the wrong token (issue #467).
@@ -120,9 +149,27 @@ internal static class Program
             if (typo is not null)
             {
                 var suggested = "-" + typo;
-                Console.Error.WriteLine($"Unknown option '{typo}'. Did you mean '{suggested}'?");
-                Console.Error.WriteLine(
-                    "(Single-dash flags are reserved for short aliases like '-a'. Long options use a double dash.)");
+                if (effectiveJson && IsUiDescendant(parsedArgs))
+                {
+                    // Gate on IsUiDescendant so that non-ui commands (e.g. cert info) fall through
+                    // to default error handling instead of receiving the nested UI schema (M2).
+                    if (!isCompleteMode)
+                    {
+                        CommandInvokedEvent.Log(parsedArgs.CommandResult);
+                    }
+                    UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments,
+                        $"Unknown option '{typo}'. Did you mean '{suggested}'?");
+                    if (!isCompleteMode)
+                    {
+                        CommandCompletedEvent.Log(parsedArgs.CommandResult, 1);
+                    }
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Unknown option '{typo}'. Did you mean '{suggested}'?");
+                    Console.Error.WriteLine(
+                        "(Single-dash flags are reserved for short aliases like '-a'. Long options use a double dash.)");
+                }
                 return 1;
             }
         }
@@ -177,6 +224,24 @@ internal static class Program
                 logCommandInvoked(parsedArgs.CommandResult);
             }
 
+            bool effectiveJson = ResolveEffectiveJson(parsedArgs);
+
+            // Parse-error → JSON bridge: activated only when the SELECTED command exposes --json,
+            // its parsed value is true (effectiveJson), AND the command is a ui descendant (M3).
+            // Non-ui commands (e.g. cert info) use a flat {"error":"..."} schema — do not impose
+            // the UI nested contract on them; let SCL's default parse-error handling run instead.
+            // M3: emit CommandCompletedEvent before the early return to keep telemetry paired.
+            if (effectiveJson && parsedArgs.Errors.Count > 0 && IsUiDescendant(parsedArgs))
+            {
+                var errorMsg = string.Join("; ", parsedArgs.Errors.Select(e => e.Message));
+                UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments, errorMsg);
+                if (!isCompleteMode)
+                {
+                    logCommandCompleted(parsedArgs.CommandResult, 1);
+                }
+                return 1;
+            }
+
             var returnCode = await invoke();
 
             if (!isCompleteMode)
@@ -192,6 +257,96 @@ internal static class Program
             Console.Error.WriteLine($"An unexpected error occurred: {ex.Message}");
             return 1;
         }
+    }
+
+    /// <summary>
+    /// Derives the effective JSON mode from the selected command's PARSED <c>--json</c> option.
+    /// Reading the parsed value is reliable even when a different option caused a parse error,
+    /// because System.CommandLine parses each option independently (M1).
+    /// </summary>
+    private static bool ResolveEffectiveJson(System.CommandLine.ParseResult parsedArgs)
+    {
+        // Only engage when the selected (innermost) command actually owns --json.
+        var selectedCmd = parsedArgs.CommandResult.Command;
+        if (!selectedCmd.Options.Contains(WinAppRootCommand.JsonOption))
+        {
+            return false;
+        }
+        try
+        {
+            return parsedArgs.GetValue(WinAppRootCommand.JsonOption);
+        }
+        catch
+        {
+            // If reading the parsed value fails for any reason, do not fire the bridge.
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when the selected command is the <c>ui</c> command
+    /// or any of its descendants. Used to scope the parse-error JSON bridge to ui commands
+    /// only, leaving non-ui commands (e.g. <c>cert info</c>) with their own flat error schema (M3).
+    /// </summary>
+    private static bool IsUiDescendant(System.CommandLine.ParseResult parseResult)
+    {
+        var cmd = parseResult.CommandResult.Command;
+        while (cmd is not null)
+        {
+            if (cmd.Name == "ui")
+            {
+                return true;
+            }
+            cmd = cmd.Parents.OfType<System.CommandLine.Command>().FirstOrDefault();
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Scans argv for an invalid <c>=</c>-attached value on any boolean option reachable by the
+    /// selected command — the command's own <see cref="System.CommandLine.Option{T}"/> boolean
+    /// options plus inherited/global ones on ancestor commands (e.g. <c>--json</c>/<c>--verbose</c>/
+    /// <c>--quiet</c> on the root, or <c>--eraser</c> on <c>ui pen</c>). System.CommandLine silently
+    /// coerces a non-boolean attached value (e.g. <c>--eraser=bogus</c>) to <see langword="true"/>;
+    /// the caller uses this to reject it with a clean error instead (#600 H1/M1/M2).
+    /// </summary>
+    private static bool TryFindInvalidBooleanOption(
+        System.CommandLine.ParseResult parseResult,
+        string[] args,
+        out string optionName,
+        out string invalidValue)
+    {
+        optionName = string.Empty;
+        invalidValue = string.Empty;
+
+        // Walk the selected command up through its ancestors so both command-level bool options
+        // and inherited/global ones are covered. Dedupe by name in case an option appears twice.
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var cmd = parseResult.CommandResult.Command;
+        while (cmd is not null)
+        {
+            foreach (var option in cmd.Options)
+            {
+                if (option is not System.CommandLine.Option<bool>)
+                {
+                    continue;
+                }
+                if (!seen.Add(option.Name))
+                {
+                    continue;
+                }
+                if (GlobalOptionPreScan.TryFindInvalidBooleanValue(args, option.Name, option.Aliases, out var badValue))
+                {
+                    optionName = option.Name;
+                    invalidValue = badValue;
+                    return true;
+                }
+            }
+
+            cmd = cmd.Parents.OfType<System.CommandLine.Command>().FirstOrDefault();
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -215,20 +370,20 @@ internal static class Program
         bool verbose = false;
         bool json = false;
 
-        if (GlobalOptionPreScan.IsFlagPresent(args, WinAppRootCommand.VerboseOption.Name, WinAppRootCommand.VerboseOption.Aliases))
+        verbose = GlobalOptionPreScan.GetBooleanFlagValue(args, WinAppRootCommand.VerboseOption.Name, WinAppRootCommand.VerboseOption.Aliases);
+        if (verbose)
         {
             minimumLogLevel = LogLevel.Debug;
-            verbose = true;
         }
-        if (GlobalOptionPreScan.IsFlagPresent(args, WinAppRootCommand.QuietOption.Name, WinAppRootCommand.QuietOption.Aliases))
+        quiet = GlobalOptionPreScan.GetBooleanFlagValue(args, WinAppRootCommand.QuietOption.Name, WinAppRootCommand.QuietOption.Aliases);
+        if (quiet)
         {
             minimumLogLevel = LogLevel.Warning;
-            quiet = true;
         }
-        if (GlobalOptionPreScan.IsFlagPresent(args, WinAppRootCommand.JsonOption.Name, WinAppRootCommand.JsonOption.Aliases))
+        json = GlobalOptionPreScan.GetBooleanFlagValue(args, WinAppRootCommand.JsonOption.Name, WinAppRootCommand.JsonOption.Aliases);
+        if (json)
         {
             minimumLogLevel = LogLevel.None;
-            json = true;
         }
 
         string? conflictError = null;

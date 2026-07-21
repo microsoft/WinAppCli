@@ -88,6 +88,33 @@ internal class FakeUiAutomationService : IUiAutomationService
         return WindowsByPidResult;
     }
 
+    /// <summary>When non-null, <see cref="FindSingleElementAsync"/> throws this exception instead of
+    /// returning a result. Use to simulate selector-ambiguity or other UIA failures.</summary>
+    public Exception? FindSingleElementThrowException { get; set; }
+
+    /// <summary>The rectangle returned for any nonzero handle (default: 0,0 – 1920,1080).</summary>
+    public WinApp.Cli.Helpers.PointerRect WindowRect { get; set; } = new(0, 0, 1920, 1080);
+
+    /// <summary>When <see langword="false"/>, reports the window rect as unreadable (returns false).</summary>
+    public bool WindowRectAllow { get; set; } = true;
+
+    /// <summary>Records each <see cref="TryGetWindowRect"/> call so tests can distinguish the
+    /// hwnd-0 rejection (no lookup) from the out-of-bounds rejection (lookup happened).</summary>
+    public List<long> WindowRectCalls { get; } = [];
+
+    public bool TryGetWindowRect(long hwnd, out WinApp.Cli.Helpers.PointerRect rect)
+    {
+        WindowRectCalls.Add(hwnd);
+        if (!WindowRectAllow || hwnd == 0)
+        {
+            rect = default;
+            return false;
+        }
+
+        rect = WindowRect;
+        return true;
+    }
+
     public Task<UiElement[]> InspectAsync(UiSessionInfo session, string? elementId, int depth, CancellationToken ct)
     {
         if (InspectThrow is not null) { throw InspectThrow; }
@@ -108,6 +135,7 @@ internal class FakeUiAutomationService : IUiAutomationService
 
     public Task<UiElement?> FindSingleElementAsync(UiSessionInfo session, SelectorExpression selector, CancellationToken ct)
     {
+        if (FindSingleElementThrowException is not null) { throw FindSingleElementThrowException; }
         if (FindSingleThrow is not null) { throw FindSingleThrow; }
         if (FindSingleThrowCount > 0)
         {
@@ -152,6 +180,47 @@ internal class FakeUiAutomationService : IUiAutomationService
     {
         if (ScreenshotThrow is not null) { throw ScreenshotThrow; }
         return Task.FromResult(ScreenshotResult);
+    }
+
+    /// <summary>Configurable result for <see cref="RecordAsync"/>. The fake writes a tiny placeholder file to the output path.</summary>
+    public RecordCaptureResult RecordResult { get; set; } = new() { Frames = 3, Width = 2, Height = 2, FileSize = 0, Mode = "wgc" };
+
+    /// <summary>When non-null, <see cref="RecordAsync"/> throws this exception instead of writing a file.</summary>
+    public Exception? RecordException { get; set; }
+
+    /// <summary>
+    /// When <see langword="true"/>, <see cref="RecordAsync"/> signals readiness (calls onRecordingStarted)
+    /// then blocks on the cancellation token rather than returning immediately. This lets tests verify that
+    /// a stop signal (stdin EOF, Ctrl+C) cancels an in-progress recording and produces a graceful result.
+    /// </summary>
+    public bool RecordShouldWaitForCancellation { get; set; }
+
+    public async Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action? onRecordingStarted = null)
+    {
+        if (RecordException is not null)
+        {
+            throw RecordException;
+        }
+        await File.WriteAllBytesAsync(options.OutputPath, new byte[16], CancellationToken.None);
+        // Signal readiness before returning — mirrors the real service behavior (encoder is
+        // initialized and the first frame has been captured at this point).
+        onRecordingStarted?.Invoke();
+        if (RecordShouldWaitForCancellation)
+        {
+            // Block until cancelled — simulates a long recording that is stopped early
+            // by a stdin EOF, Ctrl+C, or a duration-expiry. The real RecordAsync returns
+            // normally (not via exception) when cancelled inside the frame loop.
+            try { await Task.Delay(Timeout.Infinite, ct); } catch (OperationCanceledException) { /* graceful stop */ }
+        }
+        var size = new FileInfo(options.OutputPath).Length;
+        return new RecordCaptureResult
+        {
+            Frames = RecordResult.Frames,
+            Width = RecordResult.Width,
+            Height = RecordResult.Height,
+            FileSize = size,
+            Mode = RecordResult.Mode,
+        };
     }
 
     public Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
@@ -216,12 +285,17 @@ internal class FakeUiSessionService : IUiSessionService
         WindowTitle = "Test Window"
     };
 
+    /// <summary>When non-null, <see cref="ResolveSessionAsync"/> throws this exception instead
+    /// of returning <see cref="SessionResult"/>. Use to test command-level exception handling.</summary>
+    public Exception? ThrowException { get; set; }
+
     /// <summary>When set, <see cref="ResolveSessionAsync"/> throws this — drives a command's generic
     /// (or COMException) catch from inside its <c>try</c>, before any element work. Default null = no-op.</summary>
     public Exception? ResolveThrow { get; set; }
 
     public Task<UiSessionInfo> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct)
     {
+        if (ThrowException is not null) { throw ThrowException; }
         if (ResolveThrow is not null) { throw ResolveThrow; }
         return Task.FromResult(SessionResult);
     }
@@ -255,6 +329,56 @@ internal class FakeMouseInput : WinApp.Cli.Helpers.IMouseInput
 }
 
 /// <summary>
+/// Fake pointer input for testing — records injected touch contacts and pen strokes instead of
+/// issuing real synthetic-pointer injection.
+/// </summary>
+internal class FakePointerInput : WinApp.Cli.Helpers.IPointerInput
+{
+    public record TouchCall(
+        WinApp.Cli.Helpers.TouchGesture Gesture,
+        IReadOnlyList<IReadOnlyList<WinApp.Cli.Helpers.PointerPoint>> ContactPaths,
+        int HoldMs,
+        int DurationMs);
+
+    public record PenCall(
+        IReadOnlyList<WinApp.Cli.Helpers.PointerPoint> Path,
+        float Pressure,
+        int TiltX,
+        int TiltY,
+        bool Eraser,
+        int DurationMs);
+
+    public List<TouchCall> TouchCalls { get; } = [];
+    public List<PenCall> PenCalls { get; } = [];
+
+    /// <summary>When non-null, both Touch() and Pen() throw this exception instead of recording the call.
+    /// Use to test command-level exception handling without a live injection path.</summary>
+    public Exception? ThrowException { get; set; }
+
+    public void Touch(
+        WinApp.Cli.Helpers.TouchGesture gesture,
+        IReadOnlyList<IReadOnlyList<WinApp.Cli.Helpers.PointerPoint>> contactPaths,
+        int holdMs,
+        int durationMs)
+    {
+        if (ThrowException is not null) { throw ThrowException; }
+        TouchCalls.Add(new(gesture, contactPaths, holdMs, durationMs));
+    }
+
+    public void Pen(
+        IReadOnlyList<WinApp.Cli.Helpers.PointerPoint> path,
+        float pressure,
+        int tiltX,
+        int tiltY,
+        bool eraser,
+        int durationMs)
+    {
+        if (ThrowException is not null) { throw ThrowException; }
+        PenCalls.Add(new(path, pressure, tiltX, tiltY, eraser, durationMs));
+    }
+}
+
+/// <summary>
 /// Fake keyboard input for testing — records the actions/transport instead of issuing real input.
 /// </summary>
 internal class FakeKeyboardInput : WinApp.Cli.Helpers.IKeyboardInput
@@ -263,8 +387,18 @@ internal class FakeKeyboardInput : WinApp.Cli.Helpers.IKeyboardInput
 
     public List<SendCall> SendCalls { get; } = [];
 
+    /// <summary>When set, <see cref="Send"/> records the call then throws this — lets a test drive the
+    /// command's exception mapping (e.g. a mid-injection <c>ForegroundLostException</c> → foreground_not_target).</summary>
+    public Exception? SendException { get; set; }
+
     public void Send(long hwnd, IReadOnlyList<WinApp.Cli.Helpers.KeyAction> actions, WinApp.Cli.Helpers.KeyTransport transport)
-        => SendCalls.Add(new(hwnd, actions, transport));
+    {
+        SendCalls.Add(new(hwnd, actions, transport));
+        if (SendException is not null)
+        {
+            throw SendException;
+        }
+    }
 }
 
 /// <summary>
@@ -287,6 +421,11 @@ internal class FakeForegroundGuard : WinApp.Cli.Helpers.IForegroundGuard
 
     /// <summary>Error emitted on denial — defaults to the locked-desktop reason.</summary>
     public string DenyCode { get; set; } = WinApp.Cli.Helpers.UiJsonError.CodeNoInteractiveDesktop;
+
+    /// <summary>Value returned by <see cref="IsRemoteSession"/> — drives the remote-session delivery warning on touch/pen.</summary>
+    public bool IsRemoteSessionResult { get; set; }
+
+    public bool IsRemoteSession() => IsRemoteSessionResult;
 
     public bool TryEnsureForeground(long targetHwnd, Microsoft.Extensions.Logging.ILogger logger, bool json, string action)
     {
@@ -359,6 +498,15 @@ internal sealed class FakeSystemUiQuery : ISystemUiQuery
     /// <summary>Per-HWND owner handles for <see cref="GetWindowOwner"/>. Unmapped handles report 0 (no owner).</summary>
     public Dictionary<long, nint> WindowOwnerByHwnd { get; } = [];
 
+    /// <summary>Per-HWND focused child handles for <see cref="GetFocusedWindow"/>. Unmapped handles report 0
+    /// (no resolvable focus → the command keeps the passed target HWND).</summary>
+    public Dictionary<long, long> FocusedWindowByHwnd { get; } = [];
+
+    /// <summary>Per-HWND top-level root handles for <see cref="GetRootWindow"/>. Unmapped handles report the
+    /// handle itself (a top-level window is its own root); map a child to its top-level window to model
+    /// <c>GetAncestor(GA_ROOT)</c>.</summary>
+    public Dictionary<long, long> RootWindowByHwnd { get; } = [];
+
     public UiProcessInfo? GetProcessById(int pid)
     {
         if (ProcessesById.TryGetValue(pid, out var info)) { return info; }
@@ -384,6 +532,12 @@ internal sealed class FakeSystemUiQuery : ISystemUiQuery
 
     public nint GetWindowOwner(long hwnd)
         => WindowOwnerByHwnd.TryGetValue(hwnd, out var owner) ? owner : 0;
+
+    public long GetFocusedWindow(long hwnd)
+        => FocusedWindowByHwnd.TryGetValue(hwnd, out var focused) ? focused : 0;
+
+    public long GetRootWindow(long hwnd)
+        => RootWindowByHwnd.TryGetValue(hwnd, out var root) ? root : hwnd;
 }
 
 /// <summary>

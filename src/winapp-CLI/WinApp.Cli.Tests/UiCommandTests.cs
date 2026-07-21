@@ -9,6 +9,7 @@ using WinApp.Cli.Services;
 namespace WinApp.Cli.Tests;
 
 [TestClass]
+[DoNotParallelize] // UiCommandTests uses shared static fields on Handler (s_isInputRedirectedOverride, s_stdinOverride)
 public partial class UiCommandTests : BaseCommandTests
 {
     private FakeUiAutomationService _fakeUia = null!;
@@ -16,9 +17,22 @@ public partial class UiCommandTests : BaseCommandTests
     private FakeMouseInput _fakeMouse = null!;
     private FakeKeyboardInput _fakeKeyboard = null!;
     private FakeForegroundGuard _fakeForeground = null!;
+    private FakePointerInput _fakePointer = null!;
     private FakeOwnedWindowFinder _fakeWindowFinder = null!;
     private FakeSystemUiQuery _fakeSystemQuery = null!;
     private FakePollDelay _fakePollDelay = null!;
+
+    private void AssertJsonErrorCode(string expectedCode)
+        => AssertJsonErrorCodeIn(ConsoleStdErr.ToString(), expectedCode);
+
+    private static void AssertJsonErrorCodeIn(string stderr, string expectedCode)
+    {
+        int jsonStart = stderr.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stderr must contain a JSON error object; got: {stderr}");
+        var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
+            stderr.AsSpan(jsonStart).TrimEnd());
+        Assert.AreEqual(expectedCode, error.GetProperty("error").GetProperty("code").GetString());
+    }
 
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
     {
@@ -27,6 +41,7 @@ public partial class UiCommandTests : BaseCommandTests
         _fakeMouse = new FakeMouseInput();
         _fakeKeyboard = new FakeKeyboardInput();
         _fakeForeground = new FakeForegroundGuard();
+        _fakePointer = new FakePointerInput();
         _fakeWindowFinder = new FakeOwnedWindowFinder();
         _fakeSystemQuery = new FakeSystemUiQuery();
         _fakePollDelay = new FakePollDelay();
@@ -36,6 +51,7 @@ public partial class UiCommandTests : BaseCommandTests
             .AddSingleton<WinApp.Cli.Helpers.IMouseInput>(_fakeMouse)
             .AddSingleton<WinApp.Cli.Helpers.IKeyboardInput>(_fakeKeyboard)
             .AddSingleton<WinApp.Cli.Helpers.IForegroundGuard>(_fakeForeground)
+            .AddSingleton<WinApp.Cli.Helpers.IPointerInput>(_fakePointer)
             .AddSingleton<WinApp.Cli.Helpers.IOwnedWindowFinder>(_fakeWindowFinder)
             .AddSingleton<ISystemUiQuery>(_fakeSystemQuery)
             .AddSingleton<WinApp.Cli.Helpers.IPollDelay>(_fakePollDelay);
