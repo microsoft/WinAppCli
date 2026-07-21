@@ -510,7 +510,7 @@ internal static partial class ToolkitFetcher
         xaml = Regex.Replace(xaml, @"\s+IsEnabled=""\{x:Bind\s+\w+,\s*Mode=OneWay\}""", "");
         xaml = Regex.Replace(xaml, @"\s+IsExpanded=""\{x:Bind\s+\w+,\s*Mode=OneWay\}""", "");
         xaml = Regex.Replace(xaml, @"\s+x:Name=""\w+""", "");
-        xaml = Regex.Replace(xaml, @"\s+AutomationProperties\.\w+=""[^""]*""", "");
+        xaml = Regex.Replace(xaml, @"\s+AutomationProperties\.AutomationId=""[^""]*""", "");
         xaml = Regex.Replace(xaml, @"<!--\s*TODO:.*?-->", "", RegexOptions.Singleline);
         xaml = Regex.Replace(xaml, @"<!--.*?-->", "", RegexOptions.Singleline);
         // Demo sizes

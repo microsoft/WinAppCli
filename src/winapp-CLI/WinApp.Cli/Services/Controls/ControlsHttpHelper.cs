@@ -84,6 +84,10 @@ internal static class ControlsHttpHelper
         {
             return null;
         }
+        catch (IOException)
+        {
+            return null;
+        }
     }
 
     private static async Task<string> ReadCappedAsync(
