@@ -592,7 +592,7 @@
       },
       "options": {
         "--id": {
-          "description": "Fetch full XAML + C# (and prerequisite notes) for one or more scenario ids from a prior search (e.g. gallery-tabview-1).",
+          "description": "Fetch the full available code (Gallery/Toolkit return XAML + C#; Reactor is C#-only) plus prerequisite notes for one or more scenario ids from a prior search (e.g. gallery-tabview-1).",
           "hidden": false,
           "valueType": "System.String[]",
           "hasDefaultValue": false,

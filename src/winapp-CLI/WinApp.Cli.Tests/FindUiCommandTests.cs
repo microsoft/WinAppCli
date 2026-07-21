@@ -119,6 +119,51 @@ public class FindUiCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task List_PassesAllowCoreOnly()
+    {
+        var fake = FakeControlsSearchService.WithEngine(BuildEngine());
+        _fakeService = fake;
+        await ParseAndInvokeWithCaptureAsync(Command(), ["--list"]);
+        Assert.IsTrue(fake.LastAllowCoreOnly, "--list should allow a core-only corpus so it works offline");
+    }
+
+    [TestMethod]
+    public async Task SourceCore_PassesAllowCoreOnly()
+    {
+        var fake = FakeControlsSearchService.WithEngine(BuildEngine());
+        _fakeService = fake;
+        await ParseAndInvokeWithCaptureAsync(Command(), ["file picker", "--source", "core"]);
+        Assert.IsTrue(fake.LastAllowCoreOnly, "--source core should allow a core-only corpus offline");
+    }
+
+    [TestMethod]
+    public async Task Search_DoesNotAllowCoreOnly()
+    {
+        var fake = FakeControlsSearchService.WithEngine(BuildEngine());
+        _fakeService = fake;
+        await ParseAndInvokeWithCaptureAsync(Command(), ["tabview"]);
+        Assert.IsFalse(fake.LastAllowCoreOnly, "a normal search needs the network corpus; keep the cold-start error");
+    }
+
+    [TestMethod]
+    public async Task IdCoreOnly_PassesAllowCoreOnly()
+    {
+        var fake = FakeControlsSearchService.WithEngine(BuildEngine());
+        _fakeService = fake;
+        await ParseAndInvokeWithCaptureAsync(Command(), ["--id", "file-picker-desktop"]);
+        Assert.IsTrue(fake.LastAllowCoreOnly, "a core-prefixed id needs no network");
+    }
+
+    [TestMethod]
+    public async Task IdNetwork_DoesNotAllowCoreOnly()
+    {
+        var fake = FakeControlsSearchService.WithEngine(BuildEngine());
+        _fakeService = fake;
+        await ParseAndInvokeWithCaptureAsync(Command(), ["--id", "gallery-tabview-1"]);
+        Assert.IsFalse(fake.LastAllowCoreOnly, "a gallery id needs the network corpus");
+    }
+
+    [TestMethod]
     public async Task NoArgs_PrintsGuidance_Exit1()
     {
         _fakeService = FakeControlsSearchService.WithEngine(BuildEngine());

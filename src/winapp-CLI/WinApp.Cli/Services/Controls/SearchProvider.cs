@@ -126,17 +126,20 @@ internal abstract class CachedProviderBase : ISearchProvider
 
         // Fetch failed (offline / upstream error). For a forced refresh, fall
         // back to any existing cache rather than dropping the provider entirely
-        // — a stale corpus beats no corpus. On a cold cache there is nothing to
-        // fall back to, so return Empty and let the caller surface the error.
+        // — a stale corpus beats no corpus. Ignore the TTL here: the whole point
+        // of the fallback is to serve data that is (by definition) past its
+        // freshness window when the network is unreachable. On a cold cache there
+        // is nothing to fall back to, so return Empty and let the caller surface
+        // the error.
         if (forceRefresh)
         {
-            var cached = TryReadCache();
+            var cached = TryReadCache(ignoreTtl: true);
             if (cached != null) return cached;
         }
         return ProviderData.Empty;
     }
 
-    private ProviderData? TryReadCache()
+    private ProviderData? TryReadCache(bool ignoreTtl = false)
     {
         var scenariosPath = Path.Combine(CacheDir, "scenarios.json");
         var tagsPath = Path.Combine(CacheDir, "tags.json");
@@ -153,8 +156,10 @@ internal abstract class CachedProviderBase : ISearchProvider
             if (File.ReadAllText(versionPath).Trim() != CacheVersion.Current) return null;
             var lastUpdated = ControlsCacheIo.ReadTimestamp(timestampPath);
             // Reject future-dated timestamps so a clock reset can't pin stale data.
+            // The TTL (age >= CacheTtl) is skipped for the fetch-failure fallback so
+            // an offline forced-refresh can still serve an expired-but-valid corpus.
             if (!lastUpdated.HasValue || lastUpdated.Value > DateTime.UtcNow
-                || DateTime.UtcNow - lastUpdated.Value >= CacheTtl)
+                || (!ignoreTtl && DateTime.UtcNow - lastUpdated.Value >= CacheTtl))
                 return null;
 
             var scenarios = JsonSerializer.Deserialize(

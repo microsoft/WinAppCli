@@ -63,7 +63,7 @@ winapp find-ui "color picker" --json
 ```
 
 - **Search** → `{ query, matchCount, matches: [ { source, control, score, description?, scenarios: [ { id, header } ] } ] }` — compact; use the `id` values to fetch code.
-- **`--id`** → `{ results: [ { id, found, content } ] }` — `content` is the full XAML + C# markdown block.
+- **`--id`** → `{ results: [ { id, found, content } ] }` — `content` is the full code markdown block (XAML + C# for Gallery/Toolkit; C# only for Reactor).
 - **`--list`** → `{ count, items: [ { id, header } ] }`.
 - On error, `--json` emits `{ "error": "..." }` on stdout with a non-zero exit code.
 

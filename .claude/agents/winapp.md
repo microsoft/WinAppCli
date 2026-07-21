@@ -201,10 +201,10 @@ Want to inspect or interact with a running app's UI?
 
 ### `winapp find-ui "<query>"` — WinUI control & sample search
 **Purpose:** Lexically search **WinUI** controls and samples (WinUI 3 Gallery + Windows Community Toolkit + microsoft-ui-reactor ReactorGallery, plus curated core patterns) for a working code example. WinUI-only — not WPF/WinForms.
-**When to use:** When building a WinUI 3 UI and you need to discover which control fits an intent and get a real XAML + C# example, without leaving the CLI. Distinct from `winapp ui search`, which searches a *running app's* UI tree.
+**When to use:** When building a WinUI 3 UI and you need to discover which control fits an intent and get a real code example (XAML + C# for Gallery/Toolkit; C#-only for Reactor), without leaving the CLI. Distinct from `winapp ui search`, which searches a *running app's* UI tree.
 **Workflow:** search compactly to find the control and its scenario ids, then fetch full code with `--id`.
 **Key options:**
-- `--id <id>` — fetch full XAML + C# for one or more scenario ids (e.g. `gallery-tabview-1`); repeatable
+- `--id <id>` — fetch the full available code (XAML + C# for Gallery/Toolkit, C#-only for Reactor) for one or more scenario ids (e.g. `gallery-tabview-1`); repeatable
 - `--list` — list all discoverable control/sample ids
 - `--source <gallery|toolkit|reactor|core>` — restrict search to one source (search only)
 - `--max <N>` — max matched controls (default 3)

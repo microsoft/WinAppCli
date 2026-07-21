@@ -138,7 +138,7 @@ internal static partial class GalleryFetcher
         // Step 2: Fetch each control page and parse ControlExample blocks
         var allScenarios = new List<Scenario>();
         var fetchTasks = new List<Task<List<Scenario>>>();
-        var semaphore = new SemaphoreSlim(10);
+        using var semaphore = new SemaphoreSlim(10);
         foreach (var (uniqueId, title) in controlPages)
         {
             fetchTasks.Add(FetchControlPageAsync(

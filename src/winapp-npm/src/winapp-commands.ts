@@ -223,7 +223,7 @@ export async function createExternalCatalog(options: CreateExternalCatalogOption
 export interface FindUiOptions extends CommonOptions {
   /** What you're looking for, e.g. "tabbed layout" or "color picker". Matched lexically against WinUI control names, sample headers, and tags. */
   query?: string;
-  /** Fetch full XAML + C# (and prerequisite notes) for one or more scenario ids from a prior search (e.g. gallery-tabview-1). */
+  /** Fetch the full available code (Gallery/Toolkit return XAML + C#; Reactor is C#-only) plus prerequisite notes for one or more scenario ids from a prior search (e.g. gallery-tabview-1). */
   id?: string | string[];
   /** Format output as JSON */
   json?: boolean;
@@ -233,12 +233,12 @@ export interface FindUiOptions extends CommonOptions {
   max?: number;
   /** Bypass the local cache and re-fetch the WinUI corpus from GitHub. */
   refresh?: boolean;
-  /** Restrict results to a single source: gallery (WinUI 3 Gallery), toolkit (Windows Community Toolkit), or core (curated patterns). */
+  /** Restrict results to a single source: gallery (WinUI 3 Gallery), toolkit (Windows Community Toolkit), reactor (microsoft-ui-reactor, C#-only declarative WinUI), or core (curated patterns). */
   source?: string;
 }
 
 /**
- * Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery and Windows Community Toolkit (not WPF/WinForms). The corpus is fetched from GitHub on first use and cached per-user, so the first run requires network access.
+ * Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery, the Windows Community Toolkit, and the microsoft-ui-reactor ReactorGallery (not WPF/WinForms). The corpus is fetched from GitHub on first use and cached per-user, so the first run requires network access.
  */
 export async function findUi(options: FindUiOptions = {}): Promise<WinappResult> {
   const args: string[] = ['find-ui'];

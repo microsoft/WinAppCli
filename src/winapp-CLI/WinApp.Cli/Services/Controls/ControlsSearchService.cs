@@ -24,12 +24,16 @@ internal interface IControlsSearchService
     /// Returns a configured engine, building it lazily on first use and memoizing
     /// it thereafter. Pass <paramref name="forceRefresh"/> to bypass both the
     /// in-memory engine and the on-disk cache and re-fetch from GitHub.
-    /// <paramref name="onFetchStarting"/> is invoked (with a provider display name)
-    /// the first time any provider starts a network fetch, so the caller can show
-    /// a one-time "fetching…" notice; it is never invoked when everything is served
-    /// from cache or the memoized engine.
+    /// When <paramref name="allowCoreOnly"/> is true and no network corpus can be
+    /// loaded (offline cold cache), a core-only engine is returned instead of
+    /// throwing — the embedded core patterns are always available, so
+    /// <c>--list</c>, <c>--source core</c>, and <c>--id &lt;core-id&gt;</c> keep
+    /// working offline. <paramref name="onFetchStarting"/> is invoked (with a
+    /// provider display name) the first time any provider starts a network fetch,
+    /// so the caller can show a one-time "fetching…" notice; it is never invoked
+    /// when everything is served from cache or the memoized engine.
     /// </summary>
-    Task<SearchEngine> GetEngineAsync(bool forceRefresh = false, Action<string>? onFetchStarting = null, CancellationToken cancellationToken = default);
+    Task<SearchEngine> GetEngineAsync(bool forceRefresh = false, bool allowCoreOnly = false, Action<string>? onFetchStarting = null, CancellationToken cancellationToken = default);
 
     /// <summary>Delete every provider's per-user cache so the next load re-fetches.</summary>
     void ClearCache();
@@ -62,7 +66,7 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
         _providers = providers;
     }
 
-    public async Task<SearchEngine> GetEngineAsync(bool forceRefresh = false, Action<string>? onFetchStarting = null, CancellationToken cancellationToken = default)
+    public async Task<SearchEngine> GetEngineAsync(bool forceRefresh = false, bool allowCoreOnly = false, Action<string>? onFetchStarting = null, CancellationToken cancellationToken = default)
     {
         if (_engine != null && !forceRefresh)
         {
@@ -100,6 +104,20 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
 
             if (allScenarios.Count == 0)
             {
+                // No network corpus. The embedded core patterns are always available,
+                // so for requests that a core-only corpus can satisfy (--list,
+                // --source core, --id <core-id>) return a core-only engine rather
+                // than failing. Not memoized: the network corpus may load on a later
+                // call, and this degraded engine must not be pinned.
+                if (allowCoreOnly)
+                {
+                    return new SearchEngine(
+                        Array.Empty<Scenario>(),
+                        DataLoader.LoadCorePatterns(),
+                        new(),
+                        new());
+                }
+
                 throw new ControlsDataUnavailableException(
                     "No WinUI control data is available. find-ui fetches the WinUI Gallery, " +
                     "Community Toolkit, and Reactor corpora from GitHub on first use — connect to the " +

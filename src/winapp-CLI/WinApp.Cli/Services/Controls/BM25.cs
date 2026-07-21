@@ -71,7 +71,9 @@ internal static partial class BM25
         double score = 0;
         foreach (var word in queryWords)
         {
-            if (!doc.Tf.TryGetValue(word, out var tf) || tf == 0) continue;
+            // tf is an integer term-frequency stored as double; guard <= 0 (never negative)
+            // and avoid an exact floating-point equality check.
+            if (!doc.Tf.TryGetValue(word, out var tf) || tf <= 0) continue;
             var df = corpus.Df.GetValueOrDefault(word);
             var idf = Math.Log((corpus.N - df + 0.5) / (df + 0.5) + 1);
             var tfNorm = (tf * (K1 + 1)) / (tf + K1 * (1 - B + B * (doc.Length / corpus.AvgDl)));

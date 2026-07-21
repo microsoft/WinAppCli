@@ -208,7 +208,7 @@ internal static partial class ToolkitFetcher
 
         // Step 2: Fetch all md docs FIRST (parallel) — gives us tags + descriptions
         // before processing samples, so each scenario can be enriched with prose.
-        var sem = new SemaphoreSlim(10);
+        using var sem = new SemaphoreSlim(10);
         var mdTasks = mdDocs.Select(p => FetchMdAsync(p, sem, cancellationToken)).ToArray();
         var mdResults = await Task.WhenAll(mdTasks);
         var tags = new Dictionary<string, string[]>();

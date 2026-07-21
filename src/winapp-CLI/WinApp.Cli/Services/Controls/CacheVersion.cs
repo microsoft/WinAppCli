@@ -1,11 +1,13 @@
 namespace WinApp.Cli.Services.Controls;
 
 /// <summary>
-/// Single source of truth for the on-disk cache version under
-/// <c>%LOCALAPPDATA%\winui-search\cache\</c>. Both <see cref="GalleryFetcher"/>
-/// and <see cref="ToolkitFetcher"/> stamp this string into their
-/// <c>schema-version.txt</c> on write and require an exact match on read;
-/// any mismatch forces a cache miss + rebuild from embedded fallback JSON.
+/// Single source of truth for the on-disk cache version. Each provider's cache
+/// lives under the managed global <c>.winapp/cache/find-ui/{providerId}</c>
+/// directory (gallery / toolkit / reactor). <see cref="CachedProviderBase"/>
+/// stamps this string into that provider's <c>schema-version.txt</c> on write
+/// and requires an exact match on read; any mismatch forces a cache miss.
+/// Unlike the upstream winui-search tool, find-ui ships NO embedded scenario
+/// snapshot — a cache miss re-fetches the corpus from GitHub (network required).
 ///
 /// Bump <see cref="Current"/> whenever ANY cached payload should be discarded:
 ///   1. Scenario / tag JSON schema changes (new or removed fields)

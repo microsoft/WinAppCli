@@ -68,7 +68,7 @@ winapp find-ui "color picker" --json
 ```
 
 - **Search** → `{ query, matchCount, matches: [ { source, control, score, description?, scenarios: [ { id, header } ] } ] }` — compact; use the `id` values to fetch code.
-- **`--id`** → `{ results: [ { id, found, content } ] }` — `content` is the full XAML + C# markdown block.
+- **`--id`** → `{ results: [ { id, found, content } ] }` — `content` is the full code markdown block (XAML + C# for Gallery/Toolkit; C# only for Reactor).
 - **`--list`** → `{ count, items: [ { id, header } ] }`.
 - On error, `--json` emits `{ "error": "..." }` on stdout with a non-zero exit code.
 
@@ -106,7 +106,7 @@ Search WinUI controls and samples for a working code example. WinUI-only: covers
 <!-- auto-generated from cli-schema.json -->
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--id` | Fetch full XAML + C# (and prerequisite notes) for one or more scenario ids from a prior search (e.g. gallery-tabview-1). | (none) |
+| `--id` | Fetch the full available code (Gallery/Toolkit return XAML + C#; Reactor is C#-only) plus prerequisite notes for one or more scenario ids from a prior search (e.g. gallery-tabview-1). | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--list` | List every discoverable control/sample id instead of searching. | (none) |
 | `--max` | Maximum number of matched controls to return. | `3` |

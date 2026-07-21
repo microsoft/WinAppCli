@@ -84,6 +84,28 @@ public class ControlsSearchServiceTests
     }
 
     [TestMethod]
+    public async Task GetEngineAsync_AllProvidersEmpty_AllowCoreOnly_ReturnsCoreOnlyEngine()
+    {
+        // Offline cold cache: both network providers empty. --list, --source core, and
+        // --id <core-id> must still work off the embedded (non-network) core patterns.
+        var gallery = new FakeSearchProvider("gallery", ProviderData.Empty);
+        var toolkit = new FakeSearchProvider("toolkit", ProviderData.Empty);
+        var sut = new ControlsSearchService([gallery, toolkit]);
+
+        var engine = await sut.GetEngineAsync(allowCoreOnly: true);
+
+        var ids = engine.ListAll().Select(x => x.id).ToList();
+        Assert.IsTrue(ids.Count > 0, "the embedded core patterns must be listable offline");
+        Assert.IsTrue(ids.All(id => ProviderRegistry.ForScenarioId(id) is null),
+            "a core-only engine exposes only the embedded (non-network) core patterns");
+
+        // A degraded core-only engine must NOT be memoized — a later call re-attempts
+        // the network providers rather than being pinned offline.
+        await sut.GetEngineAsync(allowCoreOnly: true);
+        Assert.AreEqual(2, gallery.LoadCalls, "the core-only fallback must not be pinned as the memoized engine");
+    }
+
+    [TestMethod]
     public async Task GetEngineAsync_CollidingControlIdsAcrossSources_BothSurvive()
     {
         // Both providers expose the same bare controlId "colorpicker" (and a

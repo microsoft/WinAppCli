@@ -40,7 +40,7 @@ internal sealed class FindUiCommand : Command, IShortDescription
 
         IdOption = new Option<string[]>("--id")
         {
-            Description = "Fetch full XAML + C# (and prerequisite notes) for one or more scenario ids from a prior search (e.g. gallery-tabview-1).",
+            Description = "Fetch the full available code (Gallery/Toolkit return XAML + C#; Reactor is C#-only) plus prerequisite notes for one or more scenario ids from a prior search (e.g. gallery-tabview-1).",
             Arity = ArgumentArity.OneOrMore,
             AllowMultipleArgumentsPerToken = true
         };
@@ -128,9 +128,18 @@ internal sealed class FindUiCommand : Command, IShortDescription
             }
 
             SearchEngine engine;
+            // The embedded core patterns need no network. A request that a core-only
+            // corpus can satisfy — browse (--list), an explicit --source core search,
+            // or fetching only core-prefixed ids — should still work offline, so tell
+            // the service a core-only engine is acceptable when the network corpus is
+            // unavailable. A normal search or a gallery/toolkit/reactor --id still
+            // surfaces the friendly "connect and run once" error on a cold offline cache.
+            var allowCoreOnly = list
+                || string.Equals(source, "core", StringComparison.OrdinalIgnoreCase)
+                || (ids.Length > 0 && ids.All(id => ProviderRegistry.ForScenarioId(id) is null));
             try
             {
-                engine = await searchService.GetEngineAsync(refresh, BuildFetchNotice(json), cancellationToken).ConfigureAwait(false);
+                engine = await searchService.GetEngineAsync(refresh, allowCoreOnly, BuildFetchNotice(json), cancellationToken).ConfigureAwait(false);
             }
             catch (ControlsDataUnavailableException ex)
             {
