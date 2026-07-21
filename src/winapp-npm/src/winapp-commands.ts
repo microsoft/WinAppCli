@@ -445,7 +445,7 @@ export async function restore(options: RestoreOptions = {}): Promise<WinappResul
 // ---------------------------------------------------------------------------
 
 export interface RunOptions extends CommonOptions {
-  /** Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one (default: current directory). */
+  /** Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory). */
   inputFolder?: string;
   /** Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Default: the current process architecture. */
   arch?: string;

@@ -90,6 +90,25 @@ public class ProjectRunServiceTests
         </Project>
         """;
 
+    // Multi-targeted executable whose <TargetFrameworks> is declared per-Configuration in CONDITIONAL
+    // property groups. A naive first-textual-match static read pins the Debug group's first TFM
+    // (net8) even for a Release run, so project mode must instead fall back to the MSBuild
+    // --getProperty:TargetFrameworks evaluate (which honors Configuration) to pin the right group's first
+    // TFM (C24).
+    private const string ConditionalMultiTargetExeCsproj = """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>WinExe</OutputType>
+          </PropertyGroup>
+          <PropertyGroup Condition="'$(Configuration)'=='Debug'">
+            <TargetFrameworks>net8.0-windows10.0.26100.0;net10.0-windows10.0.26100.0</TargetFrameworks>
+          </PropertyGroup>
+          <PropertyGroup Condition="'$(Configuration)'=='Release'">
+            <TargetFrameworks>net10.0-windows10.0.26100.0;net8.0-windows10.0.26100.0</TargetFrameworks>
+          </PropertyGroup>
+        </Project>
+        """;
+
     [TestInitialize]
     public void Setup()
     {
@@ -730,6 +749,22 @@ public class ProjectRunServiceTests
 
         Assert.IsNotNull(resolution.Solution);
         Assert.AreEqual(solution.FullName, resolution.Solution!.FullName);
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_CsprojFile_SingleSolutionConfirmsAbsent_LeavesSolutionNull()
+    {
+        // C26: exactly one solution at the nearest ancestor, readable and listing OTHER projects but NOT this
+        // one → it confirms the project is absent. We must not fabricate ownership by locality (that would
+        // inject an unrelated $(SolutionDir)/Solution* set and restore unrelated siblings, changing explicit
+        // .csproj semantics); solution context stays null.
+        var csproj = WriteFileAt(Path.Combine("src", "App", "App.csproj"), ExecutableCsproj);
+        WriteFile("Other.sln", SlnListing(Path.Combine("src", "Other", "Other.csproj")));
+
+        var resolution = await _service.ResolveInputAsync(csproj, CancellationToken.None);
+
+        Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
+        Assert.IsNull(resolution.Solution, "a lone solution that confirms the project is absent must not be attached by locality");
     }
 
     [TestMethod]
@@ -1960,6 +1995,41 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public async Task BuildAndResolveAsync_WholeSolutionRestoreFails_FallsBackToPerSiblingRestore()
+    {
+        // C25: an all-managed solution restores as a whole first, but if that whole-solution restore FAILS
+        // the managed siblings must still be restored individually (the NETSDK1004 case this pre-step exists
+        // to prevent) rather than silently deferring to the target-only build restore.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var solution = WriteFile("App.slnx", SlnxListing("App.csproj", "Server/Server.csproj"));
+        var serverSibling = Path.Combine(_tempDir.FullName, "Server", "Server.csproj");
+        var commandArgs = new List<string>();
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = a =>
+            {
+                commandArgs.Add(a);
+                // Fail only the whole-solution restore; everything else (per-sibling restore, evaluate) succeeds.
+                if (a.StartsWith($"restore {solution.FullName}", StringComparison.Ordinal))
+                {
+                    return (1, string.Empty, "simulated whole-solution restore failure");
+                }
+
+                return (0, PackagedPropertiesJson(), string.Empty);
+            },
+        };
+        var service = NewServiceWith(dotnet, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Solution: solution);
+
+        await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsTrue(commandArgs.Any(a => a.StartsWith($"restore {solution.FullName}", StringComparison.Ordinal)),
+            "the all-managed whole-solution restore must be attempted first");
+        Assert.IsTrue(commandArgs.Any(a => a.StartsWith("restore ", StringComparison.Ordinal) && a.Contains(serverSibling)),
+            "after the whole-solution restore fails, the managed sibling must be restored individually (NETSDK1004 guard)");
+    }
+
+    [TestMethod]
     public async Task BuildAndResolveAsync_SolutionListsOnlyTarget_NoSiblingRestore()
     {
         // Negative control: a solution that lists only the target adds no extra restore — behaviour is
@@ -2210,6 +2280,40 @@ public class ProjectRunServiceTests
             commandArgs.Any(a => a.Contains("--getProperty:TargetFrameworks", StringComparison.Ordinal)),
             "an inline multi-targeted project must be pinned statically, without a discovery evaluate");
         StringAssert.Contains(dotnet.StreamingCalls[0], "-f net10.0-windows10.0.26100.0", "the first inline TFM must still be pinned into the build pass");
+    }
+
+    [TestMethod]
+    public async Task BuildAndResolveAsync_ConditionalMultiTargeted_UsesEvaluate_NotStaticGroup()
+    {
+        // C24: <TargetFrameworks> is declared in per-Configuration conditional groups. The static first-match
+        // read would pin the Debug group's first TFM (net8) even for a Release run; project mode must instead
+        // discover the effective list via an MSBuild evaluate (which honors -p:Configuration=Release) and pin
+        // net10 — the Release group's first — NOT net8.
+        var csproj = WriteFile("App.csproj", ConditionalMultiTargetExeCsproj);
+        var discoveryQueried = false;
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+            {
+                if (args.Contains("--getProperty:TargetFrameworks", StringComparison.Ordinal))
+                {
+                    discoveryQueried = true;
+                    StringAssert.Contains(args, "-p:Configuration=Release", "the discovery evaluate must run under the run's Configuration");
+                    // The Release-conditional list (net10 first) — what MSBuild resolves under Release.
+                    return (0, "net10.0-windows10.0.26100.0;net8.0-windows10.0.26100.0", string.Empty);
+                }
+
+                return (0, PackagedPropertiesJson(), string.Empty);
+            },
+        };
+        var service = NewServiceWith(dotnet, LogLevel.Information, out _);
+        var options = new ProjectRunOptions("Release", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
+
+        await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsTrue(discoveryQueried, "a conditional <TargetFrameworks> must be resolved via the MSBuild evaluate, not the static group");
+        StringAssert.Contains(dotnet.StreamingCalls[0], "-f net10.0-windows10.0.26100.0", "the Release group's first TFM must be pinned");
+        Assert.IsFalse(dotnet.StreamingCalls[0].Contains("-f net8.0-windows10.0.26100.0"), "the Debug group's first TFM (net8) must NOT be pinned for a Release run");
     }
 
     [TestMethod]

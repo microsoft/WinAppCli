@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.Logging;
+using System.Xml.Linq;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 
@@ -46,9 +47,13 @@ internal sealed partial class ProjectRunService
 
         if (dotNetService.IsMultiTargeted(csproj))
         {
-            // Inline <TargetFrameworks>: pin the first statically when it's a concrete value — the common,
-            // cheap case that needs no MSBuild round-trip.
-            if (staticFirstIsConcrete)
+            // Inline <TargetFrameworks>: pin the first statically ONLY when the declaration is a concrete
+            // value AND unconditional (a single element with no Condition on it or any ancestor). The static
+            // read is a first-textual-match, so a conditional/duplicated declaration — e.g. per-Configuration
+            // <TargetFrameworks> groups — could pin the wrong group's TFM (a Release run picking Debug's
+            // first). In that case fall through to the authoritative MSBuild evaluate, which honors the same
+            // Configuration/property globals.
+            if (staticFirstIsConcrete && HasUnconditionalInlineTargetFrameworks(csproj))
             {
                 LogEffectiveFrameworkPinned(csproj, staticFirst!);
                 return options with { Framework = staticFirst };
@@ -77,6 +82,41 @@ internal sealed partial class ProjectRunService
         logger.LogDebug(
             "{UISymbol} '{Project}' is multi-targeted; defaulting to first target framework '{Tfm}'. Pass --framework to choose another.",
             UiSymbols.Note, csproj.Name, tfm);
+
+    /// <summary>
+    /// True when the project's multi-targeting is declared inline in a form the cheap static read can trust:
+    /// exactly ONE <c>&lt;TargetFrameworks&gt;</c> element, and neither it nor any ancestor (its
+    /// <c>&lt;PropertyGroup&gt;</c>, a <c>&lt;Choose&gt;/&lt;When&gt;</c>, the <c>&lt;Project&gt;</c>) carries
+    /// a <c>Condition</c>. A conditional or duplicated declaration (e.g. per-Configuration variants) makes the
+    /// first-textual-match static read unreliable, so the caller must fall back to an authoritative MSBuild
+    /// evaluate that resolves the effective list under the real globals. Returns <see langword="false"/> on
+    /// unreadable/invalid XML so the evaluate path decides.
+    /// </summary>
+    private static bool HasUnconditionalInlineTargetFrameworks(FileInfo csproj)
+    {
+        XDocument doc;
+        try
+        {
+            doc = XDocument.Load(csproj.FullName);
+        }
+        catch (Exception ex) when (ex is System.Xml.XmlException or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        // SDK-style project files are namespace-less; match on local name to stay namespace-agnostic.
+        var declarations = doc.Descendants()
+            .Where(e => e.Name.LocalName == "TargetFrameworks")
+            .ToList();
+
+        if (declarations.Count != 1)
+        {
+            return false;
+        }
+
+        return !declarations[0].AncestorsAndSelf()
+            .Any(a => !string.IsNullOrWhiteSpace(a.Attribute("Condition")?.Value));
+    }
 
     /// <summary>MSBuild property queried to authoritatively discover a project's effective TFM list.</summary>
     private static readonly string[] FrameworkDiscoveryProperties = ["TargetFrameworks"];

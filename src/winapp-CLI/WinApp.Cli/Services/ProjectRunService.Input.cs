@@ -162,8 +162,10 @@ internal sealed partial class ProjectRunService
     /// Finds the solution that owns a bare <c>.csproj</c> so a direct-file run defines <c>$(SolutionDir)</c>
     /// the same way <c>dotnet build &lt;sln&gt;</c> / Visual Studio do. Walks up from the project directory;
     /// at the nearest ancestor that contains any <c>.sln</c>/<c>.slnx</c>, prefers a solution that actually
-    /// lists this project, else uses it when there is exactly one, else returns null (several solutions,
-    /// none demonstrably owning → don't guess). Returns null when no solution is found at all.
+    /// lists this project; else, when there is exactly one solution whose listing is indeterminate
+    /// (empty/unreadable), attaches it by locality. A lone solution that CONFIRMS the project is absent — or
+    /// several non-listing solutions — is not guessed at; the walk continues upward, ultimately returning
+    /// null when no solution demonstrably owns the project.
     /// </summary>
     private static FileInfo? FindOwningSolution(FileInfo csproj)
     {
@@ -188,27 +190,47 @@ internal sealed partial class ProjectRunService
             }
 
             // Prefer a solution at this level that actually lists the project (deterministic: alpha order).
-            var owning = solutions.FirstOrDefault(s => SolutionListsProject(s, csproj));
+            var owning = solutions.FirstOrDefault(s => InspectSolutionOwnership(s, csproj) == SolutionOwnership.Lists);
             if (owning is not null)
             {
                 return owning;
             }
 
-            // Exactly one solution here and we couldn't confirm it lists the project (empty/unreadable) —
-            // it is still the owning solution by locality. Several with no listing match → don't guess.
-            return solutions.Count == 1 ? solutions[0] : null;
+            // No solution here lists the project. Attach the lone solution by locality ONLY when its listing
+            // can't be inspected (empty/unreadable) — matching how a developer opens that one solution in VS.
+            // When exactly one solution is readable and CONFIRMS the project is absent, don't fabricate
+            // ownership: that would inject an unrelated $(SolutionDir)/Solution* set and restore unrelated
+            // siblings, changing explicit-.csproj semantics. Keep walking ancestors, then fall back to null.
+            if (solutions.Count == 1 && InspectSolutionOwnership(solutions[0], csproj) == SolutionOwnership.Indeterminate)
+            {
+                return solutions[0];
+            }
         }
 
         return null;
     }
 
+    /// <summary>Whether a solution file demonstrably owns a project.</summary>
+    private enum SolutionOwnership
+    {
+        /// <summary>The solution lists the project.</summary>
+        Lists,
+
+        /// <summary>The solution was read and lists real projects, but not this one → definitively not owned.</summary>
+        ConfirmedAbsent,
+
+        /// <summary>The solution couldn't be read, or parsed to no project entries → ownership unknown.</summary>
+        Indeterminate,
+    }
+
     /// <summary>
-    /// True when a solution file lists the given project. Parses the solution text directly (no
-    /// <c>dotnet</c> shell-out): classic <c>.sln</c> via the project-entry regex, <c>.slnx</c> via XML.
-    /// Each listed path is resolved relative to the solution directory and compared to the project's
-    /// full path. Returns false when the file cannot be read or lists nothing matching.
+    /// Inspects whether a solution owns a project, distinguishing a solution that CONFIRMS the project is
+    /// absent (readable, lists real projects, none match) from one whose ownership is merely
+    /// <see cref="SolutionOwnership.Indeterminate"/> (unreadable, or parsed to zero entries). Parses the
+    /// solution text directly (no <c>dotnet</c> shell-out): classic <c>.sln</c> via the project-entry regex,
+    /// <c>.slnx</c> via XML. Each listed path is resolved relative to the solution directory.
     /// </summary>
-    private static bool SolutionListsProject(FileInfo solution, FileInfo project)
+    private static SolutionOwnership InspectSolutionOwnership(FileInfo solution, FileInfo project)
     {
         string text;
         try
@@ -217,7 +239,7 @@ internal sealed partial class ProjectRunService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return false;
+            return SolutionOwnership.Indeterminate;
         }
 
         var solutionDir = solution.Directory?.FullName ?? Directory.GetCurrentDirectory();
@@ -225,6 +247,7 @@ internal sealed partial class ProjectRunService
             ? ExtractSlnxProjectPaths(text)
             : ExtractSlnProjectPaths(text);
 
+        var sawProject = false;
         foreach (var relative in relativePaths)
         {
             string full;
@@ -238,14 +261,24 @@ internal sealed partial class ProjectRunService
                 continue;
             }
 
+            sawProject = true;
             if (string.Equals(full, project.FullName, StringComparison.OrdinalIgnoreCase))
             {
-                return true;
+                return SolutionOwnership.Lists;
             }
         }
 
-        return false;
+        // Read a real, non-empty project list without a match → confirmed absent. An empty/opaque list
+        // (nothing parsed) leaves ownership unknown.
+        return sawProject ? SolutionOwnership.ConfirmedAbsent : SolutionOwnership.Indeterminate;
     }
+
+    /// <summary>
+    /// True when a solution file lists the given project. Thin wrapper over
+    /// <see cref="InspectSolutionOwnership"/> for callers that only need the yes/no answer.
+    /// </summary>
+    private static bool SolutionListsProject(FileInfo solution, FileInfo project) =>
+        InspectSolutionOwnership(solution, project) == SolutionOwnership.Lists;
 
     /// <summary>Extracts every listed project path (any type) from a classic <c>.sln</c> file.</summary>
     private static List<string> ExtractSlnAllProjectPaths(string text) =>

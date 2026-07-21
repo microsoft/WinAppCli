@@ -392,9 +392,9 @@ internal sealed partial class ProjectRunService(
     /// <c>dotnet restore &lt;sln&gt;</c> restores the whole graph (including the target) and this returns
     /// <see langword="true"/> so the caller can skip the build pass's own restore. When a native project
     /// (<c>.vcxproj</c>/<c>.wapproj</c>/<c>.shproj</c>) is present — which <c>dotnet restore</c> can't handle
-    /// on a VS-less box — the managed siblings are restored individually (the target is left to the normal
-    /// restore) and this returns <see langword="false"/>. All restores are non-fatal (best-effort); the
-    /// build pass surfaces any real error.
+    /// on a VS-less box — OR the whole-solution restore fails, the managed siblings are restored individually
+    /// (the target is left to the normal restore) and this returns <see langword="false"/>. All restores are
+    /// non-fatal (best-effort); the build pass surfaces any real error.
     /// </summary>
     private async Task<bool> RestoreSolutionSiblingsAsync(FileInfo target, ProjectRunOptions options, DirectoryInfo workingDir, CancellationToken cancellationToken)
     {
@@ -417,15 +417,36 @@ internal sealed partial class ProjectRunService(
             var args = BuildRestorePassArguments(options.Solution, options);
             logger.LogDebug("{UISymbol} Restoring solution before build (build-dependency parity): dotnet {Arguments}", UiSymbols.Note, args);
             var (exitCode, _, _) = await dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken);
-            if (exitCode != 0)
+            if (exitCode == 0)
             {
-                logger.LogDebug("{UISymbol} Solution restore exited {ExitCode}; deferring to per-project restore.", UiSymbols.Note, exitCode);
+                return true;
             }
-            return exitCode == 0;
+
+            // Whole-solution restore failed (e.g. a transient error). Don't just defer to the target-only
+            // build restore — that would leave non-ProjectReference managed siblings unrestored, the exact
+            // NETSDK1004 case this pre-step exists to prevent. Fall back to restoring the siblings
+            // individually before returning false so the target restore is left to the normal build pass.
+            logger.LogDebug("{UISymbol} Solution restore exited {ExitCode}; falling back to per-project sibling restore.", UiSymbols.Note, exitCode);
         }
 
-        // A native project is present, so `dotnet restore <sln>` would error on a VS-less host. Restore the
-        // managed siblings individually and skip the natives; the target is restored by the normal pass.
+        // Either a native project is present (so `dotnet restore <sln>` would error on a VS-less host) or the
+        // whole-solution restore failed. Restore the managed siblings individually and skip the natives; the
+        // target is restored by the normal pass.
+        await RestoreSiblingsIndividuallyAsync(siblings, options, workingDir, cancellationToken);
+        return false;
+    }
+
+    /// <summary>
+    /// Best-effort restores each managed sibling project individually (skipping the target, which the normal
+    /// build pass restores). Used both when a native sibling forces a per-project plan and as the fallback
+    /// when a whole-solution restore fails. Each restore is non-fatal; a real error surfaces at build time.
+    /// </summary>
+    private async Task RestoreSiblingsIndividuallyAsync(
+        IReadOnlyList<FileInfo> siblings,
+        ProjectRunOptions options,
+        DirectoryInfo workingDir,
+        CancellationToken cancellationToken)
+    {
         foreach (var sibling in siblings)
         {
             var args = BuildRestorePassArguments(sibling, options);
@@ -436,9 +457,8 @@ internal sealed partial class ProjectRunService(
                 logger.LogDebug("{UISymbol} Sibling restore of {Sibling} exited {ExitCode}; continuing.", UiSymbols.Note, sibling.Name, exitCode);
             }
         }
-
-        return false;
     }
+
     /// <summary>
     /// Builds the argument string for the SHIM's pre-build <c>dotnet restore</c>. It mirrors the build
     /// pass's effective values — the RID (<c>-r win-&lt;arch&gt;</c>), the configuration (as
