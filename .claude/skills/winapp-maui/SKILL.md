@@ -1,7 +1,7 @@
 ---
 name: winapp-maui
 description: Package and sign .NET MAUI Windows apps with winapp, resolving the resizetizer manifest dependency. Use when packaging or signing a .NET MAUI Windows app, building a MAUI MSIX or signed unpackaged build in CI, or fixing 'manifest contains unresolved placeholders ($placeholder$)' errors from winapp package.
-version: 1.0.0
+version: 0.5.1
 ---
 ## When to use
 
