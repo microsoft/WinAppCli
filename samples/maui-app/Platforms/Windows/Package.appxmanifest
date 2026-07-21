@@ -2,20 +2,20 @@
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap rescap">
+  IgnorableNamespaces="uap uap3 rescap">
 
-  <Identity Name="maui-package-name-placeholder" Publisher="CN=User Name" Version="0.0.0.0" />
+  <Identity Name="$placeholder$" Publisher="$placeholder$" Version="$placeholder$" />
 
   <Properties>
     <DisplayName>$placeholder$</DisplayName>
-    <PublisherDisplayName>maui-app</PublisherDisplayName>
-    <Logo>$placeholder$.png</Logo>
+    <PublisherDisplayName>$placeholder$</PublisherDisplayName>
+    <Logo>$placeholder$</Logo>
   </Properties>
 
   <Dependencies>
     <TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
-    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
   </Dependencies>
 
   <Resources>
@@ -28,10 +28,10 @@
         DisplayName="$placeholder$"
         Description="$placeholder$"
         BackgroundColor="transparent"
-        Square150x150Logo="$placeholder$.png"
-        Square44x44Logo="$placeholder$.png">
-        <uap:DefaultTile Wide310x150Logo="$placeholder$.png" Square71x71Logo="$placeholder$.png" />
-        <uap:SplashScreen Image="$placeholder$.png" />
+        Square150x150Logo="$placeholder$"
+        Square44x44Logo="$placeholder$">
+        <uap:DefaultTile Wide310x150Logo="$placeholder$" Square71x71Logo="$placeholder$" />
+        <uap:SplashScreen Image="$placeholder$" />
       </uap:VisualElements>
     </Application>
   </Applications>

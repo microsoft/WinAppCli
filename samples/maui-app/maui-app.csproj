@@ -13,7 +13,6 @@
     <ApplicationId>com.microsoft.winappcli.mauisample</ApplicationId>
     <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
     <ApplicationVersion>1</ApplicationVersion>
-    <ApplicationPublisher>CN=User Name</ApplicationPublisher>
     <WindowsPackageType>None</WindowsPackageType>
   </PropertyGroup>
 
