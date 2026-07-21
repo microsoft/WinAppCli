@@ -27,7 +27,7 @@ These are resolved at **build/publish time** by **`Microsoft.Maui.Resizetizer`**
 
 **Why winapp trips on this:** `winapp package` only auto-resolves its own entry-point tokens — `$targetnametoken$` and `$targetentrypoint$` (via `--executable`). It does **not** understand MAUI's `$placeholder$` tokens. If you point winapp at the raw `Platforms/Windows/Package.appxmanifest`, packaging fails because those placeholders are still literal `$placeholder$` strings.
 
-> **Never edit `Platforms/Windows/Package.appxmanifest` to hard-code values.** The resizetizer overwrites the generated copy on every build, and hand-editing the source breaks the MAUI tooling contract. The fix is to point winapp at the generated manifest instead.
+> **Do not replace MAUI's placeholders in `Platforms/Windows/Package.appxmanifest` just to satisfy winapp.** Keep framework-managed tokens in the source manifest and point winapp at the generated manifest. Files under `obj`/`bin` are regenerated on every build, so never edit those generated copies.
 
 ## Where the resolved manifest lives
 
