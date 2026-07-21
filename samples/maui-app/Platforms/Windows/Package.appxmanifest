@@ -9,7 +9,7 @@
 
   <Properties>
     <DisplayName>$placeholder$</DisplayName>
-    <PublisherDisplayName>$placeholder$</PublisherDisplayName>
+    <PublisherDisplayName>maui-app</PublisherDisplayName>
     <Logo>$placeholder$.png</Logo>
   </Properties>
 
