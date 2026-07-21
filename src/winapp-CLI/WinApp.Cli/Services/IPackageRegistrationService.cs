@@ -70,7 +70,9 @@ internal interface IPackageRegistrationService
     /// Optional architecture filter (<c>x64</c> / <c>arm64</c> / <c>x86</c>). When provided, only a
     /// package whose identity architecture matches is considered installed — important for the
     /// runtime install, where an x64 host may still need x86/arm64 Framework/DDLM packages.
-    /// When <c>null</c>, the first name match (any architecture) is returned.
+    /// When <c>null</c>, any architecture matches. In all cases, when several servicing versions of
+    /// the package are registered, the <em>highest</em> matching version is returned (registration
+    /// enumeration order is not guaranteed newest-first).
     /// </param>
     /// <returns>The installed version, or null if not found.</returns>
     string? GetInstalledVersion(string packageName, string? architecture = null);

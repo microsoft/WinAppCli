@@ -100,11 +100,13 @@ internal partial class RunCommand
             var noRestore = parseResult.GetValue(NoRestoreOption);
             var properties = parseResult.GetValue(PropertyOption) ?? [];
 
-            // Reject malformed -p values early (spec L3): each must be Name=Value with a non-empty
-            // name, otherwise it would become a nonsensical '-p:' / '-p:=Value' MSBuild argument.
+            // Reject malformed -p values early (spec L3): each must be Name=Value with a non-empty,
+            // non-whitespace name, otherwise it would become a nonsensical '-p:=Value' / '-p: =Value'
+            // MSBuild argument.
             foreach (var property in properties)
             {
-                if (property.IndexOf('=') <= 0)
+                var separator = property.IndexOf('=');
+                if (separator <= 0 || string.IsNullOrWhiteSpace(property[..separator]))
                 {
                     return Fail($"Invalid --property '{property}'. Expected Name=Value (for example: -p WindowsPackageType=None).", isJson);
                 }

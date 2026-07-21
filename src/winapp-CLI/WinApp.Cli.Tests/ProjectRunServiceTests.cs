@@ -77,6 +77,19 @@ public class ProjectRunServiceTests
         </Project>
         """;
 
+    // Multi-targeted executable whose TargetFrameworks come from an import / are conditional, so NO inline
+    // <TargetFramework(s)> is visible to a static scan (DotNetService.IsMultiTargeted returns false). Project
+    // mode must fall back to an MSBuild --getProperty:TargetFrameworks evaluate to discover and pin the first
+    // TFM (H1 / C16); without it the build targets all TFMs and the evaluate reads the empty outer node.
+    private const string ImportedMultiTargetExeCsproj = """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <Import Project="Directory.Build.props" />
+          <PropertyGroup>
+            <OutputType>WinExe</OutputType>
+          </PropertyGroup>
+        </Project>
+        """;
+
     [TestInitialize]
     public void Setup()
     {
@@ -494,6 +507,57 @@ public class ProjectRunServiceTests
         StringAssert.Contains(args, "-p:SolutionName=MyApp");
         StringAssert.Contains(args, "-p:SolutionFileName=MyApp.slnx");
         StringAssert.Contains(args, "-p:SolutionExt=.slnx");
+    }
+
+    #endregion
+
+    #region BuildFrameworkDiscoveryArguments (effective-TFM discovery evaluate, C16)
+
+    [TestMethod]
+    public void BuildFrameworkDiscoveryArguments_QueriesTargetFrameworks_WithoutBuildingOrPinningTfmOrRid()
+    {
+        var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: []);
+
+        var args = ProjectRunService.BuildFrameworkDiscoveryArguments(csproj, options);
+
+        StringAssert.StartsWith(args, "msbuild ");
+        StringAssert.Contains(args, "--getProperty:TargetFrameworks");
+        StringAssert.Contains(args, "-p:Configuration=Debug");
+        Assert.IsFalse(args.Contains("-t:Build"), "the discovery pass must not build");
+        // The whole point is to read the OUTER cross-targeting node, so neither a single TFM nor the RID
+        // (which does not select the TFM list) may be pinned.
+        Assert.IsFalse(args.Contains("-p:TargetFramework=", StringComparison.Ordinal), "must not pin a single TargetFramework");
+        Assert.IsFalse(args.Contains("--getProperty:TargetFramework ", StringComparison.Ordinal), "must query TargetFrameworks (plural), not TargetFramework");
+        Assert.IsFalse(args.Contains("-r win-", StringComparison.Ordinal), "must not pass -r");
+        Assert.IsFalse(args.Contains("-p:RuntimeIdentifier=", StringComparison.Ordinal), "must not pin a RID");
+    }
+
+    [TestMethod]
+    public void BuildFrameworkDiscoveryArguments_WithSolution_EmitsSolutionProperties()
+    {
+        // A Configuration/property-conditional TargetFrameworks list may depend on $(SolutionDir); the
+        // discovery evaluate must define the same Solution* family as the real passes so it resolves the
+        // identical list.
+        var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "src", "App", "App.csproj"));
+        var solution = new FileInfo(Path.Combine(_tempDir.FullName, "MyApp.slnx"));
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Solution: solution);
+
+        var args = ProjectRunService.BuildFrameworkDiscoveryArguments(csproj, options);
+
+        StringAssert.Contains(args, $"-p:SolutionDir={_tempDir.FullName}\\");
+        StringAssert.Contains(args, "-p:SolutionName=MyApp");
+    }
+
+    [TestMethod]
+    public void BuildFrameworkDiscoveryArguments_ForwardsUserProperties()
+    {
+        var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: ["MyFlavor=Retail"]);
+
+        var args = ProjectRunService.BuildFrameworkDiscoveryArguments(csproj, options);
+
+        StringAssert.Contains(args, "-p:MyFlavor=Retail");
     }
 
     #endregion
@@ -2058,6 +2122,62 @@ public class ProjectRunServiceTests
         await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
 
         StringAssert.Contains(dotnet.StreamingCalls[0], "-f net8.0-windows10.0.26100.0", "an explicit --framework must be honored, not replaced by the first TFM");
+    }
+
+    [TestMethod]
+    public async Task BuildAndResolveAsync_ImportedTargetFrameworks_DiscoversAndPinsFirstTfm()
+    {
+        // C16: a project whose <TargetFrameworks> come from an import (Directory.Build.props) is invisible
+        // to the static scan, so IsMultiTargeted returns false. Project mode must fall back to an MSBuild
+        // --getProperty:TargetFrameworks evaluate to discover the list and pin the FIRST TFM into the build.
+        var csproj = WriteFile("App.csproj", ImportedMultiTargetExeCsproj);
+        var discoveryQueried = false;
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+            {
+                if (args.Contains("--getProperty:TargetFrameworks", StringComparison.Ordinal))
+                {
+                    discoveryQueried = true;
+                    // Single --getProperty returns a raw scalar (not JSON) — exercise that path.
+                    return (0, "net10.0-windows10.0.26100.0;net8.0-windows10.0.26100.0", string.Empty);
+                }
+
+                return (0, PackagedPropertiesJson(), string.Empty);
+            },
+        };
+        var service = NewServiceWith(dotnet, LogLevel.Information, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
+
+        var outcome = await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsTrue(discoveryQueried, "the effective TargetFrameworks must be discovered via an MSBuild evaluate");
+        Assert.IsNotNull(outcome.Resolution, "the project should resolve after pinning the discovered first TFM");
+        StringAssert.Contains(dotnet.StreamingCalls[0], "-f net10.0-windows10.0.26100.0", "the first discovered TFM must be pinned into the build pass");
+        Assert.IsFalse(dotnet.StreamingCalls[0].Contains("net8.0-windows10.0.26100.0"), "only the first discovered TFM should be pinned");
+    }
+
+    [TestMethod]
+    public async Task BuildAndResolveAsync_InlineMultiTargeted_UsesStaticPath_NoDiscoveryEvaluate()
+    {
+        // C16 fast-path: an inline concrete <TargetFrameworks> is pinned by the cheap static scan, so NO
+        // --getProperty:TargetFrameworks discovery evaluate should run (that MSBuild round-trip is only for
+        // the imported/conditional case). Guards against regressing the common case into an extra evaluate.
+        var csproj = WriteFile("App.csproj", MultiTargetedExeCsproj);
+        var commandArgs = new List<string>();
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args => { commandArgs.Add(args); return (0, PackagedPropertiesJson(), string.Empty); },
+        };
+        var service = NewServiceWith(dotnet, LogLevel.Information, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
+
+        await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsFalse(
+            commandArgs.Any(a => a.Contains("--getProperty:TargetFrameworks", StringComparison.Ordinal)),
+            "an inline multi-targeted project must be pinned statically, without a discovery evaluate");
+        StringAssert.Contains(dotnet.StreamingCalls[0], "-f net10.0-windows10.0.26100.0", "the first inline TFM must still be pinned into the build pass");
     }
 
     [TestMethod]

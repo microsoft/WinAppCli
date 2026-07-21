@@ -433,6 +433,35 @@ public class RunCommandProjectModeTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task ProjectMode_WhitespaceNameProperty_Errors()
+    {
+        // C16 (Copilot review): a -p whose name before '=' is empty or whitespace-only (here " =Value")
+        // must be rejected before building, not forwarded as a nonsensical '-p: =Value' MSBuild argument.
+        var csproj = CreateCsproj();
+        SetUnpackagedOutcome(csproj, CreateTargetDir(withManifest: false), selfContained: false);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [csproj.FullName, "-p", " =Value", "--detach"]);
+
+        Assert.AreEqual(1, exitCode, "A -p with a whitespace-only name must fail");
+        Assert.AreEqual(0, _fakeProjectRunService.BuildAndResolveCalls.Count, "Validation must happen before building");
+    }
+
+    [TestMethod]
+    public async Task ProjectMode_LeadingEqualsProperty_Errors()
+    {
+        // C16: a -p that starts with '=' (empty name) is likewise rejected before building.
+        var csproj = CreateCsproj();
+        SetUnpackagedOutcome(csproj, CreateTargetDir(withManifest: false), selfContained: false);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [csproj.FullName, "-p", "=Value", "--detach"]);
+
+        Assert.AreEqual(1, exitCode, "A -p with an empty name must fail");
+        Assert.AreEqual(0, _fakeProjectRunService.BuildAndResolveCalls.Count, "Validation must happen before building");
+    }
+
+    [TestMethod]
     public async Task ProjectMode_ValuelessProperty_Errors()
     {
         // Spec L3: a bare -p with no value is rejected in the handler (via the raw OptionResult:

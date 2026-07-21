@@ -46,7 +46,7 @@ Describe 'winui-solution sample' {
 
         if (-not $SkipCleanup) {
             if ($script:tempDir) { Remove-TempTestDirectory -Path $script:tempDir }
-            foreach ($proj in @('App', 'App.Tests')) {
+            foreach ($proj in @('App', 'App.Core', 'App.Tests')) {
                 Remove-Item -Path (Join-Path $script:sampleDir "$proj\bin") -Recurse -Force -ErrorAction SilentlyContinue
                 Remove-Item -Path (Join-Path $script:sampleDir "$proj\obj") -Recurse -Force -ErrorAction SilentlyContinue
             }
