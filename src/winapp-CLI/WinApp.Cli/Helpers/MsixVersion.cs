@@ -19,6 +19,10 @@ internal readonly record struct MsixVersion
 
     public MsixVersion(ushort major, ushort minor, ushort build, ushort revision)
     {
+        if (major == 0 && minor == 0 && build == 0 && revision == 0)
+        {
+            throw new ArgumentException("Version cannot be all zeros.");
+        }
         Major = major;
         Minor = minor;
         Build = build;
@@ -50,6 +54,11 @@ internal readonly record struct MsixVersion
             !ushort.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var minor) ||
             !ushort.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var build) ||
             !ushort.TryParse(parts[3], NumberStyles.None, CultureInfo.InvariantCulture, out var revision))
+        {
+            return false;
+        }
+
+        if (major == 0 && minor == 0 && build == 0 && revision == 0)
         {
             return false;
         }
