@@ -10,20 +10,20 @@ MAUI is **not** a "run `winapp init`" framework — the Windows head already has
 
 ## The resizetizer dependency (root cause)
 
-A .NET MAUI project has a **source** manifest at `Platforms/Windows/Package.appxmanifest` that is full of MAUI-specific `$placeholder$` tokens:
+A .NET MAUI project has a **source** manifest at `Platforms/Windows/Package.appxmanifest` that contains literal placeholder defaults for identity and MAUI-specific `$placeholder$` tokens for logos and display names:
 
 ```xml
-<Identity Name="$placeholder$" Publisher="$placeholder$" Version="$placeholder$" />
+<Identity Name="maui-package-name-placeholder" Publisher="CN=User Name" Version="0.0.0.0" />
 <Properties>
   <DisplayName>$placeholder$</DisplayName>
   <PublisherDisplayName>$placeholder$</PublisherDisplayName>
-  <Logo>$placeholder$</Logo>
+  <Logo>$placeholder$.png</Logo>
 </Properties>
 ...
-<uap:VisualElements DisplayName="$placeholder$" ... Square150x150Logo="$placeholder$" Square44x44Logo="$placeholder$">
+<uap:VisualElements DisplayName="$placeholder$" ... Square150x150Logo="$placeholder$.png" Square44x44Logo="$placeholder$.png">
 ```
 
-These are resolved at **build/publish time** by **`Microsoft.Maui.Resizetizer`** (bundled with the MAUI workload), which reads MSBuild properties (`ApplicationTitle`, `ApplicationId`, `ApplicationDisplayVersion`, `ApplicationPublisher`, the `MauiIcon`/`MauiSplashScreen` items, etc.), generates the app icon/tile/splash assets, and writes a **resolved** manifest into the intermediate output.
+These are resolved at **build/publish time** by MAUI's single-project build pipeline: the `<Identity>` attributes (`Name`, `Publisher`, `Version`) use literal placeholder defaults that MAUI's MSBuild targets overwrite from `ApplicationId`, `ApplicationPublisher`, and `ApplicationDisplayVersion`; meanwhile **`Microsoft.Maui.Resizetizer`** handles the display-name, logo, and splash `$placeholder$` tokens by reading `MauiIcon`/`MauiSplashScreen` items and generating the corresponding image assets.
 
 **Why winapp trips on this:** `winapp package` only auto-resolves its own entry-point tokens — `$targetnametoken$` and `$targetentrypoint$` (via `--executable`). It does **not** understand MAUI's `$placeholder$` tokens. If you point winapp at the raw `Platforms/Windows/Package.appxmanifest`, packaging fails because those placeholders are still literal `$placeholder$` strings.
 
@@ -31,12 +31,13 @@ These are resolved at **build/publish time** by **`Microsoft.Maui.Resizetizer`**
 
 ## Where the resolved manifest lives
 
-After a **Windows-targeted build or publish**, MAUI produces two fully-usable resolved manifests:
+After a **Windows-targeted build or publish**, MAUI produces a fully-usable resolved manifest:
 
 | Manifest | Path (relative to project) | State |
 |----------|----------------------------|-------|
-| **Resizetizer manifest (reliable for `WindowsPackageType=None`)** | `obj\<Config>\<TFM>\<RID>\resizetizer\m\Package.appxmanifest` | MAUI `$placeholder$` tokens resolved; `$targetnametoken$`/`$targetentrypoint$` remain (winapp resolves these via `--executable`) |
-| **Publish-output manifest (MSIX-oriented builds)** | `bin\<Config>\<TFM>\<RID>\AppxManifest.xml` | Fully resolved when produced by your build; may be absent in `WindowsPackageType=None` workflows |
+| **Resizetizer manifest** | `obj\<Config>\<TFM>\<RID>\resizetizer\m\Package.appxmanifest` | MAUI `$placeholder$` tokens resolved; `$targetnametoken$`/`$targetentrypoint$` remain (winapp resolves these via `--executable`) |
+
+> **Note:** When building with `WindowsPackageType=MSIX` (the default), MAUI also produces `bin\<Config>\<TFM>\<RID>\AppxManifest.xml` — a fully resolved manifest. This file is **not produced** in `WindowsPackageType=None` workflows. The resizetizer manifest above works in both cases.
 
 Where:
 - `<Config>` = `Debug` or `Release`
@@ -85,7 +86,7 @@ winapp package .\publish\win-x64 `
 
 `--executable MyApp.exe` resolves the remaining `$targetnametoken$`/`$targetentrypoint$` in the resizetizer manifest.
 
-> For MAUI `WindowsPackageType=None` pipelines, do **not** rely on manifest auto-detection from the publish folder. The explicit `obj\...\resizetizer\m\Package.appxmanifest` + `--executable` path above is the reliable flow.
+> **Always use the explicit `--manifest` path** for `WindowsPackageType=None` workflows — manifest auto-detection from the publish folder does not apply because no `AppxManifest.xml` is generated in that output.
 
 ### 3. Sign the unpackaged build
 

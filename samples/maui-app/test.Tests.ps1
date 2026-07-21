@@ -49,6 +49,12 @@ Describe "maui-app sample" {
             dotnet new maui -n $script:projectName
             $LASTEXITCODE | Should -Be 0
             $script:projectDir | Should -Exist
+
+            # Strip to Windows-only TFM to avoid needing android/ios workloads
+            $csprojPath = Join-Path $script:projectDir "$($script:projectName).csproj"
+            $csprojContent = Get-Content $csprojPath -Raw
+            $csprojContent = $csprojContent -replace '<TargetFrameworks>[^<]+</TargetFrameworks>', "<TargetFrameworks>$($script:tfm)</TargetFrameworks>"
+            Set-Content -Path $csprojPath -Value $csprojContent
         }
 
         It "Should publish the Windows head output" {
