@@ -83,18 +83,6 @@ Describe 'winui-unpackaged-app sample' {
             }
         }
 
-        It 'Detects the project as unpackaged (WindowsPackageType=None)' -Skip:$script:skip {
-            $rid = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'win-arm64' } else { 'win-x64' }
-            Push-Location $script:tempDir
-            try {
-                $wpt = dotnet build 'winui-unpackaged-app.csproj' -t:Build -c Debug -r $rid --getProperty:WindowsPackageType
-                $LASTEXITCODE | Should -Be 0
-            } finally {
-                Pop-Location
-            }
-            "$wpt".Trim() | Should -Be 'None'
-        }
-
         It 'Builds and launches the unpackaged app with winapp run .' -Skip:$script:skip {
             # Launch via Start-Process (NOT a captured pipe): the unpackaged app inherits
             # the console stdout handle, so capturing it in a pipeline would block until the
@@ -122,6 +110,24 @@ Describe 'winui-unpackaged-app sample' {
             Start-Sleep -Seconds 3
             $proc = Get-Process -Id $script:launchedPid -ErrorAction SilentlyContinue
             $proc | Should -Not -BeNullOrEmpty -Because 'the app should still be running after booting off the installed runtime'
+        }
+
+        It 'Detects the project as unpackaged (WindowsPackageType=None)' -Skip:$script:skip {
+            # Evaluate WindowsPackageType WITHOUT compiling: `dotnet build --getProperty` with no
+            # explicit target restores + evaluates the project and prints the property, but never
+            # runs the Build target (verified: no output assembly is produced). This assertion is
+            # deliberately ordered AFTER the `winapp run .` test above so it can never populate
+            # bin/obj ahead of that cold first-invocation path, which must exercise project mode's
+            # restore and CsWinRT metadata-shim logic from scratch.
+            $rid = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'win-arm64' } else { 'win-x64' }
+            Push-Location $script:tempDir
+            try {
+                $wpt = dotnet build 'winui-unpackaged-app.csproj' -c Debug -r $rid --getProperty:WindowsPackageType
+                $LASTEXITCODE | Should -Be 0
+            } finally {
+                Pop-Location
+            }
+            "$wpt".Trim() | Should -Be 'None'
         }
     }
 
