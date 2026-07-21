@@ -2,20 +2,23 @@
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
-  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap uap3 rescap">
+  IgnorableNamespaces="uap rescap">
 
-  <Identity Name="$placeholder$" Publisher="$placeholder$" Version="$placeholder$" />
+  <Identity Name="maui-package-name-placeholder" Publisher="CN=User Name" Version="0.0.0.0" />
+
+  <mp:PhoneIdentity PhoneProductId="C09F2855-2F08-4637-B315-FFDA52F9CF31" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 
   <Properties>
     <DisplayName>$placeholder$</DisplayName>
-    <PublisherDisplayName>$placeholder$</PublisherDisplayName>
-    <Logo>$placeholder$</Logo>
+    <PublisherDisplayName>User Name</PublisherDisplayName>
+    <Logo>$placeholder$.png</Logo>
   </Properties>
 
   <Dependencies>
     <TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
   </Dependencies>
 
   <Resources>
@@ -28,10 +31,10 @@
         DisplayName="$placeholder$"
         Description="$placeholder$"
         BackgroundColor="transparent"
-        Square150x150Logo="$placeholder$"
-        Square44x44Logo="$placeholder$">
-        <uap:DefaultTile Wide310x150Logo="$placeholder$" Square71x71Logo="$placeholder$" />
-        <uap:SplashScreen Image="$placeholder$" />
+        Square150x150Logo="$placeholder$.png"
+        Square44x44Logo="$placeholder$.png">
+        <uap:DefaultTile Wide310x150Logo="$placeholder$.png" Square71x71Logo="$placeholder$.png" Square310x310Logo="$placeholder$.png" />
+        <uap:SplashScreen Image="$placeholder$.png" />
       </uap:VisualElements>
     </Application>
   </Applications>
@@ -39,4 +42,5 @@
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
   </Capabilities>
+
 </Package>

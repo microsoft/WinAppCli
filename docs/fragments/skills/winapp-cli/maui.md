@@ -10,17 +10,17 @@ MAUI is **not** a "run `winapp init`" framework — the Windows head already has
 
 ## The resizetizer dependency (root cause)
 
-A .NET MAUI project has a **source** manifest at `Platforms/Windows/Package.appxmanifest` that is full of MAUI-specific `$placeholder$` tokens:
+A .NET MAUI project has a **source** manifest at `Platforms/Windows/Package.appxmanifest` with placeholder tokens that the MAUI build pipeline resolves:
 
 ```xml
-<Identity Name="$placeholder$" Publisher="$placeholder$" Version="$placeholder$" />
+<Identity Name="maui-package-name-placeholder" Publisher="CN=User Name" Version="0.0.0.0" />
 <Properties>
   <DisplayName>$placeholder$</DisplayName>
-  <PublisherDisplayName>$placeholder$</PublisherDisplayName>
-  <Logo>$placeholder$</Logo>
+  <PublisherDisplayName>User Name</PublisherDisplayName>
+  <Logo>$placeholder$.png</Logo>
 </Properties>
 ...
-<uap:VisualElements DisplayName="$placeholder$" ... Square150x150Logo="$placeholder$" Square44x44Logo="$placeholder$">
+<uap:VisualElements DisplayName="$placeholder$" ... Square150x150Logo="$placeholder$.png" Square44x44Logo="$placeholder$.png">
 ```
 
 These are resolved at **build/publish time** by **`Microsoft.Maui.Resizetizer`** (bundled with the MAUI workload), which reads MSBuild properties (`ApplicationTitle`, `ApplicationId`, `ApplicationDisplayVersion`, `ApplicationPublisher`, the `MauiIcon`/`MauiSplashScreen` items, etc.), generates the app icon/tile/splash assets, and writes a **resolved** manifest into the intermediate output.
