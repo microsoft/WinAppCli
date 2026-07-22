@@ -48,6 +48,15 @@ async function ensureDebuggerExtensionInstalled(debuggerType: string): Promise<b
 }
 
 /**
+ * Quote a value as a PowerShell single-quoted literal so that path or user-derived
+ * input can't be interpreted as PowerShell (no `$(...)`, variable, or subexpression
+ * expansion). Embedded single quotes are escaped by doubling, per PowerShell literal rules.
+ */
+function psQuote(value: string): string {
+	return `'${value.replace(/'/g, "''")}'`;
+}
+
+/**
  * Execute a winapp CLI command and show output in the terminal
  */
 async function runWinappCommand(extensionPath: string, command: string, cwd: string, showTerminal: boolean = true): Promise<string> {
@@ -681,7 +690,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 			// Signing identity is discovered interactively (subscription/account/profile) by the
 			// CLI, and authentication uses the standard Azure credential chain. No extra input needed.
-			await runWinappCommand(extensionPath, `az-sign "${filePath}"`, workspacePath);
+			await runWinappCommand(extensionPath, `az-sign ${psQuote(filePath)}`, workspacePath);
 		})
 	);
 

@@ -324,6 +324,95 @@ public class AzSignCommandTests : BaseCommandTests
         var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
         StringAssert.Contains(allOutput, "signtool.exe execution failed");
     }
+
+    [TestMethod]
+    public async Task AzSign_NonInteractive_MultipleSubscriptions_ReturnsActionableError()
+    {
+        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        await File.WriteAllTextAsync(filePath, "MZ");
+
+        _fakeAuthService.IsInteractive = false;
+        _fakeSigningService.Subscriptions =
+        [
+            new AzureSubscription("sub-123", "Sub 1"),
+            new AzureSubscription("sub-456", "Sub 2")
+        ];
+
+        var result = await ParseAndInvokeWithCaptureAsync(_command, [filePath]);
+
+        Assert.AreEqual(1, result);
+        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        StringAssert.Contains(allOutput, "--subscription");
+    }
+
+    [TestMethod]
+    public async Task AzSign_NonInteractive_MultipleAccounts_ReturnsActionableError()
+    {
+        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        await File.WriteAllTextAsync(filePath, "MZ");
+
+        _fakeAuthService.IsInteractive = false;
+        _fakeSigningService.Subscriptions = [new AzureSubscription("sub-123", "Test Subscription")];
+        _fakeSigningService.SigningAccounts =
+        [
+            new SigningAccount("account-a", "rg-a", "eastus", "https://eus.codesigning.azure.net"),
+            new SigningAccount("account-b", "rg-b", "westus", "https://wus.codesigning.azure.net")
+        ];
+
+        var result = await ParseAndInvokeWithCaptureAsync(_command, ["--subscription", "sub-123", filePath]);
+
+        Assert.AreEqual(1, result);
+        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        StringAssert.Contains(allOutput, "--account");
+    }
+
+    [TestMethod]
+    public async Task AzSign_NonInteractive_MultipleProfiles_ReturnsActionableError()
+    {
+        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        await File.WriteAllTextAsync(filePath, "MZ");
+
+        _fakeAuthService.IsInteractive = false;
+        _fakeSigningService.Subscriptions = [new AzureSubscription("sub-123", "Test Subscription")];
+        _fakeSigningService.SigningAccounts =
+        [
+            new SigningAccount("myaccount", "myrg", "eastus", "https://eus.codesigning.azure.net")
+        ];
+        _fakeSigningService.CertificateProfiles =
+        [
+            new CertificateProfile("profile-a", "PublicTrust", "Active"),
+            new CertificateProfile("profile-b", "PrivateTrust", "Active")
+        ];
+
+        var result = await ParseAndInvokeWithCaptureAsync(_command, ["--subscription", "sub-123", filePath]);
+
+        Assert.AreEqual(1, result);
+        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        StringAssert.Contains(allOutput, "--profile");
+    }
+
+    [TestMethod]
+    public async Task AzSign_WhitespaceOnlyProfile_IsTreatedAsNotProvided()
+    {
+        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        await File.WriteAllTextAsync(filePath, "MZ");
+
+        _fakeSigningService.Subscriptions = [new AzureSubscription("sub-123", "Test Subscription")];
+        _fakeSigningService.SigningAccounts = [new SigningAccount("myaccount", "myrg", "eastus", "https://eus.codesigning.azure.net")];
+        _fakeSigningService.CertificateProfiles = [new CertificateProfile("myprofile", "PublicTrust", "Active")];
+
+        // A whitespace-only --profile must normalize to "not provided" rather than tripping the
+        // "--profile must be used with --account" dependency check; the single profile auto-selects.
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
+
+        var result = await ParseAndInvokeWithCaptureAsync(_command, ["--profile", "   ", filePath]);
+
+        Assert.AreEqual(0, result);
+        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        Assert.IsFalse(allOutput.Contains("--profile must be used with --account"),
+            "Whitespace-only --profile should be treated as not provided");
+        Assert.AreEqual(1, _fakeSignToolService.CallCount, "Should reach the signing stage");
+    }
 }
 
 internal class FakeAzureAuthService : IAzureAuthService

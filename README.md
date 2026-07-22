@@ -225,6 +225,7 @@ See also: [Debugging Guide](./docs/debugging.md) — choosing between `winapp ru
 
 - [`cert`](./docs/usage.md#cert) - Generate and install development certificates
 - [`sign`](./docs/usage.md#sign) - Sign MSIX packages and executables
+- [`az-sign`](./docs/usage.md#az-sign) - Sign with Azure Trusted Signing (cloud-managed identity, no local PFX)
 - [`create-external-catalog`](./docs/usage.md#create-external-catalog) - Generate CodeIntegrityExternal.cat for TrustedLaunch sparse packages
 
 **Development Tools:**

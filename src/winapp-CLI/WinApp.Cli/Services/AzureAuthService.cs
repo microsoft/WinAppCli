@@ -158,7 +158,16 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
                 p.WaitForExit();
                 if (p.ExitCode == 0 && !string.IsNullOrEmpty(output))
                 {
-                    return output.Split('\n')[0].Trim();
+                    var resolved = output.Split('\n')[0].Trim();
+
+                    // where.exe searches the current directory *before* PATH, so a malicious
+                    // 'az.cmd' dropped into the working directory (e.g. an untrusted cloned repo)
+                    // would be returned and then executed for 'az login'. Only trust a rooted path
+                    // that does not live in the current working directory.
+                    if (IsTrustedAzureCliPath(resolved))
+                    {
+                        return resolved;
+                    }
                 }
             }
         }
@@ -168,6 +177,27 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Rejects an Azure CLI path resolved from <c>where.exe</c> when it is not a rooted,
+    /// existing file or when it resolves inside the current working directory (the hijack vector).
+    /// </summary>
+    private static bool IsTrustedAzureCliPath(string resolvedPath)
+    {
+        if (string.IsNullOrWhiteSpace(resolvedPath)
+            || !Path.IsPathRooted(resolvedPath)
+            || !File.Exists(resolvedPath))
+        {
+            return false;
+        }
+
+        var resolvedDir = Path.GetFullPath(Path.GetDirectoryName(resolvedPath)!)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var currentDir = Path.GetFullPath(Environment.CurrentDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        return !string.Equals(resolvedDir, currentDir, StringComparison.OrdinalIgnoreCase);
     }
 
     protected virtual async Task<bool> RunAzLoginAsync(string azPath, string tenantId, CancellationToken cancellationToken)

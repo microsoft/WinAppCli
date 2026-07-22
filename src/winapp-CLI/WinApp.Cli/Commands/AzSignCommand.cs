@@ -78,10 +78,12 @@ internal class AzSignCommand : Command, IShortDescription
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var filePath = parseResult.GetRequiredValue(FilePathArgument);
-            var subscription = parseResult.GetValue(SubscriptionOption);
-            var resourceGroup = parseResult.GetValue(ResourceGroupOption);
-            var account = parseResult.GetValue(AccountOption);
-            var profile = parseResult.GetValue(ProfileOption);
+            // Normalize whitespace-only values to null so a value like "--account ' '" is treated
+            // as "not provided" consistently by both the dependency checks and resource discovery.
+            var subscription = Normalize(parseResult.GetValue(SubscriptionOption));
+            var resourceGroup = Normalize(parseResult.GetValue(ResourceGroupOption));
+            var account = Normalize(parseResult.GetValue(AccountOption));
+            var profile = Normalize(parseResult.GetValue(ProfileOption));
             var metadataFile = parseResult.GetValue(MetadataFileOption);
 
             // Validate flag dependencies
@@ -191,6 +193,22 @@ internal class AzSignCommand : Command, IShortDescription
             }
         }
 
+        private static string? Normalize(string? value) =>
+            string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+        /// <summary>
+        /// Throws with an actionable message when a selection prompt would be required but the
+        /// environment is non-interactive (CI, redirected input), so scripted callers get a clear
+        /// error telling them which flag to pass instead of hanging on an unanswerable prompt.
+        /// </summary>
+        private void RequireInteractiveSelection(string message)
+        {
+            if (!azureAuthService.IsInteractive)
+            {
+                throw new InvalidOperationException(message);
+            }
+        }
+
         private async Task<SigningMetadata?> DiscoverAndSelectResourcesAsync(
             string accessToken, string? subscriptionId, string? resourceGroup,
             string? accountName, string? profileName,
@@ -289,6 +307,9 @@ internal class AzSignCommand : Command, IShortDescription
 
             // Prompt user to select
             var choices = subscriptions.Select(s => $"{s.DisplayName} ({s.SubscriptionId})").ToList();
+            RequireInteractiveSelection(
+                "Multiple Azure subscriptions are available but none was specified. " +
+                "Re-run with --subscription <id> (this environment is non-interactive and cannot prompt).");
             var prompt = new SelectionPrompt<string>()
                 .Title("Select an Azure subscription:")
                 .AddChoices(choices);
@@ -335,6 +356,9 @@ internal class AzSignCommand : Command, IShortDescription
                 .Title("Select a signing account:")
                 .AddChoices(choices);
 
+            RequireInteractiveSelection(
+                "Multiple Trusted Signing accounts are available but none was specified. " +
+                "Re-run with --resource-group <name> --account <name> (this environment is non-interactive and cannot prompt).");
             var selected = await ansiConsole.PromptAsync(prompt, cancellationToken);
             var index = choices.IndexOf(selected);
             return accounts[index];
@@ -360,6 +384,9 @@ internal class AzSignCommand : Command, IShortDescription
             }
 
             var choices = profiles.Select(p => $"{p.Name} ({p.ProfileType})").ToList();
+            RequireInteractiveSelection(
+                "Multiple certificate profiles are available but none was specified. " +
+                "Re-run with --profile <name> (this environment is non-interactive and cannot prompt).");
             var prompt = new SelectionPrompt<string>()
                 .Title("Select a certificate profile:")
                 .AddChoices(choices);

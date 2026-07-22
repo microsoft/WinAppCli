@@ -39,6 +39,7 @@ All commands are accessible from the Command Palette (`Ctrl+Shift+P`). Type **Wi
 | **WinApp: Install Certificate** | Install an existing `.pfx` or `.cer` certificate. (requires Admin elevation) |
 | **WinApp: Certificate Info** | Display certificate details (subject, thumbprint, expiry) to verify a certificate matches your manifest. |
 | **WinApp: Sign Package** | Sign an MSIX package or executable with a certificate. |
+| **WinApp: Sign Package with Azure Trusted Signing** | Sign an MSIX package or executable using Azure Trusted Signing — a cloud-managed signing identity, so no private key (PFX) lives on the local machine. Use this instead of **Sign Package** when signing with an Azure Trusted Signing account. |
 | **WinApp: Run SDK Tool** | Run Windows SDK tools (`makeappx`, `signtool`, `mt`, `makepri`) with custom arguments. |
 | **WinApp: Get WinApp Path** | Show paths to installed SDK components. |
 

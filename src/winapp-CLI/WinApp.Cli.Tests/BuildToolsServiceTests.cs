@@ -41,6 +41,26 @@ public class BuildToolsServiceTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task RunBuildToolAsync_WithToolPathOverrideAndEnvironment_UsesOverrideAndInjectsEnv()
+    {
+        // cmd.exe stands in for an architecture-matched signtool: passing it as toolPathOverride
+        // must bypass tool resolution/installation entirely, and the supplied environment must
+        // reach the child process (az-sign relies on both for AZURE_TENANT_ID propagation).
+        var cmd = new FileInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"));
+        Assert.IsTrue(cmd.Exists, "cmd.exe is expected to exist on the test host");
+
+        var (stdout, _) = await _buildToolsService.RunBuildToolAsync(
+            new GenericTool("signtool.exe"),
+            "/c echo %WINAPP_OVERRIDE_TEST%",
+            TestTaskContext,
+            toolPathOverride: cmd,
+            environment: new Dictionary<string, string> { ["WINAPP_OVERRIDE_TEST"] = "override-and-env-work" },
+            cancellationToken: TestContext.CancellationToken);
+
+        StringAssert.Contains(stdout, "override-and-env-work");
+    }
+
+    [TestMethod]
     public void GetBuildToolPath_WithNonExistentTool_ReturnsNull()
     {
         // Arrange - Create package structure but without the requested tool
