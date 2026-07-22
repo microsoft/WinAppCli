@@ -400,19 +400,41 @@ internal class AzSignCommand : Command, IShortDescription
         {
             var tempPath = Path.Combine(Path.GetTempPath(), $"winapp-az-sign-{Guid.NewGuid():N}.json");
 
-            using var stream = File.Create(tempPath);
-            using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
-            writer.WriteStartObject();
-            writer.WriteString("Endpoint", metadata.Endpoint);
-            writer.WriteString("CodeSigningAccountName", metadata.AccountName);
-            writer.WriteString("CertificateProfileName", metadata.ProfileName);
-            // Exclude SharedTokenCacheCredential — it picks up stale consumer tokens from the MSAL
-            // shared cache and fails because the Azure.CodeSigning app is AAD-only
-            writer.WriteStartArray("ExcludeCredentials");
-            writer.WriteStringValue("SharedTokenCacheCredential");
-            writer.WriteEndArray();
-            writer.WriteEndObject();
-            await writer.FlushAsync(cancellationToken);
+            try
+            {
+                using (var stream = File.Create(tempPath))
+                using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("Endpoint", metadata.Endpoint);
+                    writer.WriteString("CodeSigningAccountName", metadata.AccountName);
+                    writer.WriteString("CertificateProfileName", metadata.ProfileName);
+                    // Exclude SharedTokenCacheCredential — it picks up stale consumer tokens from the MSAL
+                    // shared cache and fails because the Azure.CodeSigning app is AAD-only
+                    writer.WriteStartArray("ExcludeCredentials");
+                    writer.WriteStringValue("SharedTokenCacheCredential");
+                    writer.WriteEndArray();
+                    writer.WriteEndObject();
+                    await writer.FlushAsync(cancellationToken);
+                }
+            }
+            catch
+            {
+                // Don't leave a partial/orphaned metadata file behind on cancellation or write failure.
+                try
+                {
+                    if (File.Exists(tempPath))
+                    {
+                        File.Delete(tempPath);
+                    }
+                }
+                catch
+                {
+                    // Best effort cleanup
+                }
+
+                throw;
+            }
 
             return new FileInfo(tempPath);
         }

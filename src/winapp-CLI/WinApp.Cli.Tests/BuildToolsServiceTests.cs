@@ -61,6 +61,66 @@ public class BuildToolsServiceTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task RunBuildToolAsync_WithLargeOutputOnBothStreams_DrainsConcurrentlyWithoutDeadlock()
+    {
+        // A tool that fills both stdout and stderr well past the OS pipe buffer (~64KB) would
+        // deadlock if the runner read one stream to completion before touching the other.
+        // signtool /v /debug is exactly such a tool; cmd.exe stands in here.
+        var cmd = new FileInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"));
+        Assert.IsTrue(cmd.Exists, "cmd.exe is expected to exist on the test host");
+
+        // ~8000 iterations * ~30 bytes = ~240KB per stream, comfortably past the pipe buffer.
+        const string args = "/c for /L %i in (1,1,8000) do @(echo OUT-%i-xxxxxxxxxxxxxxxxxxxxxxxx& echo ERR-%i-xxxxxxxxxxxxxxxxxxxxxxxx 1>&2)";
+
+        var run = _buildToolsService.RunBuildToolAsync(
+            new GenericTool("signtool.exe"),
+            args,
+            TestTaskContext,
+            toolPathOverride: cmd,
+            cancellationToken: TestContext.CancellationToken);
+
+        // If draining were sequential this would hang; bound it so a regression fails fast.
+        var completed = await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(60), TestContext.CancellationToken));
+        Assert.AreSame(run, completed, "RunBuildToolAsync deadlocked draining both pipes");
+
+        var (stdout, stderr) = await run;
+        StringAssert.Contains(stdout, "OUT-8000-");
+        StringAssert.Contains(stderr, "ERR-8000-");
+    }
+
+    [TestMethod]
+    public async Task RunBuildToolAsync_WhenCancelled_KillsChildAndThrowsWithoutWaitingForExit()
+    {
+        var cmd = new FileInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"));
+        Assert.IsTrue(cmd.Exists, "cmd.exe is expected to exist on the test host");
+
+        // ping sleeps ~30s; the cancellation must cut the wait short and kill the child.
+        using var cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromMilliseconds(500));
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        OperationCanceledException? caught = null;
+        try
+        {
+            await _buildToolsService.RunBuildToolAsync(
+                new GenericTool("signtool.exe"),
+                "/c ping -n 30 127.0.0.1 >nul",
+                TestTaskContext,
+                toolPathOverride: cmd,
+                cancellationToken: cts.Token);
+        }
+        catch (OperationCanceledException ex)
+        {
+            caught = ex;
+        }
+        stopwatch.Stop();
+
+        Assert.IsNotNull(caught, "Cancellation should surface as an OperationCanceledException");
+        Assert.IsTrue(stopwatch.Elapsed < TimeSpan.FromSeconds(15),
+            $"Cancellation should not wait for the child to exit on its own (took {stopwatch.Elapsed.TotalSeconds:F1}s)");
+    }
+
+    [TestMethod]
     public void GetBuildToolPath_WithNonExistentTool_ReturnsNull()
     {
         // Arrange - Create package structure but without the requested tool

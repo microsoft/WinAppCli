@@ -150,6 +150,30 @@ public class AzureSignToolServiceTests : BaseCommandTests
         Assert.IsNull(recording.CapturedEnvironment, "No AZURE_TENANT_ID should be injected when no tenant is known");
     }
 
+    [TestMethod]
+    public async Task SignAsync_WhenResolvedSigntoolArchMismatchesDlib_SwapsToMatchingArchSibling()
+    {
+        // The dlib only ships x64/x86, so on an ARM64 host the resolved arm64 signtool must be
+        // swapped for the sibling x64 signtool that matches the x64 dlib.
+        var dlib = CreateDlibInCache(); // bin/x64/Azure.CodeSigning.Dlib.dll
+        var arm64Signtool = CreateFakeSigntool("arm64"); // what tool resolution returns
+        var x64Signtool = CreateFakeSigntool("x64");      // sibling under the same bin parent
+        var recording = new RecordingBuildToolsService { SignToolToReturn = arm64Signtool };
+        var service = new AzureSignToolService(
+            recording, _nuget, _installer, new FakeSignToolWinappDirectoryService(_globalWinappDir));
+
+        var fileToSign = new FileInfo(Path.Combine(_tempDirectory.FullName, "app.msix"));
+        await File.WriteAllTextAsync(fileToSign.FullName, "MZ", TestContext.CancellationToken);
+        var metadata = new FileInfo(Path.Combine(_tempDirectory.FullName, "metadata.json"));
+        await File.WriteAllTextAsync(metadata.FullName, "{}", TestContext.CancellationToken);
+
+        await service.SignAsync(fileToSign, metadata, "tenant", TestTaskContext, TestContext.CancellationToken);
+
+        Assert.IsNotNull(dlib);
+        Assert.AreEqual(x64Signtool.FullName, recording.CapturedToolPathOverride!.FullName,
+            "The x64 dlib should force a swap from the resolved arm64 signtool to the sibling x64 signtool");
+    }
+
     private FileInfo CreateFakeSigntool(string architecture)
     {
         var dir = Path.Combine(_tempDirectory.FullName, "sdk", "bin", architecture);

@@ -96,7 +96,18 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
 
             // Retry with the now-valid Azure CLI credential
             var retryCredential = CreateAzureCliCredential();
-            var retryToken = await retryCredential.GetTokenAsync(new TokenRequestContext([scope]), cancellationToken);
+            AccessToken retryToken;
+            try
+            {
+                retryToken = await retryCredential.GetTokenAsync(new TokenRequestContext([scope]), cancellationToken);
+            }
+            catch (AuthenticationFailedException ex)
+            {
+                throw new InvalidOperationException(
+                    "Azure CLI login appeared to succeed but retrieving an access token failed. " +
+                    "Try running 'az login' manually, then re-run the command.", ex);
+            }
+
             logger.LogInformation("Authenticated via Azure CLI");
             return retryToken.Token;
         }
