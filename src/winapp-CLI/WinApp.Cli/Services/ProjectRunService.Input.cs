@@ -591,6 +591,15 @@ internal sealed partial class ProjectRunService
 
     private void LogRunningLoneTestProject(FileInfo project, string sourceName)
     {
+        // Courtesy note — must obey the output mode. Gate on Information (mirrors the pattern in
+        // ProjectRunService.cs / RunCommand.ProjectMode.cs) so --json (LogLevel.None) keeps stdout a
+        // pure JSON envelope and --quiet (LogLevel.Warning) suppresses it. This runs during input
+        // resolution, ahead of the command's own output-mode gating, so it must self-gate here.
+        if (!logger.IsEnabled(LogLevel.Information))
+        {
+            return;
+        }
+
         ansiConsole.MarkupLineInterpolated(
             $"{UiSymbols.Note} No runnable app project found in '{sourceName}'; running the only runnable project '{project.Name}', which is a test project.");
     }

@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Diagnostics;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
@@ -1684,6 +1685,159 @@ public class DotNetServiceTests : BaseCommandTests
 
         // Assert
         Assert.IsFalse(result, "Should return false when there is no </Project> to insert before");
+    }
+
+    #endregion
+
+    #region RunDotnetCommandAsync cancellation (process-tree kill)
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task RunDotnetCommandAsync_CancelledMidBuild_KillsChildProcessTree()
+    {
+        // The non-streaming runner is used by classification/evaluate/discovery. On Ctrl+C it must
+        // kill the whole dotnet/MSBuild process tree, not just the top-level `dotnet`. This test
+        // drives a real `dotnet msbuild` target that Execs a powershell "sleeper"; the sleeper writes
+        // its own PID to a file, then blocks for two minutes. If cancellation only reaped the parent,
+        // the powershell grandchild would be orphaned and survive. Asserting the recorded PID is dead
+        // after cancellation proves Kill(entireProcessTree: true) reached the descendant.
+        var dir = new DirectoryInfo(_testTempDirectory);
+        var pidFile = Path.Combine(_testTempDirectory, "sleeper.pid");
+        var sleeperScript = Path.Combine(_testTempDirectory, "sleeper.ps1");
+        await File.WriteAllTextAsync(
+            sleeperScript,
+            $"$PID | Set-Content -LiteralPath '{pidFile}' -NoNewline; Start-Sleep -Seconds 120",
+            TestContext.CancellationToken);
+
+        var projPath = Path.Combine(_testTempDirectory, "sleeper.proj");
+        await File.WriteAllTextAsync(
+            projPath,
+            $@"<Project>
+  <Target Name=""Sleep"">
+    <Exec Command=""powershell -NoProfile -ExecutionPolicy Bypass -File &quot;&quot;{sleeperScript}&quot;&quot;"" />
+  </Target>
+</Project>",
+            TestContext.CancellationToken);
+
+        using var cts = new CancellationTokenSource();
+        // -nodereuse:false keeps the worker node (and thus the Exec'd powershell) a descendant of the
+        // process we start, so entireProcessTree can reach it rather than a detached reused node.
+        var runTask = _dotNetService.RunDotnetCommandAsync(
+            dir, $"msbuild \"{projPath}\" -t:Sleep -nologo -nodereuse:false", cts.Token);
+
+        // Wait until the grandchild is up (it wrote its PID). If it never starts, dotnet/powershell
+        // are not usable here — treat as inconclusive rather than a failure.
+        var grandchildPid = await WaitForRunningPidFromFileAsync(
+            pidFile, "powershell", TimeSpan.FromSeconds(60), TestContext.CancellationToken);
+        if (grandchildPid is null)
+        {
+            await cts.CancelAsync();
+            try { await runTask; } catch { /* ignored */ }
+            Assert.Inconclusive("Sleeper grandchild never started; dotnet msbuild/powershell unavailable in this environment.");
+            return;
+        }
+
+        // Act: cancel the in-flight command.
+        await cts.CancelAsync();
+
+        // Assert 1: cancellation surfaces as OperationCanceledException (TaskCanceledException derives
+        // from it), matching the streaming sibling's contract.
+        Exception? thrown = null;
+        try
+        {
+            await runTask;
+        }
+        catch (Exception ex)
+        {
+            thrown = ex;
+        }
+
+        Assert.IsInstanceOfType<OperationCanceledException>(
+            thrown, "Cancelling an in-flight dotnet command must surface OperationCanceledException.");
+
+        // Assert 2: the powershell grandchild is gone — the whole tree was killed, not just the parent.
+        var died = await WaitForProcessExitAsync(
+            grandchildPid.Value, "powershell", TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+        if (!died)
+        {
+            // Best-effort cleanup so a surviving sleeper doesn't leak across the suite.
+            try
+            {
+                using var survivor = Process.GetProcessById(grandchildPid.Value);
+                survivor.Kill(entireProcessTree: true);
+            }
+            catch { /* ignored */ }
+        }
+
+        Assert.IsTrue(
+            died,
+            $"Grandchild powershell (PID {grandchildPid}) survived cancellation — the dotnet process tree was not killed.");
+    }
+
+    /// <summary>
+    /// Polls <paramref name="pidFile"/> until it contains the PID of a running process whose name
+    /// matches <paramref name="expectedName"/>, or the timeout elapses (returns null).
+    /// </summary>
+    private static async Task<int?> WaitForRunningPidFromFileAsync(
+        string pidFile, string expectedName, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (File.Exists(pidFile))
+            {
+                var text = (await File.ReadAllTextAsync(pidFile, cancellationToken)).Trim();
+                if (int.TryParse(text, out var pid) && IsNamedProcessRunning(pid, expectedName))
+                {
+                    return pid;
+                }
+            }
+
+            await Task.Delay(200, cancellationToken);
+        }
+
+        return null;
+    }
+
+    /// <summary>Polls until the named process has exited (returns true) or the timeout elapses.</summary>
+    private static async Task<bool> WaitForProcessExitAsync(
+        int pid, string expectedName, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (!IsNamedProcessRunning(pid, expectedName))
+            {
+                return true;
+            }
+
+            await Task.Delay(200, cancellationToken);
+        }
+
+        return !IsNamedProcessRunning(pid, expectedName);
+    }
+
+    /// <summary>
+    /// True only when a live process with <paramref name="pid"/> exists AND its name matches
+    /// <paramref name="expectedName"/> — the name check guards against PID reuse after the tree is
+    /// killed reporting a false survivor.
+    /// </summary>
+    private static bool IsNamedProcessRunning(int pid, string expectedName)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            return !process.HasExited
+                && string.Equals(process.ProcessName, expectedName, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (ArgumentException)
+        {
+            return false; // No process with this id is running.
+        }
+        catch (InvalidOperationException)
+        {
+            return false; // Process has exited between lookup and inspection.
+        }
     }
 
     #endregion

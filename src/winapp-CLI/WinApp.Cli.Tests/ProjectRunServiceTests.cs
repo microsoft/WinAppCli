@@ -1424,13 +1424,43 @@ public class ProjectRunServiceTests
                 : args.Contains(lib.FullName, StringComparison.OrdinalIgnoreCase) ? (0, EvalJson("Library"), string.Empty)
                 : (0, string.Empty, string.Empty),
         };
-        var service = NewServiceWith(dotnet, out var console);
+        var service = NewServiceWith(dotnet, LogLevel.Information, out var console);
 
         var resolution = await service.ResolveInputAsync(solution, CancellationToken.None);
 
         Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
         Assert.AreEqual(tests.FullName, resolution.Csproj!.FullName);
         StringAssert.Contains(console.Output, "test project");
+    }
+
+    [TestMethod]
+    [DataRow(LogLevel.Warning, DisplayName = "--quiet (Warning) suppresses the lone-test note")]
+    [DataRow(LogLevel.None, DisplayName = "--json (None) suppresses the lone-test note")]
+    public async Task ResolveInput_Solution_OnlyTestProject_NoteSuppressedAboveInformation(LogLevel minLevel)
+    {
+        // H2: the lone-test courtesy note runs during input resolution, ahead of the command's own
+        // output-mode gating, so it must self-gate on the logger level. Under --quiet (Warning) and
+        // --json (None) the note must NOT reach the console — for --json a stray write ahead of the
+        // envelope corrupts stdout into invalid JSON.
+        var solution = WriteFile("Tests.sln", "");
+        var tests = WriteFile("App.Tests.csproj", ExecutableCsproj);
+        var lib = WriteFile("App.csproj", LibraryCsproj);
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                IsSlnListCall(args) ? (0, SlnListOutput("App.csproj", "App.Tests.csproj"), string.Empty)
+                : args.Contains(tests.FullName, StringComparison.OrdinalIgnoreCase) ? (0, EvalJsonWithItems("Exe", capabilities: ["TestContainer"]), string.Empty)
+                : args.Contains(lib.FullName, StringComparison.OrdinalIgnoreCase) ? (0, EvalJson("Library"), string.Empty)
+                : (0, string.Empty, string.Empty),
+        };
+        var service = NewServiceWith(dotnet, minLevel, out var console);
+
+        var resolution = await service.ResolveInputAsync(solution, CancellationToken.None);
+
+        // The project still resolves to the lone test project — only the human note is gated.
+        Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
+        Assert.AreEqual(tests.FullName, resolution.Csproj!.FullName);
+        Assert.AreEqual(string.Empty, console.Output, "the lone-test note must be suppressed above Information (--quiet / --json).");
     }
 
     [TestMethod]
