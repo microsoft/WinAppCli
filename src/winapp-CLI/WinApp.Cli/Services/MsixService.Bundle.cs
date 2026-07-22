@@ -141,13 +141,24 @@ internal partial class MsixService
             var extractedVersion = referenceDoc.IdentityVersion;
             var extractedPublisher = publisher ?? referenceDoc.IdentityPublisher;
 
+            // Guard against malformed or malicious Identity/@Version values before they reach the
+            // file system or the makeappx command line. Parse once into a canonical MsixVersion and
+            // reuse it for both path construction and the makeappx /bv argument.
+            MsixVersion? bundleVersion = null;
+            if (!MsixVersion.TryParse(extractedVersion, out var parsedVersion))
+            {
+                throw new InvalidOperationException(
+                    $"Identity/@Version '{extractedVersion}' is not a canonical four-part MSIX version (e.g. 1.2.3.4).");
+            }
+
+            bundleVersion = parsedVersion;
+
             // Compose output filename: <Name>_<Version>_<arch1>_<arch2>.msixbundle (arches sorted)
             var sortedArches = detectedArchitectures.OrderBy(a => a, StringComparer.OrdinalIgnoreCase).ToList();
             var archSuffix = string.Join("_", sortedArches);
 
-            var defaultBundleFileName = !string.IsNullOrWhiteSpace(extractedVersion)
-                ? $"{finalPackageName}_{extractedVersion}_{archSuffix}.msixbundle"
-                : $"{finalPackageName}_{archSuffix}.msixbundle";
+            // Keep using the `extractedVersion` string for the filename to preserve the existing naming convention.
+            var defaultBundleFileName = $"{finalPackageName}_{extractedVersion}_{archSuffix}.msixbundle";
 
             FileInfo outputBundlePath;
             DirectoryInfo outputFolder;
@@ -219,7 +230,10 @@ internal partial class MsixService
 
             // --- Step 6: Create the bundle ---
             taskContext.AddStatusMessage("Creating bundle...");
-            await bundleService.CreateBundleAsync(intermediateFiles, outputBundlePath, taskContext, cancellationToken);
+            // Pass the validated, consistent slice Identity/@Version through to makeappx's /bv
+            // switch so Bundle.Identity/@Version matches the source manifests instead of
+            // makeappx's default timestamp-derived version. See microsoft/winappCli#677.
+            await bundleService.CreateBundleAsync(intermediateFiles, outputBundlePath, taskContext, bundleVersion, cancellationToken);
 
             // --- Step 7: Sign if requested ---
             if (autoSign)
