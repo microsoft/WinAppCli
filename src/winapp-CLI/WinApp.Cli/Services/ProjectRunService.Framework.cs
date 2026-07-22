@@ -118,12 +118,21 @@ internal sealed partial class ProjectRunService
             .Any(a => !string.IsNullOrWhiteSpace(a.Attribute("Condition")?.Value));
     }
 
-    /// <summary>MSBuild property queried to authoritatively discover a project's effective TFM list.</summary>
-    private static readonly string[] FrameworkDiscoveryProperties = ["TargetFrameworks"];
+    /// <summary>
+    /// MSBuild properties queried to authoritatively discover a project's effective TFM list. Deliberately
+    /// requests TWO properties (not just <c>TargetFrameworks</c>) so the SDK emits the JSON envelope
+    /// <c>{ "Properties": { ... } }</c> rather than a raw scalar: a single <c>--getProperty</c> makes the
+    /// whole trimmed stdout the value, so any evaluation warning or diagnostic preamble would be captured as
+    /// <c>TargetFrameworks</c>, split into a garbage first TFM, and passed to <c>-f</c>. Requesting the extra
+    /// (empty-on-the-outer-node) <c>TargetFramework</c> is harmless and forces the diagnostic-tolerant JSON
+    /// parse in <see cref="MsBuildPropertyReader"/>.
+    /// </summary>
+    private static readonly string[] FrameworkDiscoveryProperties = ["TargetFramework", "TargetFrameworks"];
 
     /// <summary>
     /// Authoritatively resolves the FIRST entry of a project's effective <c>TargetFrameworks</c> via an
-    /// evaluate-only <c>dotnet msbuild --getProperty:TargetFrameworks</c> (no build), using the same
+    /// evaluate-only <c>dotnet msbuild --getProperty:TargetFramework --getProperty:TargetFrameworks</c> (no
+    /// build — two properties force the diagnostic-tolerant JSON envelope), using the same
     /// Configuration / forwardable user <c>-p</c> / <c>Solution*</c> globals as the real passes so a
     /// Configuration- or property-conditional list resolves identically. Returns <c>null</c> when the
     /// project is single-targeted (empty <c>TargetFrameworks</c>) or the evaluate can't run (SDK-less /
@@ -178,9 +187,10 @@ internal sealed partial class ProjectRunService
     /// project's framework properties. Mirrors the property section of <see cref="BuildEvaluateArguments"/>
     /// — forwardable user <c>-p</c>, then <c>Solution*</c> props, then <c>-p:Configuration</c> LAST — but
     /// deliberately omits <c>-p:TargetFramework</c> (that is what we're discovering) and the RID (which does
-    /// not select the TFM list) so the outer cross-targeting node is evaluated. Defaults to querying
-    /// <c>TargetFrameworks</c>; pass explicit <paramref name="getProperties"/> to query others (e.g. both
-    /// <c>TargetFramework</c> and <c>TargetFrameworks</c> for effective single-TFM discovery).
+    /// not select the TFM list) so the outer cross-targeting node is evaluated. Defaults to querying both
+    /// <c>TargetFramework</c> and <c>TargetFrameworks</c> (two properties force the diagnostic-tolerant JSON
+    /// envelope — see <see cref="FrameworkDiscoveryProperties"/>); pass explicit <paramref name="getProperties"/>
+    /// to query others.
     /// </summary>
     internal static string BuildFrameworkDiscoveryArguments(FileInfo csproj, ProjectRunOptions options, params string[] getProperties)
     {
@@ -207,9 +217,6 @@ internal sealed partial class ProjectRunService
 
         return WindowsCommandLine.JoinArguments(tokens) ?? string.Empty;
     }
-
-    /// <summary>MSBuild properties queried to authoritatively discover a project's effective single TFM.</summary>
-    private static readonly string[] SingleFrameworkDiscoveryProperties = ["TargetFramework", "TargetFrameworks"];
 
     /// <summary>
     /// Resolves the single effective target framework moniker used ONLY to steer the CsWinRT metadata shim's
@@ -262,7 +269,7 @@ internal sealed partial class ProjectRunService
         DirectoryInfo workingDir,
         CancellationToken cancellationToken)
     {
-        var args = BuildFrameworkDiscoveryArguments(csproj, options, SingleFrameworkDiscoveryProperties);
+        var args = BuildFrameworkDiscoveryArguments(csproj, options, FrameworkDiscoveryProperties);
         logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, args);
 
         int exitCode;
@@ -285,7 +292,7 @@ internal sealed partial class ProjectRunService
             return null;
         }
 
-        var props = MsBuildPropertyReader.Parse(stdout, SingleFrameworkDiscoveryProperties);
+        var props = MsBuildPropertyReader.Parse(stdout, FrameworkDiscoveryProperties);
         var single = GetProp(props, "TargetFramework");
         if (!string.IsNullOrWhiteSpace(single))
         {

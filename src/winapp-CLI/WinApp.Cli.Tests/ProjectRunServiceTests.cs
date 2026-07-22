@@ -547,9 +547,27 @@ public class ProjectRunServiceTests
         // The whole point is to read the OUTER cross-targeting node, so neither a single TFM nor the RID
         // (which does not select the TFM list) may be pinned.
         Assert.IsFalse(args.Contains("-p:TargetFramework=", StringComparison.Ordinal), "must not pin a single TargetFramework");
-        Assert.IsFalse(args.Contains("--getProperty:TargetFramework ", StringComparison.Ordinal), "must query TargetFrameworks (plural), not TargetFramework");
         Assert.IsFalse(args.Contains("-r win-", StringComparison.Ordinal), "must not pass -r");
         Assert.IsFalse(args.Contains("-p:RuntimeIdentifier=", StringComparison.Ordinal), "must not pin a RID");
+    }
+
+    [TestMethod]
+    public void BuildFrameworkDiscoveryArguments_RequestsTwoProperties_ToForceJsonEnvelope()
+    {
+        // C36: a SINGLE --getProperty makes the SDK emit a raw scalar, so MsBuildPropertyReader treats the
+        // whole trimmed stdout (including any evaluation warning / diagnostic preamble) as the value — which
+        // is then split into a garbage first TFM and passed to -f. Requesting a SECOND property forces the
+        // { "Properties": { ... } } JSON envelope, which the reader parses tolerantly. Guard that the default
+        // discovery therefore queries BOTH TargetFramework and TargetFrameworks (two --getProperty tokens).
+        var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: []);
+
+        var args = ProjectRunService.BuildFrameworkDiscoveryArguments(csproj, options);
+
+        StringAssert.Contains(args, "--getProperty:TargetFramework ");
+        StringAssert.Contains(args, "--getProperty:TargetFrameworks");
+        var count = System.Text.RegularExpressions.Regex.Count(args, "--getProperty:");
+        Assert.IsTrue(count >= 2, $"discovery must request >=2 properties to force the JSON envelope, but requested {count}");
     }
 
     [TestMethod]
@@ -2282,8 +2300,9 @@ public class ProjectRunServiceTests
                 if (args.Contains("--getProperty:TargetFrameworks", StringComparison.Ordinal))
                 {
                     discoveryQueried = true;
-                    // Single --getProperty returns a raw scalar (not JSON) — exercise that path.
-                    return (0, "net10.0-windows10.0.26100.0;net8.0-windows10.0.26100.0", string.Empty);
+                    // C36: discovery requests two properties, so the SDK emits the JSON envelope (a diagnostic
+                    // preamble can't corrupt the value). TargetFramework is empty on the outer node.
+                    return (0, """{ "Properties": { "TargetFramework": "", "TargetFrameworks": "net10.0-windows10.0.26100.0;net8.0-windows10.0.26100.0" } }""", string.Empty);
                 }
 
                 return (0, PackagedPropertiesJson(), string.Empty);
@@ -2340,8 +2359,8 @@ public class ProjectRunServiceTests
                 {
                     discoveryQueried = true;
                     StringAssert.Contains(args, "-p:Configuration=Release", "the discovery evaluate must run under the run's Configuration");
-                    // The Release-conditional list (net10 first) — what MSBuild resolves under Release.
-                    return (0, "net10.0-windows10.0.26100.0;net8.0-windows10.0.26100.0", string.Empty);
+                    // C36: two-property discovery → JSON envelope. The Release-conditional list (net10 first).
+                    return (0, """{ "Properties": { "TargetFramework": "", "TargetFrameworks": "net10.0-windows10.0.26100.0;net8.0-windows10.0.26100.0" } }""", string.Empty);
                 }
 
                 return (0, PackagedPropertiesJson(), string.Empty);
