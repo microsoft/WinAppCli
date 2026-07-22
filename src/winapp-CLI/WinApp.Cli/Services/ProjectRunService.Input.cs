@@ -659,7 +659,20 @@ internal sealed partial class ProjectRunService
         var trimmed = selector.Trim();
         // Resolve a path-style selector against the input/solution directory (not the process cwd),
         // so `--project src/App/App.csproj` means "relative to what the user pointed winapp at".
-        var rooted = Path.GetFullPath(trimmed, baseDir.FullName);
+        // --project is user input: an unsupported path format (e.g. a colon outside a drive prefix)
+        // makes Path.GetFullPath throw. Treat that as "no match" and return null so the caller emits
+        // the normal selector error listing candidates, rather than leaking an internal exception —
+        // mirroring the same guard applied to solution-provided paths above.
+        string rooted;
+        try
+        {
+            rooted = Path.GetFullPath(trimmed, baseDir.FullName);
+        }
+        catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException)
+        {
+            return null;
+        }
+
         var matches = projects.Where(p =>
             string.Equals(p.FullName, rooted, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(p.Name, trimmed, StringComparison.OrdinalIgnoreCase) ||

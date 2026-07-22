@@ -93,14 +93,14 @@ internal sealed partial class ProjectRunService(
     /// or <c>null</c> when the user already set the property (their value wins) or no injection is
     /// needed/possible. See <see cref="CsWinRTMetadataShimService"/>.
     /// </summary>
-    private string? ResolveCsWinRTMetadataShim(ProjectRunOptions options)
+    private string? ResolveCsWinRTMetadataShim(ProjectRunOptions options, string? framework)
     {
         if (UserSetCsWinRTMetadata(options))
         {
             return null;
         }
 
-        return csWinRTMetadataShimService.ResolveMetadataFolder(options.Framework);
+        return csWinRTMetadataShimService.ResolveMetadataFolder(framework);
     }
 
     /// <summary>
@@ -127,10 +127,17 @@ internal sealed partial class ProjectRunService(
         // successful build (H1). Spec default = first declared TFM. No-op when single-targeted / --framework set.
         options = await ResolveEffectiveFrameworkAsync(csproj, options, workingDir, cancellationToken);
 
+        // The CsWinRT metadata shim (below) needs the project's effective single TFM to steer ref-pack
+        // selection to the project's TargetPlatformVersion on SDK-less hosts. --framework / multi-targeted
+        // pinning leaves options.Framework null for a normal single-targeted project, so resolve it
+        // explicitly here (also covering imported/conditional TargetFramework values). Not used as a build
+        // -p:TargetFramework — single-targeted projects need no such pin.
+        var shimFramework = await ResolveShimFrameworkAsync(csproj, options, workingDir, cancellationToken);
+
         // SHIM (temporary): on hosts with no registered Windows SDK, resolve a folder of ref-pack winmds
         // to inject as -p:CsWinRTWindowsMetadata so C#/WinRT authoring projects build (see
         // CsWinRTMetadataShimService). Skipped when the user already set the property. null = no injection.
-        var csWinRTMetadata = ResolveCsWinRTMetadataShim(options);
+        var csWinRTMetadata = ResolveCsWinRTMetadataShim(options, shimFramework);
         var buildOptions = options;
 
         // Restore ordering: when the target lives in a solution, restore the whole solution's managed
@@ -161,7 +168,7 @@ internal sealed partial class ProjectRunService(
                     : await RunRestorePassAsync(csproj, options, workingDir, cancellationToken);
                 if (restoreExit == 0)
                 {
-                    csWinRTMetadata = ResolveCsWinRTMetadataShim(options);
+                    csWinRTMetadata = ResolveCsWinRTMetadataShim(options, shimFramework);
                     // The explicit restore already populated the cache; skip the redundant restore in the
                     // build pass so we don't restore twice.
                     buildOptions = options with { NoRestore = true };
@@ -279,7 +286,8 @@ internal sealed partial class ProjectRunService(
         // Pin the same effective TFM the real build/evaluate passes use (H1) so a multi-targeted project
         // is probed against a single-TFM inner build, not the empty cross-targeting outer node.
         options = await ResolveEffectiveFrameworkAsync(csproj, options, workingDir, cancellationToken);
-        var csWinRTMetadata = ResolveCsWinRTMetadataShim(options);
+        var shimFramework = await ResolveShimFrameworkAsync(csproj, options, workingDir, cancellationToken);
+        var csWinRTMetadata = ResolveCsWinRTMetadataShim(options, shimFramework);
 
         // Reuse the exact evaluate pass (same -p/RID/Platform/TFM/shim as a real build) so the
         // WindowsPackageType we read matches what the build would see. It is evaluate-only — no build

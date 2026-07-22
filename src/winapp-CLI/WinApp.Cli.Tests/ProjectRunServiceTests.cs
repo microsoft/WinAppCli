@@ -638,6 +638,22 @@ public class ProjectRunServiceTests
         Assert.IsNull(match);
     }
 
+    [TestMethod]
+    public void MatchProjectSelector_UnsupportedPathFormat_ReturnsNull()
+    {
+        // C31: --project is user input; a value whose format makes Path.GetFullPath throw (e.g. a colon
+        // outside a drive prefix, or wildcard/redirection chars illegal in a filename) must resolve to
+        // "no match" (null) so the caller emits the normal selector error listing candidates — never leak
+        // a raw NotSupportedException/ArgumentException as an internal error. Such a value can never be a
+        // legal project filename, so the name/suffix fallback could not have matched it anyway.
+        var projects = new List<FileInfo> { new(Path.Combine(_tempDir.FullName, "App", "App.csproj")) };
+
+        foreach (var bad in new[] { "foo:bar:baz", "in|valid", "a<b>c", "quo\"te" })
+        {
+            var match = ProjectRunService.MatchProjectSelector(projects, bad, _tempDir);
+            Assert.IsNull(match, $"selector '{bad}' should resolve to no match, not throw");
+        }
+    }
     #endregion
 
     #region TryParseSdkVersion
@@ -1410,6 +1426,31 @@ public class ProjectRunServiceTests
         Assert.AreEqual(1, shim.ResolvedMonikers.Count, "the shim should be consulted once");
         Assert.AreEqual("net10.0-windows10.0.26100.0", shim.ResolvedMonikers[0],
             "the shim must be consulted with the project's target framework moniker");
+    }
+
+    [TestMethod]
+    public async Task BuildAndResolveAsync_NoFrameworkFlag_ShimGetsProjectSingleTfm()
+    {
+        // C32 regression: with NO --framework on a single-targeted project (options.Framework is null),
+        // the shim must STILL be consulted with the project's own <TargetFramework> — not null — so on an
+        // SDK-less host it prefers the ref pack matching the project's TargetPlatformVersion instead of the
+        // highest cached one (e.g. building a 10.0.19041 project against 10.0.26100 metadata). Previously
+        // the null options.Framework was passed straight through to the shim.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj); // <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+        var folder = @"C:\cache\microsoft.windows.sdk.net.ref\10.0.26100.57\winmd";
+        var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => (0, PackagedPropertiesJson(), string.Empty) };
+        var shim = new FakeCsWinRTMetadataShimService { WindowsSdkAbsent = true, FolderToReturn = folder };
+        var service = NewServiceWith(dotnet, shim, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: []);
+
+        var outcome = await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsNotNull(outcome.Resolution);
+        Assert.IsTrue(shim.ResolvedMonikers.Count >= 1, "the shim should be consulted");
+        Assert.AreEqual("net10.0-windows10.0.26100.0", shim.ResolvedMonikers[0],
+            "the shim must receive the project's single TargetFramework even when --framework is omitted");
+        Assert.IsFalse(shim.ResolvedMonikers.Contains(null),
+            "the shim must never be consulted with a null moniker when the project declares a TargetFramework");
     }
 
     [TestMethod]

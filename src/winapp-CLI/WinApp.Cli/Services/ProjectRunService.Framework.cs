@@ -174,15 +174,18 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
-    /// Builds the evaluate-only <c>dotnet msbuild --getProperty:TargetFrameworks</c> arguments for
-    /// discovering a project's effective TFM list. Mirrors the property section of
-    /// <see cref="BuildEvaluateArguments"/> — forwardable user <c>-p</c>, then <c>Solution*</c> props, then
-    /// <c>-p:Configuration</c> LAST — but deliberately omits <c>-p:TargetFramework</c> (that is what we're
-    /// discovering) and the RID (which does not select the TFM list) so the outer cross-targeting node is
-    /// evaluated.
+    /// Builds the evaluate-only <c>dotnet msbuild --getProperty:...</c> arguments for discovering a
+    /// project's framework properties. Mirrors the property section of <see cref="BuildEvaluateArguments"/>
+    /// — forwardable user <c>-p</c>, then <c>Solution*</c> props, then <c>-p:Configuration</c> LAST — but
+    /// deliberately omits <c>-p:TargetFramework</c> (that is what we're discovering) and the RID (which does
+    /// not select the TFM list) so the outer cross-targeting node is evaluated. Defaults to querying
+    /// <c>TargetFrameworks</c>; pass explicit <paramref name="getProperties"/> to query others (e.g. both
+    /// <c>TargetFramework</c> and <c>TargetFrameworks</c> for effective single-TFM discovery).
     /// </summary>
-    internal static string BuildFrameworkDiscoveryArguments(FileInfo csproj, ProjectRunOptions options)
+    internal static string BuildFrameworkDiscoveryArguments(FileInfo csproj, ProjectRunOptions options, params string[] getProperties)
     {
+        var properties = getProperties.Length > 0 ? getProperties : FrameworkDiscoveryProperties;
+
         var tokens = new List<string>
         {
             "msbuild",
@@ -197,8 +200,101 @@ internal sealed partial class ProjectRunService
         AppendSolutionProperties(tokens, options);
 
         tokens.Add($"-p:Configuration={options.Configuration}");
-        tokens.Add("--getProperty:TargetFrameworks");
+        foreach (var property in properties)
+        {
+            tokens.Add($"--getProperty:{property}");
+        }
 
         return WindowsCommandLine.JoinArguments(tokens) ?? string.Empty;
+    }
+
+    /// <summary>MSBuild properties queried to authoritatively discover a project's effective single TFM.</summary>
+    private static readonly string[] SingleFrameworkDiscoveryProperties = ["TargetFramework", "TargetFrameworks"];
+
+    /// <summary>
+    /// Resolves the single effective target framework moniker used ONLY to steer the CsWinRT metadata shim's
+    /// ref-pack selection toward the project's <c>TargetPlatformVersion</c> (e.g. <c>10.0.19041</c>). Unlike
+    /// <see cref="ResolveEffectiveFrameworkAsync"/> — which pins a build TFM only for a MULTI-targeted
+    /// project — this also covers a genuinely single-targeted project (whose <c>--framework</c> stays null),
+    /// so on an SDK-less host the shim prefers the matching ref pack instead of the highest cached one.
+    /// Order: an already pinned / user <c>--framework</c>, then a cheap static <c>&lt;TargetFramework&gt;</c>
+    /// read, then — only when the shim would actually inject (no registered SDK) and the value isn't
+    /// statically resolvable — an authoritative MSBuild evaluate honoring imported/conditional values. The
+    /// returned TFM is NEVER used as a build <c>-p:TargetFramework</c> (a single-targeted project needs none).
+    /// </summary>
+    private async Task<string?> ResolveShimFrameworkAsync(
+        FileInfo csproj,
+        ProjectRunOptions options,
+        DirectoryInfo workingDir,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(options.Framework))
+        {
+            return options.Framework;
+        }
+
+        var staticTfm = dotNetService.GetTargetFramework(csproj);
+        if (!string.IsNullOrWhiteSpace(staticTfm) && !staticTfm.Contains("$(", StringComparison.Ordinal))
+        {
+            return staticTfm;
+        }
+
+        // Only the SDK-less path consumes this framework (the shim no-ops when a Windows SDK is registered),
+        // so skip the extra MSBuild evaluate on SDK-installed hosts where the result would be discarded.
+        if (!csWinRTMetadataShimService.IsWindowsSdkAbsent())
+        {
+            return null;
+        }
+
+        return await ResolveEvaluatedTargetFrameworkAsync(csproj, options, workingDir, cancellationToken);
+    }
+
+    /// <summary>
+    /// Authoritatively resolves a project's effective SINGLE target framework moniker via an evaluate-only
+    /// <c>dotnet msbuild --getProperty:TargetFramework --getProperty:TargetFrameworks</c> (no build), using
+    /// the same globals as the real passes so an imported or conditional value resolves identically. Returns
+    /// the singular <c>TargetFramework</c> when set, else the first of <c>TargetFrameworks</c>, else
+    /// <c>null</c> when the evaluate can't run (SDK-less / pre-restore / cancelled-start).
+    /// </summary>
+    private async Task<string?> ResolveEvaluatedTargetFrameworkAsync(
+        FileInfo csproj,
+        ProjectRunOptions options,
+        DirectoryInfo workingDir,
+        CancellationToken cancellationToken)
+    {
+        var args = BuildFrameworkDiscoveryArguments(csproj, options, SingleFrameworkDiscoveryProperties);
+        logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, args);
+
+        int exitCode;
+        string stdout;
+        try
+        {
+            (exitCode, stdout, _) = await dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        if (exitCode != 0)
+        {
+            return null;
+        }
+
+        var props = MsBuildPropertyReader.Parse(stdout, SingleFrameworkDiscoveryProperties);
+        var single = GetProp(props, "TargetFramework");
+        if (!string.IsNullOrWhiteSpace(single))
+        {
+            return single;
+        }
+
+        var multi = GetProp(props, "TargetFrameworks");
+        return string.IsNullOrWhiteSpace(multi)
+            ? null
+            : multi.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
     }
 }
