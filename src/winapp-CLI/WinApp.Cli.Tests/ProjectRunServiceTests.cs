@@ -872,6 +872,33 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public async Task ResolveInput_DirectoryWithLoneProject_ClassifiesWithOwningSolutionContext()
+    {
+        // M1: a lone project in a directory (no sibling .sln) whose runnability is conditional on
+        // $(SolutionDir) must be classified WITH the owning solution's context — the solution is now
+        // resolved BEFORE classification, not attached afterward. Here the evaluate reports a runnable
+        // Exe only when the SolutionDir token is present; classifying solution-less (the old behavior)
+        // would see Library and wrongly fall back to folder mode.
+        var solution = WriteFile("App.sln", SlnListing(@"src\App.csproj"));
+        var project = WriteFileAt(@"src\App.csproj", NoInlineOutputTypeCsproj);
+        var projectDir = project.Directory!;
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                args.Contains("SolutionDir", StringComparison.OrdinalIgnoreCase)
+                    ? (0, EvalJson("Exe"), string.Empty)
+                    : (0, EvalJson("Library"), string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+
+        var resolution = await service.ResolveInputAsync(projectDir, CancellationToken.None);
+
+        Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
+        Assert.AreEqual(project.FullName, resolution.Csproj!.FullName);
+        Assert.AreEqual(solution.FullName, resolution.Solution!.FullName);
+    }
+
+    [TestMethod]
     public async Task ResolveInput_DirectoryWithSingleNonRunnableCsproj_ExplicitProject_ReturnsProjectMode()
     {
         // An explicit --project selector is honored as-is even for a non-runnable project (the user asked

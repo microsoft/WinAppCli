@@ -111,11 +111,14 @@ internal sealed partial class ProjectRunService
 
             // Auto-selection: only switch to project mode when the lone project is actually runnable.
             // A non-runnable library sitting beside build output must stay in folder mode (the G4
-            // "don't change folder mode" guarantee). Classify with the same effective MSBuild inputs
-            // used for the multi-project path so conditional OutputType/test markers are honored, and
-            // reuse PickRunnableProject so the lone-test convenience (run a sole test project) is kept.
-            var loneProps = BuildClassificationPropertyTokens(classificationInputs, solution: null);
-            var (loneApps, loneTests) = await ClassifyRunnablesAsync(csprojs, dir, loneProps, classificationInputs, solution: null, cancellationToken);
+            // "don't change folder mode" guarantee). Resolve the owning solution FIRST so classification
+            // sees the same $(SolutionDir)/Solution* context the real build will (M1): a lone project
+            // whose OutputType/IsTestProject is conditional on $(SolutionDir) would otherwise be
+            // classified with solution:null, misdetected as non-runnable, and wrongly fall back to folder
+            // mode. Reuse the same solution for the final resolution so we don't walk the tree twice.
+            var loneOwningSolution = FindOwningSolution(csprojs[0]);
+            var loneProps = BuildClassificationPropertyTokens(classificationInputs, loneOwningSolution);
+            var (loneApps, loneTests) = await ClassifyRunnablesAsync(csprojs, dir, loneProps, classificationInputs, loneOwningSolution, cancellationToken);
             var lonePick = PickRunnableProject(loneApps, loneTests, out var lonePickedTest);
             if (lonePick is null)
             {
@@ -128,7 +131,7 @@ internal sealed partial class ProjectRunService
                 LogRunningLoneTestProject(lonePick, dir.FullName);
             }
 
-            return new RunInputResolution(WinAppRunMode.Project, lonePick, dir, FindOwningSolution(lonePick));
+            return new RunInputResolution(WinAppRunMode.Project, lonePick, dir, loneOwningSolution);
         }
 
         // A --project selector disambiguates directly without evaluation.
@@ -275,13 +278,8 @@ internal sealed partial class ProjectRunService
         var sawProject = false;
         foreach (var relative in relativePaths)
         {
-            string full;
-            try
-            {
-                var normalized = relative.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
-                full = Path.GetFullPath(Path.Combine(solutionDir, normalized));
-            }
-            catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException)
+            var full = TryResolveSolutionRelativePath(solutionDir, relative);
+            if (full is null)
             {
                 continue;
             }
@@ -387,31 +385,13 @@ internal sealed partial class ProjectRunService
 
         var allManaged = projectPaths.All(IsManagedProjectPath);
 
-        var siblings = new List<FileInfo>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var relative in projectPaths.Where(IsManagedProjectPath))
-        {
-            string full;
-            try
-            {
-                var normalized = relative.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
-                full = Path.GetFullPath(Path.Combine(solutionDir, normalized));
-            }
-            catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException)
-            {
-                continue;
-            }
+        var resolvedSiblings = projectPaths
+            .Where(IsManagedProjectPath)
+            .Select(relative => TryResolveSolutionRelativePath(solutionDir, relative))
+            .Where(full => full is not null && !string.Equals(full, target.FullName, StringComparison.OrdinalIgnoreCase))
+            .Select(full => full!);
 
-            if (string.Equals(full, target.FullName, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            if (seen.Add(full))
-            {
-                siblings.Add(new FileInfo(full));
-            }
-        }
+        var siblings = DistinctProjectFiles(resolvedSiblings);
 
         return (allManaged, siblings);
     }
@@ -658,29 +638,55 @@ internal sealed partial class ProjectRunService
                 $"Could not read the solution '{solution.Name}' ('dotnet sln list' exited {exitCode}). {detail}".TrimEnd());
         }
 
-        var projects = new List<FileInfo>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var raw in stdout.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        var resolved = stdout
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            // Skip the `dotnet sln list` header ("Project(s)" and its dashed underline) and non-.csproj entries.
+            .Where(raw => !(raw.All(c => c == '-') || string.Equals(raw, "Project(s)", StringComparison.OrdinalIgnoreCase)))
+            .Where(raw => raw.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            .Select(raw => TryResolveSolutionRelativePath(solutionDir.FullName, raw))
+            .Where(full => full is not null)
+            .Select(full => full!);
+
+        return DistinctProjectFiles(resolved);
+    }
+
+    /// <summary>
+    /// Normalizes a solution-relative project path (either slash flavor → the platform separator) and
+    /// resolves it to an absolute path under <paramref name="solutionDir"/>. Returns <c>null</c> when the
+    /// path is malformed (<see cref="ArgumentException"/>/<see cref="PathTooLongException"/>/<see
+    /// cref="NotSupportedException"/>) so callers can skip it. Shared by every solution-listing walk so
+    /// they all resolve entries identically.
+    /// </summary>
+    private static string? TryResolveSolutionRelativePath(string solutionDir, string relative)
+    {
+        try
         {
-            // Skip the `dotnet sln list` header ("Project(s)" and its dashed underline).
-            if (raw.All(c => c == '-') || string.Equals(raw, "Project(s)", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
+            var normalized = relative.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+            return Path.GetFullPath(Path.Combine(solutionDir, normalized));
+        }
+        catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException)
+        {
+            return null;
+        }
+    }
 
-            if (!raw.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            var full = Path.GetFullPath(Path.Combine(solutionDir.FullName, raw));
+    /// <summary>
+    /// De-duplicates absolute project paths (case-insensitive) into <see cref="FileInfo"/> entries,
+    /// preserving first-seen order. Shared by the solution-listing walks.
+    /// </summary>
+    private static List<FileInfo> DistinctProjectFiles(IEnumerable<string> fullPaths)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var files = new List<FileInfo>();
+        foreach (var full in fullPaths)
+        {
             if (seen.Add(full))
             {
-                projects.Add(new FileInfo(full));
+                files.Add(new FileInfo(full));
             }
         }
 
-        return projects;
+        return files;
     }
 
     /// <summary>
@@ -705,28 +711,12 @@ internal sealed partial class ProjectRunService
                 $"Could not read the solution '{solution.Name}': {ex.Message}");
         }
 
-        var projects = new List<FileInfo>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var relative in extractProjectPaths(text))
-        {
-            string full;
-            try
-            {
-                var normalized = relative.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
-                full = Path.GetFullPath(Path.Combine(solutionDir.FullName, normalized));
-            }
-            catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException)
-            {
-                continue;
-            }
+        var resolved = extractProjectPaths(text)
+            .Select(relative => TryResolveSolutionRelativePath(solutionDir.FullName, relative))
+            .Where(full => full is not null)
+            .Select(full => full!);
 
-            if (seen.Add(full))
-            {
-                projects.Add(new FileInfo(full));
-            }
-        }
-
-        return projects;
+        return DistinctProjectFiles(resolved);
     }
 
     /// <summary>
