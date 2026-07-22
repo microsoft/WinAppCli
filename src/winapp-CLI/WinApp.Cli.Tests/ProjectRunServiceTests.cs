@@ -844,6 +844,48 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public async Task ResolveInput_DirectoryWithSingleNonRunnableCsproj_ReturnsFolderMode()
+    {
+        // Copilot review (ProjectRunService.Input.cs:106): a directory whose only top-level project is a
+        // non-runnable library (e.g. a lib copied beside build output) must NOT auto-switch to project
+        // mode — folder mode is preserved unchanged (G4). Classification static-parses Library → NotRunnable.
+        WriteFile("Lib.csproj", LibraryCsproj);
+
+        var resolution = await _service.ResolveInputAsync(_tempDir, CancellationToken.None);
+
+        Assert.AreEqual(WinAppRunMode.Folder, resolution.Mode, "a lone non-runnable library must stay in folder mode");
+        Assert.IsNull(resolution.Csproj);
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_DirectoryWithSingleTestCsproj_ReturnsProjectMode_LoneTest()
+    {
+        // The lone-non-runnable folder fallback must retain the lone-test convenience: a directory whose
+        // only project is a runnable test project still enters project mode (matching the multi/solution
+        // PickRunnableProject behavior).
+        WriteFile("App.Tests.csproj", TestProjectCsproj);
+
+        var resolution = await _service.ResolveInputAsync(_tempDir, CancellationToken.None);
+
+        Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
+        Assert.AreEqual("App.Tests.csproj", resolution.Csproj!.Name);
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_DirectoryWithSingleNonRunnableCsproj_ExplicitProject_ReturnsProjectMode()
+    {
+        // An explicit --project selector is honored as-is even for a non-runnable project (the user asked
+        // for it), matching the multi-.csproj --project path — the runnability gate only applies to
+        // auto-selection.
+        WriteFile("Lib.csproj", LibraryCsproj);
+
+        var resolution = await _service.ResolveInputAsync(_tempDir, CancellationToken.None, projectSelector: "Lib");
+
+        Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
+        Assert.AreEqual("Lib.csproj", resolution.Csproj!.Name);
+    }
+
+    [TestMethod]
     public async Task ResolveInput_MultipleCsproj_SingleExecutable_PicksExecutable()
     {
         // With no canned evaluation the classifier falls back to the static parse, which reads the

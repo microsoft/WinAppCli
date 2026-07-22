@@ -93,17 +93,42 @@ internal sealed partial class ProjectRunService
         if (csprojs.Count == 1)
         {
             // Honor an explicit --project even when only one .csproj exists, so a mismatched selector is
-            // a clear error rather than silently ignored. Attach the owning solution (walking up) so
-            // $(SolutionDir) is defined exactly as on the bare-.csproj and multi-.csproj paths — otherwise
-            // a lone project under a repo solution would build without the solution context VS gives it.
-            if (!string.IsNullOrWhiteSpace(projectSelector)
-                && MatchProjectSelector(csprojs, projectSelector, dir) is null)
+            // a clear error rather than silently ignored. An explicit selector is honored as-is (project
+            // mode, no runnability gate) matching the multi-.csproj --project path — the user asked for it.
+            // Attach the owning solution (walking up) so $(SolutionDir) is defined exactly as on the
+            // bare-.csproj and multi-.csproj paths — otherwise a lone project under a repo solution would
+            // build without the solution context VS gives it.
+            if (!string.IsNullOrWhiteSpace(projectSelector))
             {
-                throw new ProjectRunException(
-                    $"--project '{projectSelector}' did not match '{csprojs[0].Name}' in '{dir.FullName}'.");
+                if (MatchProjectSelector(csprojs, projectSelector, dir) is null)
+                {
+                    throw new ProjectRunException(
+                        $"--project '{projectSelector}' did not match '{csprojs[0].Name}' in '{dir.FullName}'.");
+                }
+
+                return new RunInputResolution(WinAppRunMode.Project, csprojs[0], dir, FindOwningSolution(csprojs[0]));
             }
 
-            return new RunInputResolution(WinAppRunMode.Project, csprojs[0], dir, FindOwningSolution(csprojs[0]));
+            // Auto-selection: only switch to project mode when the lone project is actually runnable.
+            // A non-runnable library sitting beside build output must stay in folder mode (the G4
+            // "don't change folder mode" guarantee). Classify with the same effective MSBuild inputs
+            // used for the multi-project path so conditional OutputType/test markers are honored, and
+            // reuse PickRunnableProject so the lone-test convenience (run a sole test project) is kept.
+            var loneProps = BuildClassificationPropertyTokens(classificationInputs, solution: null);
+            var (loneApps, loneTests) = await ClassifyRunnablesAsync(csprojs, dir, loneProps, cancellationToken);
+            var lonePick = PickRunnableProject(loneApps, loneTests, out var lonePickedTest);
+            if (lonePick is null)
+            {
+                // Non-runnable lone project → preserve existing folder-mode behavior unchanged.
+                return new RunInputResolution(WinAppRunMode.Folder, null, dir);
+            }
+
+            if (lonePickedTest)
+            {
+                LogRunningLoneTestProject(lonePick, dir.FullName);
+            }
+
+            return new RunInputResolution(WinAppRunMode.Project, lonePick, dir, FindOwningSolution(lonePick));
         }
 
         // A --project selector disambiguates directly without evaluation.
