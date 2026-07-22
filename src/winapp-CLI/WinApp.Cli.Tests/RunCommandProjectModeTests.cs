@@ -405,6 +405,25 @@ public class RunCommandProjectModeTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task ProjectMode_Packaged_ThreadsNoRestoreIntoRuntimeProvisioning()
+    {
+        // A packaged project run with --no-restore must not trigger an implicit restore during the
+        // loose-layout runtime-package discovery that follows the build. The run's NoRestore setting
+        // has to reach AddLooseLayoutIdentityAsync, not be hard-coded to false on this shared pipeline.
+        var csproj = CreateCsproj();
+        var targetDir = CreateTargetDir(withManifest: true);
+        _fakeProjectRunService.BuildOutcome = new ProjectBuildOutcome(
+            new ProjectRunResolution(csproj, targetDir.FullName, null, ProjectPackaging.Packaged, false, "x64", null, NoRestore: true), 0);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [csproj.FullName, "--no-restore", "--detach"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutRuntimeCalls.Count);
+        Assert.IsTrue(_fakeMsixService.AddLooseLayoutRuntimeCalls[0].NoRestore, "The run's --no-restore must be threaded into loose-layout runtime provisioning");
+    }
+
+    [TestMethod]
     public async Task ProjectMode_Packaged_NoManifestInOutput_Errors()
     {
         var csproj = CreateCsproj();

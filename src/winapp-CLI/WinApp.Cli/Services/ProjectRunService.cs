@@ -27,6 +27,7 @@ internal sealed partial class ProjectRunService(
         "WindowsPackageType",
         "WindowsAppSDKSelfContained",
         "EnableMsixTooling",
+        "_WinAppRunSupportActive",
         "OutputType",
     ];
 
@@ -350,8 +351,19 @@ internal sealed partial class ProjectRunService(
         }
 
         // Unset/empty (common on the --no-build evaluate-only path, where MSIX targets don't run):
-        // fall back to EnableMsixTooling or an emitted recipe.
+        // fall back to EnableMsixTooling, the WinApp run-support gate, or an emitted recipe.
         if (string.Equals(GetProp(props, "EnableMsixTooling"), "true", StringComparison.OrdinalIgnoreCase))
+        {
+            return ProjectPackaging.Packaged;
+        }
+
+        // The Microsoft.Windows.SDK.BuildTools.WinApp integration activates run support
+        // (_WinAppRunSupportActive=true) for an executable Windows project that ships an
+        // appxmanifest.xml but sets no WindowsPackageType — e.g. samples/dotnet-app. Those apps
+        // are meant to run WITH identity off the manifest the integration copies into the build
+        // output, so honor that signal here rather than misclassifying them as unpackaged (which
+        // would launch the apphost without identity and break Package.Current).
+        if (string.Equals(GetProp(props, "_WinAppRunSupportActive"), "true", StringComparison.OrdinalIgnoreCase))
         {
             return ProjectPackaging.Packaged;
         }

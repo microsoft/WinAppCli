@@ -411,7 +411,7 @@ internal partial class RunCommand : Command, IShortDescription
             return await ExecuteRunPipelineAsync(
                 inputFolder, manifest, outputAppXDirectory, appArgs,
                 noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, isJson,
-                runtimeArch: null, projectFile: null, framework: null, cancellationToken);
+                runtimeArch: null, projectFile: null, framework: null, noRestore: false, cancellationToken);
         }
 
         /// <summary>
@@ -438,6 +438,7 @@ internal partial class RunCommand : Command, IShortDescription
             string? runtimeArch,
             FileInfo? projectFile,
             string? framework,
+            bool noRestore,
             CancellationToken cancellationToken)
         {
             uint processId = 0;
@@ -504,6 +505,7 @@ internal partial class RunCommand : Command, IShortDescription
                         runtimeArch,
                         projectFile,
                         framework,
+                        noRestore,
                         cancellationToken);
 
                     packageFamilyName = appLauncherService.ComputePackageFamilyName(

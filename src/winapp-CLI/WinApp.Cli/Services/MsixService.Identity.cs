@@ -99,7 +99,7 @@ internal partial class MsixService
         return new MsixIdentityResult(debugIdentity.PackageName, debugIdentity.Publisher, debugIdentity.ApplicationId);
     }
 
-    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, string? executable = null, string? runtimeArch = null, FileInfo? projectFile = null, string? framework = null, CancellationToken cancellationToken = default)
+    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, string? executable = null, string? runtimeArch = null, FileInfo? projectFile = null, string? framework = null, bool noRestore = false, CancellationToken cancellationToken = default)
     {
         // Validate inputs
         if (!appxManifestPath.Exists)
@@ -153,8 +153,9 @@ internal partial class MsixService
             // Install the Windows App Runtime framework packages if not already present. Pin the package
             // list to the effective built TFM so a multi-targeted app doesn't pick a sibling framework's
             // divergent Windows App SDK version (M2). This loose-layout pipeline is shared with folder mode
-            // and is not on the project-mode --no-restore path, so discovery restores as before.
-            var msbuildPackageList = await ResolveDotNetPackageListAsync(projectFile, framework, noRestore: false, cancellationToken);
+            // (which always restores) and packaged project mode (which honors the run's --no-restore), so
+            // thread the caller's setting through instead of forcing a restore during discovery.
+            var msbuildPackageList = await ResolveDotNetPackageListAsync(projectFile, framework, noRestore, cancellationToken);
             await EnsureWindowsAppRuntimeInstalledAsync(msbuildPackageList, runtimeArch, taskContext, cancellationToken);
 
             // Resolve the manifest that would be registered (issue #537 / TrySkipRegistration).

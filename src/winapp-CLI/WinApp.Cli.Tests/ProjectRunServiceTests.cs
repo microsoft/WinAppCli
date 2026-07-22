@@ -1897,6 +1897,26 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public async Task BuildAndResolveAsync_EmptyPackageTypeWithWinAppRunSupport_ResolvesPackaged()
+    {
+        // The Microsoft.Windows.SDK.BuildTools.WinApp integration activates run support
+        // (_WinAppRunSupportActive=true) for an executable Windows app that ships an appxmanifest.xml
+        // but sets no WindowsPackageType (e.g. samples/dotnet-app). WindowsPackageType and
+        // EnableMsixTooling are both empty, so the app must still resolve Packaged off the run-support
+        // signal — otherwise it launches without identity and Package.Current fails.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var json = $$"""{ "Properties": { "TargetDir": "{{_tempDir.FullName.Replace("\\", "\\\\")}}", "RunCommand": "", "WindowsPackageType": "", "EnableMsixTooling": "", "_WinAppRunSupportActive": "true", "OutputType": "Exe" } }""";
+        var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => (0, json, string.Empty) };
+        var service = NewServiceWith(dotnet, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: true, NoRestore: false, Properties: [], Json: false);
+
+        var outcome = await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsNotNull(outcome.Resolution);
+        Assert.AreEqual(ProjectPackaging.Packaged, outcome.Resolution!.Packaging);
+    }
+
+    [TestMethod]
     public async Task BuildAndResolveAsync_HappyPath_CarriesResolvedArchitecture()
     {
         // The resolved architecture must flow onto the resolution so the correct-arch runtime is
