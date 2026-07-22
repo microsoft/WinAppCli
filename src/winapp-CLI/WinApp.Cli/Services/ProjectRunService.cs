@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
+using Spectre.Console.Rendering;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 
@@ -532,18 +533,11 @@ internal sealed partial class ProjectRunService(
                 }
             }
 
-            // Spectre's Status() spinner (the same primitive winapp init uses) animates the banner in
-            // place and, critically, degrades correctly across terminals: it tracks and erases its own
-            // live region. A hand-rolled Live() loop regressed here — in some ConPTY/embedded terminals
-            // it failed to reposition/clear, flooding the screen with one banner line per frame plus
-            // erase-to-EOL residue from the preceding provisioning output.
-            var spinnerExit = await ansiConsole.Status()
-                .AutoRefresh(true)
-                .Spinner(Spinner.Known.Dots)
-                .SpinnerStyle(Style.Parse("blue"))
-                .StartAsync(banner, async _ =>
-                    await dotNetService.RunDotnetStreamingAsync(
-                        workingDir, buildArgs, Capture, Capture, cancellationToken));
+            var spinnerExit = await RunTwoRowBuildSpinnerAsync(
+                banner,
+                stopwatch,
+                () => dotNetService.RunDotnetStreamingAsync(
+                    workingDir, buildArgs, Capture, Capture, cancellationToken));
 
             if (spinnerExit != 0)
             {
@@ -605,6 +599,71 @@ internal sealed partial class ProjectRunService(
     private void PrintBuildSucceeded(FileInfo csproj, ProjectRunOptions options, TimeSpan elapsed) =>
         ansiConsole.MarkupLineInterpolated(
             $"{UiSymbols.Check} Built {Path.GetFileNameWithoutExtension(csproj.Name)} in {elapsed.TotalSeconds:0.0}s");
+
+    /// <summary>
+    /// Animates the build banner as a <b>two-row</b> Spectre <see cref="LiveDisplay"/> region (spinner
+    /// line + a dim elapsed-time line) while <paramref name="work"/> runs, then auto-clears both rows.
+    ///
+    /// Why two rows, and why not <c>Status()</c> / a one-line <c>Live</c>:
+    /// <list type="bullet">
+    /// <item><c>Status()</c> (and <c>Progress</c>) reserve a leading <em>blank</em> padding row above
+    /// the spinner. Right under the pre-build context line that blank reads as a stray gap.</item>
+    /// <item>A <em>single-row</em> live region repositions each frame with <c>ESC[0A</c> (cursor-up-0).
+    /// Some embedded/ConPTY terminals mishandle a zero-count CUU and drop it, so every frame lands on a
+    /// new line and floods the screen.</item>
+    /// <item>A <em>two-row</em> region repositions with a well-formed <c>ESC[1A</c> (cursor-up-1) — the
+    /// same sequence <c>Status()</c> emits and which those terminals honour — so it animates in place.
+    /// Making the extra row a real (dim, useful) elapsed line means there is no wasted blank row.</item>
+    /// </list>
+    /// Build output is captured by the caller (not written here), so nothing competes with the region
+    /// for the cursor. On cancellation the work task faults with <see cref="OperationCanceledException"/>,
+    /// the loop exits, and the awaited task rethrows it (the dotnet child tree is killed downstream in
+    /// <c>DotNetService</c>), matching the non-spinner path.
+    /// </summary>
+    private async Task<int> RunTwoRowBuildSpinnerAsync(string banner, Stopwatch stopwatch, Func<Task<int>> work)
+    {
+        var spinner = Spinner.Known.Dots;
+        var frames = spinner.Frames;
+        var interval = spinner.Interval;
+        var escapedBanner = Markup.Escape(banner);
+        var exit = 0;
+
+        // Two non-blank rows: the animated spinner + a dim elapsed timer. Never an empty renderable —
+        // an empty Markup renders zero lines and Spectre's shape calculation throws on the initial render.
+        IRenderable Region(int frameIndex) => new Rows(
+            new Markup($"[blue]{Markup.Escape(frames[frameIndex % frames.Count])}[/] {escapedBanner}"),
+            new Markup($"[dim]  {FormatElapsed(stopwatch.Elapsed)} elapsed — build output shown only on failure[/]"));
+
+        await ansiConsole.Live(Region(0))
+            .AutoClear(true)
+            .Overflow(VerticalOverflow.Visible)
+            .StartAsync(async ctx =>
+            {
+                var workTask = work();
+                var frameIndex = 0;
+                while (!workTask.IsCompleted)
+                {
+                    ctx.UpdateTarget(Region(frameIndex));
+                    ctx.Refresh();
+                    frameIndex++;
+
+                    // WhenAny keeps the animation ticking without cancelling the build: on Ctrl+C the
+                    // work task itself faults with OperationCanceledException, the loop exits, and the
+                    // await below rethrows it. The untokened delay never faults, so it can't go unobserved.
+                    await Task.WhenAny(workTask, Task.Delay(interval));
+                }
+
+                exit = await workTask;
+            });
+
+        return exit;
+    }
+
+    /// <summary>Formats a build elapsed span compactly (<c>12s</c> under a minute, else <c>1m 05s</c>).</summary>
+    private static string FormatElapsed(TimeSpan elapsed) =>
+        elapsed.TotalMinutes >= 1
+            ? $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds:00}s"
+            : $"{elapsed.Seconds}s";
 
     /// <summary>
     /// Maps the CLI's effective log level to a dotnet <c>-v</c> verbosity for the build pass (Change #1).
