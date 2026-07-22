@@ -136,6 +136,54 @@ public class AzureSigningServiceTests
         StringAssert.Contains(ex.Message, "500");
     }
 
+    [TestMethod]
+    public async Task ListSubscriptionsAsync_FollowsNextLinkAcrossPages()
+    {
+        const string page1 = """
+        {
+            "value": [ { "subscriptionId": "sub-1", "displayName": "Page 1 Sub", "state": "Enabled" } ],
+            "nextLink": "https://management.azure.com/subscriptions?api-version=2022-12-01&$skiptoken=page2"
+        }
+        """;
+        const string page2 = """
+        {
+            "value": [ { "subscriptionId": "sub-2", "displayName": "Page 2 Sub", "state": "Enabled" } ]
+        }
+        """;
+        var handler = new QueueHttpMessageHandler(
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(page1) },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(page2) });
+
+        var service = new AzureSigningService(NullLogger<AzureSigningService>.Instance, new HttpClient(handler));
+        var subscriptions = await service.ListSubscriptionsAsync("token");
+
+        Assert.AreEqual(2, subscriptions.Count, "Both pages of results should be combined");
+        Assert.AreEqual("sub-1", subscriptions[0].SubscriptionId);
+        Assert.AreEqual("sub-2", subscriptions[1].SubscriptionId);
+        Assert.AreEqual(2, handler.RequestUris.Count, "Both the initial URL and the nextLink should be requested");
+        StringAssert.Contains(handler.RequestUris[1], "$skiptoken=page2");
+    }
+
+    [TestMethod]
+    public async Task ListSubscriptionsAsync_RepeatedNextLink_ThrowsInsteadOfLoopingForever()
+    {
+        const string cyclic = """
+        {
+            "value": [ { "subscriptionId": "sub-1", "displayName": "Loop Sub", "state": "Enabled" } ],
+            "nextLink": "https://management.azure.com/subscriptions?api-version=2022-12-01&$skiptoken=loop"
+        }
+        """;
+        var handler = new QueueHttpMessageHandler(
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(cyclic) },
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(cyclic) });
+
+        var service = new AzureSigningService(NullLogger<AzureSigningService>.Instance, new HttpClient(handler));
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => service.ListSubscriptionsAsync("token"));
+
+        StringAssert.Contains(ex.Message, "repeated nextLink");
+    }
+
     private sealed class StubHttpMessageHandler(HttpStatusCode statusCode, string body) : HttpMessageHandler
     {
         public HttpRequestMessage? LastRequest { get; private set; }
@@ -149,6 +197,24 @@ public class AzureSigningServiceTests
             {
                 Content = new StringContent(body)
             });
+        }
+    }
+
+    private sealed class QueueHttpMessageHandler(params HttpResponseMessage[] responses) : HttpMessageHandler
+    {
+        private readonly Queue<HttpResponseMessage> _responses = new(responses);
+
+        public List<string> RequestUris { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestUris.Add(request.RequestUri!.ToString());
+            if (_responses.Count == 0)
+            {
+                throw new InvalidOperationException("QueueHttpMessageHandler received more requests than queued responses.");
+            }
+
+            return Task.FromResult(_responses.Dequeue());
         }
     }
 }

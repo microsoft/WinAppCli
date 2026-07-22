@@ -35,6 +35,76 @@ public class AzureAuthServiceTests
         Assert.IsFalse(AzureAuthService.IsValidTenantId(tenantId));
     }
 
+    [TestMethod]
+    public void IsTrustedAzureCliPath_RejectsFileInCurrentDirectory()
+    {
+        var baseDir = Directory.CreateTempSubdirectory("winapp-aztrust-cwd").FullName;
+        try
+        {
+            var azPath = Path.Combine(baseDir, "az.cmd");
+            File.WriteAllText(azPath, "@echo off");
+
+            Assert.IsFalse(AzureAuthService.IsTrustedAzureCliPath(azPath, baseDir));
+        }
+        finally
+        {
+            Directory.Delete(baseDir, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void IsTrustedAzureCliPath_RejectsFileInSubdirectoryOfCurrentDirectory()
+    {
+        var baseDir = Directory.CreateTempSubdirectory("winapp-aztrust-sub").FullName;
+        try
+        {
+            var subDir = Path.Combine(baseDir, "node_modules", ".bin");
+            Directory.CreateDirectory(subDir);
+            var azPath = Path.Combine(subDir, "az.cmd");
+            File.WriteAllText(azPath, "@echo off");
+
+            Assert.IsFalse(AzureAuthService.IsTrustedAzureCliPath(azPath, baseDir));
+        }
+        finally
+        {
+            Directory.Delete(baseDir, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void IsTrustedAzureCliPath_AcceptsFileOutsideCurrentDirectoryTree()
+    {
+        var baseDir = Directory.CreateTempSubdirectory("winapp-aztrust-base").FullName;
+        var installDir = Directory.CreateTempSubdirectory("winapp-aztrust-install").FullName;
+        try
+        {
+            var azPath = Path.Combine(installDir, "az.cmd");
+            File.WriteAllText(azPath, "@echo off");
+
+            Assert.IsTrue(AzureAuthService.IsTrustedAzureCliPath(azPath, baseDir));
+        }
+        finally
+        {
+            Directory.Delete(baseDir, recursive: true);
+            Directory.Delete(installDir, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void IsTrustedAzureCliPath_RejectsNonExistentOrRelativePath()
+    {
+        var baseDir = Directory.CreateTempSubdirectory("winapp-aztrust-none").FullName;
+        try
+        {
+            Assert.IsFalse(AzureAuthService.IsTrustedAzureCliPath(Path.Combine(baseDir, "missing.cmd"), baseDir));
+            Assert.IsFalse(AzureAuthService.IsTrustedAzureCliPath("az.cmd", baseDir));
+        }
+        finally
+        {
+            Directory.Delete(baseDir, recursive: true);
+        }
+    }
+
     private const string ArmScope = "https://management.azure.com/.default";
 
     [TestMethod]

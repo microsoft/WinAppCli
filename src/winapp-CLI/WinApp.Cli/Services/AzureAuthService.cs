@@ -188,9 +188,14 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
 
     /// <summary>
     /// Rejects an Azure CLI path resolved from <c>where.exe</c> when it is not a rooted,
-    /// existing file or when it resolves inside the current working directory (the hijack vector).
+    /// existing file or when it resolves anywhere inside the current working directory tree
+    /// (the hijack vector — a repo could drop a malicious <c>az.cmd</c> in a subfolder such as
+    /// <c>.\node_modules\.bin</c> that lands early on PATH).
     /// </summary>
-    private static bool IsTrustedAzureCliPath(string resolvedPath)
+    private static bool IsTrustedAzureCliPath(string resolvedPath) =>
+        IsTrustedAzureCliPath(resolvedPath, Environment.CurrentDirectory);
+
+    internal static bool IsTrustedAzureCliPath(string resolvedPath, string currentDirectory)
     {
         if (string.IsNullOrWhiteSpace(resolvedPath)
             || !Path.IsPathRooted(resolvedPath)
@@ -199,12 +204,18 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
             return false;
         }
 
-        var resolvedDir = Path.GetFullPath(Path.GetDirectoryName(resolvedPath)!)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var currentDir = Path.GetFullPath(Environment.CurrentDirectory)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var resolvedDir = Path.GetFullPath(Path.GetDirectoryName(resolvedPath)!);
+        var currentDir = Path.GetFullPath(currentDirectory);
 
-        return !string.Equals(resolvedDir, currentDir, StringComparison.OrdinalIgnoreCase);
+        // Path.GetRelativePath yields "." when equal, a rooted path or a "..\" prefix when the
+        // resolved directory is outside the cwd, and a plain relative segment when it is inside.
+        var relative = Path.GetRelativePath(currentDir, resolvedDir);
+        var isUnderCurrentDirectory = relative == "."
+            || (!Path.IsPathRooted(relative)
+                && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                && relative != "..");
+
+        return !isUnderCurrentDirectory;
     }
 
     protected virtual async Task<bool> RunAzLoginAsync(string azPath, string tenantId, CancellationToken cancellationToken)

@@ -126,10 +126,19 @@ internal class AzureSigningService : IAzureSigningService
         where T : class
     {
         var results = new List<T>();
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         string? nextUrl = url;
 
         while (!string.IsNullOrEmpty(nextUrl))
         {
+            // Guard against a cyclic or repeated nextLink so a misbehaving service can't spin
+            // this loop forever.
+            if (!visited.Add(nextUrl))
+            {
+                throw new InvalidOperationException(
+                    "Azure API pagination returned a repeated nextLink; aborting to avoid an infinite loop.");
+            }
+
             var json = await GetArmResponseAsync(nextUrl, accessToken, cancellationToken);
             using var doc = JsonDocument.Parse(json);
 
