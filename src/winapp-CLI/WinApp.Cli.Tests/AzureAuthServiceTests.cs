@@ -191,6 +191,28 @@ public class AzureAuthServiceTests
         StringAssert.Contains(ex.Message, "Azure CLI login failed");
     }
 
+    [TestMethod]
+    public async Task GetAccessTokenAsync_InteractiveLoginSucceedsButRetryTokenFails_ThrowsWrapped()
+    {
+        var service = new TestableAzureAuthService
+        {
+            InteractiveOverride = true,
+            PrimaryCredential = new ThrowingCredential(),
+            AzCliPath = @"C:\fake\az.cmd",
+            LoginResult = true,
+            CliCredential = new ThrowingCredential(),
+            SeedTenantId = "72f988bf-86f1-41af-91ab-2d7cd011db47",
+        };
+
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => service.GetAccessTokenAsync(ArmScope));
+
+        StringAssert.Contains(ex.Message, "retrieving an access token failed");
+        Assert.IsInstanceOfType<AuthenticationFailedException>(ex.InnerException,
+            "The original authentication failure should be preserved as the inner exception");
+        Assert.AreEqual(1, service.RunAzLoginCallCount);
+    }
+
     private sealed class TestableAzureAuthService : AzureAuthService
     {
         public TestableAzureAuthService()

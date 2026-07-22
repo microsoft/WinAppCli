@@ -323,6 +323,11 @@ public class AzSignCommandTests : BaseCommandTests
         Assert.AreEqual(1, result);
         var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
         StringAssert.Contains(allOutput, "signtool.exe execution failed");
+
+        // The generated metadata temp file must be cleaned up even when signing fails.
+        Assert.IsNotNull(_fakeSignToolService.LastMetadataFilePath);
+        Assert.IsFalse(File.Exists(_fakeSignToolService.LastMetadataFilePath!.FullName),
+            "Generated metadata file should be deleted after a signing failure");
     }
 
     [TestMethod]

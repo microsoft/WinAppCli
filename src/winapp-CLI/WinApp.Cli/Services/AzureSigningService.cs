@@ -15,6 +15,7 @@ internal class AzureSigningService : IAzureSigningService
 {
     private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromSeconds(30) };
     private const string ArmBaseUrl = "https://management.azure.com";
+    private static readonly string ArmHost = new Uri(ArmBaseUrl).Host;
     private const string SubscriptionsApiVersion = "2022-12-01";
     private const string TrustedSigningApiVersion = "2024-02-05-preview";
 
@@ -139,6 +140,11 @@ internal class AzureSigningService : IAzureSigningService
                     "Azure API pagination returned a repeated nextLink; aborting to avoid an infinite loop.");
             }
 
+            // Never attach the bearer token to a URL the server can choose: only follow HTTPS
+            // links that stay on the ARM host. A crafted nextLink pointing elsewhere would
+            // otherwise leak the access token to an attacker-controlled endpoint.
+            EnsureTrustedArmUrl(nextUrl);
+
             var json = await GetArmResponseAsync(nextUrl, accessToken, cancellationToken);
             using var doc = JsonDocument.Parse(json);
 
@@ -161,6 +167,22 @@ internal class AzureSigningService : IAzureSigningService
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// Rejects a pagination URL that is not an absolute HTTPS URL on the Azure Resource Manager
+    /// host, so the bearer token is never sent to a server-chosen or attacker-controlled endpoint.
+    /// </summary>
+    private static void EnsureTrustedArmUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(uri.Host, ArmHost, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Refusing to follow an untrusted Azure pagination link '{url}'. " +
+                $"Expected an https URL on host '{ArmHost}'.");
+        }
     }
 
     private async Task<string> GetArmResponseAsync(string url, string accessToken, CancellationToken cancellationToken)

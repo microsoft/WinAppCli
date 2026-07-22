@@ -176,15 +176,18 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
                 p.WaitForExit();
                 if (p.ExitCode == 0 && !string.IsNullOrEmpty(output))
                 {
-                    var resolved = output.Split('\n')[0].Trim();
-
                     // where.exe searches the current directory *before* PATH, so a malicious
                     // 'az.cmd' dropped into the working directory (e.g. an untrusted cloned repo)
-                    // would be returned and then executed for 'az login'. Only trust a rooted path
-                    // that does not live in the current working directory.
-                    if (IsTrustedAzureCliPath(resolved))
+                    // could appear first. Walk every candidate and return the first trusted one —
+                    // a rooted path that does not live in the current working directory tree —
+                    // instead of rejecting discovery outright when the first hit is untrusted.
+                    var whereCandidates = output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    foreach (var candidate in whereCandidates)
                     {
-                        return resolved;
+                        if (IsTrustedAzureCliPath(candidate))
+                        {
+                            return candidate;
+                        }
                     }
                 }
             }

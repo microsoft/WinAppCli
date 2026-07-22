@@ -184,6 +184,28 @@ public class AzureSigningServiceTests
         StringAssert.Contains(ex.Message, "repeated nextLink");
     }
 
+    [TestMethod]
+    public async Task ListSubscriptionsAsync_NextLinkToUntrustedHost_ThrowsWithoutFollowingIt()
+    {
+        const string page1 = """
+        {
+            "value": [ { "subscriptionId": "sub-1", "displayName": "Page 1 Sub", "state": "Enabled" } ],
+            "nextLink": "https://evil.example.com/subscriptions?api-version=2022-12-01&$skiptoken=page2"
+        }
+        """;
+        var handler = new QueueHttpMessageHandler(
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(page1) },
+            // This second response must never be requested — following it would leak the token.
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{ "value": [] }""") });
+
+        var service = new AzureSigningService(NullLogger<AzureSigningService>.Instance, new HttpClient(handler));
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => service.ListSubscriptionsAsync("token"));
+
+        StringAssert.Contains(ex.Message, "untrusted");
+        Assert.AreEqual(1, handler.RequestUris.Count, "The untrusted nextLink must not be fetched");
+    }
+
     private sealed class StubHttpMessageHandler(HttpStatusCode statusCode, string body) : HttpMessageHandler
     {
         public HttpRequestMessage? LastRequest { get; private set; }
