@@ -130,4 +130,107 @@ public class MsBuildPropertyReaderTests
 
         Assert.AreEqual("[1,2,3]", result["OutputType"]);
     }
+
+    [TestMethod]
+    public void ParseItems_ValidItemsObject_ReturnsIdentitiesPerGroup()
+    {
+        var stdout = """
+            {
+              "Items": {
+                "ProjectReference": [
+                  { "Identity": "A.csproj" },
+                  { "Identity": "B.csproj" }
+                ],
+                "PackageReference": [
+                  { "Identity": "Microsoft.WindowsAppSDK" }
+                ]
+              }
+            }
+            """;
+
+        var result = MsBuildPropertyReader.ParseItems(stdout);
+
+        string[] expectedProjects = ["A.csproj", "B.csproj"];
+        string[] expectedPackages = ["Microsoft.WindowsAppSDK"];
+        CollectionAssert.AreEqual(expectedProjects, result["ProjectReference"].ToList());
+        CollectionAssert.AreEqual(expectedPackages, result["PackageReference"].ToList());
+    }
+
+    [TestMethod]
+    public void ParseItems_LookupIsCaseInsensitive()
+    {
+        var result = MsBuildPropertyReader.ParseItems("""{ "Items": { "ProjectReference": [ { "Identity": "A.csproj" } ] } }""");
+
+        string[] expected = ["A.csproj"];
+        CollectionAssert.AreEqual(expected, result["projectreference"].ToList());
+    }
+
+    [TestMethod]
+    public void ParseItems_PreambleAndTrailingDiagnostics_StillParses()
+    {
+        // Mirror Parse's tolerance: a diagnostic line (with a false-positive brace) before the object and
+        // trailing build output after it must not defeat item parsing.
+        var stdout = "note: token {placeholder} expanded\n{ \"Items\": { \"ProjectReference\": [ { \"Identity\": \"A.csproj\" } ] } }\nBuild succeeded.";
+
+        var result = MsBuildPropertyReader.ParseItems(stdout);
+
+        string[] expected = ["A.csproj"];
+        CollectionAssert.AreEqual(expected, result["ProjectReference"].ToList());
+    }
+
+    [TestMethod]
+    public void ParseItems_MalformedJson_ReturnsEmpty()
+    {
+        // Truncated/unterminated JSON: no candidate brace begins a valid JSON value → empty, never throws.
+        var stdout = """{ "Items": { "ProjectReference": [ { "Identity": "A.csproj" """;
+
+        var result = MsBuildPropertyReader.ParseItems(stdout);
+
+        Assert.AreEqual(0, result.Count);
+    }
+
+    [TestMethod]
+    public void ParseItems_EmptyObject_ReturnsEmpty()
+    {
+        var result = MsBuildPropertyReader.ParseItems("{}");
+
+        Assert.AreEqual(0, result.Count);
+    }
+
+    [TestMethod]
+    public void ParseItems_MissingItemsKey_ReturnsEmpty()
+    {
+        // A { "Properties": {...} }-only envelope (properties requested but no items) yields no item groups.
+        var result = MsBuildPropertyReader.ParseItems("""{ "Properties": { "TargetDir": "X" } }""");
+
+        Assert.AreEqual(0, result.Count);
+    }
+
+    [TestMethod]
+    public void ParseItems_ItemsNotAnObject_ReturnsEmpty()
+    {
+        var result = MsBuildPropertyReader.ParseItems("""{ "Items": "not-an-object" }""");
+
+        Assert.AreEqual(0, result.Count);
+    }
+
+    [TestMethod]
+    public void ParseItems_NullEmptyOrWhitespace_ReturnsEmpty()
+    {
+        Assert.AreEqual(0, MsBuildPropertyReader.ParseItems(null!).Count);
+        Assert.AreEqual(0, MsBuildPropertyReader.ParseItems("").Count);
+        Assert.AreEqual(0, MsBuildPropertyReader.ParseItems("   \r\n  ").Count);
+    }
+
+    [TestMethod]
+    public void ParseItems_GroupWithNoIdentities_ReturnsEmptyList()
+    {
+        // Array entries lacking an "Identity" string are skipped; the group is still surfaced (empty list).
+        var stdout = """{ "Items": { "ProjectReference": [ { "Other": "x" }, { "Identity": "" } ] } }""";
+
+        var result = MsBuildPropertyReader.ParseItems(stdout);
+
+        Assert.IsTrue(result.ContainsKey("ProjectReference"));
+        Assert.AreEqual(0, result["ProjectReference"].Count);
+    }
 }

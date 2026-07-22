@@ -1,10 +1,24 @@
 param(
     [string]$WinappPath,
-    [switch]$SkipCleanup
+    [switch]$SkipCleanup,
+    # Phase 1 installs the Windows App Runtime MSIX system-wide and launches the app. That is safe on a
+    # throwaway CI runner but is a footgun on a developer's own machine, so it is OFF by default locally.
+    # Pass -AllowRuntimeInstall to opt in when you accept that machine-global side effect.
+    [switch]$AllowRuntimeInstall
 )
+
+# Whether Phase 1 (runtime install + app launch) may run: Windows only, and only on a CI ephemeral runner
+# or when the caller explicitly opts in. On CI the install is discarded with the runner VM; locally we skip
+# it so a casual `Invoke-Pester` never mutates the machine. The expression is inlined at both discovery time
+# and run time (a top-level function would not survive into Pester's run phase, same reason $script:skip is
+# recomputed in BeforeAll).
 
 BeforeDiscovery {
     $script:skip = $null -eq (Get-Command dotnet -ErrorAction SilentlyContinue) -or $null -eq (Get-Command npm -ErrorAction SilentlyContinue)
+    # Phase 1 is additionally gated so it never installs a runtime / launches an app on a dev box by default.
+    $onWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
+    $onCI = ($env:CI -eq 'true') -or ($env:GITHUB_ACTIONS -eq 'true') -or (-not [string]::IsNullOrEmpty($env:TF_BUILD))
+    $script:skipRuntimeInstall = $script:skip -or -not ($onWindows -and ($onCI -or $AllowRuntimeInstall))
 }
 
 Describe 'winui-unpackaged-app sample' {
@@ -12,6 +26,9 @@ Describe 'winui-unpackaged-app sample' {
     BeforeAll {
         Import-Module "$PSScriptRoot\..\SampleTestHelpers.psm1" -Force
         $script:skip = $null -eq (Get-Command dotnet -ErrorAction SilentlyContinue) -or $null -eq (Get-Command npm -ErrorAction SilentlyContinue)
+        $onWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)
+        $onCI = ($env:CI -eq 'true') -or ($env:GITHUB_ACTIONS -eq 'true') -or (-not [string]::IsNullOrEmpty($env:TF_BUILD))
+        $script:skipRuntimeInstall = $script:skip -or -not ($onWindows -and ($onCI -or $AllowRuntimeInstall))
 
         $script:sampleDir = $PSScriptRoot
         $script:tempDir = $null
@@ -19,7 +36,9 @@ Describe 'winui-unpackaged-app sample' {
         $script:appProcessName = 'winui-unpackaged-app'
         $script:originalLocation = Get-Location
 
-        if (-not $script:skip) {
+        # The globally-installed winapp CLI is only used by Phase 1 (project-mode launch). Gate the
+        # global npm install on the same condition so a local run performs no global install either.
+        if (-not $script:skipRuntimeInstall) {
             $resolvedPkg = Resolve-WinappCliPath -WinappPath $WinappPath
             Install-WinappGlobal -PackagePath $resolvedPkg
         }
@@ -67,10 +86,16 @@ Describe 'winui-unpackaged-app sample' {
     # WinUI app from a clean directory: SDK probe -> build + property resolution ->
     # unpackaged detection -> reused Windows App Runtime install -> direct .exe launch.
     # The "C2" must-have: an unpackaged app boots off the reused runtime.
-    Context 'Phase 1: Project-mode run (from scratch)' {
+    #
+    # SIDE EFFECT: the launch path installs the Windows App Runtime MSIX system-wide (a
+    # machine-global change) and starts the sample app. That is fine on a throwaway CI
+    # runner but a footgun on a developer box, so this whole Context is gated behind
+    # $script:skipRuntimeInstall (Windows + CI, or -AllowRuntimeInstall). The launched app
+    # is always torn down again in the top-level AfterAll (by PID, then by name).
+    Context 'Phase 1: Project-mode run (from scratch)' -Skip:$script:skipRuntimeInstall {
 
         BeforeAll {
-            if (-not $script:skip) {
+            if (-not $script:skipRuntimeInstall) {
                 $script:tempDir = New-TempTestDirectory -Prefix 'winui-unpackaged'
 
                 # Copy the sample sources (never bin/obj) into a clean temp project dir.
@@ -83,7 +108,7 @@ Describe 'winui-unpackaged-app sample' {
             }
         }
 
-        It 'Builds and launches the unpackaged app with winapp run .' -Skip:$script:skip {
+        It 'Builds and launches the unpackaged app with winapp run .' -Skip:$script:skipRuntimeInstall {
             # Launch via Start-Process (NOT a captured pipe): the unpackaged app inherits
             # the console stdout handle, so capturing it in a pipeline would block until the
             # app exits. --detach makes winapp return as soon as the app is launched.
@@ -103,7 +128,7 @@ Describe 'winui-unpackaged-app sample' {
             $script:launchedPid = $app.Id
         }
 
-        It 'Boots off the reused Windows App Runtime (process stays alive)' -Skip:$script:skip {
+        It 'Boots off the reused Windows App Runtime (process stays alive)' -Skip:$script:skipRuntimeInstall {
             $script:launchedPid | Should -Not -BeNullOrEmpty
             # A framework-dependent unpackaged WinUI app that could not find its Windows App
             # Runtime would fail in the bootstrapper almost immediately after launch.
@@ -112,7 +137,7 @@ Describe 'winui-unpackaged-app sample' {
             $proc | Should -Not -BeNullOrEmpty -Because 'the app should still be running after booting off the installed runtime'
         }
 
-        It 'Detects the project as unpackaged (WindowsPackageType=None)' -Skip:$script:skip {
+        It 'Detects the project as unpackaged (WindowsPackageType=None)' -Skip:$script:skipRuntimeInstall {
             # Evaluate WindowsPackageType WITHOUT compiling: `dotnet build --getProperty` with no
             # explicit target restores + evaluates the project and prints the property, but never
             # runs the Build target (verified: no output assembly is produced). This assertion is

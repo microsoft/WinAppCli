@@ -49,17 +49,7 @@ internal sealed partial class ProjectRunService
         // A solution in the directory wins over loose .csproj files: it carries the config→platform
         // map and defines $(SolutionDir), which some projects (e.g. those importing shared props via
         // $(SolutionDir)) need to build at all. Prefer it, matching what a developer opens in VS.
-        List<FileInfo> solutions;
-        try
-        {
-            solutions = dir.EnumerateFiles("*.sln", SearchOption.TopDirectoryOnly)
-                .Concat(dir.EnumerateFiles("*.slnx", SearchOption.TopDirectoryOnly))
-                .ToList();
-        }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
-        {
-            solutions = [];
-        }
+        var solutions = SafeEnumerateFiles(dir, "*.sln", "*.slnx");
 
         if (solutions.Count == 1)
         {
@@ -73,15 +63,7 @@ internal sealed partial class ProjectRunService
                 $"Multiple solution files found in '{dir.FullName}' ({slnNames}). Specify which one to run, e.g. 'winapp run {solutions[0].Name}'.");
         }
 
-        List<FileInfo> csprojs;
-        try
-        {
-            csprojs = dir.EnumerateFiles("*.csproj", SearchOption.TopDirectoryOnly).ToList();
-        }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
-        {
-            csprojs = [];
-        }
+        var csprojs = SafeEnumerateFiles(dir, "*.csproj");
 
         // No top-level .csproj → folder mode (existing, unchanged behavior). Build-output folders
         // (bin/…) fall here. This path performs NO MSBuild evaluation, so folder mode stays identical.
@@ -187,6 +169,27 @@ internal sealed partial class ProjectRunService
     private static partial Regex SlnAnyProjectPathRegex();
 
     /// <summary>
+    /// Enumerates the top-level files in <paramref name="dir"/> matching any of <paramref name="patterns"/>
+    /// (in pattern order), returning an empty list when the directory can't be read
+    /// (missing/locked/permission-denied). Centralizes the enumerate-or-empty guard shared by input and
+    /// owning-solution resolution so a transient/unreadable directory degrades to "no candidates" instead
+    /// of throwing.
+    /// </summary>
+    private static List<FileInfo> SafeEnumerateFiles(DirectoryInfo dir, params string[] patterns)
+    {
+        try
+        {
+            return patterns
+                .SelectMany(pattern => dir.EnumerateFiles(pattern, SearchOption.TopDirectoryOnly))
+                .ToList();
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>
     /// Finds the solution that owns a bare <c>.csproj</c> so a direct-file run defines <c>$(SolutionDir)</c>
     /// the same way <c>dotnet build &lt;sln&gt;</c> / Visual Studio do. Walks up from the project directory;
     /// at the nearest ancestor that contains any <c>.sln</c>/<c>.slnx</c>, prefers a solution that actually
@@ -199,18 +202,9 @@ internal sealed partial class ProjectRunService
     {
         for (var dir = csproj.Directory; dir is not null; dir = dir.Parent)
         {
-            List<FileInfo> solutions;
-            try
-            {
-                solutions = dir.EnumerateFiles("*.sln", SearchOption.TopDirectoryOnly)
-                    .Concat(dir.EnumerateFiles("*.slnx", SearchOption.TopDirectoryOnly))
-                    .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-            }
-            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
-            {
-                continue;
-            }
+            var solutions = SafeEnumerateFiles(dir, "*.sln", "*.slnx")
+                .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
             if (solutions.Count == 0)
             {

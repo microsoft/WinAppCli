@@ -84,76 +84,79 @@ internal static class MsBuildPropertyReader
 
     /// <summary>
     /// Scans <paramref name="text"/> for the first JSON object that carries an <c>"Items"</c> object and,
-    /// if found, fills <paramref name="result"/> with each item group's identities. Uses the same
-    /// candidate-brace scan as <see cref="TryReadPropertiesObject"/> so a diagnostic preamble/trailer
-    /// cannot defeat parsing.
+    /// if found, fills <paramref name="result"/> with each item group's identities. Uses the shared
+    /// candidate-brace scan (<see cref="TryScanJsonObject"/>) so a diagnostic preamble/trailer cannot
+    /// defeat parsing.
     /// </summary>
     private static void TryReadItemsObject(string text, Dictionary<string, IReadOnlyList<string>> result)
     {
-        var searchStart = 0;
-        while (searchStart < text.Length)
+        TryScanJsonObject(text, root =>
         {
-            var braceIndex = text.IndexOf('{', searchStart);
-            if (braceIndex < 0)
+            if (!root.TryGetProperty("Items", out var items) || items.ValueKind != JsonValueKind.Object)
             {
-                return;
+                return false;
             }
 
-            var candidate = text[braceIndex..];
-            var bytes = System.Text.Encoding.UTF8.GetBytes(candidate);
-            var reader = new Utf8JsonReader(bytes, isFinalBlock: true, state: default);
-            try
+            foreach (var group in items.EnumerateObject().Where(g => g.Value.ValueKind == JsonValueKind.Array))
             {
-                if (JsonDocument.TryParseValue(ref reader, out var doc))
+                var identities = new List<string>();
+                foreach (var item in group.Value.EnumerateArray())
                 {
-                    using (doc)
+                    if (item.ValueKind == JsonValueKind.Object &&
+                        item.TryGetProperty("Identity", out var id) &&
+                        id.ValueKind == JsonValueKind.String)
                     {
-                        if (doc.RootElement.ValueKind == JsonValueKind.Object &&
-                            doc.RootElement.TryGetProperty("Items", out var items) &&
-                            items.ValueKind == JsonValueKind.Object)
+                        var value = id.GetString();
+                        if (!string.IsNullOrEmpty(value))
                         {
-                            foreach (var group in items.EnumerateObject().Where(g => g.Value.ValueKind == JsonValueKind.Array))
-                            {
-                                var identities = new List<string>();
-                                foreach (var item in group.Value.EnumerateArray())
-                                {
-                                    if (item.ValueKind == JsonValueKind.Object &&
-                                        item.TryGetProperty("Identity", out var id) &&
-                                        id.ValueKind == JsonValueKind.String)
-                                    {
-                                        var value = id.GetString();
-                                        if (!string.IsNullOrEmpty(value))
-                                        {
-                                            identities.Add(value);
-                                        }
-                                    }
-                                }
-
-                                result[group.Name] = identities;
-                            }
-
-                            return;
+                            identities.Add(value);
                         }
                     }
                 }
-            }
-            catch (JsonException)
-            {
-                // This '{' did not begin a valid JSON value — try the next one (preamble brace).
+
+                result[group.Name] = identities;
             }
 
-            searchStart = braceIndex + 1;
-        }
+            return true;
+        });
     }
 
     /// <summary>
     /// Scans <paramref name="text"/> for the first JSON object that is a <c>{ "Properties": {...} }</c>
-    /// envelope and, if found, fills <paramref name="result"/> and returns <c>true</c>. Each <c>'{'</c>
-    /// is tried as a candidate start (skipping a non-JSON preamble brace), and a single JSON value is
-    /// read via <see cref="JsonDocument.TryParseValue"/> so trailing diagnostics after the object are
-    /// ignored rather than causing a parse failure.
+    /// envelope and, if found, fills <paramref name="result"/> and returns <c>true</c>. Uses the shared
+    /// candidate-brace scan (<see cref="TryScanJsonObject"/>).
     /// </summary>
     private static bool TryReadPropertiesObject(string text, Dictionary<string, string> result)
+    {
+        return TryScanJsonObject(text, root =>
+        {
+            if (!root.TryGetProperty("Properties", out var props) || props.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            foreach (var prop in props.EnumerateObject())
+            {
+                result[prop.Name] = prop.Value.ValueKind == JsonValueKind.String
+                    ? prop.Value.GetString() ?? string.Empty
+                    : prop.Value.ToString();
+            }
+
+            return true;
+        });
+    }
+
+    /// <summary>
+    /// Scans <paramref name="text"/> for the first <c>'{'</c> that begins a valid JSON object which
+    /// <paramref name="tryHandle"/> accepts. Each <c>'{'</c> is tried as a candidate start (skipping a
+    /// non-JSON preamble brace), and a single JSON value is read via
+    /// <see cref="JsonDocument.TryParseValue"/> so trailing diagnostics after the object are ignored
+    /// rather than causing a parse failure. <paramref name="tryHandle"/> receives each parsed root object
+    /// and returns <c>true</c> once it has consumed the target object (it must copy out any values before
+    /// returning, as the backing <see cref="JsonDocument"/> is disposed immediately after). Returns
+    /// whether an object was handled.
+    /// </summary>
+    private static bool TryScanJsonObject(string text, Func<JsonElement, bool> tryHandle)
     {
         var searchStart = 0;
         while (searchStart < text.Length)
@@ -173,17 +176,8 @@ internal static class MsBuildPropertyReader
                 {
                     using (doc)
                     {
-                        if (doc.RootElement.ValueKind == JsonValueKind.Object &&
-                            doc.RootElement.TryGetProperty("Properties", out var props) &&
-                            props.ValueKind == JsonValueKind.Object)
+                        if (doc.RootElement.ValueKind == JsonValueKind.Object && tryHandle(doc.RootElement))
                         {
-                            foreach (var prop in props.EnumerateObject())
-                            {
-                                result[prop.Name] = prop.Value.ValueKind == JsonValueKind.String
-                                    ? prop.Value.GetString() ?? string.Empty
-                                    : prop.Value.ToString();
-                            }
-
                             return true;
                         }
                     }

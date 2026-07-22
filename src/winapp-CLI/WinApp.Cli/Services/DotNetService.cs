@@ -375,75 +375,42 @@ internal partial class DotNetService : IDotNetService
         string arguments,
         CancellationToken cancellationToken = default)
     {
-        var processStartInfo = new ProcessStartInfo
-        {
-            FileName = "dotnet",
-            Arguments = arguments,
-            WorkingDirectory = workingDirectory.FullName,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        using var process = new Process { StartInfo = processStartInfo };
-
         var outputBuilder = new StringBuilder();
         var errorBuilder = new StringBuilder();
 
-        process.OutputDataReceived += (sender, e) =>
-        {
-            if (e.Data != null)
-            {
-                outputBuilder.AppendLine(e.Data);
-            }
-        };
+        var exitCode = await RunDotnetCoreAsync(
+            workingDirectory,
+            arguments,
+            line => outputBuilder.AppendLine(line),
+            line => errorBuilder.AppendLine(line),
+            cancellationToken);
 
-        process.ErrorDataReceived += (sender, e) =>
-        {
-            if (e.Data != null)
-            {
-                errorBuilder.AppendLine(e.Data);
-            }
-        };
-
-        process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        try
-        {
-            await process.WaitForExitAsync(cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            // Ctrl+C — kill the dotnet/MSBuild/restore process tree so it isn't orphaned. The
-            // streaming sibling (RunDotnetStreamingAsync) does the same; this non-streaming path is
-            // used by classification/evaluate/discovery and must not leave child builds running.
-            try
-            {
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-            }
-            catch
-            {
-                // Best-effort cleanup; the process may have already exited.
-            }
-
-            throw;
-        }
-
-        return (process.ExitCode, outputBuilder.ToString(), errorBuilder.ToString());
+        return (exitCode, outputBuilder.ToString(), errorBuilder.ToString());
     }
 
-    public async Task<int> RunDotnetStreamingAsync(
+    public Task<int> RunDotnetStreamingAsync(
         DirectoryInfo workingDirectory,
         string arguments,
         Action<string>? onOutputLine,
         Action<string>? onErrorLine,
         CancellationToken cancellationToken = default)
+        => RunDotnetCoreAsync(workingDirectory, arguments, onOutputLine, onErrorLine, cancellationToken);
+
+    /// <summary>
+    /// Shared launch core for the buffered (<see cref="RunDotnetCommandAsync"/>) and streaming
+    /// (<see cref="RunDotnetStreamingAsync"/>) dotnet invocations: identical <see cref="ProcessStartInfo"/>,
+    /// async stdout/stderr pump, and — critically — a single kill-on-cancel policy. On cancellation both
+    /// callers kill the whole <c>dotnet</c>/MSBuild/restore process tree
+    /// (<c>Process.Kill(entireProcessTree: true)</c>), await termination, then rethrow, so neither the
+    /// classification/evaluate/discovery path nor the streaming build path can orphan child processes.
+    /// Each received line is forwarded to <paramref name="onOutputLine"/>/<paramref name="onErrorLine"/>.
+    /// </summary>
+    private static async Task<int> RunDotnetCoreAsync(
+        DirectoryInfo workingDirectory,
+        string arguments,
+        Action<string>? onOutputLine,
+        Action<string>? onErrorLine,
+        CancellationToken cancellationToken)
     {
         var processStartInfo = new ProcessStartInfo
         {
@@ -484,7 +451,9 @@ internal partial class DotNetService : IDotNetService
         }
         catch (OperationCanceledException)
         {
-            // Ctrl+C — kill the dotnet/MSBuild process tree so it isn't orphaned.
+            // Ctrl+C — kill the dotnet/MSBuild/restore process tree so it isn't orphaned. Shared by the
+            // buffered path (classification/evaluate/discovery) and the streaming build path so neither
+            // leaves child builds running.
             try
             {
                 if (!process.HasExited)
