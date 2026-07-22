@@ -291,6 +291,57 @@ public class RunCommandProjectModeTests : BaseCommandTests
             "User -p property must be forwarded to the build options");
     }
 
+    [TestMethod]
+    public async Task ProjectMode_Unpackaged_Detach_SuppressesChildStdio()
+    {
+        // C37: a detached launch must NOT let the child inherit winapp's std handles — inheriting keeps the
+        // npm wrapper's captured stdout pipe open, so `run({detach:true})` would block until the app exits.
+        var csproj = CreateCsproj();
+        var targetDir = CreateTargetDir(withManifest: false);
+        SetUnpackagedOutcome(csproj, targetDir, selfContained: true);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [csproj.FullName, "--detach"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(LaunchStdioMode.Suppress, _fakeAppLauncherService.LastLaunchStdioMode,
+            "A detached launch must suppress child stdio so it doesn't hold the parent capture pipe open");
+    }
+
+    [TestMethod]
+    public async Task ProjectMode_Unpackaged_Json_SuppressesChildStdio()
+    {
+        // C37: under --json the child must not inherit winapp's stdout, or app output would corrupt the
+        // single JSON object the CLI writes.
+        var csproj = CreateCsproj();
+        var targetDir = CreateTargetDir(withManifest: false);
+        SetUnpackagedOutcome(csproj, targetDir, selfContained: true);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [csproj.FullName, "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(LaunchStdioMode.Suppress, _fakeAppLauncherService.LastLaunchStdioMode,
+            "A --json launch must suppress child stdio so app output cannot corrupt the JSON envelope");
+    }
+
+    [TestMethod]
+    public async Task ProjectMode_Unpackaged_Foreground_InheritsChildStdio()
+    {
+        // C37: a plain foreground run streams the app's output inline (like `dotnet run`), so the child
+        // inherits winapp's std handles.
+        var csproj = CreateCsproj();
+        var targetDir = CreateTargetDir(withManifest: false);
+        SetUnpackagedOutcome(csproj, targetDir, selfContained: true);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [csproj.FullName]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(LaunchStdioMode.Inherit, _fakeAppLauncherService.LastLaunchStdioMode,
+            "A foreground, non-JSON launch must inherit stdio so output streams inline");
+    }
+
     #endregion
 
     #region Packaged

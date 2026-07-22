@@ -39,15 +39,25 @@ internal class AppLauncherService(ILogger<AppLauncherService> logger) : IAppLaun
     }
 
     /// <inheritdoc />
-    public ILaunchedProcess LaunchExecutable(string exePath, string? arguments = null, string? workingDirectory = null)
+    public ILaunchedProcess LaunchExecutable(string exePath, string? arguments = null, string? workingDirectory = null, LaunchStdioMode stdioMode = LaunchStdioMode.Inherit)
     {
         var psi = new ProcessStartInfo
         {
             FileName = exePath,
-            // Inherit the console: an unpackaged WinUI app's stdout/stderr should stream inline,
-            // matching how `dotnet run` behaves.
             UseShellExecute = false,
         };
+
+        if (stdioMode == LaunchStdioMode.Suppress)
+        {
+            // Detach/JSON launches must NOT let the child inherit winapp's standard handles. Inheriting
+            // keeps the npm wrapper's captured stdout pipe open (so `run({detach:true})` blocks until the
+            // app exits instead of resolving on the CLI's exit) and lets app output corrupt `--json` stdout.
+            // Redirecting to owned pipes gives the child fresh handles; draining prevents it from blocking
+            // on a full pipe. winapp's own stdout stays clean because only the CLI writes to it.
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError = true;
+            psi.RedirectStandardInput = true;
+        }
 
         if (!string.IsNullOrEmpty(arguments))
         {
@@ -64,6 +74,17 @@ internal class AppLauncherService(ILogger<AppLauncherService> logger) : IAppLaun
         // code once the process exits.
         var process = Process.Start(psi)
             ?? throw new InvalidOperationException($"Failed to start process '{exePath}'.");
+
+        if (stdioMode == LaunchStdioMode.Suppress)
+        {
+            // Discard the child's output so a chatty app can't block on a full pipe. Begin* is only
+            // valid because the streams are redirected above.
+            process.OutputDataReceived += static (_, _) => { };
+            process.ErrorDataReceived += static (_, _) => { };
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            process.StandardInput.Close();
+        }
 
         logger.LogDebug("Launched executable {ExePath} (PID {PID}).", exePath, process.Id);
         return new LaunchedProcess(process);

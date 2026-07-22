@@ -660,7 +660,7 @@ internal partial class MsixService
         }
     }
 
-    private async Task<DirectoryInfo?> GetRuntimeMsixDirAsync(DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
+    private async Task<DirectoryInfo?> GetRuntimeMsixDirAsync(DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken, bool requireExactVersion = false)
     {
         (var packageDependencies, var mainVersion) = await GetWinAppSDKPackageDependenciesAsync(dotNetPackageList, taskContext, cancellationToken);
         if (packageDependencies == null || mainVersion == null)
@@ -694,7 +694,7 @@ internal partial class MsixService
         }
 
         // Find the MSIX directory with the runtime package
-        var msixDir = windowsAppRuntimeService.FindWindowsAppSdkMsixDirectory(usedVersions);
+        var msixDir = windowsAppRuntimeService.FindWindowsAppSdkMsixDirectory(usedVersions, requireExactVersion);
         if (msixDir == null)
         {
             taskContext.AddDebugMessage($"{UiSymbols.Warning} Windows App SDK MSIX directory not found for dependent runtime package");

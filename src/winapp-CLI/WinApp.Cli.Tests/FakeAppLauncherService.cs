@@ -12,6 +12,9 @@ internal class FakeAppLauncherService : IAppLauncherService
 {
     public List<(string Aumid, string? Arguments)> LaunchCalls { get; } = [];
     public List<(string ExePath, string? Arguments, string? WorkingDirectory)> LaunchExecutableCalls { get; } = [];
+
+    /// <summary>The stdio mode passed to the most recent <see cref="LaunchExecutable"/> call.</summary>
+    public LaunchStdioMode? LastLaunchStdioMode { get; private set; }
     public List<(string? PackageFullName, uint ProcessId)> TerminateCalls { get; } = [];
     public uint FakeProcessId { get; set; } = 12345;
 
@@ -29,9 +32,10 @@ internal class FakeAppLauncherService : IAppLauncherService
         return FakeProcessId;
     }
 
-    public ILaunchedProcess LaunchExecutable(string exePath, string? arguments = null, string? workingDirectory = null)
+    public ILaunchedProcess LaunchExecutable(string exePath, string? arguments = null, string? workingDirectory = null, LaunchStdioMode stdioMode = LaunchStdioMode.Inherit)
     {
         LaunchExecutableCalls.Add((exePath, arguments, workingDirectory));
+        LastLaunchStdioMode = stdioMode;
         LastLaunchedProcess = new FakeLaunchedProcess(FakeProcessId, FakeExitCode);
         return LastLaunchedProcess;
     }

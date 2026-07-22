@@ -23,8 +23,12 @@ internal sealed class FakeWindowsAppRuntimeService : IWindowsAppRuntimeService
     /// <summary>Value returned by <see cref="IsWindowsAppRuntimeRegistered"/>.</summary>
     public bool IsRuntimeRegisteredResult { get; set; } = true;
 
-    public DirectoryInfo? FindWindowsAppSdkMsixDirectory(Dictionary<string, string>? usedVersions = null)
+    /// <summary>Records the <c>requireExactVersion</c> argument of the last <see cref="FindWindowsAppSdkMsixDirectory"/> call.</summary>
+    public bool? LastRequireExactVersion { get; private set; }
+
+    public DirectoryInfo? FindWindowsAppSdkMsixDirectory(Dictionary<string, string>? usedVersions = null, bool requireExactVersion = false)
     {
+        LastRequireExactVersion = requireExactVersion;
         return MsixDirectory;
     }
 

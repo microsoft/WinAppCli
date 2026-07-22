@@ -329,7 +329,11 @@ internal partial class RunCommand
             ILaunchedProcess launched;
             try
             {
-                launched = appLauncherService.LaunchExecutable(exePath, appArgs, workingDirectory);
+                // For --detach and --json the child must not inherit winapp's standard handles: inheritance
+                // would keep the npm wrapper's captured stdout pipe open (blocking a detached launch) and let
+                // app output corrupt --json stdout. A foreground, non-JSON run streams inline like `dotnet run`.
+                var stdioMode = (detach || isJson) ? LaunchStdioMode.Suppress : LaunchStdioMode.Inherit;
+                launched = appLauncherService.LaunchExecutable(exePath, appArgs, workingDirectory, stdioMode);
             }
             catch (Exception ex)
             {

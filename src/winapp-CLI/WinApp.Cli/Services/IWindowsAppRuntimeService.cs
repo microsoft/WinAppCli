@@ -16,8 +16,15 @@ internal interface IWindowsAppRuntimeService
     /// Finds the MSIX directory for Windows App SDK runtime packages in the NuGet global cache.
     /// </summary>
     /// <param name="usedVersions">Optional dictionary of package versions to look for specific installed packages.</param>
+    /// <param name="requireExactVersion">
+    /// When <c>true</c>, only the exact package/version directories in <paramref name="usedVersions"/> are
+    /// accepted; the general "any cached runtime" scan is skipped so an unrelated cached runtime is never
+    /// returned. Project-mode unpackaged launches pass <c>true</c> so the gate identities describe the
+    /// runtime the app was actually built against (returns <c>null</c> when the exact version is absent).
+    /// Legacy/packaged callers keep the default (<c>false</c>) tolerant scan.
+    /// </param>
     /// <returns>The path to the MSIX directory, or null if not found.</returns>
-    DirectoryInfo? FindWindowsAppSdkMsixDirectory(Dictionary<string, string>? usedVersions = null);
+    DirectoryInfo? FindWindowsAppSdkMsixDirectory(Dictionary<string, string>? usedVersions = null, bool requireExactVersion = false);
 
     /// <summary>
     /// Installs the Windows App Runtime framework MSIX packages (Framework / DDLM / Singleton / Main)

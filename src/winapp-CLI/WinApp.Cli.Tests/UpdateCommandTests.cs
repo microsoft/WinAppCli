@@ -240,7 +240,7 @@ internal sealed class UpdateWorkspaceFake : IWindowsAppRuntimeService
     public (int InstalledCount, int ErrorCount) InstallRuntimeResult { get; set; } = (1, 0);
     public Exception? InstallRuntimeException { get; set; }
 
-    public DirectoryInfo? FindWindowsAppSdkMsixDirectory(Dictionary<string, string>? usedVersions = null) => MsixDirectory;
+    public DirectoryInfo? FindWindowsAppSdkMsixDirectory(Dictionary<string, string>? usedVersions = null, bool requireExactVersion = false) => MsixDirectory;
 
     public bool IsRuntimeRegisteredResult { get; set; } = true;
 

@@ -390,16 +390,16 @@ internal class WindowsAppRuntimeService(
     /// </summary>
     /// <param name="usedVersions">Optional dictionary of package versions to look for specific installed packages</param>
     /// <returns>The path to the MSIX directory, or null if not found</returns>
-    public DirectoryInfo? FindWindowsAppSdkMsixDirectory(Dictionary<string, string>? usedVersions = null)
+    public DirectoryInfo? FindWindowsAppSdkMsixDirectory(Dictionary<string, string>? usedVersions = null, bool requireExactVersion = false)
     {
         var nugetCacheDir = nugetService.GetNuGetGlobalPackagesDir();
-        return FindMsixDirectoryInNuGetCache(nugetCacheDir, usedVersions);
+        return FindMsixDirectoryInNuGetCache(nugetCacheDir, usedVersions, requireExactVersion);
     }
 
     /// <summary>
     /// Searches the NuGet global packages cache (lowercase id/version folder convention).
     /// </summary>
-    private static DirectoryInfo? FindMsixDirectoryInNuGetCache(DirectoryInfo nugetCacheDir, Dictionary<string, string>? usedVersions)
+    private static DirectoryInfo? FindMsixDirectoryInNuGetCache(DirectoryInfo nugetCacheDir, Dictionary<string, string>? usedVersions, bool requireExactVersion)
     {
         if (usedVersions != null)
         {
@@ -422,6 +422,15 @@ internal class WindowsAppRuntimeService(
                     return msixDir;
                 }
             }
+        }
+
+        if (requireExactVersion)
+        {
+            // Exact-version callers (project-mode unpackaged) must NOT accept an unrelated cached runtime:
+            // the general/highest-version scans below would return a different WinAppSDK version, and the
+            // presence gate derived from it would then pass while the app's actual required runtime family
+            // was never installed. Stop here so the caller sees "exact version unavailable" instead.
+            return null;
         }
 
         // General scan: look for any runtime package directories

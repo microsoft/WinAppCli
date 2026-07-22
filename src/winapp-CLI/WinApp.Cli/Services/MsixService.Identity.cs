@@ -429,24 +429,41 @@ internal partial class MsixService
         // runtime for it is wasted work and prints a noisy "could not determine runtime" warning. Skip
         // only when we can positively confirm no reference; an unresolved list falls through to prep so
         // a real WinUI app is never left without its runtime.
-        if (packageList is not null && !ReferencesWindowsAppSdk(packageList))
+        var referencesWindowsAppSdk = packageList is not null && ReferencesWindowsAppSdk(packageList);
+        if (packageList is not null && !referencesWindowsAppSdk)
         {
             taskContext.AddDebugMessage(
                 $"{UiSymbols.Note} No Windows App SDK reference found; skipping Windows App Runtime preparation.");
             return;
         }
 
-        var expectedRuntimePackages = await EnsureWindowsAppRuntimeInstalledAsync(packageList, architecture, taskContext, cancellationToken);
+        // requireExactVersion:true — this unpackaged path must resolve the runtime the app was actually
+        // built against, never an unrelated cached WinAppSDK version (a general-scan fallback would let the
+        // presence gate below pass against the wrong runtime family; see C40).
+        var expectedRuntimePackages = await EnsureWindowsAppRuntimeInstalledAsync(packageList, architecture, taskContext, cancellationToken, requireExactVersion: true);
 
         // L1-residual: this is the project-mode UNPACKAGED path (callers gate on WindowsAppSDKSelfContained
         // before calling), so a framework-dependent app here always needs a Framework + DDLM. An empty
-        // expected list means the runtime MSIX packages couldn't be located (e.g. GetRuntimeMsixDirAsync
-        // returned null) so the version-specific identities can't be derived — the gate below would fall
-        // open to the generic prefix check and could accept a wrong runtime version. Surface that loudly
-        // (not just a verbose note) so the risk is visible even though the generic gate still fails closed
-        // when nothing is registered at all.
+        // expected list means the exact runtime MSIX packages couldn't be located (requireExactVersion
+        // returned null rather than an unrelated version), so the version-specific identities can't be
+        // derived and the gate below would fall open to the generic prefix check — which could accept a
+        // wrong (unrelated) runtime version that happens to be registered.
         if (expectedRuntimePackages.Count == 0)
         {
+            if (referencesWindowsAppSdk)
+            {
+                // We positively confirmed the app references the Windows App SDK yet couldn't locate the
+                // exact runtime it needs. Falling open here risks launching against an unrelated registered
+                // runtime, so fail closed with an actionable error instead (C40).
+                var arch = architecture ?? WorkspaceSetupService.GetSystemArchitecture();
+                throw new InvalidOperationException(
+                    $"The exact Windows App Runtime the app requires for architecture '{arch}' could not be located, so it can't be " +
+                    "installed or version-verified and the app would fail to start. Restore the project so the matching Windows App SDK " +
+                    "runtime is available for that architecture, install it manually, or build a self-contained app (WindowsAppSDKSelfContained=true).");
+            }
+
+            // Package list was unresolved (couldn't positively confirm the reference): keep the tolerant
+            // behavior and surface the risk loudly rather than blocking a launch we can't reason about.
             taskContext.AddStatusMessage(
                 $"{UiSymbols.Warning} Could not determine the exact Windows App Runtime the app requires, so its " +
                 "presence can't be version-verified. If the app fails to start, restore the project or install the " +
@@ -544,9 +561,9 @@ internal partial class MsixService
     /// Locates the runtime MSIX directory from the NuGet package cache and installs any
     /// missing or outdated packages (Framework, DDLM, Singleton, Main) via Add-AppxPackage.
     /// </summary>
-    private async Task<IReadOnlyList<(string Name, string Version)>> EnsureWindowsAppRuntimeInstalledAsync(DotNetPackageListJson? dotNetPackageList, string? architecture, TaskContext taskContext, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<(string Name, string Version)>> EnsureWindowsAppRuntimeInstalledAsync(DotNetPackageListJson? dotNetPackageList, string? architecture, TaskContext taskContext, CancellationToken cancellationToken, bool requireExactVersion = false)
     {
-        var msixDir = await GetRuntimeMsixDirAsync(dotNetPackageList, taskContext, cancellationToken);
+        var msixDir = await GetRuntimeMsixDirAsync(dotNetPackageList, taskContext, cancellationToken, requireExactVersion);
         if (msixDir == null)
         {
             taskContext.AddDebugMessage($"{UiSymbols.Warning} Could not locate Windows App Runtime MSIX packages. The runtime may need to be installed manually.");
