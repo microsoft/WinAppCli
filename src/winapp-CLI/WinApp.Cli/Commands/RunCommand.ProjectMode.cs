@@ -288,6 +288,7 @@ internal partial class RunCommand
             // bootstrapper needs, for the resolved arch. Self-contained apps carry their own copy.
             if (!resolution.SelfContained)
             {
+                string? runtimeErrorMessage = null;
                 var runtimeResult = await statusService.ExecuteWithStatusAsync(
                     "Preparing Windows App Runtime...",
                     async (taskContext, ct) =>
@@ -304,6 +305,9 @@ internal partial class RunCommand
                         }
                         catch (Exception ex)
                         {
+                            // Capture the actionable detail so --json can surface it too (the status
+                            // service consumes the tuple message for the console line only).
+                            runtimeErrorMessage = ex.Message;
                             return (1, $"{UiSymbols.Error} Failed to prepare the Windows App Runtime: {ex.Message}");
                         }
                     },
@@ -320,7 +324,10 @@ internal partial class RunCommand
                 {
                     if (isJson)
                     {
-                        PrintJson(aumid: null, processId: null, "Failed to prepare the Windows App Runtime.");
+                        var jsonError = string.IsNullOrWhiteSpace(runtimeErrorMessage)
+                            ? "Failed to prepare the Windows App Runtime."
+                            : $"Failed to prepare the Windows App Runtime: {runtimeErrorMessage}";
+                        PrintJson(aumid: null, processId: null, jsonError);
                     }
                     return runtimeResult;
                 }
