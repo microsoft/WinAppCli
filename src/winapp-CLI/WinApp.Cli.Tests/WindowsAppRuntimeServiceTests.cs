@@ -1,6 +1,10 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using Microsoft.Extensions.Logging.Abstractions;
+using Spectre.Console.Testing;
+using WinApp.Cli.ConsoleTasks;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -16,6 +20,7 @@ public class WindowsAppRuntimeServiceTests
 {
     private DirectoryInfo _cacheRoot = null!;
     private FakeNugetService _fakeNuget = null!;
+    private FakePackageRegistrationService _fakeRegistration = null!;
     private WindowsAppRuntimeService _service = null!;
 
     [TestInitialize]
@@ -24,7 +29,8 @@ public class WindowsAppRuntimeServiceTests
         _cacheRoot = new DirectoryInfo(Path.Combine(Path.GetTempPath(), "winapp-wart-" + Guid.NewGuid().ToString("N")));
         _cacheRoot.Create();
         _fakeNuget = new FakeNugetService { CacheDirectory = _cacheRoot };
-        _service = new WindowsAppRuntimeService(new FakePackageRegistrationService(), _fakeNuget);
+        _fakeRegistration = new FakePackageRegistrationService();
+        _service = new WindowsAppRuntimeService(_fakeRegistration, _fakeNuget);
     }
 
     [TestCleanup]
@@ -98,5 +104,69 @@ public class WindowsAppRuntimeServiceTests
 
         Assert.IsNotNull(result, "requireExactVersion must still return the exact match when it is cached");
         StringAssert.Contains(result!.FullName, "1.6.240701");
+    }
+
+    private static TaskContext NewTaskContext() =>
+        new(new GroupableTask("wart-test", null), null, new TestConsole(), NullLogger<WindowsAppRuntimeService>.Instance, new Lock());
+
+    /// <summary>
+    /// Seeds a minimal <c>win10-{arch}/msix.inventory</c> plus a placeholder (non-zip) package file, so
+    /// <see cref="WindowsAppRuntimeService.InstallWindowsAppRuntimeAsync"/> produces exactly one package to
+    /// evaluate. The placeholder file is intentionally not a real MSIX zip: <c>ReadMsixIdentity</c> fails and
+    /// the code falls back to parsing the package name/version from the inventory identity string.
+    /// </summary>
+    private DirectoryInfo SeedInventory(string arch, string fileName, string identity)
+    {
+        var msixDir = Directory.CreateDirectory(Path.Combine(_cacheRoot.FullName, "msix-" + Guid.NewGuid().ToString("N")));
+        var archDir = Directory.CreateDirectory(Path.Combine(msixDir.FullName, $"win10-{arch}"));
+        File.WriteAllText(Path.Combine(archDir.FullName, fileName), "not-a-real-msix-zip");
+        File.WriteAllText(Path.Combine(archDir.FullName, "msix.inventory"), $"{fileName}={identity}\n");
+        return msixDir;
+    }
+
+    [TestMethod]
+    public async Task InstallWindowsAppRuntime_ProjectMode_ChecksInstalledVersionForTargetArch_NotHostArch()
+    {
+        // Cross-arch scenario: the app resolves to arm64, but the SAME-name runtime Framework is already
+        // registered for the host (x64) arch and absent for arm64. Project mode must filter the
+        // "already installed?" check by the target arch so it doesn't wrongly skip the arm64 install.
+        var msixDir = SeedInventory("arm64", "Framework.msix", "Microsoft.WindowsAppRuntime.1.6_1.6.240701_arm64__8wekyb3d8bbwe");
+        _fakeRegistration.GetInstalledVersionFunc = (_, requestedArch) => requestedArch == "x64" ? "9.9.9" : null;
+
+        var (installedCount, errorCount, _) = await _service.InstallWindowsAppRuntimeAsync(
+            msixDir, NewTaskContext(), CancellationToken.None, architecture: "arm64");
+
+        Assert.AreEqual(0, errorCount);
+        Assert.AreEqual(1, installedCount, "cross-arch runtime must install even though a host-arch package with the same name is registered");
+        Assert.AreEqual(1, _fakeRegistration.InstallPackageCalls.Count);
+        CollectionAssert.Contains(
+            _fakeRegistration.GetInstalledVersionCalls,
+            ("Microsoft.WindowsAppRuntime.1.6", (string?)"arm64"),
+            "project mode must query the installed version for the resolved target arch");
+        CollectionAssert.DoesNotContain(
+            _fakeRegistration.GetInstalledVersionCalls,
+            ("Microsoft.WindowsAppRuntime.1.6", (string?)null),
+            "project mode must not fall back to the arch-agnostic (null) installed-version check");
+    }
+
+    [TestMethod]
+    public async Task InstallWindowsAppRuntime_FolderMode_ChecksInstalledVersionArchAgnostic()
+    {
+        // Folder mode (no explicit arch) is byte-for-byte legacy behavior: the installed-version check is
+        // arch-agnostic (null filter), so a present same-or-newer package skips the install.
+        var hostArch = RunArchHelper.DefaultArchitecture();
+        var msixDir = SeedInventory(hostArch, "Framework.msix", "Microsoft.WindowsAppRuntime.1.6_1.6.240701_" + hostArch + "__8wekyb3d8bbwe");
+        _fakeRegistration.GetInstalledVersionFunc = (_, _) => "9.9.9";
+
+        var (installedCount, errorCount, _) = await _service.InstallWindowsAppRuntimeAsync(
+            msixDir, NewTaskContext(), CancellationToken.None, architecture: null);
+
+        Assert.AreEqual(0, errorCount);
+        Assert.AreEqual(0, installedCount, "a registered same-or-newer package must skip the install in folder mode");
+        Assert.AreEqual(0, _fakeRegistration.InstallPackageCalls.Count);
+        CollectionAssert.Contains(
+            _fakeRegistration.GetInstalledVersionCalls,
+            ("Microsoft.WindowsAppRuntime.1.6", (string?)null),
+            "folder mode must keep the arch-agnostic (null) installed-version check");
     }
 }

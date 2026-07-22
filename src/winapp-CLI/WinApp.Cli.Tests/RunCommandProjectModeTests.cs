@@ -87,6 +87,31 @@ public class RunCommandProjectModeTests : BaseCommandTests
             new ProjectRunResolution(csproj, targetDir.FullName, exe, ProjectPackaging.Unpackaged, selfContained, arch), 0);
     }
 
+    // Builds `winapp run <csproj> <option> [value]` for the packaged-only-option rejection tests (M7),
+    // materializing real paths for the token-valued options so parsing succeeds.
+    private string[] BuildRejectionArgs(FileInfo csproj, string option, string? argToken)
+    {
+        if (argToken is null)
+        {
+            return [csproj.FullName, option];
+        }
+
+        var value = argToken switch
+        {
+            "MANIFEST" => WriteRejectionManifest().FullName,
+            "OUTDIR" => _tempDirectory.CreateSubdirectory($"appx_{Guid.NewGuid():N}").FullName,
+            _ => argToken,
+        };
+        return [csproj.FullName, option, value];
+    }
+
+    private FileInfo WriteRejectionManifest()
+    {
+        var path = Path.Combine(_tempDirectory.FullName, $"manifest_{Guid.NewGuid():N}.xml");
+        File.WriteAllText(path, TestManifestContent);
+        return new FileInfo(path);
+    }
+
     private void SetPackagedOutcome(FileInfo csproj, DirectoryInfo targetDir, string arch = "x64")
     {
         _fakeProjectRunService.BuildOutcome = new ProjectBuildOutcome(
@@ -204,54 +229,51 @@ public class RunCommandProjectModeTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task ProjectMode_Unpackaged_RejectsIdentityOnlyOption()
+    [DataRow("--no-launch", null)]
+    [DataRow("--with-alias", null)]
+    [DataRow("--unregister-on-exit", null)]
+    [DataRow("--clean", null)]
+    [DataRow("--manifest", "MANIFEST")]
+    [DataRow("--output-appx-directory", "OUTDIR")]
+    [DataRow("--executable", "Other.exe")]
+    public async Task ProjectMode_Unpackaged_RejectsEveryPackagedOnlyOption_AtAuthoritativeGate(string option, string? argToken)
     {
+        // M7: every launch/identity option that is only meaningful for a packaged (MSIX) app must be
+        // rejected once the target resolves unpackaged. Probe defaults to indeterminate, so this
+        // exercises the AUTHORITATIVE post-build gate for the full option set (issue #676).
         var csproj = CreateCsproj();
         var targetDir = CreateTargetDir(withManifest: false);
         SetUnpackagedOutcome(csproj, targetDir, selfContained: false);
-        // Probe defaults to false (indeterminate), so this exercises the AUTHORITATIVE post-build gate:
-        // the app is built + resolved, then --clean is rejected because it resolved unpackaged.
         var command = GetRequiredService<RunCommand>();
 
-        // --clean only makes sense for a packaged (MSIX) app.
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [csproj.FullName, "--clean"]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, BuildRejectionArgs(csproj, option, argToken));
 
-        Assert.AreEqual(1, exitCode, "Identity-only options must be rejected for unpackaged apps");
+        Assert.AreEqual(1, exitCode, $"{option} must be rejected for an unpackaged app");
         Assert.AreEqual(1, _fakeProjectRunService.BuildAndResolveCalls.Count, "Indeterminate packaging must build, then reject at the authoritative gate");
-        Assert.AreEqual(0, _fakeAppLauncherService.LaunchExecutableCalls.Count, "App must not launch when an invalid option was supplied");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchExecutableCalls.Count, $"App must not launch when {option} was supplied");
     }
 
     [TestMethod]
-    public async Task ProjectMode_Unpackaged_RejectsExecutableOption()
+    [DataRow("--no-launch", null)]
+    [DataRow("--with-alias", null)]
+    [DataRow("--unregister-on-exit", null)]
+    [DataRow("--clean", null)]
+    [DataRow("--manifest", "MANIFEST")]
+    [DataRow("--output-appx-directory", "OUTDIR")]
+    [DataRow("--executable", "Other.exe")]
+    public async Task ProjectMode_DefinitivelyUnpackaged_RejectsEveryPackagedOnlyOption_BeforeBuilding(string option, string? argToken)
     {
-        // M6: --executable selects an entry inside an MSIX layout; it is meaningless for an unpackaged
-        // app (which launches the built apphost directly). It must be rejected, not silently ignored.
-        var csproj = CreateCsproj();
-        var targetDir = CreateTargetDir(withManifest: false);
-        SetUnpackagedOutcome(csproj, targetDir, selfContained: false);
-        var command = GetRequiredService<RunCommand>();
-
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [csproj.FullName, "--executable", "Other.exe"]);
-
-        Assert.AreEqual(1, exitCode, "--executable must be rejected for unpackaged apps");
-        Assert.AreEqual(0, _fakeAppLauncherService.LaunchExecutableCalls.Count, "App must not launch when --executable was supplied to an unpackaged app");
-    }
-
-    [TestMethod]
-    public async Task ProjectMode_DefinitivelyUnpackaged_RejectsIdentityOnlyOptionBeforeBuilding()
-    {
-        // Issue #676: when the project is definitively unpackaged (WindowsPackageType=None), an
-        // identity-only option like --no-launch is rejected by the pre-build probe — the user does
-        // not pay the build cost first.
+        // M7 / Issue #676: when the project is definitively unpackaged (WindowsPackageType=None), every
+        // packaged-only option is rejected by the pre-build probe — the user does not pay the build cost.
         var csproj = CreateCsproj();
         _fakeProjectRunService.DefinitivelyUnpackaged = true;
         var command = GetRequiredService<RunCommand>();
 
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [csproj.FullName, "--no-launch"]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, BuildRejectionArgs(csproj, option, argToken));
 
-        Assert.AreEqual(1, exitCode, "An identity-only option on a definitively-unpackaged app must fail");
+        Assert.AreEqual(1, exitCode, $"{option} on a definitively-unpackaged app must fail");
         Assert.AreEqual(1, _fakeProjectRunService.IsDefinitivelyUnpackagedCalls.Count, "The pre-build probe must run");
-        Assert.AreEqual(0, _fakeProjectRunService.BuildAndResolveCalls.Count, "The fast-fail must reject before building");
+        Assert.AreEqual(0, _fakeProjectRunService.BuildAndResolveCalls.Count, $"{option} must reject before building");
         Assert.AreEqual(0, _fakeAppLauncherService.LaunchExecutableCalls.Count);
     }
 

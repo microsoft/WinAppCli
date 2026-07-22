@@ -20,6 +20,13 @@ internal sealed class FakeWindowsAppRuntimeService : IWindowsAppRuntimeService
     /// <summary>Result returned by <see cref="InstallWindowsAppRuntimeAsync"/>.</summary>
     public (int InstalledCount, int ErrorCount) InstallRuntimeResult { get; set; } = (1, 0);
 
+    /// <summary>
+    /// Versioned Framework/DDLM identities returned by <see cref="InstallWindowsAppRuntimeAsync"/> as the
+    /// "expected runtime packages". Empty by default, which models "the exact runtime could not be located"
+    /// so the caller's fail-closed gate fires for a Windows App SDK app.
+    /// </summary>
+    public IReadOnlyList<(string Name, string Version)> InstallRuntimePackages { get; set; } = [];
+
     /// <summary>Value returned by <see cref="IsWindowsAppRuntimeRegistered"/>.</summary>
     public bool IsRuntimeRegisteredResult { get; set; } = true;
 
@@ -35,7 +42,7 @@ internal sealed class FakeWindowsAppRuntimeService : IWindowsAppRuntimeService
     public Task<(int InstalledCount, int ErrorCount, IReadOnlyList<(string Name, string Version)> RuntimePackages)> InstallWindowsAppRuntimeAsync(DirectoryInfo msixDir, TaskContext taskContext, CancellationToken cancellationToken, string? architecture = null)
     {
         InstallRuntimeCalls.Add(msixDir);
-        return Task.FromResult((InstallRuntimeResult.InstalledCount, InstallRuntimeResult.ErrorCount, (IReadOnlyList<(string Name, string Version)>)[]));
+        return Task.FromResult((InstallRuntimeResult.InstalledCount, InstallRuntimeResult.ErrorCount, InstallRuntimePackages));
     }
 
     public bool IsWindowsAppRuntimeRegistered(string? architecture, IReadOnlyList<(string Name, string Version)>? expectedRuntimePackages = null)

@@ -906,6 +906,83 @@ public class MsixServiceIdentityTests : BaseCommandTests
             "runtime discovery must restore normally when --no-restore was not requested");
     }
 
+    [TestMethod]
+    public async Task EnsureWindowsAppRuntimeInstalledAsync_RefsSdkButExactRuntimeMissing_FailsClosed()
+    {
+        // M4 (gate 1, Identity.cs:454-466): the app positively references the Windows App SDK, but the
+        // exact runtime it was built against can't be located (empty expected-packages), so the runtime
+        // can't be version-verified. Falling open would risk launching against an unrelated registered
+        // runtime, so it must fail closed with an actionable error instead of silently continuing.
+        _fakeDotNet.PackageListResult = WinAppSdkPackageList();
+        _fakeWindowsAppRuntime.MsixDirectory = null; // exact runtime unavailable -> empty expected list
+        var csproj = new FileInfo(Path.Combine(_tempDirectory.FullName, "App.csproj"));
+
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+            _msixService.EnsureWindowsAppRuntimeInstalledAsync(
+                csproj, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken));
+
+        StringAssert.Contains(ex.Message, "could not be located");
+    }
+
+    [TestMethod]
+    public async Task EnsureWindowsAppRuntimeInstalledAsync_RuntimeNotRegisteredAfterInstall_FailsClosed()
+    {
+        // M4 (gate 2, Identity.cs:483-490): the exact runtime packages ARE resolved (non-empty expected
+        // list, so gate 1 is skipped), but after the install attempt the Framework + DDLM still isn't
+        // registered for the target arch. A missing runtime must abort the launch with an actionable error
+        // rather than being treated as success.
+        _fakeDotNet.PackageListResult = WinAppSdkPackageList();
+        _fakeWindowsAppRuntime.MsixDirectory = _tempDirectory.CreateSubdirectory("runtime-msix");
+        _fakeWindowsAppRuntime.InstallRuntimePackages =
+            [("Microsoft.WindowsAppRuntime.1.6", "1.6.240701"), ("Microsoft.WinAppRuntime.DDLM", "1.6.240701")];
+        _fakeWindowsAppRuntime.IsRuntimeRegisteredResult = false;
+        var csproj = new FileInfo(Path.Combine(_tempDirectory.FullName, "App.csproj"));
+
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+            _msixService.EnsureWindowsAppRuntimeInstalledAsync(
+                csproj, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken));
+
+        StringAssert.Contains(ex.Message, "not registered");
+    }
+
+    [TestMethod]
+    public async Task EnsureWindowsAppRuntimeInstalledAsync_RuntimeResolvedAndRegistered_Succeeds()
+    {
+        // Complement to the fail-closed gates: when the exact runtime resolves AND is registered for the
+        // target arch, the method completes without throwing (the happy path the gates guard).
+        _fakeDotNet.PackageListResult = WinAppSdkPackageList();
+        _fakeWindowsAppRuntime.MsixDirectory = _tempDirectory.CreateSubdirectory("runtime-msix");
+        _fakeWindowsAppRuntime.InstallRuntimePackages =
+            [("Microsoft.WindowsAppRuntime.1.6", "1.6.240701"), ("Microsoft.WinAppRuntime.DDLM", "1.6.240701")];
+        _fakeWindowsAppRuntime.IsRuntimeRegisteredResult = true;
+        var csproj = new FileInfo(Path.Combine(_tempDirectory.FullName, "App.csproj"));
+
+        await _msixService.EnsureWindowsAppRuntimeInstalledAsync(
+            csproj, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken);
+
+        Assert.HasCount(1, _fakeWindowsAppRuntime.InstallRuntimeCalls);
+    }
+
+    [TestMethod]
+    public async Task EnsureWindowsAppRuntimeInstalledAsync_UnresolvedList_FailsOpenWithWarning()
+    {
+        // M4 (tolerant branch, Identity.cs:468-473): when the package list can't be resolved we cannot
+        // positively confirm the SDK reference, so an empty expected list must NOT fail closed — it warns
+        // and proceeds (fail-open) rather than blocking a launch we can't reason about.
+        _fakeDotNet.PackageListResult = null; // unresolved -> referencesWindowsAppSdk == false
+        _fakeWindowsAppRuntime.MsixDirectory = null;
+        _fakeWindowsAppRuntime.IsRuntimeRegisteredResult = true;
+        var csproj = new FileInfo(Path.Combine(_tempDirectory.FullName, "App.csproj"));
+
+        await _msixService.EnsureWindowsAppRuntimeInstalledAsync(
+            csproj, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken);
+
+        var messages = TestTask.SubTasks.OfType<StatusMessageTask>().Select(t => t.CompletedMessage ?? string.Empty).ToList();
+        Assert.IsTrue(
+            messages.Any(m => m.Contains("Could not determine the exact Windows App Runtime", StringComparison.OrdinalIgnoreCase)),
+            $"Expected a fail-open warning when the package list is unresolved. Messages:\n{string.Join("\n", messages)}");
+    }
+
     // ---- FilterPackageListToFramework (C2: TFM-aware runtime resolution) ----------
 
     private static DotNetPackageListJson MultiTargetedWinAppSdkList() =>
