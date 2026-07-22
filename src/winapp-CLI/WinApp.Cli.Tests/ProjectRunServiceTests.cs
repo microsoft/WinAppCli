@@ -1060,6 +1060,56 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public async Task ResolveInput_MultipleCsproj_MultiTargetedConditionalOutputType_ClassifiesUnderFirstTfm()
+    {
+        // Regression (Copilot review, ProjectDetectionService.cs:324): a multi-targeted candidate whose
+        // executable OutputType is conditional on $(TargetFramework) (WinExe only for the first TFM,
+        // Library on the cross-targeting outer node). With no --framework, classification must pin the SAME
+        // effective first TFM the build/evaluate passes use — otherwise App evaluates on the empty outer
+        // node, looks non-runnable, and auto-selection fails BEFORE the build. First TFM here is
+        // net10.0-windows10.0.26100.0 (static inline <TargetFrameworks>).
+        var app = WriteFile("App.csproj", MultiTargetedExeCsproj);
+        WriteFile("Lib.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                !args.Contains(app.FullName, StringComparison.OrdinalIgnoreCase) ? (0, EvalJson("Library"), string.Empty)
+                : args.Contains("-p:TargetFramework=net10.0-windows10.0.26100.0", StringComparison.Ordinal) ? (0, EvalJson("WinExe"), string.Empty)
+                : (0, EvalJson("Library"), string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+        var inputs = new ProjectClassificationInputs("Debug", "x64", Framework: null, Properties: []);
+
+        var resolution = await service.ResolveInputAsync(_tempDir, CancellationToken.None, projectSelector: null, inputs);
+
+        Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
+        Assert.AreEqual("App.csproj", resolution.Csproj!.Name);
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_MultipleCsproj_MultiTargetedConditionalOutputType_NoTfmPinnedMisses()
+    {
+        // Negative control for the test above: the same App is WinExe only when the classify evaluate pins
+        // the first TFM. With no classification inputs (prior behavior — MSBuild defaults, outer node), App
+        // reads as a Library, so NO runnable app is found. Proves injecting the effective first TFM into
+        // classification is load-bearing, not incidental.
+        var app = WriteFile("App.csproj", MultiTargetedExeCsproj);
+        WriteFile("Lib.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                !args.Contains(app.FullName, StringComparison.OrdinalIgnoreCase) ? (0, EvalJson("Library"), string.Empty)
+                : args.Contains("-p:TargetFramework=net10.0-windows10.0.26100.0", StringComparison.Ordinal) ? (0, EvalJson("WinExe"), string.Empty)
+                : (0, EvalJson("Library"), string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+
+        var ex = await Assert.ThrowsExactlyAsync<ProjectRunException>(() =>
+            service.ResolveInputAsync(_tempDir, CancellationToken.None));
+        StringAssert.Contains(ex.Message, "Multiple .csproj files");
+    }
+
+    [TestMethod]
     public async Task ResolveInput_MultipleCsproj_TestContainerCapability_PicksApp()
     {
         // The AI Dev Gallery / WinUI Gallery shape: the test project is itself a packaged WinUI app
@@ -2203,12 +2253,29 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
-    public async Task BuildAndResolveAsync_VerboseLogger_MapsToNormalDotnetVerbosity()
+    public async Task BuildAndResolveAsync_VerboseLogger_MapsToMinimalDotnetVerbosity()
     {
-        // Change #1: verbose (ILogger Debug, the signal behind --verbose) must reach dotnet as -v normal.
+        // Change #1 (UX): --verbose (ILogger Debug) keeps dotnet at -v minimal on purpose — --verbose
+        // already streams the build live and unlocks winapp's own traces, so -v normal would just bury
+        // those under the MSBuild flood. Only --trace cranks dotnet up (covered below).
         var csproj = WriteFile("App.csproj", ExecutableCsproj);
         var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => (0, PackagedPropertiesJson(), string.Empty) };
         var service = NewServiceWith(dotnet, LogLevel.Debug, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
+
+        await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        StringAssert.Contains(dotnet.StreamingCalls[0], "-v minimal");
+    }
+
+    [TestMethod]
+    public async Task BuildAndResolveAsync_TraceLogger_MapsToNormalDotnetVerbosity()
+    {
+        // Change #1 (UX): --trace (ILogger Trace) is the only level that cranks dotnet up to -v normal
+        // for deep build diagnosis.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => (0, PackagedPropertiesJson(), string.Empty) };
+        var service = NewServiceWith(dotnet, LogLevel.Trace, out _);
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
 
         await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);

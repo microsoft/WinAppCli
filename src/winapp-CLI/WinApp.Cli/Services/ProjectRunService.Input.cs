@@ -115,7 +115,7 @@ internal sealed partial class ProjectRunService
             // used for the multi-project path so conditional OutputType/test markers are honored, and
             // reuse PickRunnableProject so the lone-test convenience (run a sole test project) is kept.
             var loneProps = BuildClassificationPropertyTokens(classificationInputs, solution: null);
-            var (loneApps, loneTests) = await ClassifyRunnablesAsync(csprojs, dir, loneProps, cancellationToken);
+            var (loneApps, loneTests) = await ClassifyRunnablesAsync(csprojs, dir, loneProps, classificationInputs, solution: null, cancellationToken);
             var lonePick = PickRunnableProject(loneApps, loneTests, out var lonePickedTest);
             if (lonePick is null)
             {
@@ -153,7 +153,7 @@ internal sealed partial class ProjectRunService
         // effective build inputs (Configuration/arch/TFM/user -p) are threaded in so a candidate whose
         // OutputType/test markers are conditional on them classifies as it will build.
         var dirClassificationProps = BuildClassificationPropertyTokens(classificationInputs, solution: null);
-        var (dirApps, dirTests) = await ClassifyRunnablesAsync(csprojs, dir, dirClassificationProps, cancellationToken);
+        var (dirApps, dirTests) = await ClassifyRunnablesAsync(csprojs, dir, dirClassificationProps, classificationInputs, solution: null, cancellationToken);
 
         var dirPick = PickRunnableProject(dirApps, dirTests, out var dirPickedTest);
         if (dirPick is not null)
@@ -450,7 +450,7 @@ internal sealed partial class ProjectRunService
         }
 
         var solutionProps = BuildClassificationPropertyTokens(classificationInputs, solution);
-        var (apps, tests) = await ClassifyRunnablesAsync(projects, solutionDir, solutionProps, cancellationToken);
+        var (apps, tests) = await ClassifyRunnablesAsync(projects, solutionDir, solutionProps, classificationInputs, solution, cancellationToken);
 
         var pick = PickRunnableProject(apps, tests, out var pickedTest);
         if (pick is not null)
@@ -498,13 +498,17 @@ internal sealed partial class ProjectRunService
         IReadOnlyList<FileInfo> projects,
         DirectoryInfo workingDirectory,
         IReadOnlyList<string>? extraMsbuildProperties,
+        ProjectClassificationInputs? classificationInputs,
+        FileInfo? solution,
         CancellationToken cancellationToken)
     {
         var apps = new List<FileInfo>();
         var tests = new List<FileInfo>();
         foreach (var project in projects)
         {
-            var kind = await projectDetectionService.ClassifyRunnableAsync(project, workingDirectory, extraMsbuildProperties, cancellationToken);
+            var projectProps = await AddEffectiveFrameworkForClassificationAsync(
+                project, workingDirectory, extraMsbuildProperties, classificationInputs, solution, cancellationToken);
+            var kind = await projectDetectionService.ClassifyRunnableAsync(project, workingDirectory, projectProps, cancellationToken);
             switch (kind)
             {
                 case ProjectRunnability.App:
@@ -520,7 +524,49 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
-    /// Picks the project to run from the classified candidates without emulating VS's startup-project
+    /// Appends a <c>-p:TargetFramework=&lt;first&gt;</c> to a candidate's classification properties when it is
+    /// multi-targeted and the user gave no <c>--framework</c>, so the classify evaluate reads
+    /// <c>OutputType</c>/test markers on the SAME inner single-TFM node the build/evaluate passes will pin.
+    /// Without this a project whose executable <c>OutputType</c> is conditional on <c>$(TargetFramework)</c>
+    /// evaluates on the cross-targeting OUTER node (empty <c>TargetFramework</c>) → appears non-runnable →
+    /// solution/directory auto-selection fails BEFORE the build even though the build would succeed. Reuses
+    /// <see cref="ResolveEffectiveFrameworkAsync"/> (its static fast-path avoids an extra evaluate for the
+    /// common inline-concrete case), which no-ops for single-targeted projects and when a TFM can't be
+    /// resolved (SDK-less / pre-restore), leaving the base properties unchanged.
+    /// </summary>
+    private async Task<IReadOnlyList<string>?> AddEffectiveFrameworkForClassificationAsync(
+        FileInfo project,
+        DirectoryInfo workingDirectory,
+        IReadOnlyList<string>? extraMsbuildProperties,
+        ProjectClassificationInputs? classificationInputs,
+        FileInfo? solution,
+        CancellationToken cancellationToken)
+    {
+        // Nothing to resolve when the arch didn't resolve (inputs null) or the user already pinned a TFM —
+        // in the latter case BuildClassificationPropertyTokens already threaded -p:TargetFramework in.
+        if (classificationInputs is null || !string.IsNullOrWhiteSpace(classificationInputs.Framework))
+        {
+            return extraMsbuildProperties;
+        }
+
+        var probe = new ProjectRunOptions(
+            classificationInputs.Configuration,
+            classificationInputs.Architecture,
+            Framework: null,
+            NoBuild: true,
+            NoRestore: true,
+            classificationInputs.Properties,
+            Solution: solution);
+
+        var resolved = await ResolveEffectiveFrameworkAsync(project, probe, workingDirectory, cancellationToken);
+        if (string.IsNullOrWhiteSpace(resolved.Framework))
+        {
+            return extraMsbuildProperties;
+        }
+
+        return [.. extraMsbuildProperties ?? [], $"-p:TargetFramework={resolved.Framework}"];
+    }
+
     /// selection: a single real app wins; test projects are skipped when any app exists; a lone test
     /// project (tests-only solution) is run as a convenience. Any other shape (several apps, several
     /// tests-only, none) returns null so the caller can require an explicit <c>--project</c>.
