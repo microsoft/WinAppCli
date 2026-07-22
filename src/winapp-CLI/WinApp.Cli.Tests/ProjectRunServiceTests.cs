@@ -913,7 +913,7 @@ public class ProjectRunServiceTests
     public async Task ResolveInput_MultipleCsproj_ExecutablePlusTestProject_PicksExecutable()
     {
         // A test project (IsTestProject=true) is excluded from the executable set even when its
-        // OutputType is Exe, so an app + its test project disambiguates to the app (spec M5).
+        // OutputType is Exe, so an app + its test project disambiguates to the app.
         WriteFile("App.csproj", ExecutableCsproj);
         WriteFile("App.Tests.csproj", TestProjectCsproj);
 
@@ -927,7 +927,7 @@ public class ProjectRunServiceTests
     public async Task ResolveInput_MultipleCsproj_NoExecutable_ThrowsAmbiguity()
     {
         // Multiple projects, none statically executable → we cannot pick one; guide the user to
-        // name a project explicitly rather than silently building a non-runnable one (spec M5).
+        // name a project explicitly rather than silently building a non-runnable one.
         WriteFile("Lib1.csproj", LibraryCsproj);
         WriteFile("Lib2.csproj", LibraryCsproj);
 
@@ -1494,7 +1494,7 @@ public class ProjectRunServiceTests
 
     #endregion
 
-    #region BuildAndResolveAsync (--json banner suppression, spec H2)
+    #region BuildAndResolveAsync (--json banner suppression)
 
     private static ProjectRunService NewServiceWith(FakeDotNetService dotnet, out TestConsole console)
         => NewServiceWith(dotnet, new FakeCsWinRTMetadataShimService(), out console);
@@ -1883,7 +1883,7 @@ public class ProjectRunServiceTests
     public async Task BuildAndResolveAsync_EmptyPackageTypeWithMsixTooling_ResolvesPackaged()
     {
         // --no-build evaluate-only path: MSIX targets don't run so WindowsPackageType is empty;
-        // fall back to EnableMsixTooling=true => packaged (spec §7.1).
+        // fall back to EnableMsixTooling=true => packaged.
         var csproj = WriteFile("App.csproj", ExecutableCsproj);
         var json = $$"""{ "Properties": { "TargetDir": "{{_tempDir.FullName.Replace("\\", "\\\\")}}", "RunCommand": "", "WindowsPackageType": "", "EnableMsixTooling": "true", "OutputType": "WinExe" } }""";
         var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => (0, json, string.Empty) };
@@ -1900,7 +1900,7 @@ public class ProjectRunServiceTests
     public async Task BuildAndResolveAsync_HappyPath_CarriesResolvedArchitecture()
     {
         // The resolved architecture must flow onto the resolution so the correct-arch runtime is
-        // installed for the packaged/unpackaged launch (spec §8.4 / H1).
+        // installed for the packaged/unpackaged launch.
         var csproj = WriteFile("App.csproj", ExecutableCsproj);
         var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => (0, PackagedPropertiesJson(), string.Empty) };
         var service = NewServiceWith(dotnet, out _);
@@ -2507,7 +2507,7 @@ public class ProjectRunServiceTests
     [TestMethod]
     public async Task BuildAndResolveAsync_JsonMode_StreamedBuildLinesNotOnStdout()
     {
-        // Change #1 + spec H2: under --json the streamed build output must go to stderr, never stdout,
+        // Change #1: under --json the streamed build output must go to stderr, never stdout,
         // so the final stdout stays pure JSON.
         var csproj = WriteFile("App.csproj", ExecutableCsproj);
         var dotnet = new FakeDotNetService

@@ -8,7 +8,7 @@ namespace WinApp.Cli.Services;
 /// <summary>
 /// Drives project-mode <c>winapp run</c>: classifies the input (folder vs project), verifies the
 /// .NET SDK is capable, and builds + resolves the MSBuild output properties needed to launch a
-/// packaged or unpackaged WinUI app. See spec <c>specs/winapp-run-csproj.md</c> §6–§8.
+/// packaged or unpackaged WinUI app.
 /// </summary>
 internal interface IProjectRunService
 {

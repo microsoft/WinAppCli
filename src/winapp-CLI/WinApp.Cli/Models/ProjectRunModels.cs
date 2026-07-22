@@ -18,7 +18,7 @@ internal enum WinAppRunMode
 
 /// <summary>
 /// The effective packaging of a project-mode target, derived from the evaluated
-/// <c>WindowsPackageType</c> MSBuild property (never from manifest presence). See spec §7.1.
+/// <c>WindowsPackageType</c> MSBuild property (never from manifest presence).
 /// </summary>
 internal enum ProjectPackaging
 {
@@ -30,7 +30,7 @@ internal enum ProjectPackaging
 }
 
 /// <summary>
-/// The outcome of resolving a <c>.csproj</c> input to a concrete run mode (spec §6).
+/// The outcome of resolving a <c>.csproj</c> input to a concrete run mode.
 /// Either <see cref="Mode"/> is <see cref="WinAppRunMode.Folder"/> (fall back to the existing
 /// folder-mode path) or it is <see cref="WinAppRunMode.Project"/> and <see cref="Csproj"/> is set.
 /// </summary>
@@ -57,7 +57,7 @@ internal sealed record RunInputResolution(
     string? SelectionReason = null);
 
 /// <summary>
-/// The build-and-resolve result for a project-mode target (spec §8.3): the evaluated output
+/// The build-and-resolve result for a project-mode target: the evaluated output
 /// paths plus the packaging determination used to pick the launch strategy.
 /// </summary>
 /// <param name="Csproj">The project that was built/evaluated.</param>

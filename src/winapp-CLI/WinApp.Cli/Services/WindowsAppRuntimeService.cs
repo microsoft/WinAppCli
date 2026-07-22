@@ -117,7 +117,7 @@ internal class WindowsAppRuntimeService(
         var dirArch = RunArchHelper.NormalizeArchitecture(architecture) ?? RunArchHelper.DefaultArchitecture();
 
         // Install-skip filter arch: preserved as-is (nullable). In folder mode this stays null so the
-        // "already installed?" check is arch-agnostic exactly as before (spec L2 — folder mode is
+        // "already installed?" check is arch-agnostic exactly as before (folder mode is
         // byte-for-byte identical). Only project mode (explicit arch) filters by target arch so a
         // cross-arch runtime isn't wrongly skipped because a same-name host-arch package is present.
         var filterArch = RunArchHelper.NormalizeArchitecture(architecture);
@@ -170,7 +170,7 @@ internal class WindowsAppRuntimeService(
         {
             // Check if already installed with same or newer version. The arch filter is applied only
             // in project mode (filterArch non-null); in folder mode it's null → arch-agnostic match,
-            // byte-identical to the previous behavior (spec L2).
+            // byte-identical to the previous behavior.
             var installedVersion = packageRegistrationService.GetInstalledVersion(packageName, filterArch);
             if (installedVersion != null)
             {
@@ -216,9 +216,9 @@ internal class WindowsAppRuntimeService(
         }
 
         // Surface the versioned Framework + DDLM identities from this inventory so the caller can gate
-        // on the SPECIFIC runtime the app was built against (spec R2-M1), rather than accepting any
+        // on the SPECIFIC runtime the app was built against, rather than accepting any
         // registered WinAppSDK version for the arch. The version is carried alongside the name so the
-        // gate can reject a stale OLDER patch of the same Framework family (spec R2-M1 residual).
+        // gate can reject a stale OLDER patch of the same Framework family.
         var runtimePackages = packagesToCheck
             .Where(p => IsRuntimeGatePackageName(p.PackageName))
             .Select(p => (Name: p.PackageName, Version: p.NewVersion))
@@ -273,13 +273,13 @@ internal class WindowsAppRuntimeService(
     /// closes the false-pass where a version-specific install silently failed but a DIFFERENT WinAppSDK
     /// version — or a stale OLDER patch of the same Framework family (whose family name is only
     /// <c>major.minor</c>) — is registered for the arch (common on dev boxes); without it the generic
-    /// prefix check would pass and the app would still crash at bootstrap (spec R2-M1). The <b>DDLM</b> is
+    /// prefix check would pass and the app would still crash at bootstrap. The <b>DDLM</b> is
     /// likewise release-gated: the highest registered DDLM for the arch must be <b>greater than or equal
     /// to</b> the required DDLM release. DDLM names embed the full version and install side-by-side, so an
     /// exact-identity match would over-strictly false-FAIL when a NEWER compatible DDLM is present — a
     /// <c>&gt;=</c> compare on the newest installed DDLM preserves that newer-compatible acceptance while
     /// still rejecting the false-pass where the app's release-specific DDLM failed to install but only an
-    /// OLDER DDLM is registered (spec R4-L1). If either the required or installed version is unparseable,
+    /// OLDER DDLM is registered. If either the required or installed version is unparseable,
     /// the check falls back to the generic presence already confirmed above. When empty or null (folder
     /// mode / legacy callers), only the generic presence check runs — byte-identical to the previous
     /// behavior.
@@ -320,7 +320,7 @@ internal class WindowsAppRuntimeService(
                     return false;
                 }
 
-                // Patch-level guard (spec R2-M1 residual): the Framework family name is only major.minor,
+                // Patch-level guard: the Framework family name is only major.minor,
                 // so a stale OLDER patch of the same minor would satisfy a name-presence check even when
                 // the newer patch the app needs failed to install. Reject when both versions parse and the
                 // installed one is older. If either is unparseable, fall back to presence (already confirmed

@@ -19,7 +19,7 @@ internal sealed partial class ProjectRunService
     /// <summary>
     /// Resolves an <em>effective</em> single target framework for a multi-targeted project so every
     /// downstream pass (build, evaluate, packaging, runtime provisioning) pins the SAME TFM. When the user
-    /// gave no <c>--framework</c> it pins the FIRST declared TFM — the spec default. It first tries a cheap
+    /// gave no <c>--framework</c> it pins the FIRST declared TFM — the default. It first tries a cheap
     /// static read of the project file's inline <c>&lt;TargetFramework(s)&gt;</c>; when the TFM(s) can't be
     /// resolved statically — an inline <c>&lt;TargetFrameworks&gt;</c> whose first entry is an MSBuild
     /// expression, or a project whose <c>TargetFrameworks</c> come from an import (<c>Directory.Build.props</c>)

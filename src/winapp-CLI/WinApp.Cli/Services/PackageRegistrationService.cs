@@ -303,7 +303,7 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
     /// <see cref="Windows.System.ProcessorArchitecture"/> used by installed package identities.
     /// A <c>null</c> result means "no arch filtering" — which is how folder-mode <c>run</c>
     /// (architecture == null) preserves its pre-project-mode behavior of matching any installed
-    /// package, including Neutral-arch ones (spec L2). Exposed as <c>internal</c> for unit tests.
+    /// package, including Neutral-arch ones. Exposed as <c>internal</c> for unit tests.
     /// </summary>
     internal static Windows.System.ProcessorArchitecture? MapArchitecture(string? architecture)
     {

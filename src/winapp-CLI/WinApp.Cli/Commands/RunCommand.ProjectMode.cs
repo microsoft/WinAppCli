@@ -17,7 +17,7 @@ internal partial class RunCommand
     {
         /// <summary>
         /// Logs a user-facing error, emits the error-shaped JSON envelope in <c>--json</c> mode, and
-        /// returns exit code 1. Consolidates the repeated log + PrintJson + return pattern (spec L5).
+        /// returns exit code 1. Consolidates the repeated log + PrintJson + return pattern.
         /// </summary>
         private int Fail(string message, bool isJson)
         {
@@ -79,7 +79,7 @@ internal partial class RunCommand
                $"'{csprojName}' resolves to an unpackaged WinUI app (WindowsPackageType=None). Remove them, or make the app packaged to use them.";
 
         /// <summary>
-        /// Project-mode entry point (spec §7/§8): build the <c>.csproj</c>, resolve its MSBuild
+        /// Project-mode entry point: build the <c>.csproj</c>, resolve its MSBuild
         /// output properties, then launch it as packaged (loose-layout register + AUMID, reusing the
         /// shared folder pipeline) or unpackaged (launch the apphost <c>.exe</c> directly). Folder
         /// mode never reaches here.
@@ -102,7 +102,7 @@ internal partial class RunCommand
             var noRestore = parseResult.GetValue(NoRestoreOption);
             var properties = parseResult.GetValue(PropertyOption) ?? [];
 
-            // Reject malformed -p values early (spec L3): each must be Name=Value with a non-empty,
+            // Reject malformed -p values early: each must be Name=Value with a non-empty,
             // non-whitespace name, otherwise it would become a nonsensical '-p:=Value' / '-p: =Value'
             // MSBuild argument.
             foreach (var property in properties)
@@ -232,7 +232,7 @@ internal partial class RunCommand
         }
 
         /// <summary>
-        /// Packaged project-mode launch (spec §7.2): point the shared folder pipeline at the build's
+        /// Packaged project-mode launch: point the shared folder pipeline at the build's
         /// TargetDir (which contains the MSBuild-generated <c>AppxManifest.xml</c> + recipe) and pass
         /// the resolved arch + project file so the correct-arch Windows App Runtime is installed.
         /// </summary>
@@ -273,7 +273,7 @@ internal partial class RunCommand
         }
 
         /// <summary>
-        /// Unpackaged project-mode launch (spec §7.3): ensure the (framework-dependent) Windows App
+        /// Unpackaged project-mode launch: ensure the (framework-dependent) Windows App
         /// Runtime is installed for the app's arch, then launch the apphost <c>.exe</c> directly.
         /// Identity-only options are rejected since there is no MSIX package.
         /// </summary>

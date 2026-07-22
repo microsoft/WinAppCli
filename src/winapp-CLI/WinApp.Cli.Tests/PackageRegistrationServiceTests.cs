@@ -663,7 +663,7 @@ public class PackageRegistrationServiceTests
 
     // --- MapArchitecture: the kernel that decides whether GetInstalledVersion/IsPackageInstalled
     // apply an arch filter. null => no filtering (folder-mode / L2 behavior); a concrete value =>
-    // only matching-arch packages count as installed (project-mode arch-correctness, spec H1/M7).
+    // only matching-arch packages count as installed (project-mode arch-correctness).
 
     [TestMethod]
     [DataRow("x64", Windows.System.ProcessorArchitecture.X64)]
@@ -684,7 +684,7 @@ public class PackageRegistrationServiceTests
         // Folder-mode run passes architecture == null. MapArchitecture must return null so the
         // filter `wantedArch is not null && ...` is skipped and any installed package (including
         // a Neutral-arch one) still counts as installed — byte-for-byte the pre-project-mode
-        // behavior required by the #1 hard constraint (spec L2).
+        // behavior required by the #1 hard constraint.
         Assert.IsNull(PackageRegistrationService.MapArchitecture(arch));
     }
 

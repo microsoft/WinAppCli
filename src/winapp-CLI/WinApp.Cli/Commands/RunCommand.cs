@@ -33,7 +33,7 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<bool> SymbolsOption { get; }
     public static Option<string?> ExecutableOption { get; }
 
-    // Project-mode build options (spec §9). Additive and inert in folder mode.
+    // Project-mode build options. Additive and inert in folder mode.
     public static Option<string> ConfigurationOption { get; }
     public static Option<string?> ArchOption { get; }
     public static Option<string?> RuntimeOption { get; }
@@ -241,7 +241,7 @@ internal partial class RunCommand : Command, IShortDescription
             var executable = parseResult.GetValue(ExecutableOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
-            // Reject a valueless -p/--property (spec L3). The option uses ZeroOrMore arity so a bare
+            // Reject a valueless -p/--property. The option uses ZeroOrMore arity so a bare
             // '-p' (no Name=Value) parses without a value instead of raising a System.CommandLine
             // arity error -- which would bypass this command's --json error envelope and print only
             // plain text. Detect it from the raw result: there is one identifier token per '-p'

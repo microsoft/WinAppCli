@@ -148,7 +148,7 @@ internal sealed partial class ProjectRunService
         // Multiple .csproj files — classify each via MSBuild evaluation so an executable/test project
         // is detected even when OutputType/IsTestProject come from an import (SDK defaults,
         // Directory.Build.props, the test SDK) rather than inline XML. A static parse cannot see those
-        // and could silently pick the wrong project (spec M5). Evaluation falls back to the static
+        // and could silently pick the wrong project. Evaluation falls back to the static
         // parse per-project when the SDK/restore is unavailable, so behavior never regresses. The
         // effective build inputs (Configuration/arch/TFM/user -p) are threaded in so a candidate whose
         // OutputType/test markers are conditional on them classifies as it will build.

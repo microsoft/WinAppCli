@@ -28,7 +28,7 @@ Describe 'winui-app sample' {
 
         # Phase 1 registers a loose-layout dev package (winapp run . --no-launch). Unregister it
         # before the backing files are deleted so we don't leave a dangling registration on the
-        # machine / CI runner (spec H3). Best-effort: read the identity Name from the manifest and
+        # machine / CI runner. Best-effort: read the identity Name from the manifest and
         # remove any matching registered package.
         try {
             $manifestPath = Join-Path $script:sampleDir 'Package.appxmanifest'

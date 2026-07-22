@@ -8,7 +8,7 @@ namespace WinApp.Cli.Tests;
 
 /// <summary>
 /// Tests for the framework-dependent Windows App Runtime presence gate
-/// (<see cref="IWindowsAppRuntimeService.IsWindowsAppRuntimeRegistered"/>), added for spec H1. A
+/// (<see cref="IWindowsAppRuntimeService.IsWindowsAppRuntimeRegistered"/>). A
 /// <see cref="FakePackageRegistrationService"/> models which packages are registered so the gate can
 /// be verified deterministically (no WinRT / real machine state). The gate must require BOTH a
 /// framework package and its matching-arch DDLM, forward the resolved arch, and exclude the CBS

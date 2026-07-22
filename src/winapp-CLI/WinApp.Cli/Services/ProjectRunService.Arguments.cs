@@ -68,7 +68,7 @@ internal sealed partial class ProjectRunService
     /// still yields the correct packaged manifest <c>ProcessorArchitecture</c> and apphost arch. A user
     /// who explicitly passes <c>-p:Platform=…</c>/<c>-p:EnableDynamicPlatformResolution=…</c> still has
     /// it forwarded (via the user <c>-p</c> loop). The <c>-v</c> verbosity is mapped from the CLI's log
-    /// level (Change #1, spec §8.3/§8.5).
+    /// level (Change #1).
     /// </summary>
     internal static string BuildBuildPassArguments(FileInfo csproj, ProjectRunOptions options, string verbosity, string? csWinRTMetadataFolder = null)
     {
@@ -128,8 +128,7 @@ internal sealed partial class ProjectRunService
     /// same shape used on the <c>--no-build</c> path and is fed the SAME effective build inputs as the
     /// build pass so its <c>TargetDir</c>/<c>RunCommand</c> match what was built. <c>dotnet msbuild</c>
     /// rejects <c>-c</c>/<c>-r</c> (MSB1001), so Configuration/RID/TFM are passed as <c>-p:</c> and are
-    /// emitted LAST so MSBuild's last-wins makes a dedicated value beat a conflicting user <c>-p</c>
-    /// (spec §8.2/M2).
+    /// emitted LAST so MSBuild's last-wins makes a dedicated value beat a conflicting user <c>-p</c>.
     /// </summary>
     internal static string BuildEvaluateArguments(FileInfo csproj, ProjectRunOptions options, string? csWinRTMetadataFolder = null)
     {

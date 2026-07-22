@@ -10,7 +10,7 @@ using WinApp.Cli.Services;
 namespace WinApp.Cli.Tests;
 
 /// <summary>
-/// Tests for <see cref="WindowsAppRuntimeService.ParseMsixInventoryAsync"/> arch selection (spec H1/M7).
+/// Tests for <see cref="WindowsAppRuntimeService.ParseMsixInventoryAsync"/> arch selection.
 /// The Windows App Runtime MSIX packages are laid out per-arch under <c>win10-{arch}</c>; project mode
 /// must read the inventory for the app's resolved TARGET architecture, not the CLI host arch, so a
 /// cross-arch run installs the right packages. A missing/empty inventory must return <c>null</c>

@@ -42,7 +42,7 @@ internal interface IWindowsAppRuntimeService
     /// <returns>
     /// Install/error counts plus the versioned Framework/DDLM package identities (name + version)
     /// discovered in the inventory, so the caller can gate on the SPECIFIC runtime the app needs at the
-    /// required version (spec R2-M1).
+    /// required version.
     /// </returns>
     Task<(int InstalledCount, int ErrorCount, IReadOnlyList<(string Name, string Version)> RuntimePackages)> InstallWindowsAppRuntimeAsync(DirectoryInfo msixDir, TaskContext taskContext, CancellationToken cancellationToken, string? architecture = null);
 
@@ -58,8 +58,8 @@ internal interface IWindowsAppRuntimeService
     /// the app was built against. When supplied, the app-facing Framework family must be registered for the
     /// arch at a version &gt;= the required one — closing the false-pass where a different WinAppSDK version,
     /// or a stale older patch of the same Framework family, is registered but the required version silently
-    /// failed to install (spec R2-M1). DDLM identities are not exact-matched (their names embed the full
-    /// version and install side-by-side); the generic DDLM presence check covers them (spec R4-L1). When
+    /// failed to install. DDLM identities are not exact-matched (their names embed the full
+    /// version and install side-by-side); the generic DDLM presence check covers them. When
     /// null/empty (folder mode / legacy callers) only the generic presence check runs.
     /// </param>
     bool IsWindowsAppRuntimeRegistered(string? architecture, IReadOnlyList<(string Name, string Version)>? expectedRuntimePackages = null);

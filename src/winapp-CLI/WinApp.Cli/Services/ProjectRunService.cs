@@ -125,7 +125,7 @@ internal sealed partial class ProjectRunService(
         // --framework, BEFORE any pass, so the build, the evaluate pass, packaging and runtime
         // provisioning all agree on one TFM. Without this a plural-<TargetFrameworks> project builds but
         // its evaluate pass hits the cross-targeting outer build (empty TargetDir) → we throw AFTER a
-        // successful build (H1). Spec default = first declared TFM. No-op when single-targeted / --framework set.
+        // successful build. Default = first declared TFM. No-op when single-targeted / --framework set.
         options = await ResolveEffectiveFrameworkAsync(csproj, options, workingDir, cancellationToken);
 
         // The CsWinRT metadata shim (below) needs the project's effective single TFM to steer ref-pack
@@ -182,7 +182,7 @@ internal sealed partial class ProjectRunService(
             }
         }
 
-        // Two passes (spec §8.2, Change #1): (1) BUILD — a plain `dotnet build` whose console log
+        // Two passes (Change #1): (1) BUILD — a plain `dotnet build` whose console log
         // STREAMS live so the user sees progress (skipped under --no-build); then (2) EVALUATE — a
         // fast `dotnet msbuild --getProperty` that returns the resolved output paths as JSON. The
         // split is required because `--getProperty` SUPPRESSES normal MSBuild console output, so a
@@ -285,7 +285,7 @@ internal sealed partial class ProjectRunService(
     {
         var workingDir = csproj.Directory ?? new DirectoryInfo(Directory.GetCurrentDirectory());
 
-        // Pin the same effective TFM the real build/evaluate passes use (H1) so a multi-targeted project
+        // Pin the same effective TFM the real build/evaluate passes use, so a multi-targeted project
         // is probed against a single-TFM inner build, not the empty cross-targeting outer node.
         options = await ResolveEffectiveFrameworkAsync(csproj, options, workingDir, cancellationToken);
         var shimFramework = await ResolveShimFrameworkAsync(csproj, options, workingDir, cancellationToken);
@@ -331,7 +331,7 @@ internal sealed partial class ProjectRunService(
     }
 
     /// <summary>
-    /// Determines packaged vs unpackaged from the evaluated properties (spec §7.1), never from
+    /// Determines packaged vs unpackaged from the evaluated properties, never from
     /// manifest presence.
     /// </summary>
     private static ProjectPackaging DeterminePackaging(IReadOnlyDictionary<string, string> props, string targetDir)
@@ -520,13 +520,10 @@ internal sealed partial class ProjectRunService(
                 }
             }
 
-            var spinnerExit = await ansiConsole.Status()
-                .AutoRefresh(true)
-                .Spinner(Spinner.Known.Dots)
-                .SpinnerStyle(Style.Parse("blue"))
-                .StartAsync(banner, async _ =>
-                    await dotNetService.RunDotnetStreamingAsync(
-                        workingDir, buildArgs, Capture, Capture, cancellationToken));
+            var spinnerExit = await RunLiveBuildSpinnerAsync(
+                banner,
+                () => dotNetService.RunDotnetStreamingAsync(
+                    workingDir, buildArgs, Capture, Capture, cancellationToken));
 
             if (spinnerExit != 0)
             {
@@ -577,6 +574,52 @@ internal sealed partial class ProjectRunService(
         }
 
         return streamedExit;
+    }
+
+    /// <summary>
+    /// Animates a single-line build spinner via Spectre <see cref="IAnsiConsole"/>.<c>Live</c> while
+    /// <paramref name="work"/> runs, returning its exit code. We deliberately avoid <c>Status()</c>:
+    /// its live region reserves a leading blank row above the spinner, which surfaces as a stray blank
+    /// line between the pre-build context line and "Building …". A one-line <c>Live</c> renderable
+    /// animates in place with no such padding, and AutoClear erases it on completion so the caller can
+    /// leave a single persistent "Built …" line.
+    /// </summary>
+    private async Task<int> RunLiveBuildSpinnerAsync(string banner, Func<Task<int>> work)
+    {
+        var spinner = Spinner.Known.Dots;
+        var frames = spinner.Frames;
+        var interval = spinner.Interval;
+        var escapedBanner = Markup.Escape(banner);
+        var exit = 0;
+
+        // Seed the live region with the first rendered frame (never an empty renderable — an empty
+        // Markup renders zero lines and Spectre's shape calculation throws on the initial render).
+        Markup FrameMarkup(int index) =>
+            new($"[blue]{Markup.Escape(frames[index % frames.Count])}[/] {escapedBanner}");
+
+        await ansiConsole.Live(FrameMarkup(0))
+            .AutoClear(true)
+            .Overflow(VerticalOverflow.Ellipsis)
+            .StartAsync(async ctx =>
+            {
+                var workTask = work();
+                var frameIndex = 0;
+                while (!workTask.IsCompleted)
+                {
+                    ctx.UpdateTarget(FrameMarkup(frameIndex));
+                    ctx.Refresh();
+                    frameIndex++;
+
+                    // WhenAny keeps the animation ticking without cancelling the build: on Ctrl+C the
+                    // work task itself faults with OperationCanceledException, the loop exits, and the
+                    // await below rethrows it. The untokened delay never faults, so it can't go unobserved.
+                    await Task.WhenAny(workTask, Task.Delay(interval));
+                }
+
+                exit = await workTask;
+            });
+
+        return exit;
     }
 
     /// <summary>

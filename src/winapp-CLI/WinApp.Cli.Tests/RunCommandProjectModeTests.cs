@@ -11,7 +11,7 @@ namespace WinApp.Cli.Tests;
 /// <summary>
 /// Project-mode routing tests for <see cref="RunCommand"/>. A <see cref="FakeProjectRunService"/>
 /// supplies canned build outcomes so the packaged/unpackaged launch branches can be verified without
-/// invoking the real .NET SDK. See spec <c>specs/winapp-run-csproj.md</c> §7–§9.
+/// invoking the real .NET SDK.
 /// </summary>
 [TestClass]
 public class RunCommandProjectModeTests : BaseCommandTests

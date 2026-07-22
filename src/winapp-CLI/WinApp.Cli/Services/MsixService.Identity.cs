@@ -472,11 +472,11 @@ internal partial class MsixService
                 "matching Windows App SDK runtime manually.");
         }
 
-        // Presence gate (spec §8.4 / H1): after the install attempt, verify the framework-dependent
+        // Presence gate: after the install attempt, verify the framework-dependent
         // runtime (Framework + matching-arch DDLM) is actually registered for the target arch. A
         // missing runtime dir was previously treated as success, so a cross-arch run could skip the
         // install and the app would crash at bootstrap. The expected identities pin the check to the
-        // SPECIFIC version the app needs (spec R2-M1), so a different (or older-patch) registered version
+        // SPECIFIC version the app needs, so a different (or older-patch) registered version
         // can't mask a failed install. Fail loudly instead so the caller aborts the launch with an
         // actionable error.
         if (!windowsAppRuntimeService.IsWindowsAppRuntimeRegistered(architecture, expectedRuntimePackages))

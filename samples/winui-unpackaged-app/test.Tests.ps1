@@ -66,7 +66,7 @@ Describe 'winui-unpackaged-app sample' {
     # Phase 1 exercises `winapp run` PROJECT MODE end-to-end against an unpackaged
     # WinUI app from a clean directory: SDK probe -> build + property resolution ->
     # unpackaged detection -> reused Windows App Runtime install -> direct .exe launch.
-    # This is the spec §10 "C2" must-have: an unpackaged app boots off the reused runtime.
+    # The "C2" must-have: an unpackaged app boots off the reused runtime.
     Context 'Phase 1: Project-mode run (from scratch)' {
 
         BeforeAll {
