@@ -1410,6 +1410,49 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public async Task ResolveInput_DirectoryWithSolution_NoCsprojProjects_FallsBackToFolderMode()
+    {
+        // A directory input whose sole solution lists no runnable C# project (native-only) must degrade
+        // to folder mode — the same fallback a lone non-runnable .csproj gets — so an existing
+        // folder-mode/build-output target that happens to sit next to such a solution keeps working.
+        // (Contrast ResolveInput_Solution_NoCsprojProjects_Throws: an *explicitly* supplied .sln errors.)
+        WriteFile("Native.sln", "");
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                IsSlnListCall(args) ? (0, SlnListOutput("Native.vcxproj"), string.Empty) : (0, string.Empty, string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+
+        var resolution = await service.ResolveInputAsync(_tempDir, CancellationToken.None);
+
+        Assert.AreEqual(WinAppRunMode.Folder, resolution.Mode, "a directory whose discovered solution has no runnable project must fall back to folder mode");
+        Assert.IsNull(resolution.Csproj);
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_DirectoryWithSolution_OnlyLibraryProjects_FallsBackToFolderMode()
+    {
+        // Same fallback when the discovered solution lists only a non-runnable library .csproj: the
+        // directory input degrades to folder mode rather than erroring.
+        WriteFile("Lib.sln", "");
+        var lib = WriteFile("Lib.csproj", LibraryCsproj);
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                IsSlnListCall(args) ? (0, SlnListOutput("Lib.csproj"), string.Empty)
+                : args.Contains(lib.FullName, StringComparison.OrdinalIgnoreCase) ? (0, EvalJson("Library"), string.Empty)
+                : (0, string.Empty, string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+
+        var resolution = await service.ResolveInputAsync(_tempDir, CancellationToken.None);
+
+        Assert.AreEqual(WinAppRunMode.Folder, resolution.Mode, "a directory whose discovered solution has only a non-runnable library must fall back to folder mode");
+        Assert.IsNull(resolution.Csproj);
+    }
+
+    [TestMethod]
     public async Task ResolveInput_Solution_AppPlusTestContainer_PicksApp()
     {
         // The real gallery scenario at the solution level: a solution with the app plus a WinUI MSTest

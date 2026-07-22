@@ -459,6 +459,11 @@ internal partial class DotNetService : IDotNetService
                 if (!process.HasExited)
                 {
                     process.Kill(entireProcessTree: true);
+
+                    // Process.Kill only *requests* termination; without awaiting exit the dotnet/MSBuild/
+                    // restore children can still hold file locks after winapp returns. Wait (best-effort,
+                    // uncancellable — we're already cancelling) so the tree is truly gone before we rethrow.
+                    await process.WaitForExitAsync(CancellationToken.None);
                 }
             }
             catch

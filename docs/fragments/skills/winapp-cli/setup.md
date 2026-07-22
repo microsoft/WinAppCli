@@ -125,11 +125,11 @@ winapp run ./src/MyApp/MyApp.csproj -c Release --arch arm64
 # Force an unpackaged run of a packaged project
 winapp run . -p WindowsPackageType=None
 
-# Stream dotnet's full build log while building (maps to dotnet -v)
+# Show winapp's build decision traces (dotnet build stays at minimal verbosity)
 winapp run . --verbose
 ```
 
-Project mode supports both **packaged** and **unpackaged** WinUI apps. It detects which from the project's effective `WindowsPackageType` MSBuild property (`MSIX` ⇒ packaged loose-layout + AUMID launch; `None` ⇒ launch the built `.exe` directly), and installs the matching-architecture Windows App Runtime the app needs before launching. Build inputs: `-c/--configuration`, `--arch`, `-r/--runtime`, `-f/--framework`, `--no-build`, `--no-restore`, `-p/--property` (repeatable). Requires the .NET SDK 8.0.100+. Identity-only options (`--manifest`, `--no-launch`, `--with-alias`, `--clean`, `--unregister-on-exit`, `--output-appx-directory`, `--executable`) apply to packaged apps only and are rejected for unpackaged ones. The build output **streams live** as it runs (with a progress spinner in interactive terminals, and the full log shown on failure); `--verbose` maps to dotnet's `-v` for the full build log, and under `--json` build output goes to stderr so stdout stays pure JSON.
+Project mode supports both **packaged** and **unpackaged** WinUI apps. It detects which from the project's effective `WindowsPackageType` MSBuild property (`MSIX` ⇒ packaged loose-layout + AUMID launch; `None` ⇒ launch the built `.exe` directly), and installs the matching-architecture Windows App Runtime the app needs before launching. Build inputs: `-c/--configuration`, `--arch`, `-r/--runtime`, `-f/--framework`, `--no-build`, `--no-restore`, `-p/--property` (repeatable). Requires the .NET SDK 8.0.100+. Identity-only options (`--manifest`, `--no-launch`, `--with-alias`, `--clean`, `--unregister-on-exit`, `--output-appx-directory`, `--executable`) apply to packaged apps only and are rejected for unpackaged ones. The build output **streams live** as it runs (with a progress spinner in interactive terminals, and the full log shown on failure) at dotnet's `minimal` verbosity; `--verbose` keeps dotnet at `minimal` but adds winapp's own build decision traces (`--trace` raises dotnet to `-v normal`), and under `--json` build output goes to stderr so stdout stays pure JSON.
 
 #### Choosing between `run` and `create-debug-identity`
 

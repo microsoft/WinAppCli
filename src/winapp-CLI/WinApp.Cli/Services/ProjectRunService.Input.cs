@@ -53,7 +53,10 @@ internal sealed partial class ProjectRunService
 
         if (solutions.Count == 1)
         {
-            return await ResolveSolutionAsync(solutions[0], projectSelector, classificationInputs, cancellationToken);
+            // Directory input: a discovered solution with no runnable C# project (native/library-only)
+            // degrades to folder mode, the same fallback a lone non-runnable .csproj gets above, so an
+            // existing build-output folder that happens to sit next to such a solution keeps working.
+            return await ResolveSolutionAsync(solutions[0], projectSelector, classificationInputs, cancellationToken, allowFolderFallback: true);
         }
 
         if (solutions.Count > 1)
@@ -398,13 +401,20 @@ internal sealed partial class ProjectRunService
     /// evaluation used for a multi-<c>.csproj</c> directory. Exactly one launchable (non-test
     /// executable) project is required unless a matching <c>--project</c> selector is supplied.
     /// </summary>
-    private async Task<RunInputResolution> ResolveSolutionAsync(FileInfo solution, string? projectSelector, ProjectClassificationInputs? classificationInputs, CancellationToken cancellationToken)
+    private async Task<RunInputResolution> ResolveSolutionAsync(FileInfo solution, string? projectSelector, ProjectClassificationInputs? classificationInputs, CancellationToken cancellationToken, bool allowFolderFallback = false)
     {
         var solutionDir = solution.Directory ?? new DirectoryInfo(Directory.GetCurrentDirectory());
         var projects = await GetSolutionProjectsAsync(solution, solutionDir, cancellationToken);
 
         if (projects.Count == 0)
         {
+            // A solution that lists no .csproj (e.g. native-only .vcxproj) has nothing runnable. From a
+            // directory input we degrade to folder mode; an explicitly-supplied .sln keeps the error.
+            if (allowFolderFallback)
+            {
+                return new RunInputResolution(WinAppRunMode.Folder, null, solutionDir);
+            }
+
             throw new ProjectRunException(
                 $"No .csproj projects were found in '{solution.Name}'. 'winapp run' needs a runnable C# project in the solution.");
         }
@@ -440,6 +450,14 @@ internal sealed partial class ProjectRunService
         // Zero or several runnable app projects → we don't emulate VS's startup-project selection;
         // require an explicit --project so the wrong app is never launched behind the user's back.
         // A lone test project auto-runs above; here we only reach the ambiguous/empty cases.
+        // Exception: a directory input whose sole solution has NO runnable project at all (libraries
+        // only) degrades to folder mode — mirroring the lone non-runnable .csproj path — rather than
+        // erroring. Ambiguity (multiple apps/tests) still requires --project; an explicit .sln always errors.
+        if (allowFolderFallback && apps.Count == 0 && tests.Count == 0)
+        {
+            return new RunInputResolution(WinAppRunMode.Folder, null, solutionDir);
+        }
+
         var candidatePool = apps.Count > 0 ? apps : (tests.Count > 0 ? tests : projects);
         var candidateList = string.Join(", ", candidatePool
             .Select(p => p.Name)
