@@ -7,6 +7,7 @@ using Azure.Core;
 using Azure.Identity;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
+using WinApp.Cli.Telemetry;
 
 namespace WinApp.Cli.Services;
 
@@ -21,9 +22,7 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
     public virtual bool IsInteractive =>
         Environment.UserInteractive
         && !Console.IsInputRedirected
-        && Environment.GetEnvironmentVariable("CI") == null
-        && Environment.GetEnvironmentVariable("TF_BUILD") == null
-        && Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == null;
+        && !CIEnvironmentDetectorForTelemetry.IsCIEnvironment();
 
     public string? TenantId { get; protected set; } = Environment.GetEnvironmentVariable("AZURE_TENANT_ID");
 
@@ -140,12 +139,20 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
             }
         }
 
-        // Fall back to PATH lookup
+        // Fall back to PATH lookup. Launch where.exe by its absolute System32 path so a
+        // malicious 'where.exe' in the current directory cannot be run instead (its own
+        // resolution would otherwise search the working directory first).
         try
         {
+            var whereExe = Path.Combine(Environment.SystemDirectory, "where.exe");
+            if (!File.Exists(whereExe))
+            {
+                return null;
+            }
+
             var psi = new ProcessStartInfo
             {
-                FileName = "where.exe",
+                FileName = whereExe,
                 Arguments = "az.cmd",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,

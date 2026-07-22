@@ -35,28 +35,20 @@ internal class AzureSigningService : IAzureSigningService
     public async Task<IReadOnlyList<AzureSubscription>> ListSubscriptionsAsync(string accessToken, CancellationToken cancellationToken = default)
     {
         var url = $"{ArmBaseUrl}/subscriptions?api-version={SubscriptionsApiVersion}";
-        var json = await GetArmResponseAsync(url, accessToken, cancellationToken);
-
-        var subscriptions = new List<AzureSubscription>();
-        using var doc = JsonDocument.Parse(json);
-
-        if (!doc.RootElement.TryGetProperty("value", out var valueArray))
+        var subscriptions = await GetArmPagedAsync<AzureSubscription>(url, accessToken, item =>
         {
-            return subscriptions;
-        }
-
-        foreach (var item in valueArray.EnumerateArray())
-        {
-            var subId = item.GetProperty("subscriptionId").GetString() ?? "";
-            var displayName = item.GetProperty("displayName").GetString() ?? "";
             var state = item.TryGetProperty("state", out var stateProp) ? stateProp.GetString() : null;
 
             // Only include enabled subscriptions
-            if (string.Equals(state, "Enabled", StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(state, "Enabled", StringComparison.OrdinalIgnoreCase))
             {
-                subscriptions.Add(new AzureSubscription(subId, displayName));
+                return null;
             }
-        }
+
+            var subId = item.GetProperty("subscriptionId").GetString() ?? "";
+            var displayName = item.GetProperty("displayName").GetString() ?? "";
+            return new AzureSubscription(subId, displayName);
+        }, cancellationToken);
 
         logger.LogInformation("Found {Count} enabled subscription(s)", subscriptions.Count);
         return subscriptions;
@@ -74,17 +66,7 @@ internal class AzureSigningService : IAzureSigningService
             url = $"{ArmBaseUrl}/subscriptions/{subscriptionId}/providers/Microsoft.CodeSigning/codeSigningAccounts?api-version={TrustedSigningApiVersion}";
         }
 
-        var json = await GetArmResponseAsync(url, accessToken, cancellationToken);
-
-        var accounts = new List<SigningAccount>();
-        using var doc = JsonDocument.Parse(json);
-
-        if (!doc.RootElement.TryGetProperty("value", out var valueArray))
-        {
-            return accounts;
-        }
-
-        foreach (var item in valueArray.EnumerateArray())
+        var accounts = await GetArmPagedAsync<SigningAccount>(url, accessToken, item =>
         {
             var name = item.GetProperty("name").GetString() ?? "";
             var location = item.TryGetProperty("location", out var locProp) ? locProp.GetString() ?? "" : "";
@@ -101,8 +83,8 @@ internal class AzureSigningService : IAzureSigningService
                 accountUri = uriProp.GetString();
             }
 
-            accounts.Add(new SigningAccount(name, rg, location, accountUri));
-        }
+            return new SigningAccount(name, rg, location, accountUri);
+        }, cancellationToken);
 
         logger.LogInformation("Found {Count} signing account(s)", accounts.Count);
         return accounts;
@@ -112,17 +94,7 @@ internal class AzureSigningService : IAzureSigningService
     {
         var url = $"{ArmBaseUrl}/subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.CodeSigning/codeSigningAccounts/{accountName}/certificateProfiles?api-version={TrustedSigningApiVersion}";
 
-        var json = await GetArmResponseAsync(url, accessToken, cancellationToken);
-
-        var profiles = new List<CertificateProfile>();
-        using var doc = JsonDocument.Parse(json);
-
-        if (!doc.RootElement.TryGetProperty("value", out var valueArray))
-        {
-            return profiles;
-        }
-
-        foreach (var item in valueArray.EnumerateArray())
+        var profiles = await GetArmPagedAsync<CertificateProfile>(url, accessToken, item =>
         {
             var name = item.GetProperty("name").GetString() ?? "";
             var profileType = "";
@@ -134,11 +106,52 @@ internal class AzureSigningService : IAzureSigningService
                 status = props.TryGetProperty("status", out var statusProp) ? statusProp.GetString() ?? "" : "";
             }
 
-            profiles.Add(new CertificateProfile(name, profileType, status));
-        }
+            return new CertificateProfile(name, profileType, status);
+        }, cancellationToken);
 
         logger.LogInformation("Found {Count} certificate profile(s) for account '{Account}'", profiles.Count, accountName);
         return profiles;
+    }
+
+    /// <summary>
+    /// Fetches an ARM list endpoint and follows the <c>nextLink</c> continuation until it is
+    /// absent, so results that span multiple pages (many subscriptions/accounts/profiles) are
+    /// returned in full. <paramref name="selector"/> may return <c>null</c> to skip an item.
+    /// </summary>
+    private async Task<IReadOnlyList<T>> GetArmPagedAsync<T>(
+        string url,
+        string accessToken,
+        Func<JsonElement, T?> selector,
+        CancellationToken cancellationToken)
+        where T : class
+    {
+        var results = new List<T>();
+        string? nextUrl = url;
+
+        while (!string.IsNullOrEmpty(nextUrl))
+        {
+            var json = await GetArmResponseAsync(nextUrl, accessToken, cancellationToken);
+            using var doc = JsonDocument.Parse(json);
+
+            if (doc.RootElement.TryGetProperty("value", out var valueArray)
+                && valueArray.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in valueArray.EnumerateArray())
+                {
+                    var selected = selector(item);
+                    if (selected != null)
+                    {
+                        results.Add(selected);
+                    }
+                }
+            }
+
+            nextUrl = doc.RootElement.TryGetProperty("nextLink", out var nextLink)
+                ? nextLink.GetString()
+                : null;
+        }
+
+        return results;
     }
 
     private async Task<string> GetArmResponseAsync(string url, string accessToken, CancellationToken cancellationToken)

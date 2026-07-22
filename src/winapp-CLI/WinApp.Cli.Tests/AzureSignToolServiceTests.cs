@@ -101,6 +101,63 @@ public class AzureSignToolServiceTests : BaseCommandTests
 
         StringAssert.Contains(ex.Message, "Could not find the Trusted Signing client library");
     }
+
+    [TestMethod]
+    public async Task SignAsync_ForwardsTenantAndSelectsArchMatchedSigntool()
+    {
+        var dlib = CreateDlibInCache(); // bin/x64/Azure.CodeSigning.Dlib.dll
+        var signtool = CreateFakeSigntool("x64");
+        var recording = new RecordingBuildToolsService { SignToolToReturn = signtool };
+        var service = new AzureSignToolService(
+            recording, _nuget, _installer, new FakeSignToolWinappDirectoryService(_globalWinappDir));
+
+        var fileToSign = new FileInfo(Path.Combine(_tempDirectory.FullName, "app.msix"));
+        await File.WriteAllTextAsync(fileToSign.FullName, "MZ", TestContext.CancellationToken);
+        var metadata = new FileInfo(Path.Combine(_tempDirectory.FullName, "metadata.json"));
+        await File.WriteAllTextAsync(metadata.FullName, "{}", TestContext.CancellationToken);
+
+        await service.SignAsync(fileToSign, metadata, "my-tenant-id", TestTaskContext, TestContext.CancellationToken);
+
+        // The x64 dlib forces the architecture-matched x64 signtool to be used as the override.
+        Assert.AreEqual(signtool.FullName, recording.CapturedToolPathOverride!.FullName);
+
+        // signtool arguments reference the dlib, the metadata file, and the target file.
+        StringAssert.Contains(recording.CapturedArguments!, dlib.FullName);
+        StringAssert.Contains(recording.CapturedArguments!, metadata.FullName);
+        StringAssert.Contains(recording.CapturedArguments!, fileToSign.FullName);
+
+        // The tenant id is forwarded to the dlib via AZURE_TENANT_ID.
+        Assert.IsNotNull(recording.CapturedEnvironment);
+        Assert.AreEqual("my-tenant-id", recording.CapturedEnvironment!["AZURE_TENANT_ID"]);
+    }
+
+    [TestMethod]
+    public async Task SignAsync_WithoutTenant_DoesNotInjectEnvironment()
+    {
+        CreateDlibInCache();
+        var signtool = CreateFakeSigntool("x64");
+        var recording = new RecordingBuildToolsService { SignToolToReturn = signtool };
+        var service = new AzureSignToolService(
+            recording, _nuget, _installer, new FakeSignToolWinappDirectoryService(_globalWinappDir));
+
+        var fileToSign = new FileInfo(Path.Combine(_tempDirectory.FullName, "app.msix"));
+        await File.WriteAllTextAsync(fileToSign.FullName, "MZ", TestContext.CancellationToken);
+        var metadata = new FileInfo(Path.Combine(_tempDirectory.FullName, "metadata.json"));
+        await File.WriteAllTextAsync(metadata.FullName, "{}", TestContext.CancellationToken);
+
+        await service.SignAsync(fileToSign, metadata, tenantId: null, TestTaskContext, TestContext.CancellationToken);
+
+        Assert.IsNull(recording.CapturedEnvironment, "No AZURE_TENANT_ID should be injected when no tenant is known");
+    }
+
+    private FileInfo CreateFakeSigntool(string architecture)
+    {
+        var dir = Path.Combine(_tempDirectory.FullName, "sdk", "bin", architecture);
+        Directory.CreateDirectory(dir);
+        var signtool = new FileInfo(Path.Combine(dir, "signtool.exe"));
+        File.WriteAllText(signtool.FullName, "fake signtool");
+        return signtool;
+    }
 }
 
 internal sealed class FakeSignToolNugetService(DirectoryInfo cacheDir) : INugetService
@@ -177,4 +234,31 @@ internal sealed class FakeSignToolBuildToolsService : IBuildToolsService
 
     public Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, FileInfo? toolPathOverride = null, IReadOnlyDictionary<string, string>? environment = null, CancellationToken cancellationToken = default)
         => throw new NotImplementedException();
+}
+
+internal sealed class RecordingBuildToolsService : IBuildToolsService
+{
+    public FileInfo SignToolToReturn { get; set; } = null!;
+
+    public Tool? CapturedTool { get; private set; }
+    public string? CapturedArguments { get; private set; }
+    public FileInfo? CapturedToolPathOverride { get; private set; }
+    public IReadOnlyDictionary<string, string>? CapturedEnvironment { get; private set; }
+
+    public FileInfo? GetBuildToolPath(string toolName) => throw new NotImplementedException();
+
+    public Task<FileInfo> EnsureBuildToolAvailableAsync(string toolName, TaskContext taskContext, CancellationToken cancellationToken = default)
+        => Task.FromResult(SignToolToReturn);
+
+    public Task<DirectoryInfo?> EnsureBuildToolsAsync(TaskContext taskContext, bool forceLatest = false, CancellationToken cancellationToken = default)
+        => throw new NotImplementedException();
+
+    public Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, FileInfo? toolPathOverride = null, IReadOnlyDictionary<string, string>? environment = null, CancellationToken cancellationToken = default)
+    {
+        CapturedTool = tool;
+        CapturedArguments = arguments;
+        CapturedToolPathOverride = toolPathOverride;
+        CapturedEnvironment = environment;
+        return Task.FromResult((string.Empty, string.Empty));
+    }
 }
