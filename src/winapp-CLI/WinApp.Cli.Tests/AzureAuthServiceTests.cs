@@ -105,6 +105,56 @@ public class AzureAuthServiceTests
         }
     }
 
+    [TestMethod]
+    public void SelectFirstTrustedAzureCliPath_SkipsUntrustedCwdHitAndReturnsLaterTrustedPath()
+    {
+        var cwd = Directory.CreateTempSubdirectory("winapp-azwhere-cwd").FullName;
+        var install = Directory.CreateTempSubdirectory("winapp-azwhere-install").FullName;
+        try
+        {
+            // where.exe lists the hijacked cwd copy first, then a legitimate install path.
+            var hijack = Path.Combine(cwd, "az.cmd");
+            File.WriteAllText(hijack, "@echo off");
+            var trusted = Path.Combine(install, "az.cmd");
+            File.WriteAllText(trusted, "@echo off");
+
+            var whereOutput = $"{hijack}\r\n{trusted}\r\n";
+
+            var result = AzureAuthService.SelectFirstTrustedAzureCliPath(whereOutput, cwd);
+
+            Assert.AreEqual(trusted, result, "The untrusted cwd hit must be skipped in favor of the trusted install path");
+        }
+        finally
+        {
+            Directory.Delete(cwd, recursive: true);
+            Directory.Delete(install, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void SelectFirstTrustedAzureCliPath_WhenAllCandidatesUntrusted_ReturnsNull()
+    {
+        var cwd = Directory.CreateTempSubdirectory("winapp-azwhere-none").FullName;
+        try
+        {
+            var hijack = Path.Combine(cwd, "az.cmd");
+            File.WriteAllText(hijack, "@echo off");
+            var subHijack = Path.Combine(cwd, "sub");
+            Directory.CreateDirectory(subHijack);
+            var subHijackCmd = Path.Combine(subHijack, "az.cmd");
+            File.WriteAllText(subHijackCmd, "@echo off");
+
+            var whereOutput = $"{hijack}\n{subHijackCmd}\n";
+
+            Assert.IsNull(AzureAuthService.SelectFirstTrustedAzureCliPath(whereOutput, cwd));
+            Assert.IsNull(AzureAuthService.SelectFirstTrustedAzureCliPath(string.Empty, cwd));
+        }
+        finally
+        {
+            Directory.Delete(cwd, recursive: true);
+        }
+    }
+
     private const string ArmScope = "https://management.azure.com/.default";
 
     [TestMethod]

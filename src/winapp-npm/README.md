@@ -53,6 +53,7 @@ npx winapp --help
 
 - [`cert`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#cert) - Generate and install development certificates
 - [`sign`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#sign) - Sign MSIX packages and executables
+- [`az-sign`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#az-sign) - Sign packages and executables with Azure Trusted Signing
 
 **Development Tools:**
 

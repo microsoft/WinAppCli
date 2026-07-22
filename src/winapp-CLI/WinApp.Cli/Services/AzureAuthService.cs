@@ -176,18 +176,10 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
                 p.WaitForExit();
                 if (p.ExitCode == 0 && !string.IsNullOrEmpty(output))
                 {
-                    // where.exe searches the current directory *before* PATH, so a malicious
-                    // 'az.cmd' dropped into the working directory (e.g. an untrusted cloned repo)
-                    // could appear first. Walk every candidate and return the first trusted one —
-                    // a rooted path that does not live in the current working directory tree —
-                    // instead of rejecting discovery outright when the first hit is untrusted.
-                    var whereCandidates = output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                    foreach (var candidate in whereCandidates)
+                    var trusted = SelectFirstTrustedAzureCliPath(output, Environment.CurrentDirectory);
+                    if (trusted != null)
                     {
-                        if (IsTrustedAzureCliPath(candidate))
-                        {
-                            return candidate;
-                        }
+                        return trusted;
                     }
                 }
             }
@@ -195,6 +187,32 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
         catch
         {
             // where.exe not available or failed
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Picks the first trusted Azure CLI path from raw <c>where.exe</c> output. where.exe searches
+    /// the current directory *before* PATH, so a malicious 'az.cmd' dropped into the working
+    /// directory (e.g. an untrusted cloned repo) could appear first. Walk every candidate and
+    /// return the first trusted one — a rooted path that does not live in the current working
+    /// directory tree — instead of rejecting discovery outright when the first hit is untrusted.
+    /// </summary>
+    internal static string? SelectFirstTrustedAzureCliPath(string whereOutput, string currentDirectory)
+    {
+        if (string.IsNullOrEmpty(whereOutput))
+        {
+            return null;
+        }
+
+        var whereCandidates = whereOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var candidate in whereCandidates)
+        {
+            if (IsTrustedAzureCliPath(candidate, currentDirectory))
+            {
+                return candidate;
+            }
         }
 
         return null;
