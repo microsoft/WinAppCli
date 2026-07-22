@@ -56,7 +56,9 @@ npm install --save-dev @microsoft/winappcli
 npx winapp init . --use-defaults --add-js-bindings
 ```
 
-The WinApp CLI sets up the manifest and SDKs, adds `@microsoft/dynwinrt` + `@microsoft/dynwinrt-codegen` to your `package.json`, and generates JavaScript wrappers and TypeScript types for the supported Windows App SDK APIs in `.winapp/bindings/`. It also writes a `winapp.jsBindings` config block to your `package.json` where you can extend the generated surface with additional namespaces or `.winmd` files, including metadata from your own WinRT components. See the [file picker guide](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/js-file-picker.md) for a detailed configuration example.
+The WinApp CLI sets up the manifest and SDKs, adds `@microsoft/dynwinrt` + `@microsoft/dynwinrt-codegen` to your `package.json`, and generates JavaScript wrappers and TypeScript types for the supported Windows App SDK APIs in `.winapp/bindings/`. It also writes a `winapp.jsBindings` config block where you can extend the generated surface with additional namespaces or `.winmd` files, including metadata from your own WinRT components.
+
+Setup also adds `#winapp/bindings` and `#winapp/bindings/*` to the `package.json#imports` map. The aliases select the generated CommonJS, ES module, and TypeScript declaration entry points, so imports stay the same no matter which source file uses them. See the [file picker guide](https://github.com/microsoft/winappCli/blob/main/docs/guides/electron/js-file-picker.md) for a detailed configuration example.
 
 Both walkthroughs below (`AppNotificationManager` and Phi Silica) use APIs that require package identity. To unblock those APIs during development, grant your Electron dev build a temporary identity:
 
@@ -75,7 +77,7 @@ const {
   AppNotificationBuilder,
   AppNotificationManager,
   AppNotificationProgressBar,
-} = require('./.winapp/bindings/index.js');
+} = require('#winapp/bindings');
 
 const progress = AppNotificationProgressBar
   .create()
@@ -106,28 +108,38 @@ You can also add on-device AI to Electron directly from your app's JavaScript, u
 ```js
 const {
   AIFeatureReadyState, LanguageModel, TextSummarizer,
-} = require('./.winapp/bindings/index.js');
+} = require('#winapp/bindings');
 
-if (LanguageModel.getReadyState() === AIFeatureReadyState.NotReady) {
-  await LanguageModel.ensureReadyAsync();
+async function summarize() {
+  const readyState = LanguageModel.getReadyState();
+  if (readyState !== AIFeatureReadyState.Ready &&
+      readyState !== AIFeatureReadyState.NotReady) {
+    console.log('Phi Silica is not available on this device.');
+    return;
+  }
+  if (readyState === AIFeatureReadyState.NotReady) {
+    await LanguageModel.ensureReadyAsync();
+  }
+
+  const model = await LanguageModel.createAsync();
+  try {
+    const op = TextSummarizer
+      .createInstance(model)
+      .summarizeParagraphAsync('Some long paragraph...');
+
+    // Stream partial output as the model generates it
+    op.progress((partial) => {
+      process.stdout.write(partial);
+    });
+
+    const result = await op;
+    console.log('\nDone:', result.text);
+  } finally {
+    model.close();
+  }
 }
 
-const model = await LanguageModel.createAsync();
-try {
-  const op = TextSummarizer
-    .createInstance(model)
-    .summarizeParagraphAsync('Some long paragraph...');
-
-  // Stream partial output as the model generates it
-  op.progress((partial) => {
-    process.stdout.write(partial);
-  });
-
-  const result = await op;
-  console.log('\nDone:', result.text);
-} finally {
-  model.close();
-}
+summarize().catch(console.error);
 ```
 
 Before running, add this restricted capability inside the existing `<Capabilities>` element in `Package.appxmanifest`:
@@ -182,7 +194,7 @@ const {
   Clipboard,
   DataPackage,
   HtmlFormatHelper,
-} = require('./.winapp/bindings/index.js');
+} = require('#winapp/bindings');
 
 const html = HtmlFormatHelper.createHtmlFormat(`
   <h2>Hello from Electron</h2>
@@ -235,6 +247,9 @@ npx winapp init . --use-defaults --add-js-bindings
 
 # winapp run needs an .exe inside the project. Alias .local-node to your Node install.
 New-Item -ItemType Junction -Path .\.local-node -Target (Split-Path (Get-Command node).Source)
+
+# --with-alias preserves stdout/stderr, so add an execution alias once.
+npx winapp manifest add-alias --name mynode.exe
 ```
 
 We'll call Phi Silica again from Node.js, so add the same `systemAIModels` capability to `Package.appxmanifest`. Then in `app.js`, use `TextRewriter` to polish a sentence:
@@ -248,10 +263,15 @@ const {
   LanguageModel,
   TextRewriter,
   TextRewriteTone,
-} = require('./.winapp/bindings/index.js');
+} = require('#winapp/bindings');
 
 async function main() {
   const readyState = LanguageModel.getReadyState();
+  if (readyState !== AIFeatureReadyState.Ready &&
+      readyState !== AIFeatureReadyState.NotReady) {
+    console.log('Phi Silica is not available on this device.');
+    return;
+  }
   if (readyState === AIFeatureReadyState.NotReady) {
     await LanguageModel.ensureReadyAsync();
   }
@@ -261,7 +281,7 @@ async function main() {
     const rewriter = TextRewriter.createInstance(model);
     const result = await rewriter.rewriteAsync(
       'WinApp CLI makes it easier to use Windows APIs from JavaScript.',
-      TextRewriteTone.Professional
+      TextRewriteTone.Formal
     );
     console.log(result.text);
   } finally {
@@ -269,7 +289,10 @@ async function main() {
   }
 }
 
-main().catch(console.error);
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
 ```
 
 Run the script under a registered package identity in one shot:
@@ -278,7 +301,7 @@ Run the script under a registered package identity in one shot:
 npx winapp run . --exe .local-node\node.exe --with-alias --args "app.js" --unregister-on-exit
 ```
 
-The rewritten text prints straight to your terminal. Under the hood, `winapp run` registers the loose-layout package, launches `.local-node\node.exe app.js` with package identity and the Windows App SDK runtime graph, and unregisters on exit (`--unregister-on-exit`). `--with-alias` uses the manifest's execution alias so stdout streams back to the launching terminal (without it, packaged apps run detached).
+The rewritten text prints straight to your terminal. Under the hood, `winapp run` registers the loose-layout package, launches `.local-node\node.exe app.js` with package identity and the Windows App SDK runtime graph, and unregisters on exit (`--unregister-on-exit`). `--with-alias` uses the execution alias added above so stdout streams back to the launching terminal (without it, packaged apps run detached).
 
 For an iteration-friendly variant using a persistent execution alias (`mynode.exe app.js` from any terminal) and packaging notes, see the full [Plain Node.js dev-mode guide](https://github.com/microsoft/dynwinrt/blob/main/docs/guides/node/dev-mode.md).
 
@@ -286,7 +309,7 @@ For an iteration-friendly variant using a persistent execution alias (`mynode.ex
 
 `dynwinrt-codegen` runs during `winapp init` / `restore` / `generate-bindings` and turns `.winmd` metadata into JavaScript wrappers with TypeScript types. No native code is generated per class. At execution time, `@microsoft/dynwinrt` invokes the underlying COM vtables directly and adapts WinRT conventions to JavaScript. For example, it converts strings and errors, makes asynchronous operations awaitable with cancellation support and progress when the API provides it, and projects generic collections, structs, enums, and event delegates.
 
-The projection targets non-UI Windows Runtime APIs such as AI, storage, notifications, networking, and similar system capabilities, not UI hosting like XAML / WinUI or WebView2.
+The projection primarily targets data-style Windows Runtime APIs such as AI, storage, notifications, networking, and similar system capabilities. The same runtime can also host WinUI 3 directly from a plain Node.js process for controlled native UI scenarios; see the [`node-winui` sample](https://github.com/microsoft/winappCli/tree/main/samples/node-winui). WebView2 is not part of the generated projection surface.
 
 For the full design, see [`dynwinrt/design.md`](https://github.com/microsoft/dynwinrt/blob/main/design.md).
 
