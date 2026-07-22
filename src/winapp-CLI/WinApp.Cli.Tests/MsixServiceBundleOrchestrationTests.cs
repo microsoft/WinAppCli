@@ -5,6 +5,7 @@ using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using WinApp.Cli.Commands;
 using WinApp.Cli.ConsoleTasks;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
@@ -15,12 +16,14 @@ internal sealed class FakeBundleService : IBundleService
     public int CallCount { get; private set; }
     public IReadOnlyList<FileInfo>? LastMsixFiles { get; private set; }
     public FileInfo? LastOutput { get; private set; }
+    public MsixVersion? LastBundleVersion { get; private set; }
 
-    public Task CreateBundleAsync(IReadOnlyList<FileInfo> msixFiles, FileInfo output, TaskContext taskContext, CancellationToken cancellationToken = default)
+    public Task CreateBundleAsync(IReadOnlyList<FileInfo> msixFiles, FileInfo output, TaskContext taskContext, MsixVersion? bundleVersion = null, CancellationToken cancellationToken = default)
     {
         CallCount++;
         LastMsixFiles = msixFiles.ToList();
         LastOutput = output;
+        LastBundleVersion = bundleVersion;
 
         output.Directory?.Create();
         File.WriteAllText(output.FullName, "fake bundle");
@@ -317,6 +320,50 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
         Assert.AreEqual(explicitOutputPath.FullName, result.BundlePath.FullName);
         Assert.AreEqual(explicitOutputPath.FullName, _fakeBundleService.LastOutput!.FullName);
         Assert.IsTrue(result.BundlePath.Exists);
+    }
+
+    [TestMethod]
+    public async Task CreateMsixBundleAsync_InvalidManifestVersion_ThrowsBeforePathUse()
+    {
+        // Arrange - manifest Identity/@Version contains a quote and spaces, which is unsafe both
+        // for file-system paths and for the makeappx.exe command line.
+        var folder = _tempDirectory.CreateSubdirectory("bad-version-folder");
+        File.WriteAllBytes(Path.Combine(folder.FullName, "TestApp.exe"), BuildMinimalNativePe(0x8664));
+        File.WriteAllBytes(Path.Combine(folder.FullName, "logo.png"), []);
+        File.WriteAllText(Path.Combine(folder.FullName, "Package.appxmanifest"), CreateManifestContent("x64", executableName: "TestApp.exe", version: "1.0\" malicious"));
+
+        // Act & Assert
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+            _msixService.CreateMsixBundleAsync(
+                [folder],
+                outputPath: null,
+                TestTaskContext,
+                skipPri: true,
+                cancellationToken: TestContext.CancellationToken));
+
+        StringAssert.Contains(ex.Message, "not a canonical four-part MSIX version");
+        Assert.AreEqual(0, _fakeBundleService.CallCount, "Bundle service must not be called when the version is invalid.");
+        Assert.AreEqual(0, _fakeBuildToolsService.Invocations.Count, "makeappx must not be invoked when the version is invalid.");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixBundleAsync_MultipleFolders_ForwardsManifestVersionToBundleService()
+    {
+        // Arrange - both slices share Identity/@Version="1.0.0.0" (see CreateManifestContent).
+        var x64Folder = CreateSliceFolder("version-x64", 0x8664, "x64");
+        var arm64Folder = CreateSliceFolder("version-arm64", 0xAA64, "arm64");
+
+        // Act
+        var result = await _msixService.CreateMsixBundleAsync(
+            [x64Folder, arm64Folder],
+            outputPath: null,
+            TestTaskContext,
+            skipPri: true,
+            cancellationToken: TestContext.CancellationToken);
+
+        Assert.IsNotNull(result);
+        Assert.AreEqual(1, _fakeBundleService.CallCount);
+        Assert.AreEqual(new MsixVersion(1, 0, 0, 0), _fakeBundleService.LastBundleVersion);
     }
 
     [TestMethod]
@@ -679,13 +726,13 @@ public class MsixServiceBundleOrchestrationTests : BaseCommandTests
 
     #endregion
 
-    private static string CreateManifestContent(string processorArchitecture, string executableName = "TestApp.exe")
+    private static string CreateManifestContent(string processorArchitecture, string executableName = "TestApp.exe", string version = "1.0.0.0")
     {
         return $$"""
             <?xml version="1.0" encoding="utf-8"?>
             <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
                      xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10">
-              <Identity Name="TestApp" Publisher="CN=TestPublisher" Version="1.0.0.0" ProcessorArchitecture="{{processorArchitecture}}" />
+              <Identity Name="TestApp" Publisher="CN=TestPublisher" Version='{{version}}' ProcessorArchitecture="{{processorArchitecture}}" />
               <Dependencies>
                 <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.22621.0" />
               </Dependencies>
