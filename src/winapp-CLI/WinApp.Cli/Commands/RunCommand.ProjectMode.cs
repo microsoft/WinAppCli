@@ -4,6 +4,7 @@
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using System.CommandLine;
+using System.Text;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
@@ -87,6 +88,7 @@ internal partial class RunCommand
             ParseResult parseResult,
             FileInfo csproj,
             FileInfo? solution,
+            string? selectionReason,
             string? appArgs,
             bool isJson,
             CancellationToken cancellationToken)
@@ -141,6 +143,27 @@ internal partial class RunCommand
             if (!TryResolveArchitecture(archOption, runtimeOption, out var architecture, out var archError))
             {
                 return Fail(archError!, isJson);
+            }
+
+            // Immediate, persistent context line (UX): the pre-build steps below (SDK probe, packaging
+            // evaluate, effective-TFM/shim evaluates, restore) each spawn dotnet and can take several
+            // silent seconds. Print WHAT we're about to run — and, when the input was ambiguous, WHY this
+            // project was chosen (from which solution) — before the first spawn so the run never looks
+            // hung. Suppressed for --json (stdout must stay pure) and --quiet (Information off).
+            if (!isJson && logger.IsEnabled(LogLevel.Information))
+            {
+                var context = new StringBuilder($"{csproj.Name}  ·  {configuration} | {architecture}");
+                if (solution != null)
+                {
+                    context.Append($"  ·  {solution.Name}");
+                }
+
+                if (!string.IsNullOrWhiteSpace(selectionReason))
+                {
+                    context.Append($" ({selectionReason})");
+                }
+
+                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Search} {context}");
             }
 
             // A capable SDK (≥ 8.0.100) is required for MSBuild --getProperty.

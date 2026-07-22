@@ -43,11 +43,18 @@ internal enum ProjectPackaging
 /// define <c>$(SolutionDir)</c> and the sibling <c>Solution*</c> properties so projects that depend
 /// on them resolve exactly as they do under a Visual Studio / <c>dotnet build &lt;sln&gt;</c> build.
 /// </param>
+/// <param name="SelectionReason">
+/// A short, human-readable note on WHY this project was chosen when the input was ambiguous (a
+/// solution or a directory with several candidates), surfaced in the pre-build context line so the
+/// user can see the decision (e.g. "only runnable project", "matched --project"). Null when the
+/// target was unambiguous (a bare <c>.csproj</c> / the lone project in a directory) — nothing to explain.
+/// </param>
 internal sealed record RunInputResolution(
     WinAppRunMode Mode,
     FileInfo? Csproj,
     DirectoryInfo ProjectDirectory,
-    FileInfo? Solution = null);
+    FileInfo? Solution = null,
+    string? SelectionReason = null);
 
 /// <summary>
 /// The build-and-resolve result for a project-mode target (spec §8.3): the evaluated output

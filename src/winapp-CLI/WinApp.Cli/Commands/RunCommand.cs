@@ -401,7 +401,7 @@ internal partial class RunCommand : Command, IShortDescription
 
             if (inputResolution.Mode == WinAppRunMode.Project)
             {
-                return await RunProjectModeAsync(parseResult, inputResolution.Csproj!, inputResolution.Solution, appArgs, isJson, cancellationToken);
+                return await RunProjectModeAsync(parseResult, inputResolution.Csproj!, inputResolution.Solution, inputResolution.SelectionReason, appArgs, isJson, cancellationToken);
             }
 
             // Folder mode: the FileSystemInfo converter yields a DirectoryInfo for an existing

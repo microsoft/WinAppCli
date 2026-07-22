@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
@@ -489,6 +490,7 @@ internal sealed partial class ProjectRunService(
         logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, buildArgs);
 
         var banner = $"Building {csproj.Name} ({options.Configuration} | {options.Architecture})...";
+        var stopwatch = Stopwatch.StartNew();
 
         // --json: stdout must stay pure JSON, so route ALL build output to stderr and show no banner.
         // Console.Error is synchronized, so the concurrent stdout/stderr callbacks are safe.
@@ -533,6 +535,12 @@ internal sealed partial class ProjectRunService(
                     ansiConsole.WriteLine(line);
                 }
             }
+            else
+            {
+                // The spinner erases its own transient banner on completion; leave a persistent line
+                // so the build stays on screen (the user can see it happened, and how long it took).
+                PrintBuildSucceeded(csproj, options, stopwatch.Elapsed);
+            }
 
             return spinnerExit;
         }
@@ -561,23 +569,37 @@ internal sealed partial class ProjectRunService(
             }
         }
 
-        return await dotNetService.RunDotnetStreamingAsync(
+        var streamedExit = await dotNetService.RunDotnetStreamingAsync(
             workingDir, buildArgs, WriteLive, WriteLive, cancellationToken);
+        if (streamedExit == 0)
+        {
+            PrintBuildSucceeded(csproj, options, stopwatch.Elapsed);
+        }
+
+        return streamedExit;
     }
 
     /// <summary>
-    /// Maps the CLI's effective log level to a dotnet <c>-v</c> verbosity for the build pass so that
-    /// <c>--verbose</c> reaches dotnet (Change #1): trace ⇒ detailed, verbose ⇒ normal, <c>--quiet</c>
-    /// ⇒ quiet; otherwise minimal to keep ordinary runs tidy.
+    /// Prints the persistent build-completion line (UX). Callers gate this to the info-enabled,
+    /// non-json paths, so it never pollutes <c>--json</c> stdout or a <c>--quiet</c> run. The project
+    /// name is shown without its <c>.csproj</c> extension since the pre-build context line already
+    /// established the full identity + Configuration/arch.
+    /// </summary>
+    private void PrintBuildSucceeded(FileInfo csproj, ProjectRunOptions options, TimeSpan elapsed) =>
+        ansiConsole.MarkupLineInterpolated(
+            $"{UiSymbols.Check} Built {Path.GetFileNameWithoutExtension(csproj.Name)} in {elapsed.TotalSeconds:0.0}s");
+
+    /// <summary>
+    /// Maps the CLI's effective log level to a dotnet <c>-v</c> verbosity for the build pass (Change #1).
+    /// <c>--verbose</c> stays at <c>minimal</c> on purpose: it already earns its keep by streaming the
+    /// build live and unlocking winapp's own decision traces, so pushing dotnet to <c>-v normal</c> just
+    /// buries those under thousands of MSBuild task lines. Only <c>--trace</c> cranks dotnet up (to
+    /// <c>normal</c>) for deep diagnosis; <c>--quiet</c> keeps dotnet quiet; everything else is minimal.
     /// </summary>
     private static string ResolveBuildVerbosity(ILogger logger, bool json)
     {
+        // --trace: crank dotnet up so the deeper MSBuild log is available when diagnosing a build.
         if (logger.IsEnabled(LogLevel.Trace))
-        {
-            return "detailed";
-        }
-
-        if (logger.IsEnabled(LogLevel.Debug))
         {
             return "normal";
         }
@@ -588,6 +610,8 @@ internal sealed partial class ProjectRunService(
             return "quiet";
         }
 
+        // Default AND --verbose (Debug): keep dotnet skimmable. --verbose still differs from the default
+        // run — it streams the build live and shows winapp's LogDebug traces — without the -v normal flood.
         return "minimal";
     }
 

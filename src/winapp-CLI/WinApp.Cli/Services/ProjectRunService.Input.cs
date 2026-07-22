@@ -142,7 +142,7 @@ internal sealed partial class ProjectRunService
                     $"--project '{projectSelector}' did not match a single .csproj in '{dir.FullName}'. Available: {available}.");
             }
 
-            return new RunInputResolution(WinAppRunMode.Project, selected, dir, FindOwningSolution(selected));
+            return new RunInputResolution(WinAppRunMode.Project, selected, dir, FindOwningSolution(selected), "matched --project");
         }
 
         // Multiple .csproj files — classify each via MSBuild evaluation so an executable/test project
@@ -163,7 +163,7 @@ internal sealed partial class ProjectRunService
                 LogRunningLoneTestProject(dirPick, dir.FullName);
             }
 
-            return new RunInputResolution(WinAppRunMode.Project, dirPick, dir, FindOwningSolution(dirPick));
+            return new RunInputResolution(WinAppRunMode.Project, dirPick, dir, FindOwningSolution(dirPick), "only runnable project");
         }
 
         // Zero or several runnable candidates → we cannot safely guess; require explicit selection.
@@ -446,7 +446,7 @@ internal sealed partial class ProjectRunService
                     $"--project '{projectSelector}' did not match a single project in '{solution.Name}'. Available: {available}.");
             }
 
-            return new RunInputResolution(WinAppRunMode.Project, selected, selected.Directory ?? solutionDir, solution);
+            return new RunInputResolution(WinAppRunMode.Project, selected, selected.Directory ?? solutionDir, solution, "matched --project");
         }
 
         var solutionProps = BuildClassificationPropertyTokens(classificationInputs, solution);
@@ -460,7 +460,7 @@ internal sealed partial class ProjectRunService
                 LogRunningLoneTestProject(pick, solution.Name);
             }
 
-            return new RunInputResolution(WinAppRunMode.Project, pick, pick.Directory ?? solutionDir, solution);
+            return new RunInputResolution(WinAppRunMode.Project, pick, pick.Directory ?? solutionDir, solution, "only runnable project");
         }
 
         // Zero or several runnable app projects → we don't emulate VS's startup-project selection;
