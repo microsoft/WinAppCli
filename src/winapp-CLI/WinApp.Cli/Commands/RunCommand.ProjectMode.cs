@@ -295,7 +295,7 @@ internal partial class RunCommand
                     {
                         try
                         {
-                            await msixService.EnsureWindowsAppRuntimeInstalledAsync(csproj, resolution.Architecture, resolution.Framework, taskContext, ct);
+                            await msixService.EnsureWindowsAppRuntimeInstalledAsync(csproj, resolution.Architecture, resolution.Framework, resolution.NoRestore, taskContext, ct);
                             return (0, "Windows App Runtime ready");
                         }
                         catch (OperationCanceledException) when (ct.IsCancellationRequested)

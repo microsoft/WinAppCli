@@ -360,7 +360,7 @@ internal class WorkspaceSetupService(
                         var existingVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                         try
                         {
-                            var packageList = await dotNetService.GetPackageListAsync(csprojFile, includeTransitive: false, cancellationToken);
+                            var packageList = await dotNetService.GetPackageListAsync(csprojFile, includeTransitive: false, cancellationToken: cancellationToken);
                             var project = packageList?.Projects?.FirstOrDefault();
                             if (project is not null)
                             {

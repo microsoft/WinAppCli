@@ -270,7 +270,8 @@ internal sealed partial class ProjectRunService(
             packaging,
             selfContained,
             options.Architecture,
-            options.Framework);
+            options.Framework,
+            options.NoRestore);
 
         return new ProjectBuildOutcome(resolution, 0);
     }

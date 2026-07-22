@@ -493,7 +493,7 @@ internal partial class DotNetService : IDotNetService
             return true;
         }
 
-        var packageList = await GetPackageListAsync(csprojPath, includeTransitive: false, cancellationToken);
+        var packageList = await GetPackageListAsync(csprojPath, includeTransitive: false, cancellationToken: cancellationToken);
         if (packageList?.Projects is null)
         {
             return false;
@@ -540,14 +540,16 @@ internal partial class DotNetService : IDotNetService
     }
 
     /// <inheritdoc />
-    public async Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, CancellationToken cancellationToken = default)
+    public async Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, bool noRestore = false, CancellationToken cancellationToken = default)
     {
         if (!csprojFile.Exists)
         {
             return null;
         }
 
-        var args = $"list \"{csprojFile.FullName}\" package{(includeTransitive ? " --include-transitive" : "")} --format json";
+        // `dotnet list package` performs an implicit restore on current SDKs; honor --no-restore so a
+        // run that requested no restore can't mutate the project's assets during runtime discovery.
+        var args = $"list \"{csprojFile.FullName}\" package{(includeTransitive ? " --include-transitive" : "")}{(noRestore ? " --no-restore" : "")} --format json";
         var (exitCode, output, _) = await RunDotnetCommandAsync(csprojFile.Directory!, args, cancellationToken);
 
         if (exitCode != 0 || string.IsNullOrWhiteSpace(output))

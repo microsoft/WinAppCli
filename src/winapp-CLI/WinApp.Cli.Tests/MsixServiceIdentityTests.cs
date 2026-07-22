@@ -25,6 +25,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
     private FakeDevModeService _fakeDevMode = null!;
     private ScriptedMtBuildToolsService _fakeBuildTools = null!;
     private FakeWindowsAppRuntimeService _fakeWindowsAppRuntime = null!;
+    private FakeDotNetService _fakeDotNet = null!;
 
     private static readonly MethodInfo CopyFilesFromRecipeMethod =
         typeof(MsixService).GetMethod("CopyFilesFromRecipeAsync", BindingFlags.NonPublic | BindingFlags.Static)!;
@@ -44,12 +45,14 @@ public class MsixServiceIdentityTests : BaseCommandTests
         _fakeDevMode = new FakeDevModeService();
         _fakeBuildTools = new ScriptedMtBuildToolsService();
         _fakeWindowsAppRuntime = new FakeWindowsAppRuntimeService();
+        _fakeDotNet = new FakeDotNetService();
 
         return services
             .AddSingleton<IPackageRegistrationService>(_fakeRegistration)
             .AddSingleton<IDevModeService>(_fakeDevMode)
             .AddSingleton<IBuildToolsService>(_fakeBuildTools)
             .AddSingleton<IWindowsAppRuntimeService>(_fakeWindowsAppRuntime)
+            .AddSingleton<IDotNetService>(_fakeDotNet)
             .AddSingleton<INugetService, FakeNugetService>();
     }
 
@@ -870,6 +873,37 @@ public class MsixServiceIdentityTests : BaseCommandTests
         await InvokeEnsureWindowsAppRuntimeInstalledAsync(WinAppSdkPackageList());
 
         Assert.IsEmpty(_fakeWindowsAppRuntime.InstallRuntimeCalls);
+    }
+
+    [TestMethod]
+    public async Task EnsureWindowsAppRuntimeInstalledAsync_ProjectMode_ForwardsNoRestoreToPackageList()
+    {
+        // C43: `dotnet list package` performs an implicit restore on current SDKs, so a run that
+        // requested --no-restore must forward it to runtime discovery too. A package list without a
+        // Windows App SDK reference makes the public entry return right after the discovery pass —
+        // enough to prove the flag is threaded into GetPackageListAsync.
+        _fakeDotNet.PackageListResult = new DotNetPackageListJson(
+        [
+            new DotNetProject(
+            [
+                new DotNetFramework(
+                    "net10.0-windows10.0.19041.0",
+                    [new DotNetPackage("SomeOther.Package", "1.0.0", "1.0.0")],
+                    [])
+            ])
+        ]);
+
+        var csproj = new FileInfo(Path.Combine(_tempDirectory.FullName, "App.csproj"));
+
+        await _msixService.EnsureWindowsAppRuntimeInstalledAsync(
+            csproj, "x64", framework: null, noRestore: true, TestTaskContext, TestContext.CancellationToken);
+        Assert.AreEqual(true, _fakeDotNet.LastGetPackageListNoRestore,
+            "--no-restore must be forwarded to dotnet list package during runtime discovery");
+
+        await _msixService.EnsureWindowsAppRuntimeInstalledAsync(
+            csproj, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken);
+        Assert.AreEqual(false, _fakeDotNet.LastGetPackageListNoRestore,
+            "runtime discovery must restore normally when --no-restore was not requested");
     }
 
     // ---- FilterPackageListToFramework (C2: TFM-aware runtime resolution) ----------

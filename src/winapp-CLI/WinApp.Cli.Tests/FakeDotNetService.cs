@@ -115,9 +115,13 @@ internal class FakeDotNetService : IDotNetService
     /// </summary>
     public Func<string, (int ExitCode, string Output, string Error)>? RunDotnetCommandHandler { get; set; }
 
-    public Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, CancellationToken cancellationToken = default)
+    /// <summary>Records the <c>noRestore</c> flag from the most recent <see cref="GetPackageListAsync"/> call.</summary>
+    public bool? LastGetPackageListNoRestore { get; private set; }
+
+    public Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, bool noRestore = false, CancellationToken cancellationToken = default)
     {
         GetPackageListCallCount++;
+        LastGetPackageListNoRestore = noRestore;
 
         if (ThrowOnGetPackageList)
         {

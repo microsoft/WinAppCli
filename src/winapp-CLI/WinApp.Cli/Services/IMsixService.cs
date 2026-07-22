@@ -76,11 +76,13 @@ internal interface IMsixService
     /// SDK version, so a sibling TFM referencing a different SDK version can't gate the wrong runtime.
     /// </param>
     /// <param name="taskContext">Status/debug sink.</param>
+    /// <param name="noRestore">When true, runtime discovery passes <c>--no-restore</c> to <c>dotnet list package</c> so a no-restore run doesn't trigger an implicit restore.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public Task EnsureWindowsAppRuntimeInstalledAsync(
         FileInfo? projectFile,
         string? architecture,
         string? framework,
+        bool noRestore,
         TaskContext taskContext,
         CancellationToken cancellationToken = default);
 }

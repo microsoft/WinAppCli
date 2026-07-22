@@ -152,8 +152,9 @@ internal partial class MsixService
 
             // Install the Windows App Runtime framework packages if not already present. Pin the package
             // list to the effective built TFM so a multi-targeted app doesn't pick a sibling framework's
-            // divergent Windows App SDK version (M2).
-            var msbuildPackageList = await ResolveDotNetPackageListAsync(projectFile, framework, cancellationToken);
+            // divergent Windows App SDK version (M2). This loose-layout pipeline is shared with folder mode
+            // and is not on the project-mode --no-restore path, so discovery restores as before.
+            var msbuildPackageList = await ResolveDotNetPackageListAsync(projectFile, framework, noRestore: false, cancellationToken);
             await EnsureWindowsAppRuntimeInstalledAsync(msbuildPackageList, runtimeArch, taskContext, cancellationToken);
 
             // Resolve the manifest that would be registered (issue #537 / TrySkipRegistration).
@@ -221,7 +222,8 @@ internal partial class MsixService
 
         // Fetch dotnet package list once for all downstream operations. Pin to the effective built TFM
         // (M2) so a multi-targeted app resolves the runtime for the framework it was actually built for.
-        var dotNetPackageList = await ResolveDotNetPackageListAsync(projectFile, framework, cancellationToken);
+        // Shared loose-layout pipeline (folder + packaged project mode); discovery restores as before.
+        var dotNetPackageList = await ResolveDotNetPackageListAsync(projectFile, framework, noRestore: false, cancellationToken);
 
         // If there is a pri file named after the executable, rename it to resources.pri
         var priFilePath = Path.Combine(outputAppXDirectory.FullName, Path.GetFileNameWithoutExtension(executableMatch.Name) + ".pri");
@@ -420,9 +422,9 @@ internal partial class MsixService
     /// list (or falls back to a cwd glob) and installs the Windows App Runtime framework packages for
     /// the given architecture. Callers gate on <c>WindowsAppSDKSelfContained</c> before calling.
     /// </summary>
-    public async Task EnsureWindowsAppRuntimeInstalledAsync(FileInfo? projectFile, string? architecture, string? framework, TaskContext taskContext, CancellationToken cancellationToken = default)
+    public async Task EnsureWindowsAppRuntimeInstalledAsync(FileInfo? projectFile, string? architecture, string? framework, bool noRestore, TaskContext taskContext, CancellationToken cancellationToken = default)
     {
-        var packageList = await ResolveDotNetPackageListAsync(projectFile, framework, cancellationToken);
+        var packageList = await ResolveDotNetPackageListAsync(projectFile, framework, noRestore, cancellationToken);
 
         // A framework-dependent app needs the Windows App Runtime only if it actually uses the Windows
         // App SDK. A plain console/desktop Exe (no WindowsAppSDK reference) doesn't — preparing the
@@ -492,12 +494,14 @@ internal partial class MsixService
     /// otherwise falls back to the current-directory glob used by folder mode. When an effective
     /// <paramref name="framework"/> is supplied, the list is narrowed to that TFM so a multi-targeted
     /// project's other frameworks (which may reference a different Windows App SDK version) don't drive
-    /// the runtime version resolution for the framework we actually built.
+    /// the runtime version resolution for the framework we actually built. <paramref name="noRestore"/>
+    /// forwards <c>--no-restore</c> to <c>dotnet list package</c> so a no-restore run can't trigger an
+    /// implicit restore during runtime discovery.
     /// </summary>
-    private async Task<DotNetPackageListJson?> ResolveDotNetPackageListAsync(FileInfo? projectFile, string? framework, CancellationToken cancellationToken)
+    private async Task<DotNetPackageListJson?> ResolveDotNetPackageListAsync(FileInfo? projectFile, string? framework, bool noRestore, CancellationToken cancellationToken)
     {
         var packageList = projectFile is not null
-            ? await dotNetService.GetPackageListAsync(projectFile, cancellationToken: cancellationToken)
+            ? await dotNetService.GetPackageListAsync(projectFile, noRestore: noRestore, cancellationToken: cancellationToken)
             : await FetchDotNetPackageListAsync(cancellationToken);
 
         return FilterPackageListToFramework(packageList, framework);

@@ -64,6 +64,11 @@ internal sealed record RunInputResolution(
 /// or null for a single-targeted project. Threaded into the unpackaged runtime install so a multi-targeted
 /// project's runtime version resolves from the built TFM, not a sibling one.
 /// </param>
+/// <param name="NoRestore">
+/// Mirrors <c>ProjectRunOptions.NoRestore</c>. Threaded into the unpackaged runtime install so the
+/// <c>dotnet list package</c> discovery pass also runs with <c>--no-restore</c> and can't trigger an
+/// implicit restore the user asked to skip.
+/// </param>
 internal sealed record ProjectRunResolution(
     FileInfo Csproj,
     string TargetDir,
@@ -71,7 +76,8 @@ internal sealed record ProjectRunResolution(
     ProjectPackaging Packaging,
     bool SelfContained,
     string Architecture,
-    string? Framework = null);
+    string? Framework = null,
+    bool NoRestore = false);
 
 /// <summary>
 /// User-provided build inputs for project mode, forwarded to <c>dotnet build</c> / <c>dotnet msbuild</c>.

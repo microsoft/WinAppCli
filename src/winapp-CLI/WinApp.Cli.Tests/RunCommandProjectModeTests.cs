@@ -129,6 +129,25 @@ public class RunCommandProjectModeTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task ProjectMode_Unpackaged_NoRestore_ThreadsNoRestoreIntoRuntimeInstall()
+    {
+        // C43: a --no-restore run must not trigger an implicit restore during runtime discovery, so the
+        // flag has to reach EnsureWindowsAppRuntimeInstalledAsync (which forwards it to dotnet list package).
+        var csproj = CreateCsproj();
+        var targetDir = CreateTargetDir(withManifest: false);
+        var exe = Path.Combine(targetDir.FullName, "App.exe");
+        _fakeProjectRunService.BuildOutcome = new ProjectBuildOutcome(
+            new ProjectRunResolution(csproj, targetDir.FullName, exe, ProjectPackaging.Unpackaged, false, "x64", NoRestore: true), 0);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [csproj.FullName, "--no-restore", "--detach"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeMsixService.EnsureRuntimeInstalledCalls.Count);
+        Assert.IsTrue(_fakeMsixService.EnsureRuntimeInstalledCalls[0].NoRestore, "Runtime install must honor the run's --no-restore");
+    }
+
+    [TestMethod]
     public async Task ProjectMode_UnpackagedSelfContained_SkipsRuntimeInstall()
     {
         var csproj = CreateCsproj();
