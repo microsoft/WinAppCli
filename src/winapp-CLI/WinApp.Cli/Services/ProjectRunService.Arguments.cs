@@ -273,6 +273,28 @@ internal sealed partial class ProjectRunService
         properties.Any(p => p.StartsWith(name + "=", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
+    /// Reads the value of the user's <c>-p Name=Value</c> for <paramref name="name"/> (case-insensitive),
+    /// returning <see langword="true"/> only when present with a non-empty value. Project-mode validation
+    /// rejects a ';'-packed <c>-p</c> up front, so each entry is a single <c>Name=Value</c> here.
+    /// </summary>
+    private static bool TryGetUserProperty(IReadOnlyList<string> properties, string name, out string value)
+    {
+        foreach (var property in properties)
+        {
+            var equals = property.IndexOf('=');
+            if (equals > 0 && property[..equals].Trim().Equals(name, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property[(equals + 1)..].Trim();
+                return value.Length > 0;
+            }
+        }
+
+        value = string.Empty;
+        return false;
+    }
+
+
+    /// <summary>
     /// User <c>Name=Value</c> properties with any that duplicate a dedicated <c>-c</c>/<c>-r</c>/<c>-f</c>
     /// switch removed (see <see cref="DedicatedFlagProperties"/>). Applied to BOTH the build and evaluate
     /// passes so the dedicated switch is the single source of Configuration/RID/TFM in each — a conflicting

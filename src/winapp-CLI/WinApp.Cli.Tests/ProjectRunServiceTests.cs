@@ -2542,6 +2542,38 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public async Task BuildAndResolveAsync_SingleTargetedUserTargetFrameworkProperty_IsHonoredNotDropped()
+    {
+        // A bare -p:TargetFramework=X (no --framework) must NOT be silently dropped by the dedicated-flag
+        // filter: it is promoted to the effective framework and re-emitted via -f so the user's TFM choice
+        // actually builds/runs. Without the promotion the build would fall back to the project's default TFM.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => (0, PackagedPropertiesJson(), string.Empty) };
+        var service = NewServiceWith(dotnet, LogLevel.Information, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: ["TargetFramework=net8.0-windows10.0.26100.0"], Json: false);
+
+        await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        StringAssert.Contains(dotnet.StreamingCalls[0], "-f net8.0-windows10.0.26100.0", "a bare -p:TargetFramework must be promoted and honored, not dropped");
+    }
+
+    [TestMethod]
+    public async Task BuildAndResolveAsync_MultiTargetedUserTargetFrameworkProperty_BeatsFirstTfmDefault()
+    {
+        // On a multi-targeted project an explicit -p:TargetFramework=X (no --framework) is a deliberate
+        // request and must win over the first-TFM auto-pin default — the user gets net8, not net10.
+        var csproj = WriteFile("App.csproj", MultiTargetedExeCsproj);
+        var dotnet = new FakeDotNetService { RunDotnetCommandHandler = _ => (0, PackagedPropertiesJson(), string.Empty) };
+        var service = NewServiceWith(dotnet, LogLevel.Information, out _);
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: ["TargetFramework=net8.0-windows10.0.26100.0"], Json: false);
+
+        await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        StringAssert.Contains(dotnet.StreamingCalls[0], "-f net8.0-windows10.0.26100.0", "an explicit -p:TargetFramework must beat the multi-targeted first-TFM default");
+        Assert.IsFalse(dotnet.StreamingCalls[0].Contains("-f net10.0-windows10.0.26100.0"), "the auto-pinned first TFM must not override the user's explicit -p:TargetFramework");
+    }
+
+    [TestMethod]
     public async Task BuildAndResolveAsync_ImportedTargetFrameworks_DiscoversAndPinsFirstTfm()
     {
         // C16: a project whose <TargetFrameworks> come from an import (Directory.Build.props) is invisible

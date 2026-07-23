@@ -722,6 +722,43 @@ public class ProjectDetectionServiceTests
         await Assert.ThrowsExactlyAsync<OperationCanceledException>(
             () => sut.ClassifyRunnableAsync(csproj, Root, null, cts.Token));
     }
+
+    [TestMethod]
+    public void ClassifyRunnableStatic_TestPackageUnderInactiveCondition_IsAppNotTest()
+    {
+        // Static fallback must ignore a test PackageReference gated behind a Condition — it can't evaluate
+        // the Condition, so assuming the marker is active would misclassify a runnable app as a test and
+        // drop it from directory detection (Copilot review). The evaluated path handles Conditions.
+        CreateFile("App.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup><OutputType>WinExe</OutputType></PropertyGroup>
+          <ItemGroup Condition="'$(Configuration)'=='Test'">
+            <PackageReference Include="xunit" Version="2.9.0" />
+          </ItemGroup>
+        </Project>
+        """);
+        var csproj = new FileInfo(Path.Combine(_tempDir, "App.csproj"));
+
+        Assert.AreEqual(ProjectRunnability.App, ProjectDetectionService.ClassifyRunnableStatic(csproj));
+    }
+
+    [TestMethod]
+    public void ClassifyRunnableStatic_UnconditionalTestPackage_IsTest()
+    {
+        // The unconditional-marker filter must not regress genuine detection: an ungated test package
+        // reference on a WinExe app (the WinUI MSTest shape) still classifies as a test.
+        CreateFile("App.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup><OutputType>WinExe</OutputType></PropertyGroup>
+          <ItemGroup>
+            <PackageReference Include="MSTest.TestFramework" Version="3.6.0" />
+          </ItemGroup>
+        </Project>
+        """);
+        var csproj = new FileInfo(Path.Combine(_tempDir, "App.csproj"));
+
+        Assert.AreEqual(ProjectRunnability.Test, ProjectDetectionService.ClassifyRunnableStatic(csproj));
+    }
 }
 
 /// <summary>

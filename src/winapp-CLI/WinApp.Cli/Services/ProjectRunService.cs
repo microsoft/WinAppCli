@@ -38,6 +38,14 @@ internal sealed partial class ProjectRunService(
     /// build one output and evaluate/launch another). Matches the documented "dedicated flag wins"
     /// contract (see <see cref="WarnOnOverriddenFlags"/>). <c>Platform</c> is intentionally NOT reserved:
     /// project mode forwards it as-is and conveys arch via the RuntimeIdentifier only.
+    /// <para>
+    /// <c>Configuration</c> and <c>RuntimeIdentifier</c> are ALWAYS pinned by winapp (<c>-c</c>/<c>-r</c>).
+    /// <c>TargetFramework</c> is pinned only when a TFM is actually resolved — from <c>--framework</c>, a
+    /// PROMOTED bare <c>-p:TargetFramework</c> (see <see cref="ResolveEffectiveFrameworkAsync"/>), or the
+    /// multi-targeted first-TFM default. Because a bare <c>-p:TargetFramework</c> is promoted before these
+    /// passes run, dropping it here is safe: winapp re-emits the same value via <c>-f</c>, so the user's
+    /// choice is honored rather than silently discarded.
+    /// </para>
     /// </summary>
     private static readonly string[] DedicatedFlagProperties = ["Configuration", "RuntimeIdentifier", "TargetFramework"];
 
@@ -670,6 +678,20 @@ internal sealed partial class ProjectRunService(
                 logger.LogDebug(
                     "{UISymbol} -p:{Property} is overridden by the dedicated flag (matches dotnet precedence).",
                     UiSymbols.Note, property);
+            }
+            else if (name.Equals("TargetFramework", StringComparison.OrdinalIgnoreCase))
+            {
+                // TargetFramework is dedicated only when winapp actually pins a TFM. A bare -p:TargetFramework
+                // (no --framework) is PROMOTED to the effective framework and honored, so it's not overridden.
+                // It's only overridden when a dedicated --framework resolved a DIFFERENT TFM — warn just then.
+                var value = property.Split('=', 2).ElementAtOrDefault(1)?.Trim() ?? string.Empty;
+                if (!string.IsNullOrEmpty(options.Framework) &&
+                    !options.Framework.Equals(value, StringComparison.OrdinalIgnoreCase))
+                {
+                    logger.LogDebug(
+                        "{UISymbol} -p:{Property} is overridden by --framework '{Framework}' (matches dotnet precedence).",
+                        UiSymbols.Note, property, options.Framework);
+                }
             }
             else if (name.Equals("Platform", StringComparison.OrdinalIgnoreCase))
             {

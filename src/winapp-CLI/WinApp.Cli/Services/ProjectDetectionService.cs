@@ -407,11 +407,25 @@ internal sealed class ProjectDetectionService(
         return TestPackagePrefixes.Any(prefix => id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
     }
 
-    /// <summary>Scans inline csproj XML for a TestContainer capability or a test-framework package ref.</summary>
+    /// <summary>
+    /// Scans inline csproj XML for a TestContainer capability or a test-framework package ref, counting
+    /// ONLY unconditional markers — an element (or any ancestor <c>ItemGroup</c>/<c>Choose</c>/<c>When</c>/
+    /// <c>Project</c>) carrying a <c>Condition</c> is ignored. This is the static fallback used when an
+    /// evaluated classification isn't available; a test <c>PackageReference</c>/capability gated behind an
+    /// inactive Condition (e.g. a Configuration-specific <c>ItemGroup</c>) would otherwise misclassify a
+    /// runnable app as a test project and drop it from directory detection. The evaluated path
+    /// (<see cref="HasEvaluatedTestMarkers"/>) already resolves Conditions under the real globals.
+    /// </summary>
     private static bool HasInlineTestMarkers(XDocument doc)
     {
+        // Trust a marker only when neither it nor any ancestor carries a Condition (mirrors the
+        // unconditional-inline check used for static <TargetFrameworks> reads). A conditioned marker is
+        // deferred to the authoritative evaluated classification rather than assumed active.
+        static bool IsUnconditional(XElement element) =>
+            !element.AncestorsAndSelf().Any(a => !string.IsNullOrWhiteSpace(a.Attribute("Condition")?.Value));
+
         var capabilities = doc.Descendants()
-            .Where(e => e.Name.LocalName == "ProjectCapability")
+            .Where(e => e.Name.LocalName == "ProjectCapability" && IsUnconditional(e))
             .Select(e => (string?)e.Attribute("Include"));
         if (capabilities.Any(IsTestContainerCapability))
         {
@@ -419,7 +433,7 @@ internal sealed class ProjectDetectionService(
         }
 
         var packageRefs = doc.Descendants()
-            .Where(e => e.Name.LocalName == "PackageReference")
+            .Where(e => e.Name.LocalName == "PackageReference" && IsUnconditional(e))
             .Select(e => (string?)e.Attribute("Include") ?? (string?)e.Attribute("Update"));
         return packageRefs.Any(IsKnownTestPackage);
     }

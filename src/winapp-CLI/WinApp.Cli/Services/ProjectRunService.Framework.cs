@@ -41,6 +41,18 @@ internal sealed partial class ProjectRunService
             return options;
         }
 
+        // No dedicated --framework, but the user forwarded an explicit -p:TargetFramework=X. TFM is a
+        // DedicatedFlagProperty, so ForwardableProperties would otherwise strip that -p from every pass
+        // and silently build/run the project's default TFM instead — dropping the user's choice. Promote
+        // it to the effective framework so it flows through the dedicated -f / -p:TargetFramework path
+        // consistently across the build, evaluate and classification passes (and beats the auto-pin of a
+        // multi-targeted project's first TFM — an explicit request wins over the default). An explicit
+        // --framework still wins over this (handled by the early return above).
+        if (TryGetUserProperty(options.Properties, "TargetFramework", out var userFramework))
+        {
+            return options with { Framework = userFramework };
+        }
+
         var staticFirst = dotNetService.GetTargetFramework(csproj);
         var staticFirstIsConcrete = !string.IsNullOrWhiteSpace(staticFirst)
             && !staticFirst.Contains("$(", StringComparison.Ordinal);
