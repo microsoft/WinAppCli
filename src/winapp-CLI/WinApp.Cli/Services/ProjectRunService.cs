@@ -121,20 +121,30 @@ internal sealed partial class ProjectRunService(
         options.Properties.Any(p =>
             p.StartsWith("CsWinRTWindowsMetadata=", StringComparison.OrdinalIgnoreCase));
 
-    /// <inheritdoc />
-    public async Task<ProjectBuildOutcome> BuildAndResolveAsync(
-        FileInfo csproj,
-        ProjectRunOptions options,
-        CancellationToken cancellationToken)
+    /// <summary>
+    /// Runs the silent pre-build steps — effective-framework pinning, the CsWinRT metadata shim, and the
+    /// pre-build restore (whole-solution when the target lives in a solution) — that must complete before
+    /// the build pass. These all shell out to buffered <c>dotnet</c> sub-processes and produce no console
+    /// output, so <paramref name="setStatus"/> lets an interactive caller animate a spinner by reporting
+    /// phase changes ("Resolving project…", "Restoring dependencies…"); pass <see langword="null"/> to run
+    /// them with no status updates (agents / <c>--json</c> / <c>--quiet</c> / <c>--verbose</c>). Returns the
+    /// (possibly framework-pinned) options, the build-pass options (with <c>NoRestore</c> set when a
+    /// pre-restore already covered the target), and the resolved CsWinRT metadata folder (or null).
+    /// </summary>
+    private async Task<(ProjectRunOptions Options, ProjectRunOptions BuildOptions, string? CsWinRTMetadata)>
+        PrepareBuildInputsAsync(
+            FileInfo csproj,
+            ProjectRunOptions options,
+            DirectoryInfo workingDir,
+            Action<string>? setStatus,
+            CancellationToken cancellationToken)
     {
-        var workingDir = csproj.Directory ?? new DirectoryInfo(Directory.GetCurrentDirectory());
-        WarnOnOverriddenFlags(options);
-
         // Pin an effective single target framework for a multi-targeted project when the user gave no
         // --framework, BEFORE any pass, so the build, the evaluate pass, packaging and runtime
         // provisioning all agree on one TFM. Without this a plural-<TargetFrameworks> project builds but
         // its evaluate pass hits the cross-targeting outer build (empty TargetDir) → we throw AFTER a
         // successful build. Default = first declared TFM. No-op when single-targeted / --framework set.
+        setStatus?.Invoke("Resolving project...");
         options = await ResolveEffectiveFrameworkAsync(csproj, options, workingDir, cancellationToken);
 
         // The CsWinRT metadata shim (below) needs the project's effective single TFM to steer ref-pack
@@ -158,6 +168,8 @@ internal sealed partial class ProjectRunService(
         // actually building AND the user not opting out of restore.
         if (!options.NoBuild && !options.NoRestore)
         {
+            setStatus?.Invoke("Restoring dependencies...");
+
             // (1) Restore the owning solution's managed siblings. When it restores the whole solution
             // (all-managed) it also restored the target, so the passes below can skip their own restore.
             var restoredWholeSolution = await RestoreSolutionSiblingsAsync(csproj, options, workingDir, cancellationToken);
@@ -189,6 +201,42 @@ internal sealed partial class ProjectRunService(
                 // The whole-solution restore already covered the target; skip the build pass's own restore.
                 buildOptions = options with { NoRestore = true };
             }
+        }
+
+        return (options, buildOptions, csWinRTMetadata);
+    }
+
+    /// <inheritdoc />
+    public async Task<ProjectBuildOutcome> BuildAndResolveAsync(
+        FileInfo csproj,
+        ProjectRunOptions options,
+        CancellationToken cancellationToken)
+    {
+        var workingDir = csproj.Directory ?? new DirectoryInfo(Directory.GetCurrentDirectory());
+        WarnOnOverriddenFlags(options);
+
+        // Framework resolution, the CsWinRT metadata shim, and the pre-build restore below all shell out
+        // to SILENT (buffered) `dotnet` sub-processes — on a solution the whole-solution restore alone can
+        // take several seconds with no output. On a real interactive terminal, animate an inline spinner
+        // around them so the user sees liveness (e.g. "Restoring dependencies…") before the `🔧 Building`
+        // line instead of a dead gap. Skipped under --verbose (Debug) so the phase LogDebug traces render
+        // plainly, and under --json/--quiet/agent/CI/redirected (ShouldUseLiveSpinner == false), where the
+        // work runs exactly as before with no status output.
+        ProjectRunOptions buildOptions;
+        string? csWinRTMetadata;
+        if (ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger) && !logger.IsEnabled(LogLevel.Debug))
+        {
+            (options, buildOptions, csWinRTMetadata) = await ansiConsole.Status()
+                .AutoRefresh(true)
+                .Spinner(Spinner.Known.Dots)
+                .SpinnerStyle(Style.Parse("blue"))
+                .StartAsync("Resolving project...", async ctx =>
+                    await PrepareBuildInputsAsync(csproj, options, workingDir, s => ctx.Status(s), cancellationToken));
+        }
+        else
+        {
+            (options, buildOptions, csWinRTMetadata) = await PrepareBuildInputsAsync(
+                csproj, options, workingDir, setStatus: null, cancellationToken);
         }
 
         // Two passes (Change #1): (1) BUILD — a plain `dotnet build` whose console log
