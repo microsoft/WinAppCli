@@ -12,23 +12,17 @@ namespace WinApp.Cli.Services;
 /// Effective-target-framework resolution for a multi-targeted project: pins a single TFM so every
 /// downstream pass (build, evaluate, packaging, runtime provisioning) agrees, preferring a cheap static
 /// read and falling back to an authoritative MSBuild evaluate only when the TFM list can't be resolved
-/// statically. Split from the main <see cref="ProjectRunService"/> partial to keep each file cohesive.
+/// statically.
 /// </summary>
 internal sealed partial class ProjectRunService
 {
     /// <summary>
-    /// Resolves an <em>effective</em> single target framework for a multi-targeted project so every
-    /// downstream pass (build, evaluate, packaging, runtime provisioning) pins the SAME TFM. When the user
-    /// gave no <c>--framework</c> it pins the FIRST declared TFM — the default. It first tries a cheap
-    /// static read of the project file's inline <c>&lt;TargetFramework(s)&gt;</c>; when the TFM(s) can't be
-    /// resolved statically — an inline <c>&lt;TargetFrameworks&gt;</c> whose first entry is an MSBuild
-    /// expression, or a project whose <c>TargetFrameworks</c> come from an import (<c>Directory.Build.props</c>)
-    /// or are conditional on Configuration/user <c>-p</c> — it falls back to an authoritative
-    /// <c>dotnet msbuild --getProperty:TargetFrameworks</c> evaluate using the SAME globals. Without this a
-    /// plural-<c>&lt;TargetFrameworks&gt;</c> project builds but its evaluate pass hits the cross-targeting
-    /// outer node (empty <c>TargetDir</c>) → we throw AFTER a successful build (H1). No-op when the user set
-    /// <c>--framework</c>, the project is genuinely single-targeted, or a TFM still can't be determined
-    /// (e.g. SDK-less / pre-restore) — the normal passes then surface any real error.
+    /// Resolves an <em>effective</em> single TFM for a multi-targeted project so every downstream pass
+    /// pins the SAME one; with no <c>--framework</c> it pins the FIRST declared TFM. Tries a cheap static
+    /// read first, falling back to an authoritative <c>dotnet msbuild --getProperty:TargetFrameworks</c>
+    /// evaluate when the list is imported/conditional/expression-based (without which a plural-TFMs
+    /// project builds but its evaluate hits the empty cross-targeting outer node → throw after a
+    /// successful build). No-op when single-targeted, <c>--framework</c> is set, or no TFM is determinable.
     /// </summary>
     private async Task<ProjectRunOptions> ResolveEffectiveFrameworkAsync(
         FileInfo csproj,
@@ -41,16 +35,11 @@ internal sealed partial class ProjectRunService
             return options;
         }
 
-        // No dedicated --framework, but the user forwarded an explicit -p:TargetFramework=X. TFM is a
-        // DedicatedFlagProperty, so ForwardableProperties would otherwise strip that -p from every pass
-        // and silently build/run the project's default TFM instead — dropping the user's choice. Promote
-        // it to the effective framework so it flows through the dedicated -f / -p:TargetFramework path
-        // consistently across the build and evaluate passes (and beats the auto-pin of a multi-targeted
-        // project's first TFM — an explicit request wins over the default). An explicit --framework still
-        // wins over this (handled by the early return above). NOTE: the command layer now resolves this SAME
-        // explicit framework up front (ProjectRunService.ResolveExplicitFramework) and threads it into BOTH
-        // options.Framework and the classification pass, so in the normal flow the early return above already
-        // fired; this block is a service-level fallback that preserves the precedence for direct callers/tests.
+        // No --framework, but the user forwarded an explicit -p:TargetFramework=X. TFM is a
+        // DedicatedFlagProperty, so ForwardableProperties would strip it from every pass and silently build
+        // the default; promote it so it flows through the -f path and beats the multi-target auto-pin. The
+        // command layer normally resolves this up front (ResolveExplicitFramework) so the early return
+        // above already fired; this is a service-level fallback for direct callers/tests.
         if (TryGetUserProperty(options.Properties, "TargetFramework", out var userFramework))
         {
             return options with { Framework = userFramework };
@@ -62,12 +51,9 @@ internal sealed partial class ProjectRunService
 
         if (dotNetService.IsMultiTargeted(csproj))
         {
-            // Inline <TargetFrameworks>: pin the first statically ONLY when the declaration is a concrete
-            // value AND unconditional (a single element with no Condition on it or any ancestor). The static
-            // read is a first-textual-match, so a conditional/duplicated declaration — e.g. per-Configuration
-            // <TargetFrameworks> groups — could pin the wrong group's TFM (a Release run picking Debug's
-            // first). In that case fall through to the authoritative MSBuild evaluate, which honors the same
-            // Configuration/property globals.
+            // Inline <TargetFrameworks>: pin the first statically ONLY when concrete AND unconditional. The
+            // static read is first-textual-match, so a conditional/per-Configuration declaration could pin
+            // the wrong group's TFM; fall through to the authoritative MSBuild evaluate in that case.
             if (staticFirstIsConcrete && HasUnconditionalInlineTargetFrameworks(csproj))
             {
                 LogEffectiveFrameworkPinned(csproj, staticFirst!);
@@ -76,8 +62,7 @@ internal sealed partial class ProjectRunService
         }
         else if (staticFirstIsConcrete)
         {
-            // Inline single <TargetFramework> with a concrete value: genuinely single-targeted — the build
-            // and evaluate passes already resolve the one TFM identically, so no pinning is needed.
+            // Inline single concrete <TargetFramework>: genuinely single-targeted — no pinning needed.
             return options;
         }
 
@@ -99,13 +84,10 @@ internal sealed partial class ProjectRunService
             UiSymbols.Note, csproj.Name, tfm);
 
     /// <summary>
-    /// True when the project's multi-targeting is declared inline in a form the cheap static read can trust:
-    /// exactly ONE <c>&lt;TargetFrameworks&gt;</c> element, and neither it nor any ancestor (its
-    /// <c>&lt;PropertyGroup&gt;</c>, a <c>&lt;Choose&gt;/&lt;When&gt;</c>, the <c>&lt;Project&gt;</c>) carries
-    /// a <c>Condition</c>. A conditional or duplicated declaration (e.g. per-Configuration variants) makes the
-    /// first-textual-match static read unreliable, so the caller must fall back to an authoritative MSBuild
-    /// evaluate that resolves the effective list under the real globals. Returns <see langword="false"/> on
-    /// unreadable/invalid XML so the evaluate path decides.
+    /// True when multi-targeting is declared inline in a form the cheap static read can trust: exactly ONE
+    /// <c>&lt;TargetFrameworks&gt;</c> element with no <c>Condition</c> on it or any ancestor. A conditional
+    /// or duplicated declaration makes the first-textual-match read unreliable, forcing the caller to the
+    /// authoritative evaluate. Returns <see langword="false"/> on unreadable/invalid XML.
     /// </summary>
     private static bool HasUnconditionalInlineTargetFrameworks(FileInfo csproj)
     {
@@ -134,24 +116,17 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
-    /// MSBuild properties queried to authoritatively discover a project's effective TFM list. Deliberately
-    /// requests TWO properties (not just <c>TargetFrameworks</c>) so the SDK emits the JSON envelope
-    /// <c>{ "Properties": { ... } }</c> rather than a raw scalar: a single <c>--getProperty</c> makes the
-    /// whole trimmed stdout the value, so any evaluation warning or diagnostic preamble would be captured as
-    /// <c>TargetFrameworks</c>, split into a garbage first TFM, and passed to <c>-f</c>. Requesting the extra
-    /// (empty-on-the-outer-node) <c>TargetFramework</c> is harmless and forces the diagnostic-tolerant JSON
-    /// parse in <see cref="MsBuildPropertyReader"/>.
+    /// MSBuild properties queried to discover a project's effective TFM list. Requests TWO properties (not
+    /// just <c>TargetFrameworks</c>) so the SDK emits the JSON envelope rather than a raw scalar — a single
+    /// <c>--getProperty</c> would capture any warning/diagnostic preamble as the value. See
+    /// <see cref="MsBuildPropertyReader"/>.
     /// </summary>
     private static readonly string[] FrameworkDiscoveryProperties = ["TargetFramework", "TargetFrameworks"];
 
     /// <summary>
     /// Authoritatively resolves the FIRST entry of a project's effective <c>TargetFrameworks</c> via an
-    /// evaluate-only <c>dotnet msbuild --getProperty:TargetFramework --getProperty:TargetFrameworks</c> (no
-    /// build — two properties force the diagnostic-tolerant JSON envelope), using the same
-    /// Configuration / forwardable user <c>-p</c> / <c>Solution*</c> globals as the real passes so a
-    /// Configuration- or property-conditional list resolves identically. Returns <c>null</c> when the
-    /// project is single-targeted (empty <c>TargetFrameworks</c>) or the evaluate can't run (SDK-less /
-    /// pre-restore / cancelled-start), leaving the caller to no-op gracefully.
+    /// evaluate-only MSBuild pass using the same globals as the real passes. Returns <c>null</c> when the
+    /// project is single-targeted or the evaluate can't run (SDK-less / pre-restore / cancelled-start).
     /// </summary>
     private async Task<string?> ResolveFirstMultiTargetFrameworkAsync(
         FileInfo csproj,
@@ -174,8 +149,7 @@ internal sealed partial class ProjectRunService
         }
         catch (Exception)
         {
-            // Starting or communicating with dotnet failed → indeterminate; let the normal passes surface
-            // any real error rather than crash the run before the authoritative build.
+            // Starting/communicating with dotnet failed → indeterminate; let the normal passes surface it.
             return null;
         }
 
@@ -188,8 +162,7 @@ internal sealed partial class ProjectRunService
         var targetFrameworks = GetProp(props, "TargetFrameworks");
         if (string.IsNullOrWhiteSpace(targetFrameworks))
         {
-            // Single-targeted (TargetFrameworks empty, TargetFramework set) — nothing to pin.
-            return null;
+            return null; // Single-targeted — nothing to pin.
         }
 
         return targetFrameworks
@@ -200,12 +173,9 @@ internal sealed partial class ProjectRunService
     /// <summary>
     /// Builds the evaluate-only <c>dotnet msbuild --getProperty:...</c> arguments for discovering a
     /// project's framework properties. Mirrors the property section of <see cref="BuildEvaluateArguments"/>
-    /// — forwardable user <c>-p</c>, then <c>Solution*</c> props, then <c>-p:Configuration</c> LAST — but
-    /// deliberately omits <c>-p:TargetFramework</c> (that is what we're discovering) and the RID (which does
-    /// not select the TFM list) so the outer cross-targeting node is evaluated. Defaults to querying both
-    /// <c>TargetFramework</c> and <c>TargetFrameworks</c> (two properties force the diagnostic-tolerant JSON
-    /// envelope — see <see cref="FrameworkDiscoveryProperties"/>); pass explicit <paramref name="getProperties"/>
-    /// to query others.
+    /// but omits <c>-p:TargetFramework</c> (that's what we're discovering) and the RID so the outer
+    /// cross-targeting node is evaluated. Defaults to both <c>TargetFramework</c> and <c>TargetFrameworks</c>
+    /// (two properties force the JSON envelope — see <see cref="FrameworkDiscoveryProperties"/>).
     /// </summary>
     internal static string BuildFrameworkDiscoveryArguments(FileInfo csproj, ProjectRunOptions options, params string[] getProperties)
     {
@@ -234,15 +204,12 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
-    /// Resolves the single effective target framework moniker used ONLY to steer the CsWinRT metadata shim's
-    /// ref-pack selection toward the project's <c>TargetPlatformVersion</c> (e.g. <c>10.0.19041</c>). Unlike
-    /// <see cref="ResolveEffectiveFrameworkAsync"/> — which pins a build TFM only for a MULTI-targeted
-    /// project — this also covers a genuinely single-targeted project (whose <c>--framework</c> stays null),
-    /// so on an SDK-less host the shim prefers the matching ref pack instead of the highest cached one.
-    /// Order: an already pinned / user <c>--framework</c>, then a cheap static <c>&lt;TargetFramework&gt;</c>
-    /// read, then — only when the shim would actually inject (no registered SDK) and the value isn't
-    /// statically resolvable — an authoritative MSBuild evaluate honoring imported/conditional values. The
-    /// returned TFM is NEVER used as a build <c>-p:TargetFramework</c> (a single-targeted project needs none).
+    /// Resolves the single effective TFM used ONLY to steer the CsWinRT metadata shim's ref-pack selection
+    /// toward the project's <c>TargetPlatformVersion</c>. Unlike <see cref="ResolveEffectiveFrameworkAsync"/>
+    /// this also covers a single-targeted project (whose <c>--framework</c> stays null) so an SDK-less host
+    /// prefers the matching ref pack. Order: pinned/user <c>--framework</c>, cheap static read, then — only
+    /// when the shim would inject (no registered SDK) and the value isn't static — an MSBuild evaluate. The
+    /// result is NEVER used as a build <c>-p:TargetFramework</c>.
     /// </summary>
     private async Task<string?> ResolveShimFrameworkAsync(
         FileInfo csproj,
@@ -272,11 +239,9 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
-    /// Authoritatively resolves a project's effective SINGLE target framework moniker via an evaluate-only
-    /// <c>dotnet msbuild --getProperty:TargetFramework --getProperty:TargetFrameworks</c> (no build), using
-    /// the same globals as the real passes so an imported or conditional value resolves identically. Returns
-    /// the singular <c>TargetFramework</c> when set, else the first of <c>TargetFrameworks</c>, else
-    /// <c>null</c> when the evaluate can't run (SDK-less / pre-restore / cancelled-start).
+    /// Authoritatively resolves a project's effective SINGLE target framework via an evaluate-only MSBuild
+    /// pass using the same globals as the real passes. Returns <c>TargetFramework</c> when set, else the
+    /// first of <c>TargetFrameworks</c>, else <c>null</c> when the evaluate can't run.
     /// </summary>
     private async Task<string?> ResolveEvaluatedTargetFrameworkAsync(
         FileInfo csproj,

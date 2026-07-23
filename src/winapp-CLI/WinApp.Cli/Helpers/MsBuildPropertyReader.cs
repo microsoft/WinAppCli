@@ -9,27 +9,17 @@ namespace WinApp.Cli.Helpers;
 /// Parses the stdout of <c>dotnet build/msbuild --getProperty:...</c> into a property dictionary.
 /// </summary>
 /// <remarks>
-/// The dotnet SDK returns two different shapes depending on how many properties were requested:
-/// <list type="bullet">
-/// <item><description>A <b>single</b> <c>--getProperty</c> returns a raw scalar (e.g. <c>WinExe</c>).</description></item>
-/// <item><description><b>Multiple</b> <c>--getProperty</c> return JSON: <c>{ "Properties": { "Name": "Value", ... } }</c>.</description></item>
-/// </list>
-/// This helper accepts either shape. Pure and side-effect free so it can be unit tested without a build.
+/// The dotnet SDK returns a raw scalar for a <b>single</b> <c>--getProperty</c>, or JSON
+/// (<c>{ "Properties": { "Name": "Value", ... } }</c>) for <b>multiple</b>. This helper accepts either
+/// shape. Pure and side-effect free.
 /// </remarks>
 internal static class MsBuildPropertyReader
 {
     /// <summary>
-    /// Parses <paramref name="stdout"/> for the requested properties.
+    /// Parses <paramref name="stdout"/> for the requested properties into a case-insensitive map (values
+    /// may be empty; missing properties are absent). When exactly one name is requested and the output
+    /// isn't JSON, the whole trimmed output is that property's value.
     /// </summary>
-    /// <param name="stdout">Raw stdout captured from the dotnet invocation.</param>
-    /// <param name="requestedNames">
-    /// The property names that were requested. When exactly one name is requested and the output is
-    /// not JSON, the whole (trimmed) output is treated as that property's value.
-    /// </param>
-    /// <returns>
-    /// A case-insensitive map of property name to value. Values may be empty strings (a property that
-    /// evaluated to empty). Missing properties are simply absent from the map.
-    /// </returns>
     public static IReadOnlyDictionary<string, string> Parse(string stdout, IReadOnlyList<string> requestedNames)
     {
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -44,10 +34,9 @@ internal static class MsBuildPropertyReader
             return result;
         }
 
-        // JSON shape: { "Properties": { "Name": "Value", ... } }. Normally stdout is clean JSON, but be
-        // tolerant of a diagnostic preamble before the object AND of trailing content after it. We only
-        // accept an object that actually carries a "Properties" object, so a scalar value that merely
-        // contains a '{' can never be misread as the JSON shape.
+        // JSON shape: { "Properties": { "Name": "Value", ... } }. Tolerant of a diagnostic preamble/trailer;
+        // only an object that actually carries a "Properties" object is accepted, so a scalar containing '{'
+        // is never misread.
         if (TryReadPropertiesObject(trimmed, result))
         {
             return result;
@@ -63,12 +52,9 @@ internal static class MsBuildPropertyReader
     }
 
     /// <summary>
-    /// Parses the stdout of <c>dotnet build/msbuild --getItem:...</c> into a map of item name to the
-    /// list of item identities (the <c>Include</c> values). The SDK emits
-    /// <c>{ "Items": { "ItemName": [ { "Identity": "…", … }, … ], … } }</c> (combined with
-    /// <c>{ "Properties": … }</c> when properties are requested too). Tolerant of a diagnostic preamble
-    /// before the object and trailing content after it, mirroring <see cref="Parse"/>. Pure and
-    /// side-effect free so it can be unit tested without a build. Missing item groups are simply absent.
+    /// Parses the stdout of <c>dotnet build/msbuild --getItem:...</c> into a map of item name to its
+    /// <c>Include</c> identities. The SDK emits <c>{ "Items": { "ItemName": [ { "Identity": "…" }, … ] } }</c>.
+    /// Tolerant of a diagnostic preamble/trailer like <see cref="Parse"/>; pure and side-effect free.
     /// </summary>
     public static IReadOnlyDictionary<string, IReadOnlyList<string>> ParseItems(string stdout)
     {
@@ -83,10 +69,8 @@ internal static class MsBuildPropertyReader
     }
 
     /// <summary>
-    /// Scans <paramref name="text"/> for the first JSON object that carries an <c>"Items"</c> object and,
-    /// if found, fills <paramref name="result"/> with each item group's identities. Uses the shared
-    /// candidate-brace scan (<see cref="TryScanJsonObject"/>) so a diagnostic preamble/trailer cannot
-    /// defeat parsing.
+    /// Scans <paramref name="text"/> for the first JSON object carrying an <c>"Items"</c> object and fills
+    /// <paramref name="result"/> with each group's identities.
     /// </summary>
     private static void TryReadItemsObject(string text, Dictionary<string, IReadOnlyList<string>> result)
     {
@@ -122,9 +106,8 @@ internal static class MsBuildPropertyReader
     }
 
     /// <summary>
-    /// Scans <paramref name="text"/> for the first JSON object that is a <c>{ "Properties": {...} }</c>
-    /// envelope and, if found, fills <paramref name="result"/> and returns <c>true</c>. Uses the shared
-    /// candidate-brace scan (<see cref="TryScanJsonObject"/>).
+    /// Scans <paramref name="text"/> for the first <c>{ "Properties": {...} }</c> envelope and, if found,
+    /// fills <paramref name="result"/> and returns <c>true</c>.
     /// </summary>
     private static bool TryReadPropertiesObject(string text, Dictionary<string, string> result)
     {
@@ -148,13 +131,9 @@ internal static class MsBuildPropertyReader
 
     /// <summary>
     /// Scans <paramref name="text"/> for the first <c>'{'</c> that begins a valid JSON object which
-    /// <paramref name="tryHandle"/> accepts. Each <c>'{'</c> is tried as a candidate start (skipping a
-    /// non-JSON preamble brace), and a single JSON value is read via
-    /// <see cref="JsonDocument.TryParseValue"/> so trailing diagnostics after the object are ignored
-    /// rather than causing a parse failure. <paramref name="tryHandle"/> receives each parsed root object
-    /// and returns <c>true</c> once it has consumed the target object (it must copy out any values before
-    /// returning, as the backing <see cref="JsonDocument"/> is disposed immediately after). Returns
-    /// whether an object was handled.
+    /// <paramref name="tryHandle"/> accepts, skipping non-JSON preamble braces and ignoring trailing
+    /// diagnostics. <paramref name="tryHandle"/> must copy out any values before returning, as the backing
+    /// <see cref="JsonDocument"/> is disposed immediately after. Returns whether an object was handled.
     /// </summary>
     private static bool TryScanJsonObject(string text, Func<JsonElement, bool> tryHandle)
     {

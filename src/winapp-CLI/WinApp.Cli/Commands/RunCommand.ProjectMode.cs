@@ -65,9 +65,7 @@ internal partial class RunCommand
             }
             if (!string.IsNullOrWhiteSpace(executable))
             {
-                // --executable selects an entry within an MSIX layout; an unpackaged app is launched
-                // from the project's own build output (RunCommand), so honoring it is impossible — reject
-                // rather than silently ignore.
+                // --executable selects an entry within an MSIX layout; unusable for an unpackaged app.
                 rejected.Add("--executable");
             }
             return rejected;
@@ -101,22 +99,19 @@ internal partial class RunCommand
             var noRestore = parseResult.GetValue(NoRestoreOption);
             var properties = parseResult.GetValue(PropertyOption) ?? [];
 
-            // Resolve the explicit effective framework ONCE (--framework > bare -p:TargetFramework), so the
-            // build options below and the classification pass (BuildClassificationInputs) share the SAME TFM
-            // and can never evaluate a different one for a multi-targeted project (M3). The lower-precedence
-            // multi-target first-TFM auto-pin still happens in the build resolution when this is null.
+            // Resolve the explicit effective framework ONCE (--framework > bare -p:TargetFramework) so the
+            // build and the classification pass (BuildClassificationInputs) share the SAME TFM and never
+            // evaluate a different one for a multi-targeted project. The lower-precedence multi-target
+            // first-TFM auto-pin still happens in build resolution when this is null.
             var framework = ProjectRunService.ResolveExplicitFramework(parseResult.GetValue(FrameworkOption), properties);
 
-            // Reject malformed -p values early: each must be Name=Value with a non-empty,
-            // non-whitespace name, otherwise it would become a nonsensical '-p:=Value' / '-p: =Value'
-            // MSBuild argument.
+            // Reject malformed -p values early so they never become a nonsensical MSBuild argument.
             foreach (var property in properties)
             {
-                // MSBuild's /p splits a single token on ';' into MULTIPLE properties, so a raw ';' here
-                // packs more than one property into one -p. That smuggles a dedicated-flag property (e.g.
-                // RuntimeIdentifier=win-arm64) past the ForwardableProperties filter — which only inspects
-                // the name before the FIRST '=' — and lets it override the arch winapp conveys via the RID.
-                // The option is repeatable, so reject packing and point at the escape for a literal ';'.
+                // MSBuild splits a -p token on ';' into MULTIPLE properties, which would smuggle a
+                // dedicated-flag property (e.g. RuntimeIdentifier) past the name-only ForwardableProperties
+                // filter and override the arch winapp conveys via the RID. Reject packing; '%3B' escapes a
+                // literal ';' in a value.
                 if (property.Contains(';'))
                 {
                     return Fail(
@@ -150,11 +145,10 @@ internal partial class RunCommand
                 return Fail(archError!, isJson);
             }
 
-            // Immediate, persistent context line (UX): the pre-build steps below (SDK probe, packaging
-            // evaluate, effective-TFM/shim evaluates, restore) each spawn dotnet and can take several
-            // silent seconds. Print WHAT we're about to run — and, when the input was ambiguous, WHY this
-            // project was chosen (from which solution) — before the first spawn so the run never looks
-            // hung. Suppressed for --json (stdout must stay pure) and --quiet (Information off).
+            // Immediate, persistent context line (UX): the pre-build steps below each spawn dotnet and can
+            // take several silent seconds. Print WHAT we're about to run — and, when the input was
+            // ambiguous, WHY this project was chosen — so the run never looks hung. Suppressed for --json
+            // (stdout must stay pure) and --quiet (Information off).
             if (!isJson && logger.IsEnabled(LogLevel.Information))
             {
                 var context = new StringBuilder($"{csproj.Name}  ·  {configuration} | {architecture}");
@@ -179,19 +173,16 @@ internal partial class RunCommand
                 return Fail(sdkError, isJson);
             }
 
-            // Build (unless --no-build) and resolve the output properties. ProjectRunService owns the
-            // build UX: it always streams dotnet's output live and prints the exact dotnet invocation,
-            // so success-path warnings stay visible and failures are self-describing. In --json/--quiet
-            // mode it routes the invocation and build output to stderr to keep stdout pure JSON / clean.
+            // Build (unless --no-build) and resolve the output properties. ProjectRunService owns the build
+            // UX: it streams dotnet's output live and prints the exact invocation; in --json/--quiet mode it
+            // routes both to stderr to keep stdout pure.
             var buildOptions = new ProjectRunOptions(configuration, architecture, framework, noBuild, noRestore, properties, isJson, solution);
 
             // Fail fast (issue #676): identity-only options like --no-launch are meaningless for an
-            // unpackaged app, but are only rejected authoritatively AFTER packaging is known (post-build,
-            // in RunUnpackagedProjectAsync). Rather than making the user pay the full build cost only to
-            // be rejected, cheaply evaluate WindowsPackageType first and reject now when the project is
-            // DEFINITIVELY unpackaged (explicit WindowsPackageType=None). Packaged/indeterminate projects
-            // fall through to the build + authoritative gate. Skipped under --no-build (no build cost to
-            // save; that path's evaluate + gate are already fast).
+            // unpackaged app but are only rejected authoritatively AFTER packaging is known (post-build).
+            // Cheaply evaluate WindowsPackageType first and reject now when the project is DEFINITIVELY
+            // unpackaged, so the user doesn't pay the full build cost only to be rejected. Skipped under
+            // --no-build (no build cost to save).
             if (!noBuild)
             {
                 var incompatible = CollectUnpackagedIncompatibleOptions(noLaunch, withAlias, unregisterOnExit, clean, manifest, outputAppXDirectory, executable);
@@ -299,10 +290,9 @@ internal partial class RunCommand
             bool isJson,
             CancellationToken cancellationToken)
         {
-            // Reject options that only make sense for a packaged (MSIX identity) app. This is the
-            // AUTHORITATIVE gate — it runs once packaging is definitively known. RunProjectModeAsync
-            // additionally fails fast on the definitively-unpackaged case before building (issue #676),
-            // but this gate still catches the indeterminate-then-unpackaged case that only resolves here.
+            // AUTHORITATIVE gate — rejects packaged-only options once packaging is definitively known.
+            // RunProjectModeAsync fails fast on the definitively-unpackaged case before building (issue
+            // #676); this still catches the indeterminate-then-unpackaged case that only resolves here.
             var rejected = CollectUnpackagedIncompatibleOptions(noLaunch, withAlias, unregisterOnExit, clean, manifest, outputAppXDirectory, executable);
             if (rejected.Count > 0)
             {
@@ -312,10 +302,9 @@ internal partial class RunCommand
             var exePath = resolution.RunCommand!; // guaranteed non-null for unpackaged by BuildAndResolveAsync
 
             // Launch with the caller's current directory (like `dotnet run`), NOT the build-output
-            // directory. Apps that resolve config/data files via paths relative to the working
-            // directory must see the same cwd they would under `dotnet run`; using the exe's output
-            // folder would silently break them. Assembly/resource lookup is unaffected — the .NET
-            // apphost resolves those from its own location (AppContext.BaseDirectory), independent of cwd.
+            // directory, so apps that resolve config/data files relative to the working directory behave
+            // the same. Assembly/resource lookup is unaffected (the apphost resolves those from its own
+            // location).
             var workingDirectory = currentDirectoryProvider.GetCurrentDirectory();
 
             // Install the framework-dependent Windows App Runtime (Framework + DDLM) the app's
@@ -386,9 +375,9 @@ internal partial class RunCommand
                 return 1;
             }
 
-            // Own the handle for the lifetime of the wait so the exit code survives the process
-            // exiting and the PID can't be reused out from under us. Disposing does not kill the OS
-            // process, so the --detach path below can return while the app keeps running.
+            // Own the handle for the lifetime of the wait so the exit code survives the process exiting
+            // and the PID can't be reused. Disposing doesn't kill the OS process, so --detach can return
+            // while the app keeps running.
             using (launched)
             {
                 var processId = launched.ProcessId;
@@ -452,10 +441,9 @@ internal partial class RunCommand
         /// <summary>
         /// Computes the effective build inputs threaded into candidate classification so a multi-
         /// <c>.csproj</c> directory or solution is resolved under the SAME Configuration/arch/TFM/user
-        /// <c>-p</c> the build will use (not MSBuild defaults). Returns null when the architecture can't
-        /// be resolved — classification then uses defaults and <see cref="RunProjectModeAsync"/> surfaces
-        /// the arch error. Reads only project-mode options and is a no-op for folder mode (which never
-        /// classifies), so evaluating it before mode is known is harmless.
+        /// <c>-p</c> the build will use. Returns null when the architecture can't be resolved
+        /// (classification then uses defaults and <see cref="RunProjectModeAsync"/> surfaces the arch
+        /// error). No-op for folder mode, so evaluating it before mode is known is harmless.
         /// </summary>
         internal static ProjectClassificationInputs? BuildClassificationInputs(ParseResult parseResult)
         {
@@ -469,7 +457,7 @@ internal partial class RunCommand
             var configuration = parseResult.GetValue(ConfigurationOption) ?? "Debug";
             var properties = parseResult.GetValue(PropertyOption) ?? [];
             // Share the SAME explicit effective framework the build uses (--framework > bare
-            // -p:TargetFramework) so classification and build never evaluate a different TFM (M3).
+            // -p:TargetFramework) so classification and build never evaluate a different TFM.
             var framework = ProjectRunService.ResolveExplicitFramework(parseResult.GetValue(FrameworkOption), properties);
             return new ProjectClassificationInputs(configuration, architecture, framework, properties);
         }

@@ -9,22 +9,16 @@ namespace WinApp.Cli.Services;
 /// <summary>
 /// Pure MSBuild argument and property-token construction for <see cref="ProjectRunService"/>'s restore,
 /// build, and evaluate passes. Extracted into its own partial to keep the primary partial under the
-/// repository's file-size limits; every method here is static and side-effect-free (unit-testable in
-/// isolation).
+/// file-size limits; every method here is static and side-effect-free.
 /// </summary>
 internal sealed partial class ProjectRunService
 {
     /// <summary>
-    /// Builds the argument string for the SHIM's pre-build <c>dotnet restore</c>. It mirrors the build
-    /// pass's effective values — the RID (<c>-r win-&lt;arch&gt;</c>), the configuration (as
-    /// <c>-p:Configuration=</c>, since <c>dotnet restore</c> has no <c>-c</c> switch), user <c>-p</c>, and
-    /// solution properties — so the same graph resolves into <c>project.assets.json</c> that the
-    /// subsequent <c>--no-restore</c> build consumes. Dedicated-flag user <c>-p</c>
-    /// (Configuration/RuntimeIdentifier/TargetFramework) are filtered out via
-    /// <see cref="ForwardableProperties"/> so a conflicting <c>-p:RuntimeIdentifier</c> can't (MSBuild
-    /// last-wins) restore a different RID's assets than the build needs. Verbosity (<c>-v</c>) is omitted
-    /// (restore output is captured, not streamed) and it never adds <c>--no-restore</c> (restoring is the
-    /// whole point). Pure and unit-testable.
+    /// Builds the arguments for the pre-build <c>dotnet restore</c>. Mirrors the build pass's effective
+    /// RID / Configuration / user <c>-p</c> / solution properties so the same graph resolves into
+    /// <c>project.assets.json</c> that the subsequent <c>--no-restore</c> build consumes. Dedicated-flag
+    /// user <c>-p</c> are filtered (see <see cref="ForwardableProperties"/>) so a conflicting
+    /// <c>-p:RuntimeIdentifier</c> can't restore a different RID's assets than the build needs.
     /// </summary>
     internal static string BuildRestorePassArguments(FileInfo csproj, ProjectRunOptions options)
     {
@@ -35,15 +29,13 @@ internal sealed partial class ProjectRunService
             csproj.FullName,
             "-r",
             rid,
-            // 'dotnet restore' has no -c switch, so the configuration flows as an MSBuild property. This
-            // makes config-conditional <PackageReference Condition="'$(Configuration)'=='Release'"> land
-            // in project.assets.json BEFORE the --no-restore build consumes them.
+            // 'dotnet restore' has no -c switch; Configuration flows as a property so config-conditional
+            // <PackageReference> lands in project.assets.json before the --no-restore build consumes it.
             $"-p:Configuration={options.Configuration}",
         };
 
-        // Forward user -p EXCEPT the dedicated-flag properties the -r / -p:Configuration above own — a
-        // conflicting user -p:RuntimeIdentifier/TargetFramework/Configuration would otherwise diverge the
-        // restored graph from what the --no-restore build resolves. WarnOnOverriddenFlags surfaces it.
+        // Drop dedicated-flag user -p (RID/Configuration/TFM) so the restored graph can't diverge from
+        // what the --no-restore build resolves; WarnOnOverriddenFlags surfaces the conflict.
         foreach (var property in ForwardableProperties(options.Properties))
         {
             tokens.Add($"-p:{property}");
@@ -55,20 +47,11 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
-    /// Builds the argument string for the streaming BUILD pass: a plain <c>dotnet build</c> that
-    /// produces the output and STREAMS its console log. It deliberately omits <c>--getProperty</c>
-    /// (which suppresses that log) and needs no explicit <c>-t:Build</c> (Build is the default
-    /// target). The dedicated <c>-c</c>/<c>-r</c>/<c>-f</c> switches always beat a same-named user
-    /// <c>-p</c>. Architecture is conveyed by the RID (<c>-r win-&lt;arch&gt;</c>) ONLY — project mode
-    /// does NOT force a global <c>-p:Platform</c> (nor its <c>EnableDynamicPlatformResolution</c>
-    /// companion), matching how Visual Studio and a plain <c>dotnet build -r win-&lt;arch&gt;</c> convey
-    /// arch. A forced global Platform de-synchronizes a no-<c>&lt;Platforms&gt;</c> WinUI library
-    /// reference (its XAML/MRT outputs compile to the AnyCPU <c>bin\Debug\…</c> path while the app's
-    /// Platform-driven lookup expects <c>bin\&lt;arch&gt;\Debug\…</c>) → MSB3030/PRI252. The RID alone
-    /// still yields the correct packaged manifest <c>ProcessorArchitecture</c> and apphost arch. A user
-    /// who explicitly passes <c>-p:Platform=…</c>/<c>-p:EnableDynamicPlatformResolution=…</c> still has
-    /// it forwarded (via the user <c>-p</c> loop). The <c>-v</c> verbosity is mapped from the CLI's log
-    /// level (Change #1).
+    /// Builds the arguments for the streaming BUILD pass (a plain <c>dotnet build</c> that streams its
+    /// console log). Omits <c>--getProperty</c> (which suppresses that log). Architecture is conveyed by
+    /// the RID (<c>-r win-&lt;arch&gt;</c>) ONLY — project mode never injects <c>-p:Platform</c> (nor
+    /// <c>EnableDynamicPlatformResolution</c>), which would desync a no-<c>&lt;Platforms&gt;</c> WinUI
+    /// library reference → MSB3030/PRI252. A user-supplied <c>-p:Platform</c> still flows through.
     /// </summary>
     internal static string BuildBuildPassArguments(FileInfo csproj, ProjectRunOptions options, string verbosity, string? csWinRTMetadataFolder = null, bool nativeTerminal = false)
     {
@@ -98,37 +81,25 @@ internal sealed partial class ProjectRunService
         tokens.Add("-v");
         tokens.Add(verbosity);
 
-        // MSBuild terminal-logger regime for the build pass, gated on how winapp launches dotnet:
-        //  • Redirected (streaming/json/quiet paths, nativeTerminal:false): pin `-tl:off`. winapp redirects
-        //    dotnet's stdout, and the console logger is the only mode available under redirection; pinning
-        //    off keeps clean append-only output and guards a future SDK that redefines `-tl:auto` and
-        //    reintroduces the animated `(0.1s)(0.2s)…` carriage-return redraw churn.
-        //  • Native terminal (nativeTerminal:true, inherited stdio on a real TTY): omit the token entirely
-        //    so dotnet's default `-tl:auto` resolves to ON, giving the native live build display that
-        //    de-duplicates warnings (the console logger double-prints them). Do NOT add `-tl:on` — absence
-        //    is the correct default and lets dotnet honor a user's own TERM/redirection decisions.
-        // Build pass only — the `--getProperty` evaluate pass is left untouched.
+        // Terminal-logger regime depends on how winapp launches dotnet. Redirected (streaming/json/quiet):
+        // pin -tl:off for clean append-only output. Native TTY: omit the token so dotnet's -tl:auto enables
+        // the live display. Never -tl:on. Build pass only; the evaluate pass is untouched.
         if (!nativeTerminal)
         {
             tokens.Add("-tl:off");
         }
 
-        // Forward user -p properties, but drop any that duplicate a dedicated -c/-r/-f switch so this
-        // build pass and the evaluate pass can never resolve a different Configuration/RID/TFM (see
-        // DedicatedFlagProperties / WarnOnOverriddenFlags). A user-supplied -p:Platform / EDPR still
-        // flows through and is respected — project mode itself never injects them.
+        // Drop dedicated-switch dupes (-c/-r/-f) so the build and evaluate passes can't resolve a
+        // different Configuration/RID/TFM; a user -p:Platform / EDPR still flows through and is respected.
         foreach (var property in ForwardableProperties(options.Properties))
         {
             tokens.Add($"-p:{property}");
         }
 
-        // When the target was resolved from a solution, define $(SolutionDir) and its siblings so
-        // projects that reference them build exactly as they do under `dotnet build <sln>` / VS.
         AppendSolutionProperties(tokens, options);
 
-        // SHIM (temporary): inject the resolved ref-pack winmd folder so cswinrt.exe can find contract
-        // winmds without a registered Windows SDK. Only present when the shim resolved a folder (SDK
-        // absent + ref pack restored) and the user didn't set the property. See CsWinRTMetadataShimService.
+        // SHIM (temporary): inject the resolved ref-pack winmd folder so cswinrt.exe finds contract winmds
+        // without a registered Windows SDK. See CsWinRTMetadataShimService.
         if (!string.IsNullOrEmpty(csWinRTMetadataFolder))
         {
             tokens.Add($"-p:CsWinRTWindowsMetadata={csWinRTMetadataFolder}");
@@ -138,12 +109,11 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
-    /// Builds the argument string for the project-mode EVALUATE pass: a fast, side-effect-free
-    /// <c>dotnet msbuild --getProperty</c> that returns the resolved output paths as JSON. It is the
-    /// same shape used on the <c>--no-build</c> path and is fed the SAME effective build inputs as the
-    /// build pass so its <c>TargetDir</c>/<c>RunCommand</c> match what was built. <c>dotnet msbuild</c>
-    /// rejects <c>-c</c>/<c>-r</c> (MSB1001), so Configuration/RID/TFM are passed as <c>-p:</c> and are
-    /// emitted LAST so MSBuild's last-wins makes a dedicated value beat a conflicting user <c>-p</c>.
+    /// Builds the arguments for the EVALUATE pass: a fast, side-effect-free <c>dotnet msbuild
+    /// --getProperty</c> returning resolved output paths as JSON. Fed the SAME effective build inputs as
+    /// the build pass so its <c>TargetDir</c>/<c>RunCommand</c> match what was built. <c>dotnet msbuild</c>
+    /// rejects <c>-c</c>/<c>-r</c> (MSB1001), so Configuration/RID/TFM go as <c>-p:</c> emitted LAST
+    /// (MSBuild last-wins beats a conflicting user <c>-p</c>).
     /// </summary>
     internal static string BuildEvaluateArguments(FileInfo csproj, ProjectRunOptions options, string? csWinRTMetadataFolder = null)
     {
@@ -155,17 +125,13 @@ internal sealed partial class ProjectRunService
             csproj.FullName,
         };
 
-        // Forward user -p, dropping any that duplicate a dedicated switch (same filter as the build pass)
-        // so the two passes stay in lock-step on Configuration/RID/TFM; the dedicated -p: equivalents are
-        // then emitted below. A user-supplied -p:Platform / EDPR flows through here and is respected;
-        // project mode never injects them (arch is conveyed by RuntimeIdentifier only).
+        // Drop dedicated-switch dupes (same filter as the build pass) so the two passes stay in lock-step;
+        // the dedicated -p: equivalents are emitted below. A user -p:Platform / EDPR flows through.
         foreach (var property in ForwardableProperties(options.Properties))
         {
             tokens.Add($"-p:{property}");
         }
 
-        // Match the build pass: define $(SolutionDir) & siblings so the evaluated TargetDir/RunCommand
-        // resolve against the same solution-anchored inputs as the build (solution mode only).
         AppendSolutionProperties(tokens, options);
 
         tokens.Add($"-p:Configuration={options.Configuration}");
@@ -175,8 +141,7 @@ internal sealed partial class ProjectRunService
             tokens.Add($"-p:TargetFramework={options.Framework}");
         }
 
-        // SHIM (temporary): keep the evaluate pass's inputs identical to the build pass — inject the same
-        // CsWinRTWindowsMetadata folder when the shim resolved one. See CsWinRTMetadataShimService.
+        // SHIM (temporary): keep the evaluate pass's inputs identical to the build pass.
         if (!string.IsNullOrEmpty(csWinRTMetadataFolder))
         {
             tokens.Add($"-p:CsWinRTWindowsMetadata={csWinRTMetadataFolder}");
@@ -191,11 +156,9 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
-    /// Appends the <c>Solution*</c> MSBuild properties a solution build normally sets — most
-    /// importantly <c>$(SolutionDir)</c> — when the run target was resolved from a solution. Building
-    /// a bare <c>.csproj</c> leaves these undefined, so projects that reference them (shared prop
-    /// imports, output paths) fail; defining them here builds the project the same way it builds under
-    /// <c>dotnet build &lt;sln&gt;</c> / Visual Studio. No-op for a bare <c>.csproj</c> target.
+    /// Appends the <c>Solution*</c> MSBuild properties a solution build normally sets — most importantly
+    /// <c>$(SolutionDir)</c> — when the target was resolved from a solution, so projects referencing them
+    /// build as they do under <c>dotnet build &lt;sln&gt;</c> / VS. No-op for a bare <c>.csproj</c>.
     /// </summary>
     private static void AppendSolutionProperties(List<string> tokens, ProjectRunOptions options)
     {
@@ -204,10 +167,8 @@ internal sealed partial class ProjectRunService
             return;
         }
 
-        // User -p properties are emitted before this call, and MSBuild is last-wins, so re-emitting a
-        // Solution* property the user already set would clobber their value. Skip any the user specified
-        // so an explicit `-p:SolutionDir=…` (or sibling) always wins. Covers every solution-attached
-        // target — bare-.csproj-with-owning-sln, directory-resolved, and explicit-solution alike.
+        // MSBuild is last-wins and user -p is emitted first, so skip any Solution* the user set explicitly
+        // (an explicit -p:SolutionDir=… always wins).
         foreach (var token in BuildSolutionPropertyTokens(solution))
         {
             if (UserSpecifiesProperty(options.Properties, SolutionPropertyName(token)))
@@ -220,14 +181,11 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
-    /// Builds the MSBuild <c>-p:</c> property tokens used to classify runnable candidates so the
-    /// evaluate reads <c>OutputType</c>/test markers under the SAME globals the build will use. Mirrors
-    /// the property section of <see cref="BuildEvaluateArguments"/>: forwardable user <c>-p</c> first,
-    /// then the <c>Solution*</c> props (solution targets only, skipping any the user set so their value
-    /// wins), then Configuration/RID/TargetFramework LAST so MSBuild's last-wins makes a dedicated value
-    /// beat a conflicting user <c>-p</c>. When <paramref name="inputs"/> is null, preserves the prior
-    /// behavior: solution props only (or nothing for a directory), letting classification use MSBuild's
-    /// defaults for Configuration/Platform/RID/TFM.
+    /// Builds the <c>-p:</c> property tokens used to classify runnable candidates so the evaluate reads
+    /// <c>OutputType</c>/test markers under the SAME globals the build uses. Mirrors the property section
+    /// of <see cref="BuildEvaluateArguments"/>: forwardable user <c>-p</c>, then <c>Solution*</c> props
+    /// (skipping any the user set), then Configuration/RID/TFM LAST. Null <paramref name="inputs"/> emits
+    /// solution props only (classification against MSBuild defaults).
     /// </summary>
     private static IReadOnlyList<string> BuildClassificationPropertyTokens(
         ProjectClassificationInputs? inputs,
@@ -274,11 +232,9 @@ internal sealed partial class ProjectRunService
 
     /// <summary>
     /// Reads the effective value of the user's <c>-p Name=Value</c> for <paramref name="name"/>
-    /// (case-insensitive). MSBuild is last-wins for repeated properties, so this scans ALL entries and
-    /// returns the LAST non-empty match; an empty value (e.g. <c>-p:TargetFramework=</c>) is treated as
-    /// "not specified" and does not hide a later valid value. Returns <see langword="true"/> only when a
-    /// non-empty value was found. Project-mode validation rejects a ';'-packed <c>-p</c> up front, so each
-    /// entry is a single <c>Name=Value</c> here.
+    /// (case-insensitive). MSBuild is last-wins, so this returns the LAST non-empty match; an empty value
+    /// (<c>-p:TargetFramework=</c>) is treated as "not specified" and doesn't hide a later valid one.
+    /// Returns <see langword="true"/> only when a non-empty value was found.
     /// </summary>
     private static bool TryGetUserProperty(IReadOnlyList<string> properties, string name, out string value)
     {
@@ -302,13 +258,11 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
-    /// Resolves the <em>explicit</em> effective target framework from the CLI inputs — the value both the
-    /// classification pass and the build pass must share so they never evaluate a different TFM. Precedence:
-    /// a dedicated <c>--framework</c> wins; otherwise a bare <c>-p:TargetFramework</c> is PROMOTED (last-wins
-    /// across repeats, empty ignored — see <see cref="TryGetUserProperty"/>); otherwise <see langword="null"/>,
-    /// leaving the lower-precedence multi-target first-TFM auto-pin to the build resolution. This is a pure
-    /// function of the args (no project evaluate), so it can run BEFORE input/classification resolution and be
-    /// threaded into both, keeping the two passes from diverging for a multi-targeted project.
+    /// Resolves the <em>explicit</em> effective target framework shared by the classification and build
+    /// passes so they never evaluate a different TFM. Precedence: <c>--framework</c> wins; else a bare
+    /// <c>-p:TargetFramework</c> is promoted (last-wins, empty ignored); else <see langword="null"/>
+    /// (leaving the multi-target first-TFM auto-pin to build resolution). Pure function of the args, so it
+    /// runs BEFORE input/classification and is threaded into both.
     /// </summary>
     internal static string? ResolveExplicitFramework(string? frameworkOption, IReadOnlyList<string> properties)
     {
@@ -320,23 +274,18 @@ internal sealed partial class ProjectRunService
         return TryGetUserProperty(properties, "TargetFramework", out var userFramework) ? userFramework : null;
     }
 
-
     /// <summary>
-    /// User <c>Name=Value</c> properties with any that duplicate a dedicated <c>-c</c>/<c>-r</c>/<c>-f</c>
-    /// switch removed (see <see cref="DedicatedFlagProperties"/>). Applied to BOTH the build and evaluate
-    /// passes so the dedicated switch is the single source of Configuration/RID/TFM in each — a conflicting
-    /// user <c>-p</c> is already surfaced by <see cref="WarnOnOverriddenFlags"/>.
+    /// User <c>Name=Value</c> properties with dedicated <c>-c</c>/<c>-r</c>/<c>-f</c> dupes removed (see
+    /// <see cref="DedicatedFlagProperties"/>), so the dedicated switch is the single source of
+    /// Configuration/RID/TFM in both the build and evaluate passes.
     /// </summary>
     private static IEnumerable<string> ForwardableProperties(IReadOnlyList<string> properties) =>
         properties.Where(p => !IsDedicatedFlagProperty(p));
 
     /// <summary>
-    /// True when a <c>Name=Value</c> property names a dedicated-switch property (case-insensitive).
-    /// Defense-in-depth: even though project-mode validation rejects a ';'-packed <c>-p</c> up front (a
-    /// single MSBuild <c>/p</c> token splits on ';' into multiple properties), split on ';' here too and
-    /// treat the token as dedicated if ANY packed segment is a dedicated-flag property — so a smuggled
-    /// <c>RuntimeIdentifier</c>/<c>Configuration</c>/<c>TargetFramework</c> can never slip through
-    /// forwarding and override the switch winapp sets.
+    /// True when a <c>Name=Value</c> property names a dedicated-switch property (case-insensitive). Splits
+    /// on ';' too and matches ANY packed segment, so a smuggled <c>RuntimeIdentifier</c>/<c>Configuration</c>/
+    /// <c>TargetFramework</c> in a packed <c>-p</c> can never override the switch winapp sets.
     /// </summary>
     private static bool IsDedicatedFlagProperty(string property) =>
         property.Split(';')
@@ -352,16 +301,14 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
-    /// Builds the <c>-p:Solution*</c> MSBuild property tokens a solution build normally sets — most
-    /// importantly <c>$(SolutionDir)</c> (trailing separator, per MSBuild convention). Shared by the
-    /// build pass, the evaluation pass, and project classification so all three see the same
-    /// solution-defined properties.
+    /// Builds the <c>-p:Solution*</c> tokens a solution build sets — most importantly <c>$(SolutionDir)</c>
+    /// (trailing separator, per MSBuild convention). Shared by the build, evaluate, and classification
+    /// passes so all three see the same solution-defined properties.
     /// </summary>
     private static IReadOnlyList<string> BuildSolutionPropertyTokens(FileInfo solution)
     {
         var solutionDir = solution.Directory?.FullName ?? Directory.GetCurrentDirectory();
-        // MSBuild's $(SolutionDir) convention is a trailing directory separator. EscapeArgument
-        // doubles a trailing backslash before a closing quote, so a quoted value round-trips exactly.
+        // $(SolutionDir) convention is a trailing separator; EscapeArgument round-trips it under quoting.
         if (!solutionDir.EndsWith(Path.DirectorySeparatorChar) && !solutionDir.EndsWith(Path.AltDirectorySeparatorChar))
         {
             solutionDir += Path.DirectorySeparatorChar;
@@ -369,11 +316,8 @@ internal sealed partial class ProjectRunService
 
         var solutionName = Path.GetFileNameWithoutExtension(solution.Name);
 
-        // MSBuild-escape each value: an unescaped ';' in a legal NTFS path would be read as a property
-        // separator (silently truncating $(SolutionDir) and injecting a bogus extra property), and a
-        // literal '%' could be mis-decoded as an escape. Command-line quoting (EscapeArgument, applied
-        // when these tokens become process args) is a *separate* layer and does not cover MSBuild's own
-        // value grammar.
+        // MSBuild-escape each value: an unescaped ';' in a legal path reads as a property separator and a
+        // literal '%' could be mis-decoded. This is a separate layer from command-line quoting.
         return
         [
             $"-p:SolutionDir={EscapeMsBuildPropertyValue(solutionDir)}",
@@ -385,11 +329,9 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
-    /// Percent-escapes the characters MSBuild treats specially inside a property value passed via
-    /// <c>-p:Name=Value</c> — most importantly <c>;</c> (the property/item separator) and <c>%</c> (the
-    /// escape lead-in). Escaping <c>%</c> first keeps the transform idempotent-safe. Other special
-    /// characters (<c>$ @ ' " ( )</c>) are inert in a command-line property value and left as-is so paths
-    /// stay readable in logs.
+    /// Percent-escapes the characters MSBuild treats specially in a <c>-p:Name=Value</c> property value —
+    /// <c>;</c> (property separator) and <c>%</c> (escape lead-in, escaped first to stay idempotent-safe).
+    /// Other special chars are inert here and left as-is so paths stay readable in logs.
     /// </summary>
     private static string EscapeMsBuildPropertyValue(string value) =>
         value.Replace("%", "%25", StringComparison.Ordinal)

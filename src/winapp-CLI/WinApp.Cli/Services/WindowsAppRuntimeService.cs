@@ -8,16 +8,13 @@ namespace WinApp.Cli.Services;
 
 /// <summary>
 /// Locates, installs, and gates the framework-dependent Windows App Runtime (Framework + DDLM) MSIX
-/// packages an unpackaged WinUI app needs at startup. Extracted from <see cref="WorkspaceSetupService"/>
-/// so this runtime-install responsibility has its own home (pr-review M9).
+/// packages an unpackaged WinUI app needs at startup.
 /// </summary>
 internal class WindowsAppRuntimeService(
     IPackageRegistrationService packageRegistrationService,
     INugetService nugetService) : IWindowsAppRuntimeService
 {
-    /// <summary>
-    /// Package entry information from MSIX inventory
-    /// </summary>
+    /// <summary>Package entry information from MSIX inventory.</summary>
     public class MsixPackageEntry
     {
         public required string FileName { get; set; }
@@ -25,23 +22,18 @@ internal class WindowsAppRuntimeService(
     }
 
     /// <summary>
-    /// Parses the MSIX inventory file and returns package entries (shared implementation)
+    /// Parses the MSIX inventory file and returns package entries.
     /// </summary>
-    /// <param name="msixDir">Directory containing the MSIX packages</param>
-    /// <param name="cancellationToken">Cancellation token</param>
     /// <param name="architecture">
     /// Target architecture whose <c>win10-{arch}</c> inventory is read. When <c>null</c>, defaults to the
-    /// CLI's process architecture (folder mode / legacy callers) — preserving the original behavior.
-    /// Project mode passes the app's resolved arch so a cross-arch inventory is read correctly.
+    /// CLI's process architecture (folder mode / legacy callers). Project mode passes the app's resolved arch.
     /// </param>
-    /// <returns>List of package entries, or null if not found</returns>
     public static async Task<List<MsixPackageEntry>?> ParseMsixInventoryAsync(TaskContext taskContext, DirectoryInfo msixDir, CancellationToken cancellationToken, string? architecture = null)
     {
         architecture = RunArchHelper.NormalizeArchitecture(architecture) ?? RunArchHelper.DefaultArchitecture();
 
         taskContext.AddDebugMessage($"{UiSymbols.Note} Using architecture for MSIX inventory: {architecture}");
 
-        // Look for MSIX packages for the current architecture
         var msixArchDir = Path.Combine(msixDir.FullName, $"win10-{architecture}");
         if (!Directory.Exists(msixArchDir))
         {
@@ -50,7 +42,6 @@ internal class WindowsAppRuntimeService(
             return null;
         }
 
-        // Read the MSIX inventory file
         var inventoryPath = Path.Combine(msixArchDir, "msix.inventory");
         if (!File.Exists(inventoryPath))
         {
@@ -78,9 +69,8 @@ internal class WindowsAppRuntimeService(
     }
 
     /// <summary>
-    /// Reads the actual package Name and Version from the AppxManifest.xml inside an MSIX file.
-    /// The MSIX inventory file can have incorrect package names (e.g., the DDLM), so we read
-    /// the real identity directly from the package to ensure correct installation checks.
+    /// Reads the actual package Name and Version from the AppxManifest.xml inside an MSIX file, since the
+    /// inventory file's names can be wrong (e.g. the DDLM).
     /// </summary>
     private static (string? Name, string? Version) ReadMsixIdentity(string msixFilePath, TaskContext taskContext)
     {
@@ -105,24 +95,19 @@ internal class WindowsAppRuntimeService(
     }
 
     /// <summary>
-    /// Installs Windows App SDK runtime MSIX packages for the current system architecture
+    /// Installs Windows App SDK runtime MSIX packages for the target architecture.
     /// </summary>
-    /// <param name="msixDir">Directory containing the MSIX packages</param>
-    /// <param name="cancellationToken">Cancellation token</param>
     public async Task<(int InstalledCount, int ErrorCount, IReadOnlyList<(string Name, string Version)> RuntimePackages)> InstallWindowsAppRuntimeAsync(DirectoryInfo msixDir, TaskContext taskContext, CancellationToken cancellationToken, string? architecture = null)
     {
         // Directory/inventory arch: needs a concrete value to locate win10-{arch}. Default to the CLI's
-        // process arch (folder mode / legacy callers — byte-identical to the previous behavior). Project
-        // mode passes the app's resolved --arch so the correct-arch inventory/packages are used.
+        // process arch (folder mode / legacy callers); project mode passes the app's resolved --arch.
         var dirArch = RunArchHelper.NormalizeArchitecture(architecture) ?? RunArchHelper.DefaultArchitecture();
 
-        // Install-skip filter arch: preserved as-is (nullable). In folder mode this stays null so the
-        // "already installed?" check is arch-agnostic exactly as before (folder mode is
-        // byte-for-byte identical). Only project mode (explicit arch) filters by target arch so a
-        // cross-arch runtime isn't wrongly skipped because a same-name host-arch package is present.
+        // Install-skip filter arch: nullable. Folder mode keeps it null (arch-agnostic "already installed?"
+        // check); project mode filters by target arch so a cross-arch runtime isn't wrongly skipped because
+        // a same-name host-arch package is present.
         var filterArch = RunArchHelper.NormalizeArchitecture(architecture);
 
-        // Get package entries from MSIX inventory
         var packageEntries = await ParseMsixInventoryAsync(taskContext, msixDir, cancellationToken, dirArch);
         if (packageEntries == null || packageEntries.Count == 0)
         {
@@ -131,7 +116,6 @@ internal class WindowsAppRuntimeService(
 
         var msixArchDir = Path.Join(msixDir.FullName, $"win10-{dirArch}");
 
-        // Build list of packages to evaluate
         var packagesToCheck = new List<(string FilePath, string PackageName, string NewVersion, string FileName)>();
         foreach (var entry in packageEntries)
         {
@@ -142,12 +126,12 @@ internal class WindowsAppRuntimeService(
                 continue;
             }
 
-            // Read the actual package identity from the MSIX's AppxManifest.xml.
-            // The inventory file's PackageIdentity can differ from the real installed name.
+            // Read the real identity from the MSIX's AppxManifest.xml (the inventory's PackageIdentity can
+            // differ from the installed name).
             var (packageName, newVersionString) = ReadMsixIdentity(msixFilePath, taskContext);
             if (packageName == null)
             {
-                // Fallback: parse from inventory identity string
+                // Fallback: parse from inventory identity string.
                 var identityParts = entry.PackageIdentity.Split('_');
                 packageName = identityParts[0];
                 newVersionString = identityParts.Length >= 2 ? identityParts[1] : "";
@@ -168,9 +152,8 @@ internal class WindowsAppRuntimeService(
 
         foreach (var (filePath, packageName, newVersion, fileName) in packagesToCheck)
         {
-            // Check if already installed with same or newer version. The arch filter is applied only
-            // in project mode (filterArch non-null); in folder mode it's null → arch-agnostic match,
-            // byte-identical to the previous behavior.
+            // Skip if already installed with same or newer version. The arch filter applies only in project
+            // mode (filterArch non-null); folder mode is null → arch-agnostic match.
             var installedVersion = packageRegistrationService.GetInstalledVersion(packageName, filterArch);
             if (installedVersion != null)
             {
@@ -194,8 +177,7 @@ internal class WindowsAppRuntimeService(
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 // Ctrl+C — stop provisioning immediately instead of counting cancellation as an install
-                // failure and hammering the remaining packages with an already-cancelled token (which a
-                // direct caller like `update` would otherwise report as a completed runtime install).
+                // failure and hammering the remaining packages with an already-cancelled token.
                 throw;
             }
             catch (Exception ex)
@@ -205,7 +187,6 @@ internal class WindowsAppRuntimeService(
             }
         }
 
-        // Provide summary feedback
         if (installedCount > 0)
         {
             taskContext.AddDebugMessage($"{UiSymbols.Check} Installed {installedCount} MSIX packages");
@@ -215,10 +196,8 @@ internal class WindowsAppRuntimeService(
             taskContext.AddDebugMessage($"{UiSymbols.Note} {errorCount} packages failed to install");
         }
 
-        // Surface the versioned Framework + DDLM identities from this inventory so the caller can gate
-        // on the SPECIFIC runtime the app was built against, rather than accepting any
-        // registered WinAppSDK version for the arch. The version is carried alongside the name so the
-        // gate can reject a stale OLDER patch of the same Framework family.
+        // Surface the versioned Framework + DDLM identities so the caller can gate on the SPECIFIC runtime
+        // the app was built against (not any registered version) and reject a stale older patch.
         var runtimePackages = packagesToCheck
             .Where(p => IsRuntimeGatePackageName(p.PackageName))
             .Select(p => (Name: p.PackageName, Version: p.NewVersion))
@@ -229,23 +208,20 @@ internal class WindowsAppRuntimeService(
     }
 
     /// <summary>
-    /// Package-name prefixes that identify a framework-dependent Windows App Runtime registration.
-    /// The bootstrapper an unpackaged WinUI app runs at startup resolves a versioned Framework package
-    /// plus its matching-arch DDLM; both must be present for the app to boot.
+    /// Package-name prefixes that identify a framework-dependent Windows App Runtime registration (a
+    /// versioned Framework plus its matching-arch DDLM; both must be present for an unpackaged app to boot).
     /// </summary>
     private const string WinAppRuntimeFrameworkPrefix = "Microsoft.WindowsAppRuntime.";
     private const string WinAppRuntimeDdlmPrefix = "Microsoft.WinAppRuntime.DDLM.";
 
-    // The Component Store (CBS) package shares the Framework prefix but is a system singleton, not the
-    // app-facing Framework — exclude it so its presence never masks a missing target-arch Framework.
-    // Internal so a test can assert this infix actually discriminates a CBS name from a Framework name.
+    // The Component Store (CBS) package shares the Framework prefix but is a system singleton — exclude it
+    // so its presence never masks a missing target-arch Framework. (Internal for a discriminator test.)
     internal const string WinAppRuntimeCbsInfix = ".CBS.";
 
     /// <summary>
-    /// Classifies a package name as the app-facing versioned Framework (whose family name is
-    /// <c>Microsoft.WindowsAppRuntime.{major.minor}</c>, excluding the CBS system component). This is the
-    /// identity the gate exact-matches and version-compares, since the Framework's version lives in its
-    /// package Version (not its name).
+    /// Classifies a package name as the app-facing versioned Framework (family
+    /// <c>Microsoft.WindowsAppRuntime.{major.minor}</c>, excluding CBS). Its version lives in the package
+    /// Version, not the name, so the gate version-compares separately.
     /// </summary>
     private static bool IsFrameworkGatePackageName(string packageName) =>
         packageName.StartsWith(WinAppRuntimeFrameworkPrefix, StringComparison.OrdinalIgnoreCase)
@@ -260,29 +236,17 @@ internal class WindowsAppRuntimeService(
         || packageName.StartsWith(WinAppRuntimeDdlmPrefix, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Returns <c>true</c> when a framework-dependent Windows App Runtime is registered for the current
-    /// user for <paramref name="architecture"/>: i.e. both a versioned Framework package
-    /// (<c>Microsoft.WindowsAppRuntime.{version}</c>, excluding the CBS system component) and its
-    /// matching-arch DDLM (<c>Microsoft.WinAppRuntime.DDLM.*</c>) are present. Mirrors the runtime
-    /// presence check an unpackaged WinUI app's bootstrapper performs, so callers can gate the launch
-    /// instead of starting an app that would crash resolving its runtime.
+    /// Returns <c>true</c> when a framework-dependent Windows App Runtime is registered for
+    /// <paramref name="architecture"/>: both a versioned Framework package (excluding CBS) and its
+    /// matching-arch DDLM. Mirrors the bootstrapper's presence check so callers can gate the launch.
     /// <para>
-    /// When <paramref name="expectedRuntimePackages"/> is supplied (the versioned identities from
-    /// the resolved runtime inventory), the app-facing <b>Framework</b> family is additionally required to
-    /// be registered for the arch at a version <b>greater than or equal to</b> the required one. This
-    /// closes the false-pass where a version-specific install silently failed but a DIFFERENT WinAppSDK
-    /// version — or a stale OLDER patch of the same Framework family (whose family name is only
-    /// <c>major.minor</c>) — is registered for the arch (common on dev boxes); without it the generic
-    /// prefix check would pass and the app would still crash at bootstrap. The <b>DDLM</b> is
-    /// likewise release-gated: the highest registered DDLM for the arch must be <b>greater than or equal
-    /// to</b> the required DDLM release. DDLM names embed the full version and install side-by-side, so an
-    /// exact-identity match would over-strictly false-FAIL when a NEWER compatible DDLM is present — a
-    /// <c>&gt;=</c> compare on the newest installed DDLM preserves that newer-compatible acceptance while
-    /// still rejecting the false-pass where the app's release-specific DDLM failed to install but only an
-    /// OLDER DDLM is registered. If either the required or installed version is unparseable,
-    /// the check falls back to the generic presence already confirmed above. When empty or null (folder
-    /// mode / legacy callers), only the generic presence check runs — byte-identical to the previous
-    /// behavior.
+    /// When <paramref name="expectedRuntimePackages"/> is supplied, the app-facing <b>Framework</b> family
+    /// is additionally required at a version <b>&gt;=</b> the required one — closing the false-pass where a
+    /// version-specific install silently failed but a different/older WinAppSDK version is registered. The
+    /// <b>DDLM</b> is release-gated the same way (highest registered DDLM must be <b>&gt;=</b> the required
+    /// release; DDLMs install side-by-side, so a <c>&gt;=</c> compare accepts a newer compatible DDLM while
+    /// rejecting only-older). An unparseable required/installed version falls back to the generic presence
+    /// check above. Empty/null (folder mode / legacy callers) runs only the generic presence check.
     /// </para>
     /// </summary>
     public bool IsWindowsAppRuntimeRegistered(string? architecture, IReadOnlyList<(string Name, string Version)>? expectedRuntimePackages = null)
@@ -302,29 +266,24 @@ internal class WindowsAppRuntimeService(
         {
             foreach (var (name, requiredVersion) in expectedRuntimePackages)
             {
-                // Only the app-facing Framework family gets an exact-identity + version check here; the
-                // DDLM is release-gated separately below (its name embeds the full version and it installs
-                // side-by-side, so an exact-identity match would over-strictly false-fail a newer
-                // compatible DDLM — see IsDdlmReleaseSatisfied).
+                // Only the app-facing Framework family gets an exact-identity + version check; the DDLM is
+                // release-gated separately below (see IsDdlmReleaseSatisfied).
                 if (!IsFrameworkGatePackageName(name))
                 {
                     continue;
                 }
 
-                // Require the SPECIFIC Framework family the app was built against to be registered for the
-                // arch. GetInstalledVersion is an exact-name match, so a wrong minor (e.g. need 1.8, have
-                // 1.6) returns null here and fails the gate.
+                // Require the SPECIFIC Framework family the app was built against. GetInstalledVersion is an
+                // exact-name match, so a wrong minor (need 1.8, have 1.6) returns null and fails the gate.
                 var installedVersion = packageRegistrationService.GetInstalledVersion(name, arch);
                 if (installedVersion is null)
                 {
                     return false;
                 }
 
-                // Patch-level guard: the Framework family name is only major.minor,
-                // so a stale OLDER patch of the same minor would satisfy a name-presence check even when
-                // the newer patch the app needs failed to install. Reject when both versions parse and the
-                // installed one is older. If either is unparseable, fall back to presence (already confirmed
-                // above) rather than blocking a launch on an unexpected version string.
+                // Patch-level guard: the family name is only major.minor, so a stale older patch would
+                // satisfy a name-presence check. Reject when both versions parse and the installed one is
+                // older; fall back to presence when either is unparseable.
                 if (Version.TryParse(requiredVersion, out var required) &&
                     Version.TryParse(installedVersion, out var installed) &&
                     installed < required)
@@ -343,13 +302,11 @@ internal class WindowsAppRuntimeService(
     }
 
     /// <summary>
-    /// Verifies that the highest DDLM registered for <paramref name="arch"/> is at least the required DDLM
-    /// release drawn from <paramref name="expectedRuntimePackages"/>. Returns <c>true</c> (accept) when no
-    /// required DDLM version can be parsed from the expected identities, or when the installed version is
-    /// unparseable — those fall back to the generic DDLM presence already confirmed by the caller. Using a
-    /// <c>&gt;=</c> compare against the NEWEST installed DDLM keeps a newer-than-required DDLM compatible
-    /// while rejecting the case where only an OLDER DDLM is registered because the app's release-specific
-    /// DDLM install silently failed.
+    /// Verifies the highest DDLM registered for <paramref name="arch"/> is at least the required release
+    /// from <paramref name="expectedRuntimePackages"/>. Returns <c>true</c> (accept) when no required/installed
+    /// version parses — falling back to the generic DDLM presence the caller already confirmed. A <c>&gt;=</c>
+    /// compare against the newest installed DDLM keeps a newer-than-required DDLM compatible while rejecting
+    /// only-older.
     /// </summary>
     private bool IsDdlmReleaseSatisfied(string arch, IReadOnlyList<(string Name, string Version)> expectedRuntimePackages)
     {
@@ -369,16 +326,14 @@ internal class WindowsAppRuntimeService(
 
         if (required is null)
         {
-            // No parseable required DDLM release in the expected identities — nothing to gate beyond the
-            // presence check the caller already confirmed.
+            // No parseable required DDLM release — nothing to gate beyond the caller's presence check.
             return true;
         }
 
         var installedRaw = packageRegistrationService.GetHighestInstalledVersion(WinAppRuntimeDdlmPrefix, arch);
         if (!Version.TryParse(installedRaw, out var installed))
         {
-            // A DDLM is present (caller confirmed) but its version string is unexpected — don't block a
-            // launch on an unparseable version.
+            // A DDLM is present but its version string is unexpected — don't block on an unparseable version.
             return true;
         }
 
@@ -386,10 +341,8 @@ internal class WindowsAppRuntimeService(
     }
 
     /// <summary>
-    /// Finds the MSIX directory for Windows App SDK runtime packages
+    /// Finds the MSIX directory for Windows App SDK runtime packages, or null if not found.
     /// </summary>
-    /// <param name="usedVersions">Optional dictionary of package versions to look for specific installed packages</param>
-    /// <returns>The path to the MSIX directory, or null if not found</returns>
     public DirectoryInfo? FindWindowsAppSdkMsixDirectory(Dictionary<string, string>? usedVersions = null, bool requireExactVersion = false)
     {
         var nugetCacheDir = nugetService.GetNuGetGlobalPackagesDir();
@@ -413,7 +366,7 @@ internal class WindowsAppRuntimeService(
                 }
             }
 
-            // Fallback to main package
+            // Fallback to main package.
             if (usedVersions.TryGetValue(BuildToolsService.WINAPP_SDK_PACKAGE, out var mainVersion))
             {
                 var msixDir = TryGetMsixDirectoryFromNuGetCache(nugetCacheDir, BuildToolsService.WINAPP_SDK_PACKAGE, mainVersion);
@@ -427,13 +380,12 @@ internal class WindowsAppRuntimeService(
         if (requireExactVersion)
         {
             // Exact-version callers (project-mode unpackaged) must NOT accept an unrelated cached runtime:
-            // the general/highest-version scans below would return a different WinAppSDK version, and the
-            // presence gate derived from it would then pass while the app's actual required runtime family
-            // was never installed. Stop here so the caller sees "exact version unavailable" instead.
+            // the highest-version scans below would return a different WinAppSDK version and the derived
+            // presence gate would falsely pass. Stop here so the caller sees "exact version unavailable".
             return null;
         }
 
-        // General scan: look for any runtime package directories
+        // General scan: any runtime package directories.
         var runtimeDir = new DirectoryInfo(Path.Combine(nugetCacheDir.FullName, BuildToolsService.WINAPP_SDK_RUNTIME_PACKAGE.ToLowerInvariant()));
         if (runtimeDir.Exists)
         {
@@ -447,7 +399,7 @@ internal class WindowsAppRuntimeService(
             }
         }
 
-        // Fallback: main package
+        // Fallback: main package.
         var mainDir = new DirectoryInfo(Path.Combine(nugetCacheDir.FullName, BuildToolsService.WINAPP_SDK_PACKAGE.ToLowerInvariant()));
         if (mainDir.Exists)
         {
@@ -460,30 +412,21 @@ internal class WindowsAppRuntimeService(
         return null;
     }
 
-    /// <summary>
-    /// Checks the NuGet cache for a specific package/version (lowercase ID/version layout).
-    /// </summary>
+    /// <summary>Checks the NuGet cache for a specific package/version (lowercase ID/version layout).</summary>
     private static DirectoryInfo? TryGetMsixDirectoryFromNuGetCache(DirectoryInfo nugetCacheDir, string packageId, string version)
     {
-        // NuGet global cache uses lowercase package IDs
         var pkgVersionDir = new DirectoryInfo(Path.Combine(nugetCacheDir.FullName, packageId.ToLowerInvariant(), version));
         return TryGetMsixDirectoryFromPath(pkgVersionDir);
     }
 
-    /// <summary>
-    /// Helper method to check if an MSIX directory exists for a given package path
-    /// </summary>
-    /// <param name="packagePath">The full path to the package directory</param>
-    /// <returns>The MSIX directory path if it exists, null otherwise</returns>
+    /// <summary>Returns the <c>tools/MSIX</c> directory under a package path if it exists, else null.</summary>
     private static DirectoryInfo? TryGetMsixDirectoryFromPath(DirectoryInfo packagePath)
     {
         var msixDir = new DirectoryInfo(Path.Combine(packagePath.FullName, "tools", "MSIX"));
         return msixDir.Exists ? msixDir : null;
     }
 
-    /// <summary>
-    /// Comparer for sorting version strings, including prerelease support
-    /// </summary>
+    /// <summary>Comparer for sorting version strings, including prerelease support.</summary>
     private class VersionStringComparer : IComparer<string>
     {
         public int Compare(string? x, string? y)
@@ -501,7 +444,6 @@ internal class WindowsAppRuntimeService(
                 return 1;
             }
 
-            // Use the same comparison logic as NugetService.CompareVersions
             return NugetService.CompareVersions(x, y);
         }
     }

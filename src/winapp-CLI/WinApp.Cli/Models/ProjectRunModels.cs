@@ -37,18 +37,8 @@ internal enum ProjectPackaging
 /// <param name="Mode">The resolved run mode.</param>
 /// <param name="Csproj">The resolved project file, when <see cref="Mode"/> is Project.</param>
 /// <param name="ProjectDirectory">The directory containing the project (project mode) or the input folder.</param>
-/// <param name="Solution">
-/// The solution (<c>.sln</c>/<c>.slnx</c>) the project was resolved from, when the input was a
-/// solution. Null for a bare <c>.csproj</c>/directory input. When set, the build/evaluate passes
-/// define <c>$(SolutionDir)</c> and the sibling <c>Solution*</c> properties so projects that depend
-/// on them resolve exactly as they do under a Visual Studio / <c>dotnet build &lt;sln&gt;</c> build.
-/// </param>
-/// <param name="SelectionReason">
-/// A short, human-readable note on WHY this project was chosen when the input was ambiguous (a
-/// solution or a directory with several candidates), surfaced in the pre-build context line so the
-/// user can see the decision (e.g. "only runnable project", "matched --project"). Null when the
-/// target was unambiguous (a bare <c>.csproj</c> / the lone project in a directory) — nothing to explain.
-/// </param>
+/// <param name="Solution">The solution the project was resolved from (defines <c>$(SolutionDir)</c> and siblings for the build/evaluate passes); null for a bare <c>.csproj</c>/directory input.</param>
+/// <param name="SelectionReason">Why this project was chosen for an ambiguous input (shown in the context line); null if unambiguous.</param>
 internal sealed record RunInputResolution(
     WinAppRunMode Mode,
     FileInfo? Csproj,
@@ -66,16 +56,8 @@ internal sealed record RunInputResolution(
 /// <param name="Packaging">Packaged vs unpackaged.</param>
 /// <param name="SelfContained">True when <c>WindowsAppSDKSelfContained=true</c> — the runtime install is skipped.</param>
 /// <param name="Architecture">The resolved app architecture (x64 / arm64 / x86) used for build + runtime install.</param>
-/// <param name="Framework">
-/// The effective target framework moniker the app was built for (mirrors <c>ProjectRunOptions.Framework</c>),
-/// or null for a single-targeted project. Threaded into the unpackaged runtime install so a multi-targeted
-/// project's runtime version resolves from the built TFM, not a sibling one.
-/// </param>
-/// <param name="NoRestore">
-/// Mirrors <c>ProjectRunOptions.NoRestore</c>. Threaded into the unpackaged runtime install so the
-/// <c>dotnet list package</c> discovery pass also runs with <c>--no-restore</c> and can't trigger an
-/// implicit restore the user asked to skip.
-/// </param>
+/// <param name="Framework">The effective target framework the app was built for (mirrors <c>ProjectRunOptions.Framework</c>); null for a single-targeted project. Threaded into the unpackaged runtime install so the version resolves from the built TFM.</param>
+/// <param name="NoRestore">Mirrors <c>ProjectRunOptions.NoRestore</c>; threaded into the unpackaged <c>dotnet list package</c> discovery so it can't trigger a restore the user skipped.</param>
 internal sealed record ProjectRunResolution(
     FileInfo Csproj,
     string TargetDir,
@@ -96,12 +78,7 @@ internal sealed record ProjectRunResolution(
 /// <param name="NoRestore">Pass <c>--no-restore</c> to the build.</param>
 /// <param name="Properties">Raw repeatable <c>-p Name=Value</c> passthrough, forwarded to both build and evaluation.</param>
 /// <param name="Json">When true, suppress human-readable stdout (banner) and route build diagnostics to stderr so stdout stays pure JSON.</param>
-/// <param name="Solution">
-/// When the run target was resolved from a solution (<c>.sln</c>/<c>.slnx</c>), the solution file.
-/// The build and evaluate passes then define <c>$(SolutionDir)</c> and the sibling <c>Solution*</c>
-/// MSBuild properties (the ones a solution build sets) so projects that reference them build the
-/// same way they do in Visual Studio. Null for a bare <c>.csproj</c> target.
-/// </param>
+/// <param name="Solution">The solution the target was resolved from; when set, the build/evaluate passes define <c>$(SolutionDir)</c> and sibling <c>Solution*</c> properties so referencing projects build as they do in VS. Null for a bare <c>.csproj</c>.</param>
 internal sealed record ProjectRunOptions(
     string Configuration,
     string Architecture,
@@ -114,11 +91,9 @@ internal sealed record ProjectRunOptions(
 
 /// <summary>
 /// The effective build inputs used to classify runnable candidates (multi-<c>.csproj</c> directory or
-/// solution) under the SAME MSBuild globals the subsequent build/evaluate passes use. Threading these
-/// in means a project whose <c>OutputType</c> or test markers are conditional on Configuration/arch/
-/// TargetFramework/user <c>-p</c> is classified the way it will actually build, so
-/// <c>winapp run App.sln -c Release</c> never selects a Debug-only app (or reports none) and then
-/// builds Release. Null preserves the pre-existing behavior (classification against MSBuild defaults).
+/// solution) under the SAME MSBuild globals the build/evaluate passes use, so a project whose
+/// <c>OutputType</c>/test markers are conditional is classified the way it will actually build. Null
+/// classifies against MSBuild defaults (pre-existing behavior).
 /// </summary>
 /// <param name="Configuration">The effective <c>-c</c> Configuration (e.g. <c>Debug</c>/<c>Release</c>).</param>
 /// <param name="Architecture">The resolved target architecture, mapped to a RID for the evaluate.</param>

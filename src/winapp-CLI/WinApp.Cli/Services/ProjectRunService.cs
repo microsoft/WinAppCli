@@ -33,30 +33,19 @@ internal sealed partial class ProjectRunService(
 
     /// <summary>
     /// Property names owned by a dedicated <c>-c</c>/<c>-r</c>/<c>-f</c> switch. A same-named user
-    /// <c>-p</c> is dropped from BOTH the build and evaluate passes so they can never resolve a different
-    /// Configuration/RID/TFM from each other (otherwise <c>-c Debug -p Configuration=Release</c> would
-    /// build one output and evaluate/launch another). Matches the documented "dedicated flag wins"
-    /// contract (see <see cref="WarnOnOverriddenFlags"/>). <c>Platform</c> is intentionally NOT reserved:
-    /// project mode forwards it as-is and conveys arch via the RuntimeIdentifier only.
-    /// <para>
-    /// <c>Configuration</c> and <c>RuntimeIdentifier</c> are ALWAYS pinned by winapp (<c>-c</c>/<c>-r</c>).
-    /// <c>TargetFramework</c> is pinned only when a TFM is actually resolved — from <c>--framework</c>, a
-    /// PROMOTED bare <c>-p:TargetFramework</c> (see <see cref="ResolveEffectiveFrameworkAsync"/>), or the
-    /// multi-targeted first-TFM default. Because a bare <c>-p:TargetFramework</c> is promoted before these
-    /// passes run, dropping it here is safe: winapp re-emits the same value via <c>-f</c>, so the user's
-    /// choice is honored rather than silently discarded.
-    /// </para>
+    /// <c>-p</c> is dropped from BOTH passes so they can't resolve a different Configuration/RID/TFM (see
+    /// <see cref="WarnOnOverriddenFlags"/>). <c>Platform</c> is intentionally NOT reserved — project mode
+    /// forwards it as-is and conveys arch via the RuntimeIdentifier only. <c>Configuration</c>/
+    /// <c>RuntimeIdentifier</c> are always pinned; <c>TargetFramework</c> only when a TFM is resolved (a
+    /// bare <c>-p:TargetFramework</c> is promoted and re-emitted via <c>-f</c>, so dropping it is safe).
     /// </summary>
     private static readonly string[] DedicatedFlagProperties = ["Configuration", "RuntimeIdentifier", "TargetFramework"];
 
     /// <summary>
-    /// Test seam for the "real interactive terminal" gate that <see cref="RunBuildPassAsync"/> uses to
-    /// choose the native terminal-logger (inherited-stdio) launcher over plain line streaming. In
-    /// production this is <see langword="null"/> and the gate is
-    /// <see cref="ProgressDisplay.ShouldUseLiveSpinner(IAnsiConsole, ILogger)"/> (the single source of
-    /// truth for TTY detection). It is overridable only because that gate reads process-global state
-    /// (<c>Console.IsOutputRedirected</c>, <c>Environment.UserInteractive</c>) which is always false under
-    /// the test host, so a test could otherwise never exercise the native-terminal branch.
+    /// Test seam for the "real interactive terminal" gate <see cref="RunBuildPassAsync"/> uses to choose
+    /// the native terminal-logger launcher over plain line streaming. <see langword="null"/> in production
+    /// (the gate is <see cref="ProgressDisplay.ShouldUseLiveSpinner(IAnsiConsole, ILogger)"/>); overridable
+    /// only because that gate reads process-global state that is always false under the test host.
     /// </summary>
     internal Func<bool>? NativeTerminalGateOverrideForTests { get; set; }
 
@@ -131,11 +120,10 @@ internal sealed partial class ProjectRunService(
 
     /// <summary>
     /// Runs the silent pre-build steps — effective-framework pinning, the CsWinRT metadata shim, and the
-    /// pre-build restore (whole-solution when the target lives in a solution) — that must complete before
-    /// the build pass. These all shell out to buffered <c>dotnet</c> sub-processes and produce no console
-    /// output, so <paramref name="setStatus"/> lets an interactive caller animate a spinner by reporting
-    /// phase changes ("Resolving project…", "Restoring dependencies…"); pass <see langword="null"/> to run
-    /// them with no status updates (agents / <c>--json</c> / <c>--quiet</c> / <c>--verbose</c>). Returns the
+    /// pre-build restore (whole-solution when applicable) — before the build pass. These shell out to
+    /// buffered <c>dotnet</c> sub-processes with no console output, so <paramref name="setStatus"/> lets an
+    /// interactive caller animate a spinner; pass <see langword="null"/> to run silently (agents / <c>--json</c>
+    /// / <c>--quiet</c> / <c>--verbose</c>). Returns the
     /// (possibly framework-pinned) options, the build-pass options (with <c>NoRestore</c> set when a
     /// pre-restore already covered the target), and the resolved CsWinRT metadata folder (or null).
     /// </summary>
@@ -147,48 +135,35 @@ internal sealed partial class ProjectRunService(
             Action<string>? setStatus,
             CancellationToken cancellationToken)
     {
-        // Pin an effective single target framework for a multi-targeted project when the user gave no
-        // --framework, BEFORE any pass, so the build, the evaluate pass, packaging and runtime
-        // provisioning all agree on one TFM. Without this a plural-<TargetFrameworks> project builds but
-        // its evaluate pass hits the cross-targeting outer build (empty TargetDir) → we throw AFTER a
-        // successful build. Default = first declared TFM. No-op when single-targeted / --framework set.
+        // Pin an effective single TFM for a multi-targeted project (default = first declared) BEFORE any
+        // pass so build/evaluate/packaging/provisioning all agree. No-op when single-targeted / --framework set.
         setStatus?.Invoke("Resolving project...");
         options = await ResolveEffectiveFrameworkAsync(csproj, options, workingDir, cancellationToken);
 
-        // The CsWinRT metadata shim (below) needs the project's effective single TFM to steer ref-pack
-        // selection to the project's TargetPlatformVersion on SDK-less hosts. --framework / multi-targeted
-        // pinning leaves options.Framework null for a normal single-targeted project, so resolve it
-        // explicitly here (also covering imported/conditional TargetFramework values). Not used as a build
-        // -p:TargetFramework — single-targeted projects need no such pin.
+        // The shim needs the effective single TFM to steer ref-pack selection on SDK-less hosts. Resolved
+        // separately since options.Framework stays null for a normal single-targeted project; never used as
+        // a build -p:TargetFramework.
         var shimFramework = await ResolveShimFrameworkAsync(csproj, options, workingDir, cancellationToken);
 
-        // SHIM (temporary): on hosts with no registered Windows SDK, resolve a folder of ref-pack winmds
-        // to inject as -p:CsWinRTWindowsMetadata so C#/WinRT authoring projects build (see
-        // CsWinRTMetadataShimService). Skipped when the user already set the property. null = no injection.
+        // SHIM (temporary): on hosts with no registered Windows SDK, resolve ref-pack winmds to inject as
+        // -p:CsWinRTWindowsMetadata. Skipped when the user set the property. null = no injection.
         var csWinRTMetadata = ResolveCsWinRTMetadataShim(options, shimFramework);
         var buildOptions = options;
 
-        // Restore ordering: when the target lives in a solution, restore the whole solution's managed
-        // projects up front so build-dependency siblings that are NOT ProjectReferences of the target
-        // (e.g. an out-of-process COM server built by a custom MSBuild target) have a project.assets.json
-        // and the build doesn't fail with NETSDK1004 — matching what VS / `dotnet build <sln>` do. The
-        // SHIM restore below then covers the ref pack on genuinely clean SDK-less hosts. Both are gated on
-        // actually building AND the user not opting out of restore.
+        // When the target lives in a solution, restore the whole solution's managed projects up front so
+        // build-dependency siblings that aren't ProjectReferences (e.g. a COM server) have project.assets.json
+        // (else NETSDK1004) — matching VS / `dotnet build <sln>`. Gated on actually building + restore not opted out.
         if (!options.NoBuild && !options.NoRestore)
         {
             setStatus?.Invoke("Restoring dependencies...");
 
-            // (1) Restore the owning solution's managed siblings. When it restores the whole solution
-            // (all-managed) it also restored the target, so the passes below can skip their own restore.
+            // (1) Restore the owning solution's managed siblings. An all-managed whole-solution restore also
+            // covered the target, so the passes below can skip their own restore.
             var restoredWholeSolution = await RestoreSolutionSiblingsAsync(csproj, options, workingDir, cancellationToken);
 
-            // (2) SHIM (temporary) — ref-pack ordering: on a genuinely clean SDK-less host the ref pack
-            // (Microsoft.Windows.SDK.NET.Ref) may not be on disk yet when we first resolve the shim, so the
-            // shim no-ops and the very first `dotnet build` — handed no CsWinRTWindowsMetadata — fails even
-            // though that same build restores the ref pack; only a SECOND invocation (cache warm) succeeds.
-            // Pre-populate the ref pack with an explicit restore, then re-resolve so the first build gets the
-            // winmd folder. Only fires when the shim would otherwise inject (no SDK registered) and the user
-            // didn't set the property himself.
+            // (2) SHIM (temporary): on a clean SDK-less host the ref pack may not be on disk when the shim
+            // first resolves, so it no-ops and the first build fails even though it restores the ref pack.
+            // Pre-populate it with an explicit restore, then re-resolve. Only when the shim would inject.
             if (csWinRTMetadata is null
                 && !UserSetCsWinRTMetadata(options)
                 && csWinRTMetadataShimService.IsWindowsSdkAbsent())
@@ -199,15 +174,12 @@ internal sealed partial class ProjectRunService(
                 if (restoreExit == 0)
                 {
                     csWinRTMetadata = ResolveCsWinRTMetadataShim(options, shimFramework);
-                    // The explicit restore already populated the cache; skip the redundant restore in the
-                    // build pass so we don't restore twice.
-                    buildOptions = options with { NoRestore = true };
+                    buildOptions = options with { NoRestore = true }; // Explicit restore done; skip build-pass restore.
                 }
             }
             else if (restoredWholeSolution)
             {
-                // The whole-solution restore already covered the target; skip the build pass's own restore.
-                buildOptions = options with { NoRestore = true };
+                buildOptions = options with { NoRestore = true }; // Whole-solution restore covered the target.
             }
         }
 
@@ -223,13 +195,10 @@ internal sealed partial class ProjectRunService(
         var workingDir = csproj.Directory ?? new DirectoryInfo(Directory.GetCurrentDirectory());
         WarnOnOverriddenFlags(options);
 
-        // Framework resolution, the CsWinRT metadata shim, and the pre-build restore below all shell out
-        // to SILENT (buffered) `dotnet` sub-processes — on a solution the whole-solution restore alone can
-        // take several seconds with no output. On a real interactive terminal, animate an inline spinner
-        // around them so the user sees liveness (e.g. "Restoring dependencies…") before the `🔧 Building`
-        // line instead of a dead gap. Skipped under --verbose (Debug) so the phase LogDebug traces render
-        // plainly, and under --json/--quiet/agent/CI/redirected (ShouldUseLiveSpinner == false), where the
-        // work runs exactly as before with no status output.
+        // The steps below shell out to SILENT (buffered) dotnet sub-processes — a whole-solution restore
+        // alone can take several seconds with no output. On a real interactive terminal, animate a spinner
+        // so the user sees liveness before the build line. Skipped under --verbose (traces render plainly)
+        // and under --json/--quiet/agent/CI/redirected (ShouldUseLiveSpinner == false).
         ProjectRunOptions buildOptions;
         string? csWinRTMetadata;
         if (ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger) && !logger.IsEnabled(LogLevel.Debug))
@@ -259,8 +228,7 @@ internal sealed partial class ProjectRunService(
             var buildExit = await RunBuildPassAsync(csproj, buildOptions, workingDir, csWinRTMetadata, cancellationToken);
             if (buildExit != 0)
             {
-                // dotnet's diagnostics were already streamed live; just log the summary and propagate
-                // the exit code — do not attempt to launch.
+                // dotnet's diagnostics were already streamed live; log the summary and propagate the exit code.
                 logger.LogError("{UISymbol} Build failed for {Project} (exit code {ExitCode}).", UiSymbols.Error, csproj.Name, buildExit);
                 return new ProjectBuildOutcome(null, buildExit);
             }
@@ -355,9 +323,8 @@ internal sealed partial class ProjectRunService(
         var shimFramework = await ResolveShimFrameworkAsync(csproj, options, workingDir, cancellationToken);
         var csWinRTMetadata = ResolveCsWinRTMetadataShim(options, shimFramework);
 
-        // Reuse the exact evaluate pass (same -p/RID/Platform/TFM/shim as a real build) so the
-        // WindowsPackageType we read matches what the build would see. It is evaluate-only — no build
-        // is triggered — which is why this is cheap enough to run before deciding to build.
+        // Reuse the exact evaluate pass (same -p/RID/TFM/shim as a real build) so the WindowsPackageType we
+        // read matches what the build would see. Evaluate-only — no build is triggered.
         var evaluateArgs = BuildEvaluateArguments(csproj, options, csWinRTMetadata);
         int exitCode;
         string stdout;
@@ -371,26 +338,21 @@ internal sealed partial class ProjectRunService(
         }
         catch (Exception)
         {
-            // Starting or communicating with dotnet failed (e.g. a transient Win32Exception) →
-            // indeterminate. Don't crash the run before the authoritative build; let the normal build +
-            // gate surface the real error and classify packaging.
+            // Starting/communicating with dotnet failed → indeterminate; let the authoritative build classify.
             return false;
         }
 
         if (exitCode != 0)
         {
-            // Evaluation failed → indeterminate. Don't fail fast; let the normal build + authoritative
-            // gate surface the real error and classify packaging.
+            // Evaluation failed → indeterminate; let the authoritative build classify.
             return false;
         }
 
         var props = MsBuildPropertyReader.Parse(stdout, RequestedProperties);
 
-        // Only an EXPLICIT WindowsPackageType=None is treated as definitive. An unset value is NOT —
-        // a packaged app that declares identity via an emitted recipe (rather than the property) also
-        // evaluates empty here pre-build, so DeterminePackaging's post-build recipe fallback must stay
-        // authoritative. Reporting "unpackaged" on empty would misclassify that app and wrongly reject
-        // its packaged-only options.
+        // Only an EXPLICIT WindowsPackageType=None is definitive. An unset value is NOT — a packaged app
+        // declaring identity via an emitted recipe also evaluates empty here pre-build, so
+        // DeterminePackaging's post-build recipe fallback stays authoritative.
         return string.Equals(GetProp(props, "WindowsPackageType"), "None", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -420,12 +382,10 @@ internal sealed partial class ProjectRunService(
             return ProjectPackaging.Packaged;
         }
 
-        // The Microsoft.Windows.SDK.BuildTools.WinApp integration activates run support
-        // (_WinAppRunSupportActive=true) for an executable Windows project that ships an
-        // appxmanifest.xml but sets no WindowsPackageType — e.g. samples/dotnet-app. Those apps
-        // are meant to run WITH identity off the manifest the integration copies into the build
-        // output, so honor that signal here rather than misclassifying them as unpackaged (which
-        // would launch the apphost without identity and break Package.Current).
+        // The Microsoft.Windows.SDK.BuildTools.WinApp integration activates run support for an executable
+        // Windows project that ships an appxmanifest.xml but sets no WindowsPackageType (e.g.
+        // samples/dotnet-app). Those run WITH identity off the copied manifest, so honor the signal rather
+        // than launching the apphost without identity (which breaks Package.Current).
         if (string.Equals(GetProp(props, "_WinAppRunSupportActive"), "true", StringComparison.OrdinalIgnoreCase))
         {
             return ProjectPackaging.Packaged;
@@ -450,11 +410,9 @@ internal sealed partial class ProjectRunService(
     }
 
     /// <summary>
-    /// SHIM (temporary) — restore ordering: runs an explicit <c>dotnet restore</c> so the
-    /// <c>Microsoft.Windows.SDK.NET.Ref</c> ref pack lands on disk BEFORE the shim resolves its winmd
-    /// folder, fixing the clean-host first-build failure (see <c>BuildAndResolveAsync</c>). Output is
-    /// captured (not streamed) since it's a fast pre-step; the following build pass streams as usual.
-    /// Returns the dotnet exit code so the caller only skips the build's own restore when this succeeded.
+    /// SHIM (temporary): runs an explicit <c>dotnet restore</c> so the <c>Microsoft.Windows.SDK.NET.Ref</c>
+    /// ref pack lands on disk BEFORE the shim resolves its winmd folder (fixes the clean-host first-build
+    /// failure). Returns the dotnet exit code so the caller only skips the build's own restore on success.
     /// </summary>
     private async Task<int> RunRestorePassAsync(FileInfo csproj, ProjectRunOptions options, DirectoryInfo workingDir, CancellationToken cancellationToken)
     {
@@ -471,15 +429,13 @@ internal sealed partial class ProjectRunService(
 
     /// <summary>
     /// Restores the owning solution's managed sibling projects before the target build so build-dependency
-    /// siblings that are not <c>ProjectReference</c>s of the target still have a <c>project.assets.json</c>
-    /// (NETSDK1004 parity with VS / <c>dotnet build &lt;sln&gt;</c>). Only fires for a solution-resolved run
-    /// (<see cref="ProjectRunOptions.Solution"/> non-null). When every listed project is managed, a single
-    /// <c>dotnet restore &lt;sln&gt;</c> restores the whole graph (including the target) and this returns
-    /// <see langword="true"/> so the caller can skip the build pass's own restore. When a native project
-    /// (<c>.vcxproj</c>/<c>.wapproj</c>/<c>.shproj</c>) is present — which <c>dotnet restore</c> can't handle
-    /// on a VS-less box — OR the whole-solution restore fails, the managed siblings are restored individually
-    /// (the target is left to the normal restore) and this returns <see langword="false"/>. All restores are
-    /// non-fatal (best-effort); the build pass surfaces any real error.
+    /// siblings that aren't <c>ProjectReference</c>s still have a <c>project.assets.json</c> (NETSDK1004
+    /// parity with VS / <c>dotnet build &lt;sln&gt;</c>). Only fires for a solution-resolved run. When every
+    /// listed project is managed, a single <c>dotnet restore &lt;sln&gt;</c> covers the whole graph and this
+    /// returns <see langword="true"/> (caller skips the build pass's restore). When a native project is
+    /// present (<c>dotnet restore</c> can't handle it VS-less) OR the whole-solution restore fails, managed
+    /// siblings are restored individually and this returns <see langword="false"/>. All restores are
+    /// best-effort; the build pass surfaces any real error.
     /// </summary>
     private async Task<bool> RestoreSolutionSiblingsAsync(FileInfo target, ProjectRunOptions options, DirectoryInfo workingDir, CancellationToken cancellationToken)
     {
@@ -507,16 +463,14 @@ internal sealed partial class ProjectRunService(
                 return true;
             }
 
-            // Whole-solution restore failed (e.g. a transient error). Don't just defer to the target-only
-            // build restore — that would leave non-ProjectReference managed siblings unrestored, the exact
-            // NETSDK1004 case this pre-step exists to prevent. Fall back to restoring the siblings
-            // individually before returning false so the target restore is left to the normal build pass.
+            // Whole-solution restore failed. Don't defer to the target-only build restore (that leaves
+            // non-ProjectReference managed siblings unrestored — the NETSDK1004 case this prevents); fall
+            // back to per-sibling restore before returning false.
             logger.LogDebug("{UISymbol} Solution restore exited {ExitCode}; falling back to per-project sibling restore.", UiSymbols.Note, exitCode);
         }
 
-        // Either a native project is present (so `dotnet restore <sln>` would error on a VS-less host) or the
-        // whole-solution restore failed. Restore the managed siblings individually and skip the natives; the
-        // target is restored by the normal pass.
+        // Native project present (dotnet restore <sln> errors VS-less) or the solution restore failed:
+        // restore managed siblings individually and skip natives; the target restores in the normal pass.
         await RestoreSiblingsIndividuallyAsync(siblings, options, workingDir, cancellationToken);
         return false;
     }
@@ -547,19 +501,16 @@ internal sealed partial class ProjectRunService(
     /// <summary>
     /// Runs the project-mode build pass, streaming dotnet's output live. Output routing:
     /// <list type="bullet">
-    ///   <item><c>--json</c> or <c>--quiet</c> (Information suppressed): print the <c>dotnet</c>
-    ///   invocation and stream all build output to <b>stderr</b>, so stdout stays pure JSON / clean.
+    ///   <item><c>--json</c>/<c>--quiet</c>: stream all build output to <b>stderr</b> so stdout stays pure
+    ///   JSON / clean. Keeps <c>-tl:off</c>.</item>
+    ///   <item>Real interactive terminal: print a <c>🔧 Building…</c> header + dim invocation, then hand the
+    ///   terminal to dotnet with <b>inherited stdio</b> so its native terminal logger renders the live build.
+    ///   Omits <c>-tl:off</c>.</item>
+    ///   <item>Otherwise (agent/CI/redirected): header + dim invocation, then stream output live to stdout.
     ///   Keeps <c>-tl:off</c>.</item>
-    ///   <item>Real interactive terminal (<see cref="ProgressDisplay.ShouldUseLiveSpinner"/>): print a
-    ///   <c>🔧 Building…</c> header and a dim <c>dotnet build …</c> invocation line, then hand the terminal
-    ///   to dotnet with <b>inherited stdio</b> so its native terminal logger renders the live build
-    ///   (single warnings, live progress), then a persistent <c>✓ Built</c> line. Omits <c>-tl:off</c>.</item>
-    ///   <item>Otherwise (info-enabled but not a TTY: agent/CI/redirected/piped <c>--verbose</c>): print the
-    ///   header and dim invocation, then stream dotnet's output live to stdout (warnings included), then
-    ///   <c>✓ Built</c>. Keeps <c>-tl:off</c>.</item>
     /// </list>
-    /// The build output always streams (no hide-behind-spinner, no capture buffer) so success-path
-    /// warnings stay visible and the exact, injected-arg invocation is self-describing / reproducible.
+    /// Output always streams (never hidden behind a spinner) so success-path warnings stay visible and the
+    /// exact injected-arg invocation is self-describing.
     /// </summary>
     internal async Task<int> RunBuildPassAsync(
         FileInfo csproj,
@@ -573,9 +524,8 @@ internal sealed partial class ProjectRunService(
         var banner = $"Building {csproj.Name} ({options.Configuration} | {options.Architecture})...";
         var stopwatch = Stopwatch.StartNew();
 
-        // --json or --quiet: stdout must stay pure JSON / clean, so route the invocation AND all build
-        // output to stderr. Console.Error is synchronized, so the concurrent stdout/stderr callbacks are
-        // safe to write through it directly.
+        // --json/--quiet: stdout stays pure JSON, so route the invocation AND build output to stderr
+        // (Console.Error is synchronized, so concurrent stdout/stderr callbacks are safe).
         if (options.Json || !logger.IsEnabled(LogLevel.Information))
         {
             var redirectedArgs = BuildBuildPassArguments(csproj, options, verbosity, csWinRTMetadataFolder);
@@ -587,9 +537,9 @@ internal sealed partial class ProjectRunService(
                 cancellationToken);
         }
 
-        // Info-enabled paths (default interactive / --verbose / agent-CI, non-json): print the header and
-        // the exact dotnet invocation (winapp injects args the user never typed — RID, cswinrt shim, -p
-        // forwarding — so surfacing it makes failures self-describing) before the build output.
+        // Info-enabled paths (default interactive / --verbose / agent-CI): print the header and the exact
+        // dotnet invocation (winapp injects args the user never typed — RID, shim, -p forwarding) so
+        // failures are self-describing.
         var nativeTerminal = NativeTerminalGateOverrideForTests?.Invoke()
             ?? ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger);
         var buildArgs = BuildBuildPassArguments(csproj, options, verbosity, csWinRTMetadataFolder, nativeTerminal);
@@ -606,9 +556,8 @@ internal sealed partial class ProjectRunService(
         }
         else
         {
-            // Info-enabled but NOT a TTY (agent/CI/redirected/piped --verbose): stream dotnet's redirected
-            // output live to stdout. Serialize the writes so the concurrent stdout/stderr callbacks don't
-            // interleave.
+            // Info-enabled but NOT a TTY (agent/CI/redirected/piped --verbose): stream dotnet's output live
+            // to stdout, serializing writes so concurrent stdout/stderr callbacks don't interleave.
             var writeLock = new object();
             void WriteLive(string line)
             {
@@ -631,21 +580,18 @@ internal sealed partial class ProjectRunService(
     }
 
     /// <summary>
-    /// Prints the persistent build-completion line (UX). Callers gate this to the info-enabled,
-    /// non-json paths, so it never pollutes <c>--json</c> stdout or a <c>--quiet</c> run. The project
-    /// name is shown without its <c>.csproj</c> extension since the pre-build context line already
-    /// established the full identity + Configuration/arch.
+    /// Prints the persistent build-completion line (UX). Callers gate this to info-enabled, non-json paths
+    /// so it never pollutes <c>--json</c> stdout or a <c>--quiet</c> run.
     /// </summary>
     private void PrintBuildSucceeded(FileInfo csproj, ProjectRunOptions options, TimeSpan elapsed) =>
         ansiConsole.MarkupLineInterpolated(
             $"{UiSymbols.Check} Built {Path.GetFileNameWithoutExtension(csproj.Name)} in {elapsed.TotalSeconds:0.0}s");
 
     /// <summary>
-    /// Maps the CLI's effective log level to a dotnet <c>-v</c> verbosity for the build pass (Change #1).
-    /// <c>--verbose</c> stays at <c>minimal</c> on purpose: it already earns its keep by streaming the
-    /// build live and unlocking winapp's own decision traces, so pushing dotnet to <c>-v normal</c> just
-    /// buries those under thousands of MSBuild task lines. Only <c>--trace</c> cranks dotnet up (to
-    /// <c>normal</c>) for deep diagnosis; <c>--quiet</c> keeps dotnet quiet; everything else is minimal.
+    /// Maps the CLI's effective log level to a dotnet <c>-v</c> verbosity for the build pass. <c>--verbose</c>
+    /// stays at <c>minimal</c> on purpose (it already streams the build live and unlocks winapp's decision
+    /// traces; <c>-v normal</c> would bury those under MSBuild task lines). Only <c>--trace</c> cranks dotnet
+    /// to <c>normal</c>; <c>--quiet</c> keeps it quiet; everything else is minimal.
     /// </summary>
     private static string ResolveBuildVerbosity(ILogger logger, bool json)
     {
@@ -661,8 +607,8 @@ internal sealed partial class ProjectRunService(
             return "quiet";
         }
 
-        // Default AND --verbose (Debug): keep dotnet skimmable. --verbose still differs from the default
-        // run — it streams the build live and shows winapp's LogDebug traces — without the -v normal flood.
+        // Default AND --verbose (Debug): keep dotnet skimmable. --verbose still streams the build live and
+        // shows winapp's LogDebug traces — without the -v normal flood.
         return "minimal";
     }
 
@@ -681,9 +627,9 @@ internal sealed partial class ProjectRunService(
             }
             else if (name.Equals("TargetFramework", StringComparison.OrdinalIgnoreCase))
             {
-                // TargetFramework is dedicated only when winapp actually pins a TFM. A bare -p:TargetFramework
-                // (no --framework) is PROMOTED to the effective framework and honored, so it's not overridden.
-                // It's only overridden when a dedicated --framework resolved a DIFFERENT TFM — warn just then.
+                // A bare -p:TargetFramework (no --framework) is PROMOTED to the effective framework and
+                // honored, so it's not overridden. It's only overridden when a dedicated --framework
+                // resolved a DIFFERENT TFM — warn just then.
                 var value = property.Split('=', 2).ElementAtOrDefault(1)?.Trim() ?? string.Empty;
                 if (!string.IsNullOrEmpty(options.Framework) &&
                     !options.Framework.Equals(value, StringComparison.OrdinalIgnoreCase))
@@ -697,9 +643,9 @@ internal sealed partial class ProjectRunService(
             {
                 // Project mode conveys arch via the RuntimeIdentifier only and does NOT inject a global
                 // Platform, so a user -p:Platform is forwarded as-is. The RID still follows --arch, so an
-                // inconsistent pair (e.g. --arch x86 -p:Platform=ARM64) builds a mismatched app — warn so
-                // the divergence isn't silent. Note: forcing -p:Platform on a multi-project WinUI app can
-                // reintroduce the MSB3030/PRI252 split with no-<Platforms> library references.
+                // inconsistent pair (e.g. --arch x86 -p:Platform=ARM64) builds a mismatched app — warn so the
+                // divergence isn't silent. (Forcing -p:Platform on a multi-project WinUI app can reintroduce
+                // the MSB3030/PRI252 split with no-<Platforms> library references.)
                 logger.LogDebug(
                     "{UISymbol} -p:{Property} is forwarded as-is; the RuntimeIdentifier still follows --arch, so ensure they are consistent.",
                     UiSymbols.Note, property);

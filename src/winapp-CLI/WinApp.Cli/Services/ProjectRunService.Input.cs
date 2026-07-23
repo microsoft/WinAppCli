@@ -35,27 +35,23 @@ internal sealed partial class ProjectRunService
 
             var projectDir = file.Directory ?? new DirectoryInfo(Directory.GetCurrentDirectory());
 
-            // A bare .csproj input has no solution context, so $(SolutionDir) and the sibling Solution*
-            // properties are undefined — projects that reference them in imports/AdditionalFiles then
-            // fail to build (e.g. a source generator reading $(SolutionDir)…\Resources.resw). Discover
-            // the owning solution by walking up so the build defines them exactly as `dotnet build <sln>`
-            // / Visual Studio does. Null when none is found → behavior is identical to before.
+            // A bare .csproj has no solution context, so $(SolutionDir) and sibling Solution* properties
+            // are undefined — projects that reference them in imports/AdditionalFiles then fail to build.
+            // Walk up to the owning solution so the build defines them as `dotnet build <sln>` / VS does.
             var owningSolution = FindOwningSolution(file);
             return new RunInputResolution(WinAppRunMode.Project, file, projectDir, owningSolution);
         }
 
         var dir = (DirectoryInfo)input;
 
-        // A solution in the directory wins over loose .csproj files: it carries the config→platform
-        // map and defines $(SolutionDir), which some projects (e.g. those importing shared props via
-        // $(SolutionDir)) need to build at all. Prefer it, matching what a developer opens in VS.
+        // A solution in the directory wins over loose .csproj files: it carries the config→platform map
+        // and defines $(SolutionDir), which some projects need to build at all. Matches what VS opens.
         var solutions = SafeEnumerateFiles(dir, "*.sln", "*.slnx");
 
         if (solutions.Count == 1)
         {
-            // Directory input: a discovered solution with no runnable C# project (native/library-only)
-            // degrades to folder mode, the same fallback a lone non-runnable .csproj gets above, so an
-            // existing build-output folder that happens to sit next to such a solution keeps working.
+            // A discovered solution with no runnable C# project (native/library-only) degrades to folder
+            // mode, so a build-output folder next to such a solution keeps working.
             return await ResolveSolutionAsync(solutions[0], projectSelector, classificationInputs, cancellationToken, allowFolderFallback: true);
         }
 
@@ -68,8 +64,8 @@ internal sealed partial class ProjectRunService
 
         var csprojs = SafeEnumerateFiles(dir, "*.csproj");
 
-        // No top-level .csproj → folder mode (existing, unchanged behavior). Build-output folders
-        // (bin/…) fall here. This path performs NO MSBuild evaluation, so folder mode stays identical.
+        // No top-level .csproj → folder mode (unchanged). Build-output folders (bin/…) fall here; this
+        // path performs NO MSBuild evaluation.
         if (csprojs.Count == 0)
         {
             return new RunInputResolution(WinAppRunMode.Folder, null, dir);
@@ -77,12 +73,9 @@ internal sealed partial class ProjectRunService
 
         if (csprojs.Count == 1)
         {
-            // Honor an explicit --project even when only one .csproj exists, so a mismatched selector is
-            // a clear error rather than silently ignored. An explicit selector is honored as-is (project
-            // mode, no runnability gate) matching the multi-.csproj --project path — the user asked for it.
-            // Attach the owning solution (walking up) so $(SolutionDir) is defined exactly as on the
-            // bare-.csproj and multi-.csproj paths — otherwise a lone project under a repo solution would
-            // build without the solution context VS gives it.
+            // Honor an explicit --project even with only one .csproj, so a mismatched selector errors
+            // rather than being silently ignored. An explicit selector is honored as-is (no runnability
+            // gate). Attach the owning solution so $(SolutionDir) is defined as on the other paths.
             if (!string.IsNullOrWhiteSpace(projectSelector))
             {
                 if (MatchProjectSelector(csprojs, projectSelector, dir) is null)
@@ -94,13 +87,11 @@ internal sealed partial class ProjectRunService
                 return new RunInputResolution(WinAppRunMode.Project, csprojs[0], dir, FindOwningSolution(csprojs[0]));
             }
 
-            // Auto-selection: only switch to project mode when the lone project is actually runnable.
-            // A non-runnable library sitting beside build output must stay in folder mode (the G4
-            // "don't change folder mode" guarantee). Resolve the owning solution FIRST so classification
-            // sees the same $(SolutionDir)/Solution* context the real build will (M1): a lone project
-            // whose OutputType/IsTestProject is conditional on $(SolutionDir) would otherwise be
-            // classified with solution:null, misdetected as non-runnable, and wrongly fall back to folder
-            // mode. Reuse the same solution for the final resolution so we don't walk the tree twice.
+            // Auto-selection: only switch to project mode when the lone project is actually runnable; a
+            // non-runnable library beside build output stays in folder mode (G4 guarantee). Resolve the
+            // owning solution FIRST so classification sees the same $(SolutionDir)/Solution* context the
+            // build will (M1) — otherwise a project whose OutputType/IsTestProject is conditional on it
+            // would misclassify. Reuse the solution for the final resolution to avoid walking twice.
             var loneOwningSolution = FindOwningSolution(csprojs[0]);
             var loneProps = BuildClassificationPropertyTokens(classificationInputs, loneOwningSolution);
             var (loneApps, loneTests) = await ClassifyRunnablesAsync(csprojs, dir, loneProps, classificationInputs, loneOwningSolution, cancellationToken);
@@ -133,13 +124,11 @@ internal sealed partial class ProjectRunService
             return new RunInputResolution(WinAppRunMode.Project, selected, dir, FindOwningSolution(selected), "matched --project");
         }
 
-        // Multiple .csproj files — classify each via MSBuild evaluation so an executable/test project
-        // is detected even when OutputType/IsTestProject come from an import (SDK defaults,
-        // Directory.Build.props, the test SDK) rather than inline XML. A static parse cannot see those
-        // and could silently pick the wrong project. Evaluation falls back to the static
-        // parse per-project when the SDK/restore is unavailable, so behavior never regresses. The
-        // effective build inputs (Configuration/arch/TFM/user -p) are threaded in so a candidate whose
-        // OutputType/test markers are conditional on them classifies as it will build.
+        // Multiple .csproj files — classify each via MSBuild evaluation so an executable/test project is
+        // detected even when OutputType/IsTestProject come from an import (SDK defaults, Directory.Build.props,
+        // the test SDK) a static parse can't see. Evaluation falls back to the static parse per-project when
+        // the SDK/restore is unavailable. The effective build inputs (Configuration/arch/TFM/user -p) are
+        // threaded in so a candidate whose markers are conditional on them classifies as it will build.
         var dirClassificationProps = BuildClassificationPropertyTokens(classificationInputs, solution: null);
         var (dirApps, dirTests) = await ClassifyRunnablesAsync(csprojs, dir, dirClassificationProps, classificationInputs, solution: null, cancellationToken);
 
@@ -172,11 +161,8 @@ internal sealed partial class ProjectRunService
     private static partial Regex SlnAnyProjectPathRegex();
 
     /// <summary>
-    /// Enumerates the top-level files in <paramref name="dir"/> matching any of <paramref name="patterns"/>
-    /// (in pattern order), returning an empty list when the directory can't be read
-    /// (missing/locked/permission-denied). Centralizes the enumerate-or-empty guard shared by input and
-    /// owning-solution resolution so a transient/unreadable directory degrades to "no candidates" instead
-    /// of throwing.
+    /// Enumerates top-level files in <paramref name="dir"/> matching any of <paramref name="patterns"/>
+    /// (in order), returning an empty list when the directory can't be read (missing/locked/denied).
     /// </summary>
     private static List<FileInfo> SafeEnumerateFiles(DirectoryInfo dir, params string[] patterns)
     {
@@ -194,12 +180,11 @@ internal sealed partial class ProjectRunService
 
     /// <summary>
     /// Finds the solution that owns a bare <c>.csproj</c> so a direct-file run defines <c>$(SolutionDir)</c>
-    /// the same way <c>dotnet build &lt;sln&gt;</c> / Visual Studio do. Walks up from the project directory;
-    /// at the nearest ancestor that contains any <c>.sln</c>/<c>.slnx</c>, prefers a solution that actually
-    /// lists this project; else, when there is exactly one solution whose listing is indeterminate
-    /// (empty/unreadable), attaches it by locality. A lone solution that CONFIRMS the project is absent — or
-    /// several non-listing solutions — is not guessed at; the walk continues upward, ultimately returning
-    /// null when no solution demonstrably owns the project.
+    /// as <c>dotnet build &lt;sln&gt;</c> / VS do. Walks up from the project directory; at the nearest ancestor
+    /// with any <c>.sln</c>/<c>.slnx</c>, prefers a solution that lists this project, else attaches a lone
+    /// solution whose listing is indeterminate (empty/unreadable) by locality. A lone solution that CONFIRMS
+    /// the project is absent — or several non-listing solutions — is not guessed; the walk continues upward,
+    /// returning null when no solution demonstrably owns the project.
     /// </summary>
     private static FileInfo? FindOwningSolution(FileInfo csproj)
     {
@@ -221,11 +206,10 @@ internal sealed partial class ProjectRunService
                 return owning;
             }
 
-            // No solution here lists the project. Attach the lone solution by locality ONLY when its listing
-            // can't be inspected (empty/unreadable) — matching how a developer opens that one solution in VS.
-            // When exactly one solution is readable and CONFIRMS the project is absent, don't fabricate
-            // ownership: that would inject an unrelated $(SolutionDir)/Solution* set and restore unrelated
-            // siblings, changing explicit-.csproj semantics. Keep walking ancestors, then fall back to null.
+            // No solution here lists the project. Attach a lone solution by locality ONLY when its listing
+            // can't be inspected (empty/unreadable) — as a developer would open that one in VS. When exactly
+            // one solution is readable and CONFIRMS the project is absent, don't fabricate ownership (that
+            // would inject an unrelated $(SolutionDir)/Solution* set). Keep walking, then fall back to null.
             if (solutions.Count == 1 && InspectSolutionOwnership(solutions[0], csproj) == SolutionOwnership.Indeterminate)
             {
                 return solutions[0];
@@ -249,11 +233,10 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
-    /// Inspects whether a solution owns a project, distinguishing a solution that CONFIRMS the project is
-    /// absent (readable, lists real projects, none match) from one whose ownership is merely
-    /// <see cref="SolutionOwnership.Indeterminate"/> (unreadable, or parsed to zero entries). Parses the
-    /// solution text directly (no <c>dotnet</c> shell-out): classic <c>.sln</c> via the project-entry regex,
-    /// <c>.slnx</c> via XML. Each listed path is resolved relative to the solution directory.
+    /// Inspects whether a solution owns a project, distinguishing a CONFIRMED-absent solution (readable,
+    /// lists real projects, none match) from an <see cref="SolutionOwnership.Indeterminate"/> one
+    /// (unreadable, or zero entries). Parses the solution text directly (no <c>dotnet</c> shell-out):
+    /// classic <c>.sln</c> via regex, <c>.slnx</c> via XML; each path resolved relative to the solution dir.
     /// </summary>
     private static SolutionOwnership InspectSolutionOwnership(FileInfo solution, FileInfo project)
     {
@@ -346,18 +329,16 @@ internal sealed partial class ProjectRunService
         ManagedProjectExtensions.Any(ext => path.EndsWith(ext, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
-    /// Computes the restore plan for a solution build. Visual Studio (and <c>dotnet build &lt;sln&gt;</c>)
-    /// restore the <em>whole solution</em> before building — including projects that are build-dependencies
-    /// but not <c>ProjectReference</c>s of the target (e.g. an out-of-process COM server invoked by a custom
-    /// MSBuild target). <c>winapp run</c> restores only the single target, so those siblings have no
-    /// <c>project.assets.json</c> and the build fails with <c>NETSDK1004</c>. This enumerates the solution's
-    /// listed projects (a pure text parse — no <c>dotnet</c> shell-out, no <c>File.Exists</c> gating) and
-    /// returns the managed siblings to restore, excluding the target itself.
+    /// Computes the restore plan for a solution build. VS (and <c>dotnet build &lt;sln&gt;</c>) restore the
+    /// <em>whole solution</em> before building — including build-dependency projects that aren't
+    /// <c>ProjectReference</c>s of the target — whereas <c>winapp run</c> restores only the target, so those
+    /// siblings lack a <c>project.assets.json</c> and the build fails with <c>NETSDK1004</c>. Enumerates the
+    /// solution's listed projects (pure text parse — no shell-out, no <c>File.Exists</c> gating) and returns
+    /// the managed siblings to restore, excluding the target.
     /// <para>
-    /// <paramref name="AllManaged"/> is true when every listed project is a restorable managed type. When it
-    /// is false (a native <c>.vcxproj</c>/<c>.wapproj</c>/<c>.shproj</c> is present), a single
-    /// <c>dotnet restore &lt;sln&gt;</c> would error on a VS-less box, so the caller restores the managed
-    /// siblings individually and skips the natives.
+    /// <paramref name="AllManaged"/> is true when every listed project is a restorable managed type. When
+    /// false (a native <c>.vcxproj</c>/<c>.wapproj</c>/<c>.shproj</c> is present, which <c>dotnet restore
+    /// &lt;sln&gt;</c> can't handle VS-less), the caller restores managed siblings individually.
     /// </para>
     /// </summary>
     internal static (bool AllManaged, List<FileInfo> ManagedSiblings) ComputeSolutionRestorePlan(FileInfo solution, FileInfo target)
@@ -394,12 +375,11 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
-    /// Resolves the runnable app project out of a solution and records the solution on the result so
-    /// the build defines <c>$(SolutionDir)</c>. A classic <c>.sln</c>'s project list comes from
-    /// <c>dotnet sln &lt;sln&gt; list</c>; an XML <c>.slnx</c> is parsed locally (see
-    /// <see cref="GetSolutionProjectsAsync"/>). Each candidate is classified with the same MSBuild
-    /// evaluation used for a multi-<c>.csproj</c> directory. Exactly one launchable (non-test
-    /// executable) project is required unless a matching <c>--project</c> selector is supplied.
+    /// Resolves the runnable app project out of a solution and records the solution on the result so the
+    /// build defines <c>$(SolutionDir)</c>. A classic <c>.sln</c>'s project list comes from <c>dotnet sln
+    /// list</c>; an XML <c>.slnx</c> is parsed locally. Each candidate is classified with the same MSBuild
+    /// evaluation used for a multi-<c>.csproj</c> directory. Exactly one launchable (non-test executable)
+    /// project is required unless a matching <c>--project</c> selector is supplied.
     /// </summary>
     private async Task<RunInputResolution> ResolveSolutionAsync(FileInfo solution, string? projectSelector, ProjectClassificationInputs? classificationInputs, CancellationToken cancellationToken, bool allowFolderFallback = false)
     {
@@ -408,8 +388,8 @@ internal sealed partial class ProjectRunService
 
         if (projects.Count == 0)
         {
-            // A solution that lists no .csproj (e.g. native-only .vcxproj) has nothing runnable. From a
-            // directory input we degrade to folder mode; an explicitly-supplied .sln keeps the error.
+            // A solution that lists no .csproj (e.g. native-only) has nothing runnable. A directory input
+            // degrades to folder mode; an explicit .sln keeps the error.
             if (allowFolderFallback)
             {
                 return new RunInputResolution(WinAppRunMode.Folder, null, solutionDir);
@@ -447,12 +427,10 @@ internal sealed partial class ProjectRunService
             return new RunInputResolution(WinAppRunMode.Project, pick, pick.Directory ?? solutionDir, solution, "only runnable project");
         }
 
-        // Zero or several runnable app projects → we don't emulate VS's startup-project selection;
-        // require an explicit --project so the wrong app is never launched behind the user's back.
-        // A lone test project auto-runs above; here we only reach the ambiguous/empty cases.
-        // Exception: a directory input whose sole solution has NO runnable project at all (libraries
-        // only) degrades to folder mode — mirroring the lone non-runnable .csproj path — rather than
-        // erroring. Ambiguity (multiple apps/tests) still requires --project; an explicit .sln always errors.
+        // Zero or several runnable app projects → we don't emulate VS's startup-project selection; require
+        // an explicit --project so the wrong app is never launched. (A lone test project auto-runs above.)
+        // Exception: a directory input whose sole solution has NO runnable project (libraries only) degrades
+        // to folder mode, mirroring the lone non-runnable .csproj path; an explicit .sln always errors.
         if (allowFolderFallback && apps.Count == 0 && tests.Count == 0)
         {
             return new RunInputResolution(WinAppRunMode.Folder, null, solutionDir);
@@ -516,15 +494,13 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
-    /// Appends a <c>-p:TargetFramework=&lt;first&gt;</c> to a candidate's classification properties when it is
+    /// Appends <c>-p:TargetFramework=&lt;first&gt;</c> to a candidate's classification properties when it is
     /// multi-targeted and the user gave no <c>--framework</c>, so the classify evaluate reads
-    /// <c>OutputType</c>/test markers on the SAME inner single-TFM node the build/evaluate passes will pin.
-    /// Without this a project whose executable <c>OutputType</c> is conditional on <c>$(TargetFramework)</c>
-    /// evaluates on the cross-targeting OUTER node (empty <c>TargetFramework</c>) → appears non-runnable →
-    /// solution/directory auto-selection fails BEFORE the build even though the build would succeed. Reuses
-    /// <see cref="ResolveEffectiveFrameworkAsync"/> (its static fast-path avoids an extra evaluate for the
-    /// common inline-concrete case), which no-ops for single-targeted projects and when a TFM can't be
-    /// resolved (SDK-less / pre-restore), leaving the base properties unchanged.
+    /// <c>OutputType</c>/test markers on the SAME inner single-TFM node the build pins. Without this, a
+    /// project whose executable <c>OutputType</c> is conditional on <c>$(TargetFramework)</c> evaluates on
+    /// the cross-targeting outer node (empty TFM) → appears non-runnable → auto-selection fails before the
+    /// build. Reuses <see cref="ResolveEffectiveFrameworkAsync"/>, which no-ops for single-targeted projects
+    /// and when a TFM can't be resolved (SDK-less / pre-restore).
     /// </summary>
     private async Task<IReadOnlyList<string>?> AddEffectiveFrameworkForClassificationAsync(
         FileInfo project,
@@ -534,8 +510,8 @@ internal sealed partial class ProjectRunService
         FileInfo? solution,
         CancellationToken cancellationToken)
     {
-        // Nothing to resolve when the arch didn't resolve (inputs null) or the user already pinned a TFM —
-        // in the latter case BuildClassificationPropertyTokens already threaded -p:TargetFramework in.
+        // Nothing to resolve when arch didn't resolve (inputs null) or the user already pinned a TFM (then
+        // BuildClassificationPropertyTokens already threaded -p:TargetFramework in).
         if (classificationInputs is null || !string.IsNullOrWhiteSpace(classificationInputs.Framework))
         {
             return extraMsbuildProperties;
@@ -559,7 +535,8 @@ internal sealed partial class ProjectRunService
         return [.. extraMsbuildProperties ?? [], $"-p:TargetFramework={resolved.Framework}"];
     }
 
-    /// selection: a single real app wins; test projects are skipped when any app exists; a lone test
+    /// <summary>
+    /// Auto-selection: a single real app wins; test projects are skipped when any app exists; a lone test
     /// project (tests-only solution) is run as a convenience. Any other shape (several apps, several
     /// tests-only, none) returns null so the caller can require an explicit <c>--project</c>.
     /// </summary>
@@ -583,10 +560,9 @@ internal sealed partial class ProjectRunService
 
     private void LogRunningLoneTestProject(FileInfo project, string sourceName)
     {
-        // Courtesy note — must obey the output mode. Gate on Information (mirrors the pattern in
-        // ProjectRunService.cs / RunCommand.ProjectMode.cs) so --json (LogLevel.None) keeps stdout a
-        // pure JSON envelope and --quiet (LogLevel.Warning) suppresses it. This runs during input
-        // resolution, ahead of the command's own output-mode gating, so it must self-gate here.
+        // Courtesy note that obeys the output mode: gate on Information so --json keeps stdout a pure JSON
+        // envelope and --quiet suppresses it. Runs during input resolution, ahead of the command's own
+        // gating, so it must self-gate.
         if (!logger.IsEnabled(LogLevel.Information))
         {
             return;
@@ -598,25 +574,23 @@ internal sealed partial class ProjectRunService
 
     /// <summary>
     /// Lists the C# projects in a solution, resolving each to an absolute <see cref="FileInfo"/>.
-    /// Non-<c>.csproj</c> projects (e.g. <c>.vcxproj</c>) are excluded because <c>winapp run</c> builds and
-    /// launches managed app projects. A classic <c>.sln</c> is enumerated via <c>dotnet sln &lt;sln&gt;
-    /// list</c>; an XML <c>.slnx</c> is parsed directly with the local XML helper because <c>dotnet sln
-    /// list</c> only understands <c>.slnx</c> on SDK 9.0.200+, whereas the run target's own <c>.csproj</c>
-    /// (not the solution) is what gets built, so no <c>.slnx</c>-aware SDK is actually required.
+    /// Non-<c>.csproj</c> projects are excluded (<c>winapp run</c> builds/launches managed app projects).
+    /// A classic <c>.sln</c> is enumerated via <c>dotnet sln list</c>; an XML <c>.slnx</c> is parsed directly
+    /// (<c>dotnet sln list</c> needs SDK 9.0.200+ for <c>.slnx</c>, but the target <c>.csproj</c> is what
+    /// gets built, so no <c>.slnx</c>-aware SDK is required).
     /// </summary>
     private async Task<List<FileInfo>> GetSolutionProjectsAsync(FileInfo solution, DirectoryInfo solutionDir, CancellationToken cancellationToken)
     {
-        // Check for a capable SDK first: the build/evaluate passes below need it, and its failure
-        // message ("could not read the solution") is far less actionable than the SDK guidance.
+        // Check for a capable SDK first: the build/evaluate passes need it, and its failure message is far
+        // more actionable than "could not read the solution".
         var sdkError = await CheckSdkAsync(solutionDir, cancellationToken);
         if (sdkError != null)
         {
             throw new ProjectRunException(sdkError);
         }
 
-        // .slnx: parse locally (dotnet sln list needs SDK 9.0.200+ for .slnx; the 8.0.100 floor we just
-        // verified does not cover it). We build the resolved .csproj directly, so a .slnx-aware SDK is
-        // not required — only the local XML parse.
+        // .slnx: parse locally (dotnet sln list needs SDK 9.0.200+ for .slnx; our 8.0.100 floor doesn't
+        // cover it). We build the resolved .csproj directly, so only the local XML parse is needed.
         if (string.Equals(solution.Extension, ".slnx", StringComparison.OrdinalIgnoreCase))
         {
             return ReadSolutionProjectsFromText(solution, solutionDir, ExtractSlnxProjectPaths);
@@ -663,11 +637,9 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
-    /// Normalizes a solution-relative project path (either slash flavor → the platform separator) and
-    /// resolves it to an absolute path under <paramref name="solutionDir"/>. Returns <c>null</c> when the
-    /// path is malformed (<see cref="ArgumentException"/>/<see cref="PathTooLongException"/>/<see
-    /// cref="NotSupportedException"/>) so callers can skip it. Shared by every solution-listing walk so
-    /// they all resolve entries identically.
+    /// Normalizes a solution-relative project path (either slash flavor) and resolves it to an absolute path
+    /// under <paramref name="solutionDir"/>. Returns <c>null</c> when the path is malformed so callers skip
+    /// it.
     /// </summary>
     private static string? TryResolveSolutionRelativePath(string solutionDir, string relative)
     {
@@ -682,10 +654,7 @@ internal sealed partial class ProjectRunService
         }
     }
 
-    /// <summary>
-    /// De-duplicates absolute project paths (case-insensitive) into <see cref="FileInfo"/> entries,
-    /// preserving first-seen order. Shared by the solution-listing walks.
-    /// </summary>
+    /// <summary>De-duplicates absolute project paths (case-insensitive) into <see cref="FileInfo"/> entries, preserving first-seen order.</summary>
     private static List<FileInfo> DistinctProjectFiles(IEnumerable<string> fullPaths)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -702,10 +671,10 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
-    /// Reads a solution file's text and resolves the relative <c>.csproj</c> paths (extracted by
-    /// <paramref name="extractProjectPaths"/>) to absolute, de-duplicated <see cref="FileInfo"/> entries
-    /// relative to the solution directory. Used for the pure-text solution formats (<c>.slnx</c>). Throws
-    /// <see cref="ProjectRunException"/> when the solution cannot be read.
+    /// Reads a solution file's text and resolves the relative <c>.csproj</c> paths (via
+    /// <paramref name="extractProjectPaths"/>) to absolute, de-duplicated <see cref="FileInfo"/> entries.
+    /// Used for the pure-text solution formats (<c>.slnx</c>). Throws <see cref="ProjectRunException"/> when
+    /// the solution can't be read.
     /// </summary>
     private static List<FileInfo> ReadSolutionProjectsFromText(
         FileInfo solution,
@@ -739,12 +708,9 @@ internal sealed partial class ProjectRunService
     internal static FileInfo? MatchProjectSelector(IReadOnlyList<FileInfo> projects, string selector, DirectoryInfo baseDir)
     {
         var trimmed = selector.Trim();
-        // Resolve a path-style selector against the input/solution directory (not the process cwd),
-        // so `--project src/App/App.csproj` means "relative to what the user pointed winapp at".
-        // --project is user input: an unsupported path format (e.g. a colon outside a drive prefix)
-        // makes Path.GetFullPath throw. Treat that as "no match" and return null so the caller emits
-        // the normal selector error listing candidates, rather than leaking an internal exception —
-        // mirroring the same guard applied to solution-provided paths above.
+        // Resolve a path-style selector against the input/solution directory (not the process cwd). --project
+        // is user input: an unsupported path format makes Path.GetFullPath throw — treat that as "no match"
+        // so the caller emits the normal selector error rather than leaking an exception.
         string rooted;
         try
         {
@@ -761,14 +727,10 @@ internal sealed partial class ProjectRunService
             string.Equals(Path.GetFileNameWithoutExtension(p.Name), trimmed, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
-        // A *relative* path-style selector may not be rooted where we computed (e.g. the user gave a
-        // path relative to a different base). Fall back to matching against the selector, but honor its
-        // directory intent: if the selector names a directory component, suffix-match the full path so
-        // `--project src/App/App.csproj` still resolves to …\src\App\App.csproj yet a *different*
-        // same-named project (…\other\App.csproj) is NOT silently picked. Only a bare leaf selector
-        // (no directory component) falls back to a name match. Skip this entirely for a fully qualified
-        // path: the user named an exact location, so matching elsewhere would be wrong (e.g.
-        // `--project C:\wrong\App.csproj` must not pick the solution's unrelated `App.csproj`).
+        // A relative path-style selector may not be rooted where we computed. Fall back to matching the
+        // selector while honoring its directory intent: a selector with a directory component suffix-matches
+        // the full path (so `src/App/App.csproj` resolves there yet a different same-named project isn't
+        // picked); a bare leaf falls back to a name match. A fully qualified selector is exact — no fallback.
         if (matches.Count == 0 && !Path.IsPathFullyQualified(trimmed))
         {
             var normalized = trimmed.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
