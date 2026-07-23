@@ -33,7 +33,7 @@ public class ProcessRunnerTests
         {
             _tempDirectory.Delete(recursive: true);
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Best-effort cleanup of the per-test temp directory; a leftover temp folder is harmless.
         }
