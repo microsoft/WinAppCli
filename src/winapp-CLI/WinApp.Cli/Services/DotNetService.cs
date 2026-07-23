@@ -565,9 +565,15 @@ internal partial class DotNetService : IDotNetService
             return null;
         }
 
-        // `dotnet list package` performs an implicit restore on current SDKs; honor --no-restore so a
-        // run that requested no restore can't mutate the project's assets during runtime discovery.
-        var args = $"list \"{csprojFile.FullName}\" package{(includeTransitive ? " --include-transitive" : "")}{(noRestore ? " --no-restore" : "")} --format json";
+        // `--no-restore` on `dotnet list package` is a .NET 10 SDK addition: that SDK made an implicit
+        // restore the default and `--no-restore` opts out. On .NET 9 and earlier the switch is unknown
+        // and the command fails — and those SDKs don't restore here anyway (they read existing assets),
+        // so there's nothing to opt out of. Only forward it on SDK 10+; otherwise omit it so package
+        // discovery keeps working on the SDK 8.0.100+ range project mode supports.
+        var applyNoRestore = noRestore
+            && await GetSdkMajorVersionAsync(csprojFile.Directory!, cancellationToken) is int major
+            && major >= 10;
+        var args = $"list \"{csprojFile.FullName}\" package{(includeTransitive ? " --include-transitive" : "")}{(applyNoRestore ? " --no-restore" : "")} --format json";
         var (exitCode, output, _) = await RunDotnetCommandAsync(csprojFile.Directory!, args, cancellationToken);
 
         if (exitCode != 0 || string.IsNullOrWhiteSpace(output))
@@ -583,6 +589,73 @@ internal partial class DotNetService : IDotNetService
         {
             return null;
         }
+    }
+
+    // Caches the resolved dotnet SDK major version per working directory (global.json can pin different
+    // SDKs per project), so the `--no-restore` capability probe runs `dotnet --version` at most once.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int?> _sdkMajorByDir =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Resolves the major version of the dotnet SDK active in <paramref name="workingDirectory"/> by
+    /// running <c>dotnet --version</c> (respecting any <c>global.json</c>). Returns <c>null</c> when the
+    /// version can't be determined; callers treat unknown conservatively (they skip SDK 10+-only switches).
+    /// </summary>
+    private async Task<int?> GetSdkMajorVersionAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken)
+    {
+        var key = workingDirectory.FullName;
+        if (_sdkMajorByDir.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        int? major = null;
+        try
+        {
+            var (exitCode, output, _) = await RunDotnetCommandAsync(workingDirectory, "--version", cancellationToken);
+            if (exitCode == 0)
+            {
+                major = ParseSdkMajorVersion(output);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            // Leave unknown; the caller falls back to the safe (switch-omitted) behavior.
+        }
+
+        _sdkMajorByDir[key] = major;
+        return major;
+    }
+
+    /// <summary>
+    /// Parses the SDK major version from <c>dotnet --version</c> output such as <c>10.0.302</c> or
+    /// <c>10.0.100-preview.1.24101.2</c>. Returns <c>null</c> for unrecognized output.
+    /// </summary>
+    internal static int? ParseSdkMajorVersion(string? versionOutput)
+    {
+        if (string.IsNullOrWhiteSpace(versionOutput))
+        {
+            return null;
+        }
+
+        var firstLine = versionOutput
+            .Split('\n', '\r')
+            .FirstOrDefault(line => !string.IsNullOrWhiteSpace(line))?
+            .Trim();
+        if (string.IsNullOrWhiteSpace(firstLine))
+        {
+            return null;
+        }
+
+        // Drop any prerelease/build suffix (after '-') before reading the leading major component.
+        var core = firstLine.Split('-', ' ')[0];
+        var dot = core.IndexOf('.');
+        var majorPart = dot >= 0 ? core[..dot] : core;
+        return int.TryParse(majorPart, out var parsed) && parsed > 0 ? parsed : null;
     }
 
     public async Task<bool> EnsureEnableMsixToolingAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)

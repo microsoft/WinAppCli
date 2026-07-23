@@ -1859,4 +1859,31 @@ public class DotNetServiceTests : BaseCommandTests
     }
 
     #endregion
+
+    #region ParseSdkMajorVersion
+
+    [TestMethod]
+    [DataRow("10.0.302", 10)]
+    [DataRow("9.0.100", 9)]
+    [DataRow("8.0.100", 8)]
+    [DataRow("10.0.100-preview.1.24101.2", 10)]
+    [DataRow("  10.0.302  ", 10)]
+    [DataRow("10.0.302\n", 10)]
+    public void ParseSdkMajorVersion_ValidOutput_ReturnsMajor(string output, int expected)
+    {
+        Assert.AreEqual(expected, DotNetService.ParseSdkMajorVersion(output));
+    }
+
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("   ")]
+    [DataRow(null)]
+    [DataRow("not-a-version")]
+    [DataRow("x.y.z")]
+    public void ParseSdkMajorVersion_InvalidOutput_ReturnsNull(string? output)
+    {
+        Assert.IsNull(DotNetService.ParseSdkMajorVersion(output));
+    }
+
+    #endregion
 }
