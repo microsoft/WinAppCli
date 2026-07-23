@@ -68,6 +68,17 @@ internal interface IDotNetService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Runs a dotnet CLI command passing each argument as a discrete token via
+    /// <see cref="System.Diagnostics.ProcessStartInfo.ArgumentList"/>. Prefer this overload when any
+    /// argument is derived from user input, since it is immune to argument injection (no manual
+    /// quoting/escaping of interpolated values).
+    /// </summary>
+    Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(
+        DirectoryInfo workingDirectory,
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Ensures the .csproj has a RuntimeIdentifier element with a default that auto-detects
     /// the current platform architecture. Only adds the element if no RuntimeIdentifier or
     /// RuntimeIdentifiers element already exists in the project.

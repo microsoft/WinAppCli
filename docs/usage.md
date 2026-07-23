@@ -149,7 +149,7 @@ WinUI templates already include Windows packaging and identity (`Package.appxman
 **Examples:**
 
 ```bash
-# Interactive: pick a template, then name/output
+# Interactive: pick a template, then a name (output defaults to ./<name>)
 winapp new
 
 # One-shot with a specific template

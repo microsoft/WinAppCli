@@ -370,7 +370,7 @@ internal partial class DotNetService : IDotNetService
     }
 
     /// <inheritdoc />
-    public async Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(
+    public Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(
         DirectoryInfo workingDirectory,
         string arguments,
         CancellationToken cancellationToken = default)
@@ -386,6 +386,39 @@ internal partial class DotNetService : IDotNetService
             CreateNoWindow = true
         };
 
+        return RunDotnetProcessAsync(processStartInfo, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(
+        DirectoryInfo workingDirectory,
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken = default)
+    {
+        var processStartInfo = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            WorkingDirectory = workingDirectory.FullName,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        // ArgumentList passes each token verbatim to the child process, so user-derived values
+        // (e.g. project name, template version) cannot inject additional dotnet options.
+        foreach (var argument in arguments)
+        {
+            processStartInfo.ArgumentList.Add(argument);
+        }
+
+        return RunDotnetProcessAsync(processStartInfo, cancellationToken);
+    }
+
+    private static async Task<(int ExitCode, string Output, string Error)> RunDotnetProcessAsync(
+        ProcessStartInfo processStartInfo,
+        CancellationToken cancellationToken)
+    {
         using var process = new Process { StartInfo = processStartInfo };
 
         var outputBuilder = new StringBuilder();

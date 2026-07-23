@@ -90,4 +90,60 @@ public class NewCommandTests : BaseCommandTests
         Assert.AreEqual(expectedShortName, shortName);
         Assert.IsFalse(string.IsNullOrWhiteSpace(label), "Each template should have a friendly picker label.");
     }
+
+    [TestMethod]
+    [DataRow(nameof(WinUiTemplate.Blank), "app")]
+    [DataRow(nameof(WinUiTemplate.NavView), "app")]
+    [DataRow(nameof(WinUiTemplate.Lib), "class library")]
+    [DataRow(nameof(WinUiTemplate.UnitTest), "unit test project")]
+    public void ProjectKind_DescribesTheArtifact(string templateName, string expectedKind)
+    {
+        var template = Enum.Parse<WinUiTemplate>(templateName);
+
+        Assert.AreEqual(expectedKind, NewCommand.ProjectKind(template));
+    }
+
+    [TestMethod]
+    [DataRow("0.0.6-alpha", true)]
+    [DataRow("1.2.3", true)]
+    [DataRow("1.0.0-preview.2", true)]
+    [DataRow("", false)]
+    [DataRow("   ", false)]
+    [DataRow("latest", false)]      // does not start with a digit
+    [DataRow("1.0 --add-source http://evil", false)] // whitespace / injection shape
+    [DataRow("1.0\"", false)]       // quote
+    public void IsPlausibleVersion_AcceptsOnlyVersionShapedInput(string version, bool expected)
+    {
+        Assert.AreEqual(expected, NewCommand.IsPlausibleVersion(version));
+    }
+
+    [TestMethod]
+    public void IsTemplatePackInstalled_MatchingVersion_ReturnsTrue()
+    {
+        var listing =
+            "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n" +
+            "   Version: 0.0.6-alpha\n" +
+            "   Details: ...\n";
+
+        Assert.IsTrue(NewCommand.IsTemplatePackInstalled(listing, "0.0.6-alpha"));
+    }
+
+    [TestMethod]
+    public void IsTemplatePackInstalled_DifferentVersion_ReturnsFalse()
+    {
+        var listing =
+            "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n" +
+            "   Version: 0.0.5-alpha\n";
+
+        Assert.IsFalse(NewCommand.IsTemplatePackInstalled(listing, "0.0.6-alpha"),
+            "An installed-but-different version must not satisfy an explicit --template-version.");
+    }
+
+    [TestMethod]
+    public void IsTemplatePackInstalled_NotInstalled_ReturnsFalse()
+    {
+        var listing = "Some.Other.Template.Pack\n   Version: 1.0.0\n";
+
+        Assert.IsFalse(NewCommand.IsTemplatePackInstalled(listing, "0.0.6-alpha"));
+    }
 }

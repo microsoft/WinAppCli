@@ -44,6 +44,10 @@ internal class NewCommand : Command, IShortDescription
     /// <summary>Minimum .NET SDK version, matching <c>winapp run</c>'s project mode.</summary>
     internal static readonly Version MinimumSdkVersion = new(8, 0, 100);
 
+    // Fixed dotnet argument lists, hoisted to static readonly fields to satisfy CA1861.
+    private static readonly string[] VersionArgs = ["--version"];
+    private static readonly string[] ListTemplatePacksArgs = ["new", "uninstall"];
+
     // Distinct exit codes so agents can branch on the failing stage without parsing text.
     internal const int ExitSuccess = 0;
     internal const int ExitInvalidArgs = 2;
@@ -110,6 +114,70 @@ internal class NewCommand : Command, IShortDescription
         _ => ("winui", "Blank app")
     };
 
+    /// <summary>Human-facing noun for the created artifact, used in the success message.</summary>
+    internal static string ProjectKind(WinUiTemplate template) => template switch
+    {
+        WinUiTemplate.Lib => "class library",
+        WinUiTemplate.UnitTest => "unit test project",
+        _ => "app"
+    };
+
+    /// <summary>
+    /// A plausible NuGet package version: non-empty, starts with a digit, and contains only
+    /// version characters. Rejects whitespace/quote-laden input (defense-in-depth against argument
+    /// injection, and a fast-fail for typos).
+    /// </summary>
+    internal static bool IsPlausibleVersion(string version) =>
+        !string.IsNullOrWhiteSpace(version)
+        && char.IsDigit(version[0])
+        && version.All(c => char.IsLetterOrDigit(c) || c is '.' or '-' or '+');
+
+    /// <summary>
+    /// Returns true only when the <paramref name="requestedVersion"/> of the template pack is already
+    /// installed. Parses the <c>dotnet new uninstall</c> listing (a package-id line followed by an
+    /// indented "Version: x" line) so an older/different installed version is not mistaken for the
+    /// requested one — otherwise an explicit <c>--template-version</c> would silently be ignored.
+    /// </summary>
+    internal static bool IsTemplatePackInstalled(string uninstallListOutput, string requestedVersion)
+    {
+        if (string.IsNullOrEmpty(uninstallListOutput))
+        {
+            return false;
+        }
+
+        var lines = uninstallListOutput.Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (!lines[i].Trim().Equals(TemplatePackageId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // The version appears on a following indented line, e.g. "   Version: 0.0.6-alpha".
+            const string marker = "Version:";
+            for (var j = i + 1; j < lines.Length && j <= i + 5; j++)
+            {
+                var line = lines[j].Trim();
+                var idx = line.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+                if (idx >= 0)
+                {
+                    var installedVersion = line[(idx + marker.Length)..].Trim();
+                    return installedVersion.Equals(requestedVersion, StringComparison.OrdinalIgnoreCase);
+                }
+
+                // Reached the next package block without finding a version line.
+                if (line.Equals(TemplatePackageId, StringComparison.OrdinalIgnoreCase))
+                {
+                    break;
+                }
+            }
+
+            return false;
+        }
+
+        return false;
+    }
+
     public class Handler(
         IDotNetService dotNetService,
         ICurrentDirectoryProvider currentDirectoryProvider,
@@ -125,6 +193,7 @@ internal class NewCommand : Command, IShortDescription
             var force = parseResult.GetValue(ForceOption);
             var templateVersion = parseResult.GetValue(TemplateVersionOption) ?? DefaultTemplateVersion;
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
+            var quiet = parseResult.GetValue(WinAppRootCommand.QuietOption);
 
             var name = nameFromOption;
 
@@ -166,6 +235,23 @@ internal class NewCommand : Command, IShortDescription
             var currentDir = currentDirectoryProvider.GetCurrentDirectoryInfo();
             var outputDir = output ?? new DirectoryInfo(Path.Combine(currentDir.FullName, name!));
 
+            // 3b. Validate the template-pack version (a NuGet version starts with a digit and contains
+            // only version characters). This fails fast on clearly invalid input with exit code 2.
+            if (!IsPlausibleVersion(templateVersion))
+            {
+                if (isJson)
+                {
+                    PrintJson(false, template.Value, name!, outputDir.FullName,
+                        $"Invalid --template-version '{templateVersion}'. Expected a NuGet version such as {DefaultTemplateVersion}.");
+                }
+                else
+                {
+                    logger.LogError("{Error} Invalid --template-version '{Version}'. Expected a NuGet version such as {Default}.",
+                        UiSymbols.Error, templateVersion, DefaultTemplateVersion);
+                }
+                return ExitInvalidArgs;
+            }
+
             // 4. Prerequisite: .NET SDK (fail fast, do not install anything)
             var sdkOk = await CheckDotnetSdkAsync(isJson, cancellationToken);
             if (!sdkOk)
@@ -192,15 +278,17 @@ internal class NewCommand : Command, IShortDescription
 
             // 6. Scaffold via dotnet new
             var (shortName, _) = TemplateInfo(template.Value);
-            if (!useDefaults && !isJson)
+            if (!useDefaults && !isJson && !quiet)
             {
                 ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Creating [green]{name}[/] from [blue]{shortName}[/]...");
             }
 
-            var args = $"new {shortName} -n \"{name}\" -o \"{outputDir.FullName}\"";
+            // Pass each token via ArgumentList (injection-safe) so a crafted --name or --output cannot
+            // inject additional dotnet new options.
+            var args = new List<string> { "new", shortName, "-n", name!, "-o", outputDir.FullName };
             if (force)
             {
-                args += " --force";
+                args.Add("--force");
             }
 
             var (exitCode, stdout, stderr) = await dotNetService.RunDotnetCommandAsync(currentDir, args, cancellationToken);
@@ -223,11 +311,22 @@ internal class NewCommand : Command, IShortDescription
             {
                 PrintJson(true, template.Value, name!, outputDir.FullName, null);
             }
-            else
+            else if (!quiet)
             {
                 var relative = Path.GetRelativePath(currentDir.FullName, outputDir.FullName);
-                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Check} Created WinUI app [green]{name}[/] at [blue]{outputDir.FullName}[/].");
-                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: [blue]cd \"{relative}\"[/] then [blue]winapp run .[/]");
+                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Check} Created WinUI {ProjectKind(template.Value)} [green]{name}[/] at [blue]{outputDir.FullName}[/].");
+                switch (template.Value)
+                {
+                    case WinUiTemplate.Lib:
+                        ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: reference [blue]{relative}[/] from an app project.");
+                        break;
+                    case WinUiTemplate.UnitTest:
+                        ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: [blue]cd \"{relative}\"[/] then [blue]dotnet test[/].");
+                        break;
+                    default:
+                        ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: [blue]cd \"{relative}\"[/] then [blue]winapp run .[/]");
+                        break;
+                }
             }
 
             return ExitSuccess;
@@ -270,7 +369,7 @@ internal class NewCommand : Command, IShortDescription
             string stdout;
             try
             {
-                (exitCode, stdout, _) = await dotNetService.RunDotnetCommandAsync(cwd, "--version", cancellationToken);
+                (exitCode, stdout, _) = await dotNetService.RunDotnetCommandAsync(cwd, VersionArgs, cancellationToken);
             }
             catch (Win32Exception)
             {
@@ -296,17 +395,29 @@ internal class NewCommand : Command, IShortDescription
                 versionText = versionText[..dashIndex];
             }
 
-            if (Version.TryParse(versionText, out var installed) && installed < MinimumSdkVersion)
+            if (Version.TryParse(versionText, out var installed))
             {
-                if (!isJson)
+                if (installed < MinimumSdkVersion)
                 {
-                    logger.LogError("{Error} .NET SDK {Installed} is installed, but {Minimum} or newer is required. Update from https://dotnet.microsoft.com/download, then re-run 'winapp new'.",
-                        UiSymbols.Error, installed, MinimumSdkVersion);
+                    if (!isJson)
+                    {
+                        logger.LogError("{Error} .NET SDK {Installed} is installed, but {Minimum} or newer is required. Update from https://dotnet.microsoft.com/download, then re-run 'winapp new'.",
+                            UiSymbols.Error, installed, MinimumSdkVersion);
+                    }
+                    return false;
                 }
-                return false;
+
+                return true;
             }
 
-            return true;
+            // Unparseable output means we can't confirm a usable SDK — fail the prerequisite rather
+            // than optimistically proceeding into a confusing `dotnet new` error.
+            if (!isJson)
+            {
+                logger.LogError("{Error} Could not determine the installed .NET SDK version (got '{Output}'). Ensure the .NET SDK {Minimum} or newer is installed from https://dotnet.microsoft.com/download, then re-run 'winapp new'.",
+                    UiSymbols.Error, stdout.Trim(), MinimumSdkVersion);
+            }
+            return false;
         }
 
         /// <summary>
@@ -315,9 +426,9 @@ internal class NewCommand : Command, IShortDescription
         /// </summary>
         private async Task<bool> EnsureTemplatePackAsync(DirectoryInfo cwd, string version, bool isJson, CancellationToken cancellationToken)
         {
-            // `dotnet new uninstall` with no args lists installed template packages.
-            var (listExit, listOut, _) = await dotNetService.RunDotnetCommandAsync(cwd, "new uninstall", cancellationToken);
-            if (listExit == 0 && listOut.Contains(TemplatePackageId, StringComparison.OrdinalIgnoreCase))
+            // `dotnet new uninstall` with no args lists installed template packages (and versions).
+            var (listExit, listOut, _) = await dotNetService.RunDotnetCommandAsync(cwd, ListTemplatePacksArgs, cancellationToken);
+            if (listExit == 0 && IsTemplatePackInstalled(listOut, version))
             {
                 return true;
             }
@@ -328,7 +439,7 @@ internal class NewCommand : Command, IShortDescription
             }
 
             var (installExit, installOut, installErr) = await dotNetService.RunDotnetCommandAsync(
-                cwd, $"new install {TemplatePackageId}::{version}", cancellationToken);
+                cwd, new[] { "new", "install", $"{TemplatePackageId}::{version}" }, cancellationToken);
 
             if (installExit != 0)
             {
@@ -356,7 +467,9 @@ internal class NewCommand : Command, IShortDescription
             };
 
             var json = JsonSerializer.Serialize(result, NewCommandJsonContext.Default.NewCommandResult);
-            ansiConsole.WriteLine(json);
+            // Write via the raw output writer (not ansiConsole.WriteLine) so Spectre does not
+            // word-wrap the JSON to the console width and corrupt it on narrow terminals.
+            ansiConsole.Profile.Out.Writer.WriteLine(json);
         }
     }
 }

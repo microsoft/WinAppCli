@@ -81,7 +81,27 @@ internal class FakeDotNetService : IDotNetService
 
     public Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(DirectoryInfo workingDirectory, string arguments, CancellationToken cancellationToken = default)
     {
+        StringInvocations.Add(arguments);
         return Task.FromResult((0, "Fake dotnet command executed successfully.", string.Empty));
+    }
+
+    /// <summary>Records every argument list passed to the <see cref="IReadOnlyList{T}"/> overload.</summary>
+    public List<IReadOnlyList<string>> ArgumentListInvocations { get; } = [];
+
+    /// <summary>Records every string passed to the string overload.</summary>
+    public List<string> StringInvocations { get; } = [];
+
+    /// <summary>
+    /// Optional scripted responder for the <see cref="IReadOnlyList{T}"/> overload. When null, the
+    /// call is recorded and a success tuple is returned. May throw to simulate a missing executable.
+    /// </summary>
+    public Func<IReadOnlyList<string>, (int ExitCode, string Output, string Error)>? RunDotnetArgumentListHandler { get; set; }
+
+    public Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(DirectoryInfo workingDirectory, IReadOnlyList<string> arguments, CancellationToken cancellationToken = default)
+    {
+        ArgumentListInvocations.Add(arguments.ToArray());
+        var result = RunDotnetArgumentListHandler?.Invoke(arguments) ?? (0, string.Empty, string.Empty);
+        return Task.FromResult(result);
     }
 
     public Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, CancellationToken cancellationToken = default)
