@@ -70,7 +70,7 @@ internal sealed partial class ProjectRunService
     /// it forwarded (via the user <c>-p</c> loop). The <c>-v</c> verbosity is mapped from the CLI's log
     /// level (Change #1).
     /// </summary>
-    internal static string BuildBuildPassArguments(FileInfo csproj, ProjectRunOptions options, string verbosity, string? csWinRTMetadataFolder = null)
+    internal static string BuildBuildPassArguments(FileInfo csproj, ProjectRunOptions options, string verbosity, string? csWinRTMetadataFolder = null, bool nativeTerminal = false)
     {
         var rid = RunArchHelper.ToRuntimeIdentifier(options.Architecture);
 
@@ -98,12 +98,20 @@ internal sealed partial class ProjectRunService
         tokens.Add("-v");
         tokens.Add(verbosity);
 
-        // Pin the MSBuild terminal logger OFF for the build pass. winapp always redirects dotnet's
-        // stdout (RunDotnetStreamingAsync), and under redirection the default `-tl:auto` already
-        // resolves to off → clean append-only output. Pinning it guards against a future SDK that
-        // redefines `auto` and reintroduces the animated `(0.1s)(0.2s)…` carriage-return redraw churn.
+        // MSBuild terminal-logger regime for the build pass, gated on how winapp launches dotnet:
+        //  • Redirected (streaming/json/quiet paths, nativeTerminal:false): pin `-tl:off`. winapp redirects
+        //    dotnet's stdout, and the console logger is the only mode available under redirection; pinning
+        //    off keeps clean append-only output and guards a future SDK that redefines `-tl:auto` and
+        //    reintroduces the animated `(0.1s)(0.2s)…` carriage-return redraw churn.
+        //  • Native terminal (nativeTerminal:true, inherited stdio on a real TTY): omit the token entirely
+        //    so dotnet's default `-tl:auto` resolves to ON, giving the native live build display that
+        //    de-duplicates warnings (the console logger double-prints them). Do NOT add `-tl:on` — absence
+        //    is the correct default and lets dotnet honor a user's own TERM/redirection decisions.
         // Build pass only — the `--getProperty` evaluate pass is left untouched.
-        tokens.Add("-tl:off");
+        if (!nativeTerminal)
+        {
+            tokens.Add("-tl:off");
+        }
 
         // Forward user -p properties, but drop any that duplicate a dedicated -c/-r/-f switch so this
         // build pass and the evaluate pass can never resolve a different Configuration/RID/TFM (see

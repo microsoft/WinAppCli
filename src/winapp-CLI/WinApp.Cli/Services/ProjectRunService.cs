@@ -41,6 +41,17 @@ internal sealed partial class ProjectRunService(
     /// </summary>
     private static readonly string[] DedicatedFlagProperties = ["Configuration", "RuntimeIdentifier", "TargetFramework"];
 
+    /// <summary>
+    /// Test seam for the "real interactive terminal" gate that <see cref="RunBuildPassAsync"/> uses to
+    /// choose the native terminal-logger (inherited-stdio) launcher over plain line streaming. In
+    /// production this is <see langword="null"/> and the gate is
+    /// <see cref="ProgressDisplay.ShouldUseLiveSpinner(IAnsiConsole, ILogger)"/> (the single source of
+    /// truth for TTY detection). It is overridable only because that gate reads process-global state
+    /// (<c>Console.IsOutputRedirected</c>, <c>Environment.UserInteractive</c>) which is always false under
+    /// the test host, so a test could otherwise never exercise the native-terminal branch.
+    /// </summary>
+    internal Func<bool>? NativeTerminalGateOverrideForTests { get; set; }
+
     /// <inheritdoc />
     public async Task<string?> CheckSdkAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken)
     {
@@ -481,10 +492,15 @@ internal sealed partial class ProjectRunService(
     /// Runs the project-mode build pass, streaming dotnet's output live. Output routing:
     /// <list type="bullet">
     ///   <item><c>--json</c> or <c>--quiet</c> (Information suppressed): print the <c>dotnet</c>
-    ///   invocation and stream all build output to <b>stderr</b>, so stdout stays pure JSON / clean.</item>
-    ///   <item>Otherwise (default interactive, <c>--verbose</c>, or an agent/CI terminal): print a
-    ///   <c>🔧 Building…</c> header and a dim <c>dotnet build …</c> invocation line, then stream
-    ///   dotnet's output live to stdout (warnings included), then a persistent <c>✓ Built</c> line.</item>
+    ///   invocation and stream all build output to <b>stderr</b>, so stdout stays pure JSON / clean.
+    ///   Keeps <c>-tl:off</c>.</item>
+    ///   <item>Real interactive terminal (<see cref="ProgressDisplay.ShouldUseLiveSpinner"/>): print a
+    ///   <c>🔧 Building…</c> header and a dim <c>dotnet build …</c> invocation line, then hand the terminal
+    ///   to dotnet with <b>inherited stdio</b> so its native terminal logger renders the live build
+    ///   (single warnings, live progress), then a persistent <c>✓ Built</c> line. Omits <c>-tl:off</c>.</item>
+    ///   <item>Otherwise (info-enabled but not a TTY: agent/CI/redirected/piped <c>--verbose</c>): print the
+    ///   header and dim invocation, then stream dotnet's output live to stdout (warnings included), then
+    ///   <c>✓ Built</c>. Keeps <c>-tl:off</c>.</item>
     /// </list>
     /// The build output always streams (no hide-behind-spinner, no capture buffer) so success-path
     /// warnings stay visible and the exact, injected-arg invocation is self-describing / reproducible.
@@ -497,7 +513,6 @@ internal sealed partial class ProjectRunService(
         CancellationToken cancellationToken)
     {
         var verbosity = ResolveBuildVerbosity(logger, options.Json);
-        var buildArgs = BuildBuildPassArguments(csproj, options, verbosity, csWinRTMetadataFolder);
 
         var banner = $"Building {csproj.Name} ({options.Configuration} | {options.Architecture})...";
         var stopwatch = Stopwatch.StartNew();
@@ -507,31 +522,50 @@ internal sealed partial class ProjectRunService(
         // safe to write through it directly.
         if (options.Json || !logger.IsEnabled(LogLevel.Information))
         {
-            Console.Error.WriteLine($"dotnet {buildArgs}");
+            var redirectedArgs = BuildBuildPassArguments(csproj, options, verbosity, csWinRTMetadataFolder);
+            Console.Error.WriteLine($"dotnet {redirectedArgs}");
             return await dotNetService.RunDotnetStreamingAsync(
-                workingDir, buildArgs,
+                workingDir, redirectedArgs,
                 onOutputLine: static line => Console.Error.WriteLine(line),
                 onErrorLine: static line => Console.Error.WriteLine(line),
                 cancellationToken);
         }
 
-        // Info-enabled (default interactive / --verbose / agent-CI, non-json): print the header and the
-        // exact dotnet invocation (winapp injects args the user never typed — RID, cswinrt shim, -p
-        // forwarding — so surfacing it makes failures self-describing), then stream dotnet's output live.
-        // Serialize the writes so the concurrent stdout/stderr callbacks don't interleave.
+        // Info-enabled paths (default interactive / --verbose / agent-CI, non-json): print the header and
+        // the exact dotnet invocation (winapp injects args the user never typed — RID, cswinrt shim, -p
+        // forwarding — so surfacing it makes failures self-describing) before the build output.
+        var nativeTerminal = NativeTerminalGateOverrideForTests?.Invoke()
+            ?? ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger);
+        var buildArgs = BuildBuildPassArguments(csproj, options, verbosity, csWinRTMetadataFolder, nativeTerminal);
         ansiConsole.MarkupLineInterpolated($"{UiSymbols.Wrench} {banner}");
         ansiConsole.MarkupLineInterpolated($"[dim]   dotnet {Markup.Escape(buildArgs)}[/]");
-        var writeLock = new object();
-        void WriteLive(string line)
+
+        int streamedExit;
+        if (nativeTerminal)
         {
-            lock (writeLock)
+            // Real interactive terminal: hand the console to dotnet (inherited stdio, no -tl:off) so its
+            // native terminal logger renders the live build directly — single warnings, live progress.
+            // winapp never sees the lines; the persistent header/invocation above and ✓ Built below frame it.
+            streamedExit = await dotNetService.RunDotnetInheritedAsync(workingDir, buildArgs, cancellationToken);
+        }
+        else
+        {
+            // Info-enabled but NOT a TTY (agent/CI/redirected/piped --verbose): stream dotnet's redirected
+            // output live to stdout. Serialize the writes so the concurrent stdout/stderr callbacks don't
+            // interleave.
+            var writeLock = new object();
+            void WriteLive(string line)
             {
-                ansiConsole.WriteLine(line);
+                lock (writeLock)
+                {
+                    ansiConsole.WriteLine(line);
+                }
             }
+
+            streamedExit = await dotNetService.RunDotnetStreamingAsync(
+                workingDir, buildArgs, WriteLive, WriteLive, cancellationToken);
         }
 
-        var streamedExit = await dotNetService.RunDotnetStreamingAsync(
-            workingDir, buildArgs, WriteLive, WriteLive, cancellationToken);
         if (streamedExit == 0)
         {
             PrintBuildSucceeded(csproj, options, stopwatch.Elapsed);

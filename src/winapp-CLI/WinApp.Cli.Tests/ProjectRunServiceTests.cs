@@ -250,6 +250,33 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public void BuildBuildPassArguments_RedirectedDefault_PinsTerminalLoggerOff()
+    {
+        // Redirected launchers (streaming / --json / --quiet) pin -tl:off so the console logger produces
+        // clean append-only output and a future SDK can't reintroduce redraw churn under redirection.
+        var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: []);
+
+        var args = ProjectRunService.BuildBuildPassArguments(csproj, options, "minimal");
+
+        StringAssert.Contains(args, "-tl:off", "the redirected build pass must pin the terminal logger off");
+    }
+
+    [TestMethod]
+    public void BuildBuildPassArguments_NativeTerminal_OmitsAnyTerminalLoggerToken()
+    {
+        // Native-terminal launcher (inherited stdio on a real TTY): omit every -tl token so dotnet's default
+        // -tl:auto resolves to ON and its native logger de-duplicates warnings. Absence is the correct
+        // default — we must NOT add -tl:on either.
+        var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: []);
+
+        var args = ProjectRunService.BuildBuildPassArguments(csproj, options, "minimal", csWinRTMetadataFolder: null, nativeTerminal: true);
+
+        Assert.IsFalse(args.Contains("-tl:"), "the native-terminal build pass must omit any -tl token (default auto → on)");
+    }
+
+    [TestMethod]
     public void BuildBuildPassArguments_UserPlatformProperty_ForwardedAsIs()
     {
         // Project mode never injects Platform, but a user-supplied -p:Platform still flows through the
@@ -2616,6 +2643,7 @@ public class ProjectRunServiceTests
             RunDotnetCommandHandler = _ => (0, PackagedPropertiesJson(), string.Empty),
         };
         var service = NewServiceWith(dotnet, LogLevel.Information, out var console);
+        service.NativeTerminalGateOverrideForTests = () => false; // pin the non-TTY streaming path
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
 
         await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
@@ -2646,18 +2674,23 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
-    public async Task RunBuildPassAsync_InteractiveDefault_StreamsHeaderInvocationWarningAndBuilt()
+    public async Task RunBuildPassAsync_InfoEnabledNonTty_StreamsHeaderInvocationWarningAndBuiltToStdout()
     {
-        // Streaming after-state: the default info-enabled, non-json path prints the header, the dim
-        // `dotnet build …` invocation, streams build output live (warnings included, on SUCCESS), then
-        // the persistent `✓ Built` line — all on stdout. Nothing is hidden behind a spinner.
+        // Non-TTY info path (agent / CI / redirected / piped --verbose — ShouldUseLiveSpinner == false):
+        // winapp prints the header, the dim `dotnet build …` invocation, streams build output live
+        // (warnings included, on SUCCESS), then the persistent `✓ Built` line — all on stdout. Nothing is
+        // hidden behind a spinner. (On a real TTY dotnet's terminal logger owns that output instead — see
+        // RunBuildPassAsync_RealTerminal_* below.)
         var csproj = WriteFile("App.csproj", ExecutableCsproj);
         var dotnet = new FakeDotNetService
         {
             RunDotnetStreamingHandler = (_, onOut, _) => { onOut?.Invoke("warning CS1998: this async method lacks await"); return 0; },
         };
         var console = new TestConsole();
-        var service = new ProjectRunService(dotnet, NewDetection(dotnet), new FakeCsWinRTMetadataShimService(), console, new LevelLogger<ProjectRunService>(LogLevel.Information));
+        var service = new ProjectRunService(dotnet, NewDetection(dotnet), new FakeCsWinRTMetadataShimService(), console, new LevelLogger<ProjectRunService>(LogLevel.Information))
+        {
+            NativeTerminalGateOverrideForTests = () => false, // pin the non-TTY streaming path deterministically
+        };
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
 
         var exit = await service.RunBuildPassAsync(csproj, options, _tempDir, csWinRTMetadataFolder: null, CancellationToken.None);
@@ -2667,6 +2700,44 @@ public class ProjectRunServiceTests
         StringAssert.Contains(console.Output, "dotnet build", "the exact dotnet invocation must be surfaced");
         StringAssert.Contains(console.Output, "warning CS1998", "success-path warnings must stay visible (not swallowed)");
         StringAssert.Contains(console.Output, "Built", "a persistent Built line should follow a successful build");
+        Assert.AreEqual(1, dotnet.StreamingCalls.Count, "the non-TTY path must use the redirected streaming launcher");
+        Assert.AreEqual(0, dotnet.InheritedCalls.Count, "the non-TTY path must NOT use the inherited-stdio launcher");
+        StringAssert.Contains(dotnet.StreamingCalls[0], "-tl:off", "the redirected streaming path must pin -tl:off");
+    }
+
+    [TestMethod]
+    public async Task RunBuildPassAsync_RealTerminal_UsesInheritedLauncherWithoutTlOffAndPrintsHeaderAndBuilt()
+    {
+        // Real interactive terminal (ShouldUseLiveSpinner == true, forced via the test seam): winapp prints
+        // the header + dim invocation, then hands the console to dotnet with the INHERITED-stdio launcher so
+        // its native terminal logger renders the live build. The build args must OMIT -tl:off (dotnet's
+        // default -tl:auto → ON on a real TTY, which de-dupes warnings). winapp does not itself stream the
+        // build lines here — dotnet owns that output — but still frames it with the header and `✓ Built`.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService
+        {
+            // Inherited launcher: dotnet writes straight to the inherited console; winapp gets no callbacks.
+            RunDotnetInheritedHandler = _ => 0,
+            // If the streaming launcher were wrongly chosen this line would leak onto stdout and fail below.
+            RunDotnetStreamingHandler = (_, onOut, _) => { onOut?.Invoke("STREAMING-LAUNCHER-WRONGLY-USED"); return 0; },
+        };
+        var console = new TestConsole();
+        var service = new ProjectRunService(dotnet, NewDetection(dotnet), new FakeCsWinRTMetadataShimService(), console, new LevelLogger<ProjectRunService>(LogLevel.Information))
+        {
+            NativeTerminalGateOverrideForTests = () => true, // force the real-TTY / native-terminal branch
+        };
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
+
+        var exit = await service.RunBuildPassAsync(csproj, options, _tempDir, csWinRTMetadataFolder: null, CancellationToken.None);
+
+        Assert.AreEqual(0, exit);
+        Assert.AreEqual(1, dotnet.InheritedCalls.Count, "the real-TTY path must use the inherited-stdio launcher");
+        Assert.AreEqual(0, dotnet.StreamingCalls.Count, "the real-TTY path must NOT use the redirected streaming launcher");
+        Assert.IsFalse(dotnet.InheritedCalls[0].Contains("-tl:"), "the native-terminal build args must omit any -tl token (default auto → on)");
+        StringAssert.Contains(console.Output, "Building", "the build header should still be shown above dotnet's output");
+        StringAssert.Contains(console.Output, "dotnet build", "the exact dotnet invocation must still be surfaced");
+        StringAssert.Contains(console.Output, "Built", "a persistent Built line should still follow a successful build");
+        Assert.IsFalse(console.Output.Contains("STREAMING-LAUNCHER-WRONGLY-USED"), "the streaming launcher must not be used on a real TTY");
     }
 
     [TestMethod]
@@ -2749,7 +2820,10 @@ public class ProjectRunServiceTests
             RunDotnetStreamingHandler = (_, _, onErr) => { onErr?.Invoke("error CS9999: the real failure"); return 1; },
         };
         var console = new TestConsole();
-        var service = new ProjectRunService(dotnet, NewDetection(dotnet), new FakeCsWinRTMetadataShimService(), console, new LevelLogger<ProjectRunService>(LogLevel.Information));
+        var service = new ProjectRunService(dotnet, NewDetection(dotnet), new FakeCsWinRTMetadataShimService(), console, new LevelLogger<ProjectRunService>(LogLevel.Information))
+        {
+            NativeTerminalGateOverrideForTests = () => false, // pin the non-TTY streaming path (dotnet doesn't own output)
+        };
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
 
         var exit = await service.RunBuildPassAsync(csproj, options, _tempDir, csWinRTMetadataFolder: null, CancellationToken.None);

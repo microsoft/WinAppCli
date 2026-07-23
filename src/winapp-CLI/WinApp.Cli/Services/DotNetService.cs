@@ -396,54 +396,76 @@ internal partial class DotNetService : IDotNetService
         CancellationToken cancellationToken = default)
         => RunDotnetCoreAsync(workingDirectory, arguments, onOutputLine, onErrorLine, cancellationToken);
 
+    public Task<int> RunDotnetInheritedAsync(
+        DirectoryInfo workingDirectory,
+        string arguments,
+        CancellationToken cancellationToken = default)
+        => RunDotnetCoreAsync(workingDirectory, arguments, onOutputLine: null, onErrorLine: null, cancellationToken, inheritStdio: true);
+
     /// <summary>
-    /// Shared launch core for the buffered (<see cref="RunDotnetCommandAsync"/>) and streaming
-    /// (<see cref="RunDotnetStreamingAsync"/>) dotnet invocations: identical <see cref="ProcessStartInfo"/>,
-    /// async stdout/stderr pump, and — critically — a single kill-on-cancel policy. On cancellation both
-    /// callers kill the whole <c>dotnet</c>/MSBuild/restore process tree
-    /// (<c>Process.Kill(entireProcessTree: true)</c>), await termination, then rethrow, so neither the
-    /// classification/evaluate/discovery path nor the streaming build path can orphan child processes.
-    /// Each received line is forwarded to <paramref name="onOutputLine"/>/<paramref name="onErrorLine"/>.
+    /// Shared launch core for the buffered (<see cref="RunDotnetCommandAsync"/>), streaming
+    /// (<see cref="RunDotnetStreamingAsync"/>), and inherited-stdio (<see cref="RunDotnetInheritedAsync"/>)
+    /// dotnet invocations. All three share one <see cref="ProcessStartInfo"/> shape and — critically — a
+    /// single kill-on-cancel policy: on cancellation every caller kills the whole
+    /// <c>dotnet</c>/MSBuild/restore process tree (<c>Process.Kill(entireProcessTree: true)</c>), awaits
+    /// termination, then rethrows, so none of the classification/evaluate/discovery, streaming build, or
+    /// native-terminal build paths can orphan child processes.
+    ///
+    /// When <paramref name="inheritStdio"/> is <see langword="false"/> (buffered/streaming) stdout and
+    /// stderr are redirected and each received line is forwarded to <paramref name="onOutputLine"/>/
+    /// <paramref name="onErrorLine"/>. When <paramref name="inheritStdio"/> is <see langword="true"/> the
+    /// child inherits winapp's console handles (no redirection, no read pumps) so dotnet sees a real TTY
+    /// and its native terminal logger renders live; the callbacks are ignored in that mode.
     /// </summary>
     private static async Task<int> RunDotnetCoreAsync(
         DirectoryInfo workingDirectory,
         string arguments,
         Action<string>? onOutputLine,
         Action<string>? onErrorLine,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool inheritStdio = false)
     {
         var processStartInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
             Arguments = arguments,
             WorkingDirectory = workingDirectory.FullName,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
+            // inheritStdio: hand winapp's own console handles to dotnet so it sees a real terminal and its
+            // native terminal logger activates (single warnings, live progress). Otherwise redirect+pump.
+            RedirectStandardOutput = !inheritStdio,
+            RedirectStandardError = !inheritStdio,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = !inheritStdio
         };
 
         using var process = new Process { StartInfo = processStartInfo };
 
-        process.OutputDataReceived += (sender, e) =>
+        if (!inheritStdio)
         {
-            if (e.Data != null)
+            process.OutputDataReceived += (sender, e) =>
             {
-                onOutputLine?.Invoke(e.Data);
-            }
-        };
+                if (e.Data != null)
+                {
+                    onOutputLine?.Invoke(e.Data);
+                }
+            };
 
-        process.ErrorDataReceived += (sender, e) =>
-        {
-            if (e.Data != null)
+            process.ErrorDataReceived += (sender, e) =>
             {
-                onErrorLine?.Invoke(e.Data);
-            }
-        };
+                if (e.Data != null)
+                {
+                    onErrorLine?.Invoke(e.Data);
+                }
+            };
+        }
 
         process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
+
+        if (!inheritStdio)
+        {
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+        }
 
         try
         {

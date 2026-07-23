@@ -109,6 +109,26 @@ internal class FakeDotNetService : IDotNetService
     }
 
     /// <summary>
+    /// When set, <see cref="RunDotnetInheritedAsync"/> returns this handler's result (keyed on the
+    /// argument string) instead of the default success. Lets a test control the exit code of the
+    /// inherited-stdio (native terminal logger) build path.
+    /// </summary>
+    public Func<string, int>? RunDotnetInheritedHandler { get; set; }
+
+    /// <summary>Records the argument strings passed to <see cref="RunDotnetInheritedAsync"/> (native-terminal build passes).</summary>
+    public List<string> InheritedCalls { get; } = [];
+
+    public Task<int> RunDotnetInheritedAsync(DirectoryInfo workingDirectory, string arguments, CancellationToken cancellationToken = default)
+    {
+        InheritedCalls.Add(arguments);
+        if (RunDotnetInheritedHandler is not null)
+        {
+            return Task.FromResult(RunDotnetInheritedHandler(arguments));
+        }
+        return Task.FromResult(0);
+    }
+
+    /// <summary>
     /// When set, <see cref="RunDotnetCommandAsync"/> returns this handler's result (keyed on the
     /// argument string) instead of the fixed success tuple. Lets a test feed canned
     /// <c>--getProperty</c> JSON for build/resolve scenarios.

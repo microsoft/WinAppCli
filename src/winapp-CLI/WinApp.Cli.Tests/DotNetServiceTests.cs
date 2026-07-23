@@ -1693,14 +1693,32 @@ public class DotNetServiceTests : BaseCommandTests
 
     [TestMethod]
     [DoNotParallelize]
-    public async Task RunDotnetCommandAsync_CancelledMidBuild_KillsChildProcessTree()
+    public Task RunDotnetCommandAsync_CancelledMidBuild_KillsChildProcessTree()
+        // The non-streaming (buffered) runner is used by classification/evaluate/discovery.
+        => AssertLauncherKillsGrandchildTreeOnCancelAsync(
+            async (dir, args, ct) => await _dotNetService.RunDotnetCommandAsync(dir, args, ct));
+
+    [TestMethod]
+    [DoNotParallelize]
+    public Task RunDotnetInheritedAsync_CancelledMidBuild_KillsChildProcessTree()
+        // The inherited-stdio runner (native terminal-logger build path) shares the SAME RunDotnetCoreAsync
+        // kill-on-cancel policy as the buffered/streaming launchers. This proves the shared tree-kill (H1)
+        // reaches grandchildren on the inherit path too — no weaker forked cancel path.
+        => AssertLauncherKillsGrandchildTreeOnCancelAsync(
+            (dir, args, ct) => _dotNetService.RunDotnetInheritedAsync(dir, args, ct));
+
+    /// <summary>
+    /// Shared grandchild-reap proof for every RunDotnetCoreAsync launcher. On Ctrl+C the runner must kill
+    /// the whole dotnet/MSBuild process tree, not just the top-level <c>dotnet</c>. Drives a real
+    /// <c>dotnet msbuild</c> target that Execs a powershell "sleeper"; the sleeper writes its own PID to a
+    /// file then blocks for two minutes. If cancellation only reaped the parent, the powershell grandchild
+    /// would be orphaned and survive. Asserting the recorded PID is dead after cancellation proves
+    /// <c>Kill(entireProcessTree: true)</c> reached the descendant. Passing the launcher in keeps the two
+    /// callers (buffered + inherited) on one behavior-identical assertion so neither can drift.
+    /// </summary>
+    private async Task AssertLauncherKillsGrandchildTreeOnCancelAsync(
+        Func<DirectoryInfo, string, CancellationToken, Task> launch)
     {
-        // The non-streaming runner is used by classification/evaluate/discovery. On Ctrl+C it must
-        // kill the whole dotnet/MSBuild process tree, not just the top-level `dotnet`. This test
-        // drives a real `dotnet msbuild` target that Execs a powershell "sleeper"; the sleeper writes
-        // its own PID to a file, then blocks for two minutes. If cancellation only reaped the parent,
-        // the powershell grandchild would be orphaned and survive. Asserting the recorded PID is dead
-        // after cancellation proves Kill(entireProcessTree: true) reached the descendant.
         var dir = new DirectoryInfo(_testTempDirectory);
         var pidFile = Path.Combine(_testTempDirectory, "sleeper.pid");
         var sleeperScript = Path.Combine(_testTempDirectory, "sleeper.ps1");
@@ -1722,7 +1740,7 @@ public class DotNetServiceTests : BaseCommandTests
         using var cts = new CancellationTokenSource();
         // -nodereuse:false keeps the worker node (and thus the Exec'd powershell) a descendant of the
         // process we start, so entireProcessTree can reach it rather than a detached reused node.
-        var runTask = _dotNetService.RunDotnetCommandAsync(
+        var runTask = launch(
             dir, $"msbuild \"{projPath}\" -t:Sleep -nologo -nodereuse:false", cts.Token);
 
         // Wait until the grandchild is up (it wrote its PID). If it never starts, dotnet/powershell

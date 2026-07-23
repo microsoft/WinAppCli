@@ -82,6 +82,20 @@ internal interface IDotNetService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Runs a dotnet CLI command with <b>inherited</b> stdio: the child inherits winapp's own console
+    /// handles (no redirection, no read pumps), so dotnet sees a real terminal and its native terminal
+    /// logger renders the live build (single warnings, live progress) directly. Used for the project-mode
+    /// build pass when winapp is attached to a real interactive terminal. Returns the process exit code.
+    /// The command's output goes straight to the inherited console — winapp never sees the lines, so this
+    /// must not be used for any pass whose output winapp needs to parse. Shares the same kill-on-cancel
+    /// tree-kill policy as the streaming/buffered launchers.
+    /// </summary>
+    Task<int> RunDotnetInheritedAsync(
+        DirectoryInfo workingDirectory,
+        string arguments,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Ensures the .csproj has a RuntimeIdentifier element with a default that auto-detects
     /// the current platform architecture. Only adds the element if no RuntimeIdentifier or
     /// RuntimeIdentifiers element already exists in the project.
