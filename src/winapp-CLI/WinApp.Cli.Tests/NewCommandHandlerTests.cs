@@ -376,4 +376,43 @@ public class NewCommandHandlerTests : BaseCommandTests
         Assert.AreEqual($"{NewCommand.TemplatePackageId}::0.0.6-alpha", install[2],
             "The requested (newer) template-pack version must be the one installed.");
     }
+
+    [TestMethod]
+    public async Task Handler_NonInteractiveWithoutUseDefaults_FallsBackToDefaults()
+    {
+        ScriptHappyPath();
+        TestAnsiConsole.Profile.Capabilities.Interactive = false;
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--json"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        var json = ParseJson(TestAnsiConsole.Output);
+        Assert.AreEqual("WinUIApp", json.GetProperty("Name").GetString(),
+            "A non-interactive host must default the name without prompting.");
+        Assert.AreEqual("winui", json.GetProperty("Template").GetString());
+    }
+
+    [TestMethod]
+    public async Task Handler_InteractivePrompts_UsePromptedValues()
+    {
+        ScriptHappyPath();
+        // The test console is interactive by default (BaseCommandTests). Accept the first template
+        // (blank) and type a name so we can prove prompted values flow into the dotnet new args.
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);        // select first template (blank)
+        TestAnsiConsole.Input.PushTextWithEnter("PromptedApp"); // name prompt
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, []);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        var scaffold = ScaffoldInvocation();
+        Assert.IsNotNull(scaffold);
+        var tokens = scaffold.ToArray();
+        CollectionAssert.Contains(tokens, "winui");
+        var nameIdx = Array.IndexOf(tokens, "-n");
+        Assert.IsTrue(nameIdx >= 0 && nameIdx + 1 < tokens.Length);
+        Assert.AreEqual("PromptedApp", tokens[nameIdx + 1],
+            "The prompted name must be passed to dotnet new.");
+    }
 }

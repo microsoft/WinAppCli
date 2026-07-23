@@ -135,13 +135,42 @@ internal class NewCommand : Command, IShortDescription
     /// <summary>
     /// Returns true only when <paramref name="name"/> is a safe single path segment. The resolved
     /// name becomes both the default output directory (<c>./&lt;name&gt;</c>) and the <c>dotnet new</c>
-    /// project name, so path separators, <c>.</c>/<c>..</c>, rooted paths, and other invalid filename
-    /// characters are rejected to prevent the scaffold from escaping the current directory.
+    /// project name, so path separators, <c>.</c>/<c>..</c>, rooted paths, invalid filename
+    /// characters, Windows reserved device names, and trailing dot/space names are rejected so the
+    /// scaffold can't escape the current directory or produce an unusable folder.
     /// </summary>
-    internal static bool IsValidProjectName(string? name) =>
-        !string.IsNullOrWhiteSpace(name)
-        && name is not ("." or "..")
-        && name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0;
+    internal static bool IsValidProjectName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)
+            || name is "." or ".."
+            || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        {
+            return false;
+        }
+
+        // Windows cannot create directories whose name ends in a space or dot.
+        if (name[^1] is ' ' or '.')
+        {
+            return false;
+        }
+
+        // Reserved DOS device names are invalid regardless of any extension (e.g. "CON", "CON.txt").
+        var stem = name;
+        var dot = stem.IndexOf('.');
+        if (dot >= 0)
+        {
+            stem = stem[..dot];
+        }
+
+        return !ReservedDeviceNames.Contains(stem);
+    }
+
+    private static readonly HashSet<string> ReservedDeviceNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    };
 
     /// <summary>
     /// Returns true only when the <paramref name="requestedVersion"/> of the template pack is already
@@ -164,16 +193,24 @@ internal class NewCommand : Command, IShortDescription
                 continue;
             }
 
-            // The version appears on a following indented line, e.g. "   Version: 0.0.6-alpha".
+            // `dotnet new uninstall` nests details under the package header, e.g.
+            //    Microsoft.WindowsAppSDK.WinUI.CSharp.Templates   (indent 3)
+            //       Version: 0.0.6-alpha                          (indent 6)
+            // so the version is a deeper-indented line. Bound the scan to this block by stopping at
+            // the next line indented no deeper than the header, which prevents a following package's
+            // "Version:" line from being misread as the WinUI pack version.
+            var headerIndent = IndentWidth(lines[i]);
             const string marker = "Version:";
-            for (var j = i + 1; j < lines.Length && j <= i + 5; j++)
+            for (var j = i + 1; j < lines.Length; j++)
             {
                 var raw = lines[j];
                 var line = raw.Trim();
+                if (line.Length == 0)
+                {
+                    continue;
+                }
 
-                // A non-empty, non-indented line starts a new package block. Stop before reading a
-                // different package's "Version:" line so the WinUI pack version can't be misread.
-                if (line.Length > 0 && !char.IsWhiteSpace(raw[0]))
+                if (IndentWidth(raw) <= headerIndent)
                 {
                     break;
                 }
@@ -190,6 +227,18 @@ internal class NewCommand : Command, IShortDescription
         }
 
         return false;
+    }
+
+    /// <summary>Number of leading space/tab characters (indentation) on a line, ignoring a trailing CR.</summary>
+    private static int IndentWidth(string line)
+    {
+        var count = 0;
+        while (count < line.Length && (line[count] == ' ' || line[count] == '\t'))
+        {
+            count++;
+        }
+
+        return count;
     }
 
     public class Handler(
@@ -255,7 +304,7 @@ internal class NewCommand : Command, IShortDescription
             {
                 if (isJson)
                 {
-                    PrintJson(false, template.Value, name ?? string.Empty, currentDir.FullName,
+                    PrintJson(false, template.Value, name ?? string.Empty, (output ?? currentDir).FullName,
                         $"Invalid name '{name}'. Use a simple name without path separators or invalid filename characters.");
                 }
                 else
@@ -351,7 +400,7 @@ internal class NewCommand : Command, IShortDescription
                 switch (template.Value)
                 {
                     case WinUiTemplate.Lib:
-                        ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: reference [blue]{relative}[/] from an app project.");
+                        ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: from your app project, run [blue]dotnet add reference \"{Path.Combine(relative, name + ".csproj")}\"[/].");
                         break;
                     case WinUiTemplate.UnitTest:
                         ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: [blue]cd \"{relative}\"[/] then [blue]dotnet test[/].");

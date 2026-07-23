@@ -186,8 +186,60 @@ public class NewCommandTests : BaseCommandTests
     [DataRow("sub/dir", false)]          // forward-slash separator
     [DataRow(@"C:\rooted", false)]       // rooted path (contains ':' and '\')
     [DataRow("bad*name", false)]         // invalid filename char
+    [DataRow("CON", false)]              // reserved device name
+    [DataRow("con", false)]              // reserved device name (case-insensitive)
+    [DataRow("LPT1", false)]             // reserved device name
+    [DataRow("NUL.txt", false)]          // reserved device name with extension
+    [DataRow("MyApp.", false)]           // trailing dot (invalid on Windows)
+    [DataRow("MyApp ", false)]           // trailing space (invalid on Windows)
     public void IsValidProjectName_RejectsPathSeparatorsAndInvalidChars(string name, bool expected)
     {
         Assert.AreEqual(expected, NewCommand.IsValidProjectName(name));
+    }
+
+    [TestMethod]
+    public void IsTemplatePackInstalled_RealDotnetFormat_ReturnsTrue()
+    {
+        // Mirrors actual `dotnet new uninstall` output: a "Currently installed items:" banner, then
+        // the package id indented, with Version/Details/Templates nested one level deeper.
+        var listing =
+            "Currently installed items:\n" +
+            "   Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n" +
+            "      Version: 0.0.6-alpha\n" +
+            "      Details:\n" +
+            "         Author: Microsoft\n" +
+            "      Templates:\n" +
+            "         WinUI Blank App (winui) C#\n";
+
+        Assert.IsTrue(NewCommand.IsTemplatePackInstalled(listing, "0.0.6-alpha"));
+        Assert.IsFalse(NewCommand.IsTemplatePackInstalled(listing, "0.0.7-alpha"));
+    }
+
+    [TestMethod]
+    public void IsTemplatePackInstalled_CrlfLineEndings_ReturnsTrue()
+    {
+        // dotnet output on Windows is CRLF; splitting on '\n' leaves a trailing '\r' that must not
+        // break header matching, indentation detection, or version parsing.
+        var listing =
+            "Currently installed items:\r\n" +
+            "   Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\r\n" +
+            "      Version: 0.0.6-alpha\r\n";
+
+        Assert.IsTrue(NewCommand.IsTemplatePackInstalled(listing, "0.0.6-alpha"));
+    }
+
+    [TestMethod]
+    public void IsTemplatePackInstalled_IndentedNextPackage_DoesNotMisreadVersion()
+    {
+        // The WinUI pack header has no Version line before the next (equally indented) package. The
+        // sibling package's version must NOT be attributed to the WinUI pack.
+        var listing =
+            "Currently installed items:\n" +
+            "   Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n" +
+            "   Some.Other.Template.Pack\n" +
+            "      Version: 0.0.6-alpha\n";
+
+        Assert.IsFalse(NewCommand.IsTemplatePackInstalled(listing, "0.0.6-alpha"),
+            "A sibling package's version line must not be read as the WinUI pack version.");
     }
 }
