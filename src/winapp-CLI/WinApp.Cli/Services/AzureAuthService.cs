@@ -294,7 +294,9 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
         string? line;
         while ((line = await reader.ReadLineAsync(cancellationToken)) != null)
         {
-            ansiConsole.WriteLine(line);
+            // Route through the logger so --quiet (which raises the minimum log level) suppresses
+            // this output. At the default Information level it still reaches the user.
+            logger.LogInformation("{AzCliOutput}", line);
         }
     }
 
@@ -347,7 +349,7 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
         }
         else
         {
-            logger.LogInformation("Authenticated via Azure CLI");
+            logger.LogInformation("Authenticated via cached credential");
         }
     }
 }

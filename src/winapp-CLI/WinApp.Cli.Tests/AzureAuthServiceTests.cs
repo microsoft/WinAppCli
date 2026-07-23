@@ -160,7 +160,7 @@ public class AzureAuthServiceTests
     [TestMethod]
     public async Task GetAccessTokenAsync_WhenPrimaryCredentialSucceeds_ReturnsToken()
     {
-        var service = new TestableAzureAuthService
+        using var service = new TestableAzureAuthService
         {
             PrimaryCredential = new StubCredential("primary-token"),
         };
@@ -174,7 +174,7 @@ public class AzureAuthServiceTests
     [TestMethod]
     public async Task GetAccessTokenAsync_NonInteractiveAndCredentialFails_ThrowsCiGuidance()
     {
-        var service = new TestableAzureAuthService
+        using var service = new TestableAzureAuthService
         {
             InteractiveOverride = false,
             PrimaryCredential = new ThrowingCredential(),
@@ -190,7 +190,7 @@ public class AzureAuthServiceTests
     [TestMethod]
     public async Task GetAccessTokenAsync_InteractiveButNoAzureCli_ThrowsInstallGuidance()
     {
-        var service = new TestableAzureAuthService
+        using var service = new TestableAzureAuthService
         {
             InteractiveOverride = true,
             PrimaryCredential = new ThrowingCredential(),
@@ -206,7 +206,7 @@ public class AzureAuthServiceTests
     [TestMethod]
     public async Task GetAccessTokenAsync_InteractiveLoginSucceeds_RetriesWithCliCredential()
     {
-        var service = new TestableAzureAuthService
+        using var service = new TestableAzureAuthService
         {
             InteractiveOverride = true,
             PrimaryCredential = new ThrowingCredential(),
@@ -226,7 +226,7 @@ public class AzureAuthServiceTests
     [TestMethod]
     public async Task GetAccessTokenAsync_InteractiveLoginFails_Throws()
     {
-        var service = new TestableAzureAuthService
+        using var service = new TestableAzureAuthService
         {
             InteractiveOverride = true,
             PrimaryCredential = new ThrowingCredential(),
@@ -244,7 +244,7 @@ public class AzureAuthServiceTests
     [TestMethod]
     public async Task GetAccessTokenAsync_InteractiveLoginSucceedsButRetryTokenFails_ThrowsWrapped()
     {
-        var service = new TestableAzureAuthService
+        using var service = new TestableAzureAuthService
         {
             InteractiveOverride = true,
             PrimaryCredential = new ThrowingCredential(),
@@ -263,11 +263,21 @@ public class AzureAuthServiceTests
         Assert.AreEqual(1, service.RunAzLoginCallCount);
     }
 
-    private sealed class TestableAzureAuthService : AzureAuthService
+    private sealed class TestableAzureAuthService : AzureAuthService, IDisposable
     {
-        public TestableAzureAuthService()
-            : base(NullLogger<AzureAuthService>.Instance, new TestConsole())
+        private readonly TestConsole _console;
+
+        public TestableAzureAuthService() : this(new TestConsole()) { }
+
+        private TestableAzureAuthService(TestConsole console)
+            : base(NullLogger<AzureAuthService>.Instance, console)
         {
+            _console = console;
+        }
+
+        public void Dispose()
+        {
+            _console.Dispose();
         }
 
         public bool? InteractiveOverride { get; init; }

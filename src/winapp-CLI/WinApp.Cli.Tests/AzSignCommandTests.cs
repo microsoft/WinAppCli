@@ -42,7 +42,7 @@ public class AzSignCommandTests : BaseCommandTests
         var result = await ParseAndInvokeWithCaptureAsync(_command, ["--account", "myaccount", filePath]);
 
         Assert.AreEqual(1, result);
-        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
         StringAssert.Contains(allOutput, "--account must be used with --resource-group");
     }
 
@@ -55,7 +55,7 @@ public class AzSignCommandTests : BaseCommandTests
         var result = await ParseAndInvokeWithCaptureAsync(_command, ["--profile", "myprofile", filePath]);
 
         Assert.AreEqual(1, result);
-        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
         StringAssert.Contains(allOutput, "--profile must be used with --account");
     }
 
@@ -71,7 +71,7 @@ public class AzSignCommandTests : BaseCommandTests
         var result = await ParseAndInvokeWithCaptureAsync(_command, [filePath]);
 
         Assert.AreEqual(1, result);
-        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
         StringAssert.Contains(allOutput, "Azure authentication failed");
     }
 
@@ -86,7 +86,7 @@ public class AzSignCommandTests : BaseCommandTests
         var result = await ParseAndInvokeWithCaptureAsync(_command, [filePath]);
 
         Assert.AreEqual(1, result);
-        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
         StringAssert.Contains(allOutput, "No Azure subscriptions found");
     }
 
@@ -105,7 +105,7 @@ public class AzSignCommandTests : BaseCommandTests
         var result = await ParseAndInvokeWithCaptureAsync(_command, [filePath]);
 
         Assert.AreEqual(1, result);
-        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
         StringAssert.Contains(allOutput, "No Trusted Signing accounts found");
     }
 
@@ -128,7 +128,7 @@ public class AzSignCommandTests : BaseCommandTests
         var result = await ParseAndInvokeWithCaptureAsync(_command, [filePath]);
 
         Assert.AreEqual(1, result);
-        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
         StringAssert.Contains(allOutput, "No certificate profiles found");
     }
 
@@ -143,7 +143,7 @@ public class AzSignCommandTests : BaseCommandTests
         var result = await ParseAndInvokeWithCaptureAsync(_command, ["--metadata-file", nonExistentMetadata, filePath]);
 
         Assert.AreEqual(1, result);
-        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
         StringAssert.Contains(allOutput, "Metadata file not found");
     }
 
@@ -163,7 +163,7 @@ public class AzSignCommandTests : BaseCommandTests
             ["--subscription", "sub-123", "--resource-group", "myrg", "--account", "nonexistent", filePath]);
 
         Assert.AreEqual(1, result);
-        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
         StringAssert.Contains(allOutput, "not found");
     }
 
@@ -194,7 +194,7 @@ public class AzSignCommandTests : BaseCommandTests
         // Reaches the signing stage and succeeds via the faked sign-tool service.
         Assert.AreEqual(0, result);
         Assert.AreEqual(1, _fakeSignToolService.CallCount, "Should reach the signing stage");
-        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
         Assert.IsFalse(allOutput.Contains("No Azure subscriptions found"), "Should not fail at subscription selection");
         Assert.IsFalse(allOutput.Contains("No Trusted Signing accounts found"), "Should not fail at account selection");
         Assert.IsFalse(allOutput.Contains("No certificate profiles found"), "Should not fail at profile selection");
@@ -227,7 +227,7 @@ public class AzSignCommandTests : BaseCommandTests
         var result = await ParseAndInvokeWithCaptureAsync(_command, ["--subscription", "sub-123", filePath]);
 
         Assert.AreEqual(0, result);
-        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
         Assert.IsFalse(allOutput.Contains("Select an Azure subscription"), "Should not prompt for subscription when flag is provided");
     }
 
@@ -257,7 +257,7 @@ public class AzSignCommandTests : BaseCommandTests
         Assert.AreEqual(0, result);
         Assert.AreEqual(1, _fakeSignToolService.CallCount, "Should reach the signing stage without prompting");
         Assert.AreEqual("fake-tenant-id", _fakeSignToolService.LastTenantId, "Tenant ID should be forwarded to signtool");
-        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
         Assert.IsFalse(allOutput.Contains("Select"), "Should not show any selection prompts when all flags are provided");
         Assert.IsFalse(allOutput.Contains("Sign with profile"), "Should not show a confirmation prompt when account and profile are explicit");
     }
@@ -321,7 +321,7 @@ public class AzSignCommandTests : BaseCommandTests
             ["--subscription", "sub-123", "--resource-group", "myrg", "--account", "myaccount", "--profile", "myprofile", filePath]);
 
         Assert.AreEqual(1, result);
-        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
         StringAssert.Contains(allOutput, "signtool.exe execution failed");
 
         // The generated metadata temp file must be cleaned up even when signing fails.
@@ -346,7 +346,7 @@ public class AzSignCommandTests : BaseCommandTests
         var result = await ParseAndInvokeWithCaptureAsync(_command, [filePath]);
 
         Assert.AreEqual(1, result);
-        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
         StringAssert.Contains(allOutput, "--subscription");
     }
 
@@ -367,7 +367,7 @@ public class AzSignCommandTests : BaseCommandTests
         var result = await ParseAndInvokeWithCaptureAsync(_command, ["--subscription", "sub-123", filePath]);
 
         Assert.AreEqual(1, result);
-        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
         StringAssert.Contains(allOutput, "--account");
     }
 
@@ -392,7 +392,7 @@ public class AzSignCommandTests : BaseCommandTests
         var result = await ParseAndInvokeWithCaptureAsync(_command, ["--subscription", "sub-123", filePath]);
 
         Assert.AreEqual(1, result);
-        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
         StringAssert.Contains(allOutput, "--profile");
     }
 
@@ -413,7 +413,7 @@ public class AzSignCommandTests : BaseCommandTests
         var result = await ParseAndInvokeWithCaptureAsync(_command, ["--profile", "   ", filePath]);
 
         Assert.AreEqual(0, result);
-        var allOutput = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
         Assert.IsFalse(allOutput.Contains("--profile must be used with --account"),
             "Whitespace-only --profile should be treated as not provided");
         Assert.AreEqual(1, _fakeSignToolService.CallCount, "Should reach the signing stage");

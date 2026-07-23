@@ -208,6 +208,8 @@ public class AzureSigningServiceTests
 
     private sealed class StubHttpMessageHandler(HttpStatusCode statusCode, string body) : HttpMessageHandler
     {
+        private HttpResponseMessage? _response;
+
         public HttpRequestMessage? LastRequest { get; private set; }
         public string? LastRequestUri { get; private set; }
 
@@ -215,10 +217,20 @@ public class AzureSigningServiceTests
         {
             LastRequest = request;
             LastRequestUri = request.RequestUri?.ToString();
-            return Task.FromResult(new HttpResponseMessage(statusCode)
+            _response = new HttpResponseMessage(statusCode)
             {
                 Content = new StringContent(body)
-            });
+            };
+            return Task.FromResult(_response);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _response?.Dispose();
+            }
+            base.Dispose(disposing);
         }
     }
 

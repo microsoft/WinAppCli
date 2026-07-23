@@ -186,9 +186,16 @@ internal class AzSignCommand : Command, IShortDescription
                 logger.LogError("{Message}", ex.Message);
                 return 1;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 logger.LogError("Operation cancelled.");
+                return 1;
+            }
+            catch (OperationCanceledException)
+            {
+                // HttpClient.Timeout throws OperationCanceledException even when the user's
+                // cancellation token was not signalled. Report this as a timeout, not a cancellation.
+                logger.LogError("An Azure API request timed out. Check your network connection and try again.");
                 return 1;
             }
         }
@@ -305,8 +312,9 @@ internal class AzSignCommand : Command, IShortDescription
                 return subscriptions[0].SubscriptionId;
             }
 
-            // Prompt user to select
-            var choices = subscriptions.Select(s => $"{s.DisplayName} ({s.SubscriptionId})").ToList();
+            // Prompt user to select — escape display names so Spectre markup characters (e.g. brackets)
+            // in Azure subscription names don't misrender or throw.
+            var choices = subscriptions.Select(s => $"{Markup.Escape(s.DisplayName)} ({s.SubscriptionId})").ToList();
             RequireInteractiveSelection(
                 "Multiple Azure subscriptions are available but none was specified. " +
                 "Re-run with --subscription <id> (this environment is non-interactive and cannot prompt).");
@@ -368,14 +376,24 @@ internal class AzSignCommand : Command, IShortDescription
             string accessToken, string subscriptionId, string resourceGroup, string accountName,
             CancellationToken cancellationToken)
         {
-            var profiles = await azureSigningService.ListCertificateProfilesAsync(
+            var allProfiles = await azureSigningService.ListCertificateProfilesAsync(
                 accessToken, subscriptionId, resourceGroup, accountName, cancellationToken);
+
+            // Only offer profiles that can actually sign; disabled/suspended profiles would
+            // fail later in signtool with a confusing error.
+            var profiles = allProfiles
+                .Where(p => string.Equals(p.Status, "Active", StringComparison.OrdinalIgnoreCase))
+                .ToList();
 
             if (profiles.Count == 0)
             {
-                throw new InvalidOperationException(
-                    $"No certificate profiles found for signing account '{accountName}'.\n" +
-                    "Create a certificate profile in the Azure portal after completing identity validation.");
+                var totalCount = allProfiles.Count;
+                var message = totalCount > 0
+                    ? $"No active certificate profiles found for signing account '{accountName}'. " +
+                      $"{totalCount} profile(s) exist but none have 'Active' status."
+                    : $"No certificate profiles found for signing account '{accountName}'.\n" +
+                      "Create a certificate profile in the Azure portal after completing identity validation.";
+                throw new InvalidOperationException(message);
             }
 
             if (profiles.Count == 1)
