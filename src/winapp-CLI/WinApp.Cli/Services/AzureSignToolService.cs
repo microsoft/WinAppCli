@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Security.Cryptography;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Tools;
 
@@ -20,6 +21,21 @@ internal class AzureSignToolService(
     // Pin to a known-good version so the DLL loaded into signtool is reproducible and
     // not silently upgraded to whatever happens to be latest in the NuGet feed.
     internal const string ArtifactSigningClientVersion = "1.0.128";
+
+    // SHA-256 of the exact Azure.CodeSigning.Dlib.dll payloads shipped in the pinned package
+    // version above (bin/x64 and bin/x86). signtool loads this DLL and it acquires an Azure
+    // access token inside the signing process, so the flat-container download (HTTPS + extract,
+    // no NuGet signature/hash check) is not by itself sufficient to authenticate it: a mirrored
+    // or compromised feed/CDN could serve an altered DLL. We therefore refuse to hand signtool a
+    // dlib whose content does not match one of these compiled-in hashes (fail closed). When the
+    // pinned version is bumped, refresh these values from the official nuget.org package.
+    private static readonly HashSet<string> TrustedDlibSha256 = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // bin/x64/Azure.CodeSigning.Dlib.dll
+        "2D4C1BBC87467B3AC25BBC49DF58CC8B36A0F92B3E21AA98BBBAD08A4D7C98BA",
+        // bin/x86/Azure.CodeSigning.Dlib.dll
+        "584110D279E2C112206E4CC28949354654E8A72B143EDB52352CFA103C65AB7D",
+    };
 
     private const string TimestampUrl = "http://timestamp.acs.microsoft.com";
 
@@ -81,13 +97,32 @@ internal class AzureSignToolService(
         taskContext.AddDebugMessage("File signed successfully");
     }
 
+    /// <summary>
+    /// Verifies that a located dlib matches one of the compiled-in pinned hashes before it is used.
+    /// Exposed as a settable seam (default: <see cref="DefaultIsTrustedDlib"/>) only so unit tests can
+    /// exercise the install/cache flow with placeholder DLL content; production never overrides it, so
+    /// the real SHA-256 check always runs.
+    /// </summary>
+    internal Func<FileInfo, bool> DlibIntegrityVerifier { get; set; } = DefaultIsTrustedDlib;
+
     internal async Task<FileInfo> EnsureTrustedSigningDlibAsync(TaskContext taskContext, CancellationToken cancellationToken)
     {
-        // Check if already available in NuGet cache
+        // Check if already available in NuGet cache. Verify the cached DLL's content before trusting
+        // it: the shared NuGet global cache can be populated by anything, so a cache hit alone does
+        // not prove the payload is the pinned, authenticated dlib.
         var dlibPath = FindTrustedSigningDlib(ArtifactSigningClientVersion);
         if (dlibPath != null)
         {
-            return dlibPath;
+            if (DlibIntegrityVerifier(dlibPath))
+            {
+                return dlibPath;
+            }
+
+            // The cached DLL does not match a pinned hash — treat it like a poisoned cache entry and
+            // delete the version directory so the install below re-extracts a clean copy.
+            taskContext.AddDebugMessage(
+                $"Cached {ArtifactSigningClientPackage} dlib failed integrity verification; removing and reinstalling.");
+            RemoveVersionDir(ArtifactSigningClientVersion, taskContext);
         }
 
         // Download the pinned version of the package
@@ -123,7 +158,37 @@ internal class AzureSignToolService(
                 "Ensure the package contains the expected DLL structure.");
         }
 
+        // Fail closed: never hand signtool a freshly downloaded dlib whose content does not match a
+        // pinned hash. A mismatch here means the feed/CDN served something other than the pinned,
+        // known-good payload.
+        if (!DlibIntegrityVerifier(dlibPath))
+        {
+            throw new InvalidOperationException(
+                $"The downloaded {ArtifactSigningClientPackage} {ArtifactSigningClientVersion} dlib failed integrity verification " +
+                $"(unexpected SHA-256 for {dlibPath.Name}). Refusing to use it; the NuGet feed or CDN may be compromised or mirrored.");
+        }
+
         return dlibPath;
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> only when the DLL's SHA-256 matches one of the compiled-in hashes for the
+    /// pinned package version. This authenticates the exact executable payload signtool loads,
+    /// closing the gap that the flat-container downloader (HTTPS + unzip, no NuGet signature check)
+    /// leaves open. Reads the file fully and hashes it; failures to read are treated as untrusted.
+    /// </summary>
+    private static bool DefaultIsTrustedDlib(FileInfo dlib)
+    {
+        try
+        {
+            using var stream = dlib.OpenRead();
+            var hash = Convert.ToHexString(SHA256.HashData(stream));
+            return TrustedDlibSha256.Contains(hash);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -156,6 +221,27 @@ internal class AzureSignToolService(
         {
             // Best-effort: if cleanup fails, the subsequent install/find will surface a clear error.
             taskContext.AddDebugMessage($"Could not clean up incomplete package cache: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Unconditionally deletes the cached package version directory (best-effort). Used when a cached
+    /// dlib fails integrity verification and must be removed before a clean reinstall.
+    /// </summary>
+    private void RemoveVersionDir(string version, TaskContext taskContext)
+    {
+        try
+        {
+            var nugetCache = nugetService.GetNuGetGlobalPackagesDir();
+            var versionDir = new DirectoryInfo(Path.Join(nugetCache.FullName, ArtifactSigningClientPackage.ToLowerInvariant(), version));
+            if (versionDir.Exists)
+            {
+                versionDir.Delete(recursive: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            taskContext.AddDebugMessage($"Could not remove cached package directory: {ex.Message}");
         }
     }
 

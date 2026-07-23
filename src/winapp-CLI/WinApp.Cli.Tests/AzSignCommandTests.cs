@@ -304,6 +304,30 @@ public class AzSignCommandTests : BaseCommandTests
         Assert.AreEqual(metadataPath, _fakeSignToolService.LastMetadataFilePath!.FullName);
         // A user-supplied metadata file must not be deleted.
         Assert.IsTrue(File.Exists(metadataPath), "User-provided metadata file should not be deleted");
+        // The metadata-file path must still run credential/login preparation (the only path that
+        // performs the advertised `az login` fallback), even though it skips ARM resource discovery.
+        Assert.AreEqual(1, _fakeAuthService.GetAccessTokenCallCount,
+            "The metadata-file path should prepare Azure credentials so the dlib can authenticate");
+    }
+
+    [TestMethod]
+    public async Task AzSign_WithMetadataFile_WhenAuthFails_ReturnsError()
+    {
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
+        await File.WriteAllTextAsync(filePath, "MZ");
+
+        var metadataPath = Path.Join(_tempDirectory.FullName, "metadata.json");
+        await File.WriteAllTextAsync(metadataPath, "{\"Endpoint\":\"https://eus.codesigning.azure.net\"}");
+
+        _fakeAuthService.ShouldFail = true;
+        _fakeAuthService.FailureMessage = "Azure authentication failed. No credentials found.";
+
+        var result = await ParseAndInvokeWithCaptureAsync(_command, ["--metadata-file", metadataPath, filePath]);
+
+        // Authentication failure on the metadata-file path must surface as an error rather than being
+        // deferred to an opaque failure deep inside the dlib.
+        Assert.AreEqual(1, result);
+        Assert.AreEqual(0, _fakeSignToolService.CallCount, "Signing should not run when credential preparation fails");
     }
 
     [TestMethod]
@@ -532,9 +556,11 @@ internal class FakeAzureAuthService : IAzureAuthService
     public string FailureMessage { get; set; } = "Authentication failed";
     public bool IsInteractive { get; set; } = true;
     public string? TenantId { get; set; } = "fake-tenant-id";
+    public int GetAccessTokenCallCount { get; private set; }
 
     public Task<string> GetAccessTokenAsync(string scope, CancellationToken cancellationToken = default)
     {
+        GetAccessTokenCallCount++;
         if (ShouldFail)
         {
             throw new InvalidOperationException(FailureMessage);

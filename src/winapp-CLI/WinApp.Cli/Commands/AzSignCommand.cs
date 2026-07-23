@@ -138,6 +138,21 @@ internal class AzSignCommand : Command, IShortDescription
                     // Azure access token to this host, so an attacker-controlled Endpoint (in a
                     // checked-in or CI-produced metadata.json) could exfiltrate the token.
                     ValidateMetadataFileEndpoint(metadataFile);
+
+                    // Even though we skip ARM resource discovery here, still run the credential/login
+                    // preparation. This is the only path that detects a missing interactive credential
+                    // and performs the advertised `az login` fallback; without it, `az-sign
+                    // --metadata-file ...` would fail deep inside the dlib when the user has no cached
+                    // login instead of prompting to sign in. The token itself is unused (the dlib
+                    // authenticates independently for the signing data plane) — acquiring it just
+                    // ensures a usable credential exists first.
+                    var loginToken = await azureAuthService.GetAccessTokenAsync(ArmScope, cancellationToken);
+                    if (string.IsNullOrEmpty(loginToken))
+                    {
+                        logger.LogError("Failed to authenticate with Azure.");
+                        return 1;
+                    }
+
                     metadataFilePath = metadataFile;
                     generatedMetadata = false;
                 }

@@ -35,19 +35,24 @@ public class AzureSignToolServiceTests : BaseCommandTests
             new FakeSignToolBuildToolsService(),
             _nuget,
             _installer,
-            new FakeSignToolWinappDirectoryService(_globalWinappDir));
+            new FakeSignToolWinappDirectoryService(_globalWinappDir))
+        {
+            // Tests use placeholder DLL content; bypass the compiled-in SHA-256 pin here. Dedicated
+            // tests below exercise the real verification behaviour (accept / reject / reinstall).
+            DlibIntegrityVerifier = _ => true,
+        };
     }
 
     private FileInfo CreateDlibInCache()
     {
-        var binDir = Path.Combine(
+        var binDir = Path.Join(
             _nugetCacheDir.FullName,
             PackageDirName,
             AzureSignToolService.ArtifactSigningClientVersion,
             "bin",
             "x64");
         Directory.CreateDirectory(binDir);
-        var dlibPath = Path.Combine(binDir, DlibDllName);
+        var dlibPath = Path.Join(binDir, DlibDllName);
         File.WriteAllText(dlibPath, "fake dlib");
         return new FileInfo(dlibPath);
     }
@@ -92,6 +97,57 @@ public class AzureSignToolServiceTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task EnsureTrustedSigningDlibAsync_WhenCachedDlibFailsIntegrity_RemovesAndReinstalls()
+    {
+        // A cached dlib whose content does not match a pinned hash must not be trusted: the version
+        // directory is removed and the package reinstalled, and the reinstalled (now-verified) copy
+        // is returned.
+        CreateDlibInCache();
+        _installer.EnsureResult = true;
+        _installer.OnEnsure = () => CreateDlibInCache();
+
+        var callCount = 0;
+        _service.DlibIntegrityVerifier = _ => ++callCount > 1; // reject the cached copy, accept after reinstall
+
+        var result = await _service.EnsureTrustedSigningDlibAsync(TestTaskContext, TestContext.CancellationToken);
+
+        Assert.AreEqual(1, _installer.EnsureCallCount, "A cached dlib that fails verification should trigger a reinstall");
+        Assert.AreEqual(DlibDllName, result.Name);
+    }
+
+    [TestMethod]
+    public async Task EnsureTrustedSigningDlibAsync_WhenDownloadedDlibFailsIntegrity_Throws()
+    {
+        // If even the freshly installed dlib fails verification, refuse to use it (fail closed).
+        _installer.EnsureResult = true;
+        _installer.OnEnsure = () => CreateDlibInCache();
+        _service.DlibIntegrityVerifier = _ => false;
+
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => _service.EnsureTrustedSigningDlibAsync(TestTaskContext, TestContext.CancellationToken));
+
+        StringAssert.Contains(ex.Message, "failed integrity verification");
+    }
+
+    [TestMethod]
+    public async Task EnsureTrustedSigningDlibAsync_DefaultVerifier_RejectsUnpinnedContent()
+    {
+        // Exercise the real compiled-in SHA-256 pin (no verifier override): placeholder DLL content
+        // must be rejected, proving the production path does not blindly trust cached/downloaded bits.
+        var service = new AzureSignToolService(
+            new FakeSignToolBuildToolsService(), _nuget, _installer,
+            new FakeSignToolWinappDirectoryService(_globalWinappDir));
+        CreateDlibInCache();               // "fake dlib" content — not a pinned hash
+        _installer.EnsureResult = true;
+        _installer.OnEnsure = () => CreateDlibInCache();
+
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => service.EnsureTrustedSigningDlibAsync(TestTaskContext, TestContext.CancellationToken));
+
+        StringAssert.Contains(ex.Message, "failed integrity verification");
+    }
+
+    [TestMethod]
     public async Task EnsureTrustedSigningDlibAsync_WhenInstallFails_Throws()
     {
         _installer.EnsureResult = false;
@@ -109,11 +165,14 @@ public class AzureSignToolServiceTests : BaseCommandTests
         var signtool = CreateFakeSigntool("x64");
         var recording = new RecordingBuildToolsService { SignToolToReturn = signtool };
         var service = new AzureSignToolService(
-            recording, _nuget, _installer, new FakeSignToolWinappDirectoryService(_globalWinappDir));
+            recording, _nuget, _installer, new FakeSignToolWinappDirectoryService(_globalWinappDir))
+        {
+            DlibIntegrityVerifier = _ => true,
+        };
 
-        var fileToSign = new FileInfo(Path.Combine(_tempDirectory.FullName, "app.msix"));
+        var fileToSign = new FileInfo(Path.Join(_tempDirectory.FullName, "app.msix"));
         await File.WriteAllTextAsync(fileToSign.FullName, "MZ", TestContext.CancellationToken);
-        var metadata = new FileInfo(Path.Combine(_tempDirectory.FullName, "metadata.json"));
+        var metadata = new FileInfo(Path.Join(_tempDirectory.FullName, "metadata.json"));
         await File.WriteAllTextAsync(metadata.FullName, "{}", TestContext.CancellationToken);
 
         await service.SignAsync(fileToSign, metadata, "my-tenant-id", TestTaskContext, TestContext.CancellationToken);
@@ -138,11 +197,14 @@ public class AzureSignToolServiceTests : BaseCommandTests
         var signtool = CreateFakeSigntool("x64");
         var recording = new RecordingBuildToolsService { SignToolToReturn = signtool };
         var service = new AzureSignToolService(
-            recording, _nuget, _installer, new FakeSignToolWinappDirectoryService(_globalWinappDir));
+            recording, _nuget, _installer, new FakeSignToolWinappDirectoryService(_globalWinappDir))
+        {
+            DlibIntegrityVerifier = _ => true,
+        };
 
-        var fileToSign = new FileInfo(Path.Combine(_tempDirectory.FullName, "app.msix"));
+        var fileToSign = new FileInfo(Path.Join(_tempDirectory.FullName, "app.msix"));
         await File.WriteAllTextAsync(fileToSign.FullName, "MZ", TestContext.CancellationToken);
-        var metadata = new FileInfo(Path.Combine(_tempDirectory.FullName, "metadata.json"));
+        var metadata = new FileInfo(Path.Join(_tempDirectory.FullName, "metadata.json"));
         await File.WriteAllTextAsync(metadata.FullName, "{}", TestContext.CancellationToken);
 
         await service.SignAsync(fileToSign, metadata, tenantId: null, TestTaskContext, TestContext.CancellationToken);
@@ -160,11 +222,14 @@ public class AzureSignToolServiceTests : BaseCommandTests
         var x64Signtool = CreateFakeSigntool("x64");      // sibling under the same bin parent
         var recording = new RecordingBuildToolsService { SignToolToReturn = arm64Signtool };
         var service = new AzureSignToolService(
-            recording, _nuget, _installer, new FakeSignToolWinappDirectoryService(_globalWinappDir));
+            recording, _nuget, _installer, new FakeSignToolWinappDirectoryService(_globalWinappDir))
+        {
+            DlibIntegrityVerifier = _ => true,
+        };
 
-        var fileToSign = new FileInfo(Path.Combine(_tempDirectory.FullName, "app.msix"));
+        var fileToSign = new FileInfo(Path.Join(_tempDirectory.FullName, "app.msix"));
         await File.WriteAllTextAsync(fileToSign.FullName, "MZ", TestContext.CancellationToken);
-        var metadata = new FileInfo(Path.Combine(_tempDirectory.FullName, "metadata.json"));
+        var metadata = new FileInfo(Path.Join(_tempDirectory.FullName, "metadata.json"));
         await File.WriteAllTextAsync(metadata.FullName, "{}", TestContext.CancellationToken);
 
         await service.SignAsync(fileToSign, metadata, "tenant", TestTaskContext, TestContext.CancellationToken);
@@ -176,9 +241,9 @@ public class AzureSignToolServiceTests : BaseCommandTests
 
     private FileInfo CreateFakeSigntool(string architecture)
     {
-        var dir = Path.Combine(_tempDirectory.FullName, "sdk", "bin", architecture);
+        var dir = Path.Join(_tempDirectory.FullName, "sdk", "bin", architecture);
         Directory.CreateDirectory(dir);
-        var signtool = new FileInfo(Path.Combine(dir, "signtool.exe"));
+        var signtool = new FileInfo(Path.Join(dir, "signtool.exe"));
         File.WriteAllText(signtool.FullName, "fake signtool");
         return signtool;
     }
