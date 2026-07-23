@@ -381,6 +381,8 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
 
         return result.ExitCode == 0;
     }
+
+    /// <summary>
     /// Validates that a tenant identifier is a GUID or a DNS-style domain name. This both
     /// prevents bad input from reaching the Azure CLI and rejects shell/argument metacharacters.
     /// </summary>
