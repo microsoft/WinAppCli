@@ -447,6 +447,8 @@ export async function restore(options: RestoreOptions = {}): Promise<WinappResul
 export interface RunOptions extends CommonOptions {
   /** Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory). */
   input?: string;
+  /** @deprecated Use `input` instead. Retained for backward compatibility. */
+  inputFolder?: string;
   /** Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Default: the current process architecture. */
   arch?: string;
   /** Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). */
@@ -496,7 +498,8 @@ export interface RunOptions extends CommonOptions {
  */
 export async function run(options: RunOptions = {}): Promise<WinappResult> {
   const args: string[] = ['run'];
-  if (options.input) args.push(options.input);
+  const inputValue = options.input ?? options.inputFolder;
+  if (inputValue) args.push(inputValue);
   if (options.arch) args.push('--arch', options.arch);
   if (options.args) args.push('--args', options.args);
   if (options.clean) args.push('--clean');

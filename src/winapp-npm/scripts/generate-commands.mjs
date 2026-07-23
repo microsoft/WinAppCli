@@ -83,6 +83,23 @@ const COMMON_OPTIONS = new Set(['--quiet', '--verbose', '--help']);
 const TS_RESERVED = new Set(['package', 'default', 'export', 'import', 'class', 'function', 'return', 'delete', 'new']);
 
 /**
+ * Deprecated positional-argument property aliases, keyed by command path.
+ *
+ * When a CLI positional argument is renamed, the old npm SDK property name is a
+ * breaking change for existing JS/TS callers. To avoid that, list the old name
+ * here: the generator emits it as an optional, `@deprecated` field and resolves
+ * `canonicalProp ?? aliasProp` when forwarding to the CLI, so old callers keep
+ * working while `--help`/the schema use the new name.
+ *
+ * Map shape: `{ '<cmd path>': { '<canonicalProp>': '<deprecatedAliasProp>' } }`.
+ */
+const DEPRECATED_ARG_ALIASES = {
+  // `run`'s positional was renamed from `input-folder` to `input` (it accepts a
+  // .csproj/.sln/folder, not just a folder). Keep `inputFolder` working.
+  run: { input: 'inputFolder' },
+};
+
+/**
  * Nullable enum types — strip `System.Nullable<...>` wrapper.
  */
 const NULLABLE_ENUM_RE = /^System\.Nullable<(.+)>$/;
@@ -291,12 +308,13 @@ function generate(schema) {
     }
 
     // Collect arguments (positional)
+    const argAliases = DEPRECATED_ARG_ALIASES[cmdPathStr] || {};
     const positionalArgs = [];
     for (const [argName, argDef] of Object.entries(cmd.arguments || {})) {
       const propName = kebabToCamel(argName);
       // The passthrough arg (e.g. run's app-args) is emitted after '--' below, not as a positional.
       if (passthrough && propName === passthrough.propName) continue;
-      positionalArgs.push({ cliName: argName, def: argDef, propName });
+      positionalArgs.push({ cliName: argName, def: argDef, propName, alias: argAliases[propName] || null });
     }
     // Sort by order
     positionalArgs.sort((a, b) => (a.def.order ?? 0) - (b.def.order ?? 0));
@@ -319,6 +337,10 @@ function generate(schema) {
       const type = variadic ? 'string | string[]' : tsType(arg.def.valueType);
       L(`  /** ${cleanDesc(arg.def.description)} */`);
       L(`  ${arg.propName}${required ? '' : '?'}: ${type};`);
+      if (arg.alias) {
+        L(`  /** @deprecated Use \`${arg.propName}\` instead. Retained for backward compatibility. */`);
+        L(`  ${arg.alias}?: ${type};`);
+      }
     }
     // then named options
     for (const opt of opts) {
@@ -362,20 +384,28 @@ function generate(schema) {
     for (const arg of positionalArgs) {
       const required = arg.def.arity?.minimum >= 1;
       const variadic = isVariadicArg(arg.def);
+      // When a deprecated alias exists, prefer the canonical property but fall
+      // back to the alias so pre-rename callers keep working. Hoist to a local so
+      // TypeScript can narrow it (a re-evaluated `??` expression is not narrowed).
+      let accessor = `options.${arg.propName}`;
+      if (arg.alias) {
+        accessor = `${arg.propName}Value`;
+        L(`  const ${accessor} = options.${arg.propName} ?? options.${arg.alias};`);
+      }
       if (variadic) {
         if (required) {
-          L(`  const ${arg.propName}Arr = Array.isArray(options.${arg.propName}) ? options.${arg.propName} : [options.${arg.propName}];`);
+          L(`  const ${arg.propName}Arr = Array.isArray(${accessor}) ? ${accessor} : [${accessor}];`);
           L(`  args.push(...${arg.propName}Arr);`);
         } else {
-          L(`  if (options.${arg.propName}) {`);
-          L(`    const ${arg.propName}Arr = Array.isArray(options.${arg.propName}) ? options.${arg.propName} : [options.${arg.propName}];`);
+          L(`  if (${accessor}) {`);
+          L(`    const ${arg.propName}Arr = Array.isArray(${accessor}) ? ${accessor} : [${accessor}];`);
           L(`    args.push(...${arg.propName}Arr);`);
           L('  }');
         }
       } else if (required) {
-        L(`  args.push(options.${arg.propName});`);
+        L(`  args.push(${accessor});`);
       } else {
-        L(`  if (options.${arg.propName}) args.push(options.${arg.propName});`);
+        L(`  if (${accessor}) args.push(${accessor});`);
       }
     }
 

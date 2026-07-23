@@ -87,3 +87,34 @@ test('run accepts a single scalar --property value', async () => {
   assert.deepEqual(propValues, ['X=9'], 'a scalar property is emitted as one --property pair');
   assert.equal(argv.indexOf('--'), -1, 'no passthrough separator without appArgs');
 });
+
+test('run forwards the canonical `input` property as the first positional', async () => {
+  const state = captureSpawnArgs();
+
+  await run({ input: './dist' });
+
+  const argv = state.calls[0];
+  assert.equal(argv[0], 'run', 'first token is the run subcommand');
+  assert.equal(argv[1], './dist', 'input is forwarded as the first positional');
+});
+
+test('run still honors the deprecated `inputFolder` alias (backward compatibility)', async () => {
+  // The positional argument was renamed input-folder -> input; pre-rename callers
+  // that pass `inputFolder` must keep working instead of silently running the cwd.
+  const state = captureSpawnArgs();
+
+  await run({ inputFolder: './dist' });
+
+  const argv = state.calls[0];
+  assert.equal(argv[1], './dist', 'the deprecated inputFolder alias is forwarded as the positional');
+});
+
+test('run prefers `input` over the deprecated `inputFolder` when both are set', async () => {
+  const state = captureSpawnArgs();
+
+  await run({ input: './new', inputFolder: './old' });
+
+  const argv = state.calls[0];
+  assert.equal(argv[1], './new', 'the canonical input wins over the deprecated alias');
+  assert.equal(argv.indexOf('./old'), -1, 'the deprecated alias value is not forwarded when input is set');
+});
