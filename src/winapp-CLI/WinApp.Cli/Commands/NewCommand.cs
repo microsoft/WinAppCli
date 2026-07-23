@@ -442,11 +442,14 @@ internal class NewCommand : Command, IShortDescription
 
         private async Task<string> PromptNameAsync(CancellationToken cancellationToken)
         {
+            // Reuse the same validation the handler applies so invalid interactive input (empty,
+            // path separators, "..", reserved device names, etc.) is corrected in place instead of
+            // being accepted here and then rejected after the wizard completes.
             var prompt = new TextPrompt<string>("What should the app be named?")
                 .DefaultValue("WinUIApp")
-                .Validate(value => string.IsNullOrWhiteSpace(value)
-                    ? ValidationResult.Error("Name cannot be empty")
-                    : ValidationResult.Success());
+                .Validate(value => IsValidProjectName(value)
+                    ? ValidationResult.Success()
+                    : ValidationResult.Error("Use a simple name without path separators or invalid filename characters."));
 
             return await ansiConsole.PromptAsync(prompt, cancellationToken);
         }

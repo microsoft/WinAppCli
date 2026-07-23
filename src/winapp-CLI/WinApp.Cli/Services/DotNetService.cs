@@ -444,7 +444,31 @@ internal partial class DotNetService : IDotNetService
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        await process.WaitForExitAsync(cancellationToken);
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // WaitForExitAsync only stops awaiting on cancellation; the spawned dotnet process keeps
+            // running and can continue mutating the global template store or the output directory
+            // after winapp exits. Kill the whole process tree and wait for it to actually stop before
+            // propagating the cancellation.
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync(CancellationToken.None);
+                }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                // The process already exited between the HasExited check and Kill — nothing to do.
+            }
+
+            throw;
+        }
 
         // WaitForExitAsync returns once the process exits, but the async stdout/stderr readers may
         // still have buffered data in flight. The parameterless overload blocks until those readers

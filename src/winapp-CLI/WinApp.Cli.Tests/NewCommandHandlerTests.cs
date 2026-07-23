@@ -451,4 +451,28 @@ public class NewCommandHandlerTests : BaseCommandTests
         Assert.AreEqual("PromptedApp", tokens[nameIdx + 1],
             "The prompted name must be passed to dotnet new.");
     }
+
+    [TestMethod]
+    public async Task Handler_InteractiveInvalidName_Reprompts_ThenUsesValidName()
+    {
+        ScriptHappyPath();
+        // The name prompt reuses IsValidProjectName, so an invalid interactive entry must be rejected
+        // in place (re-prompt) rather than accepted and then failing the whole wizard afterwards.
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);            // select first template (blank)
+        TestAnsiConsole.Input.PushTextWithEnter(@"..\Escaped");    // invalid: path separators / traversal
+        TestAnsiConsole.Input.PushTextWithEnter("CON");            // invalid: reserved device name
+        TestAnsiConsole.Input.PushTextWithEnter("ValidApp");       // valid: accepted, ends the prompt
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, []);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        var scaffold = ScaffoldInvocation();
+        Assert.IsNotNull(scaffold, "Scaffolding should run once a valid name is entered.");
+        var tokens = scaffold.ToArray();
+        var nameIdx = Array.IndexOf(tokens, "-n");
+        Assert.IsTrue(nameIdx >= 0 && nameIdx + 1 < tokens.Length);
+        Assert.AreEqual("ValidApp", tokens[nameIdx + 1],
+            "Only the corrected, valid name should reach dotnet new — the invalid entries must be re-prompted.");
+    }
 }
