@@ -29,7 +29,7 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
 
     public async Task<string> GetAccessTokenAsync(string scope, CancellationToken cancellationToken = default)
     {
-var presetTenantId = TenantId;
+        var presetTenantId = TenantId;
         if (!string.IsNullOrEmpty(presetTenantId) && !IsValidTenantId(presetTenantId))
         {
             throw new InvalidOperationException(

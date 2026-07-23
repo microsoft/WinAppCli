@@ -463,19 +463,18 @@ internal class AzSignCommand : Command, IShortDescription
                 return subscriptions[0].SubscriptionId;
             }
 
-            // Prompt user to select — escape display names so Spectre markup characters (e.g. brackets)
-            // in Azure subscription names don't misrender or throw.
-            var choices = subscriptions.Select(s => $"{Markup.Escape(s.DisplayName)} ({s.SubscriptionId})").ToList();
             RequireInteractiveSelection(
                 "Multiple Azure subscriptions are available but none was specified. " +
                 "Re-run with --subscription <id> (this environment is non-interactive and cannot prompt).");
-            var prompt = new SelectionPrompt<string>()
+            // Prompt over the model so the returned value is the real subscription; the converter
+            // escapes display names so Spectre markup characters (e.g. brackets) don't misrender or throw.
+            var prompt = new SelectionPrompt<AzureSubscription>()
                 .Title("Select an Azure subscription:")
-                .AddChoices(choices);
+                .UseConverter(s => $"{Markup.Escape(s.DisplayName)} ({s.SubscriptionId})")
+                .AddChoices(subscriptions);
 
             var selected = await ansiConsole.PromptAsync(prompt, cancellationToken);
-            var index = choices.IndexOf(selected);
-            return subscriptions[index].SubscriptionId;
+            return selected.SubscriptionId;
         }
 
         private async Task<SigningAccount?> SelectSigningAccountAsync(
@@ -501,20 +500,21 @@ internal class AzSignCommand : Command, IShortDescription
             }
 
             // Format choices based on whether resource group was provided
-            var choices = string.IsNullOrEmpty(resourceGroup)
-                ? accounts.Select(a => $"{a.Name}, Resource Group: {a.ResourceGroup}").ToList()
-                : accounts.Select(a => a.Name).ToList();
-
-            var prompt = new SelectionPrompt<string>()
-                .Title("Select a signing account:")
-                .AddChoices(choices);
+            string DisplayAccount(SigningAccount a) => string.IsNullOrEmpty(resourceGroup)
+                ? $"{a.Name}, Resource Group: {a.ResourceGroup}"
+                : a.Name;
 
             RequireInteractiveSelection(
                 "Multiple Trusted Signing accounts are available but none was specified. " +
                 "Re-run with --resource-group <name> --account <name> (this environment is non-interactive and cannot prompt).");
-            var selected = await ansiConsole.PromptAsync(prompt, cancellationToken);
-            var index = choices.IndexOf(selected);
-            return accounts[index];
+            // Prompt over the model so the returned value is the real account; the converter escapes
+            // display names so markup characters in account/resource-group names don't misrender or throw.
+            var prompt = new SelectionPrompt<SigningAccount>()
+                .Title("Select a signing account:")
+                .UseConverter(a => Markup.Escape(DisplayAccount(a)))
+                .AddChoices(accounts);
+
+            return await ansiConsole.PromptAsync(prompt, cancellationToken);
         }
 
         private async Task<string?> SelectCertificateProfileAsync(
@@ -546,17 +546,18 @@ internal class AzSignCommand : Command, IShortDescription
                 return profiles[0].Name;
             }
 
-            var choices = profiles.Select(p => $"{p.Name} ({p.ProfileType})").ToList();
             RequireInteractiveSelection(
                 "Multiple certificate profiles are available but none was specified. " +
                 "Re-run with --profile <name> (this environment is non-interactive and cannot prompt).");
-            var prompt = new SelectionPrompt<string>()
+            // Prompt over the model so the returned value is the real profile name; the converter
+            // escapes display strings so markup characters in profile names don't misrender or throw.
+            var prompt = new SelectionPrompt<CertificateProfile>()
                 .Title("Select a certificate profile:")
-                .AddChoices(choices);
+                .UseConverter(p => Markup.Escape($"{p.Name} ({p.ProfileType})"))
+                .AddChoices(profiles);
 
             var selected = await ansiConsole.PromptAsync(prompt, cancellationToken);
-            // Strip the profile type suffix to get just the name
-            return selected[..selected.LastIndexOf(" (")];
+            return selected.Name;
         }
 
         private static async Task<FileInfo> GenerateMetadataFileAsync(SigningMetadata metadata, CancellationToken cancellationToken)
