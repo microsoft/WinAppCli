@@ -168,7 +168,7 @@ internal class AzureSigningService : IAzureSigningService
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
-        var response = await http.SendAsync(request, cancellationToken);
+        using var response = await http.SendAsync(request, cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
@@ -265,7 +265,7 @@ internal class AzureSigningService : IAzureSigningService
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
-        var response = await http.SendAsync(request, cancellationToken);
+        using var response = await http.SendAsync(request, cancellationToken);
         var content = await response.Content.ReadAsStringAsync(cancellationToken);
 
         if (!response.IsSuccessStatusCode)

@@ -353,6 +353,12 @@ internal partial class BuildToolsService(
         catch (OperationCanceledException)
         {
             TryKillProcessTree(p);
+
+            // We killed the process while its pipes were still being read. Observe both read tasks
+            // before rethrowing so their reads don't keep running and can't surface later as
+            // unobserved task exceptions; the failures they raise here are the expected result of
+            // cancelling/killing mid-read.
+            await DrainReadsQuietlyAsync(stdoutTask, stderrTask);
             throw;
         }
 
@@ -404,6 +410,23 @@ internal partial class BuildToolsService(
         catch (NotSupportedException)
         {
             // Best-effort cleanup on cancellation
+        }
+    }
+
+    /// <summary>
+    /// Awaits the stdout/stderr read tasks after the process was killed on cancellation, swallowing
+    /// the expected failures (cancellation or a broken pipe from the kill) so the tasks are observed
+    /// and never surface as unobserved exceptions. Any unexpected exception is left to propagate.
+    /// </summary>
+    private static async Task DrainReadsQuietlyAsync(Task stdoutTask, Task stderrTask)
+    {
+        try
+        {
+            await Task.WhenAll(stdoutTask, stderrTask);
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or IOException)
+        {
+            // Expected: the reads were cancelled or their pipe closed when we killed the process.
         }
     }
 

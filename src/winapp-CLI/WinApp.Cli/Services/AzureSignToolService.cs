@@ -37,6 +37,14 @@ internal class AzureSignToolService(
         "584110D279E2C112206E4CC28949354654E8A72B143EDB52352CFA103C65AB7D",
     };
 
+    // Microsoft's official RFC 3161 timestamp endpoint for Azure Trusted Signing. It is HTTP by
+    // design, matching Microsoft's documented signtool integration and the industry norm for
+    // timestamp authorities (DigiCert, Sectigo, etc. all publish http:// timestamp URLs). Security
+    // does not depend on the transport: the timestamp token returned by the TSA is itself
+    // cryptographically signed, and signtool verifies that signature, so a man-in-the-middle cannot
+    // forge or alter the timestamp without invalidating it — a tampered response is rejected rather
+    // than trusted. The TSA also does not receive the file being signed (only a hash), so HTTP does
+    // not expose content. https is not offered at this endpoint, so using it would simply fail.
     private const string TimestampUrl = "http://timestamp.acs.microsoft.com";
 
     /// <summary>
