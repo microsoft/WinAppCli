@@ -39,6 +39,11 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = $PSScriptRoot | Split-Path -Parent
 if (-not $DocsRoot) { $DocsRoot = Join-Path $ProjectRoot "docs" }
 
+# Display paths relative to the docs root's parent so they read like "docs/..."
+# regardless of whether DocsRoot is inside this repo or an external/temp path.
+$DocsRootFull = [System.IO.Path]::GetFullPath($DocsRoot)
+$DisplayBase = Split-Path $DocsRootFull -Parent
+
 # ─── Rules (keep in sync with port-mslearn-docs.ps1) ────────────────────────────
 
 $DescriptionMin = 115
@@ -85,7 +90,7 @@ $docFiles = Get-ChildItem $DocsRoot -Recurse -File -Filter *.md
 $checked = 0
 
 foreach ($file in $docFiles) {
-    $relPath = $file.FullName.Substring($ProjectRoot.Length + 1) -replace '\\', '/'
+    $relPath = [System.IO.Path]::GetRelativePath($DisplayBase, $file.FullName) -replace '\\', '/'
     $raw = Get-Content $file.FullName -Raw
 
     # Opt-in marker (match the first-10-lines window port-mslearn-docs.ps1 uses)
