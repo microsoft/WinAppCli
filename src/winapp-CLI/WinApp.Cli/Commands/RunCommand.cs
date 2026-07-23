@@ -20,7 +20,7 @@ internal partial class RunCommand : Command, IShortDescription
 {
     public string ShortDescription => "Build and run a Windows app from a .csproj, .sln, or build-output folder.";
 
-    public static Argument<FileSystemInfo> InputFolderArgument { get; }
+    public static Argument<FileSystemInfo> InputArgument { get; }
     public static Option<FileInfo> ManifestOption { get; }
     public static Option<DirectoryInfo?> OutputAppXDirectoryOption { get; }
     public static Option<string> ArgsOption { get; }
@@ -52,7 +52,7 @@ internal partial class RunCommand : Command, IShortDescription
 
     static RunCommand()
     {
-        InputFolderArgument = new Argument<FileSystemInfo>("input-folder")
+        InputArgument = new Argument<FileSystemInfo>("input")
         {
             Description = "Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory).",
             Arity = ArgumentArity.ZeroOrOne
@@ -64,7 +64,7 @@ internal partial class RunCommand : Command, IShortDescription
             Arity = ArgumentArity.ZeroOrMore,
             // Hidden from help/schema: this argument exists only to absorb tokens after '--'
             // so System.CommandLine doesn't reject them. Exposing it would mislead users and
-            // schema consumers into thinking `winapp run <input-folder> [<app-args>...]` is
+            // schema consumers into thinking `winapp run <input> [<app-args>...]` is
             // a valid direct invocation; in reality, app args MUST be preceded by '--'.
             Hidden = true,
         };
@@ -77,7 +77,7 @@ internal partial class RunCommand : Command, IShortDescription
 
         OutputAppXDirectoryOption = new Option<DirectoryInfo?>("--output-appx-directory")
         {
-            Description = "Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used."
+            Description = "Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory will be used."
         };
 
         ArgsOption = new Option<string>("--args")
@@ -176,7 +176,7 @@ internal partial class RunCommand : Command, IShortDescription
 
     public RunCommand() : base("run", "Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.")
     {
-        Arguments.Add(InputFolderArgument);
+        Arguments.Add(InputArgument);
         Arguments.Add(PassthroughArgument);
         Options.Add(ManifestOption);
         Options.Add(OutputAppXDirectoryOption);
@@ -222,12 +222,12 @@ internal partial class RunCommand : Command, IShortDescription
 
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
-            // input-folder is optional (ArgumentArity.ZeroOrOne). The final FileSystemInfo is resolved
+            // input is optional (ArgumentArity.ZeroOrOne). The final FileSystemInfo is resolved
             // below, AFTER the passthrough split, because a bare `winapp run -- <app-arg>` makes the
             // parser greedily bind the first post-'--' token to this positional. That "stolen" case is
             // detected by comparing what the passthrough argument absorbed against the raw post-'--'
             // tokens; when it happens we fall back to the current directory (see resolution below).
-            var inputArg = parseResult.GetValue(InputFolderArgument);
+            var inputArg = parseResult.GetValue(InputArgument);
             var manifest = parseResult.GetValue(ManifestOption);
             var outputAppXDirectory = parseResult.GetValue(OutputAppXDirectoryOption);
             var appArgs = parseResult.GetValue(ArgsOption);
@@ -284,10 +284,10 @@ internal partial class RunCommand : Command, IShortDescription
             }
 
             // Resolve the effective input path now that the passthrough split is known.
-            // ZeroOrOne input-folder + a trailing ZeroOrMore passthrough means the parser binds the
-            // FIRST positional token to input-folder even when it appears after '--' (e.g.
+            // ZeroOrOne input + a trailing ZeroOrMore passthrough means the parser binds the
+            // FIRST positional token to input even when it appears after '--' (e.g.
             // `winapp run -- --flag`). SplitPassthroughTokens returns the RAW post-'--' tokens
-            // (passthroughArgs) independent of that binding, so when input-folder "stole" the first
+            // (passthroughArgs) independent of that binding, so when input "stole" the first
             // post-'--' token, passthrough absorbed one fewer token than actually followed '--'.
             // In that case (or when no positional was supplied at all) default to the current
             // directory and let ResolveInputAsync decide project-vs-folder mode from cwd (matches
@@ -297,7 +297,7 @@ internal partial class RunCommand : Command, IShortDescription
                 ? currentDirectoryProvider.GetCurrentDirectoryInfo()
                 : inputArg;
 
-            // Preserve the pre-existing "path must exist" guarantee. The input-folder argument no
+            // Preserve the pre-existing "path must exist" guarantee. The input argument no
             // longer uses AcceptExistingOnly (that validator hard-errors on the stolen post-'--'
             // token above, bypassing the --json envelope), so validate a genuinely-provided path
             // here instead. Defaulted/stolen inputs resolve to the current directory and are skipped.

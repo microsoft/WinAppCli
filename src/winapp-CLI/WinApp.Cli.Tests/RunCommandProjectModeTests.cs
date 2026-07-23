@@ -133,6 +133,13 @@ public class RunCommandProjectModeTests : BaseCommandTests
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(1, _fakeAppLauncherService.LaunchExecutableCalls.Count, "Unpackaged app should launch via LaunchExecutable");
         StringAssert.Contains(_fakeAppLauncherService.LaunchExecutableCalls[0].ExePath, "App.exe");
+        // Launch with the caller's cwd (like `dotnet run`), NOT the build-output directory, so apps
+        // resolving config/data via relative paths behave the same as under `dotnet run`.
+        var cwd = GetRequiredService<ICurrentDirectoryProvider>().GetCurrentDirectory();
+        Assert.AreEqual(cwd, _fakeAppLauncherService.LaunchExecutableCalls[0].WorkingDirectory,
+            "Unpackaged app must launch with the caller's current directory, not the exe output folder");
+        Assert.AreNotEqual(targetDir.FullName, _fakeAppLauncherService.LaunchExecutableCalls[0].WorkingDirectory,
+            "Working directory must not be the build-output directory");
         Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "Unpackaged app must NOT use AUMID activation");
         Assert.AreEqual(1, _fakeMsixService.EnsureRuntimeInstalledCalls.Count, "Runtime should be installed for a non-self-contained app");
         Assert.AreEqual("x64", _fakeMsixService.EnsureRuntimeInstalledCalls[0].Architecture, "Runtime install must honor the resolved arch");

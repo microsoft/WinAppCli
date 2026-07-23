@@ -241,7 +241,7 @@ Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In p
 <!-- auto-generated from cli-schema.json -->
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `<input-folder>` | No | Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory). |
+| `<input>` | No | Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory). |
 | `<app-args>` | No | Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). |
 
 #### Options
@@ -261,7 +261,7 @@ Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In p
 | `--no-build` | Project mode: skip building and run the existing build output (still evaluates output properties). Ignored in folder mode. | (none) |
 | `--no-launch` | Only create the debug identity and register the package without launching the application | (none) |
 | `--no-restore` | Project mode: skip restoring the project before building. Ignored in folder mode. | (none) |
-| `--output-appx-directory` | Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used. | (none) |
+| `--output-appx-directory` | Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory will be used. | (none) |
 | `--project` | Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode. | (none) |
 | `--property` | Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. | (none) |
 | `--runtime` | Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode. | (none) |

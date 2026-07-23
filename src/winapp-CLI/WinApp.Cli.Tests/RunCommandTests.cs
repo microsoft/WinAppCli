@@ -126,7 +126,7 @@ public class RunCommandTests : BaseCommandTests
 
         // Assert
         Assert.IsEmpty(parseResult.Errors, "There should be no parsing errors");
-        var folder = parseResult.GetValue(RunCommand.InputFolderArgument);
+        var folder = parseResult.GetValue(RunCommand.InputArgument);
         Assert.IsNotNull(folder);
         Assert.AreEqual(_tempDirectory.FullName, folder.FullName);
     }
@@ -143,7 +143,7 @@ public class RunCommandTests : BaseCommandTests
         // Assert: input-folder is now optional (ArgumentArity.ZeroOrOne). With no path there is no
         // parse error; the argument value is null and the handler substitutes the current directory.
         Assert.IsEmpty(parseResult.Errors, "Omitting the optional input-folder should not produce a parse error");
-        Assert.IsNull(parseResult.GetValue(RunCommand.InputFolderArgument),
+        Assert.IsNull(parseResult.GetValue(RunCommand.InputArgument),
             "With no positional token, the input-folder value should be null (handler defaults it to cwd)");
     }
 
@@ -176,7 +176,7 @@ public class RunCommandTests : BaseCommandTests
 
         // Assert
         Assert.IsEmpty(parseResult.Errors, "'.' is a valid explicit path and should not error");
-        var input = parseResult.GetValue(RunCommand.InputFolderArgument);
+        var input = parseResult.GetValue(RunCommand.InputArgument);
         Assert.IsNotNull(input, "'.' should bind to the input-folder argument");
         Assert.AreEqual(Path.GetFullPath("."), input.FullName,
             "'.' should resolve to the current directory");
@@ -193,7 +193,7 @@ public class RunCommandTests : BaseCommandTests
 
         // Assert
         Assert.IsEmpty(parseResult.Errors, "'. -- <app args>' should not produce a parse error");
-        Assert.IsNotNull(parseResult.GetValue(RunCommand.InputFolderArgument),
+        Assert.IsNotNull(parseResult.GetValue(RunCommand.InputArgument),
             "'.' should bind to the input-folder argument");
         var passthrough = parseResult.GetValue(RunCommand.PassthroughArgument);
         var expectedPassthrough = new[] { "--appflag", "value" };
@@ -224,7 +224,7 @@ public class RunCommandTests : BaseCommandTests
         Assert.IsEmpty(parseResult.Errors, "There should be no parsing errors");
         Assert.IsTrue(parseResult.GetValue(RunCommand.NoLaunchOption));
         Assert.AreEqual("arg1 arg2", parseResult.GetValue(RunCommand.ArgsOption));
-        var folder = parseResult.GetValue(RunCommand.InputFolderArgument);
+        var folder = parseResult.GetValue(RunCommand.InputArgument);
         Assert.IsNotNull(folder);
         Assert.AreEqual(_tempDirectory.FullName, folder.FullName);
     }

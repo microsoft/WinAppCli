@@ -310,7 +310,13 @@ internal partial class RunCommand
             }
 
             var exePath = resolution.RunCommand!; // guaranteed non-null for unpackaged by BuildAndResolveAsync
-            var workingDirectory = Path.GetDirectoryName(exePath);
+
+            // Launch with the caller's current directory (like `dotnet run`), NOT the build-output
+            // directory. Apps that resolve config/data files via paths relative to the working
+            // directory must see the same cwd they would under `dotnet run`; using the exe's output
+            // folder would silently break them. Assembly/resource lookup is unaffected — the .NET
+            // apphost resolves those from its own location (AppContext.BaseDirectory), independent of cwd.
+            var workingDirectory = currentDirectoryProvider.GetCurrentDirectory();
 
             // Install the framework-dependent Windows App Runtime (Framework + DDLM) the app's
             // bootstrapper needs, for the resolved arch. Self-contained apps carry their own copy.
