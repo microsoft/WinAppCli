@@ -236,6 +236,51 @@ public class AzureAuthServiceTests
     }
 
     [TestMethod]
+    public async Task GetAccessTokenAsync_NonInteractiveExistingCliSession_ReturnsTokenWithoutLogin()
+    {
+        // Regression: DefaultAzureCredential excludes AzureCliCredential, so a CI job authenticated via
+        // 'az login' (e.g. the azure/login GitHub Action) is only reachable through the explicit CLI
+        // token path. That path must run even when non-interactive, rather than throwing CI guidance.
+        using var service = new TestableAzureAuthService
+        {
+            InteractiveOverride = false,
+            PrimaryCredential = new ThrowingCredential(),
+            AzCliPath = @"C:\fake\az.cmd",
+            HasExistingSession = true,
+            SeedTenantId = "72f988bf-86f1-41af-91ab-2d7cd011db47",
+        };
+
+        var token = await service.GetAccessTokenAsync(ArmScope);
+
+        Assert.AreEqual("cli-token", token);
+        Assert.AreEqual(0, service.RunAzLoginCallCount, "Non-interactive sessions must never launch az login");
+
+        // The token must still be minted through the validated absolute az path, never an ambient lookup.
+        var tokenRequest = service.ProcessRunner.Requests.Single();
+        Assert.AreEqual(@"C:\fake\az.cmd", tokenRequest.FileName);
+    }
+
+    [TestMethod]
+    public async Task GetAccessTokenAsync_NonInteractiveCliInstalledButNoSession_ThrowsCiGuidanceWithoutLogin()
+    {
+        // The CLI is present but has no cached session; a non-interactive environment cannot launch an
+        // interactive login, so it must surface CI guidance rather than prompting.
+        using var service = new TestableAzureAuthService
+        {
+            InteractiveOverride = false,
+            PrimaryCredential = new ThrowingCredential(),
+            AzCliPath = @"C:\fake\az.cmd",
+            HasExistingSession = false,
+        };
+
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => service.GetAccessTokenAsync(ArmScope));
+
+        StringAssert.Contains(ex.Message, "AZURE_CLIENT_SECRET");
+        Assert.AreEqual(0, service.RunAzLoginCallCount, "Non-interactive sessions must never launch az login");
+    }
+
+    [TestMethod]
     public async Task GetAccessTokenAsync_InteractiveLoginSucceeds_RetriesViaValidatedAzPath()
     {
         using var service = new TestableAzureAuthService

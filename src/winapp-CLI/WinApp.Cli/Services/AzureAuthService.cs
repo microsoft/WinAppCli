@@ -40,6 +40,76 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
         }
         catch (AuthenticationFailedException)
         {
+            // DefaultAzureCredential excludes AzureCliCredential (see CreateCredential), so a session
+            // established by 'az login' — including the azure/login GitHub Actions flow in CI — is only
+            // reachable through this explicit, validated-path lookup. Attempt it in EVERY environment
+            // before giving up: resolve the CLI to a validated absolute path, then mint a token from any
+            // existing session. Only launching a NEW interactive 'az login' (which prompts) is gated by
+            // IsInteractive further below.
+            var azPath = FindAzureCli();
+            if (azPath != null)
+            {
+                var tenantId = TenantId;
+
+                // A preset tenant must be well-formed before it is ever passed to the CLI (it rejects
+                // both bad input and argument-injection metacharacters).
+                if (!string.IsNullOrEmpty(tenantId) && !IsValidTenantId(tenantId))
+                {
+                    throw new InvalidOperationException(
+                        $"Invalid AZURE_TENANT_ID value '{tenantId}'. " +
+                        "It must be a tenant GUID or a domain such as contoso.onmicrosoft.com.");
+                }
+
+                // First try to mint a token from an existing Azure CLI session using the validated
+                // absolute path. This preserves the zero-prompt experience for anyone who already ran
+                // 'az login' — the case DefaultAzureCredential's (now excluded) CLI credential covered —
+                // and, crucially, works in non-interactive CI where 'az login' ran earlier.
+                var existingToken = await GetTokenViaAzureCliAsync(azPath, scope, tenantId, cancellationToken);
+                if (existingToken != null)
+                {
+                    logger.LogInformation("Authenticated via Azure CLI");
+                    return existingToken;
+                }
+
+                // No usable cached session. Launching a new interactive 'az login' only makes sense when
+                // we can actually prompt; in non-interactive/CI environments fall through to guidance.
+                if (IsInteractive)
+                {
+                    if (string.IsNullOrEmpty(tenantId))
+                    {
+                        tenantId = await ansiConsole.PromptAsync(
+                            new TextPrompt<string>("Enter your [green]Azure Tenant ID[/] (found in Azure Portal > Azure AD > Overview):")
+                                .ValidationErrorMessage("[red]Enter a valid tenant ID — a GUID or a domain like contoso.onmicrosoft.com[/]")
+                                .Validate(IsValidTenantId),
+                            cancellationToken);
+                        TenantId = tenantId;
+                    }
+
+                    logger.LogInformation("Signing in via Azure CLI...");
+                    var success = await RunAzLoginAsync(azPath, tenantId, cancellationToken);
+
+                    if (!success)
+                    {
+                        throw new InvalidOperationException("Azure CLI login failed. Please try running 'az login' manually.");
+                    }
+
+                    // Retrieve the token from the now-valid session via the same validated absolute path.
+                    var retryToken = await GetTokenViaAzureCliAsync(azPath, scope, tenantId, cancellationToken);
+                    if (retryToken == null)
+                    {
+                        throw new InvalidOperationException(
+                            "Azure CLI login appeared to succeed but retrieving an access token failed. " +
+                            "Try running 'az login' manually, then re-run the command.");
+                    }
+
+                    logger.LogInformation("Authenticated via Azure CLI");
+                    return retryToken;
+                }
+            }
+
+            // Reached when no credentials worked: either the Azure CLI is not installed, or it is
+            // installed but has no usable cached session and we cannot launch an interactive login.
+            // Emit environment-appropriate guidance.
             if (!IsInteractive)
             {
                 throw new InvalidOperationException(
@@ -54,73 +124,14 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
                     "Alternatively, ensure the Azure CLI is installed and run 'az login' before this command.");
             }
 
-            // The Trusted Signing dlib requires an Azure CLI login for interactive signing. Resolve
-            // the CLI to a validated absolute path first; all subsequent az invocations use that
-            // path rather than an ambient 'az' lookup that a hijacked az.cmd could satisfy.
-            var azPath = FindAzureCli();
-            if (azPath == null)
-            {
-                throw new InvalidOperationException(
-                    "Azure authentication failed. To sign interactively, you have two options:\n\n" +
-                    "Option 1: Install the Azure CLI and run this command again (login will be handled automatically)\n" +
-                    "  Install from: https://aka.ms/installazurecli\n\n" +
-                    "Option 2: Set environment variables for a service principal:\n" +
-                    "  AZURE_TENANT_ID     - Your Azure AD tenant ID\n" +
-                    "  AZURE_CLIENT_ID     - Service principal application ID\n" +
-                    "  AZURE_CLIENT_SECRET - Service principal secret");
-            }
-
-            var tenantId = TenantId;
-
-            // A preset tenant must be well-formed before it is ever passed to the CLI (it rejects
-            // both bad input and argument-injection metacharacters).
-            if (!string.IsNullOrEmpty(tenantId) && !IsValidTenantId(tenantId))
-            {
-                throw new InvalidOperationException(
-                    $"Invalid AZURE_TENANT_ID value '{tenantId}'. " +
-                    "It must be a tenant GUID or a domain such as contoso.onmicrosoft.com.");
-            }
-
-            // First try to mint a token from an existing Azure CLI session using the validated
-            // absolute path. This preserves the zero-prompt experience for users who already ran
-            // 'az login' — the case DefaultAzureCredential's (now excluded) CLI credential covered.
-            var existingToken = await GetTokenViaAzureCliAsync(azPath, scope, tenantId, cancellationToken);
-            if (existingToken != null)
-            {
-                logger.LogInformation("Authenticated via Azure CLI");
-                return existingToken;
-            }
-
-            // No usable cached session — prompt for a tenant if we don't have one, then log in.
-            if (string.IsNullOrEmpty(tenantId))
-            {
-                tenantId = await ansiConsole.PromptAsync(
-                    new TextPrompt<string>("Enter your [green]Azure Tenant ID[/] (found in Azure Portal > Azure AD > Overview):")
-                        .ValidationErrorMessage("[red]Enter a valid tenant ID — a GUID or a domain like contoso.onmicrosoft.com[/]")
-                        .Validate(IsValidTenantId),
-                    cancellationToken);
-                TenantId = tenantId;
-            }
-
-            logger.LogInformation("Signing in via Azure CLI...");
-            var success = await RunAzLoginAsync(azPath, tenantId, cancellationToken);
-
-            if (!success)
-            {
-                throw new InvalidOperationException("Azure CLI login failed. Please try running 'az login' manually.");
-            }
-
-            // Retrieve the token from the now-valid session via the same validated absolute path.
-            var retryToken = await GetTokenViaAzureCliAsync(azPath, scope, tenantId, cancellationToken);
-            if (retryToken == null)
-            {
-                throw new InvalidOperationException(
-                    "Azure CLI login appeared to succeed but retrieving an access token failed. " +
-                    "Try running 'az login' manually, then re-run the command.");
-            }
-
-            logger.LogInformation("Authenticated via Azure CLI");
-            return retryToken;
+            throw new InvalidOperationException(
+                "Azure authentication failed. To sign interactively, you have two options:\n\n" +
+                "Option 1: Install the Azure CLI and run this command again (login will be handled automatically)\n" +
+                "  Install from: https://aka.ms/installazurecli\n\n" +
+                "Option 2: Set environment variables for a service principal:\n" +
+                "  AZURE_TENANT_ID     - Your Azure AD tenant ID\n" +
+                "  AZURE_CLIENT_ID     - Service principal application ID\n" +
+                "  AZURE_CLIENT_SECRET - Service principal secret");
         }
     }
 

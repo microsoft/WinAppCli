@@ -758,7 +758,7 @@ winapp az-sign <file-path> [options]
 
 **Authentication:**
 
-`az-sign` uses Azure's standard credential chain (`DefaultAzureCredential`). For CI/CD, set `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET` (or use GitHub Actions OIDC / managed identity). Interactively, if no credentials are found and the Azure CLI is installed, `az-sign` runs `az login` for you.
+`az-sign` uses Azure's standard credential chain (`DefaultAzureCredential`). For CI/CD, set `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET` (or use GitHub Actions OIDC / managed identity). An existing Azure CLI session (`az login`, including the `azure/login` GitHub Action) is also honored in any environment. Only when no credentials are found *and* the session is interactive will `az-sign` launch `az login` for you.
 
 **Prerequisites:**
 
