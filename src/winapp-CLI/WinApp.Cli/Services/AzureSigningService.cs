@@ -57,15 +57,9 @@ internal class AzureSigningService : IAzureSigningService
 
     public async Task<IReadOnlyList<SigningAccount>> ListSigningAccountsAsync(string accessToken, string subscriptionId, string? resourceGroup = null, CancellationToken cancellationToken = default)
     {
-        string url;
-        if (!string.IsNullOrEmpty(resourceGroup))
-        {
-            url = $"{ArmBaseUrl}/subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.CodeSigning/codeSigningAccounts?api-version={TrustedSigningApiVersion}";
-        }
-        else
-        {
-            url = $"{ArmBaseUrl}/subscriptions/{subscriptionId}/providers/Microsoft.CodeSigning/codeSigningAccounts?api-version={TrustedSigningApiVersion}";
-        }
+        string url = !string.IsNullOrEmpty(resourceGroup)
+            ? $"{ArmBaseUrl}/subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.CodeSigning/codeSigningAccounts?api-version={TrustedSigningApiVersion}"
+            : $"{ArmBaseUrl}/subscriptions/{subscriptionId}/providers/Microsoft.CodeSigning/codeSigningAccounts?api-version={TrustedSigningApiVersion}";
 
         var accounts = await GetArmPagedAsync<SigningAccount>(url, accessToken, item =>
         {

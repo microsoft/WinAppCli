@@ -470,15 +470,9 @@ internal class AzSignCommand : Command, IShortDescription
             }
 
             // Format choices based on whether resource group was provided
-            List<string> choices;
-            if (string.IsNullOrEmpty(resourceGroup))
-            {
-                choices = accounts.Select(a => $"{a.Name}, Resource Group: {a.ResourceGroup}").ToList();
-            }
-            else
-            {
-                choices = accounts.Select(a => a.Name).ToList();
-            }
+            var choices = string.IsNullOrEmpty(resourceGroup)
+                ? accounts.Select(a => $"{a.Name}, Resource Group: {a.ResourceGroup}").ToList()
+                : accounts.Select(a => a.Name).ToList();
 
             var prompt = new SelectionPrompt<string>()
                 .Title("Select a signing account:")
