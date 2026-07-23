@@ -286,7 +286,7 @@ internal class AzureSigningService : IAzureSigningService
                 }
             }
         }
-        catch
+        catch (JsonException)
         {
             // Not valid JSON or unexpected structure
         }
