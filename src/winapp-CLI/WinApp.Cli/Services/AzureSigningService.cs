@@ -200,7 +200,13 @@ internal class AzureSigningService : IAzureSigningService
         where T : class
     {
         var results = new List<T>();
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Track visited links with ordinal (case-sensitive) comparison. ARM's nextLink carries an
+        // opaque continuation token in its query string that may be case-sensitive, so two genuinely
+        // distinct pages can differ only by case; a case-insensitive set would treat them as a repeat
+        // and abort pagination early, silently dropping results. Host trust is validated separately by
+        // EnsureTrustedArmUrl, so this comparison only needs to detect exact-URL cycles.
+        var visited = new HashSet<string>(StringComparer.Ordinal);
         string? nextUrl = url;
 
         while (!string.IsNullOrEmpty(nextUrl))

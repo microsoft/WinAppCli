@@ -86,12 +86,22 @@ internal class AzureSignToolService(
         // Reuse the shared build-tool runner so process spawning, concurrent stream draining,
         // cancellation/kill, and exit-code handling live in one place. We pass the resolved
         // (architecture-matched) signtool path as an override rather than re-resolving by name.
+        //
+        // Run signtool from a trusted system directory rather than inheriting the caller's working
+        // directory. The dlib performs its own Azure.Identity authentication in-process and, unlike
+        // AzureAuthService, its credential chain still includes AzureCliCredential, which resolves
+        // 'az' by ambient lookup. Because Windows searches the current directory first, a repo-local
+        // or otherwise attacker-writable 'az.cmd' in the caller's working directory could run when the
+        // dlib requests its token. Anchoring the working directory to System32 removes that vector
+        // while still allowing 'az' to resolve from legitimate PATH locations. All file arguments
+        // (dlib, metadata, target) are absolute, so the working directory does not affect signing.
         await buildToolsService.RunBuildToolAsync(
             new GenericTool("signtool.exe"),
             arguments,
             taskContext,
             toolPathOverride: signtoolPath,
             environment: environment,
+            workingDirectory: Environment.SystemDirectory,
             cancellationToken: cancellationToken);
 
         taskContext.AddDebugMessage("File signed successfully");

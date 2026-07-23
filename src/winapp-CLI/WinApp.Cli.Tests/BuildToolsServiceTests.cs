@@ -72,18 +72,30 @@ public class BuildToolsServiceTests : BaseCommandTests
         // ~8000 iterations * ~30 bytes = ~240KB per stream, comfortably past the pipe buffer.
         const string args = "/c for /L %i in (1,1,8000) do @(echo OUT-%i-xxxxxxxxxxxxxxxxxxxxxxxx& echo ERR-%i-xxxxxxxxxxxxxxxxxxxxxxxx 1>&2)";
 
-        var run = _buildToolsService.RunBuildToolAsync(
-            new GenericTool("signtool.exe"),
-            args,
-            TestTaskContext,
-            toolPathOverride: cmd,
-            cancellationToken: TestContext.CancellationToken);
+        // Bound the run with a linked token rather than racing a bare Task.Delay: if draining were
+        // sequential the operation would hang, and CancelAfter drives the production cancellation path,
+        // which kills the child. A detached Task.WhenAny timeout would instead leave the deadlocked
+        // cmd.exe and its pipe reads alive for the rest of the test process.
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+        cts.CancelAfter(TimeSpan.FromSeconds(60));
 
-        // If draining were sequential this would hang; bound it so a regression fails fast.
-        var completed = await Task.WhenAny(run, Task.Delay(TimeSpan.FromSeconds(60), TestContext.CancellationToken));
-        Assert.AreSame(run, completed, "RunBuildToolAsync deadlocked draining both pipes");
+        string stdout;
+        string stderr;
+        try
+        {
+            (stdout, stderr) = await _buildToolsService.RunBuildToolAsync(
+                new GenericTool("signtool.exe"),
+                args,
+                TestTaskContext,
+                toolPathOverride: cmd,
+                cancellationToken: cts.Token);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested && !TestContext.CancellationToken.IsCancellationRequested)
+        {
+            Assert.Fail("RunBuildToolAsync deadlocked draining both pipes; the timeout cancelled and killed the child.");
+            throw; // unreachable — Assert.Fail always throws — but satisfies definite assignment.
+        }
 
-        var (stdout, stderr) = await run;
         StringAssert.Contains(stdout, "OUT-8000-");
         StringAssert.Contains(stderr, "ERR-8000-");
     }

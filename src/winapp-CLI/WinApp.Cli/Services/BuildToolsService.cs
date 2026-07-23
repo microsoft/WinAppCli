@@ -300,7 +300,7 @@ internal partial class BuildToolsService(
     /// <param name="environment">Additional environment variables to set on the child process</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Tuple containing (stdout, stderr)</returns>
-    public async Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, FileInfo? toolPathOverride = null, IReadOnlyDictionary<string, string>? environment = null, CancellationToken cancellationToken = default)
+    public async Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, FileInfo? toolPathOverride = null, IReadOnlyDictionary<string, string>? environment = null, string? workingDirectory = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -318,6 +318,15 @@ internal partial class BuildToolsService(
             RedirectStandardError = true,
             CreateNoWindow = true
         };
+
+        // A caller-supplied working directory is used verbatim; otherwise the child inherits the
+        // caller's current directory. Signing supplies a trusted directory so that when the Trusted
+        // Signing dlib shells out to resolve 'az', a repo-local 'az.cmd' in the caller's working
+        // directory cannot be picked up ahead of a legitimate one on PATH.
+        if (!string.IsNullOrEmpty(workingDirectory))
+        {
+            psi.WorkingDirectory = workingDirectory;
+        }
 
         if (environment != null)
         {

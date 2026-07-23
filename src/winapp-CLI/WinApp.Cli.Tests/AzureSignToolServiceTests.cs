@@ -188,6 +188,11 @@ public class AzureSignToolServiceTests : BaseCommandTests
         // The tenant id is forwarded to the dlib via AZURE_TENANT_ID.
         Assert.IsNotNull(recording.CapturedEnvironment);
         Assert.AreEqual("my-tenant-id", recording.CapturedEnvironment!["AZURE_TENANT_ID"]);
+
+        // signtool runs from a trusted system directory rather than inheriting the caller's working
+        // directory, so the dlib's own 'az' lookup can't pick up a repo-local az.cmd next to the target.
+        Assert.AreEqual(Environment.SystemDirectory, recording.CapturedWorkingDirectory,
+            "SignAsync must anchor signtool's working directory to System32");
     }
 
     [TestMethod]
@@ -321,7 +326,7 @@ internal sealed class FakeSignToolBuildToolsService : IBuildToolsService
     public Task<DirectoryInfo?> EnsureBuildToolsAsync(TaskContext taskContext, bool forceLatest = false, CancellationToken cancellationToken = default)
         => throw new NotImplementedException();
 
-    public Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, FileInfo? toolPathOverride = null, IReadOnlyDictionary<string, string>? environment = null, CancellationToken cancellationToken = default)
+    public Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, FileInfo? toolPathOverride = null, IReadOnlyDictionary<string, string>? environment = null, string? workingDirectory = null, CancellationToken cancellationToken = default)
         => throw new NotImplementedException();
 }
 
@@ -333,6 +338,7 @@ internal sealed class RecordingBuildToolsService : IBuildToolsService
     public string? CapturedArguments { get; private set; }
     public FileInfo? CapturedToolPathOverride { get; private set; }
     public IReadOnlyDictionary<string, string>? CapturedEnvironment { get; private set; }
+    public string? CapturedWorkingDirectory { get; private set; }
 
     public FileInfo? GetBuildToolPath(string toolName) => throw new NotImplementedException();
 
@@ -342,12 +348,13 @@ internal sealed class RecordingBuildToolsService : IBuildToolsService
     public Task<DirectoryInfo?> EnsureBuildToolsAsync(TaskContext taskContext, bool forceLatest = false, CancellationToken cancellationToken = default)
         => throw new NotImplementedException();
 
-    public Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, FileInfo? toolPathOverride = null, IReadOnlyDictionary<string, string>? environment = null, CancellationToken cancellationToken = default)
+    public Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, FileInfo? toolPathOverride = null, IReadOnlyDictionary<string, string>? environment = null, string? workingDirectory = null, CancellationToken cancellationToken = default)
     {
         CapturedTool = tool;
         CapturedArguments = arguments;
         CapturedToolPathOverride = toolPathOverride;
         CapturedEnvironment = environment;
+        CapturedWorkingDirectory = workingDirectory;
         return Task.FromResult((string.Empty, string.Empty));
     }
 }
