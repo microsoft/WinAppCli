@@ -29,6 +29,14 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
 
     public async Task<string> GetAccessTokenAsync(string scope, CancellationToken cancellationToken = default)
     {
+var presetTenantId = TenantId;
+        if (!string.IsNullOrEmpty(presetTenantId) && !IsValidTenantId(presetTenantId))
+        {
+            throw new InvalidOperationException(
+                $"Invalid AZURE_TENANT_ID value '{presetTenantId}'. " +
+                "It must be a tenant GUID or a domain such as contoso.onmicrosoft.com.");
+        }
+
         var credential = CreateCredential();
 
         try
