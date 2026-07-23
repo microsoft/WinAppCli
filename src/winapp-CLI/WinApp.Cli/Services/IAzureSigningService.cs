@@ -21,6 +21,13 @@ internal interface IAzureSigningService
     Task<IReadOnlyList<SigningAccount>> ListSigningAccountsAsync(string accessToken, string subscriptionId, string? resourceGroup = null, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Gets a single signing account by name via a direct ARM GET, avoiding the broader list
+    /// permission that <see cref="ListSigningAccountsAsync"/> requires. Returns null if the
+    /// account is not found (404).
+    /// </summary>
+    Task<SigningAccount?> GetSigningAccountAsync(string accessToken, string subscriptionId, string resourceGroup, string accountName, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Lists certificate profiles under a signing account.
     /// </summary>
     Task<IReadOnlyList<CertificateProfile>> ListCertificateProfilesAsync(string accessToken, string subscriptionId, string resourceGroup, string accountName, CancellationToken cancellationToken = default);

@@ -250,5 +250,17 @@ public class AzureSigningServiceTests
 
             return Task.FromResult(_responses.Dequeue());
         }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                while (_responses.Count > 0)
+                {
+                    _responses.Dequeue().Dispose();
+                }
+            }
+            base.Dispose(disposing);
+        }
     }
 }

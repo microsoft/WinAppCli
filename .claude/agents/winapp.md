@@ -182,7 +182,7 @@ Want to inspect or interact with a running app's UI?
 - `--profile <name>` (`-p`) — certificate profile name (requires `--account`)
 - `--metadata-file <path>` (`-m`) — reuse an existing `metadata.json`, skipping all prompting
 **Auth:** Uses `DefaultAzureCredential`. For CI/CD set `AZURE_TENANT_ID`/`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET` (or OIDC/managed identity); interactively falls back to `az login`.
-**Requires:** An Azure Trusted Signing account + certificate profile, and the Trusted Signing Certificate Profile Signer role.
+**Requires:** An Azure Code Signing account + certificate profile, and the Code Signing Certificate Profile Signer role.
 
 ### `winapp manifest generate [directory]`
 **Purpose:** Create an `appxmanifest.xml` without full project setup.

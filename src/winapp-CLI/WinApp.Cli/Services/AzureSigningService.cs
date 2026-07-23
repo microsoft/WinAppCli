@@ -114,6 +114,46 @@ internal class AzureSigningService : IAzureSigningService
         return profiles;
     }
 
+    public async Task<SigningAccount?> GetSigningAccountAsync(string accessToken, string subscriptionId, string resourceGroup, string accountName, CancellationToken cancellationToken = default)
+    {
+        var url = $"{ArmBaseUrl}/subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.CodeSigning/codeSigningAccounts/{accountName}?api-version={TrustedSigningApiVersion}";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+        var response = await http.SendAsync(request, cancellationToken);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorMessage = TryParseAzureError(content) ?? $"HTTP {(int)response.StatusCode}: {response.ReasonPhrase}";
+            throw new InvalidOperationException($"Azure API request failed: {errorMessage}");
+        }
+
+        using var doc = JsonDocument.Parse(content);
+        var item = doc.RootElement;
+
+        var name = item.GetProperty("name").GetString() ?? "";
+        var location = item.TryGetProperty("location", out var locProp) ? locProp.GetString() ?? "" : "";
+        var id = item.GetProperty("id").GetString() ?? "";
+        var rg = ParseResourceGroupFromId(id);
+
+        string? accountUri = null;
+        if (item.TryGetProperty("properties", out var props) &&
+            props.TryGetProperty("accountUri", out var uriProp))
+        {
+            accountUri = uriProp.GetString();
+        }
+
+        return new SigningAccount(name, rg, location, accountUri);
+    }
+
     /// <summary>
     /// Fetches an ARM list endpoint and follows the <c>nextLink</c> continuation until it is
     /// absent, so results that span multiple pages (many subscriptions/accounts/profiles) are

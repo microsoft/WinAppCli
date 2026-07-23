@@ -106,7 +106,7 @@ public class AzSignCommandTests : BaseCommandTests
 
         Assert.AreEqual(1, result);
         var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
-        StringAssert.Contains(allOutput, "No Trusted Signing accounts found");
+        StringAssert.Contains(allOutput, "No signing accounts found");
     }
 
     [TestMethod]
@@ -196,7 +196,7 @@ public class AzSignCommandTests : BaseCommandTests
         Assert.AreEqual(1, _fakeSignToolService.CallCount, "Should reach the signing stage");
         var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
         Assert.IsFalse(allOutput.Contains("No Azure subscriptions found"), "Should not fail at subscription selection");
-        Assert.IsFalse(allOutput.Contains("No Trusted Signing accounts found"), "Should not fail at account selection");
+        Assert.IsFalse(allOutput.Contains("No signing accounts found"), "Should not fail at account selection");
         Assert.IsFalse(allOutput.Contains("No certificate profiles found"), "Should not fail at profile selection");
     }
 
@@ -497,6 +497,13 @@ internal class FakeAzureSigningService : IAzureSigningService
     public Task<IReadOnlyList<SigningAccount>> ListSigningAccountsAsync(string accessToken, string subscriptionId, string? resourceGroup = null, CancellationToken cancellationToken = default)
     {
         return Task.FromResult(SigningAccounts);
+    }
+
+    public Task<SigningAccount?> GetSigningAccountAsync(string accessToken, string subscriptionId, string resourceGroup, string accountName, CancellationToken cancellationToken = default)
+    {
+        var match = SigningAccounts.FirstOrDefault(a =>
+            string.Equals(a.Name, accountName, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(match);
     }
 
     public Task<IReadOnlyList<CertificateProfile>> ListCertificateProfilesAsync(string accessToken, string subscriptionId, string resourceGroup, string accountName, CancellationToken cancellationToken = default)

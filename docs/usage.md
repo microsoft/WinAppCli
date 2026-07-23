@@ -762,7 +762,7 @@ winapp az-sign <file-path> [options]
 
 **Prerequisites:**
 
-An Azure Trusted Signing account and a certificate profile (created in the Azure portal after identity validation), plus the **Trusted Signing Certificate Profile Signer** role assigned to your identity.
+An Azure Code Signing account and a certificate profile (created in the Azure portal after identity validation), plus the **Code Signing Certificate Profile Signer** role assigned to your identity.
 
 **Examples:**
 

@@ -240,18 +240,19 @@ internal class AzSignCommand : Command, IShortDescription
             {
                 resolvedResourceGroup = resourceGroup!;
                 resolvedAccountName = accountName;
-                // We need the account URI — fetch it
-                var accounts = await azureSigningService.ListSigningAccountsAsync(
-                    accessToken, subscriptionId, resolvedResourceGroup, cancellationToken);
-                var matchedAccount = accounts.FirstOrDefault(a =>
-                    string.Equals(a.Name, accountName, StringComparison.OrdinalIgnoreCase));
-                accountUri = matchedAccount?.AccountUri;
+                // Use a direct GET rather than listing all accounts in the resource group.
+                // A CI principal scoped to the account/profile may not have the broader list
+                // permission on the resource group.
+                var matchedAccount = await azureSigningService.GetSigningAccountAsync(
+                    accessToken, subscriptionId, resolvedResourceGroup, accountName, cancellationToken);
 
                 if (matchedAccount == null)
                 {
                     throw new InvalidOperationException(
                         $"Signing account '{accountName}' not found in resource group '{resolvedResourceGroup}'.");
                 }
+
+                accountUri = matchedAccount.AccountUri;
             }
             else
             {
@@ -340,8 +341,8 @@ internal class AzSignCommand : Command, IShortDescription
                     ? "subscription"
                     : $"resource group '{resourceGroup}'";
                 throw new InvalidOperationException(
-                    $"No Trusted Signing accounts found in the {context}.\n" +
-                    "Create one in the Azure portal or via 'az trustedsigning create'.");
+                    $"No signing accounts found in the {context}.\n" +
+                    "Create one in the Azure portal (Azure Code Signing > Create).");
             }
 
             if (accounts.Count == 1)
