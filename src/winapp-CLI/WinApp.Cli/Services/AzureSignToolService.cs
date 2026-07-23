@@ -151,7 +151,7 @@ internal class AzureSignToolService(
         foreach (var versionDir in versionDirs)
         {
             // The dlib is at: bin/x64/Azure.CodeSigning.Dlib.dll (x64 works on ARM64 via emulation)
-            var dlibFile = new FileInfo(Path.Combine(versionDir.FullName, "bin", "x64", "Azure.CodeSigning.Dlib.dll"));
+            var dlibFile = new FileInfo(Path.Join(versionDir.FullName, "bin", "x64", "Azure.CodeSigning.Dlib.dll"));
             if (dlibFile.Exists)
             {
                 return dlibFile;

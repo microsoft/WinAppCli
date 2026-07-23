@@ -36,7 +36,7 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_AccountWithoutResourceGroup_ReturnsError()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
         var result = await ParseAndInvokeWithCaptureAsync(_command, ["--account", "myaccount", filePath]);
@@ -49,7 +49,7 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_ProfileWithoutAccount_ReturnsError()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
         var result = await ParseAndInvokeWithCaptureAsync(_command, ["--profile", "myprofile", filePath]);
@@ -62,7 +62,7 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_AuthenticationFails_ReturnsError()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
         _fakeAuthService.ShouldFail = true;
@@ -78,7 +78,7 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_NoSubscriptionsFound_ReturnsError()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
         _fakeSigningService.Subscriptions = [];
@@ -93,7 +93,7 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_NoSigningAccountsFound_ReturnsError()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
         _fakeSigningService.Subscriptions =
@@ -112,7 +112,7 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_NoProfilesFound_ReturnsError()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
         _fakeSigningService.Subscriptions =
@@ -135,10 +135,10 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_MetadataFileNotFound_ReturnsError()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
-        var nonExistentMetadata = Path.Combine(_tempDirectory.FullName, "nonexistent.json");
+        var nonExistentMetadata = Path.Join(_tempDirectory.FullName, "nonexistent.json");
 
         var result = await ParseAndInvokeWithCaptureAsync(_command, ["--metadata-file", nonExistentMetadata, filePath]);
 
@@ -150,7 +150,7 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_SpecifiedAccountNotFound_ReturnsError()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
         _fakeSigningService.Subscriptions =
@@ -170,7 +170,7 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_SingleSubscription_AutoSelects()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
         _fakeSigningService.Subscriptions =
@@ -203,7 +203,7 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_MultipleSubscriptions_WithFlag_SkipsPrompt()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
         _fakeSigningService.Subscriptions =
@@ -234,7 +234,7 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_AllFlagsProvided_SkipsAllPrompting()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
         _fakeSigningService.Subscriptions =
@@ -265,7 +265,7 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_AllFlagsProvided_GeneratesMetadataAndCleansUp()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
         _fakeSigningService.Subscriptions = [new AzureSubscription("sub-123", "Test Subscription")];
@@ -291,10 +291,10 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_WithMetadataFile_UsesFileDirectly_DoesNotDelete()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
-        var metadataPath = Path.Combine(_tempDirectory.FullName, "metadata.json");
+        var metadataPath = Path.Join(_tempDirectory.FullName, "metadata.json");
         await File.WriteAllTextAsync(metadataPath, "{\"Endpoint\":\"https://eus.codesigning.azure.net\"}");
 
         var result = await ParseAndInvokeWithCaptureAsync(_command, ["--metadata-file", metadataPath, filePath]);
@@ -309,7 +309,7 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_SignToolFails_ReturnsError()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
         _fakeSigningService.Subscriptions = [new AzureSubscription("sub-123", "Test Subscription")];
@@ -333,7 +333,7 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_NonInteractive_MultipleSubscriptions_ReturnsActionableError()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
         _fakeAuthService.IsInteractive = false;
@@ -353,7 +353,7 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_NonInteractive_MultipleAccounts_ReturnsActionableError()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
         _fakeAuthService.IsInteractive = false;
@@ -374,7 +374,7 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_NonInteractive_MultipleProfiles_ReturnsActionableError()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
         _fakeAuthService.IsInteractive = false;
@@ -399,7 +399,7 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_WhitespaceOnlyProfile_IsTreatedAsNotProvided()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
         _fakeSigningService.Subscriptions = [new AzureSubscription("sub-123", "Test Subscription")];
@@ -422,10 +422,10 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_MetadataFileCombinedWithResourceFlags_ReturnsError()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
-        var metadataPath = Path.Combine(_tempDirectory.FullName, "metadata.json");
+        var metadataPath = Path.Join(_tempDirectory.FullName, "metadata.json");
         await File.WriteAllTextAsync(metadataPath, "{\"Endpoint\":\"https://eus.codesigning.azure.net\"}");
 
         var result = await ParseAndInvokeWithCaptureAsync(_command,
@@ -440,10 +440,10 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_MetadataFileWithUntrustedEndpoint_ReturnsError()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
-        var metadataPath = Path.Combine(_tempDirectory.FullName, "metadata.json");
+        var metadataPath = Path.Join(_tempDirectory.FullName, "metadata.json");
         await File.WriteAllTextAsync(metadataPath, "{\"Endpoint\":\"https://evil.example.com\"}");
 
         var result = await ParseAndInvokeWithCaptureAsync(_command, ["--metadata-file", metadataPath, filePath]);
@@ -457,10 +457,10 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_MetadataFileMissingEndpoint_ReturnsError()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
-        var metadataPath = Path.Combine(_tempDirectory.FullName, "metadata.json");
+        var metadataPath = Path.Join(_tempDirectory.FullName, "metadata.json");
         await File.WriteAllTextAsync(metadataPath, "{\"CertificateProfileName\":\"myprofile\"}");
 
         var result = await ParseAndInvokeWithCaptureAsync(_command, ["--metadata-file", metadataPath, filePath]);
@@ -474,7 +474,7 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_ExplicitProfileNotFound_ReturnsError()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
         _fakeSigningService.Subscriptions = [new AzureSubscription("sub-123", "Test Subscription")];
@@ -493,7 +493,7 @@ public class AzSignCommandTests : BaseCommandTests
     [TestMethod]
     public async Task AzSign_ExplicitProfileNotActive_ReturnsError()
     {
-        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
         await File.WriteAllTextAsync(filePath, "MZ");
 
         _fakeSigningService.Subscriptions = [new AzureSubscription("sub-123", "Test Subscription")];
