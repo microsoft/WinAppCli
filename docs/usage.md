@@ -754,7 +754,7 @@ winapp az-sign <file-path> [options]
 - `--resource-group`, `-r` - Resource group to narrow down signing accounts
 - `--account` - Signing account name. Must be used with `--resource-group`
 - `--profile`, `-p` - Certificate profile name. Must be used with `--account`
-- `--metadata-file`, `-m` - Path to an existing `metadata.json`. Skips all prompting and signs directly
+- `--metadata-file`, `-m` - Path to an existing `metadata.json`. Skips resource discovery and account/profile selection prompts and signs directly. Authentication may still be interactive (tenant prompt or `az login`) if no non-interactive credential is available
 
 **Authentication:**
 
@@ -780,7 +780,7 @@ winapp az-sign ./app.msix
 # Fully specified — no prompting (ideal for CI/CD)
 winapp az-sign ./app.msix --subscription <sub-id> --resource-group <rg> --account <account> --profile <profile>
 
-# Reuse an existing metadata.json (skips discovery and prompting)
+# Reuse an existing metadata.json (skips resource discovery and selection; authentication may still prompt)
 winapp az-sign ./app.msix --metadata-file ./metadata.json
 ```
 

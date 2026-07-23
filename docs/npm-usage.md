@@ -73,7 +73,7 @@ function azSign(options: AzSignOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `filePath` | `string` | Yes | Path to the file to sign (exe, msix, or msixbundle) |
 | `account` | `string \| undefined` | No | Signing account name. Must be used with --resource-group |
-| `metadataFile` | `string \| undefined` | No | Path to an existing metadata.json file. Skips all prompting and uses this file directly for signing. |
+| `metadataFile` | `string \| undefined` | No | Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. Authentication may still be interactive (tenant prompt or 'az login') if no non-interactive credential is available. |
 | `profile` | `string \| undefined` | No | Certificate profile name. Must be used with --account |
 | `resourceGroup` | `string \| undefined` | No | Resource group to narrow down signing accounts |
 | `subscription` | `string \| undefined` | No | Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted. |
@@ -1276,7 +1276,7 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `filePath` | `string` | Yes | Path to the file to sign (exe, msix, or msixbundle) |
 | `account` | `string \| undefined` | No | Signing account name. Must be used with --resource-group |
-| `metadataFile` | `string \| undefined` | No | Path to an existing metadata.json file. Skips all prompting and uses this file directly for signing. |
+| `metadataFile` | `string \| undefined` | No | Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. Authentication may still be interactive (tenant prompt or 'az login') if no non-interactive credential is available. |
 | `profile` | `string \| undefined` | No | Certificate profile name. Must be used with --account |
 | `resourceGroup` | `string \| undefined` | No | Resource group to narrow down signing accounts |
 | `subscription` | `string \| undefined` | No | Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted. |

@@ -75,7 +75,7 @@ export interface AzSignOptions extends CommonOptions {
   filePath: string;
   /** Signing account name. Must be used with --resource-group */
   account?: string;
-  /** Path to an existing metadata.json file. Skips all prompting and uses this file directly for signing. */
+  /** Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. Authentication may still be interactive (tenant prompt or 'az login') if no non-interactive credential is available. */
   metadataFile?: string;
   /** Certificate profile name. Must be used with --account */
   profile?: string;

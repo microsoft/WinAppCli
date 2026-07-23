@@ -180,7 +180,7 @@ Want to inspect or interact with a running app's UI?
 - `--resource-group <rg>` (`-r`) — resource group to narrow down signing accounts
 - `--account <name>` — signing account name (requires `--resource-group`)
 - `--profile <name>` (`-p`) — certificate profile name (requires `--account`)
-- `--metadata-file <path>` (`-m`) — reuse an existing `metadata.json`, skipping all prompting
+- `--metadata-file <path>` (`-m`) — reuse an existing `metadata.json`, skipping resource discovery and identity selection (authentication may still prompt for a tenant or `az login`)
 **Auth:** Uses `DefaultAzureCredential`. For CI/CD set `AZURE_TENANT_ID`/`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET` (or OIDC/managed identity); interactively falls back to `az login`.
 **Requires:** An Azure Code Signing account + certificate profile, and the Code Signing Certificate Profile Signer role. Also needs two machine-wide x64 runtimes that winapp does not auto-install (it downloads the raw NuGet package, not the client-tools installer): the x64 .NET 8+ runtime (the signing library is a managed assembly loaded by `signtool.exe`) and the x64 Visual C++ Redistributable. Plus SignTool 10.0.22621.755+. A dlib load failure (e.g. `0xc000007b`) usually means a missing runtime — most often the VC++ Redistributable.
 

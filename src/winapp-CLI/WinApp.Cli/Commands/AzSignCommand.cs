@@ -51,7 +51,7 @@ internal class AzSignCommand : Command, IShortDescription
 
         MetadataFileOption = new Option<FileInfo?>("--metadata-file", "-m")
         {
-            Description = "Path to an existing metadata.json file. Skips all prompting and uses this file directly for signing."
+            Description = "Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. Authentication may still be interactive (tenant prompt or 'az login') if no non-interactive credential is available."
         };
     }
 

@@ -87,7 +87,7 @@ winapp az-sign ./app.msix
 # Fully specified — no prompting (ideal for CI/CD)
 winapp az-sign ./app.msix --subscription <sub-id> --resource-group <rg> --account <account> --profile <profile>
 
-# Reuse an existing metadata.json (skips all discovery/prompting)
+# Reuse an existing metadata.json (skips resource discovery and identity selection; authentication may still be interactive)
 winapp az-sign ./app.msix --metadata-file ./metadata.json
 ```
 
