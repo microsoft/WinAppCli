@@ -1,6 +1,6 @@
 {
   "name": "winapp",
-  "version": "0.4.1",
+  "version": "0.5.1",
   "schemaVersion": "1.0",
   "description": "CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows",
   "hidden": false,
@@ -1502,7 +1502,7 @@
           "recursive": false
         },
         "--debug-output": {
-          "description": "Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json.",
+          "description": "Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. For WinUI apps, a crash also triggers a stowed-exception triage pass; the first run downloads debugger components (cached under the winapp global directory) and can be pointed at an existing debugger install via the WINAPP_DBGTOOLS_DIR environment variable. Cannot be combined with --no-launch or --json.",
           "hidden": false,
           "valueType": "System.Boolean",
           "hasDefaultValue": true,
@@ -1609,7 +1609,7 @@
           "recursive": false
         },
         "--symbols": {
-          "description": "Download symbols from Microsoft Symbol Server for richer native crash analysis. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache.",
+          "description": "Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache.",
           "hidden": false,
           "valueType": "System.Boolean",
           "hasDefaultValue": true,
@@ -1922,11 +1922,11 @@
           }
         },
         "drag": {
-          "description": "Press the mouse button at one point, move to another, then release. 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or app-relative x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.",
+          "description": "Press the mouse button at one point, move to another, then release. 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or screen x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.",
           "hidden": false,
           "arguments": {
             "from": {
-              "description": "Start point — an element selector (drags from its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200).",
+              "description": "Start point — an element selector (drags from its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200).",
               "order": 0,
               "hidden": false,
               "valueType": "System.String",
@@ -1937,7 +1937,7 @@
               }
             },
             "to": {
-              "description": "End point — an element selector (drops at its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400).",
+              "description": "End point — an element selector (drops at its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400).",
               "order": 1,
               "hidden": false,
               "valueType": "System.String",
@@ -2888,6 +2888,350 @@
             }
           }
         },
+        "pen": {
+          "description": "Inject synthetic pen/stylus input using the Windows synthetic-pointer API. Taps or draws ink strokes with configurable pressure, tilt and eraser mode, at an element's center or explicit screen x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable (Windows 10 1809+).",
+          "hidden": false,
+          "arguments": {
+            "selector": {
+              "description": "Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId",
+              "order": 0,
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          },
+          "options": {
+            "--app": {
+              "description": "Target app (process name, window title, or PID). Lists windows if ambiguous.",
+              "hidden": false,
+              "aliases": [
+                "-a"
+              ],
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--at": {
+              "description": "Pen contact point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. Ignored when --path is given.",
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--duration-ms": {
+              "description": "Total glide time in milliseconds distributed across the stroke path segments (default: ~10 ms per segment).",
+              "hidden": false,
+              "valueType": "System.Int32",
+              "hasDefaultValue": true,
+              "defaultValue": 0,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--eraser": {
+              "description": "Use the eraser end of the pen instead of the tip.",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--json": {
+              "description": "Format output as JSON",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--path": {
+              "description": "Ink stroke path as a whitespace-separated list of x,y pairs, e.g. \"10,10 20,30 40,50\".",
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--pressure": {
+              "description": "Pen pressure from 0.0 to 1.0 (default: 0.5).",
+              "hidden": false,
+              "valueType": "System.Single",
+              "hasDefaultValue": true,
+              "defaultValue": 0.5,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--quiet": {
+              "description": "Suppress progress messages",
+              "hidden": false,
+              "aliases": [
+                "-q"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--tilt-x": {
+              "description": "Pen tilt along the x-axis in degrees (-90 to 90, default: 0).",
+              "hidden": false,
+              "valueType": "System.Int32",
+              "hasDefaultValue": true,
+              "defaultValue": 0,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--tilt-y": {
+              "description": "Pen tilt along the y-axis in degrees (-90 to 90, default: 0).",
+              "hidden": false,
+              "valueType": "System.Int32",
+              "hasDefaultValue": true,
+              "defaultValue": 0,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--verbose": {
+              "description": "Enable verbose output",
+              "hidden": false,
+              "aliases": [
+                "-v"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--window": {
+              "description": "Target window by HWND (stable handle from list output). Takes precedence over --app.",
+              "hidden": false,
+              "aliases": [
+                "-w"
+              ],
+              "valueType": "System.Nullable<System.Int64>",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            }
+          }
+        },
+        "record": {
+          "description": "Record the target window (or an element's region) to an H.264 MP4 video. Captures frames via Windows Graphics Capture and encodes with Media Foundation. By default records until stopped (Ctrl+C, or a newline/EOF on stdin for programmatic callers). Use --duration-sec N for a timed run. A valid MP4 is always finalized on graceful stop. Use --capture-screen to include overlays/popups.",
+          "hidden": false,
+          "arguments": {
+            "selector": {
+              "description": "Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId",
+              "order": 0,
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          },
+          "options": {
+            "--app": {
+              "description": "Target app (process name, window title, or PID). Lists windows if ambiguous.",
+              "hidden": false,
+              "aliases": [
+                "-a"
+              ],
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--capture-screen": {
+              "description": "Capture from screen DC via BitBlt (includes popups/overlays not owned by the target).",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--duration-sec": {
+              "description": "Recording duration in seconds. Default 0 records until stopped — Ctrl+C, or (for programmatic callers) a newline or EOF on stdin. A valid MP4 is always finalized on graceful stop.",
+              "hidden": false,
+              "valueType": "System.Int32",
+              "hasDefaultValue": true,
+              "defaultValue": 0,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--fps": {
+              "description": "Frames per second to capture",
+              "hidden": false,
+              "valueType": "System.Int32",
+              "hasDefaultValue": true,
+              "defaultValue": 15,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--json": {
+              "description": "Format output as JSON",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--max-edge": {
+              "description": "Downscale so the longest edge is at most this many pixels (0 = no downscale)",
+              "hidden": false,
+              "valueType": "System.Int32",
+              "hasDefaultValue": true,
+              "defaultValue": 0,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--output": {
+              "description": "Save output to this file path.",
+              "hidden": false,
+              "aliases": [
+                "-o"
+              ],
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--quiet": {
+              "description": "Suppress progress messages",
+              "hidden": false,
+              "aliases": [
+                "-q"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--verbose": {
+              "description": "Enable verbose output",
+              "hidden": false,
+              "aliases": [
+                "-v"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--window": {
+              "description": "Target window by HWND (stable handle from list output). Takes precedence over --app.",
+              "hidden": false,
+              "aliases": [
+                "-w"
+              ],
+              "valueType": "System.Nullable<System.Int64>",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            }
+          }
+        },
         "screenshot": {
           "description": "Capture the target window or element as a PNG image. When multiple windows exist (e.g., dialogs), captures each to a separate file. With --json, returns file path and dimensions. Use --capture-screen for popup overlays.",
           "hidden": false,
@@ -2921,7 +3265,7 @@
               "recursive": false
             },
             "--capture-screen": {
-              "description": "Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus.",
+              "description": "Capture from screen DC via BitBlt (includes popups/overlays not owned by the target).",
               "hidden": false,
               "valueType": "System.Boolean",
               "hasDefaultValue": true,
@@ -2960,7 +3304,7 @@
               "recursive": false
             },
             "--output": {
-              "description": "Save output to file path (e.g., screenshot)",
+              "description": "Save output to this file path.",
               "hidden": false,
               "aliases": [
                 "-o"
@@ -3371,6 +3715,19 @@
             }
           },
           "options": {
+            "--allow-system-keys": {
+              "description": "Allow synthesizing system-/shell-reserved combos (win+<key>, alt+f4, alt+tab, ctrl+esc, …) via --via send-input, which are refused by default because they act on the OS/shell beyond the target app. Opt in to drive global hotkeys (e.g. PowerToys' win+shift+v, win+r). No effect on --via post-message (already window-scoped; a warning is emitted if set without send-input). Note: win+l and ctrl+alt+del stay blocked even with this flag — win+l locks the workstation (LockWorkStation() via the shell hook), which is unrecoverable from automation, and ctrl+alt+del is a Secure Attention Sequence (SAS) that Windows drops from injected input regardless of this flag, so it can never take effect.",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
             "--app": {
               "description": "Target app (process name, window title, or PID). Lists windows if ambiguous.",
               "hidden": false,
@@ -3457,7 +3814,7 @@
               "recursive": false
             },
             "--via": {
-              "description": "Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character KeyDown + TextChanged). Named keys and combos raise KeyDown on both, but keyboard accelerators/shortcuts (KeyboardAccelerator, e.g. ctrl+t) only fire via send-input.",
+              "description": "Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character KeyDown + TextChanged). Named keys and combos raise KeyDown on both, but keyboard accelerators/shortcuts (KeyboardAccelerator, e.g. ctrl+t) only fire via send-input. post-message targets the focused child control and works for classic Win32/WinForms controls, but WinUI 3 / UWP / XAML controls are windowless and ignore posted messages — use send-input for those (a warning is emitted when the target looks like a XAML app).",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": true,
@@ -3487,7 +3844,7 @@
           }
         },
         "set-value": {
-          "description": "Set a value on an element using UIA ValuePattern. Works for TextBox, ComboBox, Slider, and other editable controls. Usage: winapp ui set-value <selector> <value> -a <app>",
+          "description": "Set a value on an element programmatically. Works for TextBox, ComboBox, Slider, and other editable controls via UIA ValuePattern/RangeValuePattern, with a LegacyIAccessible (put_accValue) fallback for TextPattern-only edit controls — no app foreground required. Some rich text controls (e.g. WinUI 3 RichEditBox and WPF RichTextBox) don't support setting their value programmatically — use the 'send-keys' command with '--via send-input' to type into them instead. Usage: winapp ui set-value <selector> <value> -a <app>",
           "hidden": false,
           "arguments": {
             "selector": {
@@ -3634,6 +3991,205 @@
               "defaultValue": false,
               "arity": {
                 "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--verbose": {
+              "description": "Enable verbose output",
+              "hidden": false,
+              "aliases": [
+                "-v"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--window": {
+              "description": "Target window by HWND (stable handle from list output). Takes precedence over --app.",
+              "hidden": false,
+              "aliases": [
+                "-w"
+              ],
+              "valueType": "System.Nullable<System.Int64>",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            }
+          }
+        },
+        "touch": {
+          "description": "Inject synthetic touch input using the Windows touch-injection API. Supports tap, double-tap, long-press, swipe, pinch and stretch gestures at an element's center or explicit screen x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable.",
+          "hidden": false,
+          "arguments": {
+            "selector": {
+              "description": "Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId",
+              "order": 0,
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          },
+          "options": {
+            "--app": {
+              "description": "Target app (process name, window title, or PID). Lists windows if ambiguous.",
+              "hidden": false,
+              "aliases": [
+                "-a"
+              ],
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--at": {
+              "description": "Explicit start point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center.",
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--direction": {
+              "description": "Swipe direction: right (default), left, up, or down. Combined with --distance to compute the end point when --to-point is not given.",
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": true,
+              "defaultValue": "right",
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--distance": {
+              "description": "Distance in pixels for pinch/stretch (finger spread) or swipe.",
+              "hidden": false,
+              "valueType": "System.Int32",
+              "hasDefaultValue": true,
+              "defaultValue": 0,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--duration-ms": {
+              "description": "Glide time in milliseconds for moving gestures (swipe/pinch/stretch).",
+              "hidden": false,
+              "valueType": "System.Int32",
+              "hasDefaultValue": true,
+              "defaultValue": 300,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--fingers": {
+              "description": "Number of touch contacts (default: 1). Pinch/stretch always use 2.",
+              "hidden": false,
+              "valueType": "System.Int32",
+              "hasDefaultValue": true,
+              "defaultValue": 1,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--gesture": {
+              "description": "Gesture to perform: tap, double-tap, long-press, swipe, pinch, stretch (default: tap).",
+              "hidden": false,
+              "aliases": [
+                "-g"
+              ],
+              "valueType": "System.String",
+              "hasDefaultValue": true,
+              "defaultValue": "tap",
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--hold-ms": {
+              "description": "Milliseconds to hold contacts down before lifting (long-press hold time). Defaults to 500 ms when --gesture long-press is used and this option is not set.",
+              "hidden": false,
+              "valueType": "System.Int32",
+              "hasDefaultValue": true,
+              "defaultValue": 0,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--json": {
+              "description": "Format output as JSON",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--quiet": {
+              "description": "Suppress progress messages",
+              "hidden": false,
+              "aliases": [
+                "-q"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--to-point": {
+              "description": "End point x,y for a swipe (screen coordinates). Takes precedence over --direction.",
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
                 "maximum": 1
               },
               "required": false,

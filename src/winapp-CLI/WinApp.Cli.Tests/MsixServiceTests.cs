@@ -1775,6 +1775,57 @@ public class MsixServiceTests
     }
 
     [TestMethod]
+    public void IsExistingRegistrationUpToDate_NewManifestMissing_ReturnsFalse()
+    {
+        // We have a previous snapshot but the new manifest was never written to disk — the
+        // cheap existence check must short-circuit to false before querying packages.
+        var outputDir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "AppX"));
+        outputDir.Create();
+        var missingManifest = new FileInfo(Path.Combine(outputDir.FullName, "AppxManifest.xml"));
+        var previousBytes = Encoding.UTF8.GetBytes("<Package />");
+
+        var fake = new FakePackageRegistrationService();
+        var svc = CreateMsixServiceForUnregister(fake, _tempDir.FullName);
+
+        var result = svc.IsExistingRegistrationUpToDate(
+            "MyApp", previousBytes, missingManifest, outputDir, CreateTestTaskContext());
+
+        Assert.IsFalse(result);
+        Assert.AreEqual(0, fake.FindDevPackagesCalls.Count, "Should short-circuit before querying packages when the new manifest is missing");
+    }
+
+    [TestMethod]
+    public void IsExistingRegistrationUpToDate_ManifestSizeDiffers_ReturnsFalse()
+    {
+        // Different-length previous vs new manifest — the size shortcut returns false before
+        // enumerating packages.
+        var fixture = CreateSkipRegistrationFixture(
+            manifestBody:         "<Package longer-than-before/>",
+            previousManifestBody: "<Package/>");
+
+        var result = fixture.Svc.IsExistingRegistrationUpToDate(
+            "MyApp", fixture.PreviousBytes, fixture.NewManifest, fixture.OutputDir, CreateTestTaskContext());
+
+        Assert.IsFalse(result, "A size mismatch must trigger re-registration");
+        Assert.AreEqual(0, fixture.Fake.FindDevPackagesCalls.Count, "Size mismatch should short-circuit before querying packages");
+    }
+
+    [TestMethod]
+    public void IsExistingRegistrationUpToDate_InstallLocationPathInvalid_ReturnsFalse()
+    {
+        // A dev package whose InstallLocation can't be normalized (embedded NUL) must be treated
+        // as unknown via the path-normalization catch, not crash.
+        var fixture = CreateSkipRegistrationFixture(
+            manifestBody: "<Package />",
+            installLocationOverride: "C:\\bad\0location");
+
+        var result = fixture.Svc.IsExistingRegistrationUpToDate(
+            "MyApp", fixture.PreviousBytes, fixture.NewManifest, fixture.OutputDir, CreateTestTaskContext());
+
+        Assert.IsFalse(result, "An un-normalizable install location must fall back to re-registration");
+    }
+
+    [TestMethod]
     public void IsExistingRegistrationUpToDate_FindDevPackagesThrows_ReturnsFalse()
     {
         // L4 (PR #542 review): future code changes flipping the fallback to "true" or removing
@@ -1817,6 +1868,23 @@ public class MsixServiceTests
     {
         var dir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "EmptyAppX"));
         dir.Create();
+
+        var bytes = MsixService.TryReadExistingLayoutManifestBytes(dir);
+
+        Assert.IsNull(bytes);
+    }
+
+    [TestMethod]
+    public void TryReadExistingLayoutManifestBytes_ReadFailure_ReturnsNull()
+    {
+        var dir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "LockedAppX"));
+        dir.Create();
+        var manifestPath = Path.Combine(dir.FullName, "AppxManifest.xml");
+        File.WriteAllText(manifestPath, "<Package />");
+
+        // Hold the manifest open with no sharing so the read throws — the helper must swallow it
+        // and return null rather than propagating an I/O error.
+        using var _ = new FileStream(manifestPath, FileMode.Open, FileAccess.Read, FileShare.None);
 
         var bytes = MsixService.TryReadExistingLayoutManifestBytes(dir);
 

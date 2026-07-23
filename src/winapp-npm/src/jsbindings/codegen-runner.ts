@@ -485,9 +485,48 @@ export async function getCodegenRuntimeDependency(workspaceDir: string): Promise
   return parseRuntimeDependencySpec(stdout);
 }
 
+export function getCodegenPackageVersion(workspaceDir: string): string | null {
+  const { packageDir } = resolveCodegenInvocation(workspaceDir);
+  const packageJsonPath = path.join(packageDir, 'package.json');
+  const parsed = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as { version?: unknown };
+  return typeof parsed.version === 'string' ? parsed.version : null;
+}
+
+export function supportsPackageImports(version: string | null): boolean {
+  if (!version) {
+    return false;
+  }
+
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:-([^+]+))?(?:\+.*)?$/.exec(version);
+  if (!match) {
+    return false;
+  }
+
+  const current = match.slice(1, 4).map(Number);
+  const minimum = [0, 1, 0];
+  for (let i = 0; i < minimum.length; i++) {
+    if (current[i] !== minimum[i]) {
+      return current[i] > minimum[i];
+    }
+  }
+
+  const prerelease = match[4];
+  if (!prerelease) {
+    return true;
+  }
+
+  // Only `preview.N` is recognized today because that's the channel dynwinrt-codegen
+  // ships on. Dual CJS/ESM output — required by the `#winapp/bindings` imports map —
+  // landed in preview.8. If codegen ever switches to `rc.N`/`beta.N`/etc., extend
+  // this to accept those tags too (any recognized prerelease with N ≥ 8 → true).
+  const preview = /^preview\.(\d+)$/.exec(prerelease);
+  return preview !== null && Number(preview[1]) >= 8;
+}
+
 interface CodegenInvocation {
   executable: string;
   prefixArgs: string[];
+  packageDir: string;
 }
 
 /** Resolve via Node first (npm/pnpm/yarn/PnP), then physical node_modules for patched layouts. */
@@ -517,7 +556,7 @@ export function resolveCodegenInvocation(workspaceDir?: string): CodegenInvocati
             `or reinstall ${CODEGEN_PACKAGE_NAME}.`
         );
       }
-      return { executable: nodePath, prefixArgs: [cliJs] };
+      return { executable: nodePath, prefixArgs: [cliJs], packageDir: pkgDir };
     }
     lastChecked = pkgDir;
   }

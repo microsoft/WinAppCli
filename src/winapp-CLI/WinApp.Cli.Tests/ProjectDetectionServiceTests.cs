@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Diagnostics;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -555,6 +556,146 @@ public class ProjectDetectionServiceTests
 
         Assert.AreEqual(1, results.Count, "Should only find the visible project");
         Assert.AreEqual("visible", results[0].DisplayPath);
+    }
+
+    // --- DetectProjectAt (single-directory public API) ---
+
+    [TestMethod]
+    public void DetectProjectAt_WithProject_ReturnsProject()
+    {
+        CreateFile("Cargo.toml", "[package]");
+        var result = _sut.DetectProjectAt(Root);
+        Assert.IsNotNull(result);
+        Assert.AreEqual(DetectedProjectType.Rust, result.Type);
+        Assert.AreEqual(".", result.DisplayPath);
+    }
+
+    [TestMethod]
+    public void DetectProjectAt_EmptyDir_ReturnsNull()
+    {
+        var result = _sut.DetectProjectAt(Root);
+        Assert.IsNull(result);
+    }
+
+    // --- Error / defensive paths ---
+
+    [TestMethod]
+    public void DetectProject_MalformedCsproj_IsSkipped()
+    {
+        // Invalid XML causes XDocument.Load to throw; the csproj should be skipped, not crash.
+        CreateFile("Broken.csproj", "<Project><PropertyGroup><OutputType>Exe</OutputType></Broken>");
+        var result = ProjectDetectionService.DetectProject(Root, Root);
+        Assert.IsNull(result, "A csproj that fails to parse should be treated as not-a-project");
+    }
+
+    [TestMethod]
+    public async Task DetectProjects_NonExistentRoot_ReturnsEmpty()
+    {
+        // A missing root exercises the DirectoryNotFoundException (IOException) handlers in
+        // FindTauriConfFile, FindExecutableCsproj and EnqueueSubdirectories without crashing.
+        var missing = new DirectoryInfo(Path.Combine(_tempDir, "does-not-exist"));
+        var results = await _sut.DetectProjectsAsync(missing, 5, null, CancellationToken.None);
+        Assert.AreEqual(0, results.Count);
+    }
+
+    [TestMethod]
+    public void DetectProject_DirectoryOutsideSearchRoot_UsesFullPath()
+    {
+        // When the directory is not under the search root, the display path falls back
+        // to the absolute path.
+        CreateFile("Cargo.toml", "[package]");
+        var unrelatedRoot = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"Unrelated_{Guid.NewGuid():N}"));
+
+        var result = ProjectDetectionService.DetectProject(Root, unrelatedRoot);
+
+        Assert.IsNotNull(result);
+        Assert.AreEqual(_tempDir.TrimEnd(Path.DirectorySeparatorChar), result.DisplayPath);
+    }
+
+    [TestMethod]
+    public void DetectProject_ElectronPackageJsonUnreadable_IsNotDetected()
+    {
+        // package.json exists but is locked for exclusive access, so File.ReadAllText throws
+        // IOException inside IsElectronProject, which must be swallowed (returns not-electron).
+        CreateFile("package.json", """{ "dependencies": { "electron": "^28.0.0" } }""");
+        var packageJsonPath = Path.Combine(_tempDir, "package.json");
+
+        using (new FileStream(packageJsonPath, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            var result = ProjectDetectionService.DetectProject(Root, Root);
+            Assert.IsNull(result, "An unreadable package.json should not be detected as Electron");
+        }
+    }
+
+    // --- Reparse point (junction) skipping ---
+
+    private static bool TryCreateJunction(string linkPath, string targetPath)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo("cmd.exe", $"/c mklink /J \"{linkPath}\" \"{targetPath}\"")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            using var proc = Process.Start(psi);
+            if (proc == null)
+            {
+                return false;
+            }
+
+            proc.WaitForExit();
+            return proc.ExitCode == 0 &&
+                   Directory.Exists(linkPath) &&
+                   new DirectoryInfo(linkPath).Attributes.HasFlag(FileAttributes.ReparsePoint);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    [TestMethod]
+    public void DetectProject_Tauri_SkipsReparsePointSubdir()
+    {
+        // A tauri.conf.json reachable only through a junction must be ignored, so no Tauri
+        // project is detected (guards against following links outside the search root).
+        var targetDir = CreateDir("obj", "tauri-target");
+        File.WriteAllText(Path.Combine(targetDir, "tauri.conf.json"), "{}");
+
+        var junctionPath = Path.Combine(_tempDir, "src-tauri");
+        if (!TryCreateJunction(junctionPath, targetDir))
+        {
+            Assert.Inconclusive("Could not create a directory junction on this machine.");
+        }
+
+        var result = ProjectDetectionService.DetectProject(Root, Root);
+        Assert.IsNull(result, "Tauri config behind a reparse point should be skipped");
+    }
+
+    [TestMethod]
+    public async Task DetectProjects_BFS_SkipsReparsePointDirectories()
+    {
+        // Project inside a junction target (kept under an ignored 'obj' dir so BFS can only
+        // reach it via the junction) must not be discovered, while a normal sibling is.
+        var targetDir = CreateDir("obj", "linked-target");
+        File.WriteAllText(Path.Combine(targetDir, "Cargo.toml"), "[package]");
+
+        var junctionPath = Path.Combine(_tempDir, "linked");
+        if (!TryCreateJunction(junctionPath, targetDir))
+        {
+            Assert.Inconclusive("Could not create a directory junction on this machine.");
+        }
+
+        CreateDir("visible");
+        CreateFile(Path.Combine("visible", "CMakeLists.txt"), "cmake");
+
+        var results = await _sut.DetectProjectsAsync(Root, 5, null, CancellationToken.None);
+
+        Assert.AreEqual(1, results.Count, "Only the non-junction project should be found");
+        Assert.AreEqual(DetectedProjectType.CPP, results[0].Type);
     }
 }
 

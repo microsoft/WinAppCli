@@ -479,7 +479,7 @@ export interface RunOptions extends CommonOptions {
   args?: string;
   /** Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. */
   clean?: boolean;
-  /** Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. */
+  /** Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. For WinUI apps, a crash also triggers a stowed-exception triage pass; the first run downloads debugger components (cached under the winapp global directory) and can be pointed at an existing debugger install via the WINAPP_DBGTOOLS_DIR environment variable. Cannot be combined with --no-launch or --json. */
   debugOutput?: boolean;
   /** Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). */
   detach?: boolean;
@@ -493,7 +493,7 @@ export interface RunOptions extends CommonOptions {
   noLaunch?: boolean;
   /** Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used. */
   outputAppxDirectory?: string;
-  /** Download symbols from Microsoft Symbol Server for richer native crash analysis. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. */
+  /** Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. */
   symbols?: boolean;
   /** Unregister the development package after the application exits. Only removes packages registered in development mode. */
   unregisterOnExit?: boolean;
@@ -629,9 +629,9 @@ export async function uiClick(options: UiClickOptions = {}): Promise<WinappResul
 // ---------------------------------------------------------------------------
 
 export interface UiDragOptions extends CommonOptions {
-  /** Start point — an element selector (drags from its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200). */
+  /** Start point — an element selector (drags from its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200). */
   from?: string;
-  /** End point — an element selector (drops at its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400). */
+  /** End point — an element selector (drops at its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400). */
   to?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
@@ -648,7 +648,7 @@ export interface UiDragOptions extends CommonOptions {
 }
 
 /**
- * Press the mouse button at one point, move to another, then release. 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or app-relative x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.
+ * Press the mouse button at one point, move to another, then release. 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or screen x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.
  */
 export async function uiDrag(options: UiDragOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'drag'];
@@ -895,6 +895,82 @@ export async function uiListWindows(options: UiListWindowsOptions = {}): Promise
 }
 
 // ---------------------------------------------------------------------------
+// ui pen
+// ---------------------------------------------------------------------------
+
+export interface UiPenOptions extends CommonOptions {
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Pen contact point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. Ignored when --path is given. */
+  at?: string;
+  /** Total glide time in milliseconds distributed across the stroke path segments (default: ~10 ms per segment). */
+  durationMs?: number;
+  /** Use the eraser end of the pen instead of the tip. */
+  eraser?: boolean;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Ink stroke path as a whitespace-separated list of x,y pairs, e.g. "10,10 20,30 40,50". */
+  path?: string;
+  /** Pen pressure from 0.0 to 1.0 (default: 0.5). */
+  pressure?: number;
+  /** Pen tilt along the x-axis in degrees (-90 to 90, default: 0). */
+  tiltX?: number;
+  /** Pen tilt along the y-axis in degrees (-90 to 90, default: 0). */
+  tiltY?: number;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Inject synthetic pen/stylus input using the Windows synthetic-pointer API. Taps or draws ink strokes with configurable pressure, tilt and eraser mode, at an element's center or explicit screen x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable (Windows 10 1809+).
+ */
+export async function uiPen(options: UiPenOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'pen'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.at) args.push('--at', options.at);
+  if (options.durationMs !== undefined) args.push('--duration-ms', options.durationMs.toString());
+  if (options.eraser) args.push('--eraser');
+  if (options.json) args.push('--json');
+  if (options.path) args.push('--path', options.path);
+  if (options.pressure !== undefined) args.push('--pressure', options.pressure.toString());
+  if (options.tiltX !== undefined) args.push('--tilt-x', options.tiltX.toString());
+  if (options.tiltY !== undefined) args.push('--tilt-y', options.tiltY.toString());
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui record
+// ---------------------------------------------------------------------------
+
+export interface UiRecordOptions extends CommonOptions {
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). */
+  captureScreen?: boolean;
+  /** Recording duration in seconds. Default 0 records until stopped — Ctrl+C, or (for programmatic callers) a newline or EOF on stdin. A valid MP4 is always finalized on graceful stop. */
+  durationSec?: number;
+  /** Frames per second to capture */
+  fps?: number;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Downscale so the longest edge is at most this many pixels (0 = no downscale) */
+  maxEdge?: number;
+  /** Save output to this file path. */
+  output?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+// _uiRecordGenerated: options interface exported above; function body omitted — use the
+//   public guarded wrapper (e.g. uiRecord from ui-record-guard.ts) instead.
+
+// ---------------------------------------------------------------------------
 // ui screenshot
 // ---------------------------------------------------------------------------
 
@@ -903,13 +979,13 @@ export interface UiScreenshotOptions extends CommonOptions {
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
-  /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus. */
+  /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). */
   captureScreen?: boolean;
   /** Bring the target window to the foreground before capture. Already implied by --capture-screen. */
   focus?: boolean;
   /** Format output as JSON */
   json?: boolean;
-  /** Save output to file path (e.g., screenshot) */
+  /** Save output to this file path. */
   output?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
@@ -1030,6 +1106,8 @@ export async function uiSearch(options: UiSearchOptions = {}): Promise<WinappRes
 export interface UiSendKeysOptions extends CommonOptions {
   /** Keys to send. Whitespace-separated tokens: named keys (down, enter, tab, esc, f5), modifier combos (ctrl+shift+t, alt+f4), raw virtual keys (vk=0x42), or literal text (hello). Use text=<literal> to type a single value verbatim when it would otherwise be read as a key name or combo (text=enter types "enter"; text=ctrl+a types "ctrl+a"); backslash escapes \s \t \n \r \\ are supported (text=a\s\sb types "a b"). To type the whole argument literally without escaping each token, pass --verbatim instead. Quote multi-token strings, e.g. "ctrl+a delete". */
   keys?: string;
+  /** Allow synthesizing system-/shell-reserved combos (win+<key>, alt+f4, alt+tab, ctrl+esc, …) via --via send-input, which are refused by default because they act on the OS/shell beyond the target app. Opt in to drive global hotkeys (e.g. PowerToys' win+shift+v, win+r). No effect on --via post-message (already window-scoped; a warning is emitted if set without send-input). Note: win+l and ctrl+alt+del stay blocked even with this flag — win+l locks the workstation (LockWorkStation() via the shell hook), which is unrecoverable from automation, and ctrl+alt+del is a Secure Attention Sequence (SAS) that Windows drops from injected input regardless of this flag, so it can never take effect. */
+  allowSystemKeys?: boolean;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
   /** Format output as JSON */
@@ -1038,7 +1116,7 @@ export interface UiSendKeysOptions extends CommonOptions {
   target?: string;
   /** Type the entire keys argument as literal text — no named-key, combo, or vk= interpretation, and exact whitespace preserved. The whole-argument form of the per-token text= escape: --verbatim "down down enter" types the words instead of pressing Down, Down, Enter. */
   verbatim?: boolean;
-  /** Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character KeyDown + TextChanged). Named keys and combos raise KeyDown on both, but keyboard accelerators/shortcuts (KeyboardAccelerator, e.g. ctrl+t) only fire via send-input. */
+  /** Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character KeyDown + TextChanged). Named keys and combos raise KeyDown on both, but keyboard accelerators/shortcuts (KeyboardAccelerator, e.g. ctrl+t) only fire via send-input. post-message targets the focused child control and works for classic Win32/WinForms controls, but WinUI 3 / UWP / XAML controls are windowless and ignore posted messages — use send-input for those (a warning is emitted when the target looks like a XAML app). */
   via?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
@@ -1050,6 +1128,7 @@ export interface UiSendKeysOptions extends CommonOptions {
 export async function uiSendKeys(options: UiSendKeysOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'send-keys'];
   if (options.keys) args.push(options.keys);
+  if (options.allowSystemKeys) args.push('--allow-system-keys');
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
   if (options.target) args.push('--target', options.target);
@@ -1077,7 +1156,7 @@ export interface UiSetValueOptions extends CommonOptions {
 }
 
 /**
- * Set a value on an element using UIA ValuePattern. Works for TextBox, ComboBox, Slider, and other editable controls. Usage: winapp ui set-value <selector> <value> -a <app>
+ * Set a value on an element programmatically. Works for TextBox, ComboBox, Slider, and other editable controls via UIA ValuePattern/RangeValuePattern, with a LegacyIAccessible (put_accValue) fallback for TextPattern-only edit controls — no app foreground required. Some rich text controls (e.g. WinUI 3 RichEditBox and WPF RichTextBox) don't support setting their value programmatically — use the 'send-keys' command with '--via send-input' to type into them instead. Usage: winapp ui set-value <selector> <value> -a <app>
  */
 export async function uiSetValue(options: UiSetValueOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'set-value'];
@@ -1109,6 +1188,57 @@ export async function uiStatus(options: UiStatusOptions = {}): Promise<WinappRes
   const args: string[] = ['ui', 'status'];
   if (options.app) args.push('--app', options.app);
   if (options.json) args.push('--json');
+  if (options.window !== undefined) args.push('--window', options.window.toString());
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// ui touch
+// ---------------------------------------------------------------------------
+
+export interface UiTouchOptions extends CommonOptions {
+  /** Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId */
+  selector?: string;
+  /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
+  app?: string;
+  /** Explicit start point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. */
+  at?: string;
+  /** Swipe direction: right (default), left, up, or down. Combined with --distance to compute the end point when --to-point is not given. */
+  direction?: string;
+  /** Distance in pixels for pinch/stretch (finger spread) or swipe. */
+  distance?: number;
+  /** Glide time in milliseconds for moving gestures (swipe/pinch/stretch). */
+  durationMs?: number;
+  /** Number of touch contacts (default: 1). Pinch/stretch always use 2. */
+  fingers?: number;
+  /** Gesture to perform: tap, double-tap, long-press, swipe, pinch, stretch (default: tap). */
+  gesture?: string;
+  /** Milliseconds to hold contacts down before lifting (long-press hold time). Defaults to 500 ms when --gesture long-press is used and this option is not set. */
+  holdMs?: number;
+  /** Format output as JSON */
+  json?: boolean;
+  /** End point x,y for a swipe (screen coordinates). Takes precedence over --direction. */
+  toPoint?: string;
+  /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
+  window?: number;
+}
+
+/**
+ * Inject synthetic touch input using the Windows touch-injection API. Supports tap, double-tap, long-press, swipe, pinch and stretch gestures at an element's center or explicit screen x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable.
+ */
+export async function uiTouch(options: UiTouchOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['ui', 'touch'];
+  if (options.selector) args.push(options.selector);
+  if (options.app) args.push('--app', options.app);
+  if (options.at) args.push('--at', options.at);
+  if (options.direction) args.push('--direction', options.direction);
+  if (options.distance !== undefined) args.push('--distance', options.distance.toString());
+  if (options.durationMs !== undefined) args.push('--duration-ms', options.durationMs.toString());
+  if (options.fingers !== undefined) args.push('--fingers', options.fingers.toString());
+  if (options.gesture) args.push('--gesture', options.gesture);
+  if (options.holdMs !== undefined) args.push('--hold-ms', options.holdMs.toString());
+  if (options.json) args.push('--json');
+  if (options.toPoint) args.push('--to-point', options.toPoint);
   if (options.window !== undefined) args.push('--window', options.window.toString());
   return execCommand(args, options);
 }

@@ -12,7 +12,7 @@ internal class BundleService(
     IBuildToolsService buildToolsService,
     ILogger<BundleService> logger) : IBundleService
 {
-    public async Task CreateBundleAsync(IReadOnlyList<FileInfo> msixFiles, FileInfo output, TaskContext taskContext, CancellationToken cancellationToken = default)
+    public async Task CreateBundleAsync(IReadOnlyList<FileInfo> msixFiles, FileInfo output, TaskContext taskContext, MsixVersion? bundleVersion = null, CancellationToken cancellationToken = default)
     {
         if (msixFiles.Count == 0)
         {
@@ -40,6 +40,13 @@ internal class BundleService(
             var inputPath = LongPathHelper.EnsureExtendedLengthPrefix(Path.TrimEndingDirectorySeparator(bundleStagingDir.FullName));
             var outputPath = LongPathHelper.EnsureExtendedLengthPrefix(output.FullName);
             var makeappxArguments = $@"bundle /o /d ""{inputPath}"" /p ""{outputPath}""";
+
+            // Stamp Bundle.Identity/@Version to match the (validated, consistent) slice
+            // Identity/@Version.
+            if (bundleVersion != null)
+            {
+                makeappxArguments += $@" /bv ""{bundleVersion}""";
+            }
 
             taskContext.AddDebugMessage($"Creating MSIX bundle with {msixFiles.Count} package(s)...");
             logger.LogDebug("Running makeappx bundle: {Arguments}", makeappxArguments);

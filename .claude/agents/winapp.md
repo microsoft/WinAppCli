@@ -55,9 +55,12 @@ Want to inspect or interact with a running app's UI?
 ├─ Find specific elements → winapp ui search <selector> -a <appname>
 ├─ Click/activate an element → winapp ui invoke <selector> -a <appname>
 ├─ Take a screenshot → winapp ui screenshot -a <appname>
+├─ Record a window to video (MP4) → winapp ui record -a <appname> --duration-sec <n>
 ├─ Read element properties → winapp ui get-property <selector> -a <appname>
 ├─ Set a value on an element → winapp ui set-value <selector> "value" -a <appname>
 ├─ Wait for UI state → winapp ui wait-for <selector> -a <appname> --timeout 5000
+├─ Inject touch gestures (tap/swipe/pinch/long-press) → winapp ui touch <selector> -a <appname> --gesture swipe --direction right --distance 200
+├─ Inject pen/stylus ink stroke or tap → winapp ui pen <selector> -a <appname> --path "10,10 200,200"
 └─ List app windows → winapp ui list-windows -a <appname> [--show-hidden]
 ```
 
@@ -138,7 +141,8 @@ Want to inspect or interact with a running app's UI?
 - `--args <string>` — command-line arguments to pass to the app
 - `--no-launch` — register the package without launching
 - `--with-alias` — launch via execution alias (console apps run in current terminal)
-- `--debug-output` — capture `OutputDebugString` messages and first-chance exceptions (prevents other debuggers like VS/VS Code from attaching)
+- `--debug-output` — capture `OutputDebugString` messages and first-chance exceptions (prevents other debuggers like VS/VS Code from attaching). For WinUI apps it also auto-runs a stowed-exception (`0xC000027B`) triage pass (`!xamlstowed`/`!xamltriage`) that recovers the originating HRESULT and native XAML dispatch stack. The first triage run downloads debugger components (engine bits from NuGet + `JsProvider.dll` from the WinDbg CDN) and caches them under `~\.winapp\dbgtools\`; if downloads are blocked, install Debugging Tools for Windows or point `WINAPP_DBGTOOLS_DIR` at a debugger directory containing `dbgeng.dll` and `JsProvider.dll`.
+- `--symbols` — with `--debug-output`, download Microsoft public symbols for richer native crash stacks (first run downloads and caches them)
 - `--output-appx-directory <path>` — custom output directory for loose layout
 **Requires:** Built app output directory + `appxmanifest.xml`
 
@@ -224,14 +228,17 @@ Want to inspect or interact with a running app's UI?
 - `ui search <selector> -a <app> [--max N]` — find elements; output shows semantic slugs. Surfaces invokable ancestor for all non-invokable results
 - `ui get-property <selector> -a <app> [-p <prop>]` — read UIA properties (including ToggleState, Value, IsSelected, ExpandCollapseState)
 - `ui screenshot -a <app> [--output file.png] [--json] [--focus] [--capture-screen]` — capture window as PNG. Default uses Windows.Graphics.Capture (composited surface — preserves rounded corners and works while occluded), with PrintWindow as fallback. Use `--focus` to bring the window to the foreground first; use `--capture-screen` for popup overlays not owned by the target window.
+- `ui record -a <app> [--output file.mp4] [--duration-sec <n>] [--fps <n>] [--max-edge <px>] [--capture-screen] [--json]` — record window or element region to an H.264 MP4 using Windows Graphics Capture + Media Foundation. Default is 0 — records until stopped (Ctrl+C interactively, or a newline/EOF on stdin for programmatic callers); use `--duration-sec N` for a timed run. A valid MP4 is always finalized on graceful stop. `--fps` (default 15) controls frame rate; `--max-edge` downscales so the longest edge is at most N pixels. The `mode` field in JSON output is `"wgc"`, `"screen"` (explicit `--capture-screen`), or `"printwindow"`.
 - `ui invoke <selector> -a <app>` — activate element by slug or text search. Auto-walks to invokable ancestor for non-invokable elements.
 - `ui hover <selector> -a <app> [--dwell-time <ms>]` — move mouse to element center to trigger tooltips, flyouts, and hover states. Use with `ui screenshot --capture-screen` to capture the result.
-- `ui drag <from> <to> -a <app> [--right]` — press the mouse button at one point, move to another, and release (reorder, resize, sliders, drag-and-drop). Each of `<from>`/`<to>` is an element selector (drags from/to its center) or app coordinates `x,y` as reported by `ui inspect`.
-- `ui send-keys "<keys>" -a <app> [--target <selector>] [--via post-message|send-input] [--verbatim]` — send synthetic keyboard input: named keys (`enter`, `down`), combos (`ctrl+shift+t`), raw virtual keys (`vk=0xNN`), or literal text. Use `--verbatim` to type the whole argument literally (no key/combo parsing), or `--via send-input` for per-keystroke KeyDown on typed text (e.g. a WinUI 3/WPF TextBox).
-- `ui set-value <selector> "value" -a <app>` — set text or slider value
+- `ui drag <from> <to> -a <app> [--right]` — press the mouse button at one point, move to another, and release (reorder, resize, sliders, drag-and-drop). Each of `<from>`/`<to>` is an element selector (drags from/to its center) or screen coordinates `x,y` as reported by `ui inspect`.
+- `ui send-keys "<keys>" -a <app> [--target <selector>] [--via post-message|send-input] [--verbatim] [--allow-system-keys]` — send synthetic keyboard input: named keys (`enter`, `down`), combos (`ctrl+shift+t`), raw virtual keys (`vk=0xNN`), or literal text. Use `--verbatim` to type the whole argument literally (no key/combo parsing). The default `post-message` transport auto-targets the window's focused child control (works for classic Win32/WinForms), but **windowless WinUI 3 / UWP / XAML controls ignore posted messages** — neither keys nor text reach them (it warns and still exits 0 when a XAML target is detected), so use **`--via send-input`** for WinUI 3 / UWP / WPF apps (also required for per-keystroke KeyDown on typed text, e.g. a WinUI 3/WPF TextBox). Pass `--allow-system-keys` with `--via send-input` to opt in to OS/shell hotkeys (e.g. `win+r`, `win+shift+v`); **`win+l` and `ctrl+alt+del` stay blocked even with this flag** (`win+l` locks the workstation — unrecoverable from automation; `ctrl+alt+del` is a Secure Attention Sequence Windows drops from injected input, so it errors instead of falsely reporting success).
+- `ui set-value <selector> "value" -a <app>` — set text or slider value programmatically (ValuePattern → RangeValuePattern → LegacyIAccessible `put_accValue` fallback for TextPattern-only rich-edit/compose boxes). WinUI 3 `RichEditBox` / WPF `RichTextBox` don't support programmatic value-setting (read-only to UIA value APIs) — use `send-keys` for those.
 - `ui focus <selector> -a <app>` — move keyboard focus
 - `ui scroll-into-view <selector> -a <app>` — scroll element visible
 - `ui scroll <selector> -a <app> --direction down` — scroll a container (up/down/left/right, --to top/bottom)
+- `ui touch <selector> -a <app> [--gesture tap|double-tap|long-press|swipe|pinch|stretch] [--at x,y] [--to-point x,y] [--direction right|left|up|down] [--distance px] [--duration-ms ms] [--hold-ms ms] [--fingers N]` — inject synthetic touch gestures (tap, swipe, pinch, stretch, long-press). Swipe direction defaults to right; long-press defaults to 500 ms hold if --hold-ms not set. Requires an unlocked interactive desktop.
+- `ui pen <selector> -a <app> [--at x,y] [--path "x1,y1 x2,y2 ..."] [--pressure 0.5] [--tilt-x N] [--tilt-y N] [--eraser] [--duration-ms ms]` — inject synthetic pen/stylus input: a tap at element center/--at, or an ink stroke along --path. --duration-ms distributes glide time across stroke segments. Requires Windows 10 1809+ and an unlocked interactive desktop.
 - `ui wait-for <selector> -a <app> --timeout <ms> [--gone] [--value Y] [--property X --value Y]` — wait for element value or property match
 - `ui list-windows -a <app> [--show-hidden]` — list windows, popups, and dialogs with HWNDs (untitled zero-size windows hidden by default)
 - `ui get-focused -a <app>` — show the element with keyboard focus

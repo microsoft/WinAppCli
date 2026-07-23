@@ -11,6 +11,21 @@ namespace WinApp.Cli.Helpers;
 /// </summary>
 internal static class SystemKeyGuard
 {
+    /// <summary>
+    /// A key combo that must NEVER be synthesized via send-input, paired with the reason it stays
+    /// blocked even when the caller passes <c>--allow-system-keys</c>. Different combos are blocked
+    /// for different reasons (<c>win+l</c> locks the session; <c>ctrl+alt+del</c> is a Secure
+    /// Attention Sequence Windows drops from injected input), so the reason travels with the name.
+    /// </summary>
+    public readonly record struct HardBlockedCombo(string Name, string Reason);
+
+    // Reasons are phrased as predicates ("<name> <reason>") so callers can compose a message.
+    private const string WinLReason =
+        "locks the workstation (LockWorkStation() via the shell hook), which is unrecoverable from automation";
+    private const string CtrlAltDelReason =
+        "is a Secure Attention Sequence (SAS) that Windows blocks from injected input regardless of privileges, " +
+        "so it can never be synthesized from automation";
+
     private const ushort VkShift = 0x10;
     private const ushort VkControl = 0x11;
     private const ushort VkAlt = 0x12;
@@ -21,6 +36,57 @@ internal static class SystemKeyGuard
     private const ushort VkF4 = 0x73;
     private const ushort VkLWin = 0x5B;
     private const ushort VkRWin = 0x5C;
+    private const ushort VkL = 0x4C; // 'L' — win+l triggers LockWorkStation() via the shell hook
+
+    /// <summary>
+    /// Returns the combos that must NEVER be synthesized via send-input, even when the caller opts in
+    /// with <c>--allow-system-keys</c>, each paired with the reason it stays blocked. Two combos qualify:
+    /// <list type="bullet">
+    /// <item><c>win+l</c> — VK_LWIN/VK_RWIN + VK_L (0x4C) fires <c>LockWorkStation()</c> via the shell
+    /// hook when injected OS-wide, locking the interactive session with no recovery path from automation.</item>
+    /// <item><c>ctrl+alt+del</c> — VK_CONTROL + VK_MENU + VK_DELETE (0x2E) is the Secure Attention
+    /// Sequence; Windows discards synthesized SAS input at the OS level regardless of privilege or flag,
+    /// so it can never take effect and reporting success for it is misleading.</item>
+    /// </list>
+    /// Unlike soft-blocked combos (<c>alt+f4</c>, <c>ctrl+shift+esc</c>, <c>win+r</c>, …) that can be
+    /// opted into for driving global hotkeys, these two can never be usefully or safely driven from
+    /// automation. (Extra modifiers alongside the combo — e.g. <c>win+shift+l</c>,
+    /// <c>ctrl+alt+shift+del</c> — do not defeat the block.)
+    /// </summary>
+    public static IReadOnlyList<HardBlockedCombo> FindNeverBypassableCombos(IEnumerable<KeyAction> actions)
+    {
+        var hits = new List<HardBlockedCombo>();
+        foreach (var action in actions)
+        {
+            if (action is not KeyChord chord)
+            {
+                continue;
+            }
+
+            bool win = chord.Modifiers.Contains(VkLWin) || chord.Modifiers.Contains(VkRWin);
+            bool ctrl = chord.Modifiers.Contains(VkControl);
+            bool alt = chord.Modifiers.Contains(VkAlt);
+
+            if (win && chord.Vk == VkL)
+            {
+                AddUnique(hits, new HardBlockedCombo("win+l", WinLReason));
+            }
+            else if (ctrl && alt && chord.Vk == VkDelete)
+            {
+                AddUnique(hits, new HardBlockedCombo("ctrl+alt+del", CtrlAltDelReason));
+            }
+        }
+
+        return hits;
+    }
+
+    private static void AddUnique(List<HardBlockedCombo> hits, HardBlockedCombo combo)
+    {
+        if (!hits.Any(h => h.Name == combo.Name))
+        {
+            hits.Add(combo);
+        }
+    }
 
     /// <summary>
     /// Returns the friendly names of any system-reserved combos present in <paramref name="actions"/>,

@@ -4,9 +4,39 @@
 using Microsoft.Extensions.Logging;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
+using Windows.Win32;
 
 namespace WinApp.Cli.Tests;
 
+/// <summary>
+/// Tests for <see cref="CodeIntegrityCatalogService"/>. The full-catalog tests below invoke the
+/// REAL native CryptCATCDF* APIs against real system executables, so the happy-path native flow is
+/// genuinely exercised (not faked).
+/// </summary>
+/// <remarks>
+/// Residual uncovered lines in CodeIntegrityCatalogService.cs (~93% line coverage in Debug) are the
+/// native-failure paths, each of which needs a genuine native fault a unit test cannot deterministically
+/// induce without contriving a flaky fault or adding a product seam. Named precisely:
+/// <list type="bullet">
+///   <item>ParseErrorCallback body (~47-55): an <c>[UnmanagedCallersOnly]</c> stdcall callback that ONLY
+///     the native CryptCATCDF* parser invokes, and only on a CDF parse/member error. Its mapping logic
+///     IS unit-tested directly via <see cref="CodeIntegrityCatalogService.DescribeCatalogErrorArea"/> /
+///     <see cref="CodeIntegrityCatalogService.DescribeCatalogLocalError"/>; only the ~3-line native shell
+///     (read the PWSTR line + LogError) is native-invoked.</item>
+///   <item>Line ~276 <c>throw new Win32Exception</c>: reached only when CryptCATCDFOpen returns null (a real
+///     native open/parse failure). These tests feed valid CDFs built from real system exes, so open succeeds.</item>
+///   <item>Lines ~290-293 (outer <c>catch (Exception)</c>): the only thrower inside the guarded try is the
+///     line ~276 Win32Exception (native-gated); the Enumerate* helpers only throw on a native enum fault, so
+///     entering this catch likewise requires a real native failure.</item>
+///   <item>Line ~304 (empty <c>catch { }</c> around <c>File.Delete(cdfPath)</c>): runs only if deleting the
+///     temp CDF itself throws (e.g. the file is locked); not exercised.</item>
+/// </list>
+/// These are deferred to the wave-2 real-runtime integration test (a genuine malformed-CDF fault on CI).
+/// NOT native-only and already covered: the finally <c>if (cdfOutputPath == null) File.Delete</c> cleanup
+/// branch (~298-302) via the no-ref overload (seeds cdfOutputPath = null), and the
+/// <c>else { cdfOutputPath = cdfPath; }</c> branch (~306-308) via the ref-based tests that seed
+/// <c>cdfPath = string.Empty</c> (non-null).
+/// </remarks>
 [TestClass]
 public class CodeIntegrityCatalogServiceTests : BaseCommandTests
 {
@@ -106,9 +136,15 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
 
         var cdfPath = CodeIntegrityCatalogService.CreateCatalogDefinitionFile(outputCatalogPath, files, false, true);
 
-        var content = File.ReadAllText(cdfPath);
-        VerifyCdfContent(content, files, outputCatalogPath, false, true);
-        File.Delete(cdfPath);
+        try
+        {
+            var content = File.ReadAllText(cdfPath);
+            VerifyCdfContent(content, files, outputCatalogPath, false, true);
+        }
+        finally
+        {
+            File.Delete(cdfPath);
+        }
     }
 
     [TestMethod]
@@ -119,10 +155,16 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
 
         var cdfPath = CodeIntegrityCatalogService.CreateCatalogDefinitionFile(outputCatalogPath, files, false, false);
 
-        var content = File.ReadAllText(cdfPath);
-        Assert.IsFalse(content.Contains("ALTSIPID", StringComparison.Ordinal),
-            "CDF should not contain ALTSIPID when computeFlatHashes is false");
-        File.Delete(cdfPath);
+        try
+        {
+            var content = File.ReadAllText(cdfPath);
+            Assert.IsFalse(content.Contains("ALTSIPID", StringComparison.Ordinal),
+                "CDF should not contain ALTSIPID when computeFlatHashes is false");
+        }
+        finally
+        {
+            File.Delete(cdfPath);
+        }
     }
 
     [TestMethod]
@@ -133,8 +175,15 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
 
         var cdfPath = CodeIntegrityCatalogService.CreateCatalogDefinitionFile(outputCatalogPath, files, false, false);
 
-        var content = File.ReadAllText(cdfPath);
-        VerifyCdfContent(content, files, outputCatalogPath, false, false);
+        try
+        {
+            var content = File.ReadAllText(cdfPath);
+            VerifyCdfContent(content, files, outputCatalogPath, false, false);
+        }
+        finally
+        {
+            File.Delete(cdfPath);
+        }
     }
 
     [TestMethod]
@@ -144,11 +193,18 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
         var outputCatalogPath = Path.Combine(_tempDirectory.FullName, "output.cat");
         var cdfPath = CodeIntegrityCatalogService.CreateCatalogDefinitionFile(outputCatalogPath, files, false, false);
 
-        var content = File.ReadAllText(cdfPath);
-        VerifyCdfContent(content, files, outputCatalogPath, false, false);
-        var catalogFilesIndex = content.IndexOf("[CatalogFiles]", StringComparison.Ordinal);
-        var afterCatalogFiles = content[(catalogFilesIndex + "[CatalogFiles]".Length)..].Trim();
-        Assert.AreEqual(string.Empty, afterCatalogFiles, "No file entries should be present");
+        try
+        {
+            var content = File.ReadAllText(cdfPath);
+            VerifyCdfContent(content, files, outputCatalogPath, false, false);
+            var catalogFilesIndex = content.IndexOf("[CatalogFiles]", StringComparison.Ordinal);
+            var afterCatalogFiles = content[(catalogFilesIndex + "[CatalogFiles]".Length)..].Trim();
+            Assert.AreEqual(string.Empty, afterCatalogFiles, "No file entries should be present");
+        }
+        finally
+        {
+            File.Delete(cdfPath);
+        }
     }
 
     #endregion
@@ -356,6 +412,197 @@ public class CodeIntegrityCatalogServiceTests : BaseCommandTests
 
         var cdfContent = File.ReadAllText(cdfPath!);
         VerifyCdfContent(cdfContent, files, outputPath, false, false);
+    }
+
+    #endregion
+
+    #region ReadBytes / IsExecutable / IfExists edge cases
+
+    [TestMethod]
+    public void ReadBytes_InsufficientBytes_ThrowsEndOfStream()
+    {
+        using var stream = new MemoryStream([0x01, 0x02]);
+        using var reader = new BinaryReader(stream);
+
+        // int needs 4 bytes but only 2 are available.
+        var ex = Assert.ThrowsExactly<EndOfStreamException>(() => CodeIntegrityCatalogService.ReadBytes<int>(reader));
+        StringAssert.Contains(ex.Message, "Int32");
+    }
+
+    private static void WriteWord(byte[] b, int off, ushort v)
+    {
+        b[off] = (byte)(v & 0xFF);
+        b[off + 1] = (byte)(v >> 8);
+    }
+
+    private static void WriteDword(byte[] b, int off, uint v)
+    {
+        b[off] = (byte)(v & 0xFF);
+        b[off + 1] = (byte)((v >> 8) & 0xFF);
+        b[off + 2] = (byte)((v >> 16) & 0xFF);
+        b[off + 3] = (byte)((v >> 24) & 0xFF);
+    }
+
+    private static byte[] BuildPeWithOneSection(byte[] name8, uint characteristics)
+    {
+        var b = new byte[128];
+        WriteWord(b, 0, 0x5A4D);           // e_magic 'MZ'
+        WriteDword(b, 60, 64);             // e_lfanew -> NT headers at 64
+        WriteDword(b, 64, 0x00004550);     // 'PE\0\0'
+        WriteWord(b, 68 + 2, 1);           // FileHeader.NumberOfSections = 1
+        WriteWord(b, 68 + 16, 0);          // FileHeader.SizeOfOptionalHeader = 0
+        for (var i = 0; i < name8.Length && i < 8; i++)
+        {
+            b[88 + i] = name8[i];          // SectionHeader.Name
+        }
+        WriteDword(b, 88 + 36, characteristics); // SectionHeader.Characteristics
+        return b;
+    }
+
+    private bool InvokeIsExecutable(byte[] peBytes)
+    {
+        var path = Path.Combine(_tempDirectory.FullName, $"pe_{Guid.NewGuid():N}.bin");
+        File.WriteAllBytes(path, peBytes);
+        var method = typeof(CodeIntegrityCatalogService).GetMethod(
+            "IsExecutable", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        return (bool)method.Invoke(null, [path])!;
+    }
+
+    [TestMethod]
+    public void IsExecutable_NotMzMagic_ReturnsFalse()
+    {
+        // 64 zero bytes: large enough for a DOS header but e_magic != 'MZ'.
+        Assert.IsFalse(InvokeIsExecutable(new byte[64]));
+    }
+
+    [TestMethod]
+    public void IsExecutable_InvalidLfanew_ReturnsFalse()
+    {
+        var b = new byte[64];
+        WriteWord(b, 0, 0x5A4D); // 'MZ' but e_lfanew stays 0 (<= 0)
+        Assert.IsFalse(InvokeIsExecutable(b));
+    }
+
+    [TestMethod]
+    public void IsExecutable_BadNtSignature_ReturnsFalse()
+    {
+        var b = new byte[72];
+        WriteWord(b, 0, 0x5A4D);
+        WriteDword(b, 60, 64);
+        WriteDword(b, 64, 0xFFFFFFFF); // not 'PE\0\0'
+        Assert.IsFalse(InvokeIsExecutable(b));
+    }
+
+    [TestMethod]
+    public void IsExecutable_TruncatedBeforeFileHeader_ReturnsFalse()
+    {
+        var b = new byte[80]; // room for PE signature but not the whole file header
+        WriteWord(b, 0, 0x5A4D);
+        WriteDword(b, 60, 64);
+        WriteDword(b, 64, 0x00004550);
+        Assert.IsFalse(InvokeIsExecutable(b));
+    }
+
+    [TestMethod]
+    public void IsExecutable_OptionalHeaderExceedsStream_ReturnsFalse()
+    {
+        var b = new byte[88]; // exactly a file header, but SizeOfOptionalHeader overflows the stream
+        WriteWord(b, 0, 0x5A4D);
+        WriteDword(b, 60, 64);
+        WriteDword(b, 64, 0x00004550);
+        WriteWord(b, 68 + 16, 0xFFFF); // SizeOfOptionalHeader
+        Assert.IsFalse(InvokeIsExecutable(b));
+    }
+
+    [TestMethod]
+    public void IsExecutable_SectionsExceedStream_ReturnsFalse()
+    {
+        var b = new byte[88];
+        WriteWord(b, 0, 0x5A4D);
+        WriteDword(b, 60, 64);
+        WriteDword(b, 64, 0x00004550);
+        WriteWord(b, 68 + 2, 10);  // NumberOfSections far more than the stream can hold
+        WriteWord(b, 68 + 16, 0);  // SizeOfOptionalHeader
+        Assert.IsFalse(InvokeIsExecutable(b));
+    }
+
+    [TestMethod]
+    public void IsExecutable_TextSectionWithoutCodeFlag_ReturnsTrue()
+    {
+        // A ".text" section is treated as executable even without the code/exec characteristics.
+        var name = new byte[] { (byte)'.', (byte)'t', (byte)'e', (byte)'x', (byte)'t', 0, 0, 0 };
+        Assert.IsTrue(InvokeIsExecutable(BuildPeWithOneSection(name, 0)));
+    }
+
+    [TestMethod]
+    public void IsExecutable_NoExecutableSection_ReturnsFalse()
+    {
+        // A single non-code, non-".text" section => not executable.
+        var name = new byte[] { (byte)'.', (byte)'d', (byte)'a', (byte)'t', (byte)'a', 0, 0, 0 };
+        Assert.IsFalse(InvokeIsExecutable(BuildPeWithOneSection(name, 0)));
+    }
+
+    [TestMethod]
+    public async Task CreateExternalCatalog_OutputExistsWithSkip_DoesNotRegenerate()
+    {
+        var outputPath = Path.Combine(_tempDirectory.FullName, "existing.cat");
+        File.WriteAllText(outputPath, "SENTINEL");
+
+        await _codeIntegrityCatalogService.CreateExternalCatalogAsync(
+            [_testInputDirectory], false, false, false, IfExists.Skip, new FileInfo(outputPath));
+
+        // Skip mode must return before collecting/regenerating, leaving the file untouched.
+        // (If Skip were ignored, the empty input directory would throw InvalidOperationException.)
+        Assert.AreEqual("SENTINEL", File.ReadAllText(outputPath));
+    }
+
+    [TestMethod]
+    public void CollectExecutableFiles_WhitespaceDirectoryEntry_IsSkipped()
+    {
+        var method = typeof(CodeIntegrityCatalogService).GetMethod(
+            "CollectExecutableFiles", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+
+        var result = (List<string>)method.Invoke(
+            _codeIntegrityCatalogService,
+            [new List<string> { "   " }, SearchOption.TopDirectoryOnly])!;
+
+        Assert.AreEqual(0, result.Count, "Whitespace-only directory entries must be skipped, not enumerated");
+    }
+
+    [TestMethod]
+    public void DescribeCatalogErrorArea_KnownAndUnknownAreas_MapToExpectedText()
+    {
+        Assert.AreEqual("The header section of the CDF",
+            CodeIntegrityCatalogService.DescribeCatalogErrorArea(PInvoke.CRYPTCAT_E_AREA_HEADER));
+        Assert.AreEqual("A member file entry in the CatalogFiles section of the CDF",
+            CodeIntegrityCatalogService.DescribeCatalogErrorArea(PInvoke.CRYPTCAT_E_AREA_MEMBER));
+        Assert.AreEqual("An attribute entry in the CDF",
+            CodeIntegrityCatalogService.DescribeCatalogErrorArea(PInvoke.CRYPTCAT_E_AREA_ATTRIBUTE));
+        StringAssert.Contains(CodeIntegrityCatalogService.DescribeCatalogErrorArea(0xDEAD), "Unknown");
+    }
+
+    [TestMethod]
+    public void DescribeCatalogLocalError_KnownAndUnknownErrors_MapToExpectedText()
+    {
+        Assert.AreEqual("The member file name or path is missing.",
+            CodeIntegrityCatalogService.DescribeCatalogLocalError(PInvoke.CRYPTCAT_E_CDF_MEMBER_FILE_PATH));
+        Assert.AreEqual("The function failed to create a hash of the member subject.",
+            CodeIntegrityCatalogService.DescribeCatalogLocalError(PInvoke.CRYPTCAT_E_CDF_MEMBER_INDIRECTDATA));
+        Assert.AreEqual("The function failed to find the member file.",
+            CodeIntegrityCatalogService.DescribeCatalogLocalError(PInvoke.CRYPTCAT_E_CDF_MEMBER_FILENOTFOUND));
+        Assert.AreEqual("The function failed to convert the subject string to a GUID.",
+            CodeIntegrityCatalogService.DescribeCatalogLocalError(PInvoke.CRYPTCAT_E_CDF_BAD_GUID_CONV));
+        Assert.AreEqual("The attribute contains an invalid OID, or the combination of type, name or OID, and value is not valid.",
+            CodeIntegrityCatalogService.DescribeCatalogLocalError(PInvoke.CRYPTCAT_E_CDF_ATTR_TYPECOMBO));
+        Assert.AreEqual("The attribute line is missing one or more elements of its composition including type, object identifier (OID) or name, or value.",
+            CodeIntegrityCatalogService.DescribeCatalogLocalError(PInvoke.CRYPTCAT_E_CDF_ATTR_TOOFEWVALUES));
+        Assert.AreEqual("The function does not support the attribute.",
+            CodeIntegrityCatalogService.DescribeCatalogLocalError(PInvoke.CRYPTCAT_E_CDF_UNSUPPORTED));
+        Assert.AreEqual("The file member already exists.",
+            CodeIntegrityCatalogService.DescribeCatalogLocalError(PInvoke.CRYPTCAT_E_CDF_DUPLICATE));
+        Assert.AreEqual("The CatalogHeader or Name tag is missing.",
+            CodeIntegrityCatalogService.DescribeCatalogLocalError(PInvoke.CRYPTCAT_E_CDF_TAGNOTFOUND));
+        StringAssert.Contains(CodeIntegrityCatalogService.DescribeCatalogLocalError(0xBEEF), "Unknown");
     }
 
     #endregion

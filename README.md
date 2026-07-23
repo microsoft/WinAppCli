@@ -175,7 +175,6 @@ Download the latest CI build artifacts directly (no GitHub login required):
 | [**npm Package**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/npm-package.zip) | `@microsoft/winappcli` .tgz package |
 | [**MSIX Packages**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/msix-packages.zip) | MSIX installer bundle (self-signed) |
 | [**NuGet Packages**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/nuget-packages.zip) | NuGet .nupkg packages |
-| [**VS Code Extension**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/vscode-extension.zip) | Pre-release `.vsix` for VS Code |
 
 <details>
 <summary>Download links not working?</summary>
@@ -260,12 +259,9 @@ This repository includes samples demonstrating how to use the CLI with various f
 
 ## 🧩 VS Code Extension
 
-The **WinApp VS Code Extension** brings WinApp CLI into Visual Studio Code. It can initialize projects, debug with package identity, package, sign, and more without leaving the editor. Press **F5** to launch your app with identity and automatically attach a debugger.
+The **[WinApp VS Code Extension](https://marketplace.visualstudio.com/items?itemName=Microsoft-WinAppCLI.winapp)** brings WinApp CLI into Visual Studio Code. It can initialize projects, debug with package identity, package, sign, and more without leaving the editor. Press **F5** to launch your app with identity and automatically attach a debugger.
 
-> [!IMPORTANT]
-> The extension is not yet available in the VS Code Marketplace. Download the latest prerelease: [**VS Code Extension**](https://nightly.link/microsoft/WinAppCli/workflows/build-package/main/vscode-extension.zip)
-
-For setup, configuration, and troubleshooting details, see the [VS Code Extension README](./src/winapp-VSC/README.md).
+Install it from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=Microsoft-WinAppCLI.winapp). Checkout the repo for the WinApp VS Code Extension at [microsoft/WinAppVSCE](https://github.com/microsoft/WinAppVSCE).
 
 ## 🤖 Using with AI Coding Agents
 
@@ -298,7 +294,7 @@ For more information see the [Code of Conduct FAQ](https://opensource.microsoft.
 
 To build the CLI:
 ```
-# Build the CLI and package for npm, VS Code extension, NuGet, and MSIX from the repo root
+# Build the CLI and package for npm, NuGet, and MSIX from the repo root
 .\scripts\build-cli.ps1
 ```
 
