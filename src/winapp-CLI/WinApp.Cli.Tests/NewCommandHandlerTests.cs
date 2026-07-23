@@ -83,7 +83,7 @@ public class NewCommandHandlerTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task Handler_NameWithInjectionPayload_PassesNameAsSingleToken()
+    public async Task Handler_NameWithInjectionPayload_IsRejected()
     {
         ScriptHappyPath();
         var command = GetRequiredService<NewCommand>();
@@ -91,16 +91,30 @@ public class NewCommandHandlerTests : BaseCommandTests
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json", "--name", malicious]);
 
+        Assert.AreEqual(NewCommand.ExitInvalidArgs, exitCode,
+            "A name containing quotes/separators must be rejected outright, not passed to dotnet new.");
+        Assert.AreEqual(0, _dotnet.ArgumentListInvocations.Count,
+            "An invalid name must fail fast before any dotnet call runs.");
+    }
+
+    [TestMethod]
+    public async Task Handler_OutputPathWithSpaces_PassesPathAsSingleToken()
+    {
+        ScriptHappyPath();
+        var command = GetRequiredService<NewCommand>();
+        var outDir = Path.Combine(_tempDirectory.FullName, "My App Dir");
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json", "--output", outDir]);
+
         Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
         var scaffold = ScaffoldInvocation();
         Assert.IsNotNull(scaffold);
         var tokens = scaffold.ToArray();
-        var nameIdx = Array.IndexOf(tokens, "-n");
-        Assert.IsTrue(nameIdx >= 0 && nameIdx + 1 < tokens.Length, "Scaffold should pass -n <name>.");
-        Assert.AreEqual(malicious, tokens[nameIdx + 1],
-            "The name must be a single verbatim token — proving no argument injection is possible.");
-        CollectionAssert.DoesNotContain(tokens, "--force",
-            "A crafted name must not inject a --force option into the dotnet new command.");
+        var outIdx = Array.IndexOf(tokens, "-o");
+        Assert.IsTrue(outIdx >= 0 && outIdx + 1 < tokens.Length, "Scaffold should pass -o <path>.");
+        Assert.AreEqual(outDir, tokens[outIdx + 1],
+            "A path with spaces must be a single verbatim token — proving ArgumentList prevents splitting/injection.");
+        CollectionAssert.DoesNotContain(tokens, "--force");
     }
 
     [TestMethod]
@@ -270,5 +284,96 @@ public class NewCommandHandlerTests : BaseCommandTests
         Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
         Assert.IsFalse(TestAnsiConsole.Output.Contains("QuietApp", StringComparison.Ordinal),
             "--quiet should suppress the human-readable progress and completion output.");
+    }
+
+    [TestMethod]
+    public async Task Handler_NameEscapingCurrentDirectory_ReturnsInvalidArgs()
+    {
+        ScriptHappyPath();
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["--use-defaults", "--json", "--name", @"..\Escaped"]);
+
+        Assert.AreEqual(NewCommand.ExitInvalidArgs, exitCode,
+            "A name containing path separators must be rejected before it becomes the output directory.");
+        Assert.AreEqual(0, _dotnet.ArgumentListInvocations.Count,
+            "An invalid name must fail fast before any dotnet call runs.");
+        Assert.IsNull(ScaffoldInvocation());
+    }
+
+    [TestMethod]
+    public async Task Handler_AppTemplate_PrintsWinappRunNextStep()
+    {
+        ScriptHappyPath();
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--name", "MyApp"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        Assert.IsTrue(TestAnsiConsole.Output.Contains("winapp run", StringComparison.Ordinal),
+            $"App templates should suggest 'winapp run' as the next step. Output:\n{TestAnsiConsole.Output}");
+    }
+
+    [TestMethod]
+    public async Task Handler_LibTemplate_PrintsReferenceNextStep()
+    {
+        ScriptHappyPath();
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--template", "lib", "--name", "MyLib"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        Assert.IsTrue(TestAnsiConsole.Output.Contains("reference", StringComparison.OrdinalIgnoreCase),
+            $"The lib template should not suggest 'winapp run'. Output:\n{TestAnsiConsole.Output}");
+        Assert.IsFalse(TestAnsiConsole.Output.Contains("winapp run", StringComparison.Ordinal),
+            "A class library is not runnable, so 'winapp run' must not be suggested.");
+    }
+
+    [TestMethod]
+    public async Task Handler_UnitTestTemplate_PrintsDotnetTestNextStep()
+    {
+        ScriptHappyPath();
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--template", "unittest", "--name", "MyTests"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        Assert.IsTrue(TestAnsiConsole.Output.Contains("dotnet test", StringComparison.Ordinal),
+            $"The unittest template should suggest 'dotnet test'. Output:\n{TestAnsiConsole.Output}");
+        Assert.IsFalse(TestAnsiConsole.Output.Contains("winapp run", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task Handler_OlderPackInstalled_InstallsRequestedVersionBeforeScaffold()
+    {
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "uninstall")
+            {
+                // An OLDER version is installed than the one requested below.
+                return (0, "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n   Version: 0.0.5-alpha\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "install")
+            {
+                return (0, "Success", string.Empty);
+            }
+            return (0, "created", string.Empty); // scaffold
+        };
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["--use-defaults", "--json", "--template-version", "0.0.6-alpha"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        var install = _dotnet.ArgumentListInvocations
+            .FirstOrDefault(a => a.Count >= 3 && a[0] == "new" && a[1] == "install");
+        Assert.IsNotNull(install, "An older installed pack must be upgraded to the requested version.");
+        Assert.AreEqual($"{NewCommand.TemplatePackageId}::0.0.6-alpha", install[2],
+            "The requested (newer) template-pack version must be the one installed.");
     }
 }

@@ -133,6 +133,17 @@ internal class NewCommand : Command, IShortDescription
         && version.All(c => char.IsLetterOrDigit(c) || c is '.' or '-' or '+');
 
     /// <summary>
+    /// Returns true only when <paramref name="name"/> is a safe single path segment. The resolved
+    /// name becomes both the default output directory (<c>./&lt;name&gt;</c>) and the <c>dotnet new</c>
+    /// project name, so path separators, <c>.</c>/<c>..</c>, rooted paths, and other invalid filename
+    /// characters are rejected to prevent the scaffold from escaping the current directory.
+    /// </summary>
+    internal static bool IsValidProjectName(string? name) =>
+        !string.IsNullOrWhiteSpace(name)
+        && name is not ("." or "..")
+        && name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0;
+
+    /// <summary>
     /// Returns true only when the <paramref name="requestedVersion"/> of the template pack is already
     /// installed. Parses the <c>dotnet new uninstall</c> listing (a package-id line followed by an
     /// indented "Version: x" line) so an older/different installed version is not mistaken for the
@@ -157,18 +168,21 @@ internal class NewCommand : Command, IShortDescription
             const string marker = "Version:";
             for (var j = i + 1; j < lines.Length && j <= i + 5; j++)
             {
-                var line = lines[j].Trim();
+                var raw = lines[j];
+                var line = raw.Trim();
+
+                // A non-empty, non-indented line starts a new package block. Stop before reading a
+                // different package's "Version:" line so the WinUI pack version can't be misread.
+                if (line.Length > 0 && !char.IsWhiteSpace(raw[0]))
+                {
+                    break;
+                }
+
                 var idx = line.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
                 if (idx >= 0)
                 {
                     var installedVersion = line[(idx + marker.Length)..].Trim();
                     return installedVersion.Equals(requestedVersion, StringComparison.OrdinalIgnoreCase);
-                }
-
-                // Reached the next package block without finding a version line.
-                if (line.Equals(TemplatePackageId, StringComparison.OrdinalIgnoreCase))
-                {
-                    break;
                 }
             }
 
@@ -233,6 +247,25 @@ internal class NewCommand : Command, IShortDescription
 
             // 3. Resolve output directory (default ./<name>)
             var currentDir = currentDirectoryProvider.GetCurrentDirectoryInfo();
+
+            // 3a. Validate the resolved name is a safe single path segment before it is used to build
+            // the default output path or passed to dotnet new. This fails fast (exit code 2) on names
+            // that would escape the current directory (e.g. "..\Escaped") or are otherwise invalid.
+            if (!IsValidProjectName(name))
+            {
+                if (isJson)
+                {
+                    PrintJson(false, template.Value, name ?? string.Empty, currentDir.FullName,
+                        $"Invalid name '{name}'. Use a simple name without path separators or invalid filename characters.");
+                }
+                else
+                {
+                    logger.LogError("{Error} Invalid name '{Name}'. Use a simple name without path separators or invalid filename characters.",
+                        UiSymbols.Error, name);
+                }
+                return ExitInvalidArgs;
+            }
+
             var outputDir = output ?? new DirectoryInfo(Path.Combine(currentDir.FullName, name!));
 
             // 3b. Validate the template-pack version (a NuGet version starts with a digit and contains

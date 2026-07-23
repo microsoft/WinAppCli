@@ -146,4 +146,48 @@ public class NewCommandTests : BaseCommandTests
 
         Assert.IsFalse(NewCommand.IsTemplatePackInstalled(listing, "0.0.6-alpha"));
     }
+
+    [TestMethod]
+    public void IsTemplatePackInstalled_MatchAfterOtherPackage_ReturnsTrue()
+    {
+        // The WinUI pack is listed after another package; its own indented Version line must be read.
+        var listing =
+            "Some.Other.Template.Pack\n" +
+            "   Version: 9.9.9\n" +
+            "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n" +
+            "   Version: 0.0.6-alpha\n";
+
+        Assert.IsTrue(NewCommand.IsTemplatePackInstalled(listing, "0.0.6-alpha"));
+    }
+
+    [TestMethod]
+    public void IsTemplatePackInstalled_MalformedBlockWithoutVersion_ReturnsFalse()
+    {
+        // The WinUI pack header has no Version line before the next package header. The next
+        // package's version must NOT be misattributed to the WinUI pack.
+        var listing =
+            "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n" +
+            "Some.Other.Template.Pack\n" +
+            "   Version: 0.0.6-alpha\n";
+
+        Assert.IsFalse(NewCommand.IsTemplatePackInstalled(listing, "0.0.6-alpha"),
+            "A following package's version line must not be read as the WinUI pack version.");
+    }
+
+    [TestMethod]
+    [DataRow("MyApp", true)]
+    [DataRow("My.App", true)]
+    [DataRow("My_App-1", true)]
+    [DataRow("", false)]
+    [DataRow("   ", false)]
+    [DataRow(".", false)]
+    [DataRow("..", false)]
+    [DataRow(@"..\Escaped", false)]     // path traversal
+    [DataRow("sub/dir", false)]          // forward-slash separator
+    [DataRow(@"C:\rooted", false)]       // rooted path (contains ':' and '\')
+    [DataRow("bad*name", false)]         // invalid filename char
+    public void IsValidProjectName_RejectsPathSeparatorsAndInvalidChars(string name, bool expected)
+    {
+        Assert.AreEqual(expected, NewCommand.IsValidProjectName(name));
+    }
 }

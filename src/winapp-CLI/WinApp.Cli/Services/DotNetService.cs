@@ -446,6 +446,11 @@ internal partial class DotNetService : IDotNetService
 
         await process.WaitForExitAsync(cancellationToken);
 
+        // WaitForExitAsync returns once the process exits, but the async stdout/stderr readers may
+        // still have buffered data in flight. The parameterless overload blocks until those readers
+        // have flushed, so the StringBuilders are complete before we read them.
+        process.WaitForExit();
+
         return (process.ExitCode, outputBuilder.ToString(), errorBuilder.ToString());
     }
 
