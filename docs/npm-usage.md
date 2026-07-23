@@ -279,7 +279,7 @@ function manifestUpdateAssets(options: ManifestUpdateAssetsOptions): Promise<Win
 
 ### `newCommand()`
 
-Create a new WinUI app from an official Windows App SDK template. Interactive by default: pick a template (blank, navigation view, tab view, MVVM, class library, or unit test), then a name and output directory. Automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Requires the .NET SDK; installs the WinUI template pack on demand and delegates scaffolding to 'dotnet new'. After creating, use 'winapp run' to build and launch.
+Create a new WinUI app from an official Windows App SDK template. Interactive by default: pick a template (blank, navigation view, tab view, MVVM, class library, or unit test), then a name (the output directory defaults to ./<name>). Automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Requires the .NET SDK; installs the WinUI template pack on demand and delegates scaffolding to 'dotnet new'. Scaffolds against the installed SDK's target framework and prints a template-specific next step when done (e.g. 'winapp run' for app templates).
 
 ```typescript
 function newCommand(options?: NewOptions): Promise<WinappResult>

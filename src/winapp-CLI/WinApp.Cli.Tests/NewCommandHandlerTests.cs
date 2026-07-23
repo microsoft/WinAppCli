@@ -102,7 +102,7 @@ public class NewCommandHandlerTests : BaseCommandTests
     {
         ScriptHappyPath();
         var command = GetRequiredService<NewCommand>();
-        var outDir = Path.Combine(_tempDirectory.FullName, "My App Dir");
+        var outDir = Path.Join(_tempDirectory.FullName, "My App Dir");
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json", "--output", outDir]);
 
@@ -135,7 +135,7 @@ public class NewCommandHandlerTests : BaseCommandTests
     {
         ScriptHappyPath();
         var command = GetRequiredService<NewCommand>();
-        var outDir = Path.Combine(_tempDirectory.FullName, "DerivedName");
+        var outDir = Path.Join(_tempDirectory.FullName, "DerivedName");
 
         await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json", "--output", outDir]);
 
@@ -331,7 +331,7 @@ public class NewCommandHandlerTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task Handler_UnitTestTemplate_PrintsDotnetTestNextStep()
+    public async Task Handler_UnitTestTemplate_PrintsPackagedRunNextStep()
     {
         ScriptHappyPath();
         var command = GetRequiredService<NewCommand>();
@@ -339,9 +339,45 @@ public class NewCommandHandlerTests : BaseCommandTests
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--template", "unittest", "--name", "MyTests"]);
 
         Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
-        Assert.IsTrue(TestAnsiConsole.Output.Contains("dotnet test", StringComparison.Ordinal),
-            $"The unittest template should suggest 'dotnet test'. Output:\n{TestAnsiConsole.Output}");
-        Assert.IsFalse(TestAnsiConsole.Output.Contains("winapp run", StringComparison.Ordinal));
+        Assert.IsTrue(TestAnsiConsole.Output.Contains("winapp run", StringComparison.Ordinal),
+            $"The unittest template is a packaged app; its tests run when launched with 'winapp run'. Output:\n{TestAnsiConsole.Output}");
+        Assert.IsFalse(TestAnsiConsole.Output.Contains("dotnet test", StringComparison.OrdinalIgnoreCase)
+            && !TestAnsiConsole.Output.Contains("not via", StringComparison.OrdinalIgnoreCase),
+            "The unittest next step must not recommend 'dotnet test' — the packaged MSTest app runs its tests on launch.");
+    }
+
+    [TestMethod]
+    public async Task Handler_ScaffoldPinsTargetFrameworkToInstalledSdk()
+    {
+        ScriptHappyPath(sdkVersion: "8.0.400");
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json", "--name", "MyApp"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        var scaffold = ScaffoldInvocation();
+        Assert.IsNotNull(scaffold);
+        var tokens = scaffold.ToArray();
+        var idx = Array.IndexOf(tokens, "--dotnet-version");
+        Assert.IsTrue(idx >= 0 && idx + 1 < tokens.Length,
+            "An accepted .NET 8 SDK must pin the scaffold to its own target framework, not the template's net10.0 default.");
+        Assert.AreEqual("net8.0", tokens[idx + 1],
+            "The scaffolded project must target the installed SDK's framework so it can be built.");
+    }
+
+    [TestMethod]
+    public async Task Handler_ScaffoldOmitsFrameworkPinForNewerSdk()
+    {
+        ScriptHappyPath(sdkVersion: "11.0.100");
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json", "--name", "MyApp"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        var scaffold = ScaffoldInvocation();
+        Assert.IsNotNull(scaffold);
+        CollectionAssert.DoesNotContain(scaffold.ToArray(), "--dotnet-version",
+            "For an SDK newer than the templates' choices, omit --dotnet-version and let the template auto-detect.");
     }
 
     [TestMethod]

@@ -91,7 +91,7 @@ internal class NewCommand : Command, IShortDescription
         };
     }
 
-    public NewCommand() : base("new", "Create a new WinUI app from an official Windows App SDK template. Interactive by default: pick a template (blank, navigation view, tab view, MVVM, class library, or unit test), then a name and output directory. Automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Requires the .NET SDK; installs the WinUI template pack on demand and delegates scaffolding to 'dotnet new'. After creating, use 'winapp run' to build and launch.")
+    public NewCommand() : base("new", "Create a new WinUI app from an official Windows App SDK template. Interactive by default: pick a template (blank, navigation view, tab view, MVVM, class library, or unit test), then a name (the output directory defaults to ./<name>). Automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Requires the .NET SDK; installs the WinUI template pack on demand and delegates scaffolding to 'dotnet new'. Scaffolds against the installed SDK's target framework and prints a template-specific next step when done (e.g. 'winapp run' for app templates).")
     {
         Options.Add(TemplateOption);
         Options.Add(NameOption);
@@ -315,7 +315,7 @@ internal class NewCommand : Command, IShortDescription
                 return ExitInvalidArgs;
             }
 
-            var outputDir = output ?? new DirectoryInfo(Path.Combine(currentDir.FullName, name!));
+            var outputDir = output ?? new DirectoryInfo(Path.Join(currentDir.FullName, name!));
 
             // 3b. Validate the template-pack version (a NuGet version starts with a digit and contains
             // only version characters). This fails fast on clearly invalid input with exit code 2.
@@ -335,8 +335,8 @@ internal class NewCommand : Command, IShortDescription
             }
 
             // 4. Prerequisite: .NET SDK (fail fast, do not install anything)
-            var sdkOk = await CheckDotnetSdkAsync(isJson, cancellationToken);
-            if (!sdkOk)
+            var sdkVersion = await CheckDotnetSdkAsync(isJson, cancellationToken);
+            if (sdkVersion is null)
             {
                 if (isJson)
                 {
@@ -368,6 +368,17 @@ internal class NewCommand : Command, IShortDescription
             // Pass each token via ArgumentList (injection-safe) so a crafted --name or --output cannot
             // inject additional dotnet new options.
             var args = new List<string> { "new", shortName, "-n", name!, "-o", outputDir.FullName };
+
+            // Pin the target framework to the installed SDK. The WinUI templates default to net10.0, so
+            // without this an accepted .NET 8/9 SDK would scaffold a project it cannot build. The
+            // templates only offer net8.0/net9.0/net10.0; for a newer SDK, omit the flag and let the
+            // template auto-detect the framework from the running dotnet CLI.
+            if (sdkVersion.Major is >= 8 and <= 10)
+            {
+                args.Add("--dotnet-version");
+                args.Add($"net{sdkVersion.Major}.0");
+            }
+
             if (force)
             {
                 args.Add("--force");
@@ -400,10 +411,10 @@ internal class NewCommand : Command, IShortDescription
                 switch (template.Value)
                 {
                     case WinUiTemplate.Lib:
-                        ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: from your app project, run [blue]dotnet add reference \"{Path.Combine(relative, name + ".csproj")}\"[/].");
+                        ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: from your app project, run [blue]dotnet add reference \"{Path.Join(relative, Path.GetFileName(name!) + ".csproj")}\"[/].");
                         break;
                     case WinUiTemplate.UnitTest:
-                        ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: [blue]cd \"{relative}\"[/] then [blue]dotnet test[/].");
+                        ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: [blue]cd \"{relative}\"[/] then [blue]winapp run .[/] — this packaged MSTest app runs its tests when launched (not via [blue]dotnet test[/]).");
                         break;
                     default:
                         ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: [blue]cd \"{relative}\"[/] then [blue]winapp run .[/]");
@@ -441,10 +452,12 @@ internal class NewCommand : Command, IShortDescription
         }
 
         /// <summary>
-        /// Verifies the .NET SDK is installed and meets the minimum version. Returns false (without
-        /// installing anything) with an actionable message if missing or too old.
+        /// Verifies the .NET SDK is installed and meets the minimum version. Returns the detected SDK
+        /// version, or <c>null</c> (without installing anything) with an actionable message if the SDK
+        /// is missing, too old, or its version can't be determined. The caller uses the returned major
+        /// version to pin the scaffolded project's target framework.
         /// </summary>
-        private async Task<bool> CheckDotnetSdkAsync(bool isJson, CancellationToken cancellationToken)
+        private async Task<Version?> CheckDotnetSdkAsync(bool isJson, CancellationToken cancellationToken)
         {
             var cwd = currentDirectoryProvider.GetCurrentDirectoryInfo();
             int exitCode;
@@ -466,7 +479,7 @@ internal class NewCommand : Command, IShortDescription
                 {
                     logger.LogError("{Error} The .NET SDK is required to create a WinUI app. Install it from https://dotnet.microsoft.com/download, then re-run 'winapp new'.", UiSymbols.Error);
                 }
-                return false;
+                return null;
             }
 
             var versionText = stdout.Trim();
@@ -486,10 +499,10 @@ internal class NewCommand : Command, IShortDescription
                         logger.LogError("{Error} .NET SDK {Installed} is installed, but {Minimum} or newer is required. Update from https://dotnet.microsoft.com/download, then re-run 'winapp new'.",
                             UiSymbols.Error, installed, MinimumSdkVersion);
                     }
-                    return false;
+                    return null;
                 }
 
-                return true;
+                return installed;
             }
 
             // Unparseable output means we can't confirm a usable SDK — fail the prerequisite rather
@@ -499,7 +512,7 @@ internal class NewCommand : Command, IShortDescription
                 logger.LogError("{Error} Could not determine the installed .NET SDK version (got '{Output}'). Ensure the .NET SDK {Minimum} or newer is installed from https://dotnet.microsoft.com/download, then re-run 'winapp new'.",
                     UiSymbols.Error, stdout.Trim(), MinimumSdkVersion);
             }
-            return false;
+            return null;
         }
 
         /// <summary>

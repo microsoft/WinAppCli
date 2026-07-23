@@ -88,7 +88,7 @@ Want to inspect or interact with a running app's UI?
 ## Complete command reference
 
 ### `winapp new`
-**Purpose:** Create a brand-new **WinUI** app from an official Windows App SDK `dotnet new` template. Unlike `winapp init` (which adds Windows support to an *existing* project), `new` scaffolds a project from scratch. WinUI templates already include Windows packaging and identity (`Package.appxmanifest`), so no separate `winapp init` step is needed afterward.
+**Purpose:** Create a brand-new **WinUI** app from an official Windows App SDK `dotnet new` template. Unlike `winapp init` (which adds Windows support to an *existing* project), `new` scaffolds a project from scratch. Most WinUI templates already include Windows packaging and identity (`Package.appxmanifest`) — the exception is the `lib` class-library template, which has no app manifest — so no separate `winapp init` step is needed afterward.
 **When to use:** The user has no project yet and wants to start a WinUI app.
 **Behavior:** Interactive by default (pick a template, then a name; output defaults to `./<name>`). Automatically uses defaults in non-interactive environments. Requires the .NET SDK — fails fast with guidance if it's missing (winapp does not install toolchains). Installs the WinUI template pack on demand and delegates scaffolding to `dotnet new`.
 **Key options:**
@@ -99,7 +99,7 @@ Want to inspect or interact with a running app's UI?
 - `--force` — scaffold even if the output directory already contains files
 - `--template-version <version>` — pin the WinUI template pack version (pinned by default)
 - `--json` — machine-readable output for agents
-**Next step:** `cd <name>` then `winapp run .` to build and launch (for `lib`/`unittest` templates the next step differs — reference the library, or `dotnet test`).
+**Next step:** `cd <name>` then `winapp run .` to build and launch. The `lib` template differs — reference it from an app project. The `unittest` template is a packaged MSTest app whose tests run when it's launched (`winapp run .` / `dotnet run`), not via `dotnet test`.
 
 ### `winapp init [base-directory]`
 **Purpose:** Add Windows platform support to an existing project. Creates `appxmanifest.xml`, default image assets, `winapp.yaml` config, and optionally downloads Windows SDK / Windows App SDK packages. Does **not** create a new project — the user must already have a project with their chosen framework.
