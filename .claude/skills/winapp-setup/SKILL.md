@@ -36,6 +36,21 @@ You need an **existing app project** — `winapp init` does **not** create new p
 
 ## Usage
 
+### Create a new WinUI app
+
+To start a brand-new **WinUI** app (rather than adding Windows support to an existing project), use `winapp new`. It verifies the .NET SDK, installs the official WinUI `dotnet new` template pack on demand, and scaffolds the app. WinUI templates already include packaging/identity, so **no `winapp init` step is needed** afterward — go straight to `winapp run`.
+
+```powershell
+# Interactive — pick a template (blank, navview, tabview, mvvm, lib, unittest), then name/output
+winapp new
+
+# One-shot with a specific template
+winapp new --name MyApp --template navview
+
+# Non-interactive (agent) with machine-readable output
+winapp new --use-defaults --name MyApp --json
+```
+
 ### Initialize a new winapp project
 
 ```powershell
@@ -184,6 +199,22 @@ Start here for initializing a Windows app with required setup. Sets up everythin
 | `--no-gitignore` | Don't update .gitignore file | (none) |
 | `--setup-sdks` | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) | (none) |
 | `--use-defaults` | Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults) | (none) |
+
+### `winapp new`
+
+Create a new WinUI app from an official Windows App SDK template. Interactive by default: pick a template (blank, navigation view, tab view, MVVM, class library, or unit test), then a name and output directory. Automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Requires the .NET SDK; installs the WinUI template pack on demand and delegates scaffolding to 'dotnet new'. After creating, use 'winapp run' to build and launch.
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--force` | Scaffold even if the output directory already contains files. | (none) |
+| `--json` | Format output as JSON | (none) |
+| `--name` | Name for the new app/project (default: derived from --output, else 'WinUIApp'). | (none) |
+| `--output` | Directory to create the app in (default: ./<name>). Created if it doesn't exist. | (none) |
+| `--template` | WinUI template: blank (default), navview, tabview, mvvm, lib, or unittest. | (none) |
+| `--template-version` | Version of the WinUI template pack to use (default: 0.0.6-alpha). | (none) |
+| `--use-defaults` | Do not prompt; use defaults (blank template, name from --output/--name). | (none) |
 
 ### `winapp restore`
 

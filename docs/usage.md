@@ -109,6 +109,58 @@ Use `--setup-sdks preview` or `--setup-sdks experimental` for preview/experiment
 
 ---
 
+### new
+
+Create a new **WinUI** app from an official Windows App SDK `dotnet new` template. Interactive by default; automatically uses defaults in non-interactive environments.
+
+```bash
+winapp new [options]
+```
+
+**Options:**
+
+- `-t, --template <blank|navview|tabview|mvvm|lib|unittest>` - WinUI template to use (default: `blank`)
+- `-n, --name <name>` - Name for the new app/project (default: derived from `--output`, else `WinUIApp`)
+- `-o, --output <path>` - Directory to create the app in (default: `./<name>`)
+- `--use-defaults`, `--no-prompt` - Do not prompt; use defaults
+- `--force` - Scaffold even if the output directory already contains files
+- `--template-version <version>` - Version of the WinUI template pack to use (pinned by default)
+- `--json` - Format output as JSON
+
+**Templates:**
+
+| Alias | `dotnet new` template | Description |
+|-------|-----------------------|-------------|
+| `blank` | `winui` | Minimal blank WinUI 3 app (MSIX packaging) |
+| `navview` | `winui-navview` | NavigationView starter app |
+| `tabview` | `winui-tabview` | TabView starter app |
+| `mvvm` | `winui-mvvm` | MVVM app (CommunityToolkit.Mvvm) |
+| `lib` | `winui-lib` | WinUI 3 class library |
+| `unittest` | `winui-unittest` | Packaged MSTest unit-test app |
+
+**What it does:**
+
+- Verifies the .NET SDK is installed (fails fast with guidance if missing — `winapp` does not install toolchains)
+- Installs the official WinUI template pack (`Microsoft.WindowsAppSDK.WinUI.CSharp.Templates`) on demand
+- Delegates scaffolding to `dotnet new <template>`
+
+WinUI templates already include Windows packaging and identity (`Package.appxmanifest`), so no separate `winapp init` step is required. After creating the app, use `winapp run` to build and launch it.
+
+**Examples:**
+
+```bash
+# Interactive: pick a template, then name/output
+winapp new
+
+# One-shot with a specific template
+winapp new --name MyApp --template navview
+
+# Non-interactive (agent) with machine-readable output
+winapp new --use-defaults --name MyApp --json
+```
+
+---
+
 ### restore
 
 Restore packages and regenerate files based on existing `winapp.yaml` configuration.

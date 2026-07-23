@@ -277,6 +277,30 @@ function manifestUpdateAssets(options: ManifestUpdateAssetsOptions): Promise<Win
 
 ---
 
+### `newCommand()`
+
+Create a new WinUI app from an official Windows App SDK template. Interactive by default: pick a template (blank, navigation view, tab view, MVVM, class library, or unit test), then a name and output directory. Automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Requires the .NET SDK; installs the WinUI template pack on demand and delegates scaffolding to 'dotnet new'. After creating, use 'winapp run' to build and launch.
+
+```typescript
+function newCommand(options?: NewOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `force` | `boolean \| undefined` | No | Scaffold even if the output directory already contains files. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `name` | `string \| undefined` | No | Name for the new app/project (default: derived from --output, else 'WinUIApp'). |
+| `output` | `string \| undefined` | No | Directory to create the app in (default: ./<name>). Created if it doesn't exist. |
+| `template` | `WinUiTemplate \| undefined` | No | WinUI template: blank (default), navview, tabview, mvvm, lib, or unittest. |
+| `templateVersion` | `string \| undefined` | No | Version of the WinUI template pack to use (default: 0.0.6-alpha). |
+| `useDefaults` | `boolean \| undefined` | No | Do not prompt; use defaults (blank template, name from --output/--name). |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `packageApp()`
 
 Create MSIX installer from your built app. Run after building your app. A manifest (Package.appxmanifest or appxmanifest.xml) is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest Package.appxmanifest --cert ./devcert.pfx
@@ -1247,6 +1271,14 @@ ManifestTemplates values.
 type ManifestTemplates = "packaged" | "sparse"
 ```
 
+### `WinUiTemplate`
+
+WinUiTemplate values.
+
+```typescript
+type WinUiTemplate = "blank" | "navview" | "tabview" | "mvvm" | "lib" | "unittest"
+```
+
 ### `CertGenerateOptions`
 
 | Property | Type | Required | Description |
@@ -1371,6 +1403,21 @@ type ManifestTemplates = "packaged" | "sparse"
 | `imagePath` | `string` | Yes | Path to source image file (SVG, PNG, ICO, JPG, BMP, GIF) |
 | `lightImage` | `string \| undefined` | No | Path to source image for light theme variants (SVG, PNG, ICO, JPG, BMP, GIF) |
 | `manifest` | `string \| undefined` | No | Path to Package.appxmanifest or appxmanifest.xml file (default: search current directory) |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `NewOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `force` | `boolean \| undefined` | No | Scaffold even if the output directory already contains files. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `name` | `string \| undefined` | No | Name for the new app/project (default: derived from --output, else 'WinUIApp'). |
+| `output` | `string \| undefined` | No | Directory to create the app in (default: ./<name>). Created if it doesn't exist. |
+| `template` | `WinUiTemplate \| undefined` | No | WinUI template: blank (default), navview, tabview, mvvm, lib, or unittest. |
+| `templateVersion` | `string \| undefined` | No | Version of the WinUI template pack to use (default: 0.0.6-alpha). |
+| `useDefaults` | `boolean \| undefined` | No | Do not prompt; use defaults (blank template, name from --output/--name). |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

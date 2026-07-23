@@ -31,6 +31,21 @@ You need an **existing app project** — `winapp init` does **not** create new p
 
 ## Usage
 
+### Create a new WinUI app
+
+To start a brand-new **WinUI** app (rather than adding Windows support to an existing project), use `winapp new`. It verifies the .NET SDK, installs the official WinUI `dotnet new` template pack on demand, and scaffolds the app. WinUI templates already include packaging/identity, so **no `winapp init` step is needed** afterward — go straight to `winapp run`.
+
+```powershell
+# Interactive — pick a template (blank, navview, tabview, mvvm, lib, unittest), then name/output
+winapp new
+
+# One-shot with a specific template
+winapp new --name MyApp --template navview
+
+# Non-interactive (agent) with machine-readable output
+winapp new --use-defaults --name MyApp --json
+```
+
 ### Initialize a new winapp project
 
 ```powershell

@@ -56,6 +56,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
 
     public WinAppRootCommand(
         InitCommand initCommand,
+        NewCommand newCommand,
         RestoreCommand restoreCommand,
         PackageCommand packageCommand,
         ManifestCommand manifestCommand,
@@ -74,6 +75,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         UiCommand uiCommand) : base("CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows")
     {
         Subcommands.Add(initCommand);
+        Subcommands.Add(newCommand);
         Subcommands.Add(restoreCommand);
         Subcommands.Add(packageCommand);
         Subcommands.Add(manifestCommand);
@@ -99,7 +101,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         // Replace the default help with a custom categorized help screen
         var helpOption = Options.OfType<HelpOption>().First();
         helpOption.Action = new CustomHelpAction(this, ansiConsole,
-            ("Setup", [typeof(InitCommand), typeof(RestoreCommand), typeof(UpdateCommand)]),
+            ("Setup", [typeof(InitCommand), typeof(NewCommand), typeof(RestoreCommand), typeof(UpdateCommand)]),
             ("Packaging & Signing", [typeof(PackageCommand), typeof(SignCommand), typeof(CertCommand), typeof(ManifestCommand), typeof(CreateExternalCatalogCommand)]),
             ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand), typeof(RunCommand), typeof(UnregisterCommand)]),
             ("UI Automation", [typeof(UiCommand)])
