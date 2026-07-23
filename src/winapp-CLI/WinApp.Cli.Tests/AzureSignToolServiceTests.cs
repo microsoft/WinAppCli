@@ -159,6 +159,22 @@ public class AzureSignToolServiceTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task EnsureTrustedSigningDlibAsync_WhenCancelledDuringInstall_PropagatesCancellation()
+    {
+        using var cts = new CancellationTokenSource();
+
+        // EnsurePackageAsync swallows OperationCanceledException and returns false, so simulate a
+        // download cancelled mid-flight: the token is cancelled while "installing" and the install
+        // reports failure. The service must surface cancellation rather than the generic install
+        // failure and must not continue into the post-install dlib lookup.
+        _installer.EnsureResult = false;
+        _installer.OnEnsure = () => cts.Cancel();
+
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(
+            () => _service.EnsureTrustedSigningDlibAsync(TestTaskContext, cts.Token));
+    }
+
+    [TestMethod]
     public async Task SignAsync_ForwardsTenantAndSelectsArchMatchedSigntool()
     {
         var dlib = CreateDlibInCache(); // bin/x64/Azure.CodeSigning.Dlib.dll

@@ -203,6 +203,13 @@ internal class AzureSignToolService(
             return (0, $"{ArtifactSigningClientPackage} installed successfully.");
         }, cancellationToken);
 
+        // EnsurePackageAsync swallows all exceptions (including OperationCanceledException) and
+        // returns false, and the subtask wrapper likewise converts a thrown cancellation into a
+        // failed-result tuple rather than rethrowing. Either way a cancelled download would otherwise
+        // fall through to the dlib lookup below. Re-check the caller's token here so Ctrl+C during the
+        // install propagates as cancellation instead of a generic "could not find the dlib" failure.
+        cancellationToken.ThrowIfCancellationRequested();
+
         dlibPath = FindTrustedSigningDlib(ArtifactSigningClientVersion);
         if (dlibPath == null)
         {
