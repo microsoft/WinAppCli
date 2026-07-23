@@ -16,6 +16,11 @@ public class AzSignCommandTests : BaseCommandTests
     private FakeAzureSignToolService _fakeSignToolService = null!;
     private AzSignCommand _command = null!;
 
+    // A complete, valid dlib metadata document (trusted endpoint + account + profile) for tests that
+    // exercise the happy path of supplying a metadata file directly.
+    private const string ValidMetadataJson =
+        "{\"Endpoint\":\"https://eus.codesigning.azure.net\",\"CodeSigningAccountName\":\"myaccount\",\"CertificateProfileName\":\"myprofile\"}";
+
     [TestInitialize]
     public void Setup()
     {
@@ -295,7 +300,7 @@ public class AzSignCommandTests : BaseCommandTests
         await File.WriteAllTextAsync(filePath, "MZ");
 
         var metadataPath = Path.Join(_tempDirectory.FullName, "metadata.json");
-        await File.WriteAllTextAsync(metadataPath, "{\"Endpoint\":\"https://eus.codesigning.azure.net\"}");
+        await File.WriteAllTextAsync(metadataPath, ValidMetadataJson);
 
         var result = await ParseAndInvokeWithCaptureAsync(_command, ["--metadata-file", metadataPath, filePath]);
 
@@ -317,7 +322,7 @@ public class AzSignCommandTests : BaseCommandTests
         await File.WriteAllTextAsync(filePath, "MZ");
 
         var metadataPath = Path.Join(_tempDirectory.FullName, "metadata.json");
-        await File.WriteAllTextAsync(metadataPath, "{\"Endpoint\":\"https://eus.codesigning.azure.net\"}");
+        await File.WriteAllTextAsync(metadataPath, ValidMetadataJson);
 
         _fakeAuthService.ShouldFail = true;
         _fakeAuthService.FailureMessage = "Azure authentication failed. No credentials found.";
@@ -492,6 +497,64 @@ public class AzSignCommandTests : BaseCommandTests
         Assert.AreEqual(1, result);
         var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
         StringAssert.Contains(allOutput, "Endpoint");
+        Assert.AreEqual(0, _fakeSignToolService.CallCount);
+    }
+
+    [TestMethod]
+    public async Task AzSign_MetadataFileMissingAccountName_ReturnsError()
+    {
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
+        await File.WriteAllTextAsync(filePath, "MZ");
+
+        var metadataPath = Path.Join(_tempDirectory.FullName, "metadata.json");
+        // Trusted endpoint and profile present, but no CodeSigningAccountName.
+        await File.WriteAllTextAsync(metadataPath,
+            "{\"Endpoint\":\"https://eus.codesigning.azure.net\",\"CertificateProfileName\":\"myprofile\"}");
+
+        var result = await ParseAndInvokeWithCaptureAsync(_command, ["--metadata-file", metadataPath, filePath]);
+
+        Assert.AreEqual(1, result);
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
+        StringAssert.Contains(allOutput, "CodeSigningAccountName");
+        // Validation must fail before any Azure work or signing.
+        Assert.AreEqual(0, _fakeAuthService.GetAccessTokenCallCount, "Must not authenticate with incomplete metadata");
+        Assert.AreEqual(0, _fakeSignToolService.CallCount, "Must not sign with incomplete metadata");
+    }
+
+    [TestMethod]
+    public async Task AzSign_MetadataFileMissingProfileName_ReturnsError()
+    {
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
+        await File.WriteAllTextAsync(filePath, "MZ");
+
+        var metadataPath = Path.Join(_tempDirectory.FullName, "metadata.json");
+        // Trusted endpoint and account present, but no CertificateProfileName.
+        await File.WriteAllTextAsync(metadataPath,
+            "{\"Endpoint\":\"https://eus.codesigning.azure.net\",\"CodeSigningAccountName\":\"myaccount\"}");
+
+        var result = await ParseAndInvokeWithCaptureAsync(_command, ["--metadata-file", metadataPath, filePath]);
+
+        Assert.AreEqual(1, result);
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
+        StringAssert.Contains(allOutput, "CertificateProfileName");
+        Assert.AreEqual(0, _fakeAuthService.GetAccessTokenCallCount, "Must not authenticate with incomplete metadata");
+        Assert.AreEqual(0, _fakeSignToolService.CallCount, "Must not sign with incomplete metadata");
+    }
+
+    [TestMethod]
+    public async Task AzSign_MetadataFileWithNonObjectRoot_ReturnsError()
+    {
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
+        await File.WriteAllTextAsync(filePath, "MZ");
+
+        var metadataPath = Path.Join(_tempDirectory.FullName, "metadata.json");
+        await File.WriteAllTextAsync(metadataPath, "[\"not\",\"an\",\"object\"]");
+
+        var result = await ParseAndInvokeWithCaptureAsync(_command, ["--metadata-file", metadataPath, filePath]);
+
+        Assert.AreEqual(1, result);
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
+        StringAssert.Contains(allOutput, "must contain a JSON object");
         Assert.AreEqual(0, _fakeSignToolService.CallCount);
     }
 

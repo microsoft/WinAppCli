@@ -134,10 +134,12 @@ internal class AzSignCommand : Command, IShortDescription
 
                 if (metadataFile != null)
                 {
-                    // Validate the user-supplied Endpoint before signing: signtool's dlib sends an
-                    // Azure access token to this host, so an attacker-controlled Endpoint (in a
-                    // checked-in or CI-produced metadata.json) could exfiltrate the token.
-                    ValidateMetadataFileEndpoint(metadataFile);
+                    // Validate the user-supplied metadata before any Azure work: signtool's dlib sends
+                    // an Azure access token to the Endpoint, so an attacker-controlled Endpoint (in a
+                    // checked-in or CI-produced metadata.json) could exfiltrate the token. Also require
+                    // the account and profile fields so an incomplete file fails fast here rather than
+                    // after authentication with an opaque error from inside signtool.
+                    ValidateMetadataFile(metadataFile);
 
                     // Even though we skip ARM resource discovery here, still run the credential/login
                     // preparation. This is the only path that detects a missing interactive credential
@@ -256,23 +258,21 @@ internal class AzSignCommand : Command, IShortDescription
         }
 
         /// <summary>
-        /// Validates a user-supplied metadata file's <c>Endpoint</c> before it is handed to
-        /// signtool's dlib. The dlib acquires an Azure access token and sends it to that host, so
-        /// an attacker-controlled Endpoint (e.g. in a checked-in or CI-produced metadata.json)
-        /// could exfiltrate the token. Only an https URL on the Azure Code Signing data-plane
-        /// domain is accepted.
+        /// Validates a user-supplied metadata file before it is handed to signtool's dlib. The dlib
+        /// acquires an Azure access token and sends it to the <c>Endpoint</c>, so an attacker-controlled
+        /// Endpoint (e.g. in a checked-in or CI-produced metadata.json) could exfiltrate the token —
+        /// only an https URL on the Azure Code Signing data-plane domain is accepted. The
+        /// <c>CodeSigningAccountName</c> and <c>CertificateProfileName</c> fields required by the dlib
+        /// contract are also validated so an incomplete file fails fast here instead of after
+        /// authentication with an opaque error from inside signtool.
         /// </summary>
-        private static void ValidateMetadataFileEndpoint(FileInfo metadataFile)
+        private static void ValidateMetadataFile(FileInfo metadataFile)
         {
-            string? endpoint;
+            JsonDocument doc;
             try
             {
                 using var stream = metadataFile.OpenRead();
-                using var doc = JsonDocument.Parse(stream);
-                endpoint = doc.RootElement.TryGetProperty("Endpoint", out var endpointProp)
-                    && endpointProp.ValueKind == JsonValueKind.String
-                        ? endpointProp.GetString()
-                        : null;
+                doc = JsonDocument.Parse(stream);
             }
             catch (JsonException ex)
             {
@@ -280,19 +280,50 @@ internal class AzSignCommand : Command, IShortDescription
                     $"Metadata file '{metadataFile.FullName}' is not valid JSON: {ex.Message}");
             }
 
-            if (string.IsNullOrEmpty(endpoint))
+            using (doc)
+            {
+                var root = doc.RootElement;
+                if (root.ValueKind != JsonValueKind.Object)
+                {
+                    throw new InvalidOperationException(
+                        $"Metadata file '{metadataFile.FullName}' must contain a JSON object.");
+                }
+
+                var endpoint = GetRequiredMetadataString(root, "Endpoint", metadataFile);
+
+                if (!IsTrustedSigningEndpoint(endpoint))
+                {
+                    throw new InvalidOperationException(
+                        $"Refusing to sign with untrusted Endpoint '{endpoint}' from the metadata file. " +
+                        $"The Endpoint must be an https URL on a '*{SigningEndpointHostSuffix}' host — this " +
+                        "protects your Azure access token from being sent to an attacker-controlled endpoint.");
+                }
+
+                // The dlib metadata contract also requires the signing account and certificate profile.
+                // Validate them up front so an incomplete file fails fast here instead of after
+                // authentication/download work with an opaque error from inside signtool.
+                GetRequiredMetadataString(root, "CodeSigningAccountName", metadataFile);
+                GetRequiredMetadataString(root, "CertificateProfileName", metadataFile);
+            }
+        }
+
+        /// <summary>
+        /// Reads a required non-empty string property from the metadata root, throwing a clear error
+        /// when it is missing, not a string, or empty.
+        /// </summary>
+        private static string GetRequiredMetadataString(JsonElement root, string propertyName, FileInfo metadataFile)
+        {
+            var value = root.TryGetProperty(propertyName, out var prop) && prop.ValueKind == JsonValueKind.String
+                ? prop.GetString()
+                : null;
+
+            if (string.IsNullOrEmpty(value))
             {
                 throw new InvalidOperationException(
-                    $"Metadata file '{metadataFile.FullName}' is missing a string 'Endpoint' property.");
+                    $"Metadata file '{metadataFile.FullName}' is missing a non-empty string '{propertyName}' property.");
             }
 
-            if (!IsTrustedSigningEndpoint(endpoint))
-            {
-                throw new InvalidOperationException(
-                    $"Refusing to sign with untrusted Endpoint '{endpoint}' from the metadata file. " +
-                    $"The Endpoint must be an https URL on a '*{SigningEndpointHostSuffix}' host — this " +
-                    "protects your Azure access token from being sent to an attacker-controlled endpoint.");
-            }
+            return value;
         }
 
         /// <summary>
