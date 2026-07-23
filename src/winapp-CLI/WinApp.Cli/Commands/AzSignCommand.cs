@@ -444,7 +444,7 @@ internal class AzSignCommand : Command, IShortDescription
                     : $"resource group '{resourceGroup}'";
                 throw new InvalidOperationException(
                     $"No signing accounts found in the {context}.\n" +
-                    "Create one in the Azure portal (Azure Code Signing > Create).");
+                    "Create one in the Azure portal (search for 'Trusted Signing', formerly Azure Code Signing).");
             }
 
             if (accounts.Count == 1)
