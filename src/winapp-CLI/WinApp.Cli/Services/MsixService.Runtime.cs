@@ -750,24 +750,32 @@ internal partial class MsixService
             mainVersion = config.GetVersion(BuildToolsService.WINAPP_SDK_PACKAGE);
         }
 
+        // Prefer the runtime package resolved from the restored package graph — no network needed.
+        // Also covers the framework-dependent app that pulls in the Windows App SDK via the runtime
+        // (and other sub-packages) without the meta Microsoft.WindowsAppSDK package: mainVersion is
+        // then unavailable, but the runtime version alone locates the exact MSIX.
+        if (localRuntimeId != null && localRuntimeVersion != null)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Package} Resolved runtime package locally from restored package list: {localRuntimeId} v{localRuntimeVersion}");
+            var localDeps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [localRuntimeId] = localRuntimeVersion,
+            };
+            if (!string.IsNullOrEmpty(mainVersion))
+            {
+                localDeps[BuildToolsService.WINAPP_SDK_PACKAGE] = mainVersion;
+            }
+            // The runtime version is authoritative for the MSIX lookup; fall back to it as the
+            // returned main version when the meta package isn't in the graph.
+            return (localDeps, mainVersion ?? localRuntimeVersion);
+        }
+
         if (string.IsNullOrEmpty(mainVersion))
         {
             taskContext.AddDebugMessage($"{UiSymbols.Warning} No {BuildToolsService.WINAPP_SDK_PACKAGE} package found");
             return (null, null);
         }
         taskContext.AddDebugMessage($"{UiSymbols.Package} Found Windows App SDK main package: v{mainVersion}");
-
-        // Prefer the runtime package resolved from the restored package graph — no network needed.
-        if (localRuntimeId != null && localRuntimeVersion != null)
-        {
-            taskContext.AddDebugMessage($"{UiSymbols.Package} Resolved runtime package locally from restored package list: {localRuntimeId} v{localRuntimeVersion}");
-            var localDeps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                [BuildToolsService.WINAPP_SDK_PACKAGE] = mainVersion,
-                [localRuntimeId] = localRuntimeVersion,
-            };
-            return (localDeps, mainVersion);
-        }
 
         try
         {

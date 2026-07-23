@@ -76,6 +76,26 @@ public class MsixServiceWinAppSdkResolutionTests : BaseCommandTests
         ]);
     }
 
+    // Helper: framework-dependent app that pulls in the Windows App SDK via the runtime and other
+    // sub-packages transitively, WITHOUT the meta Microsoft.WindowsAppSDK package.
+    private static DotNetPackageListJson BuildCsprojPackageListRuntimeWithoutMeta(string runtimeVersion)
+    {
+        return new DotNetPackageListJson(
+        [
+            new DotNetProject(
+            [
+                new DotNetFramework(
+                    TestFramework,
+                    [],
+                    [
+                        new DotNetPackage("Microsoft.WindowsAppSDK.WinUI", runtimeVersion, runtimeVersion),
+                        new DotNetPackage(BuildToolsService.WINAPP_SDK_RUNTIME_PACKAGE, runtimeVersion, runtimeVersion)
+                    ]
+                )
+            ])
+        ]);
+    }
+
     #region GetWinAppSDKPackageDependenciesAsync: resolution priority tests
 
     [TestMethod]
@@ -193,6 +213,28 @@ public class MsixServiceWinAppSdkResolutionTests : BaseCommandTests
 
         // Assert: the network dependency lookup is still consulted for this case.
         Assert.AreEqual(1, _nuget.GetPackageDependenciesCallCount, "Should fall back to the network dependency lookup when no separate runtime package is in the list");
+    }
+
+    [TestMethod]
+    public async Task GetWinAppSDKPackageDependenciesAsync_RuntimeWithoutMetaPackage_ResolvesFromRuntimeVersion()
+    {
+        // Arrange: framework-dependent app that pulls in the Windows App SDK via the runtime (and
+        // other sub-packages) transitively but never the meta Microsoft.WindowsAppSDK package — a
+        // valid, buildable config that previously failed runtime resolution. Simulate offline NuGet.
+        var csprojPackageList = BuildCsprojPackageListRuntimeWithoutMeta("1.8.250916003");
+        _nuget.ThrowOnGetPackageDependencies = true;
+
+        // Act
+        var (cachedPackages, mainVersion) = await _msixService.GetWinAppSDKPackageDependenciesAsync(
+            csprojPackageList, TestTaskContext, TestContext.CancellationToken);
+
+        // Assert: resolves from the runtime package even though the meta package is absent.
+        Assert.AreEqual(0, _nuget.GetPackageDependenciesCallCount, "Runtime resolution must not require a network round-trip");
+        Assert.IsNotNull(cachedPackages, "Should resolve the runtime locally when the meta package is absent");
+        Assert.IsTrue(cachedPackages!.ContainsKey(BuildToolsService.WINAPP_SDK_RUNTIME_PACKAGE), "Runtime package should be present");
+        Assert.AreEqual("1.8.250916003", cachedPackages[BuildToolsService.WINAPP_SDK_RUNTIME_PACKAGE]);
+        Assert.IsFalse(cachedPackages.ContainsKey(BuildToolsService.WINAPP_SDK_PACKAGE), "Meta package should not be fabricated when it is not in the graph");
+        Assert.AreEqual("1.8.250916003", mainVersion, "Main version should fall back to the runtime version when the meta package is absent");
     }
 
     #endregion
