@@ -273,24 +273,51 @@ internal sealed partial class ProjectRunService
         properties.Any(p => p.StartsWith(name + "=", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
-    /// Reads the value of the user's <c>-p Name=Value</c> for <paramref name="name"/> (case-insensitive),
-    /// returning <see langword="true"/> only when present with a non-empty value. Project-mode validation
-    /// rejects a ';'-packed <c>-p</c> up front, so each entry is a single <c>Name=Value</c> here.
+    /// Reads the effective value of the user's <c>-p Name=Value</c> for <paramref name="name"/>
+    /// (case-insensitive). MSBuild is last-wins for repeated properties, so this scans ALL entries and
+    /// returns the LAST non-empty match; an empty value (e.g. <c>-p:TargetFramework=</c>) is treated as
+    /// "not specified" and does not hide a later valid value. Returns <see langword="true"/> only when a
+    /// non-empty value was found. Project-mode validation rejects a ';'-packed <c>-p</c> up front, so each
+    /// entry is a single <c>Name=Value</c> here.
     /// </summary>
     private static bool TryGetUserProperty(IReadOnlyList<string> properties, string name, out string value)
     {
+        value = string.Empty;
+        var found = false;
         foreach (var property in properties)
         {
             var equals = property.IndexOf('=');
             if (equals > 0 && property[..equals].Trim().Equals(name, StringComparison.OrdinalIgnoreCase))
             {
-                value = property[(equals + 1)..].Trim();
-                return value.Length > 0;
+                var candidate = property[(equals + 1)..].Trim();
+                if (candidate.Length > 0)
+                {
+                    value = candidate;
+                    found = true;
+                }
             }
         }
 
-        value = string.Empty;
-        return false;
+        return found;
+    }
+
+    /// <summary>
+    /// Resolves the <em>explicit</em> effective target framework from the CLI inputs — the value both the
+    /// classification pass and the build pass must share so they never evaluate a different TFM. Precedence:
+    /// a dedicated <c>--framework</c> wins; otherwise a bare <c>-p:TargetFramework</c> is PROMOTED (last-wins
+    /// across repeats, empty ignored — see <see cref="TryGetUserProperty"/>); otherwise <see langword="null"/>,
+    /// leaving the lower-precedence multi-target first-TFM auto-pin to the build resolution. This is a pure
+    /// function of the args (no project evaluate), so it can run BEFORE input/classification resolution and be
+    /// threaded into both, keeping the two passes from diverging for a multi-targeted project.
+    /// </summary>
+    internal static string? ResolveExplicitFramework(string? frameworkOption, IReadOnlyList<string> properties)
+    {
+        if (!string.IsNullOrWhiteSpace(frameworkOption))
+        {
+            return frameworkOption.Trim();
+        }
+
+        return TryGetUserProperty(properties, "TargetFramework", out var userFramework) ? userFramework : null;
     }
 
 

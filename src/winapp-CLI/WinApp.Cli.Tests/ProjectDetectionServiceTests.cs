@@ -759,6 +759,48 @@ public class ProjectDetectionServiceTests
 
         Assert.AreEqual(ProjectRunnability.Test, ProjectDetectionService.ClassifyRunnableStatic(csproj));
     }
+
+    [TestMethod]
+    public void ClassifyRunnableStatic_UnconditionalTestContainerCapability_IsTest()
+    {
+        // The unconditional filter is applied to the ProjectCapability scan too, not just PackageReference:
+        // an ungated <ProjectCapability Include="TestContainer"> (the SDK-style test shape) classifies as a
+        // test even when the app declares WinExe.
+        CreateFile("App.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup><OutputType>WinExe</OutputType></PropertyGroup>
+          <ItemGroup>
+            <ProjectCapability Include="TestContainer" />
+          </ItemGroup>
+        </Project>
+        """);
+        var csproj = new FileInfo(Path.Combine(_tempDir, "App.csproj"));
+
+        Assert.AreEqual(ProjectRunnability.Test, ProjectDetectionService.ClassifyRunnableStatic(csproj));
+    }
+
+    [TestMethod]
+    public void ClassifyRunnableStatic_TestContainerCapabilityUnderInactiveCondition_IsAppNotTest()
+    {
+        // The static fallback can't evaluate Conditions, so a TestContainer capability gated behind an
+        // inactive Condition — here via a <Choose>/<When> ancestor, exercising the AncestorsAndSelf walk —
+        // must be ignored rather than misclassifying a runnable app as a test.
+        CreateFile("App.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup><OutputType>WinExe</OutputType></PropertyGroup>
+          <Choose>
+            <When Condition="'$(Configuration)'=='Test'">
+              <ItemGroup>
+                <ProjectCapability Include="TestContainer" />
+              </ItemGroup>
+            </When>
+          </Choose>
+        </Project>
+        """);
+        var csproj = new FileInfo(Path.Combine(_tempDir, "App.csproj"));
+
+        Assert.AreEqual(ProjectRunnability.App, ProjectDetectionService.ClassifyRunnableStatic(csproj));
+    }
 }
 
 /// <summary>

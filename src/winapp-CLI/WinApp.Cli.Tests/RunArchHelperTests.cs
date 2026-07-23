@@ -50,6 +50,9 @@ public class RunArchHelperTests
     [DataRow("win10-arm64", "arm64")]
     [DataRow("win-x86", "x86")]
     [DataRow("win-arm64", "arm64")]
+    [DataRow("x64", "x64")]
+    [DataRow("arm64", "arm64")]
+    [DataRow("x86", "x86")]
     public void ArchitectureFromRid_ExtractsArch(string rid, string expected)
     {
         Assert.AreEqual(expected, RunArchHelper.ArchitectureFromRid(rid));

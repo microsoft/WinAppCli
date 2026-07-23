@@ -97,10 +97,15 @@ internal partial class RunCommand
             var configuration = parseResult.GetValue(ConfigurationOption) ?? "Debug";
             var archOption = parseResult.GetValue(ArchOption);
             var runtimeOption = parseResult.GetValue(RuntimeOption);
-            var framework = parseResult.GetValue(FrameworkOption);
             var noBuild = parseResult.GetValue(NoBuildOption);
             var noRestore = parseResult.GetValue(NoRestoreOption);
             var properties = parseResult.GetValue(PropertyOption) ?? [];
+
+            // Resolve the explicit effective framework ONCE (--framework > bare -p:TargetFramework), so the
+            // build options below and the classification pass (BuildClassificationInputs) share the SAME TFM
+            // and can never evaluate a different one for a multi-targeted project (M3). The lower-precedence
+            // multi-target first-TFM auto-pin still happens in the build resolution when this is null.
+            var framework = ProjectRunService.ResolveExplicitFramework(parseResult.GetValue(FrameworkOption), properties);
 
             // Reject malformed -p values early: each must be Name=Value with a non-empty,
             // non-whitespace name, otherwise it would become a nonsensical '-p:=Value' / '-p: =Value'
@@ -456,8 +461,10 @@ internal partial class RunCommand
             }
 
             var configuration = parseResult.GetValue(ConfigurationOption) ?? "Debug";
-            var framework = parseResult.GetValue(FrameworkOption);
             var properties = parseResult.GetValue(PropertyOption) ?? [];
+            // Share the SAME explicit effective framework the build uses (--framework > bare
+            // -p:TargetFramework) so classification and build never evaluate a different TFM (M3).
+            var framework = ProjectRunService.ResolveExplicitFramework(parseResult.GetValue(FrameworkOption), properties);
             return new ProjectClassificationInputs(configuration, architecture, framework, properties);
         }
 

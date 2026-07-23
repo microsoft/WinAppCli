@@ -2127,9 +2127,13 @@ public class RunCommandTests : BaseCommandTests
     [DataRow("win-x64", "x64")]
     [DataRow("win-arm64", "arm64")]
     [DataRow("win-x86", "x86")]
+    [DataRow("x64", "x64")]
+    [DataRow("arm64", "arm64")]
+    [DataRow("x86", "x86")]
     public void TryResolveArchitecture_RuntimeAlone_ResolvesArchFromRid(string runtime, string expected)
     {
-        // M6: with only --runtime (no --arch), the architecture is derived from the RID.
+        // M6: with only --runtime (no --arch), the architecture is derived from the RID. A bare arch
+        // (no win- prefix, e.g. `--runtime x64`) is also accepted and used directly.
         var ok = RunCommand.Handler.TryResolveArchitecture(null, runtime, out var arch, out var error);
 
         Assert.IsTrue(ok);

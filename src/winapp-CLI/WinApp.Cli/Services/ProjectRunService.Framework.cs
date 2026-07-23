@@ -45,9 +45,12 @@ internal sealed partial class ProjectRunService
         // DedicatedFlagProperty, so ForwardableProperties would otherwise strip that -p from every pass
         // and silently build/run the project's default TFM instead — dropping the user's choice. Promote
         // it to the effective framework so it flows through the dedicated -f / -p:TargetFramework path
-        // consistently across the build, evaluate and classification passes (and beats the auto-pin of a
-        // multi-targeted project's first TFM — an explicit request wins over the default). An explicit
-        // --framework still wins over this (handled by the early return above).
+        // consistently across the build and evaluate passes (and beats the auto-pin of a multi-targeted
+        // project's first TFM — an explicit request wins over the default). An explicit --framework still
+        // wins over this (handled by the early return above). NOTE: the command layer now resolves this SAME
+        // explicit framework up front (ProjectRunService.ResolveExplicitFramework) and threads it into BOTH
+        // options.Framework and the classification pass, so in the normal flow the early return above already
+        // fired; this block is a service-level fallback that preserves the precedence for direct callers/tests.
         if (TryGetUserProperty(options.Properties, "TargetFramework", out var userFramework))
         {
             return options with { Framework = userFramework };
