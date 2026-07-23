@@ -2646,29 +2646,103 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
-    public async Task RunBuildPassAsync_Spinner_SuccessHidesBuildOutput()
+    public async Task RunBuildPassAsync_InteractiveDefault_StreamsHeaderInvocationWarningAndBuilt()
     {
-        // Change #4: the interactive spinner path hides raw build lines on success (clean output).
+        // Streaming after-state: the default info-enabled, non-json path prints the header, the dim
+        // `dotnet build …` invocation, streams build output live (warnings included, on SUCCESS), then
+        // the persistent `✓ Built` line — all on stdout. Nothing is hidden behind a spinner.
         var csproj = WriteFile("App.csproj", ExecutableCsproj);
         var dotnet = new FakeDotNetService
         {
-            RunDotnetStreamingHandler = (_, onOut, _) => { onOut?.Invoke("hidden-spinner-noise"); return 0; },
+            RunDotnetStreamingHandler = (_, onOut, _) => { onOut?.Invoke("warning CS1998: this async method lacks await"); return 0; },
         };
         var console = new TestConsole();
         var service = new ProjectRunService(dotnet, NewDetection(dotnet), new FakeCsWinRTMetadataShimService(), console, new LevelLogger<ProjectRunService>(LogLevel.Information));
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
 
-        var exit = await service.RunBuildPassAsync(csproj, options, _tempDir, useLiveSpinner: true, csWinRTMetadataFolder: null, CancellationToken.None);
+        var exit = await service.RunBuildPassAsync(csproj, options, _tempDir, csWinRTMetadataFolder: null, CancellationToken.None);
 
         Assert.AreEqual(0, exit);
-        Assert.IsFalse(console.Output.Contains("hidden-spinner-noise"),
-            "the spinner path must hide streamed build lines on success");
+        StringAssert.Contains(console.Output, "Building", "the build header should be shown");
+        StringAssert.Contains(console.Output, "dotnet build", "the exact dotnet invocation must be surfaced");
+        StringAssert.Contains(console.Output, "warning CS1998", "success-path warnings must stay visible (not swallowed)");
+        StringAssert.Contains(console.Output, "Built", "a persistent Built line should follow a successful build");
     }
 
     [TestMethod]
-    public async Task RunBuildPassAsync_Spinner_FailureDumpsBuildOutput()
+    [DoNotParallelize] // redirects the process-wide Console.Error
+    public async Task RunBuildPassAsync_Json_KeepsStdoutClean_RoutesInvocationAndOutputToStderr()
     {
-        // Change #4: on failure the spinner path must dump the captured output so the error is visible.
+        // --json: stdout must stay pure JSON, so the invocation AND streamed build output go to stderr.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetStreamingHandler = (_, onOut, onErr) => { onOut?.Invoke("STDOUT-POISON"); onErr?.Invoke("STDERR-POISON"); return 0; },
+        };
+        var console = new TestConsole();
+        var service = new ProjectRunService(dotnet, NewDetection(dotnet), new FakeCsWinRTMetadataShimService(), console, new LevelLogger<ProjectRunService>(LogLevel.Information));
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: true);
+
+        var stderr = new StringWriter();
+        var originalError = Console.Error;
+        Console.SetError(stderr);
+        int exit;
+        try
+        {
+            exit = await service.RunBuildPassAsync(csproj, options, _tempDir, csWinRTMetadataFolder: null, CancellationToken.None);
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
+
+        Assert.AreEqual(0, exit);
+        Assert.IsFalse(console.Output.Contains("STDOUT-POISON"), "--json must not write build output to stdout");
+        Assert.IsFalse(console.Output.Contains("dotnet build"), "--json must not write the invocation to stdout");
+        StringAssert.Contains(stderr.ToString(), "dotnet build", "--json must route the invocation to stderr");
+        StringAssert.Contains(stderr.ToString(), "STDOUT-POISON", "--json must route build output to stderr");
+        StringAssert.Contains(stderr.ToString(), "STDERR-POISON", "--json must route build stderr to stderr");
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // redirects the process-wide Console.Error
+    public async Task RunBuildPassAsync_Quiet_KeepsStdoutClean_RoutesInvocationAndOutputToStderr()
+    {
+        // --quiet (Information suppressed): stdout stays clean; invocation + output go to stderr.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetStreamingHandler = (_, onOut, _) => { onOut?.Invoke("QUIET-BUILD-LINE"); return 0; },
+        };
+        var console = new TestConsole();
+        var service = new ProjectRunService(dotnet, NewDetection(dotnet), new FakeCsWinRTMetadataShimService(), console, new LevelLogger<ProjectRunService>(LogLevel.Warning));
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
+
+        var stderr = new StringWriter();
+        var originalError = Console.Error;
+        Console.SetError(stderr);
+        int exit;
+        try
+        {
+            exit = await service.RunBuildPassAsync(csproj, options, _tempDir, csWinRTMetadataFolder: null, CancellationToken.None);
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
+
+        Assert.AreEqual(0, exit);
+        Assert.IsFalse(console.Output.Contains("QUIET-BUILD-LINE"), "--quiet must not write build output to stdout");
+        Assert.IsFalse(console.Output.Contains("dotnet build"), "--quiet must not write the invocation to stdout");
+        StringAssert.Contains(stderr.ToString(), "dotnet build", "--quiet must route the invocation to stderr");
+        StringAssert.Contains(stderr.ToString(), "QUIET-BUILD-LINE", "--quiet must route build output to stderr");
+    }
+
+    [TestMethod]
+    public async Task RunBuildPassAsync_Failure_SurfacesDiagnosticsViaLiveStreamAndSkipsBuilt()
+    {
+        // On failure the diagnostics surface via the live stream (no capture buffer), a non-zero exit
+        // propagates, and the ✓ Built line is NOT printed.
         var csproj = WriteFile("App.csproj", ExecutableCsproj);
         var dotnet = new FakeDotNetService
         {
@@ -2678,31 +2752,13 @@ public class ProjectRunServiceTests
         var service = new ProjectRunService(dotnet, NewDetection(dotnet), new FakeCsWinRTMetadataShimService(), console, new LevelLogger<ProjectRunService>(LogLevel.Information));
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
 
-        var exit = await service.RunBuildPassAsync(csproj, options, _tempDir, useLiveSpinner: true, csWinRTMetadataFolder: null, CancellationToken.None);
+        var exit = await service.RunBuildPassAsync(csproj, options, _tempDir, csWinRTMetadataFolder: null, CancellationToken.None);
 
         Assert.AreEqual(1, exit);
         StringAssert.Contains(console.Output, "error CS9999: the real failure",
-            "the spinner path must reveal build output when the build fails");
-    }
-
-    [TestMethod]
-    public async Task RunBuildPassAsync_Verbose_StreamsLiveEvenWhenSpinnerEligible()
-    {
-        // Change #4: --verbose wins over the spinner — the user asked for detail, so stream full output.
-        var csproj = WriteFile("App.csproj", ExecutableCsproj);
-        var dotnet = new FakeDotNetService
-        {
-            RunDotnetStreamingHandler = (_, onOut, _) => { onOut?.Invoke("detailed-build-output"); return 0; },
-        };
-        var console = new TestConsole();
-        var service = new ProjectRunService(dotnet, NewDetection(dotnet), new FakeCsWinRTMetadataShimService(), console, new LevelLogger<ProjectRunService>(LogLevel.Debug));
-        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Json: false);
-
-        var exit = await service.RunBuildPassAsync(csproj, options, _tempDir, useLiveSpinner: true, csWinRTMetadataFolder: null, CancellationToken.None);
-
-        Assert.AreEqual(0, exit);
-        StringAssert.Contains(console.Output, "detailed-build-output",
-            "verbose mode must stream full build output even when a spinner would otherwise be used");
+            "the live stream must reveal build diagnostics on failure");
+        Assert.IsFalse(console.Output.Contains("Built"),
+            "a failed build must not print the persistent Built line");
     }
 
     #endregion

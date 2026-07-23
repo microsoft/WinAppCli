@@ -98,6 +98,13 @@ internal sealed partial class ProjectRunService
         tokens.Add("-v");
         tokens.Add(verbosity);
 
+        // Pin the MSBuild terminal logger OFF for the build pass. winapp always redirects dotnet's
+        // stdout (RunDotnetStreamingAsync), and under redirection the default `-tl:auto` already
+        // resolves to off → clean append-only output. Pinning it guards against a future SDK that
+        // redefines `auto` and reintroduces the animated `(0.1s)(0.2s)…` carriage-return redraw churn.
+        // Build pass only — the `--getProperty` evaluate pass is left untouched.
+        tokens.Add("-tl:off");
+
         // Forward user -p properties, but drop any that duplicate a dedicated -c/-r/-f switch so this
         // build pass and the evaluate pass can never resolve a different Configuration/RID/TFM (see
         // DedicatedFlagProperties / WarnOnOverriddenFlags). A user-supplied -p:Platform / EDPR still

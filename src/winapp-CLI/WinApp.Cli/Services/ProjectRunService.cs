@@ -6,7 +6,6 @@ using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
-using Spectre.Console.Rendering;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 
@@ -31,9 +30,6 @@ internal sealed partial class ProjectRunService(
         "_WinAppRunSupportActive",
         "OutputType",
     ];
-
-    /// <summary>Upper bound on build-output lines retained for the spinner failure dump (bounded tail).</summary>
-    private const int MaxBuildTailLines = 500;
 
     /// <summary>
     /// Property names owned by a dedicated <c>-c</c>/<c>-r</c>/<c>-f</c> switch. A same-named user
@@ -193,12 +189,11 @@ internal sealed partial class ProjectRunService(
         // actually built.
         if (!options.NoBuild)
         {
-            var useLiveSpinner = ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger);
-            var buildExit = await RunBuildPassAsync(csproj, buildOptions, workingDir, useLiveSpinner, csWinRTMetadata, cancellationToken);
+            var buildExit = await RunBuildPassAsync(csproj, buildOptions, workingDir, csWinRTMetadata, cancellationToken);
             if (buildExit != 0)
             {
-                // dotnet's diagnostics were already streamed live (or dumped on the spinner-failure
-                // path); just log the summary and propagate the exit code — do not attempt to launch.
+                // dotnet's diagnostics were already streamed live; just log the summary and propagate
+                // the exit code — do not attempt to launch.
                 logger.LogError("{UISymbol} Build failed for {Project} (exit code {ExitCode}).", UiSymbols.Error, csproj.Name, buildExit);
                 return new ProjectBuildOutcome(null, buildExit);
             }
@@ -482,33 +477,37 @@ internal sealed partial class ProjectRunService(
         }
     }
 
+    /// <summary>
+    /// Runs the project-mode build pass, streaming dotnet's output live. Output routing:
     /// <list type="bullet">
-    ///   <item><c>--json</c>: stream to stderr only so stdout stays pure JSON — no banner, no spinner.</item>
-    ///   <item>Interactive terminal, non-verbose: animate a Spectre status spinner and hide the raw
-    ///   build lines; on failure, dump the captured output so the MSBuild error is visible.</item>
-    ///   <item>Otherwise (verbose, or an agent/CI/redirected terminal): print a single "Building…"
-    ///   line and stream dotnet's output live (plain lines — no spinner-frame flooding).</item>
+    ///   <item><c>--json</c> or <c>--quiet</c> (Information suppressed): print the <c>dotnet</c>
+    ///   invocation and stream all build output to <b>stderr</b>, so stdout stays pure JSON / clean.</item>
+    ///   <item>Otherwise (default interactive, <c>--verbose</c>, or an agent/CI terminal): print a
+    ///   <c>🔧 Building…</c> header and a dim <c>dotnet build …</c> invocation line, then stream
+    ///   dotnet's output live to stdout (warnings included), then a persistent <c>✓ Built</c> line.</item>
     /// </list>
+    /// The build output always streams (no hide-behind-spinner, no capture buffer) so success-path
+    /// warnings stay visible and the exact, injected-arg invocation is self-describing / reproducible.
     /// </summary>
     internal async Task<int> RunBuildPassAsync(
         FileInfo csproj,
         ProjectRunOptions options,
         DirectoryInfo workingDir,
-        bool useLiveSpinner,
         string? csWinRTMetadataFolder,
         CancellationToken cancellationToken)
     {
         var verbosity = ResolveBuildVerbosity(logger, options.Json);
         var buildArgs = BuildBuildPassArguments(csproj, options, verbosity, csWinRTMetadataFolder);
-        logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, buildArgs);
 
         var banner = $"Building {csproj.Name} ({options.Configuration} | {options.Architecture})...";
         var stopwatch = Stopwatch.StartNew();
 
-        // --json: stdout must stay pure JSON, so route ALL build output to stderr and show no banner.
-        // Console.Error is synchronized, so the concurrent stdout/stderr callbacks are safe.
-        if (options.Json)
+        // --json or --quiet: stdout must stay pure JSON / clean, so route the invocation AND all build
+        // output to stderr. Console.Error is synchronized, so the concurrent stdout/stderr callbacks are
+        // safe to write through it directly.
+        if (options.Json || !logger.IsEnabled(LogLevel.Information))
         {
+            Console.Error.WriteLine($"dotnet {buildArgs}");
             return await dotNetService.RunDotnetStreamingAsync(
                 workingDir, buildArgs,
                 onOutputLine: static line => Console.Error.WriteLine(line),
@@ -516,61 +515,12 @@ internal sealed partial class ProjectRunService(
                 cancellationToken);
         }
 
-        // Interactive human, non-verbose: animate a spinner and keep the raw build lines hidden,
-        // revealing the (bounded) captured output only if the build fails.
-        if (useLiveSpinner && !logger.IsEnabled(LogLevel.Debug))
-        {
-            var captured = new List<string>();
-            void Capture(string line)
-            {
-                lock (captured)
-                {
-                    captured.Add(line);
-                    if (captured.Count > MaxBuildTailLines)
-                    {
-                        captured.RemoveAt(0);
-                    }
-                }
-            }
-
-            var spinnerExit = await RunTwoRowBuildSpinnerAsync(
-                banner,
-                stopwatch,
-                () => dotNetService.RunDotnetStreamingAsync(
-                    workingDir, buildArgs, Capture, Capture, cancellationToken));
-
-            if (spinnerExit != 0)
-            {
-                foreach (var line in captured)
-                {
-                    ansiConsole.WriteLine(line);
-                }
-            }
-            else
-            {
-                // The spinner erases its own transient banner on completion; leave a persistent line
-                // so the build stays on screen (the user can see it happened, and how long it took).
-                PrintBuildSucceeded(csproj, options, stopwatch.Elapsed);
-            }
-
-            return spinnerExit;
-        }
-
-        // Verbose, or a non-interactive/agent/CI terminal: a single static line + live streamed output.
+        // Info-enabled (default interactive / --verbose / agent-CI, non-json): print the header and the
+        // exact dotnet invocation (winapp injects args the user never typed — RID, cswinrt shim, -p
+        // forwarding — so surfacing it makes failures self-describing), then stream dotnet's output live.
         // Serialize the writes so the concurrent stdout/stderr callbacks don't interleave.
-        //
-        // --quiet (Information suppressed) must keep stdout clean like --json: skip the banner and
-        // route build output to stderr so failures stay visible without polluting stdout.
-        if (!logger.IsEnabled(LogLevel.Information))
-        {
-            return await dotNetService.RunDotnetStreamingAsync(
-                workingDir, buildArgs,
-                onOutputLine: static line => Console.Error.WriteLine(line),
-                onErrorLine: static line => Console.Error.WriteLine(line),
-                cancellationToken);
-        }
-
         ansiConsole.MarkupLineInterpolated($"{UiSymbols.Wrench} {banner}");
+        ansiConsole.MarkupLineInterpolated($"[dim]   dotnet {Markup.Escape(buildArgs)}[/]");
         var writeLock = new object();
         void WriteLive(string line)
         {
@@ -599,71 +549,6 @@ internal sealed partial class ProjectRunService(
     private void PrintBuildSucceeded(FileInfo csproj, ProjectRunOptions options, TimeSpan elapsed) =>
         ansiConsole.MarkupLineInterpolated(
             $"{UiSymbols.Check} Built {Path.GetFileNameWithoutExtension(csproj.Name)} in {elapsed.TotalSeconds:0.0}s");
-
-    /// <summary>
-    /// Animates the build banner as a <b>two-row</b> Spectre <see cref="LiveDisplay"/> region (spinner
-    /// line + a dim elapsed-time line) while <paramref name="work"/> runs, then auto-clears both rows.
-    ///
-    /// Why two rows, and why not <c>Status()</c> / a one-line <c>Live</c>:
-    /// <list type="bullet">
-    /// <item><c>Status()</c> (and <c>Progress</c>) reserve a leading <em>blank</em> padding row above
-    /// the spinner. Right under the pre-build context line that blank reads as a stray gap.</item>
-    /// <item>A <em>single-row</em> live region repositions each frame with <c>ESC[0A</c> (cursor-up-0).
-    /// Some embedded/ConPTY terminals mishandle a zero-count CUU and drop it, so every frame lands on a
-    /// new line and floods the screen.</item>
-    /// <item>A <em>two-row</em> region repositions with a well-formed <c>ESC[1A</c> (cursor-up-1) — the
-    /// same sequence <c>Status()</c> emits and which those terminals honour — so it animates in place.
-    /// Making the extra row a real (dim, useful) elapsed line means there is no wasted blank row.</item>
-    /// </list>
-    /// Build output is captured by the caller (not written here), so nothing competes with the region
-    /// for the cursor. On cancellation the work task faults with <see cref="OperationCanceledException"/>,
-    /// the loop exits, and the awaited task rethrows it (the dotnet child tree is killed downstream in
-    /// <c>DotNetService</c>), matching the non-spinner path.
-    /// </summary>
-    private async Task<int> RunTwoRowBuildSpinnerAsync(string banner, Stopwatch stopwatch, Func<Task<int>> work)
-    {
-        var spinner = Spinner.Known.Dots;
-        var frames = spinner.Frames;
-        var interval = spinner.Interval;
-        var escapedBanner = Markup.Escape(banner);
-        var exit = 0;
-
-        // Two non-blank rows: the animated spinner + a dim elapsed timer. Never an empty renderable —
-        // an empty Markup renders zero lines and Spectre's shape calculation throws on the initial render.
-        IRenderable Region(int frameIndex) => new Rows(
-            new Markup($"[blue]{Markup.Escape(frames[frameIndex % frames.Count])}[/] {escapedBanner}"),
-            new Markup($"[dim]  {FormatElapsed(stopwatch.Elapsed)} elapsed — build output shown only on failure[/]"));
-
-        await ansiConsole.Live(Region(0))
-            .AutoClear(true)
-            .Overflow(VerticalOverflow.Visible)
-            .StartAsync(async ctx =>
-            {
-                var workTask = work();
-                var frameIndex = 0;
-                while (!workTask.IsCompleted)
-                {
-                    ctx.UpdateTarget(Region(frameIndex));
-                    ctx.Refresh();
-                    frameIndex++;
-
-                    // WhenAny keeps the animation ticking without cancelling the build: on Ctrl+C the
-                    // work task itself faults with OperationCanceledException, the loop exits, and the
-                    // await below rethrows it. The untokened delay never faults, so it can't go unobserved.
-                    await Task.WhenAny(workTask, Task.Delay(interval));
-                }
-
-                exit = await workTask;
-            });
-
-        return exit;
-    }
-
-    /// <summary>Formats a build elapsed span compactly (<c>12s</c> under a minute, else <c>1m 05s</c>).</summary>
-    private static string FormatElapsed(TimeSpan elapsed) =>
-        elapsed.TotalMinutes >= 1
-            ? $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds:00}s"
-            : $"{elapsed.Seconds}s";
 
     /// <summary>
     /// Maps the CLI's effective log level to a dotnet <c>-v</c> verbosity for the build pass (Change #1).

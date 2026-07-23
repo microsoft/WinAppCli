@@ -175,9 +175,9 @@ internal partial class RunCommand
             }
 
             // Build (unless --no-build) and resolve the output properties. ProjectRunService owns the
-            // build UX (Change #1/#4): it streams dotnet output live, shows an interactive spinner for
-            // humans, and maps --verbose to dotnet's -v. In --json mode it suppresses the banner and
-            // routes build output to stderr to keep stdout pure JSON.
+            // build UX: it always streams dotnet's output live and prints the exact dotnet invocation,
+            // so success-path warnings stay visible and failures are self-describing. In --json/--quiet
+            // mode it routes the invocation and build output to stderr to keep stdout pure JSON / clean.
             var buildOptions = new ProjectRunOptions(configuration, architecture, framework, noBuild, noRestore, properties, isJson, solution);
 
             // Fail fast (issue #676): identity-only options like --no-launch are meaningless for an
