@@ -400,6 +400,13 @@ internal partial class RunCommand
                 {
                     PrintJson(aumid: null, processId, errorMessage: null);
                 }
+                else
+                {
+                    // Confirm the launch so a windowed app (which streams no console output) doesn't look
+                    // stuck while winapp waits for it to exit. Mirrors packaged mode's "launched (PID)" line.
+                    ansiConsole.MarkupLineInterpolated(
+                        $"{UiSymbols.Check} Launched {Path.GetFileNameWithoutExtension(csproj.Name)} (PID: {processId})");
+                }
 
                 // --debug-output: attach the debug event loop instead of a plain wait.
                 if (debugOutput)
