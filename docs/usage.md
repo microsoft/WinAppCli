@@ -1,6 +1,6 @@
 <!-- mslearn: true -->
 <!-- ms.topic: reference -->
-<!-- description: Complete command reference for the Windows App Development CLI (winapp CLI) including setup, packaging, identity, certificates, signing, and utility commands. -->
+<!-- description: Complete command reference for the winapp CLI covering setup, packaging, identity, certificates, signing, and other utility commands. -->
 # CLI Documentation and Usage
 
 ## Shell Completion

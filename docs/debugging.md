@@ -1,4 +1,5 @@
 <!-- mslearn: true -->
+<!-- description: Register temporary package identity for an unpackaged app so you can debug identity-dependent Windows features directly from your build output. -->
 # Debugging with Package Identity
 
 Many Windows APIs (push notifications, background tasks, share target, startup tasks, Windows AI APIs) require your app to have **package identity**. During development, you don't want to build a full MSIX installer every time you test — winapp provides two commands to give your app identity on the fly.

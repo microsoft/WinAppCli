@@ -66,6 +66,19 @@ $msDate = Get-Date -Format "MM/dd/yyyy"
 Write-Step "Porting docs for v$Version"
 Write-Info "Output: $OutputPath"
 
+# ─── Step 0.5: Validate source docs against MS Learn publishing rules ────────────
+# Fail fast (and identically in CI) if any opted-in doc violates the docs-repo
+# conventions the reviewer enforces, so issues are fixed at the source of truth
+# rather than in generated output. See scripts/validate-mslearn-docs.ps1.
+
+Write-Step "Validating source docs"
+$validator = Join-Path $PSScriptRoot "validate-mslearn-docs.ps1"
+& $validator -DocsRoot $DocsRoot
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "MS Learn doc validation failed. Fix the reported issues before porting."
+    exit $LASTEXITCODE
+}
+
 # ─── Step 1: Auto-discover files to port ────────────────────────────────────────
 
 Write-Step "Discovering docs to port"
@@ -494,8 +507,10 @@ if ($frameworkSection) {
 }
 
 # Add Electron deep-dive section (these only exist as guides, not in README)
-$guidesIndex += @"
-
+# Normalize the boundary: the extracted framework/additional-guides block can
+# carry a trailing bare CR from the source capture, which renders as a stray
+# character before the next heading. Trim it and join with exactly one blank line.
+$guidesIndex = $guidesIndex.TrimEnd() + "`r`n`r`n" + @"
 ## Electron deep-dive guides
 
 After completing the [Electron setup guide](electron-setup.md):
