@@ -15,6 +15,30 @@ public class ProcessRunnerTests
 {
     private static readonly string CmdExe = Path.Join(Environment.SystemDirectory, "cmd.exe");
 
+    private DirectoryInfo _tempDirectory = null!;
+
+    public TestContext TestContext { get; set; } = null!;
+
+    [TestInitialize]
+    public void Initialize()
+    {
+        _tempDirectory = Directory.CreateDirectory(
+            Path.Join(Path.GetTempPath(), "winapp-processrunner-tests", Guid.NewGuid().ToString("N")));
+    }
+
+    [TestCleanup]
+    public void Cleanup()
+    {
+        try
+        {
+            _tempDirectory.Delete(recursive: true);
+        }
+        catch
+        {
+            // Best-effort cleanup of the per-test temp directory; a leftover temp folder is harmless.
+        }
+    }
+
     [TestMethod]
     public async Task RunAsync_CapturesStandardOutputAndExitCode()
     {
@@ -88,5 +112,33 @@ public class ProcessRunnerTests
         }
 
         Assert.IsTrue(threw, "Cancellation should surface as an OperationCanceledException");
+    }
+
+    [TestMethod]
+    public async Task RunAsync_ExecutesBatchFileDirectly_AndForwardsArguments()
+    {
+        // Regression test for the concern that ProcessRunner (UseShellExecute=false) cannot execute a
+        // .cmd/.bat target directly. FindAzureCli resolves 'az.cmd', which is handed to ProcessRunner
+        // as the executable. Since .NET 8 the runtime transparently launches a .cmd/.bat target via
+        // cmd.exe with safe argument escaping, so a batch file runs correctly and its arguments are
+        // forwarded. This locks in that behavior so the cached-session token and 'az login' paths keep
+        // working, mirroring how 'az.cmd' is invoked.
+        var runner = new ProcessRunner();
+        var batchFile = Path.Join(_tempDirectory.FullName, "harmless.cmd");
+
+        // '@echo off' keeps the prompt out of stdout; the script echoes a marker plus its first arg.
+        await File.WriteAllTextAsync(
+            batchFile,
+            "@echo off\r\necho batch-ran arg=%1\r\n",
+            TestContext.CancellationToken);
+
+        var result = await runner.RunAsync(
+            new ProcessRunRequest(batchFile, ["forwarded-arg"]),
+            cancellationToken: TestContext.CancellationToken);
+
+        Assert.AreEqual(0, result.ExitCode, "A .cmd target must execute successfully via ProcessRunner");
+        StringAssert.Contains(result.StandardOutput, "batch-ran");
+        StringAssert.Contains(result.StandardOutput, "forwarded-arg",
+            "Arguments must be forwarded to the batch file");
     }
 }

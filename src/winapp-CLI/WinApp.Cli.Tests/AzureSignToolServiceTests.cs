@@ -168,6 +168,7 @@ public class AzureSignToolServiceTests : BaseCommandTests
             recording, _nuget, _installer, new FakeSignToolWinappDirectoryService(_globalWinappDir))
         {
             DlibIntegrityVerifier = _ => true,
+            TrustedAzureCliBinDirsProvider = () => Array.Empty<string>(),
         };
 
         var fileToSign = new FileInfo(Path.Join(_tempDirectory.FullName, "app.msix"));
@@ -205,6 +206,7 @@ public class AzureSignToolServiceTests : BaseCommandTests
             recording, _nuget, _installer, new FakeSignToolWinappDirectoryService(_globalWinappDir))
         {
             DlibIntegrityVerifier = _ => true,
+            TrustedAzureCliBinDirsProvider = () => Array.Empty<string>(),
         };
 
         var fileToSign = new FileInfo(Path.Join(_tempDirectory.FullName, "app.msix"));
@@ -215,6 +217,43 @@ public class AzureSignToolServiceTests : BaseCommandTests
         await service.SignAsync(fileToSign, metadata, tenantId: null, TestTaskContext, TestContext.CancellationToken);
 
         Assert.IsNull(recording.CapturedEnvironment, "No AZURE_TENANT_ID should be injected when no tenant is known");
+    }
+
+    [TestMethod]
+    public async Task SignAsync_PrependsTrustedAzureCliDirsToPath()
+    {
+        CreateDlibInCache();
+        var signtool = CreateFakeSigntool("x64");
+        var recording = new RecordingBuildToolsService { SignToolToReturn = signtool };
+        var trustedDir = Path.Join(_tempDirectory.FullName, "trusted-az", "wbin");
+        var service = new AzureSignToolService(
+            recording, _nuget, _installer, new FakeSignToolWinappDirectoryService(_globalWinappDir))
+        {
+            DlibIntegrityVerifier = _ => true,
+            TrustedAzureCliBinDirsProvider = () => new[] { trustedDir },
+        };
+
+        var fileToSign = new FileInfo(Path.Join(_tempDirectory.FullName, "app.msix"));
+        await File.WriteAllTextAsync(fileToSign.FullName, "MZ", TestContext.CancellationToken);
+        var metadata = new FileInfo(Path.Join(_tempDirectory.FullName, "metadata.json"));
+        await File.WriteAllTextAsync(metadata.FullName, "{}", TestContext.CancellationToken);
+
+        await service.SignAsync(fileToSign, metadata, "tenant", TestTaskContext, TestContext.CancellationToken);
+
+        Assert.IsNotNull(recording.CapturedEnvironment);
+        var path = recording.CapturedEnvironment!["PATH"];
+
+        // The trusted Azure CLI directory is prepended so the dlib's AzureCliCredential resolves the
+        // legitimate az.cmd before any 'az.cmd' injected elsewhere on PATH.
+        StringAssert.StartsWith(path, trustedDir + Path.PathSeparator,
+            "The trusted Azure CLI directory must be prepended to PATH");
+
+        // Prepending is additive: the caller's existing PATH entries are preserved after the prefix.
+        var currentPath = Environment.GetEnvironmentVariable("PATH");
+        if (!string.IsNullOrEmpty(currentPath))
+        {
+            StringAssert.Contains(path, currentPath);
+        }
     }
 
     [TestMethod]

@@ -39,6 +39,20 @@ internal class AzureSignToolService(
 
     private const string TimestampUrl = "http://timestamp.acs.microsoft.com";
 
+    /// <summary>
+    /// Resolves the trusted Azure CLI <c>wbin</c> directories (those containing a real <c>az.cmd</c>)
+    /// that are prepended to signtool's PATH. Exposed as a settable seam only so tests can supply a
+    /// deterministic set independent of what is installed on the test host; production uses the known
+    /// machine/user install roots.
+    /// </summary>
+    internal Func<IReadOnlyList<string>> TrustedAzureCliBinDirsProvider { get; set; } = DefaultTrustedAzureCliBinDirs;
+
+    private static IReadOnlyList<string> DefaultTrustedAzureCliBinDirs() =>
+        AzureAuthService.GetAzureCliInstallRoots()
+            .Select(root => Path.Join(root, "wbin"))
+            .Where(wbin => File.Exists(Path.Join(wbin, "az.cmd")))
+            .ToList();
+
     public async Task SignAsync(
         FileInfo filePath,
         FileInfo metadataFilePath,
@@ -78,23 +92,23 @@ internal class AzureSignToolService(
         taskContext.AddDebugMessage($"Using signtool: {signtoolPath.FullName}");
         taskContext.AddDebugMessage($"Using dlib: {dlibPath.FullName}");
 
-        // Pass tenant ID to signtool so the dlib's Azure.Identity authenticates against the correct tenant.
-        IReadOnlyDictionary<string, string>? environment = !string.IsNullOrEmpty(tenantId)
-            ? new Dictionary<string, string> { ["AZURE_TENANT_ID"] = tenantId }
-            : null;
+        // Build the child environment: forward the tenant so the dlib authenticates against the
+        // correct tenant, and harden PATH so its Azure CLI lookup can't be hijacked (see below).
+        var environment = BuildSigntoolEnvironment(tenantId);
 
         // Reuse the shared build-tool runner so process spawning, concurrent stream draining,
         // cancellation/kill, and exit-code handling live in one place. We pass the resolved
         // (architecture-matched) signtool path as an override rather than re-resolving by name.
         //
-        // Run signtool from a trusted system directory rather than inheriting the caller's working
-        // directory. The dlib performs its own Azure.Identity authentication in-process and, unlike
+        // The dlib performs its own Azure.Identity authentication in-process and, unlike
         // AzureAuthService, its credential chain still includes AzureCliCredential, which resolves
-        // 'az' by ambient lookup. Because Windows searches the current directory first, a repo-local
-        // or otherwise attacker-writable 'az.cmd' in the caller's working directory could run when the
-        // dlib requests its token. Anchoring the working directory to System32 removes that vector
-        // while still allowing 'az' to resolve from legitimate PATH locations. All file arguments
-        // (dlib, metadata, target) are absolute, so the working directory does not affect signing.
+        // 'az' by ambient lookup. Two things harden that lookup: (1) signtool runs from a trusted
+        // system directory (System32) instead of inheriting the caller's working directory, so a
+        // repo-local 'az.cmd' next to the target can't be found via the current-directory-first
+        // search; and (2) the known Azure CLI install directories are prepended to PATH (see
+        // BuildSigntoolEnvironment), so the legitimate az.cmd wins over any 'az.cmd' injected
+        // elsewhere on PATH. All signtool file arguments (dlib, metadata, target) are absolute, so
+        // the working directory does not affect signing.
         await buildToolsService.RunBuildToolAsync(
             new GenericTool("signtool.exe"),
             arguments,
@@ -105,6 +119,35 @@ internal class AzureSignToolService(
             cancellationToken: cancellationToken);
 
         taskContext.AddDebugMessage("File signed successfully");
+    }
+
+    /// <summary>
+    /// Builds the environment overrides for the signtool child process: the tenant id (when known)
+    /// and a hardened PATH that prepends the trusted Azure CLI install directories. Prepending is
+    /// additive — existing PATH entries are preserved so non-standard installs keep working — while
+    /// ensuring the dlib's <c>AzureCliCredential</c> resolves the legitimate <c>az.cmd</c> ahead of
+    /// any attacker-injected one later on PATH. Returns null when there is nothing to override.
+    /// </summary>
+    private Dictionary<string, string>? BuildSigntoolEnvironment(string? tenantId)
+    {
+        var environment = new Dictionary<string, string>();
+
+        if (!string.IsNullOrEmpty(tenantId))
+        {
+            environment["AZURE_TENANT_ID"] = tenantId;
+        }
+
+        var trustedAzBinDirs = TrustedAzureCliBinDirsProvider();
+        if (trustedAzBinDirs.Count > 0)
+        {
+            var prefix = string.Join(Path.PathSeparator, trustedAzBinDirs);
+            var currentPath = Environment.GetEnvironmentVariable("PATH");
+            environment["PATH"] = string.IsNullOrEmpty(currentPath)
+                ? prefix
+                : prefix + Path.PathSeparator + currentPath;
+        }
+
+        return environment.Count > 0 ? environment : null;
     }
 
     /// <summary>
