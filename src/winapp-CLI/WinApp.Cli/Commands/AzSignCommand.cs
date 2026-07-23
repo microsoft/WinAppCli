@@ -355,10 +355,12 @@ internal class AzSignCommand : Command, IShortDescription
                 // Validate the explicitly named profile the same way interactive selection does,
                 // so a typo or a disabled/suspended profile fails here with an actionable message
                 // rather than deep inside signtool's dlib. This stays non-interactive.
-                var allProfiles = await azureSigningService.ListCertificateProfilesAsync(
-                    accessToken, subscriptionId, resolvedResourceGroup, resolvedAccountName, cancellationToken);
-                var matchedProfile = allProfiles.FirstOrDefault(p =>
-                    string.Equals(p.Name, profileName, StringComparison.OrdinalIgnoreCase));
+                //
+                // Use a direct GET on the named profile rather than listing the parent collection:
+                // a CI principal whose signer role is scoped to the individual profile has no list
+                // permission, so listing would 403 the documented --account --profile flow.
+                var matchedProfile = await azureSigningService.GetCertificateProfileAsync(
+                    accessToken, subscriptionId, resolvedResourceGroup, resolvedAccountName, profileName, cancellationToken);
 
                 if (matchedProfile == null)
                 {

@@ -100,7 +100,7 @@ winapp az-sign ./app.msix --metadata-file ./metadata.json
 
 **Prerequisites:** An Azure Code Signing account and certificate profile (created in the Azure portal after identity validation), plus a role assignment granting your identity the **Code Signing Certificate Profile Signer** role. Signing also requires a machine-wide **x64 .NET 8+ runtime** (the signing library is a managed assembly loaded by `signtool.exe`; winapp's self-contained runtime does not satisfy it) and **SignTool 10.0.22621.755 or later**.
 
-> **Least-privilege CI:** Resource discovery reads the parent signing account, so the signing identity needs read access at the account scope. A principal scoped only to a single certificate profile can still sign, but should skip discovery by passing a pre-generated `--metadata-file` (which specifies the account endpoint and profile directly).
+> **Least-privilege CI:** Auto-discovery (listing subscriptions, accounts, and profiles) needs read access at the account scope. When you pass `--account` and `--profile` explicitly, `az-sign` validates them with direct resource reads (a GET on the named account and profile) rather than listing the parent collection, so a principal scoped to just that account and profile is sufficient. A principal scoped only to a single certificate profile can skip validation entirely by passing a pre-generated `--metadata-file` (which specifies the account endpoint and profile directly).
 
 ## Recommended workflow
 

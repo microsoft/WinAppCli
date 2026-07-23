@@ -206,6 +206,109 @@ public class AzureSigningServiceTests
         Assert.AreEqual(1, handler.RequestUris.Count, "The untrusted nextLink must not be fetched");
     }
 
+    [TestMethod]
+    public async Task GetSigningAccountAsync_Success_ParsesAccountAndTargetsResourceScopedUrl()
+    {
+        const string json = """
+        {
+            "name": "myaccount",
+            "location": "eastus",
+            "id": "/subscriptions/sub-1/resourceGroups/my-rg/providers/Microsoft.CodeSigning/codeSigningAccounts/myaccount",
+            "properties": { "accountUri": "https://eus.codesigning.azure.net" }
+        }
+        """;
+        var handler = new StubHttpMessageHandler(HttpStatusCode.OK, json);
+
+        var service = CreateService(handler);
+        var account = await service.GetSigningAccountAsync("token", "sub-1", "my-rg", "myaccount");
+
+        Assert.IsNotNull(account);
+        Assert.AreEqual("myaccount", account.Name);
+        Assert.AreEqual("my-rg", account.ResourceGroup);
+        Assert.AreEqual("eastus", account.Location);
+        Assert.AreEqual("https://eus.codesigning.azure.net", account.AccountUri);
+
+        // Direct GET on the named account — no list segment, so only reader on the resource is needed.
+        StringAssert.Contains(handler.LastRequestUri!, "/resourceGroups/my-rg/providers/Microsoft.CodeSigning/codeSigningAccounts/myaccount?api-version=");
+        Assert.AreEqual("token", handler.LastRequest!.Headers.Authorization!.Parameter);
+    }
+
+    [TestMethod]
+    public async Task GetSigningAccountAsync_NotFound_ReturnsNull()
+    {
+        var handler = new StubHttpMessageHandler(HttpStatusCode.NotFound, """{ "error": { "code": "NotFound", "message": "gone" } }""");
+
+        var service = CreateService(handler);
+        var account = await service.GetSigningAccountAsync("token", "sub-1", "my-rg", "missing");
+
+        Assert.IsNull(account);
+    }
+
+    [TestMethod]
+    public async Task GetSigningAccountAsync_OnErrorStatus_SurfacesParsedAzureError()
+    {
+        const string errorJson = """
+        { "error": { "code": "AuthorizationFailed", "message": "The client does not have authorization." } }
+        """;
+        var handler = new StubHttpMessageHandler(HttpStatusCode.Forbidden, errorJson);
+
+        var service = CreateService(handler);
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => service.GetSigningAccountAsync("token", "sub-1", "my-rg", "myaccount"));
+
+        StringAssert.Contains(ex.Message, "AuthorizationFailed");
+    }
+
+    [TestMethod]
+    public async Task GetCertificateProfileAsync_Success_ParsesProfileAndTargetsProfileScopedUrl()
+    {
+        const string json = """
+        {
+            "name": "profile-a",
+            "properties": { "profileType": "PublicTrust", "status": "Active" }
+        }
+        """;
+        var handler = new StubHttpMessageHandler(HttpStatusCode.OK, json);
+
+        var service = CreateService(handler);
+        var profile = await service.GetCertificateProfileAsync("token", "sub-1", "my-rg", "myaccount", "profile-a");
+
+        Assert.IsNotNull(profile);
+        Assert.AreEqual("profile-a", profile.Name);
+        Assert.AreEqual("PublicTrust", profile.ProfileType);
+        Assert.AreEqual("Active", profile.Status);
+
+        // Direct GET on the named profile — no certificateProfiles list, so a profile-scoped
+        // signer principal that cannot enumerate the collection still validates successfully.
+        StringAssert.Contains(handler.LastRequestUri!, "/codeSigningAccounts/myaccount/certificateProfiles/profile-a?api-version=");
+    }
+
+    [TestMethod]
+    public async Task GetCertificateProfileAsync_NotFound_ReturnsNull()
+    {
+        var handler = new StubHttpMessageHandler(HttpStatusCode.NotFound, """{ "error": { "code": "NotFound", "message": "gone" } }""");
+
+        var service = CreateService(handler);
+        var profile = await service.GetCertificateProfileAsync("token", "sub-1", "my-rg", "myaccount", "missing");
+
+        Assert.IsNull(profile);
+    }
+
+    [TestMethod]
+    public async Task GetCertificateProfileAsync_OnErrorStatus_SurfacesParsedAzureError()
+    {
+        const string errorJson = """
+        { "error": { "code": "AuthorizationFailed", "message": "The client does not have authorization." } }
+        """;
+        var handler = new StubHttpMessageHandler(HttpStatusCode.Forbidden, errorJson);
+
+        var service = CreateService(handler);
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => service.GetCertificateProfileAsync("token", "sub-1", "my-rg", "myaccount", "profile-a"));
+
+        StringAssert.Contains(ex.Message, "AuthorizationFailed");
+    }
+
     private sealed class StubHttpMessageHandler(HttpStatusCode statusCode, string body) : HttpMessageHandler
     {
         private HttpResponseMessage? _response;

@@ -118,6 +118,59 @@ internal class AzureSigningService : IAzureSigningService
     {
         var url = $"{ArmBaseUrl}/subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.CodeSigning/codeSigningAccounts/{accountName}?api-version={TrustedSigningApiVersion}";
 
+        var item = await GetArmResourceAsync(url, accessToken, cancellationToken);
+        if (item == null)
+        {
+            return null;
+        }
+
+        var element = item.Value;
+        var name = element.GetProperty("name").GetString() ?? "";
+        var location = element.TryGetProperty("location", out var locProp) ? locProp.GetString() ?? "" : "";
+        var id = element.GetProperty("id").GetString() ?? "";
+        var rg = ParseResourceGroupFromId(id);
+
+        string? accountUri = null;
+        if (element.TryGetProperty("properties", out var props) &&
+            props.TryGetProperty("accountUri", out var uriProp))
+        {
+            accountUri = uriProp.GetString();
+        }
+
+        return new SigningAccount(name, rg, location, accountUri);
+    }
+
+    public async Task<CertificateProfile?> GetCertificateProfileAsync(string accessToken, string subscriptionId, string resourceGroup, string accountName, string profileName, CancellationToken cancellationToken = default)
+    {
+        var url = $"{ArmBaseUrl}/subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.CodeSigning/codeSigningAccounts/{accountName}/certificateProfiles/{profileName}?api-version={TrustedSigningApiVersion}";
+
+        var item = await GetArmResourceAsync(url, accessToken, cancellationToken);
+        if (item == null)
+        {
+            return null;
+        }
+
+        var element = item.Value;
+        var name = element.GetProperty("name").GetString() ?? "";
+        var profileType = "";
+        var status = "";
+        if (element.TryGetProperty("properties", out var props))
+        {
+            profileType = props.TryGetProperty("profileType", out var typeProp) ? typeProp.GetString() ?? "" : "";
+            status = props.TryGetProperty("status", out var statusProp) ? statusProp.GetString() ?? "" : "";
+        }
+
+        return new CertificateProfile(name, profileType, status);
+    }
+
+    /// <summary>
+    /// Issues a single ARM GET and returns the parsed root element, or null on 404. Shared by the
+    /// direct-GET resource lookups (<see cref="GetSigningAccountAsync"/>,
+    /// <see cref="GetCertificateProfileAsync"/>) so they need only the reader role on the specific
+    /// resource rather than list permission on the parent collection.
+    /// </summary>
+    private async Task<JsonElement?> GetArmResourceAsync(string url, string accessToken, CancellationToken cancellationToken)
+    {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
@@ -137,21 +190,7 @@ internal class AzureSigningService : IAzureSigningService
         }
 
         using var doc = JsonDocument.Parse(content);
-        var item = doc.RootElement;
-
-        var name = item.GetProperty("name").GetString() ?? "";
-        var location = item.TryGetProperty("location", out var locProp) ? locProp.GetString() ?? "" : "";
-        var id = item.GetProperty("id").GetString() ?? "";
-        var rg = ParseResourceGroupFromId(id);
-
-        string? accountUri = null;
-        if (item.TryGetProperty("properties", out var props) &&
-            props.TryGetProperty("accountUri", out var uriProp))
-        {
-            accountUri = uriProp.GetString();
-        }
-
-        return new SigningAccount(name, rg, location, accountUri);
+        return doc.RootElement.Clone();
     }
 
     /// <summary>

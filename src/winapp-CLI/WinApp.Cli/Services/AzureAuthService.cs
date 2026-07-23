@@ -17,7 +17,7 @@ namespace WinApp.Cli.Services;
 /// DefaultAzureCredential fails — the Trusted Signing dlib requires
 /// AzureCliCredential for local interactive signing.
 /// </summary>
-internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiConsole ansiConsole) : IAzureAuthService
+internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiConsole ansiConsole, IProcessRunner processRunner) : IAzureAuthService
 {
     public virtual bool IsInteractive =>
         Environment.UserInteractive
@@ -53,8 +53,9 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
                     "Alternatively, ensure the Azure CLI is installed and run 'az login' before this command.");
             }
 
-            // The Trusted Signing dlib requires AzureCliCredential for interactive signing.
-            // Check if Azure CLI is available and run 'az login' for the user.
+            // The Trusted Signing dlib requires an Azure CLI login for interactive signing. Resolve
+            // the CLI to a validated absolute path first; all subsequent az invocations use that
+            // path rather than an ambient 'az' lookup that a hijacked az.cmd could satisfy.
             var azPath = FindAzureCli();
             if (azPath == null)
             {
@@ -70,6 +71,26 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
 
             var tenantId = TenantId;
 
+            // A preset tenant must be well-formed before it is ever passed to the CLI (it rejects
+            // both bad input and argument-injection metacharacters).
+            if (!string.IsNullOrEmpty(tenantId) && !IsValidTenantId(tenantId))
+            {
+                throw new InvalidOperationException(
+                    $"Invalid AZURE_TENANT_ID value '{tenantId}'. " +
+                    "It must be a tenant GUID or a domain such as contoso.onmicrosoft.com.");
+            }
+
+            // First try to mint a token from an existing Azure CLI session using the validated
+            // absolute path. This preserves the zero-prompt experience for users who already ran
+            // 'az login' — the case DefaultAzureCredential's (now excluded) CLI credential covered.
+            var existingToken = await GetTokenViaAzureCliAsync(azPath, scope, tenantId, cancellationToken);
+            if (existingToken != null)
+            {
+                logger.LogInformation("Authenticated via Azure CLI");
+                return existingToken;
+            }
+
+            // No usable cached session — prompt for a tenant if we don't have one, then log in.
             if (string.IsNullOrEmpty(tenantId))
             {
                 tenantId = await ansiConsole.PromptAsync(
@@ -78,12 +99,6 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
                         .Validate(IsValidTenantId),
                     cancellationToken);
                 TenantId = tenantId;
-            }
-            else if (!IsValidTenantId(tenantId))
-            {
-                throw new InvalidOperationException(
-                    $"Invalid AZURE_TENANT_ID value '{tenantId}'. " +
-                    "It must be a tenant GUID or a domain such as contoso.onmicrosoft.com.");
             }
 
             logger.LogInformation("Signing in via Azure CLI...");
@@ -94,22 +109,17 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
                 throw new InvalidOperationException("Azure CLI login failed. Please try running 'az login' manually.");
             }
 
-            // Retry with the now-valid Azure CLI credential
-            var retryCredential = CreateAzureCliCredential();
-            AccessToken retryToken;
-            try
-            {
-                retryToken = await retryCredential.GetTokenAsync(new TokenRequestContext([scope]), cancellationToken);
-            }
-            catch (AuthenticationFailedException ex)
+            // Retrieve the token from the now-valid session via the same validated absolute path.
+            var retryToken = await GetTokenViaAzureCliAsync(azPath, scope, tenantId, cancellationToken);
+            if (retryToken == null)
             {
                 throw new InvalidOperationException(
                     "Azure CLI login appeared to succeed but retrieving an access token failed. " +
-                    "Try running 'az login' manually, then re-run the command.", ex);
+                    "Try running 'az login' manually, then re-run the command.");
             }
 
             logger.LogInformation("Authenticated via Azure CLI");
-            return retryToken.Token;
+            return retryToken;
         }
     }
 
@@ -119,6 +129,12 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
         var options = new DefaultAzureCredentialOptions
         {
             ExcludeInteractiveBrowserCredential = true,
+
+            // Exclude the Azure CLI credential from the implicit chain: it invokes 'az' via an
+            // ambient process lookup rather than the absolute path validated by FindAzureCli, so a
+            // repo-local or PATH-hijacked az.cmd could run. CLI-based auth is instead handled
+            // explicitly below through GetTokenViaAzureCliAsync using the validated path.
+            ExcludeAzureCliCredential = true,
         };
 
         var tenantId = Environment.GetEnvironmentVariable("AZURE_TENANT_ID");
@@ -130,8 +146,70 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
         return new DefaultAzureCredential(options);
     }
 
-    /// <summary>Creates the Azure CLI credential used after an interactive 'az login'. Virtual for tests.</summary>
-    protected virtual TokenCredential CreateAzureCliCredential() => new AzureCliCredential();
+    /// <summary>
+    /// Mints an access token from the current Azure CLI session by invoking <c>az account
+    /// get-access-token</c> at the validated absolute <paramref name="azPath"/>. Returns null when
+    /// no usable session exists or the token cannot be parsed, so callers can fall back to an
+    /// interactive login. Virtual for tests.
+    /// </summary>
+    protected virtual async Task<string?> GetTokenViaAzureCliAsync(string azPath, string scope, string? tenantId, CancellationToken cancellationToken)
+    {
+        var arguments = new List<string>
+        {
+            "account",
+            "get-access-token",
+            "--scope",
+            scope,
+            "--output",
+            "json",
+        };
+
+        // Only forward a tenant that has already been validated, so it can never carry extra args.
+        if (!string.IsNullOrEmpty(tenantId) && IsValidTenantId(tenantId))
+        {
+            arguments.Add("--tenant");
+            arguments.Add(tenantId);
+        }
+
+        ProcessRunResult result;
+        try
+        {
+            result = await processRunner.RunAsync(
+                new ProcessRunRequest(azPath, arguments, CreateNoWindow: true),
+                cancellationToken: cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Azure CLI token retrieval failed to start.");
+            return null;
+        }
+
+        if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.StandardOutput))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(result.StandardOutput);
+            if (doc.RootElement.TryGetProperty("accessToken", out var tokenProp)
+                && tokenProp.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                var token = tokenProp.GetString();
+                return string.IsNullOrEmpty(token) ? null : token;
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // Fall through — treat unparseable output as "no token".
+        }
+
+        return null;
+    }
 
     protected virtual string? FindAzureCli()
     {
@@ -174,7 +252,7 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
                 p.WaitForExit();
                 if (p.ExitCode == 0 && !string.IsNullOrEmpty(output))
                 {
-                    var trusted = SelectFirstTrustedAzureCliPath(output, Environment.CurrentDirectory);
+                    var trusted = SelectFirstTrustedAzureCliPath(output, GetAzureCliInstallRoots());
                     if (trusted != null)
                     {
                         return trusted;
@@ -191,13 +269,33 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
     }
 
     /// <summary>
+    /// The known, machine-scoped Azure CLI installation roots on Windows. An <c>az.cmd</c>
+    /// resolved from PATH is only trusted when it lives under one of these directories, so a
+    /// repo- or user-writable copy elsewhere on PATH cannot be launched automatically.
+    /// </summary>
+    internal static IReadOnlyList<string> GetAzureCliInstallRoots()
+    {
+        var bases = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+            Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs"),
+        };
+
+        return bases
+            .Where(b => !string.IsNullOrEmpty(b))
+            .Select(b => Path.Join(b, "Microsoft SDKs", "Azure", "CLI2"))
+            .ToList();
+    }
+
+    /// <summary>
     /// Picks the first trusted Azure CLI path from raw <c>where.exe</c> output. where.exe searches
     /// the current directory *before* PATH, so a malicious 'az.cmd' dropped into the working
-    /// directory (e.g. an untrusted cloned repo) could appear first. Walk every candidate and
-    /// return the first trusted one — a rooted path that does not live in the current working
-    /// directory tree — instead of rejecting discovery outright when the first hit is untrusted.
+    /// directory (or anywhere else on PATH) could appear first. Walk every candidate and return the
+    /// first one that lives under a known Azure CLI installation root, rather than trusting whatever
+    /// happens to resolve first.
     /// </summary>
-    internal static string? SelectFirstTrustedAzureCliPath(string whereOutput, string currentDirectory)
+    internal static string? SelectFirstTrustedAzureCliPath(string whereOutput, IReadOnlyList<string> allowedRoots)
     {
         if (string.IsNullOrEmpty(whereOutput))
         {
@@ -205,19 +303,17 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
         }
 
         var whereCandidates = whereOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return whereCandidates.FirstOrDefault(candidate => IsTrustedAzureCliPath(candidate, currentDirectory));
+        return whereCandidates.FirstOrDefault(candidate => IsTrustedAzureCliPath(candidate, allowedRoots));
     }
 
     /// <summary>
-    /// Rejects an Azure CLI path resolved from <c>where.exe</c> when it is not a rooted,
-    /// existing file or when it resolves anywhere inside the current working directory tree
-    /// (the hijack vector — a repo could drop a malicious <c>az.cmd</c> in a subfolder such as
-    /// <c>.\node_modules\.bin</c> that lands early on PATH).
+    /// Trusts an Azure CLI path resolved from <c>where.exe</c> only when it is a rooted, existing
+    /// file located under one of the supplied known installation roots. "Outside the current
+    /// directory" is deliberately not sufficient: a repo-controlled <c>az.cmd</c> in a sibling
+    /// folder (e.g. <c>C:\repo\node_modules\.bin</c>) is outside the working subtree yet still
+    /// attacker-controlled, so we require a positive match against a trusted install location.
     /// </summary>
-    private static bool IsTrustedAzureCliPath(string resolvedPath) =>
-        IsTrustedAzureCliPath(resolvedPath, Environment.CurrentDirectory);
-
-    internal static bool IsTrustedAzureCliPath(string resolvedPath, string currentDirectory)
+    internal static bool IsTrustedAzureCliPath(string resolvedPath, IReadOnlyList<string> allowedRoots)
     {
         if (string.IsNullOrWhiteSpace(resolvedPath)
             || !Path.IsPathRooted(resolvedPath)
@@ -226,86 +322,49 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
             return false;
         }
 
-        var resolvedDir = Path.GetFullPath(Path.GetDirectoryName(resolvedPath)!);
-        var currentDir = Path.GetFullPath(currentDirectory);
+        var fullPath = Path.GetFullPath(resolvedPath);
 
-        // Path.GetRelativePath yields "." when equal, a rooted path or a "..\" prefix when the
-        // resolved directory is outside the cwd, and a plain relative segment when it is inside.
-        var relative = Path.GetRelativePath(currentDir, resolvedDir);
-        var isUnderCurrentDirectory = relative == "."
-            || (!Path.IsPathRooted(relative)
-                && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
-                && relative != "..");
+        foreach (var root in allowedRoots)
+        {
+            if (string.IsNullOrEmpty(root))
+            {
+                continue;
+            }
 
-        return !isUnderCurrentDirectory;
+            var fullRoot = Path.GetFullPath(root);
+
+            // Path.GetRelativePath yields "." when equal, a rooted path or a "..\" prefix when the
+            // resolved path is outside the root, and a plain relative segment when it is inside.
+            var relative = Path.GetRelativePath(fullRoot, fullPath);
+            var isUnderRoot = relative == "."
+                || (!Path.IsPathRooted(relative)
+                    && relative != ".."
+                    && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal));
+
+            if (isUnderRoot)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     protected virtual async Task<bool> RunAzLoginAsync(string azPath, string tenantId, CancellationToken cancellationToken)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = azPath,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = false // Allow browser interaction
-        };
+        // Use an argument list rather than string interpolation so the (already validated) tenant
+        // value can never be smuggled in as extra arguments to the az.cmd target. CreateNoWindow is
+        // false so the CLI can pop a browser for interactive login. Both pipes are drained
+        // concurrently and forwarded so the user sees device-login instructions; routing through
+        // the logger lets --quiet suppress them.
+        var result = await processRunner.RunAsync(
+            new ProcessRunRequest(azPath, ["login", "--tenant", tenantId], CreateNoWindow: false),
+            onOutputLine: line => logger.LogInformation("{AzCliOutput}", line),
+            onErrorLine: line => logger.LogInformation("{AzCliOutput}", line),
+            cancellationToken: cancellationToken);
 
-        // Use ArgumentList rather than string interpolation so the (already validated)
-        // tenant value can never be smuggled in as extra arguments to the az.cmd target.
-        psi.ArgumentList.Add("login");
-        psi.ArgumentList.Add("--tenant");
-        psi.ArgumentList.Add(tenantId);
-
-        using var p = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start Azure CLI");
-
-        // Drain and forward both pipes concurrently. Reading neither (the previous behavior)
-        // can deadlock when az fills a redirected pipe, and forwarding lets the user see
-        // device-login instructions written to stdout/stderr.
-        var stdoutTask = ForwardStreamAsync(p.StandardOutput, cancellationToken);
-        var stderrTask = ForwardStreamAsync(p.StandardError, cancellationToken);
-
-        try
-        {
-            await p.WaitForExitAsync(cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            TryKillProcessTree(p);
-            throw;
-        }
-
-        await Task.WhenAll(stdoutTask, stderrTask);
-        return p.ExitCode == 0;
+        return result.ExitCode == 0;
     }
-
-    private async Task ForwardStreamAsync(StreamReader reader, CancellationToken cancellationToken)
-    {
-        string? line;
-        while ((line = await reader.ReadLineAsync(cancellationToken)) != null)
-        {
-            // Route through the logger so --quiet (which raises the minimum log level) suppresses
-            // this output. At the default Information level it still reaches the user.
-            logger.LogInformation("{AzCliOutput}", line);
-        }
-    }
-
-    private static void TryKillProcessTree(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
-        }
-        catch
-        {
-            // Best-effort cleanup on cancellation
-        }
-    }
-
-    /// <summary>
     /// Validates that a tenant identifier is a GUID or a DNS-style domain name. This both
     /// prevents bad input from reaching the Azure CLI and rejects shell/argument metacharacters.
     /// </summary>

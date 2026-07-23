@@ -93,6 +93,12 @@ internal class AzureSignToolService(
         // Download the pinned version of the package
         await taskContext.AddSubTaskAsync($"Installing {ArtifactSigningClientPackage} {ArtifactSigningClientVersion}...", async (subContext, ct) =>
         {
+            // A previous install that failed or was cancelled mid-extraction can leave the version
+            // directory present but without the dlib. EnsurePackageAsync treats any existing version
+            // directory as installed and would skip re-downloading, permanently poisoning the cache.
+            // Remove such a partial directory first so the install actually re-extracts.
+            RemovePoisonedVersionDir(ArtifactSigningClientVersion, subContext);
+
             var globalWinappDir = winappDirectoryService.GetGlobalWinappDirectory();
             var success = await packageInstallationService.EnsurePackageAsync(
                 globalWinappDir,
@@ -118,6 +124,39 @@ internal class AzureSignToolService(
         }
 
         return dlibPath;
+    }
+
+    /// <summary>
+    /// Deletes a cached package version directory when it exists but does not contain the expected
+    /// dlib — the signature of a failed or cancelled prior extraction. Leaving it in place would let
+    /// <c>EnsurePackageAsync</c> treat the package as already installed and skip re-downloading,
+    /// so every later run would fail without recovering. Best-effort: failures are logged, not thrown.
+    /// </summary>
+    private void RemovePoisonedVersionDir(string version, TaskContext taskContext)
+    {
+        try
+        {
+            var nugetCache = nugetService.GetNuGetGlobalPackagesDir();
+            var versionDir = new DirectoryInfo(Path.Join(nugetCache.FullName, ArtifactSigningClientPackage.ToLowerInvariant(), version));
+            if (!versionDir.Exists)
+            {
+                return;
+            }
+
+            // If the dlib is already present the cache is healthy — nothing to clean up.
+            if (FindTrustedSigningDlib(version) != null)
+            {
+                return;
+            }
+
+            taskContext.AddDebugMessage($"Removing incomplete cached package at {versionDir.FullName} before reinstalling.");
+            versionDir.Delete(recursive: true);
+        }
+        catch (Exception ex)
+        {
+            // Best-effort: if cleanup fails, the subsequent install/find will surface a clear error.
+            taskContext.AddDebugMessage($"Could not clean up incomplete package cache: {ex.Message}");
+        }
     }
 
     private FileInfo? FindTrustedSigningDlib(string? version = null)

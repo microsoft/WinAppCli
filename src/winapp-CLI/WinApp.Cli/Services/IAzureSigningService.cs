@@ -31,6 +31,15 @@ internal interface IAzureSigningService
     /// Lists certificate profiles under a signing account.
     /// </summary>
     Task<IReadOnlyList<CertificateProfile>> ListCertificateProfilesAsync(string accessToken, string subscriptionId, string resourceGroup, string accountName, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets a single certificate profile by name via a direct ARM GET, avoiding the broader
+    /// list permission that <see cref="ListCertificateProfilesAsync"/> requires. This keeps the
+    /// documented <c>--account --profile</c> flow working for a CI principal whose signer role is
+    /// scoped to the individual profile and therefore cannot enumerate the parent collection.
+    /// Returns null if the profile is not found (404).
+    /// </summary>
+    Task<CertificateProfile?> GetCertificateProfileAsync(string accessToken, string subscriptionId, string resourceGroup, string accountName, string profileName, CancellationToken cancellationToken = default);
 }
 
 internal record AzureSubscription(string SubscriptionId, string DisplayName);

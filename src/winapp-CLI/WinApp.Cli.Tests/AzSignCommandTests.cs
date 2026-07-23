@@ -616,4 +616,11 @@ internal class FakeAzureSigningService : IAzureSigningService
     {
         return Task.FromResult(CertificateProfiles);
     }
+
+    public Task<CertificateProfile?> GetCertificateProfileAsync(string accessToken, string subscriptionId, string resourceGroup, string accountName, string profileName, CancellationToken cancellationToken = default)
+    {
+        var match = CertificateProfiles.FirstOrDefault(p =>
+            string.Equals(p.Name, profileName, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(match);
+    }
 }

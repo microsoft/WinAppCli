@@ -36,97 +36,103 @@ public class AzureAuthServiceTests
     }
 
     [TestMethod]
-    public void IsTrustedAzureCliPath_RejectsFileInCurrentDirectory()
+    public void IsTrustedAzureCliPath_RejectsFileOutsideInstallRoots()
     {
-        var baseDir = Directory.CreateTempSubdirectory("winapp-aztrust-cwd").FullName;
+        var installRoot = Directory.CreateTempSubdirectory("winapp-aztrust-root").FullName;
+        var elsewhere = Directory.CreateTempSubdirectory("winapp-aztrust-cwd").FullName;
         try
         {
-            var azPath = Path.Combine(baseDir, "az.cmd");
+            var azPath = Path.Join(elsewhere, "az.cmd");
             File.WriteAllText(azPath, "@echo off");
 
-            Assert.IsFalse(AzureAuthService.IsTrustedAzureCliPath(azPath, baseDir));
+            Assert.IsFalse(AzureAuthService.IsTrustedAzureCliPath(azPath, [installRoot]));
         }
         finally
         {
-            Directory.Delete(baseDir, recursive: true);
+            Directory.Delete(installRoot, recursive: true);
+            Directory.Delete(elsewhere, recursive: true);
         }
     }
 
     [TestMethod]
-    public void IsTrustedAzureCliPath_RejectsFileInSubdirectoryOfCurrentDirectory()
+    public void IsTrustedAzureCliPath_RejectsRepoControlledSiblingOutsideWorkingSubtree()
     {
-        var baseDir = Directory.CreateTempSubdirectory("winapp-aztrust-sub").FullName;
+        // A repo-controlled az.cmd (e.g. node_modules\.bin) is outside the working subtree but is
+        // still attacker-controlled, so it must not be trusted just for being "outside cwd".
+        var installRoot = Directory.CreateTempSubdirectory("winapp-aztrust-root2").FullName;
+        var repo = Directory.CreateTempSubdirectory("winapp-aztrust-repo").FullName;
         try
         {
-            var subDir = Path.Combine(baseDir, "node_modules", ".bin");
+            var subDir = Path.Join(repo, "node_modules", ".bin");
             Directory.CreateDirectory(subDir);
-            var azPath = Path.Combine(subDir, "az.cmd");
+            var azPath = Path.Join(subDir, "az.cmd");
             File.WriteAllText(azPath, "@echo off");
 
-            Assert.IsFalse(AzureAuthService.IsTrustedAzureCliPath(azPath, baseDir));
+            Assert.IsFalse(AzureAuthService.IsTrustedAzureCliPath(azPath, [installRoot]));
         }
         finally
         {
-            Directory.Delete(baseDir, recursive: true);
+            Directory.Delete(installRoot, recursive: true);
+            Directory.Delete(repo, recursive: true);
         }
     }
 
     [TestMethod]
-    public void IsTrustedAzureCliPath_AcceptsFileOutsideCurrentDirectoryTree()
+    public void IsTrustedAzureCliPath_AcceptsFileUnderKnownInstallRoot()
     {
-        var baseDir = Directory.CreateTempSubdirectory("winapp-aztrust-base").FullName;
-        var installDir = Directory.CreateTempSubdirectory("winapp-aztrust-install").FullName;
+        var installRoot = Directory.CreateTempSubdirectory("winapp-aztrust-install").FullName;
         try
         {
-            var azPath = Path.Combine(installDir, "az.cmd");
+            var wbin = Path.Join(installRoot, "wbin");
+            Directory.CreateDirectory(wbin);
+            var azPath = Path.Join(wbin, "az.cmd");
             File.WriteAllText(azPath, "@echo off");
 
-            Assert.IsTrue(AzureAuthService.IsTrustedAzureCliPath(azPath, baseDir));
+            Assert.IsTrue(AzureAuthService.IsTrustedAzureCliPath(azPath, [installRoot]));
         }
         finally
         {
-            Directory.Delete(baseDir, recursive: true);
-            Directory.Delete(installDir, recursive: true);
+            Directory.Delete(installRoot, recursive: true);
         }
     }
 
     [TestMethod]
     public void IsTrustedAzureCliPath_RejectsNonExistentOrRelativePath()
     {
-        var baseDir = Directory.CreateTempSubdirectory("winapp-aztrust-none").FullName;
+        var installRoot = Directory.CreateTempSubdirectory("winapp-aztrust-none").FullName;
         try
         {
-            Assert.IsFalse(AzureAuthService.IsTrustedAzureCliPath(Path.Combine(baseDir, "missing.cmd"), baseDir));
-            Assert.IsFalse(AzureAuthService.IsTrustedAzureCliPath("az.cmd", baseDir));
+            Assert.IsFalse(AzureAuthService.IsTrustedAzureCliPath(Path.Join(installRoot, "missing.cmd"), [installRoot]));
+            Assert.IsFalse(AzureAuthService.IsTrustedAzureCliPath("az.cmd", [installRoot]));
         }
         finally
         {
-            Directory.Delete(baseDir, recursive: true);
+            Directory.Delete(installRoot, recursive: true);
         }
     }
 
     [TestMethod]
-    public void SelectFirstTrustedAzureCliPath_SkipsUntrustedCwdHitAndReturnsLaterTrustedPath()
+    public void SelectFirstTrustedAzureCliPath_SkipsUntrustedHitAndReturnsLaterTrustedPath()
     {
-        var cwd = Directory.CreateTempSubdirectory("winapp-azwhere-cwd").FullName;
+        var elsewhere = Directory.CreateTempSubdirectory("winapp-azwhere-cwd").FullName;
         var install = Directory.CreateTempSubdirectory("winapp-azwhere-install").FullName;
         try
         {
-            // where.exe lists the hijacked cwd copy first, then a legitimate install path.
-            var hijack = Path.Combine(cwd, "az.cmd");
+            // where.exe lists a hijacked copy outside any install root first, then a legitimate one.
+            var hijack = Path.Join(elsewhere, "az.cmd");
             File.WriteAllText(hijack, "@echo off");
-            var trusted = Path.Combine(install, "az.cmd");
+            var trusted = Path.Join(install, "az.cmd");
             File.WriteAllText(trusted, "@echo off");
 
             var whereOutput = $"{hijack}\r\n{trusted}\r\n";
 
-            var result = AzureAuthService.SelectFirstTrustedAzureCliPath(whereOutput, cwd);
+            var result = AzureAuthService.SelectFirstTrustedAzureCliPath(whereOutput, [install]);
 
-            Assert.AreEqual(trusted, result, "The untrusted cwd hit must be skipped in favor of the trusted install path");
+            Assert.AreEqual(trusted, result, "The untrusted hit must be skipped in favor of the trusted install path");
         }
         finally
         {
-            Directory.Delete(cwd, recursive: true);
+            Directory.Delete(elsewhere, recursive: true);
             Directory.Delete(install, recursive: true);
         }
     }
@@ -134,24 +140,26 @@ public class AzureAuthServiceTests
     [TestMethod]
     public void SelectFirstTrustedAzureCliPath_WhenAllCandidatesUntrusted_ReturnsNull()
     {
-        var cwd = Directory.CreateTempSubdirectory("winapp-azwhere-none").FullName;
+        var installRoot = Directory.CreateTempSubdirectory("winapp-azwhere-root").FullName;
+        var elsewhere = Directory.CreateTempSubdirectory("winapp-azwhere-none").FullName;
         try
         {
-            var hijack = Path.Combine(cwd, "az.cmd");
+            var hijack = Path.Join(elsewhere, "az.cmd");
             File.WriteAllText(hijack, "@echo off");
-            var subHijack = Path.Combine(cwd, "sub");
+            var subHijack = Path.Join(elsewhere, "sub");
             Directory.CreateDirectory(subHijack);
-            var subHijackCmd = Path.Combine(subHijack, "az.cmd");
+            var subHijackCmd = Path.Join(subHijack, "az.cmd");
             File.WriteAllText(subHijackCmd, "@echo off");
 
             var whereOutput = $"{hijack}\n{subHijackCmd}\n";
 
-            Assert.IsNull(AzureAuthService.SelectFirstTrustedAzureCliPath(whereOutput, cwd));
-            Assert.IsNull(AzureAuthService.SelectFirstTrustedAzureCliPath(string.Empty, cwd));
+            Assert.IsNull(AzureAuthService.SelectFirstTrustedAzureCliPath(whereOutput, [installRoot]));
+            Assert.IsNull(AzureAuthService.SelectFirstTrustedAzureCliPath(string.Empty, [installRoot]));
         }
         finally
         {
-            Directory.Delete(cwd, recursive: true);
+            Directory.Delete(installRoot, recursive: true);
+            Directory.Delete(elsewhere, recursive: true);
         }
     }
 
@@ -204,7 +212,31 @@ public class AzureAuthServiceTests
     }
 
     [TestMethod]
-    public async Task GetAccessTokenAsync_InteractiveLoginSucceeds_RetriesWithCliCredential()
+    public async Task GetAccessTokenAsync_ExistingCliSession_ReturnsTokenWithoutLogin()
+    {
+        using var service = new TestableAzureAuthService
+        {
+            InteractiveOverride = true,
+            PrimaryCredential = new ThrowingCredential(),
+            AzCliPath = @"C:\fake\az.cmd",
+            HasExistingSession = true,
+            SeedTenantId = "72f988bf-86f1-41af-91ab-2d7cd011db47",
+        };
+
+        var token = await service.GetAccessTokenAsync(ArmScope);
+
+        Assert.AreEqual("cli-token", token);
+        Assert.AreEqual(0, service.RunAzLoginCallCount, "A valid cached session must not trigger an interactive login");
+
+        // The token must be minted through the validated absolute az path, never an ambient lookup.
+        var tokenRequest = service.ProcessRunner.Requests.Single();
+        Assert.AreEqual(@"C:\fake\az.cmd", tokenRequest.FileName);
+        string[] expectedTokenArgs = ["account", "get-access-token", "--scope", ArmScope, "--output", "json", "--tenant", "72f988bf-86f1-41af-91ab-2d7cd011db47"];
+        CollectionAssert.AreEqual(expectedTokenArgs, tokenRequest.Arguments.ToArray());
+    }
+
+    [TestMethod]
+    public async Task GetAccessTokenAsync_InteractiveLoginSucceeds_RetriesViaValidatedAzPath()
     {
         using var service = new TestableAzureAuthService
         {
@@ -212,7 +244,6 @@ public class AzureAuthServiceTests
             PrimaryCredential = new ThrowingCredential(),
             AzCliPath = @"C:\fake\az.cmd",
             LoginResult = true,
-            CliCredential = new StubCredential("cli-token"),
             SeedTenantId = "72f988bf-86f1-41af-91ab-2d7cd011db47",
         };
 
@@ -221,6 +252,13 @@ public class AzureAuthServiceTests
         Assert.AreEqual("cli-token", token);
         Assert.AreEqual(1, service.RunAzLoginCallCount);
         Assert.AreEqual("72f988bf-86f1-41af-91ab-2d7cd011db47", service.LastLoginTenantId);
+
+        // The login itself must run against the validated absolute path with a list-form argument
+        // for the (validated) tenant — never a concatenated command string.
+        var loginRequest = service.ProcessRunner.Requests.Single(r => r.Arguments.Count > 0 && r.Arguments[0] == "login");
+        Assert.AreEqual(@"C:\fake\az.cmd", loginRequest.FileName);
+        string[] expectedLoginArgs = ["login", "--tenant", "72f988bf-86f1-41af-91ab-2d7cd011db47"];
+        CollectionAssert.AreEqual(expectedLoginArgs, loginRequest.Arguments.ToArray());
     }
 
     [TestMethod]
@@ -242,7 +280,7 @@ public class AzureAuthServiceTests
     }
 
     [TestMethod]
-    public async Task GetAccessTokenAsync_InteractiveLoginSucceedsButRetryTokenFails_ThrowsWrapped()
+    public async Task GetAccessTokenAsync_InteractiveLoginSucceedsButRetryTokenFails_Throws()
     {
         using var service = new TestableAzureAuthService
         {
@@ -250,7 +288,7 @@ public class AzureAuthServiceTests
             PrimaryCredential = new ThrowingCredential(),
             AzCliPath = @"C:\fake\az.cmd",
             LoginResult = true,
-            CliCredential = new ThrowingCredential(),
+            TokenAlwaysFails = true,
             SeedTenantId = "72f988bf-86f1-41af-91ab-2d7cd011db47",
         };
 
@@ -258,8 +296,6 @@ public class AzureAuthServiceTests
             () => service.GetAccessTokenAsync(ArmScope));
 
         StringAssert.Contains(ex.Message, "retrieving an access token failed");
-        Assert.IsInstanceOfType<AuthenticationFailedException>(ex.InnerException,
-            "The original authentication failure should be preserved as the inner exception");
         Assert.AreEqual(1, service.RunAzLoginCallCount);
     }
 
@@ -272,7 +308,6 @@ public class AzureAuthServiceTests
             PrimaryCredential = new ThrowingCredential(),
             AzCliPath = @"C:\fake\az.cmd",
             LoginResult = true,
-            CliCredential = new StubCredential("cli-token"),
             SeedTenantId = "not a valid tenant",
         };
 
@@ -281,19 +316,23 @@ public class AzureAuthServiceTests
 
         StringAssert.Contains(ex.Message, "Invalid AZURE_TENANT_ID");
         Assert.AreEqual(0, service.RunAzLoginCallCount, "Login must not run with an invalid tenant id");
+        Assert.AreEqual(0, service.ProcessRunner.Requests.Count, "An invalid tenant must never reach the Azure CLI");
     }
 
     private sealed class TestableAzureAuthService : AzureAuthService, IDisposable
     {
         private readonly TestConsole _console;
 
-        public TestableAzureAuthService() : this(new TestConsole()) { }
+        public TestableAzureAuthService() : this(new TestConsole(), new FakeProcessRunner()) { }
 
-        private TestableAzureAuthService(TestConsole console)
-            : base(NullLogger<AzureAuthService>.Instance, console)
+        private TestableAzureAuthService(TestConsole console, FakeProcessRunner processRunner)
+            : base(NullLogger<AzureAuthService>.Instance, console, processRunner)
         {
             _console = console;
+            ProcessRunner = processRunner;
         }
+
+        public FakeProcessRunner ProcessRunner { get; }
 
         public void Dispose()
         {
@@ -302,11 +341,14 @@ public class AzureAuthServiceTests
 
         public bool? InteractiveOverride { get; init; }
         public TokenCredential PrimaryCredential { get; init; } = new ThrowingCredential();
-        public TokenCredential CliCredential { get; init; } = new StubCredential("cli-token");
         public string? AzCliPath { get; init; }
-        public bool LoginResult { get; init; }
-        public int RunAzLoginCallCount { get; private set; }
-        public string? LastLoginTenantId { get; private set; }
+
+        // Convenience wrappers so tests read/configure through the injected fake runner.
+        public bool HasExistingSession { init => ProcessRunner.HasSession = value; }
+        public bool LoginResult { init => ProcessRunner.LoginSucceeds = value; }
+        public bool TokenAlwaysFails { init => ProcessRunner.TokenAlwaysFails = value; }
+        public int RunAzLoginCallCount => ProcessRunner.LoginCallCount;
+        public string? LastLoginTenantId => ProcessRunner.LastLoginTenantId;
 
         // Pre-seed the tenant so the interactive paths don't block on a prompt.
         public string? SeedTenantId { init => TenantId = value; }
@@ -315,15 +357,66 @@ public class AzureAuthServiceTests
 
         protected override TokenCredential CreateCredential() => PrimaryCredential;
 
-        protected override TokenCredential CreateAzureCliCredential() => CliCredential;
-
         protected override string? FindAzureCli() => AzCliPath;
+    }
 
-        protected override Task<bool> RunAzLoginAsync(string azPath, string tenantId, CancellationToken cancellationToken)
+    /// <summary>
+    /// A fake <see cref="IProcessRunner"/> that emulates the Azure CLI: it services the login and
+    /// <c>account get-access-token</c> invocations the real service constructs, so the argument
+    /// building, tenant forwarding, and token parsing run for real without launching a process.
+    /// </summary>
+    private sealed class FakeProcessRunner : IProcessRunner
+    {
+        public bool HasSession { get; set; }
+        public bool LoginSucceeds { get; set; } = true;
+        public bool TokenAlwaysFails { get; set; }
+        public string TokenValue { get; set; } = "cli-token";
+        public int LoginCallCount { get; private set; }
+        public string? LastLoginTenantId { get; private set; }
+        public List<ProcessRunRequest> Requests { get; } = [];
+
+        public Task<ProcessRunResult> RunAsync(
+            ProcessRunRequest request,
+            Action<string>? onOutputLine = null,
+            Action<string>? onErrorLine = null,
+            CancellationToken cancellationToken = default)
         {
-            RunAzLoginCallCount++;
-            LastLoginTenantId = tenantId;
-            return Task.FromResult(LoginResult);
+            Requests.Add(request);
+            var args = request.Arguments;
+
+            if (args.Count > 0 && args[0] == "login")
+            {
+                LoginCallCount++;
+                LastLoginTenantId = ArgValue(args, "--tenant");
+                if (LoginSucceeds)
+                {
+                    HasSession = true;
+                }
+
+                return Task.FromResult(new ProcessRunResult(LoginSucceeds ? 0 : 1, string.Empty, LoginSucceeds ? string.Empty : "login failed"));
+            }
+
+            // account get-access-token
+            if (TokenAlwaysFails || !HasSession)
+            {
+                return Task.FromResult(new ProcessRunResult(1, string.Empty, "Please run 'az login'."));
+            }
+
+            var json = $$"""{"accessToken":"{{TokenValue}}","expiresOn":"2999-01-01 00:00:00.000000","tokenType":"Bearer"}""";
+            return Task.FromResult(new ProcessRunResult(0, json, string.Empty));
+        }
+
+        private static string? ArgValue(IReadOnlyList<string> args, string name)
+        {
+            for (var i = 0; i < args.Count - 1; i++)
+            {
+                if (args[i] == name)
+                {
+                    return args[i + 1];
+                }
+            }
+
+            return null;
         }
     }
 

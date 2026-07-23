@@ -766,7 +766,7 @@ winapp az-sign <file-path> [options]
 - A machine-wide **x64 .NET 8 (or later) runtime** installed. The Azure signing client library is a managed assembly that `signtool.exe` loads in a separate process; winapp's own self-contained runtime does not satisfy it. Install it from https://dotnet.microsoft.com/download if signing fails with a runtime-load error.
 - **SignTool 10.0.22621.755 or later** (from the Windows SDK). winapp installs SDK build tools automatically, but an older pinned/cached SDK may need updating.
 
-> **Least-privilege CI:** Resource discovery reads the parent signing account, so the signing identity needs read access at the account scope. A principal scoped only to a single certificate profile can still sign, but should skip discovery by passing a pre-generated `--metadata-file` (which specifies the account endpoint and profile directly).
+> **Least-privilege CI:** Auto-discovery (listing subscriptions, accounts, and profiles) needs read access at the account scope. When you pass `--account` and `--profile` explicitly, `az-sign` validates them with direct resource reads (a GET on the named account and profile) rather than listing the parent collection, so a principal scoped to just that account and profile is sufficient. A principal scoped only to a single certificate profile can skip validation entirely by passing a pre-generated `--metadata-file` (which specifies the account endpoint and profile directly).
 
 **Examples:**
 

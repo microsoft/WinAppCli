@@ -52,6 +52,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IMSStoreCLIService, MSStoreCLIService>()
             .AddSingleton<IUpdateNotificationService, UpdateNotificationService>()
             // Azure Trusted Signing services
+            .AddSingleton<IProcessRunner, ProcessRunner>()
             .AddSingleton<IAzureAuthService, AzureAuthService>()
             .AddSingleton<IAzureSigningService, AzureSigningService>()
             .AddSingleton<IAzureSignToolService, AzureSignToolService>()
