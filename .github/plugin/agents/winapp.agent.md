@@ -146,7 +146,8 @@ Want to inspect or interact with a running app's UI?
 - `--with-alias` — launch via execution alias (console apps run in current terminal)
 - `-c, --configuration <name>` — (project mode) build configuration; default `Debug`
 - `--arch <x64|arm64|x86>` — (project mode) target architecture; default: current process arch. Sets both the build RID and the Windows App Runtime arch
-- `-r, --runtime <rid>` / `-f, --framework <tfm>` — (project mode) target RID / target framework for multi-targeted projects
+- `-r, --runtime <rid>` — (project mode) target .NET RID (e.g. `win-x64`); **only the RID's architecture is used** — project mode reduces it and always builds the canonical `win-<arch>` RID, so a version-specific or non-Windows RID is not forwarded (a non-Windows RID like `linux-x64` is rejected). Overrides `--arch`.
+- `-f, --framework <tfm>` — (project mode) target framework for multi-targeted projects
 - `--project <name-or-path>` — (project mode) select which project to launch when a solution/directory has multiple runnable app projects (errors listing candidates if ambiguous)
 - `--no-build` / `--no-restore` — (project mode) skip build / restore
 - `-p, --property <Name=Value>` — (project mode) MSBuild property forwarded to build + evaluation; repeatable (e.g. `-p WindowsPackageType=None`)

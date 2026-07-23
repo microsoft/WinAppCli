@@ -2168,5 +2168,19 @@ public class RunCommandTests : BaseCommandTests
         StringAssert.Contains(error, "win-loongarch64");
     }
 
+    [TestMethod]
+    [DataRow("linux-x64")]
+    [DataRow("osx-arm64")]
+    public void TryResolveArchitecture_NonWindowsRuntime_ReturnsError(string runtime)
+    {
+        // A non-Windows RID must not be silently reduced to win-<arch>; the user asked for a runtime
+        // target project mode can't produce, so surface an error instead of building something else.
+        var ok = RunCommand.Handler.TryResolveArchitecture(null, runtime, out _, out var error);
+
+        Assert.IsFalse(ok);
+        Assert.IsNotNull(error);
+        StringAssert.Contains(error, runtime);
+    }
+
     #endregion
 }

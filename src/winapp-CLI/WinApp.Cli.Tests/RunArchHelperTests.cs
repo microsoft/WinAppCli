@@ -57,6 +57,9 @@ public class RunArchHelperTests
 
     [TestMethod]
     [DataRow("win-loongarch64")]
+    [DataRow("linux-x64")]
+    [DataRow("osx-arm64")]
+    [DataRow("linux-musl-x64")]
     [DataRow("")]
     [DataRow(null)]
     public void ArchitectureFromRid_Unrecognized_ReturnsNull(string? rid)
