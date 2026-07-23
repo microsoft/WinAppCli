@@ -566,9 +566,9 @@ internal class AzSignCommand : Command, IShortDescription
                         File.Delete(tempPath);
                     }
                 }
-                catch
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    // Best effort cleanup
+                    // Best effort cleanup; ignore delete failures (locked/already gone/access denied).
                 }
 
                 throw;
@@ -587,9 +587,9 @@ internal class AzSignCommand : Command, IShortDescription
                     metadataFile.Delete();
                 }
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // Best effort cleanup
+                // Best effort cleanup; ignore delete failures (locked/already gone/access denied).
             }
         }
 

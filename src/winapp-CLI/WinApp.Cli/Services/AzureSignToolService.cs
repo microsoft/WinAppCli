@@ -185,8 +185,9 @@ internal class AzureSignToolService(
             var hash = Convert.ToHexString(SHA256.HashData(stream));
             return TrustedDlibSha256.Contains(hash);
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            // Cannot read the file to hash it (locked, missing, or access denied) — treat as untrusted.
             return false;
         }
     }
@@ -217,7 +218,7 @@ internal class AzureSignToolService(
             taskContext.AddDebugMessage($"Removing incomplete cached package at {versionDir.FullName} before reinstalling.");
             versionDir.Delete(recursive: true);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Best-effort: if cleanup fails, the subsequent install/find will surface a clear error.
             taskContext.AddDebugMessage($"Could not clean up incomplete package cache: {ex.Message}");
@@ -239,7 +240,7 @@ internal class AzureSignToolService(
                 versionDir.Delete(recursive: true);
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             taskContext.AddDebugMessage($"Could not remove cached package directory: {ex.Message}");
         }

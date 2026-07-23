@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Azure.Core;
@@ -182,8 +183,11 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
         {
+            // Win32Exception: the az process could not be spawned (not found / not executable).
+            // InvalidOperationException: ProcessRunner reports Process.Start returned null.
+            // IOException: failure draining the process output streams.
             logger.LogDebug(ex, "Azure CLI token retrieval failed to start.");
             return null;
         }
@@ -260,9 +264,10 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
                 }
             }
         }
-        catch
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
         {
-            // where.exe not available or failed
+            // where.exe not available or failed to run: Win32Exception (cannot spawn),
+            // InvalidOperationException (no process handle), or IOException (reading its output).
         }
 
         return null;

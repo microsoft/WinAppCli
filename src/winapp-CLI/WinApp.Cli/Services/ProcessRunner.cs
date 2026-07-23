@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 
@@ -84,9 +85,10 @@ internal sealed class ProcessRunner : IProcessRunner
                 process.Kill(entireProcessTree: true);
             }
         }
-        catch
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or NotSupportedException)
         {
-            // Best-effort cleanup on cancellation.
+            // Best-effort cleanup on cancellation: the process may have already exited
+            // (InvalidOperationException) or be unkillable; nothing more we can do.
         }
     }
 }
