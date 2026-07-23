@@ -384,7 +384,15 @@ internal partial class BuildToolsService(
                 process.Kill(entireProcessTree: true);
             }
         }
-        catch
+        catch (InvalidOperationException)
+        {
+            // Best-effort cleanup on cancellation
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // Best-effort cleanup on cancellation
+        }
+        catch (NotSupportedException)
         {
             // Best-effort cleanup on cancellation
         }
