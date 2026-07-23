@@ -48,7 +48,7 @@ internal class AzureSignToolService(
             var parentDir = signtoolDir.Parent;
             if (parentDir != null)
             {
-                var matchingArchSigntool = new FileInfo(Path.Combine(parentDir.FullName, dlibArch, "signtool.exe"));
+                var matchingArchSigntool = new FileInfo(Path.Join(parentDir.FullName, dlibArch, "signtool.exe"));
                 if (matchingArchSigntool.Exists)
                 {
                     signtoolPath = matchingArchSigntool;
@@ -123,7 +123,7 @@ internal class AzureSignToolService(
     private FileInfo? FindTrustedSigningDlib(string? version = null)
     {
         var nugetCache = nugetService.GetNuGetGlobalPackagesDir();
-        var packageDir = new DirectoryInfo(Path.Combine(nugetCache.FullName, ArtifactSigningClientPackage.ToLowerInvariant()));
+        var packageDir = new DirectoryInfo(Path.Join(nugetCache.FullName, ArtifactSigningClientPackage.ToLowerInvariant()));
 
         if (!packageDir.Exists)
         {
@@ -134,7 +134,7 @@ internal class AzureSignToolService(
         if (!string.IsNullOrEmpty(version))
         {
             // Prefer the exact pinned version so the loaded DLL is reproducible.
-            var exactDir = new DirectoryInfo(Path.Combine(packageDir.FullName, version));
+            var exactDir = new DirectoryInfo(Path.Join(packageDir.FullName, version));
             if (!exactDir.Exists)
             {
                 return null;

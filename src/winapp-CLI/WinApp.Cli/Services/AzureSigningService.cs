@@ -191,14 +191,10 @@ internal class AzureSigningService : IAzureSigningService
             if (doc.RootElement.TryGetProperty("value", out var valueArray)
                 && valueArray.ValueKind == JsonValueKind.Array)
             {
-                foreach (var item in valueArray.EnumerateArray())
-                {
-                    var selected = selector(item);
-                    if (selected != null)
-                    {
-                        results.Add(selected);
-                    }
-                }
+                results.AddRange(valueArray.EnumerateArray()
+                    .Select(selector)
+                    .Where(selected => selected != null)
+                    .Select(selected => selected!));
             }
 
             nextUrl = doc.RootElement.TryGetProperty("nextLink", out var nextLink)

@@ -138,16 +138,14 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
         // Check common install locations on Windows
         var candidates = new[]
         {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Microsoft SDKs", "Azure", "CLI2", "wbin", "az.cmd"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Microsoft SDKs", "Azure", "CLI2", "wbin", "az.cmd"),
+            Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Microsoft SDKs", "Azure", "CLI2", "wbin", "az.cmd"),
+            Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Microsoft SDKs", "Azure", "CLI2", "wbin", "az.cmd"),
         };
 
-        foreach (var candidate in candidates)
+        var installed = candidates.FirstOrDefault(File.Exists);
+        if (installed != null)
         {
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
+            return installed;
         }
 
         // Fall back to PATH lookup. Launch where.exe by its absolute System32 path so a
@@ -155,7 +153,7 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
         // resolution would otherwise search the working directory first).
         try
         {
-            var whereExe = Path.Combine(Environment.SystemDirectory, "where.exe");
+            var whereExe = Path.Join(Environment.SystemDirectory, "where.exe");
             if (!File.Exists(whereExe))
             {
                 return null;
@@ -207,15 +205,7 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
         }
 
         var whereCandidates = whereOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        foreach (var candidate in whereCandidates)
-        {
-            if (IsTrustedAzureCliPath(candidate, currentDirectory))
-            {
-                return candidate;
-            }
-        }
-
-        return null;
+        return whereCandidates.FirstOrDefault(candidate => IsTrustedAzureCliPath(candidate, currentDirectory));
     }
 
     /// <summary>

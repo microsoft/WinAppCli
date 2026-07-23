@@ -762,7 +762,9 @@ winapp az-sign <file-path> [options]
 
 **Prerequisites:**
 
-An Azure Code Signing account and a certificate profile (created in the Azure portal after identity validation), plus the **Code Signing Certificate Profile Signer** role assigned to your identity.
+- An Azure Code Signing account and a certificate profile (created in the Azure portal after identity validation), plus the **Code Signing Certificate Profile Signer** role assigned to your identity.
+- A machine-wide **x64 .NET 8 (or later) runtime** installed. The Azure signing client library is a managed assembly that `signtool.exe` loads in a separate process; winapp's own self-contained runtime does not satisfy it. Install it from https://dotnet.microsoft.com/download if signing fails with a runtime-load error.
+- **SignTool 10.0.22621.755 or later** (from the Windows SDK). winapp installs SDK build tools automatically, but an older pinned/cached SDK may need updating.
 
 **Examples:**
 

@@ -418,6 +418,112 @@ public class AzSignCommandTests : BaseCommandTests
             "Whitespace-only --profile should be treated as not provided");
         Assert.AreEqual(1, _fakeSignToolService.CallCount, "Should reach the signing stage");
     }
+
+    [TestMethod]
+    public async Task AzSign_MetadataFileCombinedWithResourceFlags_ReturnsError()
+    {
+        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        await File.WriteAllTextAsync(filePath, "MZ");
+
+        var metadataPath = Path.Combine(_tempDirectory.FullName, "metadata.json");
+        await File.WriteAllTextAsync(metadataPath, "{\"Endpoint\":\"https://eus.codesigning.azure.net\"}");
+
+        var result = await ParseAndInvokeWithCaptureAsync(_command,
+            ["--metadata-file", metadataPath, "--account", "myaccount", "--resource-group", "myrg", filePath]);
+
+        Assert.AreEqual(1, result);
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
+        StringAssert.Contains(allOutput, "--metadata-file cannot be combined");
+        Assert.AreEqual(0, _fakeSignToolService.CallCount, "Signing must not run when inputs are ambiguous");
+    }
+
+    [TestMethod]
+    public async Task AzSign_MetadataFileWithUntrustedEndpoint_ReturnsError()
+    {
+        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        await File.WriteAllTextAsync(filePath, "MZ");
+
+        var metadataPath = Path.Combine(_tempDirectory.FullName, "metadata.json");
+        await File.WriteAllTextAsync(metadataPath, "{\"Endpoint\":\"https://evil.example.com\"}");
+
+        var result = await ParseAndInvokeWithCaptureAsync(_command, ["--metadata-file", metadataPath, filePath]);
+
+        Assert.AreEqual(1, result);
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
+        StringAssert.Contains(allOutput, "untrusted Endpoint");
+        Assert.AreEqual(0, _fakeSignToolService.CallCount, "Must not sign with an untrusted endpoint");
+    }
+
+    [TestMethod]
+    public async Task AzSign_MetadataFileMissingEndpoint_ReturnsError()
+    {
+        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        await File.WriteAllTextAsync(filePath, "MZ");
+
+        var metadataPath = Path.Combine(_tempDirectory.FullName, "metadata.json");
+        await File.WriteAllTextAsync(metadataPath, "{\"CertificateProfileName\":\"myprofile\"}");
+
+        var result = await ParseAndInvokeWithCaptureAsync(_command, ["--metadata-file", metadataPath, filePath]);
+
+        Assert.AreEqual(1, result);
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
+        StringAssert.Contains(allOutput, "Endpoint");
+        Assert.AreEqual(0, _fakeSignToolService.CallCount);
+    }
+
+    [TestMethod]
+    public async Task AzSign_ExplicitProfileNotFound_ReturnsError()
+    {
+        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        await File.WriteAllTextAsync(filePath, "MZ");
+
+        _fakeSigningService.Subscriptions = [new AzureSubscription("sub-123", "Test Subscription")];
+        _fakeSigningService.SigningAccounts = [new SigningAccount("myaccount", "myrg", "eastus", "https://eus.codesigning.azure.net")];
+        _fakeSigningService.CertificateProfiles = [new CertificateProfile("otherprofile", "PublicTrust", "Active")];
+
+        var result = await ParseAndInvokeWithCaptureAsync(_command,
+            ["--subscription", "sub-123", "--resource-group", "myrg", "--account", "myaccount", "--profile", "missingprofile", filePath]);
+
+        Assert.AreEqual(1, result);
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
+        StringAssert.Contains(allOutput, "not found");
+        Assert.AreEqual(0, _fakeSignToolService.CallCount);
+    }
+
+    [TestMethod]
+    public async Task AzSign_ExplicitProfileNotActive_ReturnsError()
+    {
+        var filePath = Path.Combine(_tempDirectory.FullName, "test.exe");
+        await File.WriteAllTextAsync(filePath, "MZ");
+
+        _fakeSigningService.Subscriptions = [new AzureSubscription("sub-123", "Test Subscription")];
+        _fakeSigningService.SigningAccounts = [new SigningAccount("myaccount", "myrg", "eastus", "https://eus.codesigning.azure.net")];
+        _fakeSigningService.CertificateProfiles = [new CertificateProfile("myprofile", "PublicTrust", "Suspended")];
+
+        var result = await ParseAndInvokeWithCaptureAsync(_command,
+            ["--subscription", "sub-123", "--resource-group", "myrg", "--account", "myaccount", "--profile", "myprofile", filePath]);
+
+        Assert.AreEqual(1, result);
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
+        StringAssert.Contains(allOutput, "Suspended");
+        Assert.AreEqual(0, _fakeSignToolService.CallCount);
+    }
+
+    [TestMethod]
+    [DataRow("https://eus.codesigning.azure.net", true)]
+    [DataRow("https://weu.codesigning.azure.net/", true)]
+    [DataRow("https://codesigning.azure.net", true)]
+    [DataRow("https://EUS.CodeSigning.Azure.Net", true)]
+    [DataRow("https://evil-codesigning.azure.net", false)]
+    [DataRow("https://codesigning.azure.net.evil.com", false)]
+    [DataRow("http://eus.codesigning.azure.net", false)]
+    [DataRow("ftp://eus.codesigning.azure.net", false)]
+    [DataRow("eus.codesigning.azure.net", false)]
+    [DataRow("not a url", false)]
+    public void IsTrustedSigningEndpoint_ValidatesHostAndScheme(string endpoint, bool expected)
+    {
+        Assert.AreEqual(expected, AzSignCommand.Handler.IsTrustedSigningEndpoint(endpoint));
+    }
 }
 
 internal class FakeAzureAuthService : IAzureAuthService

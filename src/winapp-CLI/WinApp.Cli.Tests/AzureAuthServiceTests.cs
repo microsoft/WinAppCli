@@ -263,6 +263,26 @@ public class AzureAuthServiceTests
         Assert.AreEqual(1, service.RunAzLoginCallCount);
     }
 
+    [TestMethod]
+    public async Task GetAccessTokenAsync_InvalidPresetTenantId_Throws()
+    {
+        using var service = new TestableAzureAuthService
+        {
+            InteractiveOverride = true,
+            PrimaryCredential = new ThrowingCredential(),
+            AzCliPath = @"C:\fake\az.cmd",
+            LoginResult = true,
+            CliCredential = new StubCredential("cli-token"),
+            SeedTenantId = "not a valid tenant",
+        };
+
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => service.GetAccessTokenAsync(ArmScope));
+
+        StringAssert.Contains(ex.Message, "Invalid AZURE_TENANT_ID");
+        Assert.AreEqual(0, service.RunAzLoginCallCount, "Login must not run with an invalid tenant id");
+    }
+
     private sealed class TestableAzureAuthService : AzureAuthService, IDisposable
     {
         private readonly TestConsole _console;

@@ -75,6 +75,14 @@ internal class AzSignCommand : Command, IShortDescription
     {
         private const string ArmScope = "https://management.azure.com/.default";
 
+        // Azure Code Signing profiles must be "Active" to sign; other states (disabled,
+        // suspended, still-provisioning) would fail later inside signtool's dlib.
+        private const string ActiveProfileStatus = "Active";
+
+        // The signing dlib sends an Azure access token to the metadata "Endpoint" host, so a
+        // user-supplied Endpoint is only trusted on the Azure Code Signing data-plane domain.
+        private const string SigningEndpointHostSuffix = ".codesigning.azure.net";
+
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var filePath = parseResult.GetRequiredValue(FilePathArgument);
@@ -107,6 +115,17 @@ internal class AzSignCommand : Command, IShortDescription
                 return 1;
             }
 
+            // A metadata file is authoritative — it fully specifies the signing identity, so any
+            // resource-selection flags would be silently ignored. Reject the combination rather
+            // than sign with something other than what the user typed.
+            if (metadataFile != null &&
+                (subscription != null || resourceGroup != null || account != null || profile != null))
+            {
+                logger.LogError(
+                    "--metadata-file cannot be combined with --subscription, --resource-group, --account, or --profile.");
+                return 1;
+            }
+
             try
             {
                 // Determine what to sign with
@@ -115,6 +134,10 @@ internal class AzSignCommand : Command, IShortDescription
 
                 if (metadataFile != null)
                 {
+                    // Validate the user-supplied Endpoint before signing: signtool's dlib sends an
+                    // Azure access token to this host, so an attacker-controlled Endpoint (in a
+                    // checked-in or CI-produced metadata.json) could exfiltrate the token.
+                    ValidateMetadataFileEndpoint(metadataFile);
                     metadataFilePath = metadataFile;
                     generatedMetadata = false;
                 }
@@ -155,6 +178,7 @@ internal class AzSignCommand : Command, IShortDescription
 
                         if (!confirm)
                         {
+                            logger.LogInformation("Signing cancelled.");
                             return 1;
                         }
                     }
@@ -216,6 +240,63 @@ internal class AzSignCommand : Command, IShortDescription
             }
         }
 
+        /// <summary>
+        /// Validates a user-supplied metadata file's <c>Endpoint</c> before it is handed to
+        /// signtool's dlib. The dlib acquires an Azure access token and sends it to that host, so
+        /// an attacker-controlled Endpoint (e.g. in a checked-in or CI-produced metadata.json)
+        /// could exfiltrate the token. Only an https URL on the Azure Code Signing data-plane
+        /// domain is accepted.
+        /// </summary>
+        private static void ValidateMetadataFileEndpoint(FileInfo metadataFile)
+        {
+            string? endpoint;
+            try
+            {
+                using var stream = metadataFile.OpenRead();
+                using var doc = JsonDocument.Parse(stream);
+                endpoint = doc.RootElement.TryGetProperty("Endpoint", out var endpointProp)
+                    && endpointProp.ValueKind == JsonValueKind.String
+                        ? endpointProp.GetString()
+                        : null;
+            }
+            catch (JsonException ex)
+            {
+                throw new InvalidOperationException(
+                    $"Metadata file '{metadataFile.FullName}' is not valid JSON: {ex.Message}");
+            }
+
+            if (string.IsNullOrEmpty(endpoint))
+            {
+                throw new InvalidOperationException(
+                    $"Metadata file '{metadataFile.FullName}' is missing a string 'Endpoint' property.");
+            }
+
+            if (!IsTrustedSigningEndpoint(endpoint))
+            {
+                throw new InvalidOperationException(
+                    $"Refusing to sign with untrusted Endpoint '{endpoint}' from the metadata file. " +
+                    $"The Endpoint must be an https URL on a '*{SigningEndpointHostSuffix}' host — this " +
+                    "protects your Azure access token from being sent to an attacker-controlled endpoint.");
+            }
+        }
+
+        /// <summary>
+        /// Returns true only for an absolute https URL whose host is the Azure Code Signing
+        /// data-plane domain (e.g. <c>https://eus.codesigning.azure.net</c>). The leading dot in
+        /// the suffix prevents lookalikes such as <c>evil-codesigning.azure.net</c>.
+        /// </summary>
+        internal static bool IsTrustedSigningEndpoint(string endpoint)
+        {
+            if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri)
+                || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return uri.Host.EndsWith(SigningEndpointHostSuffix, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(uri.Host, SigningEndpointHostSuffix.TrimStart('.'), StringComparison.OrdinalIgnoreCase);
+        }
+
         private async Task<SigningMetadata?> DiscoverAndSelectResourcesAsync(
             string accessToken, string? subscriptionId, string? resourceGroup,
             string? accountName, string? profileName,
@@ -271,7 +352,28 @@ internal class AzSignCommand : Command, IShortDescription
             string resolvedProfileName;
             if (!string.IsNullOrEmpty(profileName))
             {
-                resolvedProfileName = profileName;
+                // Validate the explicitly named profile the same way interactive selection does,
+                // so a typo or a disabled/suspended profile fails here with an actionable message
+                // rather than deep inside signtool's dlib. This stays non-interactive.
+                var allProfiles = await azureSigningService.ListCertificateProfilesAsync(
+                    accessToken, subscriptionId, resolvedResourceGroup, resolvedAccountName, cancellationToken);
+                var matchedProfile = allProfiles.FirstOrDefault(p =>
+                    string.Equals(p.Name, profileName, StringComparison.OrdinalIgnoreCase));
+
+                if (matchedProfile == null)
+                {
+                    throw new InvalidOperationException(
+                        $"Certificate profile '{profileName}' not found in signing account '{resolvedAccountName}'.");
+                }
+
+                if (!string.Equals(matchedProfile.Status, ActiveProfileStatus, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException(
+                        $"Certificate profile '{profileName}' has status '{matchedProfile.Status}' and cannot sign. " +
+                        "Specify a profile with 'Active' status.");
+                }
+
+                resolvedProfileName = matchedProfile.Name;
             }
             else
             {
@@ -383,7 +485,7 @@ internal class AzSignCommand : Command, IShortDescription
             // Only offer profiles that can actually sign; disabled/suspended profiles would
             // fail later in signtool with a confusing error.
             var profiles = allProfiles
-                .Where(p => string.Equals(p.Status, "Active", StringComparison.OrdinalIgnoreCase))
+                .Where(p => string.Equals(p.Status, ActiveProfileStatus, StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
             if (profiles.Count == 0)
@@ -417,7 +519,7 @@ internal class AzSignCommand : Command, IShortDescription
 
         private static async Task<FileInfo> GenerateMetadataFileAsync(SigningMetadata metadata, CancellationToken cancellationToken)
         {
-            var tempPath = Path.Combine(Path.GetTempPath(), $"winapp-az-sign-{Guid.NewGuid():N}.json");
+            var tempPath = Path.Join(Path.GetTempPath(), $"winapp-az-sign-{Guid.NewGuid():N}.json");
 
             try
             {

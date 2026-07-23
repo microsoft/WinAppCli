@@ -93,7 +93,7 @@ winapp az-sign ./app.msix --metadata-file ./metadata.json
 
 **Authentication:** `az-sign` uses Azure's standard credential chain (`DefaultAzureCredential`). In CI/CD, set `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET` (or GitHub Actions OIDC / managed identity). Interactively, if no credentials are found and the Azure CLI is installed, `az-sign` runs `az login` for you.
 
-**Prerequisites:** An Azure Code Signing account and certificate profile (created in the Azure portal after identity validation), plus a role assignment granting your identity the **Code Signing Certificate Profile Signer** role.
+**Prerequisites:** An Azure Code Signing account and certificate profile (created in the Azure portal after identity validation), plus a role assignment granting your identity the **Code Signing Certificate Profile Signer** role. Signing also requires a machine-wide **x64 .NET 8+ runtime** (the signing library is a managed assembly loaded by `signtool.exe`; winapp's self-contained runtime does not satisfy it) and **SignTool 10.0.22621.755 or later**.
 
 ## Recommended workflow
 
