@@ -392,7 +392,28 @@ internal partial class RunCommand : Command, IShortDescription
                 // on Configuration/arch/TFM/user -p is picked the way it will build (e.g.
                 // `winapp run App.sln -c Release` must not select a Debug-only app then build Release).
                 var classificationInputs = BuildClassificationInputs(parseResult);
-                inputResolution = await projectRunService.ResolveInputAsync(inputFsi, cancellationToken, projectSelector, classificationInputs);
+
+                // Input resolution runs BEFORE the first `🔎` context line, and for a directory /
+                // solution / multi-project input it spawns silent MSBuild classification evaluates that
+                // can take a couple of seconds (several on a large solution like AI Dev Gallery) — long
+                // enough that the command looks hung with nothing on screen. On a real interactive
+                // terminal, animate a spinner around it so liveness shows immediately (~150 ms) instead
+                // of a dead gap. Skipped under --verbose (Debug) so any phase traces render plainly, and
+                // under --json/--quiet/agent/CI/redirected (ShouldUseLiveSpinner == false), where it runs
+                // exactly as before with no status output.
+                if (ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger) && !logger.IsEnabled(LogLevel.Debug))
+                {
+                    inputResolution = await ansiConsole.Status()
+                        .AutoRefresh(true)
+                        .Spinner(Spinner.Known.Dots)
+                        .SpinnerStyle(Style.Parse("blue"))
+                        .StartAsync("Resolving project...", async _ =>
+                            await projectRunService.ResolveInputAsync(inputFsi, cancellationToken, projectSelector, classificationInputs));
+                }
+                else
+                {
+                    inputResolution = await projectRunService.ResolveInputAsync(inputFsi, cancellationToken, projectSelector, classificationInputs);
+                }
             }
             catch (ProjectRunException ex)
             {
