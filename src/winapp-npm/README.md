@@ -39,6 +39,7 @@ npx winapp --help
 
 **Setup Commands:**
 
+- [`new`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#new) - Create a new WinUI app from an official Windows App SDK template
 - [`init`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#init) - Initialize project with Windows SDK and App SDK
 - [`restore`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#restore) - Restore packages and dependencies (also runs the bindings step when the `winapp.jsBindings` namespace is declared in `package.json`)
 - [`update`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#update) - Update packages and dependencies to latest versions
