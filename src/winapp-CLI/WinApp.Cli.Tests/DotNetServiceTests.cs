@@ -4,7 +4,6 @@
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 
 namespace WinApp.Cli.Tests;
 
@@ -1695,49 +1694,70 @@ public class DotNetServiceTests : BaseCommandTests
     [TestMethod]
     public async Task RunDotnetProcessAsync_Cancellation_KillsProcessTree()
     {
-        // Spawn a long-lived process tree (cmd -> ping) so the entireProcessTree kill path is
-        // genuinely exercised, then cancel and assert the root process is actually terminated.
+        // Spawn a long-lived process tree (powershell -> ping) so the entireProcessTree kill path is
+        // genuinely exercised, then cancel and assert BOTH the root and its descendant are terminated.
         // Before the kill-on-cancel fix, WaitForExitAsync only stopped awaiting and left the child
-        // running; this test guards against that regression.
+        // running; asserting the descendant also exits guards the tree-kill (a bare Kill() would leave
+        // ping alive and still pass a root-only assertion).
+        //
+        // The descendant PID is captured via a fully-managed handshake: the PowerShell root starts ping
+        // with -PassThru, writes ping's PID to a temp file, then blocks on Wait-Process. The test polls
+        // that file — no WMI or Win32 process enumeration required.
+        var pidFile = Path.Combine(Path.GetTempPath(), $"winapp_treekill_{Guid.NewGuid():N}.pid");
+        var script =
+            "$p = Start-Process -FilePath ping.exe -ArgumentList '-n','60','127.0.0.1' -PassThru -WindowStyle Hidden; " +
+            $"Set-Content -LiteralPath '{pidFile}' -Value $p.Id; " +
+            "Wait-Process -Id $p.Id";
+
         var startInfo = new ProcessStartInfo
         {
-            FileName = "cmd.exe",
+            FileName = "powershell.exe",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-        startInfo.ArgumentList.Add("/c");
-        startInfo.ArgumentList.Add("ping -n 60 127.0.0.1 >nul");
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-NonInteractive");
+        startInfo.ArgumentList.Add("-Command");
+        startInfo.ArgumentList.Add(script);
 
-        using var cts = new CancellationTokenSource();
-        var pidTcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var runTask = DotNetService.RunDotnetProcessAsync(
-            startInfo,
-            cts.Token,
-            onProcessStarted: p => pidTcs.TrySetResult(p.Id));
+        try
+        {
+            using var cts = new CancellationTokenSource();
+            var pidTcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var runTask = DotNetService.RunDotnetProcessAsync(
+                startInfo,
+                cts.Token,
+                onProcessStarted: p => pidTcs.TrySetResult(p.Id));
 
-        // Wait until the process is actually running (and capture its id before the service disposes it).
-        var pid = await pidTcs.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.CancellationToken);
-        Assert.IsFalse(Process.GetProcessById(pid).HasExited, "The child process should be running before cancellation.");
+            // Wait until the root process is actually running (capture its id before the service disposes it).
+            var pid = await pidTcs.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.CancellationToken);
+            Assert.IsFalse(Process.GetProcessById(pid).HasExited, "The root process should be running before cancellation.");
 
-        // Capture the ping *descendant* too: a bare Kill() (no tree) would still terminate cmd.exe and
-        // make the root assertion pass while leaving ping running. Asserting the descendant also exits
-        // is what actually guards the entireProcessTree behavior this test is named for.
-        var pingPid = await WaitForChildProcessAsync(pid, TimeSpan.FromSeconds(10), TestContext.CancellationToken);
-        Assert.IsFalse(Process.GetProcessById(pingPid).HasExited, "The ping descendant should be running before cancellation.");
+            // Capture the ping descendant via the PID file the root script writes.
+            var pingPid = await WaitForPidFileAsync(pidFile, TimeSpan.FromSeconds(15), TestContext.CancellationToken);
+            Assert.IsFalse(Process.GetProcessById(pingPid).HasExited, "The ping descendant should be running before cancellation.");
 
-        cts.Cancel();
+            cts.Cancel();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(async () => await runTask);
+            await Assert.ThrowsAsync<OperationCanceledException>(async () => await runTask);
 
-        // Both the root of the spawned tree AND its ping descendant must be gone. Kill(entireProcessTree)
-        // reaps the whole tree; GetProcessById throws ArgumentException once an id no longer maps to a
-        // running process.
-        Assert.IsTrue(await WaitForProcessExitAsync(pid, TestContext.CancellationToken),
-            "The spawned root process (cmd.exe) should be killed on cancellation.");
-        Assert.IsTrue(await WaitForProcessExitAsync(pingPid, TestContext.CancellationToken),
-            "The ping descendant should be killed on cancellation (proves the whole process tree was terminated).");
+            // Both the root of the spawned tree AND its ping descendant must be gone. Kill(entireProcessTree)
+            // reaps the whole tree; GetProcessById throws ArgumentException once an id no longer maps to a
+            // running process.
+            Assert.IsTrue(await WaitForProcessExitAsync(pid, TestContext.CancellationToken),
+                "The spawned root process (powershell.exe) should be killed on cancellation.");
+            Assert.IsTrue(await WaitForProcessExitAsync(pingPid, TestContext.CancellationToken),
+                "The ping descendant should be killed on cancellation (proves the whole process tree was terminated).");
+        }
+        finally
+        {
+            if (File.Exists(pidFile))
+            {
+                File.Delete(pidFile);
+            }
+        }
     }
 
     /// <summary>Polls until the process with <paramref name="pid"/> has exited (or its id is reused/freed).</summary>
@@ -1764,90 +1784,28 @@ public class DotNetServiceTests : BaseCommandTests
     }
 
     /// <summary>
-    /// Polls the process table for a direct child of <paramref name="parentPid"/> and returns its id.
-    /// Used to grab the ping descendant of the spawned cmd.exe so the test can prove the whole tree is
-    /// killed, not just the root.
+    /// Polls for the PID file written by the spawned PowerShell root and returns the descendant PID it
+    /// contains. This is the managed alternative to enumerating the process table for a child of the
+    /// root: the root itself reports its child's id, so the test needs no WMI or Win32 interop.
     /// </summary>
-    private static async Task<int> WaitForChildProcessAsync(int parentPid, TimeSpan timeout, CancellationToken cancellationToken)
+    private static async Task<int> WaitForPidFileAsync(string pidFile, TimeSpan timeout, CancellationToken cancellationToken)
     {
         var deadline = DateTime.UtcNow + timeout;
         while (DateTime.UtcNow < deadline)
         {
-            var childPid = FindChildProcessId(parentPid);
-            if (childPid.HasValue)
+            if (File.Exists(pidFile))
             {
-                return childPid.Value;
+                var text = (await File.ReadAllTextAsync(pidFile, cancellationToken)).Trim();
+                if (int.TryParse(text, out var pid))
+                {
+                    return pid;
+                }
             }
 
             await Task.Delay(20, cancellationToken);
         }
 
-        throw new TimeoutException($"No child process of PID {parentPid} appeared within {timeout}.");
-    }
-
-    private const uint TH32CS_SNAPPROCESS = 0x00000002;
-    private const int INVALID_HANDLE_VALUE = -1;
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct PROCESSENTRY32
-    {
-        public uint dwSize;
-        public uint cntUsage;
-        public uint th32ProcessID;
-        public IntPtr th32DefaultHeapID;
-        public uint th32ModuleID;
-        public uint cntThreads;
-        public uint th32ParentProcessID;
-        public int pcPriClassBase;
-        public uint dwFlags;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
-        public string szExeFile;
-    }
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
-
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern bool Process32First(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
-
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern bool Process32Next(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool CloseHandle(IntPtr hObject);
-
-    private static int? FindChildProcessId(int parentPid)
-    {
-        var snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (snapshot == new IntPtr(INVALID_HANDLE_VALUE))
-        {
-            return null;
-        }
-
-        try
-        {
-            var entry = new PROCESSENTRY32 { dwSize = (uint)Marshal.SizeOf<PROCESSENTRY32>() };
-            if (!Process32First(snapshot, ref entry))
-            {
-                return null;
-            }
-
-            do
-            {
-                if (entry.th32ParentProcessID == (uint)parentPid)
-                {
-                    return (int)entry.th32ProcessID;
-                }
-            }
-            while (Process32Next(snapshot, ref entry));
-        }
-        finally
-        {
-            CloseHandle(snapshot);
-        }
-
-        return null;
+        throw new TimeoutException($"The descendant PID file '{pidFile}' was not written within {timeout}.");
     }
 
     #endregion

@@ -315,10 +315,12 @@ public class NewCommandHandlerTests : BaseCommandTests
         // tell an unavailable version apart from a feed/network/configuration failure.
         var json = ParseJson(TestAnsiConsole.Output);
         var error = json.GetProperty("Error").GetString();
-        Assert.IsTrue(error is not null && error.Contains("NU1101", StringComparison.Ordinal),
-            $"The install failure detail (NU1101) must be surfaced in the JSON Error, not a generic message. Got: {error}");
-        Assert.IsTrue(error.Contains("exit code 1", StringComparison.Ordinal),
-            $"The install exit code must be preserved in the JSON Error. Got: {error}");
+        Assert.IsNotNull(error, "The template-pack failure must populate the JSON Error field.");
+        var errorText = error;
+        Assert.IsTrue(errorText.Contains("NU1101", StringComparison.Ordinal),
+            $"The install failure detail (NU1101) must be surfaced in the JSON Error, not a generic message. Got: {errorText}");
+        Assert.IsTrue(errorText.Contains("exit code 1", StringComparison.Ordinal),
+            $"The install exit code must be preserved in the JSON Error. Got: {errorText}");
     }
 
     [TestMethod]
