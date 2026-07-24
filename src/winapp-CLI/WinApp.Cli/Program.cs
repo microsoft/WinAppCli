@@ -242,6 +242,21 @@ internal static class Program
                 return 1;
             }
 
+            // Parse-error → JSON bridge for `winapp new`: it owns a bespoke NewCommandResult schema
+            // (not the ui error envelope), so a parse failure like `--template bogus --json` must be
+            // reported in that shape rather than falling through to SCL's help/error text on stdout.
+            if (effectiveJson && parsedArgs.Errors.Count > 0
+                && parsedArgs.CommandResult.Command.Name == "new")
+            {
+                var errorMsg = string.Join("; ", parsedArgs.Errors.Select(e => e.Message));
+                NewCommand.EmitParseErrorJson(errorMsg);
+                if (!isCompleteMode)
+                {
+                    logCommandCompleted(parsedArgs.CommandResult, 1);
+                }
+                return 1;
+            }
+
             var returnCode = await invoke();
 
             if (!isCompleteMode)

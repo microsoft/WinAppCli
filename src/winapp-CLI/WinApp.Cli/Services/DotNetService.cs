@@ -393,6 +393,7 @@ internal partial class DotNetService : IDotNetService
     public Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(
         DirectoryInfo workingDirectory,
         IReadOnlyList<string> arguments,
+        IReadOnlyDictionary<string, string>? environmentOverrides = null,
         CancellationToken cancellationToken = default)
     {
         var processStartInfo = new ProcessStartInfo
@@ -410,6 +411,14 @@ internal partial class DotNetService : IDotNetService
         foreach (var argument in arguments)
         {
             processStartInfo.ArgumentList.Add(argument);
+        }
+
+        if (environmentOverrides is not null)
+        {
+            foreach (var (key, value) in environmentOverrides)
+            {
+                processStartInfo.Environment[key] = value;
+            }
         }
 
         return RunDotnetProcessAsync(processStartInfo, cancellationToken);

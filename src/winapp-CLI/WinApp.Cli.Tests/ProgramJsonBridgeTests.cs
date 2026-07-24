@@ -325,6 +325,28 @@ public class ProgramJsonBridgeTests : BaseCommandTests
     // -------------------------------------------------------------------------
 
     [TestMethod]
+    public async Task JsonBridge_NewCommand_ParseError_EmitsNewCommandResultJson()
+    {
+        // `new --json --template bogus` fails at parse time. Without the bridge, System.CommandLine
+        // prints human help/error text and JSON callers (agents) get no machine-readable result. The
+        // bridge must emit a flat NewCommandResult on stdout (where `new`'s success JSON also goes).
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["new", "--json", "--template", "bogus"]);
+
+        Assert.AreEqual(1, exitCode, "Parse error must exit 1");
+
+        int jsonStart = stdout.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0,
+            $"new parse error with --json must emit a NewCommandResult on stdout; got stdout: {stdout}");
+        var result = JsonSerializer.Deserialize<JsonElement>(stdout.AsSpan(jsonStart).TrimEnd());
+        Assert.IsFalse(result.GetProperty("Created").GetBoolean(),
+            "A parse failure must report Created=false.");
+        var error = result.GetProperty("Error").GetString();
+        Assert.IsFalse(string.IsNullOrWhiteSpace(error),
+            $"The parse error must be surfaced in the JSON Error field; got: {stdout}");
+    }
+
+    [TestMethod]
     public async Task JsonBridge_NonUiCommand_ParseError_NoNestedUiSchema()
     {
         // M3: `cert info --bogus nope --json` has a parse error. The bridge must NOT impose the

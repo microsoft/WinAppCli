@@ -148,6 +148,24 @@ public class NewCommandHandlerTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task Handler_TemplatePackList_ForcesEnglishLocale()
+    {
+        ScriptHappyPath();
+        var command = GetRequiredService<NewCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json", "--name", "MyApp"]);
+
+        // The pack-list call parses the localized "Version:" label, so it must force English output.
+        var listIndex = _dotnet.ArgumentListInvocations
+            .Select((args, i) => (args, i))
+            .First(x => x.args.Count >= 2 && x.args[0] == "new" && x.args[1] == "uninstall").i;
+        var env = _dotnet.ArgumentListEnvironmentInvocations[listIndex];
+        Assert.IsNotNull(env, "The pack-list call must pass an environment override to force locale-independent output.");
+        Assert.IsTrue(env.TryGetValue("DOTNET_CLI_UI_LANGUAGE", out var lang) && lang == "en",
+            "DOTNET_CLI_UI_LANGUAGE must be forced to 'en' so the parsed 'Version:' label is stable across locales.");
+    }
+
+    [TestMethod]
     public async Task Handler_OutputDir_DerivesNameFromOutput()
     {
         ScriptHappyPath();
@@ -183,6 +201,37 @@ public class NewCommandHandlerTests : BaseCommandTests
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json"]);
 
         Assert.AreEqual(NewCommand.ExitSdkMissing, exitCode);
+    }
+
+    [TestMethod]
+    public async Task Handler_OldSdk_Json_ReportsUpdateReason()
+    {
+        ScriptHappyPath(sdkVersion: "8.0.99");
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json", "--name", "MyApp"]);
+
+        Assert.AreEqual(NewCommand.ExitSdkMissing, exitCode);
+        var json = ParseJson(TestAnsiConsole.Output);
+        Assert.IsFalse(json.GetProperty("Created").GetBoolean());
+        var error = json.GetProperty("Error").GetString();
+        Assert.IsTrue(error is not null && error.Contains("or newer is required", StringComparison.Ordinal),
+            $"An installed-but-too-old SDK must tell JSON callers to UPDATE, not that the SDK is simply missing. Got: {error}");
+    }
+
+    [TestMethod]
+    public async Task Handler_UnparseableSdk_Json_ReportsDiagnosis()
+    {
+        ScriptHappyPath(sdkVersion: "not-a-version");
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json", "--name", "MyApp"]);
+
+        Assert.AreEqual(NewCommand.ExitSdkMissing, exitCode);
+        var json = ParseJson(TestAnsiConsole.Output);
+        var error = json.GetProperty("Error").GetString();
+        Assert.IsTrue(error is not null && error.Contains("Could not determine", StringComparison.Ordinal),
+            $"Unparseable SDK output must surface the specific diagnosis in JSON, not a generic 'SDK required'. Got: {error}");
     }
 
     [TestMethod]
@@ -349,6 +398,22 @@ public class NewCommandHandlerTests : BaseCommandTests
             $"The lib template should not suggest 'winapp run'. Output:\n{TestAnsiConsole.Output}");
         Assert.IsFalse(TestAnsiConsole.Output.Contains("winapp run", StringComparison.Ordinal),
             "A class library is not runnable, so 'winapp run' must not be suggested.");
+    }
+
+    [TestMethod]
+    public async Task Handler_LibTemplate_PrintsAbsoluteReferencePath()
+    {
+        ScriptHappyPath();
+        // Widen the console so the printed absolute path isn't word-wrapped across lines.
+        TestAnsiConsole.Profile.Width = 500;
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--template", "lib", "--name", "MyLib"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        var expectedPath = Path.Join(_tempDirectory.FullName, "MyLib", "MyLib.csproj");
+        Assert.IsTrue(TestAnsiConsole.Output.Contains(expectedPath, StringComparison.Ordinal),
+            $"The lib next step must print the library's absolute csproj path so 'dotnet add reference' resolves from any app project directory (not a sibling-relative path). Expected '{expectedPath}'. Output:\n{TestAnsiConsole.Output}");
     }
 
     [TestMethod]

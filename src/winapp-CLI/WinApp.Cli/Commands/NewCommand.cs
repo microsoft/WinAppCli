@@ -3,6 +3,7 @@
 
 using System.CommandLine;
 using System.CommandLine.Invocation;
+using System.CommandLine.Parsing;
 using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -48,6 +49,14 @@ internal class NewCommand : Command, IShortDescription
     private static readonly string[] VersionArgs = ["--version"];
     private static readonly string[] ListTemplatePacksArgs = ["new", "uninstall"];
 
+    // Force English CLI output for the pack-list subprocess. `dotnet new uninstall` localizes its
+    // "Version:" label per DOTNET_CLI_UI_LANGUAGE (e.g. "Versión:", "バージョン:"), which would break
+    // the locale-dependent parse in IsTemplatePackInstalled and make every run re-install the pack.
+    private static readonly Dictionary<string, string> EnglishUiEnvironment = new()
+    {
+        ["DOTNET_CLI_UI_LANGUAGE"] = "en",
+    };
+
     // Distinct exit codes so agents can branch on the failing stage without parsing text.
     internal const int ExitSuccess = 0;
     internal const int ExitInvalidArgs = 2;
@@ -67,7 +76,12 @@ internal class NewCommand : Command, IShortDescription
         TemplateOption = new Option<WinUiTemplate?>("--template", "-t")
         {
             Description = "WinUI template: blank (default), navview, tabview, mvvm, lib, or unittest.",
-            HelpName = "blank|navview|tabview|mvvm|lib|unittest"
+            HelpName = "blank|navview|tabview|mvvm|lib|unittest",
+            // Restrict to the six named aliases (case-insensitive). The default enum binder also accepts
+            // numeric values (e.g. `--template 99` → an undefined enum, `--template 2` → TabView), which
+            // would silently scaffold the wrong/blank template. A custom parser rejects anything that
+            // isn't one of the exact names with a clean parse error.
+            CustomParser = ParseTemplate
         };
         NameOption = new Option<string?>("--name", "-n")
         {
@@ -113,6 +127,42 @@ internal class NewCommand : Command, IShortDescription
         WinUiTemplate.UnitTest => ("winui-unittest", "Unit test project"),
         _ => ("winui", "Blank app")
     };
+
+    /// <summary>
+    /// Parses <c>--template</c> as one of the six named aliases (case-insensitive), rejecting numeric
+    /// and unknown values with a parse error instead of letting the default enum binder coerce them.
+    /// </summary>
+    internal static WinUiTemplate? ParseTemplate(ArgumentResult result)
+    {
+        var token = result.Tokens.Count > 0 ? result.Tokens[0].Value : string.Empty;
+        foreach (var name in Enum.GetNames<WinUiTemplate>())
+        {
+            if (string.Equals(name, token, StringComparison.OrdinalIgnoreCase))
+            {
+                return Enum.Parse<WinUiTemplate>(name);
+            }
+        }
+
+        result.AddError($"Invalid template '{token}'. Valid templates: blank, navview, tabview, mvvm, lib, unittest.");
+        return null;
+    }
+
+    /// <summary>
+    /// Emits the <see cref="NewCommandResult"/> JSON shape for a parse-time failure (e.g. an invalid
+    /// <c>--template</c> value) so <c>winapp new --json</c> callers still get machine-readable output
+    /// instead of System.CommandLine's help/error text. Invoked from the Program-level parse-error
+    /// bridge before the handler would otherwise run.
+    /// </summary>
+    internal static void EmitParseErrorJson(string error, TextWriter? output = null)
+    {
+        var result = new NewCommandResult
+        {
+            Created = false,
+            Error = error,
+        };
+        var json = JsonSerializer.Serialize(result, NewCommandJsonContext.Default.NewCommandResult);
+        (output ?? Console.Out).WriteLine(json);
+    }
 
     /// <summary>Human-facing noun for the created artifact, used in the success message.</summary>
     internal static string ProjectKind(WinUiTemplate template) => template switch
@@ -344,13 +394,13 @@ internal class NewCommand : Command, IShortDescription
             }
 
             // 4. Prerequisite: .NET SDK (fail fast, do not install anything)
-            var sdkVersion = await CheckDotnetSdkAsync(isJson, cancellationToken);
+            var (sdkVersion, sdkError) = await CheckDotnetSdkAsync(isJson, cancellationToken);
             if (sdkVersion is null)
             {
                 if (isJson)
                 {
                     PrintJson(false, template.Value, name!, outputDir.FullName,
-                        "The .NET SDK is required to create a WinUI app. Install it from https://dotnet.microsoft.com/download, then re-run 'winapp new'.");
+                        sdkError ?? "The .NET SDK is required to create a WinUI app. Install it from https://dotnet.microsoft.com/download, then re-run 'winapp new'.");
                 }
                 return ExitSdkMissing;
             }
@@ -393,7 +443,7 @@ internal class NewCommand : Command, IShortDescription
                 args.Add("--force");
             }
 
-            var (exitCode, stdout, stderr) = await dotNetService.RunDotnetCommandAsync(currentDir, args, cancellationToken);
+            var (exitCode, stdout, stderr) = await dotNetService.RunDotnetCommandAsync(currentDir, args, cancellationToken: cancellationToken);
             if (exitCode != 0)
             {
                 var detail = !string.IsNullOrWhiteSpace(stderr) ? stderr.Trim() : stdout.Trim();
@@ -420,7 +470,7 @@ internal class NewCommand : Command, IShortDescription
                 switch (template.Value)
                 {
                     case WinUiTemplate.Lib:
-                        ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: from your app project, run [blue]dotnet add reference \"{Path.Join(relative, Path.GetFileName(name!) + ".csproj")}\"[/].");
+                        ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: from your app project, run [blue]dotnet add reference \"{Path.Join(outputDir.FullName, Path.GetFileName(name!) + ".csproj")}\"[/].");
                         break;
                     case WinUiTemplate.UnitTest:
                         ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: [blue]cd \"{relative}\"[/] then [blue]winapp run .[/] — this packaged MSTest app runs its tests when launched (not via [blue]dotnet test[/]).");
@@ -465,18 +515,19 @@ internal class NewCommand : Command, IShortDescription
 
         /// <summary>
         /// Verifies the .NET SDK is installed and meets the minimum version. Returns the detected SDK
-        /// version, or <c>null</c> (without installing anything) with an actionable message if the SDK
-        /// is missing, too old, or its version can't be determined. The caller uses the returned major
-        /// version to pin the scaffolded project's target framework.
+        /// version, or <c>null</c> (without installing anything) with a specific failure reason if the
+        /// SDK is missing, too old, or its version can't be determined. The caller uses the returned
+        /// major version to pin the scaffolded project's target framework, and surfaces the reason in
+        /// the JSON result so agent callers are told exactly what to fix (install vs update).
         /// </summary>
-        private async Task<Version?> CheckDotnetSdkAsync(bool isJson, CancellationToken cancellationToken)
+        private async Task<(Version? Version, string? Error)> CheckDotnetSdkAsync(bool isJson, CancellationToken cancellationToken)
         {
             var cwd = currentDirectoryProvider.GetCurrentDirectoryInfo();
             int exitCode;
             string stdout;
             try
             {
-                (exitCode, stdout, _) = await dotNetService.RunDotnetCommandAsync(cwd, VersionArgs, cancellationToken);
+                (exitCode, stdout, _) = await dotNetService.RunDotnetCommandAsync(cwd, VersionArgs, cancellationToken: cancellationToken);
             }
             catch (Win32Exception)
             {
@@ -487,11 +538,12 @@ internal class NewCommand : Command, IShortDescription
 
             if (exitCode != 0)
             {
+                const string missing = "The .NET SDK is required to create a WinUI app. Install it from https://dotnet.microsoft.com/download, then re-run 'winapp new'.";
                 if (!isJson)
                 {
-                    logger.LogError("{Error} The .NET SDK is required to create a WinUI app. Install it from https://dotnet.microsoft.com/download, then re-run 'winapp new'.", UiSymbols.Error);
+                    logger.LogError("{Error} {Message}", UiSymbols.Error, missing);
                 }
-                return null;
+                return (null, missing);
             }
 
             var versionText = stdout.Trim();
@@ -506,25 +558,25 @@ internal class NewCommand : Command, IShortDescription
             {
                 if (installed < MinimumSdkVersion)
                 {
+                    var tooOld = $".NET SDK {installed} is installed, but {MinimumSdkVersion} or newer is required. Update from https://dotnet.microsoft.com/download, then re-run 'winapp new'.";
                     if (!isJson)
                     {
-                        logger.LogError("{Error} .NET SDK {Installed} is installed, but {Minimum} or newer is required. Update from https://dotnet.microsoft.com/download, then re-run 'winapp new'.",
-                            UiSymbols.Error, installed, MinimumSdkVersion);
+                        logger.LogError("{Error} {Message}", UiSymbols.Error, tooOld);
                     }
-                    return null;
+                    return (null, tooOld);
                 }
 
-                return installed;
+                return (installed, null);
             }
 
             // Unparseable output means we can't confirm a usable SDK — fail the prerequisite rather
             // than optimistically proceeding into a confusing `dotnet new` error.
+            var unparseable = $"Could not determine the installed .NET SDK version (got '{stdout.Trim()}'). Ensure the .NET SDK {MinimumSdkVersion} or newer is installed from https://dotnet.microsoft.com/download, then re-run 'winapp new'.";
             if (!isJson)
             {
-                logger.LogError("{Error} Could not determine the installed .NET SDK version (got '{Output}'). Ensure the .NET SDK {Minimum} or newer is installed from https://dotnet.microsoft.com/download, then re-run 'winapp new'.",
-                    UiSymbols.Error, stdout.Trim(), MinimumSdkVersion);
+                logger.LogError("{Error} {Message}", UiSymbols.Error, unparseable);
             }
-            return null;
+            return (null, unparseable);
         }
 
         /// <summary>
@@ -534,7 +586,9 @@ internal class NewCommand : Command, IShortDescription
         private async Task<bool> EnsureTemplatePackAsync(DirectoryInfo cwd, string version, bool isJson, bool quiet, CancellationToken cancellationToken)
         {
             // `dotnet new uninstall` with no args lists installed template packages (and versions).
-            var (listExit, listOut, _) = await dotNetService.RunDotnetCommandAsync(cwd, ListTemplatePacksArgs, cancellationToken);
+            // Force English output so the "Version:" label we parse is locale-independent.
+            var (listExit, listOut, _) = await dotNetService.RunDotnetCommandAsync(
+                cwd, ListTemplatePacksArgs, EnglishUiEnvironment, cancellationToken);
             if (listExit == 0 && IsTemplatePackInstalled(listOut, version))
             {
                 return true;
@@ -548,7 +602,7 @@ internal class NewCommand : Command, IShortDescription
             }
 
             var (installExit, installOut, installErr) = await dotNetService.RunDotnetCommandAsync(
-                cwd, new[] { "new", "install", $"{TemplatePackageId}::{version}" }, cancellationToken);
+                cwd, new[] { "new", "install", $"{TemplatePackageId}::{version}" }, cancellationToken: cancellationToken);
 
             if (installExit != 0)
             {

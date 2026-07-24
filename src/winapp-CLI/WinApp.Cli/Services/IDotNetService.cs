@@ -73,9 +73,15 @@ internal interface IDotNetService
     /// argument is derived from user input, since it is immune to argument injection (no manual
     /// quoting/escaping of interpolated values).
     /// </summary>
+    /// <param name="environmentOverrides">
+    /// Optional environment variables to set on the child process (merged over the inherited
+    /// environment). Use this to force locale-independent output, e.g. <c>DOTNET_CLI_UI_LANGUAGE=en</c>,
+    /// when the caller parses labels that dotnet would otherwise localize.
+    /// </param>
     Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(
         DirectoryInfo workingDirectory,
         IReadOnlyList<string> arguments,
+        IReadOnlyDictionary<string, string>? environmentOverrides = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

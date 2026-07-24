@@ -63,6 +63,21 @@ public class NewCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    [DataRow("99")]   // undefined enum value
+    [DataRow("2")]    // numeric alias that would otherwise coerce to TabView
+    [DataRow("-1")]
+    public void Parse_NumericTemplate_ReportsError(string value)
+    {
+        // The default enum binder accepts numeric values, silently scaffolding the wrong/blank
+        // template. The custom parser must reject anything that isn't one of the six named aliases.
+        var command = GetRequiredService<NewCommand>();
+
+        var parseResult = command.Parse(["--template", value]);
+
+        Assert.IsNotEmpty(parseResult.Errors, $"Numeric template '{value}' should produce a parse error, not silently bind an enum.");
+    }
+
+    [TestMethod]
     public void Parse_NoPromptAlias_MapsToUseDefaults()
     {
         var command = GetRequiredService<NewCommand>();
