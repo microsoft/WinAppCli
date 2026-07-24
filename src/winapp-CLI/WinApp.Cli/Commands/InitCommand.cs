@@ -243,6 +243,10 @@ internal class InitCommand : Command, IShortDescription
                         targetDir, exe, name, publisher, useDefaults, taskContext, ct);
                     return (0, "Sparse identity manifest generated.");
                 }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
                 catch (Exception ex)
                 {
                     taskContext.AddDebugMessage($"Stack Trace: {ex.StackTrace}");

@@ -20,13 +20,19 @@
 #define MyAppName "Sparse Packaging Sample"
 #define MyAppExeName "sparse-app.exe"
 #define MyMsixName "SparseAppSample.identity.msix"
-; Wildcard matches the package full name (e.g. SparseAppSample_1.0.0.0_neutral__<hash>)
-#define MyPackagePattern "SparseAppSample*"
+; Exact package Identity Name (from appxmanifest.xml). Used to unregister precisely
+; on uninstall so we don't remove unrelated packages that share a name prefix.
+#define MyPackageName "SparseAppSample"
 ; Path to your published app output (contains sparse-app.exe, Assets\, and the .msix).
+; Resolved relative to SourceDir (the sample directory) below.
 #define PublishDir "bin\Release\net10.0-windows10.0.19041.0\win-x64\publish"
 
 [Setup]
 AppId={{7C2E4A1E-9E2B-4C7E-9D1F-0A1B2C3D4E5F}
+; The publish output and the identity .msix live in the sample root (the parent of
+; this installer\ directory), so resolve all relative [Files] sources from there.
+SourceDir=..
+OutputDir=installer\Output
 AppName={#MyAppName}
 AppVersion=1.0.0.0
 DefaultDirName={autopf}\SparseAppSample
@@ -60,9 +66,10 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: po
 
 [UninstallRun]
 ; Unregister the sparse package on uninstall (before files are removed).
-; MyPackagePattern is a compile-time constant (no runtime path), so no escaping is required.
+; MyPackageName is a compile-time constant (no runtime path), so no escaping is required.
+; Match the exact Identity Name so we only remove this package, not others sharing a prefix.
 Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Get-AppxPackage '{#MyPackagePattern}' | Remove-AppxPackage"""; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Get-AppxPackage -Name '{#MyPackageName}' | Remove-AppxPackage"""; \
   RunOnceId: "UnregisterSparse"; \
   Flags: runhidden waituntilterminated
 

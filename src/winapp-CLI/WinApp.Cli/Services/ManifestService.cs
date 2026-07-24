@@ -184,7 +184,7 @@ internal partial class ManifestService(
             var fileVersionInfo = FileVersionInfo.GetVersionInfo(executable.FullName);
             inferredVersion = NormalizeManifestVersion(fileVersionInfo.FileVersion) ?? "1.0.0.0";
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Non-fatal: keep the default version if the exe has no readable version info.
         }
@@ -231,26 +231,19 @@ internal partial class ManifestService(
     /// </summary>
     private string? ExtractExeIconToTempPng(string executablePath)
     {
-        Icon? extractedIcon = null;
-        try
+        using var extractedIcon = ExecutableIconExtractor(executablePath);
+        if (extractedIcon == null)
         {
-            extractedIcon = ExecutableIconExtractor(executablePath);
-            if (extractedIcon == null)
-            {
-                return null;
-            }
+            return null;
+        }
 
-            var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
-            Directory.CreateDirectory(tempDir);
-            var logoPath = Path.Combine(tempDir, "StoreLogo.png");
-            using var stream = new FileStream(logoPath, FileMode.Create);
-            extractedIcon.ToBitmap().Save(stream, ImageFormat.Png);
-            return logoPath;
-        }
-        finally
-        {
-            extractedIcon?.Dispose();
-        }
+        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        Directory.CreateDirectory(tempDir);
+        var logoPath = Path.Combine(tempDir, "StoreLogo.png");
+        using var stream = new FileStream(logoPath, FileMode.Create);
+        using var bitmap = extractedIcon.ToBitmap();
+        bitmap.Save(stream, ImageFormat.Png);
+        return logoPath;
     }
 
     /// <summary>
@@ -270,6 +263,10 @@ internal partial class ManifestService(
 
             await UpdateManifestAssetsAsync(manifestPath, new FileInfo(extractedLogoPath), taskContext, cancellationToken: cancellationToken);
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             taskContext.AddDebugMessage($"Could not extract logo from executable: {ex.Message}");
@@ -283,7 +280,7 @@ internal partial class ManifestService(
                     File.Delete(extractedLogoPath);
                     Directory.Delete(Path.GetDirectoryName(extractedLogoPath)!);
                 }
-                catch
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     // best-effort cleanup
                 }

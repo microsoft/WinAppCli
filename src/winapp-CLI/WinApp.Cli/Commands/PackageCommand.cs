@@ -123,7 +123,11 @@ internal class PackageCommand : Command, IShortDescription
                 return content.Contains("AllowExternalContent", StringComparison.OrdinalIgnoreCase)
                     && MsixService.ManifestHasAllowExternalContent(content);
             }
-            catch
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 return false;
             }
@@ -167,6 +171,10 @@ internal class PackageCommand : Command, IShortDescription
                             taskContext.AddStatusMessage($"{UiSymbols.Info} Next: winapp embed-identity <exe> — then register in your installer with Add-AppxPackage -Path <msix> -ExternalLocation <install-dir>");
 
                             return (0, "Sparse identity package creation completed.");
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
                         }
                         catch (Exception ex)
                         {

@@ -84,8 +84,18 @@ internal class EmbedIdentityCommand : Command, IShortDescription
                     {
                         taskContext.AddStatusMessage($"{UiSymbols.Info} Rebuild your app so the updated side-by-side manifest is embedded in the exe.");
                     }
+                    else
+                    {
+                        // mt.exe rewrites the exe in place, which invalidates any existing Authenticode
+                        // signature. Remind the user to re-sign before distributing.
+                        taskContext.AddStatusMessage($"{UiSymbols.Warning} Embedding rewrote the exe and invalidated any existing signature. Re-sign it before distributing: winapp sign \"{target.Name}\" <cert.pfx>.");
+                    }
 
                     return (0, "Package identity embedded successfully.");
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {
@@ -94,6 +104,10 @@ internal class EmbedIdentityCommand : Command, IShortDescription
                 }
             }, cancellationToken);
         }
+
+        // Candidate manifest file names to probe, in priority order. Static to satisfy CA1861 and
+        // avoid re-allocating the array on every lookup.
+        private static readonly string[] SparseManifestCandidateNames = ["appxmanifest.xml", "Package.appxmanifest"];
 
         /// <summary>
         /// Returns the first existing manifest candidate in <paramref name="directory"/> that is a
@@ -108,16 +122,11 @@ internal class EmbedIdentityCommand : Command, IShortDescription
                 return null;
             }
 
-            foreach (var name in new[] { "appxmanifest.xml", "Package.appxmanifest" })
-            {
-                var path = Path.Combine(directory, name);
-                if (File.Exists(path) && IsSparseManifest(path))
-                {
-                    return new FileInfo(path);
-                }
-            }
-
-            return null;
+            return SparseManifestCandidateNames
+                .Select(name => Path.Combine(directory, name))
+                .Where(path => File.Exists(path) && IsSparseManifest(path))
+                .Select(path => new FileInfo(path))
+                .FirstOrDefault();
         }
 
         private static bool IsSparseManifest(string path)
@@ -126,7 +135,7 @@ internal class EmbedIdentityCommand : Command, IShortDescription
             {
                 return AppxManifestDocument.Parse(File.ReadAllText(path)).AllowsExternalContent;
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
             {
                 return false;
             }
