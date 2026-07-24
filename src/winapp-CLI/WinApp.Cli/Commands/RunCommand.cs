@@ -162,7 +162,7 @@ internal partial class RunCommand : Command, IShortDescription
         PropertyOption = new Option<string[]>("--property")
         {
             Description = "Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode.",
-            Arity = ArgumentArity.ZeroOrMore,
+            Arity = ArgumentArity.OneOrMore,
             AllowMultipleArgumentsPerToken = false,
         };
         PropertyOption.Aliases.Add("-p");
