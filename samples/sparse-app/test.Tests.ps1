@@ -75,8 +75,8 @@ Describe 'sparse-app sample' {
             Invoke-WinappCommand -Arguments "init --exe `"$($script:exePath)`" --sparse --use-defaults --name SparseGuideApp --publisher `"CN=Sparse Guide`""
         }
 
-        It 'Generates a sparse appxmanifest.xml next to the exe' -Skip:$script:skip {
-            $manifest = Join-Path (Split-Path $script:exePath -Parent) 'appxmanifest.xml'
+        It 'Generates a sparse appxmanifest.xml in the ./sparse/ folder' -Skip:$script:skip {
+            $manifest = Join-Path (Get-Location) 'sparse\appxmanifest.xml'
             $manifest | Should -Exist
             $script:manifestPath = $manifest
             $content = Get-Content $manifest -Raw

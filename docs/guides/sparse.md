@@ -11,7 +11,7 @@ This guide covers the three CLI steps that map to the first three steps of the o
 
 | Step | Command | Result |
 |------|---------|--------|
-| 1. Create the identity manifest | `winapp init --exe <exe> --sparse` | `appxmanifest.xml` + `Assets/` |
+| 1. Create the identity manifest | `winapp init --exe <exe> --sparse` | `sparse/appxmanifest.xml` + `sparse/Assets/` |
 | 2. Build & sign the identity package | `winapp pack <appxmanifest.xml> --cert <pfx>` | `<PackageName>.identity.msix` |
 | 3. Embed identity into the app | `winapp embed-identity <exe>` | `<msix>` element in the exe's fusion manifest |
 
@@ -51,10 +51,12 @@ winapp init --exe ./bin/Release/net8.0-windows/MyApp.exe --sparse --use-defaults
   --name "Contoso.MyApp" --publisher "CN=Contoso"
 ```
 
-It writes, next to the exe (or to `--output-dir`):
+It writes the following to a dedicated `sparse/` folder in the current directory by default (override with `--output-dir`):
 
 - `appxmanifest.xml` — a sparse manifest with `<uap10:AllowExternalContent>true</uap10:AllowExternalContent>` (an element under `<Properties>`), `ProcessorArchitecture="neutral"`, a `win32App` application, and the exe name filled into `Executable`.
 - `Assets/` — placeholder visual assets (extracted from the exe's icon when possible).
+
+> **Why a `sparse/` folder and not next to the exe?** The manifest and `Assets/` are **build-time inputs** consumed by `winapp pack` and `winapp embed-identity` — nothing reads them from beside the exe at runtime (runtime identity comes from the `<msix>` element embedded in the exe plus the registered package's external location, and the manifest references the exe by *name*, so its location is independent of where the exe lives). Writing them into a dedicated, source-controlled folder keeps them out of a build-output directory (like `bin/`) that a clean/rebuild would wipe, and keeps the folder free of binaries so the next steps stay clean. `winapp pack` and `winapp embed-identity` look in `sparse/` automatically, so you rarely need to name the path.
 
 > **Note:** The sparse init flow deliberately **skips all SDK/package installation** — identity-only packages have no SDK dependencies.
 
@@ -67,7 +69,7 @@ Make sure the `Publisher` in the generated manifest matches the certificate you'
 Point `winapp pack` at the sparse manifest (a file, not a folder):
 
 ```powershell
-winapp pack ./bin/Release/net8.0-windows/appxmanifest.xml --cert ./devcert.pfx
+winapp pack ./sparse/appxmanifest.xml --cert ./devcert.pfx
 ```
 
 Because the manifest declares `AllowExternalContent`, `winapp pack` builds an **identity-only** `.msix` containing just the manifest — no binaries, no assets. The output defaults to `<PackageName>.identity.msix` in the current directory; use `--output` to change it. Signing happens only when you pass `--cert` (or `--generate-cert`).
@@ -90,7 +92,7 @@ winapp embed-identity ./app.manifest
 
 In XML mode the `<msix>` element is inserted into (or replaced in) the target manifest. Reference that manifest from your project (for .NET, set `<ApplicationManifest>app.manifest</ApplicationManifest>`) and rebuild so the element is embedded in the exe.
 
-Both modes read identity from a sparse `appxmanifest.xml`. When you omit `--manifest`, winapp looks next to the target first (where `winapp init --exe --sparse` writes it), then falls back to the current directory; pass `--manifest` to point elsewhere.
+Both modes read identity from a sparse `appxmanifest.xml`. When you omit `--manifest`, winapp looks in a `sparse/` folder (where `winapp init --exe --sparse` writes it by default) in the current directory and beside the target, then falls back to beside the target and the current directory; pass `--manifest` to point elsewhere.
 
 > **Note:** EXE mode rewrites the binary with `mt.exe`, which invalidates any existing Authenticode signature. Re-sign the exe (e.g. `winapp sign ./MyApp.exe <cert.pfx>`) before distributing it.
 
@@ -115,7 +117,9 @@ Remove-AppxPackage <full-package-name>
 
 The sparse `.msix` is **identity-only**. The visual assets referenced by the manifest (`Assets\StoreLogo.png`, tiles, etc.) are resolved from the **external content location** at runtime — i.e., from your app's install directory — **not** from inside the `.msix`.
 
-This means you must **deploy the `Assets/` folder alongside your application** (same layout the manifest expects, relative to the external location). If you pack a *folder* that contains assets or binaries, `winapp pack` will warn you: for sparse packages those files belong at the external location, not in the package.
+This means you must **deploy the `Assets/` folder alongside your application** (same layout the manifest expects, relative to the external location).
+
+Step 2 packs the manifest **file** directly (`winapp pack ./sparse/appxmanifest.xml`), which builds the identity-only `.msix` from just that manifest — sibling files are ignored, so it never includes your assets or binaries. (If you instead point `winapp pack` at a *folder* whose manifest declares `AllowExternalContent`, it warns about any assets or binaries it finds, since for a sparse package those belong at the external location, not inside the `.msix`.)
 
 ## Installer integration
 

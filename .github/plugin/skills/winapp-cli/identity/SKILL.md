@@ -140,7 +140,7 @@ For full details including IDE setup examples, see the [Debugging Guide](https:/
 winapp init --exe ./bin/Release/MyApp.exe --sparse --use-defaults
 
 # 2. Build and sign the identity-only .msix (just the manifest, no binaries)
-winapp pack ./bin/Release/appxmanifest.xml --cert ./dev.pfx
+winapp pack ./sparse/appxmanifest.xml --cert ./dev.pfx
 
 # 3. Embed the <msix> identity element into the exe's fusion manifest
 winapp embed-identity ./bin/Release/MyApp.exe
@@ -200,4 +200,4 @@ Connect a desktop exe to its sparse identity package by embedding the <msix> ele
 <!-- auto-generated from cli-schema.json -->
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--manifest` | Path to the sparse appxmanifest.xml to read identity from. When omitted, searched next to the target first (where 'winapp init --exe --sparse' writes it), then the current directory. | (none) |
+| `--manifest` | Path to the sparse appxmanifest.xml to read identity from. When omitted, searched in a 'sparse/' folder (where 'winapp init --exe --sparse' writes it by default) in the current directory and beside the target, then beside the target and in the current directory. | (none) |

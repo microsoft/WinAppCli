@@ -156,9 +156,14 @@ public class ManifestGenerateCommandFailureTests : BaseCommandTests
         public Task<AddExecutionAliasResult> AddExecutionAliasAsync(AddExecutionAliasOptions options, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
-        public Task<SparseInitResult> GenerateSparseIdentityManifestAsync(
+        public Task<ManifestGenerationInfo> PrepareSparseManifestInfoAsync(
             DirectoryInfo outputDirectory, FileInfo executable, string? packageName, string? publisherName,
-            bool useDefaults, TaskContext taskContext, CancellationToken cancellationToken = default)
+            bool useDefaults, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<SparseInitResult> GenerateSparseIdentityManifestAsync(
+            DirectoryInfo outputDirectory, FileInfo executable, ManifestGenerationInfo info,
+            TaskContext taskContext, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
     }
 }

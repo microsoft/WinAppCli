@@ -29,6 +29,11 @@ public class SparsePackagingTests : BaseCommandTests
         return dest;
     }
 
+    // Sparse init defaults to a dedicated ./sparse/ folder under the current directory, which the
+    // test harness sets to _tempDirectory.
+    private string SparseDir => Path.Combine(_tempDirectory.FullName, "sparse");
+    private string SparseManifestPath => Path.Combine(SparseDir, "appxmanifest.xml");
+
     private const string MinimalSparseManifest = """
         <?xml version="1.0" encoding="utf-8"?>
         <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
@@ -71,8 +76,8 @@ public class SparsePackagingTests : BaseCommandTests
         // Assert
         Assert.AreEqual(0, exitCode, "Sparse init should succeed");
 
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
-        Assert.IsTrue(File.Exists(manifestPath), "appxmanifest.xml should be generated in the exe's directory");
+        var manifestPath = SparseManifestPath;
+        Assert.IsTrue(File.Exists(manifestPath), "appxmanifest.xml should be generated in the default ./sparse/ folder");
 
         var content = await File.ReadAllTextAsync(manifestPath, TestContext.CancellationToken);
         Assert.Contains("uap10:AllowExternalContent", content, "Should be a sparse manifest");
@@ -83,7 +88,7 @@ public class SparsePackagingTests : BaseCommandTests
         Assert.Contains("Executable=\"app.exe\"", content, "Executable should be substituted with the exe name");
         Assert.Contains("Name=\"MySparseApp\"", content, "Package name override should be applied");
 
-        Assert.IsTrue(Directory.Exists(Path.Combine(_tempDirectory.FullName, "Assets")), "Assets directory should be generated");
+        Assert.IsTrue(Directory.Exists(Path.Combine(SparseDir, "Assets")), "Assets directory should be generated");
     }
 
     [TestMethod]
@@ -104,6 +109,35 @@ public class SparsePackagingTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task InitSparse_Interactive_PromptsOutsideStatusDisplay_DoesNotThrow()
+    {
+        // Regression: interactive sparse init (no --use-defaults) used to run the metadata
+        // prompts INSIDE the live status spinner, which Spectre.Console rejects with
+        // "Trying to run one or more interactive functions concurrently". Force the live-spinner
+        // path and push prompt answers to prove the prompt now runs before the status display.
+        var exe = CopyTestExe();
+        var statusService = (StatusService)GetRequiredService<IStatusService>();
+        statusService.ShouldUseLiveSpinnerProvider = (_, _) => true;
+
+        TestAnsiConsole.Input.PushTextWithEnter("InteractivePkg");   // Package name
+        TestAnsiConsole.Input.PushTextWithEnter("CN=Interactive");   // Publisher name
+        TestAnsiConsole.Input.PushTextWithEnter("2.3.4.5");          // Version
+        TestAnsiConsole.Input.PushTextWithEnter("Interactive desc"); // Description
+
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--exe", exe, "--sparse" };
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        Assert.AreEqual(0, exitCode, "Interactive sparse init should complete without throwing");
+        var manifestPath = SparseManifestPath;
+        Assert.IsTrue(File.Exists(manifestPath), "appxmanifest.xml should be generated");
+        var content = await File.ReadAllTextAsync(manifestPath, TestContext.CancellationToken);
+        Assert.Contains("Name=\"InteractivePkg\"", content, "Prompted package name should be applied");
+        Assert.Contains("Version=\"2.3.4.5\"", content, "Prompted version should be applied");
+    }
+
+    [TestMethod]
     public async Task InitSparse_NonExeTarget_ReturnsError()
     {
         // Arrange — a non-.exe target must be rejected before any manifest is written,
@@ -118,7 +152,7 @@ public class SparsePackagingTests : BaseCommandTests
 
         // Assert
         Assert.AreEqual(1, exitCode, "A non-.exe --exe target should fail");
-        Assert.IsFalse(File.Exists(Path.Combine(_tempDirectory.FullName, "appxmanifest.xml")), "No manifest should be generated for a non-exe target");
+        Assert.IsFalse(File.Exists(SparseManifestPath), "No manifest should be generated for a non-exe target");
     }
 
     [TestMethod]
@@ -126,7 +160,8 @@ public class SparsePackagingTests : BaseCommandTests
     {
         // Arrange — a pre-existing appxmanifest.xml must not be silently overwritten.
         var exe = CopyTestExe();
-        var existing = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        Directory.CreateDirectory(SparseDir);
+        var existing = SparseManifestPath;
         await File.WriteAllTextAsync(existing, "<hand-authored/>", TestContext.CancellationToken);
         var initCommand = GetRequiredService<InitCommand>();
         var args = new[] { "--exe", exe, "--sparse", "--use-defaults" };
@@ -145,7 +180,8 @@ public class SparsePackagingTests : BaseCommandTests
     {
         // Arrange
         var exe = CopyTestExe();
-        var existing = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        Directory.CreateDirectory(SparseDir);
+        var existing = SparseManifestPath;
         await File.WriteAllTextAsync(existing, "<hand-authored/>", TestContext.CancellationToken);
         var initCommand = GetRequiredService<InitCommand>();
         var args = new[] { "--exe", exe, "--sparse", "--use-defaults", "--force" };
@@ -187,7 +223,7 @@ public class SparsePackagingTests : BaseCommandTests
 
         // Assert
         Assert.AreEqual(1, exitCode, "--exe without --sparse should fail");
-        Assert.IsFalse(File.Exists(Path.Combine(_tempDirectory.FullName, "appxmanifest.xml")), "No manifest should be generated");
+        Assert.IsFalse(File.Exists(SparseManifestPath), "No manifest should be generated");
     }
 
     [TestMethod]
@@ -197,7 +233,7 @@ public class SparsePackagingTests : BaseCommandTests
         var exe = CopyTestExe();
         var initCommand = GetRequiredService<InitCommand>();
         await ParseAndInvokeWithCaptureAsync(initCommand, ["--exe", exe, "--sparse", "--use-defaults", "--name", "EmbeddedApp", "--publisher", "CN=Contoso"]);
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        var manifestPath = SparseManifestPath;
         var targetManifest = Path.Combine(_tempDirectory.FullName, "app.manifest");
 
         var embedCommand = GetRequiredService<EmbedIdentityCommand>();
@@ -220,7 +256,7 @@ public class SparsePackagingTests : BaseCommandTests
         var exe = CopyTestExe();
         var initCommand = GetRequiredService<InitCommand>();
         await ParseAndInvokeWithCaptureAsync(initCommand, ["--exe", exe, "--sparse", "--use-defaults", "--name", "IdempotentApp"]);
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        var manifestPath = SparseManifestPath;
         var targetManifest = Path.Combine(_tempDirectory.FullName, "app.manifest");
         var embedCommand = GetRequiredService<EmbedIdentityCommand>();
 
@@ -236,13 +272,33 @@ public class SparsePackagingTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task EmbedIdentity_AutoDiscoversManifestInSparseFolder()
+    {
+        // The dedicated ./sparse/ folder that 'init --exe --sparse' writes to by default must be
+        // found by embed-identity without an explicit --manifest (zero-config step 3).
+        var exe = CopyTestExe();
+        var initCommand = GetRequiredService<InitCommand>();
+        await ParseAndInvokeWithCaptureAsync(initCommand, ["--exe", exe, "--sparse", "--use-defaults", "--name", "AutoFound"]);
+        var targetManifest = Path.Combine(_tempDirectory.FullName, "app.manifest");
+        var embedCommand = GetRequiredService<EmbedIdentityCommand>();
+
+        // Act — no --manifest; discovery must locate ./sparse/appxmanifest.xml
+        var exitCode = await ParseAndInvokeWithCaptureAsync(embedCommand, [targetManifest]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "embed-identity should auto-discover the manifest in ./sparse/");
+        var content = await File.ReadAllTextAsync(targetManifest, TestContext.CancellationToken);
+        Assert.Contains("packageName=\"AutoFound\"", content, "Discovered manifest identity should be embedded");
+    }
+
+    [TestMethod]
     public async Task EmbedIdentity_UnsupportedExtension_ReturnsError()
     {
         // Arrange: a valid sparse manifest exists, but the target is an unsupported file type.
         var exe = CopyTestExe();
         var initCommand = GetRequiredService<InitCommand>();
         await ParseAndInvokeWithCaptureAsync(initCommand, ["--exe", exe, "--sparse", "--use-defaults"]);
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        var manifestPath = SparseManifestPath;
         var badTarget = Path.Combine(_tempDirectory.FullName, "notes.txt");
 
         var embedCommand = GetRequiredService<EmbedIdentityCommand>();

@@ -39,7 +39,7 @@ winapp init [base-directory] [options]
 - `--sparse` - Generate a sparse identity manifest (`appxmanifest.xml`) for an existing desktop exe. Skips SDK/package installation. Use with `--exe`.
 - `--name <name>` - Override the package name (sparse only; default: inferred from the exe)
 - `--publisher <CN>` - Override the publisher CN (sparse only; default: inferred from the exe's company name)
-- `--output-dir <path>` - Directory to write the sparse manifest and `Assets/` (sparse only; default: the exe's directory)
+- `--output-dir <path>` - Directory to write the sparse manifest and `Assets/` (sparse only; default: a `sparse/` folder in the current directory)
 - `--force` - Overwrite an existing `appxmanifest.xml` in the target directory (sparse only). Without it, init fails instead of replacing an existing manifest/assets.
 - `--add-js-bindings` *(npm only)* - Add `winapp.jsBindings` to package.json and generate JS/TypeScript bindings, without prompting (incompatible with `--setup-sdks none`)
 
@@ -90,7 +90,7 @@ When a `.csproj` file is found in the target directory, `init` uses a streamline
 Generates an identity-only [sparse package](guides/sparse.md) manifest for an existing desktop executable — the first step of the [sparse packaging workflow](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/grant-identity-to-nonpackaged-apps). Unlike the full `init` flow, this **skips all SDK/package installation** (sparse identity packages have no SDK dependencies) and only generates a manifest and placeholder assets.
 
 - Infers the package name, publisher, description, and version from the exe via `FileVersionInfo` (override with `--name`, `--publisher`, or interactively)
-- Writes `appxmanifest.xml` (with the exe name substituted into `Executable`) plus an `Assets/` folder to the exe's directory (or `--output-dir`)
+- Writes `appxmanifest.xml` (with the exe name substituted into `Executable`) plus an `Assets/` folder to a `sparse/` folder in the current directory (or `--output-dir`)
 - Uses `--use-defaults`/`--no-prompt` to skip the interactive override prompts (CI-friendly)
 - `--exe` without `--sparse` is an error
 
@@ -239,7 +239,7 @@ When the input is a **sparse `appxmanifest.xml` file** (one declaring `<uap10:Al
 
 ```bash
 # Build a signed identity package from a sparse manifest
-winapp pack ./appxmanifest.xml --cert ./dev.pfx
+winapp pack ./sparse/appxmanifest.xml --cert ./dev.pfx
 ```
 
 - Output defaults to `<PackageName>.identity.msix` in the current directory (override with `--output`).
@@ -381,7 +381,7 @@ winapp embed-identity <target> [options]
 
 **Options:**
 
-- `--manifest <path>` - Path to the sparse `appxmanifest.xml` to read identity (packageName, publisher, applicationId) from. When omitted, the command searches the target's directory first, then the current directory, for `appxmanifest.xml`.
+- `--manifest <path>` - Path to the sparse `appxmanifest.xml` to read identity (packageName, publisher, applicationId) from. When omitted, the command searches a `sparse/` folder in the current directory and beside the target, then the target's directory and the current directory, for `appxmanifest.xml`.
 
 **Examples:**
 

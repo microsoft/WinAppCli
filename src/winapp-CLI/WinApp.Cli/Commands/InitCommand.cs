@@ -260,9 +260,13 @@ internal class InitCommand : Command, IShortDescription
                 return 1;
             }
 
-            // Default output location is the exe's directory so the identity manifest and its
-            // Assets/ sit alongside the app that will be registered via -ExternalLocation.
-            var targetDir = outputDir ?? exe.Directory ?? currentDirectoryProvider.GetCurrentDirectoryInfo();
+            // Default output location is a dedicated ./sparse/ folder in the current directory.
+            // Keeping the identity manifest and its Assets/ out of the exe's build-output directory
+            // means a clean/rebuild won't delete them, and the folder holds only the manifest +
+            // Assets/ so 'winapp pack' has nothing to warn about. The manifest references the exe by
+            // name, so its location is independent of where the exe lives.
+            var targetDir = outputDir ?? new DirectoryInfo(
+                Path.Combine(currentDirectoryProvider.GetCurrentDirectory(), "sparse"));
 
             // Guard against silently overwriting a hand-authored manifest. Generation uses
             // File.WriteAllTextAsync/File.Create, which would replace an existing appxmanifest.xml
@@ -276,13 +280,27 @@ internal class InitCommand : Command, IShortDescription
                 return 1;
             }
 
+            // Resolve manifest metadata (inferring from the exe and, in interactive mode, prompting)
+            // BEFORE entering the status display. Spectre.Console throws if a prompt runs while a
+            // live progress spinner is active, so the interactive phase must happen outside it.
+            ManifestGenerationInfo manifestInfo;
+            try
+            {
+                manifestInfo = await manifestService.PrepareSparseManifestInfoAsync(
+                    targetDir, exe, name, publisher, useDefaults, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return 1;
+            }
+
             SparseInitResult? sparseResult = null;
             var exitCode = await statusService.ExecuteWithStatusAsync("Generating sparse identity manifest...", async (taskContext, ct) =>
             {
                 try
                 {
                     sparseResult = await manifestService.GenerateSparseIdentityManifestAsync(
-                        targetDir, exe, name, publisher, useDefaults, taskContext, ct);
+                        targetDir, exe, manifestInfo, taskContext, ct);
                     return (0, "Sparse identity manifest generated.");
                 }
                 catch (OperationCanceledException)
@@ -307,8 +325,7 @@ internal class InitCommand : Command, IShortDescription
                 ansiConsole.MarkupLineInterpolated($"{UiSymbols.Check} Generated sparse identity package files:");
                 ansiConsole.MarkupLineInterpolated($"   {UiSymbols.Files} Manifest: {sparseResult.ManifestPath.FullName}");
                 ansiConsole.MarkupLineInterpolated($"   {UiSymbols.Files} Assets:   {sparseResult.AssetsDirectory.FullName}");
-                ansiConsole.WriteLine();
-                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Package} Package: {sparseResult.Info.PackageName}  Version: {sparseResult.Info.Version}");
+                ansiConsole.MarkupLineInterpolated($"   {UiSymbols.Package} Package:  {sparseResult.Info.PackageName}  Version: {sparseResult.Info.Version}");
                 ansiConsole.WriteLine();
                 ansiConsole.MarkupLine("[yellow]Note:[/] This is an [bold]identity-only[/] package. The generated assets in [blue]Assets/[/] are resolved from the app's install directory (the external content location) at runtime — they are [bold]not[/] bundled into the .msix. Deploy them alongside your application.");
                 ansiConsole.WriteLine();

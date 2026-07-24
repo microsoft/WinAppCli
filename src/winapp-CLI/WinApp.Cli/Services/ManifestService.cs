@@ -180,17 +180,14 @@ internal partial class ManifestService(
         }
     }
 
-    public async Task<SparseInitResult> GenerateSparseIdentityManifestAsync(
+    public async Task<ManifestGenerationInfo> PrepareSparseManifestInfoAsync(
         DirectoryInfo outputDirectory,
         FileInfo executable,
         string? packageName,
         string? publisherName,
         bool useDefaults,
-        TaskContext taskContext,
         CancellationToken cancellationToken = default)
     {
-        outputDirectory.Create();
-
         // Infer the package version from the executable's file version, falling back to 1.0.0.0.
         var inferredVersion = "1.0.0.0";
         try
@@ -204,8 +201,9 @@ internal partial class ManifestService(
         }
 
         // Infer package name / publisher / description from the exe and (unless --use-defaults)
-        // prompt the user to accept or override each value.
-        var info = await PromptForManifestInfoAsync(
+        // prompt the user to accept or override each value. This runs OUTSIDE any status spinner
+        // because Spectre.Console forbids an interactive prompt during a live progress display.
+        return await PromptForManifestInfoAsync(
             outputDirectory,
             packageName,
             publisherName,
@@ -214,6 +212,16 @@ internal partial class ManifestService(
             executable: executable.FullName,
             useDefaults,
             cancellationToken);
+    }
+
+    public async Task<SparseInitResult> GenerateSparseIdentityManifestAsync(
+        DirectoryInfo outputDirectory,
+        FileInfo executable,
+        ManifestGenerationInfo info,
+        TaskContext taskContext,
+        CancellationToken cancellationToken = default)
+    {
+        outputDirectory.Create();
 
         // Generate the sparse identity manifest as appxmanifest.xml, substituting the concrete
         // external exe name for the $targetnametoken$ build token so it can be packed directly.
@@ -410,7 +418,7 @@ internal partial class ManifestService(
         FileInfo? lightImagePath = null,
         CancellationToken cancellationToken = default)
     {
-        taskContext.AddStatusMessage($"{UiSymbols.Info} Updating assets for manifest: {manifestPath.FullName}");
+        taskContext.AddDebugMessage($"Updating assets for manifest: {manifestPath.FullName}");
 
         var manifestDir = manifestPath.Directory;
         if (manifestDir == null)

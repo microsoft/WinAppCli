@@ -35,18 +35,29 @@ internal interface IManifestService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Generates a sparse identity <c>appxmanifest.xml</c> (plus placeholder assets) for an
-    /// existing desktop executable. Infers metadata defaults from the exe via
-    /// <see cref="System.Diagnostics.FileVersionInfo"/>, optionally prompting for overrides.
-    /// The generated manifest references the external exe by name so it can be packed as an
-    /// identity-only MSIX with <c>winapp pack</c>.
+    /// Infers sparse-manifest metadata defaults from an executable and, unless <paramref name="useDefaults"/>
+    /// is set, interactively prompts the user to accept or override each value. This must run OUTSIDE
+    /// any status/progress display because Spectre.Console forbids a prompt during a live spinner.
     /// </summary>
-    public Task<SparseInitResult> GenerateSparseIdentityManifestAsync(
+    public Task<ManifestGenerationInfo> PrepareSparseManifestInfoAsync(
         DirectoryInfo outputDirectory,
         FileInfo executable,
         string? packageName,
         string? publisherName,
         bool useDefaults,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Generates a sparse identity <c>appxmanifest.xml</c> (plus placeholder assets) for an
+    /// existing desktop executable using pre-resolved metadata from
+    /// <see cref="PrepareSparseManifestInfoAsync"/>. The generated manifest references the external
+    /// exe by name so it can be packed as an identity-only MSIX with <c>winapp pack</c>. This phase
+    /// is non-interactive and safe to run inside a status display.
+    /// </summary>
+    public Task<SparseInitResult> GenerateSparseIdentityManifestAsync(
+        DirectoryInfo outputDirectory,
+        FileInfo executable,
+        ManifestGenerationInfo info,
         TaskContext taskContext,
         CancellationToken cancellationToken = default);
 
