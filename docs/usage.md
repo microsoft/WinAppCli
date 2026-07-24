@@ -40,6 +40,7 @@ winapp init [base-directory] [options]
 - `--name <name>` - Override the package name (sparse only; default: inferred from the exe)
 - `--publisher <CN>` - Override the publisher CN (sparse only; default: inferred from the exe's company name)
 - `--output-dir <path>` - Directory to write the sparse manifest and `Assets/` (sparse only; default: the exe's directory)
+- `--force` - Overwrite an existing `appxmanifest.xml` in the target directory (sparse only). Without it, init fails instead of replacing an existing manifest/assets.
 - `--add-js-bindings` *(npm only)* - Add `winapp.jsBindings` to package.json and generate JS/TypeScript bindings, without prompting (incompatible with `--setup-sdks none`)
 
 **What it does:**

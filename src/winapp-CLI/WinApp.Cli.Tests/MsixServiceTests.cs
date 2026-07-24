@@ -1169,6 +1169,41 @@ public class MsixServiceTests
         StringAssert.Contains(result, "<uap:VisualElements DisplayName=\"Test App\" Square150x150Logo=\"Assets\\\\Logo.png\" AppListEntry=\"none\" />");
     }
 
+    [TestMethod]
+    public async Task UpdateAppxManifestContentAsync_Sparse_CorrectsPreExistingRuntimeBehavior()
+    {
+        // Arrange — a manifest that already declares uap10:TrustLevel and an INCORRECT
+        // RuntimeBehavior="packagedClassicApp". Converting an EXE to a sparse Win32 package must
+        // force RuntimeBehavior="win32App" even though TrustLevel is already present.
+        var service = CreateMsixServiceForManifestRewriteTests();
+        var manifest = """
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                 xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+                 xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+                 xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
+    <Identity Name="TestApp" Publisher="CN=Test" Version="1.0.0.0" />
+    <Properties>
+        <DisplayName>Test App</DisplayName>
+    </Properties>
+    <Capabilities>
+        <rescap:Capability Name="runFullTrust" />
+    </Capabilities>
+    <Applications>
+        <Application Id="App" Executable="TestApp.exe" uap10:TrustLevel="mediumIL" uap10:RuntimeBehavior="packagedClassicApp" />
+    </Applications>
+</Package>
+""";
+
+        // Act — sparse conversion of an .exe entry point.
+        var result = await InvokeUpdateAppxManifestContentAsync(service, manifest, "TestApp.exe", sparse: true);
+
+        // Assert
+        StringAssert.Contains(result, "uap10:RuntimeBehavior=\"win32App\"");
+        Assert.IsFalse(result.Contains("packagedClassicApp"), "Pre-existing packagedClassicApp must be corrected to win32App");
+        StringAssert.Contains(result, "uap10:TrustLevel=\"mediumIL\"");
+    }
+
     private MsixService CreateMsixServiceForManifestRewriteTests()
     {
         return new MsixService(
@@ -1189,20 +1224,23 @@ public class MsixServiceTests
             new CurrentDirectoryProvider(_tempDir.FullName));
     }
 
-    private static async Task<string> InvokeUpdateAppxManifestContentAsync(MsixService service, string manifest)
+    private static Task<string> InvokeUpdateAppxManifestContentAsync(MsixService service, string manifest)
+        => InvokeUpdateAppxManifestContentAsync(service, manifest, "TestApp.dll", sparse: true);
+
+    private static async Task<string> InvokeUpdateAppxManifestContentAsync(MsixService service, string manifest, string entryPointPath, bool sparse)
     {
         var updateMethod = typeof(MsixService).GetMethod("UpdateAppxManifestContentAsync", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.IsNotNull(updateMethod, "Could not locate UpdateAppxManifestContentAsync via reflection");
 
-        // selfContained=true and executable=.dll avoid dependency mutation paths, keeping this test focused
+        // selfContained=true avoids dependency mutation paths, keeping this test focused
         // exePath=null skips ProcessorArchitecture detection
         var resultTask = updateMethod.Invoke(service,
         [
             manifest,
             null,
-            "TestApp.dll",
+            entryPointPath,
             null,
-            true,
+            sparse,
             true,
             null,
             null!,

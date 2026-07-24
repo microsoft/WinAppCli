@@ -58,6 +58,8 @@ It writes, next to the exe (or to `--output-dir`):
 
 > **Note:** The sparse init flow deliberately **skips all SDK/package installation** — identity-only packages have no SDK dependencies.
 
+If an `appxmanifest.xml` already exists in the target directory, init stops rather than overwriting it (and its `Assets/`). Re-run with `--force` to regenerate it.
+
 Make sure the `Publisher` in the generated manifest matches the certificate you'll sign with. Edit `appxmanifest.xml` if needed, or pass `--publisher` when generating.
 
 ### Step 2 — Build and sign the identity package

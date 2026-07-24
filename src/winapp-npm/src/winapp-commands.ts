@@ -268,6 +268,8 @@ export interface InitOptions extends CommonOptions {
   configOnly?: boolean;
   /** Path to the application executable. Requires --sparse. Generates an identity-only sparse manifest for the exe instead of a full package/SDK setup. */
   exe?: string;
+  /** Overwrite an existing appxmanifest.xml in the target directory (sparse only). Without this, init fails instead of replacing existing manifest/asset files. */
+  force?: boolean;
   /** Don't use configuration file for version management */
   ignoreConfig?: boolean;
   /** Override the package name (sparse only; default: inferred from the exe) */
@@ -295,6 +297,7 @@ export async function init(options: InitOptions = {}): Promise<WinappResult> {
   if (options.configDir) args.push('--config-dir', options.configDir);
   if (options.configOnly) args.push('--config-only');
   if (options.exe) args.push('--exe', options.exe);
+  if (options.force) args.push('--force');
   if (options.ignoreConfig) args.push('--ignore-config');
   if (options.name) args.push('--name', options.name);
   if (options.noGitignore) args.push('--no-gitignore');

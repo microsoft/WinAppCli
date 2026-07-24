@@ -78,6 +78,8 @@ winapp init --exe ./bin/Release/MyApp.exe --sparse --name MyApp --publisher "CN=
 - `appxmanifest.xml` — identity-only sparse manifest (declares `uap10:AllowExternalContent`)
 - `Assets/` — placeholder visual assets (extracted from the exe's icon when possible), resolved from the **external location** at runtime — **not** bundled into the `.msix`
 
+If an `appxmanifest.xml` already exists in the target directory, init fails instead of overwriting it; re-run with `--force` to regenerate.
+
 This is step 1 of the sparse packaging workflow. Continue with:
 1. `winapp pack ./appxmanifest.xml --cert ./devcert.pfx` — build the signed identity `.msix`
 2. `winapp embed-identity ./bin/Release/MyApp.exe` — connect the exe to the identity package (re-sign the exe afterward)

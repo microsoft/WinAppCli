@@ -26,6 +26,7 @@ internal class InitCommand : Command, IShortDescription
     public static Option<string?> NameOption { get; }
     public static Option<string?> PublisherOption { get; }
     public static Option<DirectoryInfo> OutputDirOption { get; }
+    public static Option<bool> ForceOption { get; }
 
     static InitCommand()
     {
@@ -82,6 +83,10 @@ internal class InitCommand : Command, IShortDescription
         {
             Description = "Directory to write the sparse manifest and Assets/ (sparse only; default: the exe's directory)"
         };
+        ForceOption = new Option<bool>("--force")
+        {
+            Description = "Overwrite an existing appxmanifest.xml in the target directory (sparse only). Without this, init fails instead of replacing existing manifest/asset files."
+        };
     }
 
     public InitCommand() : base("init", "Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. Interactive by default; automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.")
@@ -98,6 +103,7 @@ internal class InitCommand : Command, IShortDescription
         Options.Add(NameOption);
         Options.Add(PublisherOption);
         Options.Add(OutputDirOption);
+        Options.Add(ForceOption);
     }
 
     public class Handler(
@@ -125,10 +131,11 @@ internal class InitCommand : Command, IShortDescription
             var name = parseResult.GetValue(NameOption);
             var publisher = parseResult.GetValue(PublisherOption);
             var outputDir = parseResult.GetValue(OutputDirOption);
+            var force = parseResult.GetValue(ForceOption);
 
-            // --exe and the sparse-only overrides (--name / --publisher / --output-dir) apply only to
-            // the sparse identity flow. Reject them without --sparse so scripts don't report success
-            // after their input is silently discarded by the normal initialization path.
+            // --exe and the sparse-only overrides (--name / --publisher / --output-dir / --force) apply
+            // only to the sparse identity flow. Reject them without --sparse so scripts don't report
+            // success after their input is silently discarded by the normal initialization path.
             if (!sparse)
             {
                 var sparseOnly = new List<string>();
@@ -136,6 +143,7 @@ internal class InitCommand : Command, IShortDescription
                 if (name != null) { sparseOnly.Add("--name"); }
                 if (publisher != null) { sparseOnly.Add("--publisher"); }
                 if (outputDir != null) { sparseOnly.Add("--output-dir"); }
+                if (parseResult.GetResult(ForceOption) is { Implicit: false }) { sparseOnly.Add("--force"); }
 
                 if (sparseOnly.Count > 0)
                 {
@@ -158,7 +166,7 @@ internal class InitCommand : Command, IShortDescription
             // existing exe. This intentionally skips all SDK/package installation.
             if (sparse)
             {
-                return await RunSparseInitAsync(exe, name, publisher, outputDir, useDefaults, cancellationToken);
+                return await RunSparseInitAsync(exe, name, publisher, outputDir, useDefaults, force, cancellationToken);
             }
 
             DirectoryInfo? selectedDirectory;
@@ -235,6 +243,7 @@ internal class InitCommand : Command, IShortDescription
             string? publisher,
             DirectoryInfo? outputDir,
             bool useDefaults,
+            bool force,
             CancellationToken cancellationToken)
         {
             if (exe == null)
@@ -254,6 +263,18 @@ internal class InitCommand : Command, IShortDescription
             // Default output location is the exe's directory so the identity manifest and its
             // Assets/ sit alongside the app that will be registered via -ExternalLocation.
             var targetDir = outputDir ?? exe.Directory ?? currentDirectoryProvider.GetCurrentDirectoryInfo();
+
+            // Guard against silently overwriting a hand-authored manifest. Generation uses
+            // File.WriteAllTextAsync/File.Create, which would replace an existing appxmanifest.xml
+            // (and matching Assets/) in place. Require --force to opt into that.
+            var existingManifest = new FileInfo(Path.Combine(targetDir.FullName, "appxmanifest.xml"));
+            if (!force && existingManifest.Exists)
+            {
+                logger.LogError(
+                    "An appxmanifest.xml already exists at '{Path}'. Re-run with --force to overwrite it, or choose a different --output-dir.",
+                    existingManifest.FullName);
+                return 1;
+            }
 
             SparseInitResult? sparseResult = null;
             var exitCode = await statusService.ExecuteWithStatusAsync("Generating sparse identity manifest...", async (taskContext, ct) =>

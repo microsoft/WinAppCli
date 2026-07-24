@@ -121,6 +121,59 @@ public class SparsePackagingTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task InitSparse_ExistingManifest_WithoutForce_ReturnsError()
+    {
+        // Arrange — a pre-existing appxmanifest.xml must not be silently overwritten.
+        var exe = CopyTestExe();
+        var existing = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        await File.WriteAllTextAsync(existing, "<hand-authored/>", TestContext.CancellationToken);
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--exe", exe, "--sparse", "--use-defaults" };
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Init should fail rather than overwrite an existing manifest");
+        var content = await File.ReadAllTextAsync(existing, TestContext.CancellationToken);
+        Assert.AreEqual("<hand-authored/>", content, "Existing manifest must be left untouched");
+    }
+
+    [TestMethod]
+    public async Task InitSparse_ExistingManifest_WithForce_Overwrites()
+    {
+        // Arrange
+        var exe = CopyTestExe();
+        var existing = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        await File.WriteAllTextAsync(existing, "<hand-authored/>", TestContext.CancellationToken);
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--exe", exe, "--sparse", "--use-defaults", "--force" };
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert
+        Assert.AreEqual(0, exitCode, "Init with --force should overwrite the existing manifest");
+        var content = await File.ReadAllTextAsync(existing, TestContext.CancellationToken);
+        Assert.Contains("uap10:AllowExternalContent", content, "Manifest should be replaced with the generated sparse manifest");
+    }
+
+    [TestMethod]
+    public async Task InitSparse_ForceWithoutSparse_ReturnsError()
+    {
+        // Arrange — --force is sparse-only; without --sparse it must be rejected.
+        var exe = CopyTestExe();
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--exe", exe, "--force", "--use-defaults" };
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "--force without --sparse should fail");
+    }
+
+    [TestMethod]
     public async Task InitSparse_ExeWithoutSparse_ReturnsError()
     {
         // Arrange

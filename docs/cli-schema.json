@@ -742,6 +742,19 @@
           "required": false,
           "recursive": false
         },
+        "--force": {
+          "description": "Overwrite an existing appxmanifest.xml in the target directory (sparse only). Without this, init fails instead of replacing existing manifest/asset files.",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--ignore-config": {
           "description": "Don't use configuration file for version management",
           "hidden": false,

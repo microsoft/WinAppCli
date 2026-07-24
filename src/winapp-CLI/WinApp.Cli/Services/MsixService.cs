@@ -969,9 +969,12 @@ internal partial class MsixService(
                 properties.Add(new XElement(AppxManifestDocument.Desktop6Ns + "RegistryWriteVirtualization", "disabled"));
             }
 
-            // Ensure Application has sparse packaging attributes
+            // Ensure Application has sparse packaging attributes. For an EXE we always force
+            // TrustLevel=mediumIL and RuntimeBehavior=win32App: a pre-existing (and for sparse
+            // Win32 apps, incorrect) value such as RuntimeBehavior="packagedClassicApp" must be
+            // corrected, so we set both unconditionally rather than only when TrustLevel is absent.
             var app = doc.GetFirstApplicationElement();
-            if (app != null && isExe && app.Attribute(AppxManifestDocument.Uap10Ns + "TrustLevel") == null)
+            if (app != null && isExe)
             {
                 app.SetAttributeValue(AppxManifestDocument.Uap10Ns + "TrustLevel", "mediumIL");
                 app.SetAttributeValue(AppxManifestDocument.Uap10Ns + "RuntimeBehavior", "win32App");
