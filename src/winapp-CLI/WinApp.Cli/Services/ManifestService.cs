@@ -73,6 +73,10 @@ internal partial class ManifestService(
             description = await PromptForValueAsync(ansiConsole, "Description", description, cancellationToken);
         }
 
+        // Re-clean after prompting: an interactive override (e.g. 'A&B') would otherwise flow raw
+        // into the manifest and produce malformed XML or an unpackable Identity name.
+        packageName = CleanPackageName(packageName);
+
         return new ManifestGenerationInfo(
             packageName,
             publisherName,

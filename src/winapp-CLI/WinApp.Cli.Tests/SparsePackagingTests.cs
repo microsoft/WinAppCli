@@ -103,6 +103,24 @@ public class SparsePackagingTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task InitSparse_NonExeTarget_ReturnsError()
+    {
+        // Arrange — a non-.exe target must be rejected before any manifest is written,
+        // because sparse identity is embedded into an .exe.
+        var notExe = Path.Combine(_tempDirectory.FullName, "notes.txt");
+        await File.WriteAllTextAsync(notExe, "not an executable", TestContext.CancellationToken);
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--exe", notExe, "--sparse", "--use-defaults" };
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "A non-.exe --exe target should fail");
+        Assert.IsFalse(File.Exists(Path.Combine(_tempDirectory.FullName, "appxmanifest.xml")), "No manifest should be generated for a non-exe target");
+    }
+
+    [TestMethod]
     public async Task InitSparse_ExeWithoutSparse_ReturnsError()
     {
         // Arrange

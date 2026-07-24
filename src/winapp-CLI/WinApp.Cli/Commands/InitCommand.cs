@@ -243,6 +243,14 @@ internal class InitCommand : Command, IShortDescription
                 return 1;
             }
 
+            if (!string.Equals(exe.Extension, ".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                logger.LogError(
+                    "--exe must point to a .exe file, but '{Name}' is not an executable. Sparse identity is embedded into an .exe, so a non-exe target cannot be used with embed-identity.",
+                    exe.Name);
+                return 1;
+            }
+
             // Default output location is the exe's directory so the identity manifest and its
             // Assets/ sit alongside the app that will be registered via -ExternalLocation.
             var targetDir = outputDir ?? exe.Directory ?? currentDirectoryProvider.GetCurrentDirectoryInfo();

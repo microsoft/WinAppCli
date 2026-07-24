@@ -114,6 +114,25 @@ public class ManifestServiceTests
         Assert.AreEqual("My description", info.Description);
     }
 
+    [TestMethod]
+    public async Task PromptForManifestInfo_Interactive_CleansOverriddenName()
+    {
+        // A raw interactive override with invalid Identity characters must be re-cleaned so it
+        // cannot produce malformed XML or an unpackable Identity name.
+        var console = new TestConsole();
+        console.Profile.Capabilities.Interactive = true;
+        console.Input.PushTextWithEnter("A&B App");
+        console.Input.PushTextWithEnter("CN=Me");
+        console.Input.PushTextWithEnter("1.0.0.0");
+        console.Input.PushTextWithEnter("desc");
+
+        var info = await NewService(console).PromptForManifestInfoAsync(
+            _tempDir, packageName: "seed", publisherName: "seedPub", version: "1.0.0.0",
+            description: "seedDesc", executable: null, useDefaults: false);
+
+        Assert.AreEqual("ABApp", info.PackageName, "overridden name should be sanitized to the Identity schema");
+    }
+
     #endregion
 
     #region CleanPackageName
