@@ -1738,13 +1738,15 @@ public class DotNetServiceTests : BaseCommandTests
                 onProcessStarted: p => pidTcs.TrySetResult(p.Id));
 
             // Wait until the root process is actually running (capture its id before the service disposes it).
-            rootPid = await pidTcs.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.CancellationToken);
-            var rootPidValue = rootPid.Value;
+            // Assign the awaited (non-null) id into a non-nullable local, then mirror it into the nullable
+            // placeholder the finally block reads — so the id is never dereferenced through int?.Value.
+            var rootPidValue = await pidTcs.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.CancellationToken);
+            rootPid = rootPidValue;
             Assert.IsFalse(Process.GetProcessById(rootPidValue).HasExited, "The root process should be running before cancellation.");
 
             // Capture the ping descendant via the PID file the root script writes.
-            pingPid = await WaitForPidFileAsync(pidFile, TimeSpan.FromSeconds(15), TestContext.CancellationToken);
-            var pingPidValue = pingPid.Value;
+            var pingPidValue = await WaitForPidFileAsync(pidFile, TimeSpan.FromSeconds(15), TestContext.CancellationToken);
+            pingPid = pingPidValue;
             Assert.IsFalse(Process.GetProcessById(pingPidValue).HasExited, "The ping descendant should be running before cancellation.");
 
             cts.Cancel();
