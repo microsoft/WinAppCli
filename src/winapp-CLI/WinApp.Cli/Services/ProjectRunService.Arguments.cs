@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using System.Text.RegularExpressions;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 
@@ -342,28 +341,41 @@ internal sealed partial class ProjectRunService
     private static readonly string[] SecretPropertyNameFragments =
         ["password", "pwd", "secret", "token", "apikey", "accesskey", "credential", "connectionstring"];
 
-    // Matches a -p:Name=Value token in a joined command line, quoted (value may contain spaces) or bare.
-    [GeneratedRegex("\"(?<t>-p:[^\"]*)\"|(?<t>-p:[^\\s\"]+)")]
-    private static partial Regex PropertyTokenRegex();
-
     /// <summary>
     /// Masks the value of secret-like <c>-p:Name=Value</c> properties (e.g. <c>PackageCertificatePassword</c>)
-    /// for DISPLAY only — the real command passed to dotnet is never altered. Non-secret tokens are
-    /// returned byte-for-byte unchanged.
+    /// for DISPLAY only — the real command passed to dotnet is never altered. Redaction runs at the token
+    /// level (splitting the joined line first) so a quote inside a value can't leave part of the secret
+    /// unmasked. Lines with no secret are returned byte-for-byte unchanged.
     /// </summary>
-    internal static string RedactSecretsForDisplay(string commandLine) =>
-        PropertyTokenRegex().Replace(commandLine, static match =>
+    internal static string RedactSecretsForDisplay(string commandLine)
+    {
+        if (string.IsNullOrEmpty(commandLine) || !commandLine.Contains("-p:", StringComparison.Ordinal))
         {
-            var body = match.Groups["t"].Value[3..]; // strip "-p:" → "Name=Value" or "A=1;Secret=2"
-            var redacted = RedactPropertySegments(body, out var changed);
-            if (!changed)
+            return commandLine;
+        }
+
+        var tokens = WindowsCommandLine.SplitArguments(commandLine);
+        var anyChanged = false;
+        var redacted = new List<string>(tokens.Count);
+
+        foreach (var token in tokens)
+        {
+            if (token.StartsWith("-p:", StringComparison.Ordinal))
             {
-                return match.Value;
+                var body = RedactPropertySegments(token[3..], out var changed);
+                if (changed)
+                {
+                    anyChanged = true;
+                    redacted.Add("-p:" + body);
+                    continue;
+                }
             }
 
-            var token = "-p:" + redacted;
-            return match.Value[0] == '"' || token.Contains(' ', StringComparison.Ordinal) ? $"\"{token}\"" : token;
-        });
+            redacted.Add(token);
+        }
+
+        return anyChanged ? WindowsCommandLine.JoinArguments(redacted) ?? commandLine : commandLine;
+    }
 
     private static string RedactPropertySegments(string body, out bool changed)
     {

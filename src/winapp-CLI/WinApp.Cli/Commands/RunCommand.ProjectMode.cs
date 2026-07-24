@@ -114,8 +114,10 @@ internal partial class RunCommand
                 // literal ';' in a value.
                 if (property.Contains(';'))
                 {
+                    // Show the name only — the value may hold a secret.
+                    var name = property[..property.IndexOfAny(['=', ';'])];
                     return Fail(
-                        $"Invalid --property '{property}'. A single -p cannot pack multiple properties with ';'. " +
+                        $"Invalid --property '{name}'. A single -p cannot pack multiple properties with ';'. " +
                         "Pass one property per repeatable -p (for example: -p A=1 -p B=2), or escape a literal ';' in a value as '%3B'.",
                         isJson);
                 }
@@ -123,7 +125,9 @@ internal partial class RunCommand
                 var separator = property.IndexOf('=');
                 if (separator <= 0 || string.IsNullOrWhiteSpace(property[..separator]))
                 {
-                    return Fail($"Invalid --property '{property}'. Expected Name=Value (for example: -p WindowsPackageType=None).", isJson);
+                    // Show the name only — the value may hold a secret.
+                    var shown = separator > 0 ? property[..separator] : (separator == 0 ? "(empty)" : property);
+                    return Fail($"Invalid --property '{shown}'. Expected Name=Value (for example: -p WindowsPackageType=None).", isJson);
                 }
             }
 

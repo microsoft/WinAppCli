@@ -73,7 +73,6 @@ internal partial class RunCommand : Command, IShortDescription
         {
             Description = "Path to the Package.appxmanifest (default: auto-detect from input folder or current directory)"
         };
-        ManifestOption.AcceptExistingOnly();
 
         OutputAppXDirectoryOption = new Option<DirectoryInfo?>("--output-appx-directory")
         {
@@ -480,6 +479,13 @@ internal partial class RunCommand : Command, IShortDescription
                     FileInfo resolvedManifest;
                     if (manifest != null)
                     {
+                        // --manifest no longer uses AcceptExistingOnly (that parser validator hard-errors
+                        // before the --json envelope and the packaging-mode gate); validate existence here.
+                        if (!manifest.Exists)
+                        {
+                            throw new FileNotFoundException($"Manifest file not found: {manifest.FullName}");
+                        }
+
                         resolvedManifest = manifest;
                         taskContext.AddDebugMessage($"{UiSymbols.Note} Using specified manifest: {resolvedManifest}");
                     }

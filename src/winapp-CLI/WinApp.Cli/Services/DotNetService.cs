@@ -558,6 +558,14 @@ internal partial class DotNetService : IDotNetService
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <c>dotnet list package</c> evaluates the project with the default Configuration and no RID/Platform,
+    /// and accepts none of <c>-c</c>/<c>-r</c>/<c>-p:</c> — so a Configuration- or RID-conditional
+    /// <c>PackageReference</c> (rare for the Windows App SDK) isn't captured here. The built TFM is scoped
+    /// downstream by <c>FilterPackageListToFramework</c>, and the runtime presence-gate in
+    /// <c>EnsureWindowsAppRuntimeInstalledAsync</c> is the backstop: a genuinely missing runtime fails the
+    /// launch with an actionable error rather than silently under-provisioning.
+    /// </remarks>
     public async Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, bool noRestore = false, CancellationToken cancellationToken = default)
     {
         if (!csprojFile.Exists)

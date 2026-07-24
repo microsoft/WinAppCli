@@ -173,9 +173,10 @@ internal sealed partial class ProjectRunService
     /// <summary>
     /// Builds the evaluate-only <c>dotnet msbuild --getProperty:...</c> arguments for discovering a
     /// project's framework properties. Mirrors the property section of <see cref="BuildEvaluateArguments"/>
-    /// but omits <c>-p:TargetFramework</c> (that's what we're discovering) and the RID so the outer
-    /// cross-targeting node is evaluated. Defaults to both <c>TargetFramework</c> and <c>TargetFrameworks</c>
-    /// (two properties force the JSON envelope — see <see cref="FrameworkDiscoveryProperties"/>).
+    /// but omits <c>-p:TargetFramework</c> (that's what we're discovering) and the RID: this reads the OUTER
+    /// cross-targeting <c>&lt;TargetFrameworks&gt;</c> node, which the RID does not select, and pinning one on
+    /// a bare cross-targeting evaluation can trip RID-graph resolution. Defaults to both <c>TargetFramework</c>
+    /// and <c>TargetFrameworks</c> (two properties force the JSON envelope — see <see cref="FrameworkDiscoveryProperties"/>).
     /// </summary>
     internal static string BuildFrameworkDiscoveryArguments(FileInfo csproj, ProjectRunOptions options, params string[] getProperties)
     {

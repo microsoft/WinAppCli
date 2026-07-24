@@ -35,6 +35,14 @@ internal sealed partial class ProjectRunService
 
             var projectDir = file.Directory ?? new DirectoryInfo(Directory.GetCurrentDirectory());
 
+            // An explicit .csproj IS the project; a --project selector must agree with it rather than be
+            // silently dropped (matching it is a harmless no-op).
+            if (!string.IsNullOrWhiteSpace(projectSelector) && MatchProjectSelector([file], projectSelector, projectDir) is null)
+            {
+                throw new ProjectRunException(
+                    $"--project '{projectSelector}' does not match the specified project '{file.Name}'. Omit --project when passing a .csproj directly.");
+            }
+
             // A bare .csproj has no solution context, so $(SolutionDir) and sibling Solution* properties
             // are undefined — projects that reference them in imports/AdditionalFiles then fail to build.
             // Walk up to the owning solution so the build defines them as `dotnet build <sln>` / VS does.
@@ -384,7 +392,7 @@ internal sealed partial class ProjectRunService
     private async Task<RunInputResolution> ResolveSolutionAsync(FileInfo solution, string? projectSelector, ProjectClassificationInputs? classificationInputs, CancellationToken cancellationToken, bool allowFolderFallback = false)
     {
         var solutionDir = solution.Directory ?? new DirectoryInfo(Directory.GetCurrentDirectory());
-        var projects = await GetSolutionProjectsAsync(solution, solutionDir, allowFolderFallback, cancellationToken);
+        var projects = await GetSolutionProjectsAsync(solution, solutionDir, cancellationToken);
 
         if (projects.Count == 0)
         {
@@ -579,20 +587,13 @@ internal sealed partial class ProjectRunService
     /// (<c>dotnet sln list</c> needs SDK 9.0.200+ for <c>.slnx</c>, but the target <c>.csproj</c> is what
     /// gets built, so no <c>.slnx</c>-aware SDK is required).
     /// </summary>
-    private async Task<List<FileInfo>> GetSolutionProjectsAsync(FileInfo solution, DirectoryInfo solutionDir, bool allowFolderFallback, CancellationToken cancellationToken)
+    private async Task<List<FileInfo>> GetSolutionProjectsAsync(FileInfo solution, DirectoryInfo solutionDir, CancellationToken cancellationToken)
     {
-        // Check for a capable SDK first: the build/evaluate passes need it, and its failure message is far
-        // more actionable than "could not read the solution". A directory input degrades to folder mode
-        // instead (launching a prebuilt app needs no SDK) — return no projects; an explicit .sln keeps the
-        // hard SDK error, since its whole purpose is to build.
+        // A solution's purpose is to build, so a missing/too-old SDK is always fatal — surface the
+        // actionable install/upgrade message rather than masking it as a folder-mode miss.
         var sdkError = await CheckSdkAsync(solutionDir, cancellationToken);
         if (sdkError != null)
         {
-            if (allowFolderFallback)
-            {
-                return [];
-            }
-
             throw new ProjectRunException(sdkError);
         }
 

@@ -6,8 +6,11 @@ using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Logging;
+using Microsoft.Win32.SafeHandles;
 using Windows.Management.Deployment;
 using Windows.Win32;
+using Windows.Win32.Foundation;
+using Windows.Win32.System.Console;
 using Windows.Win32.UI.Shell;
 
 namespace WinApp.Cli.Services;
@@ -49,11 +52,12 @@ internal class AppLauncherService(ILogger<AppLauncherService> logger) : IAppLaun
 
         if (stdioMode == LaunchStdioMode.Suppress)
         {
-            // Detach/JSON launches must NOT let the child inherit winapp's standard handles. Inheriting
-            // keeps the npm wrapper's captured stdout pipe open (so `run({detach:true})` blocks until the
-            // app exits instead of resolving on the CLI's exit) and lets app output corrupt `--json` stdout.
-            // Redirecting to owned pipes gives the child fresh handles; draining prevents it from blocking
-            // on a full pipe. winapp's own stdout stays clean because only the CLI writes to it.
+            // Detach/JSON launches must NOT let the child inherit winapp's standard handles. Redirecting to
+            // owned pipes gives the child fresh std streams (drained below so a chatty app can't block), but
+            // Process.Start still calls CreateProcess with bInheritHandles=TRUE, so the child would ALSO
+            // inherit copies of winapp's own std handles. When winapp's stdout is an npm-captured pipe those
+            // copies keep it open, so `run({detach:true})` blocks until the app exits. Clearing inheritance
+            // on our std handles across Start (see below) prevents that.
             psi.RedirectStandardOutput = true;
             psi.RedirectStandardError = true;
             psi.RedirectStandardInput = true;
@@ -72,8 +76,22 @@ internal class AppLauncherService(ILogger<AppLauncherService> logger) : IAppLaun
         // Return the owned Process wrapped in ILaunchedProcess. The caller keeps the handle to wait
         // and read the exit code — re-attaching by PID later would race PID reuse and lose the exit
         // code once the process exits.
-        var process = Process.Start(psi)
-            ?? throw new InvalidOperationException($"Failed to start process '{exePath}'.");
+        // The child's redirect pipes are created inside Process.Start and stay inheritable, so it still
+        // gets its own std streams; only the extra copies of winapp's real std handles are suppressed.
+        var cleared = stdioMode == LaunchStdioMode.Suppress ? ClearStdHandleInheritance() : null;
+        Process process;
+        try
+        {
+            process = Process.Start(psi)
+                ?? throw new InvalidOperationException($"Failed to start process '{exePath}'.");
+        }
+        finally
+        {
+            if (cleared is not null)
+            {
+                RestoreStdHandleInheritance(cleared);
+            }
+        }
 
         if (stdioMode == LaunchStdioMode.Suppress)
         {
@@ -88,6 +106,51 @@ internal class AppLauncherService(ILogger<AppLauncherService> logger) : IAppLaun
 
         logger.LogDebug("Launched executable {ExePath} (PID {PID}).", exePath, process.Id);
         return new LaunchedProcess(process);
+    }
+
+    private static readonly STD_HANDLE[] StdHandleIds =
+        [STD_HANDLE.STD_INPUT_HANDLE, STD_HANDLE.STD_OUTPUT_HANDLE, STD_HANDLE.STD_ERROR_HANDLE];
+
+    /// <summary>
+    /// Clears <c>HANDLE_FLAG_INHERIT</c> on winapp's standard handles that currently have it set, so a
+    /// child launched under bInheritHandles=TRUE (any redirect) doesn't inherit copies of them. Returns the
+    /// handles that were changed for <see cref="RestoreStdHandleInheritance"/>. Process-global — call only
+    /// around a launch that is serialized against other launches.
+    /// </summary>
+    private static List<HANDLE> ClearStdHandleInheritance()
+    {
+        var cleared = new List<HANDLE>(StdHandleIds.Length);
+        foreach (var id in StdHandleIds)
+        {
+            var handle = PInvoke.GetStdHandle(id);
+            if (handle.IsNull)
+            {
+                continue;
+            }
+
+            using var safe = new SafeFileHandle((nint)handle, ownsHandle: false);
+            if (!PInvoke.GetHandleInformation(safe, out uint flags))
+            {
+                continue;
+            }
+
+            if (((HANDLE_FLAGS)flags & HANDLE_FLAGS.HANDLE_FLAG_INHERIT) != 0 &&
+                PInvoke.SetHandleInformation(safe, (uint)HANDLE_FLAGS.HANDLE_FLAG_INHERIT, 0))
+            {
+                cleared.Add(handle);
+            }
+        }
+
+        return cleared;
+    }
+
+    private static void RestoreStdHandleInheritance(List<HANDLE> cleared)
+    {
+        foreach (var handle in cleared)
+        {
+            using var safe = new SafeFileHandle((nint)handle, ownsHandle: false);
+            PInvoke.SetHandleInformation(safe, (uint)HANDLE_FLAGS.HANDLE_FLAG_INHERIT, HANDLE_FLAGS.HANDLE_FLAG_INHERIT);
+        }
     }
 
     /// <inheritdoc />

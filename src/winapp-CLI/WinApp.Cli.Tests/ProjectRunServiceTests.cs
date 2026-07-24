@@ -4,6 +4,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Spectre.Console.Testing;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
@@ -234,6 +235,33 @@ public class ProjectRunServiceTests
 
         Assert.IsFalse(redacted.Contains("pass word"), $"quoted secret should be masked: {redacted}");
         StringAssert.Contains(redacted, "PackageCertificatePassword=***");
+    }
+
+    [TestMethod]
+    public void RedactSecretsForDisplay_MasksSecretValueContainingQuote()
+    {
+        // A '"' in the value forces EscapeArgument to quote+escape the whole token; the old regex stopped
+        // at the escaped quote and leaked the tail. Build the line exactly as the CLI would display it.
+        var line = WindowsCommandLine.JoinArguments(
+            ["build", "App.csproj", "-p:PackageCertificatePassword=ab\"cd\"ef", "-c", "Debug"])!;
+
+        var redacted = ProjectRunService.RedactSecretsForDisplay(line);
+
+        Assert.IsFalse(redacted.Contains("ab"), $"no fragment of the secret should survive: {redacted}");
+        Assert.IsFalse(redacted.Contains("cd"), $"no fragment of the secret should survive: {redacted}");
+        Assert.IsFalse(redacted.Contains("ef"), $"no fragment of the secret should survive: {redacted}");
+        StringAssert.Contains(redacted, "PackageCertificatePassword=***");
+    }
+
+    [TestMethod]
+    public void RedactSecretsForDisplay_MasksSecretValueStartingWithQuote()
+    {
+        var line = WindowsCommandLine.JoinArguments(["build", "-p:NuGetApiKey=\"quoted\"", "-c", "Debug"])!;
+
+        var redacted = ProjectRunService.RedactSecretsForDisplay(line);
+
+        Assert.IsFalse(redacted.Contains("quoted"), $"secret should be masked: {redacted}");
+        StringAssert.Contains(redacted, "NuGetApiKey=***");
     }
 
     [TestMethod]
@@ -816,6 +844,28 @@ public class ProjectRunServiceTests
 
         Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
         Assert.AreEqual(csproj.FullName, resolution.Csproj!.FullName);
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_ExplicitCsproj_MatchingProjectSelector_Honored()
+    {
+        // M3: --project that names the same explicit .csproj is a harmless no-op, not an error.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+
+        var resolution = await _service.ResolveInputAsync(csproj, CancellationToken.None, projectSelector: "App");
+
+        Assert.AreEqual(WinAppRunMode.Project, resolution.Mode);
+        Assert.AreEqual(csproj.FullName, resolution.Csproj!.FullName);
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_ExplicitCsproj_MismatchedProjectSelector_Throws()
+    {
+        // M3: a --project that disagrees with the explicit .csproj must error rather than be silently dropped.
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+
+        await Assert.ThrowsExactlyAsync<ProjectRunException>(
+            () => _service.ResolveInputAsync(csproj, CancellationToken.None, projectSelector: "Other"));
     }
 
     [TestMethod]
@@ -1558,11 +1608,11 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
-    public async Task ResolveInput_DirectoryWithSolution_SdkUnavailable_FallsBackToFolderMode()
+    public async Task ResolveInput_DirectoryWithSolution_SdkUnavailable_Throws()
     {
-        // H1 regression: a directory containing a .sln on a host with no usable SDK must degrade to folder
-        // mode (folder mode launches a prebuilt app and needs no SDK) instead of erroring — otherwise a
-        // build-output directory sitting next to a .sln fails where a directory without one would run.
+        // M4: a discovered .sln always surfaces the actionable SDK error — even for a directory input.
+        // A solution exists to be built, so masking a missing/too-old SDK as folder mode would hide the
+        // real problem. (Folder fallback only covers a solution with no runnable .csproj — see below.)
         WriteFile("App.sln", "");
         var dotnet = new FakeDotNetService
         {
@@ -1573,10 +1623,7 @@ public class ProjectRunServiceTests
         };
         var service = NewServiceWith(dotnet, out _);
 
-        var resolution = await service.ResolveInputAsync(_tempDir, CancellationToken.None);
-
-        Assert.AreEqual(WinAppRunMode.Folder, resolution.Mode, "a directory with a .sln but no usable SDK must fall back to folder mode");
-        Assert.IsNull(resolution.Csproj);
+        await Assert.ThrowsExactlyAsync<ProjectRunException>(() => service.ResolveInputAsync(_tempDir, CancellationToken.None));
     }
 
     [TestMethod]
