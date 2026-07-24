@@ -48,10 +48,10 @@ winapp init --exe .\bin\Debug\net10.0-windows10.0.19041.0\sparse-app.exe --spars
 ### 3. Generate a development certificate
 
 ```powershell
-winapp cert generate
+winapp cert generate --publisher "CN=Sparse App Sample"
 ```
 
-The certificate subject must match the manifest `Publisher` (`CN=Sparse App Sample`). Pass `--publisher "CN=Sparse App Sample"` if needed, and install/trust the cert for local testing (`winapp cert install .\devcert.pfx`, admin).
+The certificate subject must match the manifest `Publisher` (`CN=Sparse App Sample`), so pass it explicitly as shown. Install/trust the cert for local testing (`winapp cert install .\devcert.pfx`, admin).
 
 ### 4. Pack the identity-only MSIX
 
@@ -92,7 +92,7 @@ The window should show **"Running with package identity"** and the package famil
 ### 8. Clean up
 
 ```powershell
-Get-AppxPackage SparseAppSample* | Remove-AppxPackage
+Get-AppxPackage -Name SparseAppSample | Remove-AppxPackage
 ```
 
 ## Asset handling
@@ -108,7 +108,7 @@ The `installer/setup.iss` script produces a `setup.exe` that installs the app, c
 dotnet publish -c Release -r win-x64 --self-contained false
 
 # 2. Build the identity MSIX (signed)
-winapp cert generate
+winapp cert generate --publisher "CN=Sparse App Sample"
 winapp pack .\appxmanifest.xml --cert .\devcert.pfx
 
 # 3. Compile the installer (requires Inno Setup: https://jrsoftware.org/isdl.php)

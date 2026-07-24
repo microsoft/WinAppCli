@@ -380,7 +380,7 @@ winapp embed-identity <target> [options]
 
 **Options:**
 
-- `--manifest <path>` - Path to the sparse `appxmanifest.xml` to read identity (packageName, publisher, applicationId) from (default: `./appxmanifest.xml`)
+- `--manifest <path>` - Path to the sparse `appxmanifest.xml` to read identity (packageName, publisher, applicationId) from. When omitted, the command searches the target's directory first, then the current directory, for `appxmanifest.xml`.
 
 **Examples:**
 

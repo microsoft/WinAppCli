@@ -182,7 +182,7 @@ function embedIdentity(options: EmbedIdentityOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `target` | `string` | Yes | Path to the .exe (embeds identity into its side-by-side manifest via mt.exe) or an .xml/.manifest side-by-side manifest file (inserts/replaces the <msix> element; created if it doesn't exist). |
-| `manifest` | `string \| undefined` | No | Path to the sparse appxmanifest.xml to read identity from (default: ./appxmanifest.xml) |
+| `manifest` | `string \| undefined` | No | Path to the sparse appxmanifest.xml to read identity from. When omitted, searched next to the target first (where 'winapp init --exe --sparse' writes it), then the current directory. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -1341,7 +1341,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `target` | `string` | Yes | Path to the .exe (embeds identity into its side-by-side manifest via mt.exe) or an .xml/.manifest side-by-side manifest file (inserts/replaces the <msix> element; created if it doesn't exist). |
-| `manifest` | `string \| undefined` | No | Path to the sparse appxmanifest.xml to read identity from (default: ./appxmanifest.xml) |
+| `manifest` | `string \| undefined` | No | Path to the sparse appxmanifest.xml to read identity from. When omitted, searched next to the target first (where 'winapp init --exe --sparse' writes it), then the current directory. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

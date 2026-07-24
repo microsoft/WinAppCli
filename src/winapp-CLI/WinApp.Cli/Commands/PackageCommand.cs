@@ -156,6 +156,30 @@ internal class PackageCommand : Command, IShortDescription
                 var candidateManifest = new FileInfo(inputFolders[0].FullName);
                 if (await IsSparseManifestAsync(candidateManifest, cancellationToken))
                 {
+                    // Identity-only packaging builds the .msix from just the manifest, so options that
+                    // describe an app payload have no effect here. Reject them rather than silently
+                    // discarding a scripted override.
+                    var inapplicable = new[]
+                    {
+                        (parseResult.GetResult(NameOption), "--name"),
+                        (parseResult.GetResult(ManifestOption), "--manifest"),
+                        (parseResult.GetResult(SkipPriOption), "--skip-pri"),
+                        (parseResult.GetResult(SelfContainedOption), "--self-contained"),
+                        (parseResult.GetResult(ExecutableOption), "--executable"),
+                    }
+                    .Where(o => o.Item1 is { Implicit: false })
+                    .Select(o => o.Item2)
+                    .ToList();
+
+                    if (inapplicable.Count > 0)
+                    {
+                        var optionList = string.Join(", ", inapplicable);
+                        return await statusService.ExecuteWithStatusAsync("Validating input...", (taskContext, _) =>
+                        {
+                            return Task.FromResult((1, $"{UiSymbols.Error} The following option(s) do not apply to sparse identity packaging (manifest-file input): {optionList}. Remove them, or pass an input folder to build a full MSIX."));
+                        }, cancellationToken);
+                    }
+
                     return await statusService.ExecuteWithStatusAsync("Creating sparse identity package...", async (taskContext, ct) =>
                     {
                         try

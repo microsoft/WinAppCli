@@ -457,6 +457,22 @@ public class SparsePackRoutingTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task Pack_SparseManifestFile_WithInapplicableOption_ReturnsError()
+    {
+        // Arrange
+        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        await File.WriteAllTextAsync(manifestPath, SparseManifest, TestContext.CancellationToken);
+        var packageCommand = GetRequiredService<PackageCommand>();
+
+        // Act — --name does not apply to identity-only packaging
+        var exitCode = await ParseAndInvokeWithCaptureAsync(packageCommand, [manifestPath, "--name", "Ignored"]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Passing an inapplicable option should fail rather than silently ignore it");
+        Assert.AreEqual(0, _fakeMsixService.CreateSparseIdentityCalls.Count, "Should not route to sparse path when options are invalid");
+    }
+
+    [TestMethod]
     public async Task Pack_NonSparseManifestFile_ReturnsError()
     {
         // Arrange

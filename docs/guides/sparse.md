@@ -145,7 +145,7 @@ Filename: "powershell.exe"; Parameters: "{code:RegisterParams}"; Flags: runhidde
 
 [UninstallRun]
 Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Get-AppxPackage *MyApp* | Remove-AppxPackage"""; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""Get-AppxPackage -Name 'MyApp' | Remove-AppxPackage"""; \
   Flags: runhidden
 
 [Code]
