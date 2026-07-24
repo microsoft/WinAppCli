@@ -24,6 +24,7 @@ internal sealed partial class ProjectRunService(
     [
         "TargetDir",
         "RunCommand",
+        "RunArguments",
         "WindowsPackageType",
         "WindowsAppSDKSelfContained",
         "EnableMsixTooling",
@@ -235,7 +236,7 @@ internal sealed partial class ProjectRunService(
         }
 
         var evaluateArgs = BuildEvaluateArguments(csproj, options, csWinRTMetadata);
-        logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, evaluateArgs);
+        logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(evaluateArgs));
 
         var (exitCode, stdout, stderr) = await dotNetService.RunDotnetCommandAsync(workingDir, evaluateArgs, cancellationToken);
 
@@ -275,6 +276,7 @@ internal sealed partial class ProjectRunService(
 
         var targetDir = GetProp(props, "TargetDir");
         var runCommand = GetProp(props, "RunCommand");
+        var runArguments = GetProp(props, "RunArguments");
         var selfContained = string.Equals(GetProp(props, "WindowsAppSDKSelfContained"), "true", StringComparison.OrdinalIgnoreCase);
         var packaging = DeterminePackaging(props, targetDir);
 
@@ -286,13 +288,13 @@ internal sealed partial class ProjectRunService(
 
         if (packaging == ProjectPackaging.Unpackaged)
         {
-            if (string.IsNullOrEmpty(runCommand) || !File.Exists(runCommand))
+            if (string.IsNullOrEmpty(runCommand) || !RunCommandIsLaunchable(runCommand))
             {
                 var reason = options.NoBuild
                     ? "The runnable executable was not found. Remove --no-build so the project is built first, or build it manually."
                     : "The build did not produce a runnable executable (RunCommand).";
                 throw new ProjectRunException(
-                    $"'{csproj.Name}' resolves to an unpackaged app but no launchable .exe is available. {reason}");
+                    $"'{csproj.Name}' resolves to an unpackaged app but no launchable executable is available. {reason}");
             }
         }
 
@@ -304,9 +306,44 @@ internal sealed partial class ProjectRunService(
             selfContained,
             options.Architecture,
             options.Framework,
-            options.NoRestore);
+            options.NoRestore,
+            string.IsNullOrEmpty(runArguments) ? null : runArguments);
 
         return new ProjectBuildOutcome(resolution, 0);
+    }
+
+    // RunCommand is an apphost path when UseAppHost is on, but a bare command name (e.g. "dotnet", with
+    // RunArguments = exec "<app>.dll") when it's off. Validate a rooted path with File.Exists; resolve a
+    // bare name against PATH so a genuinely missing launcher errors cleanly instead of failing at Start.
+    internal static bool RunCommandIsLaunchable(string runCommand)
+    {
+        if (Path.IsPathRooted(runCommand))
+        {
+            return File.Exists(runCommand);
+        }
+
+        var pathExt = Environment.GetEnvironmentVariable("PATHEXT") ?? ".COM;.EXE;.BAT;.CMD";
+        var extensions = pathExt.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var hasExtension = Path.HasExtension(runCommand);
+
+        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
+                     .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (hasExtension && File.Exists(Path.Combine(dir, runCommand)))
+            {
+                return true;
+            }
+
+            foreach (var ext in extensions)
+            {
+                if (File.Exists(Path.Combine(dir, runCommand + ext)))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <inheritdoc />
@@ -417,7 +454,7 @@ internal sealed partial class ProjectRunService(
     private async Task<int> RunRestorePassAsync(FileInfo csproj, ProjectRunOptions options, DirectoryInfo workingDir, CancellationToken cancellationToken)
     {
         var restoreArgs = BuildRestorePassArguments(csproj, options);
-        logger.LogDebug("{UISymbol} Restoring before SDK-less CsWinRT metadata resolution: dotnet {Arguments}", UiSymbols.Note, restoreArgs);
+        logger.LogDebug("{UISymbol} Restoring before SDK-less CsWinRT metadata resolution: dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(restoreArgs));
         var (exitCode, _, _) = await dotNetService.RunDotnetCommandAsync(workingDir, restoreArgs, cancellationToken);
         if (exitCode != 0)
         {
@@ -456,7 +493,7 @@ internal sealed partial class ProjectRunService(
         {
             // Closest to VS: one restore over the whole solution pulls the target and every sibling.
             var args = BuildRestorePassArguments(options.Solution, options);
-            logger.LogDebug("{UISymbol} Restoring solution before build (build-dependency parity): dotnet {Arguments}", UiSymbols.Note, args);
+            logger.LogDebug("{UISymbol} Restoring solution before build (build-dependency parity): dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(args));
             var (exitCode, _, _) = await dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken);
             if (exitCode == 0)
             {
@@ -489,7 +526,7 @@ internal sealed partial class ProjectRunService(
         foreach (var sibling in siblings)
         {
             var args = BuildRestorePassArguments(sibling, options);
-            logger.LogDebug("{UISymbol} Restoring solution sibling before build (build-dependency parity): dotnet {Arguments}", UiSymbols.Note, args);
+            logger.LogDebug("{UISymbol} Restoring solution sibling before build (build-dependency parity): dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(args));
             var (exitCode, _, _) = await dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken);
             if (exitCode != 0)
             {
@@ -529,7 +566,7 @@ internal sealed partial class ProjectRunService(
         if (options.Json || !logger.IsEnabled(LogLevel.Information))
         {
             var redirectedArgs = BuildBuildPassArguments(csproj, options, verbosity, csWinRTMetadataFolder);
-            Console.Error.WriteLine($"dotnet {redirectedArgs}");
+            Console.Error.WriteLine($"dotnet {RedactSecretsForDisplay(redirectedArgs)}");
             return await dotNetService.RunDotnetStreamingAsync(
                 workingDir, redirectedArgs,
                 onOutputLine: static line => Console.Error.WriteLine(line),
@@ -544,7 +581,7 @@ internal sealed partial class ProjectRunService(
             ?? ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger);
         var buildArgs = BuildBuildPassArguments(csproj, options, verbosity, csWinRTMetadataFolder, nativeTerminal);
         ansiConsole.MarkupLineInterpolated($"{UiSymbols.Wrench} {banner}");
-        ansiConsole.MarkupLineInterpolated($"[dim]   dotnet {Markup.Escape(buildArgs)}[/]");
+        ansiConsole.MarkupLineInterpolated($"[dim]   dotnet {Markup.Escape(RedactSecretsForDisplay(buildArgs))}[/]");
 
         int streamedExit;
         if (nativeTerminal)

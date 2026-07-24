@@ -69,11 +69,31 @@ internal static class RunArchHelper
             return null;
         }
 
-        if (dash >= 0 && !trimmed[..dash].StartsWith("win", StringComparison.OrdinalIgnoreCase))
+        if (dash >= 0 && !IsWindowsOsToken(trimmed[..dash]))
         {
             return null;
         }
 
         return arch;
+    }
+
+    // Accepts win, win10, win10.0.19041 (RID version qualifiers); rejects windows/winter/winrt so an
+    // unrelated OS token that merely starts with "win" isn't silently treated as a Windows target.
+    private static bool IsWindowsOsToken(string os)
+    {
+        if (!os.StartsWith("win", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        for (int i = 3; i < os.Length; i++)
+        {
+            if (!char.IsDigit(os[i]) && os[i] != '.')
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

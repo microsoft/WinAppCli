@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Text.RegularExpressions;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 
@@ -336,4 +337,56 @@ internal sealed partial class ProjectRunService
     private static string EscapeMsBuildPropertyValue(string value) =>
         value.Replace("%", "%25", StringComparison.Ordinal)
              .Replace(";", "%3B", StringComparison.Ordinal);
+
+    /// <summary>Name fragments that mark a <c>-p:Name=Value</c> property whose value must not be echoed.</summary>
+    private static readonly string[] SecretPropertyNameFragments =
+        ["password", "pwd", "secret", "token", "apikey", "accesskey", "credential", "connectionstring"];
+
+    // Matches a -p:Name=Value token in a joined command line, quoted (value may contain spaces) or bare.
+    [GeneratedRegex("\"(?<t>-p:[^\"]*)\"|(?<t>-p:[^\\s\"]+)")]
+    private static partial Regex PropertyTokenRegex();
+
+    /// <summary>
+    /// Masks the value of secret-like <c>-p:Name=Value</c> properties (e.g. <c>PackageCertificatePassword</c>)
+    /// for DISPLAY only — the real command passed to dotnet is never altered. Non-secret tokens are
+    /// returned byte-for-byte unchanged.
+    /// </summary>
+    internal static string RedactSecretsForDisplay(string commandLine) =>
+        PropertyTokenRegex().Replace(commandLine, static match =>
+        {
+            var body = match.Groups["t"].Value[3..]; // strip "-p:" → "Name=Value" or "A=1;Secret=2"
+            var redacted = RedactPropertySegments(body, out var changed);
+            if (!changed)
+            {
+                return match.Value;
+            }
+
+            var token = "-p:" + redacted;
+            return match.Value[0] == '"' || token.Contains(' ', StringComparison.Ordinal) ? $"\"{token}\"" : token;
+        });
+
+    private static string RedactPropertySegments(string body, out bool changed)
+    {
+        changed = false;
+        var segments = body.Split(';');
+        for (int i = 0; i < segments.Length; i++)
+        {
+            var equals = segments[i].IndexOf('=', StringComparison.Ordinal);
+            if (equals <= 0)
+            {
+                continue;
+            }
+
+            if (IsSecretPropertyName(segments[i][..equals]))
+            {
+                segments[i] = segments[i][..equals] + "=***";
+                changed = true;
+            }
+        }
+
+        return changed ? string.Join(';', segments) : body;
+    }
+
+    private static bool IsSecretPropertyName(string name) =>
+        SecretPropertyNameFragments.Any(fragment => name.Contains(fragment, StringComparison.OrdinalIgnoreCase));
 }

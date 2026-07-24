@@ -301,6 +301,10 @@ internal partial class RunCommand
 
             var exePath = resolution.RunCommand!; // guaranteed non-null for unpackaged by BuildAndResolveAsync
 
+            // A non-apphost RunCommand (e.g. dotnet) carries its own leading args (exec "<app>.dll") that
+            // must precede the user's app args.
+            var launchArgs = CombineLaunchArguments(resolution.RunArguments, appArgs);
+
             // Launch with the caller's current directory (like `dotnet run`), NOT the build-output
             // directory, so apps that resolve config/data files relative to the working directory behave
             // the same. Assembly/resource lookup is unaffected (the apphost resolves those from its own
@@ -363,7 +367,7 @@ internal partial class RunCommand
                 // would keep the npm wrapper's captured stdout pipe open (blocking a detached launch) and let
                 // app output corrupt --json stdout. A foreground, non-JSON run streams inline like `dotnet run`.
                 var stdioMode = (detach || isJson) ? LaunchStdioMode.Suppress : LaunchStdioMode.Inherit;
-                launched = appLauncherService.LaunchExecutable(exePath, appArgs, workingDirectory, stdioMode);
+                launched = appLauncherService.LaunchExecutable(exePath, launchArgs, workingDirectory, stdioMode);
             }
             catch (Exception ex)
             {
@@ -422,6 +426,18 @@ internal partial class RunCommand
 
                 return await WaitForLaunchedProcessAsync(launched, cancellationToken);
             }
+        }
+
+        /// <summary>
+        /// Prepends a non-apphost RunCommand's own launch args (e.g. <c>exec "&lt;app&gt;.dll"</c>) before the
+        /// user's app args, so both reach the launcher in the right order. Either side may be null/empty.
+        /// </summary>
+        internal static string? CombineLaunchArguments(string? runArguments, string? appArgs)
+        {
+            var parts = new[] { runArguments, appArgs }
+                .Where(p => !string.IsNullOrWhiteSpace(p));
+            var combined = string.Join(" ", parts);
+            return string.IsNullOrWhiteSpace(combined) ? null : combined;
         }
 
         /// <summary>

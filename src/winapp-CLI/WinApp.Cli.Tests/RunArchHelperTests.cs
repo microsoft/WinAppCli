@@ -48,6 +48,7 @@ public class RunArchHelperTests
     [TestMethod]
     [DataRow("win-x64", "x64")]
     [DataRow("win10-arm64", "arm64")]
+    [DataRow("win10.0.19041-x64", "x64")]
     [DataRow("win-x86", "x86")]
     [DataRow("win-arm64", "arm64")]
     [DataRow("x64", "x64")]
@@ -63,6 +64,9 @@ public class RunArchHelperTests
     [DataRow("linux-x64")]
     [DataRow("osx-arm64")]
     [DataRow("linux-musl-x64")]
+    [DataRow("windows-x64")]
+    [DataRow("winter-x64")]
+    [DataRow("winrt-arm64")]
     [DataRow("")]
     [DataRow(null)]
     public void ArchitectureFromRid_Unrecognized_ReturnsNull(string? rid)

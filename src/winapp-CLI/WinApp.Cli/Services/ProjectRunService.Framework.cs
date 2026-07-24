@@ -135,7 +135,7 @@ internal sealed partial class ProjectRunService
         CancellationToken cancellationToken)
     {
         var args = BuildFrameworkDiscoveryArguments(csproj, options);
-        logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, args);
+        logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(args));
 
         int exitCode;
         string stdout;
@@ -250,7 +250,7 @@ internal sealed partial class ProjectRunService
         CancellationToken cancellationToken)
     {
         var args = BuildFrameworkDiscoveryArguments(csproj, options, FrameworkDiscoveryProperties);
-        logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, args);
+        logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(args));
 
         int exitCode;
         string stdout;

@@ -190,6 +190,84 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    [DataRow("PackageCertificatePassword", "hunter2")]
+    [DataRow("NuGetApiKey", "abc123")]
+    [DataRow("MySecretToken", "xyz")]
+    [DataRow("SqlConnectionString", "Server=.;Pwd=p")]
+    public void RedactSecretsForDisplay_MasksSecretPropertyValue(string name, string value)
+    {
+        var line = $"build App.csproj -p:{name}={value} -c Debug";
+
+        var redacted = ProjectRunService.RedactSecretsForDisplay(line);
+
+        StringAssert.Contains(redacted, $"-p:{name}=***");
+        Assert.IsFalse(redacted.Contains(value), $"the secret value should not survive display: {redacted}");
+    }
+
+    [TestMethod]
+    public void RedactSecretsForDisplay_LeavesNonSecretPropertiesUntouched()
+    {
+        var line = "build App.csproj -p:Platform=x64 -p:OutputPath=bin -c Debug";
+
+        Assert.AreEqual(line, ProjectRunService.RedactSecretsForDisplay(line));
+    }
+
+    [TestMethod]
+    public void RedactSecretsForDisplay_RedactsOnlySecretSegmentOfPackedProperty()
+    {
+        var line = "build -p:A=1;Password=s3cr3t;B=2";
+
+        var redacted = ProjectRunService.RedactSecretsForDisplay(line);
+
+        StringAssert.Contains(redacted, "A=1");
+        StringAssert.Contains(redacted, "Password=***");
+        StringAssert.Contains(redacted, "B=2");
+        Assert.IsFalse(redacted.Contains("s3cr3t"));
+    }
+
+    [TestMethod]
+    public void RedactSecretsForDisplay_MasksQuotedSecretWithSpaces()
+    {
+        var line = "build \"-p:PackageCertificatePassword=pass word\" -c Debug";
+
+        var redacted = ProjectRunService.RedactSecretsForDisplay(line);
+
+        Assert.IsFalse(redacted.Contains("pass word"), $"quoted secret should be masked: {redacted}");
+        StringAssert.Contains(redacted, "PackageCertificatePassword=***");
+    }
+
+    [TestMethod]
+    public void RunCommandIsLaunchable_RootedExistingFile_ReturnsTrue()
+    {
+        // An apphost RunCommand is a rooted path validated with File.Exists; use this assembly as a stand-in.
+        var existing = typeof(ProjectRunService).Assembly.Location;
+
+        Assert.IsTrue(ProjectRunService.RunCommandIsLaunchable(existing));
+    }
+
+    [TestMethod]
+    public void RunCommandIsLaunchable_RootedMissingFile_ReturnsFalse()
+    {
+        var missing = Path.Combine(_tempDir.FullName, "does-not-exist.exe");
+
+        Assert.IsFalse(ProjectRunService.RunCommandIsLaunchable(missing));
+    }
+
+    [TestMethod]
+    public void RunCommandIsLaunchable_BareCommandOnPath_ReturnsTrue()
+    {
+        // UseAppHost=false makes RunCommand a bare command name (e.g. dotnet) resolved via PATH; cmd is
+        // always present on Windows PATH via PATHEXT.
+        Assert.IsTrue(ProjectRunService.RunCommandIsLaunchable("cmd"));
+    }
+
+    [TestMethod]
+    public void RunCommandIsLaunchable_BareCommandNotOnPath_ReturnsFalse()
+    {
+        Assert.IsFalse(ProjectRunService.RunCommandIsLaunchable("winapp-nonexistent-launcher-xyz"));
+    }
+
+    [TestMethod]
     public void BuildEvaluateArguments_WithCsWinRTMetadataFolder_InjectsProperty()
     {
         // The evaluate pass must be fed the same inputs as the build pass, so the shim folder flows here too.

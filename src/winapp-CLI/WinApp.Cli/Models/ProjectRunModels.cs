@@ -52,12 +52,13 @@ internal sealed record RunInputResolution(
 /// </summary>
 /// <param name="Csproj">The project that was built/evaluated.</param>
 /// <param name="TargetDir">Absolute output directory (contains the manifest/recipe for packaged apps).</param>
-/// <param name="RunCommand">Absolute, runnable apphost <c>.exe</c> for the unpackaged direct launch (null if not produced).</param>
+/// <param name="RunCommand">The launcher for the unpackaged direct launch: an apphost <c>.exe</c> when <c>UseAppHost</c> is on, or a bare command (e.g. <c>dotnet</c>, paired with <see cref="RunArguments"/>) when it's off; null if not produced.</param>
 /// <param name="Packaging">Packaged vs unpackaged.</param>
 /// <param name="SelfContained">True when <c>WindowsAppSDKSelfContained=true</c> — the runtime install is skipped.</param>
 /// <param name="Architecture">The resolved app architecture (x64 / arm64 / x86) used for build + runtime install.</param>
 /// <param name="Framework">The effective target framework the app was built for (mirrors <c>ProjectRunOptions.Framework</c>); null for a single-targeted project. Threaded into the unpackaged runtime install so the version resolves from the built TFM.</param>
 /// <param name="NoRestore">Mirrors <c>ProjectRunOptions.NoRestore</c>; threaded into the unpackaged <c>dotnet list package</c> discovery so it can't trigger a restore the user skipped.</param>
+/// <param name="RunArguments">Leading launch arguments MSBuild pairs with a non-apphost <see cref="RunCommand"/> (e.g. <c>exec "&lt;app&gt;.dll"</c>); prepended before the user's app args. Null for a plain apphost launch.</param>
 internal sealed record ProjectRunResolution(
     FileInfo Csproj,
     string TargetDir,
@@ -66,7 +67,8 @@ internal sealed record ProjectRunResolution(
     bool SelfContained,
     string Architecture,
     string? Framework = null,
-    bool NoRestore = false);
+    bool NoRestore = false,
+    string? RunArguments = null);
 
 /// <summary>
 /// User-provided build inputs for project mode, forwarded to <c>dotnet build</c> / <c>dotnet msbuild</c>.

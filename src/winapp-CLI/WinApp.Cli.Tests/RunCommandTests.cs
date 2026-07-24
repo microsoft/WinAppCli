@@ -2187,4 +2187,26 @@ public class RunCommandTests : BaseCommandTests
     }
 
     #endregion
+
+    #region CombineLaunchArguments (non-apphost RunCommand arg ordering)
+
+    [TestMethod]
+    public void CombineLaunchArguments_PrependsRunArgumentsBeforeAppArgs()
+    {
+        var combined = RunCommand.Handler.CombineLaunchArguments("exec \"App.dll\"", "--flag value");
+
+        Assert.AreEqual("exec \"App.dll\" --flag value", combined);
+    }
+
+    [TestMethod]
+    [DataRow(null, "--flag", "--flag")]
+    [DataRow("exec App.dll", null, "exec App.dll")]
+    [DataRow("exec App.dll", "", "exec App.dll")]
+    [DataRow(null, null, null)]
+    public void CombineLaunchArguments_HandlesMissingSides(string? runArguments, string? appArgs, string? expected)
+    {
+        Assert.AreEqual(expected, RunCommand.Handler.CombineLaunchArguments(runArguments, appArgs));
+    }
+
+    #endregion
 }
