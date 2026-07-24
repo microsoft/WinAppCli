@@ -37,7 +37,7 @@ First, you'll set up your development environment with the necessary tools and S
 
 ### 2. Call Windows APIs from JavaScript
 
-If you enabled JS bindings during setup, `.winapp/bindings/` contains generated `.js` wrapper classes and matching `.d.ts` declarations for Windows App SDK APIs. Import `#winapp/bindings` to access all exported classes. The `#winapp/bindings` package import requires `@microsoft/dynwinrt-codegen` ≥ `0.1.0-preview.8`; older projects can keep a path relative to the importing file (for example, `require('../.winapp/bindings/index.js')` from `src/index.js`) or upgrade with `npm i -D @microsoft/dynwinrt-codegen@latest && npx winapp init --add-js-bindings`.
+If you enabled JS bindings during setup, `.winapp/bindings/` contains generated `.js` wrapper classes and matching `.d.ts` declarations for Windows App SDK APIs. Import `#winapp/bindings` to access all exported classes. `winapp init --add-js-bindings` wires this specifier into your `package.json` `imports` map. If `require('#winapp/bindings')` ever fails with `ERR_MODULE_NOT_FOUND`, follow [Enable the `#winapp/bindings` import](setup.md#enable-the-winappbindings-import) to add it, or import the generated `index.js` by a path relative to the importing file (for example `require('../.winapp/bindings/index.js')` from `src/index.js`).
 
 - **[Show a Notification from JavaScript →](js-notification.md)** — call the same Windows App SDK notification surface without a native addon.
 - **[Call Windows APIs from JavaScript →](js-file-picker.md)** — pick a file with Windows App SDK and inspect it with Windows SDK imaging APIs.

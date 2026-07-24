@@ -21,13 +21,13 @@ npm install onnxruntime-node@1.24.3
 
 The Windows App SDK transitively depends on `Microsoft.WindowsAppSDK.ML`, so the WinML APIs are already in your generated bindings. Verify:
 
-> **Requires `@microsoft/dynwinrt-codegen` ≥ `0.1.0-preview.8`** — see [Get started with Electron](index.md#2-call-windows-apis-from-javascript) for older-project fallbacks.
+> `winapp init --add-js-bindings` wires the `#winapp/bindings` specifier into `package.json`. If `require('#winapp/bindings')` fails with `ERR_MODULE_NOT_FOUND`, see [Enable the `#winapp/bindings` import](setup.md#enable-the-winappbindings-import).
 
 ```bash
 node -e "console.log(Object.keys(require('#winapp/bindings')).filter(k => k.startsWith('ExecutionProvider')))"
 ```
 
-You should see `[ 'ExecutionProvider', 'ExecutionProviderCatalog', 'ExecutionProviderReadyState' ]`.
+You should see `[ 'ExecutionProvider', 'ExecutionProviderCatalog', 'ExecutionProviderCertification', 'ExecutionProviderReadyResult', 'ExecutionProviderReadyResultState', 'ExecutionProviderReadyState' ]` (the exact list depends on your Windows App SDK version). If the array is empty, the ML APIs weren't emitted — re-run `npx winapp node generate-bindings`.
 
 ## Step 2: Download the model via Model Catalog (main process)
 

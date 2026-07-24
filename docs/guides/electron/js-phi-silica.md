@@ -30,7 +30,7 @@ npx winapp node add-electron-debug-identity
 
 Import the generated bindings through `#winapp/bindings`, create a `TextSummarizer`, and call it at the end of `createWindow()` to verify everything works:
 
-> **Requires `@microsoft/dynwinrt-codegen` ≥ `0.1.0-preview.8`** — see [Get started with Electron](index.md#2-call-windows-apis-from-javascript) for older-project fallbacks.
+> `winapp init --add-js-bindings` wires the `#winapp/bindings` specifier into `package.json`. If `require('#winapp/bindings')` fails with `ERR_MODULE_NOT_FOUND`, see [Enable the `#winapp/bindings` import](setup.md#enable-the-winappbindings-import).
 
 ```js
 // src/index.js (Electron main, CommonJS)

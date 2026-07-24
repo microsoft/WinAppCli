@@ -12,7 +12,7 @@ Before starting this guide, make sure you've:
 
 Import the generated bindings through the `#winapp/bindings` package import, build an app notification, and show it with the default notification manager:
 
-> **Requires `@microsoft/dynwinrt-codegen` ≥ `0.1.0-preview.8`.** Older projects can either upgrade with `npm i -D @microsoft/dynwinrt-codegen@latest && npx winapp init --add-js-bindings` to have `winapp init` wire the `#winapp/bindings` imports map, or keep the relative form `require('../.winapp/bindings/index.js')` (path is relative to `src/index.js`; adjust it if your entry file lives elsewhere).
+> `winapp init --add-js-bindings` wires the `#winapp/bindings` specifier into `package.json`. If `require('#winapp/bindings')` fails with `ERR_MODULE_NOT_FOUND`, see [Enable the `#winapp/bindings` import](setup.md#enable-the-winappbindings-import) — or use the relative form `require('../.winapp/bindings/index.js')` (path relative to `src/index.js`; adjust it if your entry file lives elsewhere).
 
 ```js
 // src/index.js (Electron main, CommonJS)

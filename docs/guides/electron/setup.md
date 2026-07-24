@@ -21,11 +21,22 @@ npm create electron-app@latest my-windows-app
 cd my-windows-app
 ```
 
-When prompted by Electron Forge:
-- **Bundler**: Select **None** (recommended — native addons work without extra configuration)
-- **Language**: Select **JavaScript** (this guide uses JS; TypeScript works too)
-- **Electron version**: Select **latest**
-- **Initialize git**: Your preference
+`create-electron-app` is non-interactive — it scaffolds with its default template rather than prompting you. The default is exactly what this guide wants:
+- **No bundler** — native addons and the generated JS bindings work without extra bundler configuration.
+- **JavaScript** — this guide uses JS (TypeScript works too).
+
+It also installs the current `latest` Electron version and initializes a git repository. To customize, pass flags after a `--` separator (npm forwards them to `create-electron-app`), for example:
+
+```bash
+# Use a bundler and/or TypeScript (optional):
+npm create electron-app@latest my-windows-app -- --template=webpack
+npm create electron-app@latest my-windows-app -- --template=vite-typescript
+
+# Pin a specific Electron version, or skip git init:
+npm create electron-app@latest my-windows-app -- --electron-version=38.3.0 --skip-git
+```
+
+The official Forge templates are `webpack`, `webpack-typescript`, `vite`, and `vite-typescript`. Run `npx create-electron-app@latest --help` to see all flags.
 
 Verify the app runs:
 
@@ -88,6 +99,7 @@ This command sets up everything you need for Windows development:
    - Adds `@microsoft/dynwinrt-codegen` to `devDependencies` — the build-time tool that produces the bindings (pinned to the registry's `latest` version on first run, then left alone)
    - Adds `@microsoft/dynwinrt` to `dependencies` — the runtime that the generated bindings import at execution time (version is chosen by the installed codegen to guarantee ABI compatibility)
    - Generates JS bindings for Windows App SDK APIs into `.winapp/bindings/`
+   - Adds the `#winapp/bindings` imports map to `package.json` so `require('#winapp/bindings')` resolves (see [Enable the `#winapp/bindings` import](#enable-the-winappbindings-import) below)
 
 > [!NOTE]
 > The `.winapp/` folder is automatically added to `.gitignore` and should not be checked in to source.
@@ -102,6 +114,43 @@ You can open `Package.appxmanifest` to further customize properties like the dis
 > - **[Windows App SDK](https://learn.microsoft.com/windows/apps/windows-app-sdk/)** - A new development platform that lets you build modern desktop apps that can be installed across Windows versions (down to Windows 10 1809). It provides a convenient, OS-decoupled abstraction around the rich catalogue of Windows OS APIs. The Windows App SDK includes WinUI 3 and provides access to modern features like AI capabilities (Phi Silica), notifications, window management, and more that receive regular updates independent of Windows OS releases.
 >
 > Learn more: [What's the difference between the Windows App SDK and the Windows SDK?](https://learn.microsoft.com/windows/apps/get-started/windows-developer-faq#what-s-the-difference-between-the-windows-app-sdk-and-the-windows-sdk)
+
+### Enable the `#winapp/bindings` import
+
+`winapp init` generates the bindings into `.winapp/bindings/` (an `index.js` + `index.mjs` + `index.d.ts`, plus one file per emitted class). The rest of these guides import them with the clean `#winapp/bindings` specifier:
+
+```js
+const { FileOpenPicker } = require('#winapp/bindings');
+```
+
+That specifier only resolves if your `package.json` has a matching [subpath `imports`](https://nodejs.org/api/packages.html#subpath-imports) map. **`winapp init --add-js-bindings` writes this map for you** — you'll see `Added "#winapp/bindings" package imports to package.json` in the init output. If it's ever missing (for example, `require('#winapp/bindings')` fails with `ERR_MODULE_NOT_FOUND`), add it yourself:
+
+```jsonc
+// package.json
+{
+  "imports": {
+    "#winapp/bindings": {
+      "types": "./.winapp/bindings/index.d.ts",
+      "import": "./.winapp/bindings/index.mjs",
+      "require": "./.winapp/bindings/index.js",
+      "default": "./.winapp/bindings/index.js"
+    },
+    "#winapp/bindings/*": {
+      "types": "./.winapp/bindings/*.d.ts",
+      "default": "./.winapp/bindings/*.js"
+    }
+  }
+}
+```
+
+Confirm it resolves:
+
+```bash
+node -e "console.log(Object.keys(require('#winapp/bindings')).length + ' Windows classes available')"
+```
+
+> [!NOTE]
+> The paths are relative to `package.json` (the folder that also holds `.winapp/`), so they're the same no matter where your entry file lives. If you'd rather not add an `imports` map, you can instead import the generated `index.js` by a path relative to the importing file — for example `require('../.winapp/bindings/index.js')` from `src/index.js`.
 
 ## Step 4: Add Restore to Your Build Pipeline
 

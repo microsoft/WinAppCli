@@ -62,6 +62,8 @@ When JS bindings are enabled (via `--add-js-bindings` or by answering yes in int
 - `.winapp/bindings/` — generated JS bindings for Windows App SDK APIs (npm-only, Node / Electron)
 - `package.json` update — adds the `winapp.jsBindings` namespace and `@microsoft/dynwinrt` dependency (npm-only)
 
+Import the generated classes with the `#winapp/bindings` specifier (e.g. `require('#winapp/bindings')`). `winapp init --add-js-bindings` adds the matching subpath `imports` map to `package.json`. If `require('#winapp/bindings')` fails with `ERR_MODULE_NOT_FOUND`, add the map manually (or import `.winapp/bindings/index.js` by a relative path). See [Enable the `#winapp/bindings` import](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/setup.md#enable-the-winappbindings-import).
+
 ### Restore after cloning
 
 ```powershell
