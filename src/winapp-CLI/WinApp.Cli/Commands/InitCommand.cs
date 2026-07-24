@@ -81,7 +81,7 @@ internal class InitCommand : Command, IShortDescription
         };
         OutputDirOption = new Option<DirectoryInfo>("--output-dir")
         {
-            Description = "Directory to write the sparse manifest and Assets/ (sparse only; default: the exe's directory)"
+            Description = "Directory to write the sparse manifest and Assets/ (sparse only; default: a 'sparse/' folder in the current directory)"
         };
         ForceOption = new Option<bool>("--force")
         {

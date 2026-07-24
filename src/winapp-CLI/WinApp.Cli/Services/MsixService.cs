@@ -33,20 +33,49 @@ internal partial class MsixService(
     ICurrentDirectoryProvider currentDirectoryProvider) : IMsixService
 {
     /// <summary>
-    /// Returns true when the manifest content declares a &lt;uap10:AllowExternalContent&gt;true&lt;/uap10:AllowExternalContent&gt; element,
-    /// indicating a sparse identity package whose binaries/assets live at an external location.
+    /// Classification of a manifest's sparse-identity status, distinguishing a valid non-sparse
+    /// manifest from one that could not be parsed so callers can report each case correctly.
     /// </summary>
-    public static bool ManifestHasAllowExternalContent(string manifestContent)
+    public enum SparseManifestKind
     {
+        /// <summary>Parsed successfully and does NOT declare AllowExternalContent.</summary>
+        NotSparse,
+        /// <summary>Parsed successfully and declares &lt;uap10:AllowExternalContent&gt;true.</summary>
+        Sparse,
+        /// <summary>The content could not be parsed as XML (malformed / invalid manifest).</summary>
+        ParseError,
+    }
+
+    /// <summary>
+    /// Classifies whether a manifest declares a &lt;uap10:AllowExternalContent&gt;true&lt;/uap10:AllowExternalContent&gt;
+    /// element (a sparse identity package), returning <see cref="SparseManifestKind.ParseError"/> with the
+    /// parser message in <paramref name="parseError"/> when the content is not valid manifest XML — so a
+    /// malformed file is not silently reported as a valid non-sparse manifest.
+    /// </summary>
+    public static SparseManifestKind ClassifySparseManifest(string manifestContent, out string? parseError)
+    {
+        parseError = null;
         try
         {
-            return AppxManifestDocument.Parse(manifestContent).AllowsExternalContent;
+            return AppxManifestDocument.Parse(manifestContent).AllowsExternalContent
+                ? SparseManifestKind.Sparse
+                : SparseManifestKind.NotSparse;
         }
         catch (Exception ex) when (ex is System.Xml.XmlException or FormatException or InvalidOperationException or ArgumentException)
         {
-            return false;
+            parseError = ex.Message;
+            return SparseManifestKind.ParseError;
         }
     }
+
+    /// <summary>
+    /// Returns true when the manifest content declares a &lt;uap10:AllowExternalContent&gt;true&lt;/uap10:AllowExternalContent&gt; element,
+    /// indicating a sparse identity package whose binaries/assets live at an external location.
+    /// Malformed manifests are treated as non-sparse; use <see cref="ClassifySparseManifest"/> to
+    /// distinguish a parse failure from a valid non-sparse manifest.
+    /// </summary>
+    public static bool ManifestHasAllowExternalContent(string manifestContent)
+        => ClassifySparseManifest(manifestContent, out _) == SparseManifestKind.Sparse;
 
     /// <summary>
     /// Returns warning messages for content found in a folder being packaged as a sparse

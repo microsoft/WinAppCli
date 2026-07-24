@@ -276,7 +276,7 @@ export interface InitOptions extends CommonOptions {
   name?: string;
   /** Don't update .gitignore file */
   noGitignore?: boolean;
-  /** Directory to write the sparse manifest and Assets/ (sparse only; default: the exe's directory) */
+  /** Directory to write the sparse manifest and Assets/ (sparse only; default: a 'sparse/' folder in the current directory) */
   outputDir?: string;
   /** Override the publisher CN (sparse only; default: inferred from the exe's company name). Bare names are auto-wrapped as CN=<name>. */
   publisher?: string;

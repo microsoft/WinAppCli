@@ -222,10 +222,11 @@ function init(options?: InitOptions): Promise<WinappResult>
 | `configDir` | `string \| undefined` | No | Directory to read/store configuration (default: the selected project directory, or current directory if no project is detected) |
 | `configOnly` | `boolean \| undefined` | No | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. |
 | `exe` | `string \| undefined` | No | Path to the application executable. Requires --sparse. Generates an identity-only sparse manifest for the exe instead of a full package/SDK setup. |
+| `force` | `boolean \| undefined` | No | Overwrite an existing appxmanifest.xml in the target directory (sparse only). Without this, init fails instead of replacing existing manifest/asset files. |
 | `ignoreConfig` | `boolean \| undefined` | No | Don't use configuration file for version management |
 | `name` | `string \| undefined` | No | Override the package name (sparse only; default: inferred from the exe) |
 | `noGitignore` | `boolean \| undefined` | No | Don't update .gitignore file |
-| `outputDir` | `string \| undefined` | No | Directory to write the sparse manifest and Assets/ (sparse only; default: the exe's directory) |
+| `outputDir` | `string \| undefined` | No | Directory to write the sparse manifest and Assets/ (sparse only; default: a 'sparse/' folder in the current directory) |
 | `publisher` | `string \| undefined` | No | Override the publisher CN (sparse only; default: inferred from the exe's company name). Bare names are auto-wrapped as CN=<name>. |
 | `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
 | `sparse` | `boolean \| undefined` | No | Generate a sparse identity manifest (appxmanifest.xml) for an existing desktop exe instead of a full package manifest. Use with --exe. Skips SDK/package installation. |
@@ -1363,10 +1364,11 @@ type ManifestTemplates = "packaged" | "sparse"
 | `configDir` | `string \| undefined` | No | Directory to read/store configuration (default: the selected project directory, or current directory if no project is detected) |
 | `configOnly` | `boolean \| undefined` | No | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. |
 | `exe` | `string \| undefined` | No | Path to the application executable. Requires --sparse. Generates an identity-only sparse manifest for the exe instead of a full package/SDK setup. |
+| `force` | `boolean \| undefined` | No | Overwrite an existing appxmanifest.xml in the target directory (sparse only). Without this, init fails instead of replacing existing manifest/asset files. |
 | `ignoreConfig` | `boolean \| undefined` | No | Don't use configuration file for version management |
 | `name` | `string \| undefined` | No | Override the package name (sparse only; default: inferred from the exe) |
 | `noGitignore` | `boolean \| undefined` | No | Don't update .gitignore file |
-| `outputDir` | `string \| undefined` | No | Directory to write the sparse manifest and Assets/ (sparse only; default: the exe's directory) |
+| `outputDir` | `string \| undefined` | No | Directory to write the sparse manifest and Assets/ (sparse only; default: a 'sparse/' folder in the current directory) |
 | `publisher` | `string \| undefined` | No | Override the publisher CN (sparse only; default: inferred from the exe's company name). Bare names are auto-wrapped as CN=<name>. |
 | `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
 | `sparse` | `boolean \| undefined` | No | Generate a sparse identity manifest (appxmanifest.xml) for an existing desktop exe instead of a full package manifest. Use with --exe. Skips SDK/package installation. |

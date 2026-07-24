@@ -750,4 +750,25 @@ public class SparsePackRoutingTests : BaseCommandTests
         var output = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
         Assert.Contains("Manifest file not found", output, "A missing manifest path should be reported as a missing file");
     }
+
+    [TestMethod]
+    public async Task Pack_MalformedManifestFile_ReportsParseErrorNotMissingElement()
+    {
+        // A manifest-named file that contains the literal "AllowExternalContent" but is not valid
+        // XML must be reported as a parse failure — NOT misreported as "missing AllowExternalContent"
+        // (which would hide the real syntax error and mislead the user).
+        var packageCommand = GetRequiredService<PackageCommand>();
+        var malformed = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        await File.WriteAllTextAsync(malformed, "<Package><Properties><AllowExternalContent>true</AllowExternalContent></Package>");
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(packageCommand, [malformed]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "A malformed manifest should fail");
+        Assert.AreEqual(0, _fakeMsixService.CreateSparseIdentityCalls.Count, "Should not route to the sparse path");
+        var output = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        Assert.Contains("could not be read as valid XML", output, "A malformed manifest should be reported as a parse error");
+        Assert.DoesNotContain("missing uap10:AllowExternalContent", output, "A parse failure must not be reported as a missing element");
+    }
 }

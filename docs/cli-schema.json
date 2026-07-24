@@ -797,7 +797,7 @@
           "recursive": false
         },
         "--output-dir": {
-          "description": "Directory to write the sparse manifest and Assets/ (sparse only; default: the exe's directory)",
+          "description": "Directory to write the sparse manifest and Assets/ (sparse only; default: a 'sparse/' folder in the current directory)",
           "hidden": false,
           "valueType": "System.IO.DirectoryInfo",
           "hasDefaultValue": false,

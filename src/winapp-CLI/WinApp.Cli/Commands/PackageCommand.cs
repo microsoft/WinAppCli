@@ -112,24 +112,26 @@ internal class PackageCommand : Command, IShortDescription
                 || name.EndsWith(".appxmanifest", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
-        /// Returns true when the file is an appx manifest that declares
-        /// a &lt;uap10:AllowExternalContent&gt;true&lt;/uap10:AllowExternalContent&gt; element (i.e. a sparse identity package manifest).
+        /// Classifies a manifest-file input into sparse / non-sparse / unreadable so the caller can
+        /// report a malformed or inaccessible manifest distinctly from a valid non-sparse one
+        /// (rather than mislabelling a parse failure as "missing AllowExternalContent").
         /// </summary>
-        private static async Task<bool> IsSparseManifestAsync(FileInfo file, CancellationToken cancellationToken)
+        private enum ManifestInputKind { NotManifestName, Sparse, NotSparse, Unreadable }
+
+        private static async Task<(ManifestInputKind Kind, string? Error)> ClassifyManifestInputAsync(FileInfo file, CancellationToken cancellationToken)
         {
             var name = file.Name;
             var isManifestName = name.EndsWith(".appxmanifest", StringComparison.OrdinalIgnoreCase)
                 || name.Equals("appxmanifest.xml", StringComparison.OrdinalIgnoreCase);
             if (!isManifestName)
             {
-                return false;
+                return (ManifestInputKind.NotManifestName, null);
             }
 
+            string content;
             try
             {
-                var content = await File.ReadAllTextAsync(file.FullName, cancellationToken);
-                return content.Contains("AllowExternalContent", StringComparison.OrdinalIgnoreCase)
-                    && MsixService.ManifestHasAllowExternalContent(content);
+                content = await File.ReadAllTextAsync(file.FullName, cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -137,8 +139,15 @@ internal class PackageCommand : Command, IShortDescription
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                return false;
+                return (ManifestInputKind.Unreadable, ex.Message);
             }
+
+            return MsixService.ClassifySparseManifest(content, out var parseError) switch
+            {
+                MsixService.SparseManifestKind.Sparse => (ManifestInputKind.Sparse, null),
+                MsixService.SparseManifestKind.ParseError => (ManifestInputKind.Unreadable, parseError),
+                _ => (ManifestInputKind.NotSparse, null),
+            };
         }
 
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
@@ -162,7 +171,8 @@ internal class PackageCommand : Command, IShortDescription
             if (inputFolders.Length == 1 && File.Exists(inputFolders[0].FullName))
             {
                 var candidateManifest = new FileInfo(inputFolders[0].FullName);
-                if (await IsSparseManifestAsync(candidateManifest, cancellationToken))
+                var (manifestKind, manifestError) = await ClassifyManifestInputAsync(candidateManifest, cancellationToken);
+                if (manifestKind == ManifestInputKind.Sparse)
                 {
                     // Identity-only packaging builds the .msix from just the manifest, so options that
                     // describe an app payload have no effect here. Reject them rather than silently
@@ -213,6 +223,14 @@ internal class PackageCommand : Command, IShortDescription
                             taskContext.AddDebugMessage($"Stack Trace: {ex.StackTrace}");
                             return (1, $"{UiSymbols.Error} Failed to create sparse identity package: {ex.GetBaseException().Message}");
                         }
+                    }, cancellationToken);
+                }
+
+                if (manifestKind == ManifestInputKind.Unreadable)
+                {
+                    return await statusService.ExecuteWithStatusAsync("Validating input...", (taskContext, _) =>
+                    {
+                        return Task.FromResult((1, $"{UiSymbols.Error} Manifest file could not be read as valid XML: {manifestError} Fix the manifest, or regenerate it with 'winapp init --exe <exe> --sparse'."));
                     }, cancellationToken);
                 }
 
