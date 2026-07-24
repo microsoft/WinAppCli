@@ -103,8 +103,17 @@ internal partial class ManifestService
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (
+            ex is IOException
+            or UnauthorizedAccessException
+            or System.Security.SecurityException
+            or System.Runtime.InteropServices.ExternalException
+            or ArgumentException
+            or InvalidOperationException)
         {
+            // Best-effort branding: extraction (shell/COM icon + GDI+ bitmap save) and asset
+            // application are non-essential, so swallow the expected operational failures and
+            // keep the placeholder assets. Unexpected exception types still propagate.
             taskContext.AddDebugMessage($"Could not extract logo from executable: {ex.Message}");
         }
         finally

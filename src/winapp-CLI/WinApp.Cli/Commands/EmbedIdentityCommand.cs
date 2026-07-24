@@ -52,8 +52,8 @@ internal class EmbedIdentityCommand : Command, IShortDescription
             {
                 var targetDir = target.Directory?.FullName;
                 var currentDir = currentDirectoryProvider.GetCurrentDirectory();
-                var currentSparseDir = Path.Combine(currentDir, "sparse");
-                var targetSparseDir = targetDir != null ? Path.Combine(targetDir, "sparse") : null;
+                var currentSparseDir = Path.Join(currentDir, "sparse");
+                var targetSparseDir = targetDir != null ? Path.Join(targetDir, "sparse") : null;
                 manifest = FindSparseManifest(currentSparseDir)
                     ?? FindSparseManifest(targetSparseDir)
                     ?? FindSparseManifest(targetDir)

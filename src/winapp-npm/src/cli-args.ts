@@ -64,6 +64,35 @@ export function hasAddJsBindings(args: readonly string[]): boolean {
   return args.includes('--add-js-bindings');
 }
 
+/**
+ * Resolve the boolean value of the native `--sparse` option the same way the native
+ * System.CommandLine parser does, so wrapper routing matches native behavior:
+ *   - `--sparse`                       -> true  (bare flag)
+ *   - `--sparse true` / `--sparse false` -> the following token (space form)
+ *   - `--sparse=true` / `--sparse:false` -> the inline value
+ *   - absent                           -> false
+ * A `--sparse` immediately followed by a non-boolean token (e.g. another option or a
+ * path) is treated as a bare `true`, matching the native option's 0..1 arity.
+ */
+export function parseSparseFlag(args: readonly string[]): boolean {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--sparse') {
+      const next = args[i + 1];
+      if (next !== undefined) {
+        const lowered = next.toLowerCase();
+        if (lowered === 'true') return true;
+        if (lowered === 'false') return false;
+      }
+      return true;
+    }
+    if (a.startsWith('--sparse=') || a.startsWith('--sparse:')) {
+      return a.substring('--sparse='.length).toLowerCase() !== 'false';
+    }
+  }
+  return false;
+}
+
 /** Remove wrapper-only flags before forwarding to native. */
 export function stripWrapperOnlyFlags(args: readonly string[]): string[] {
   return args.filter((a) => !WRAPPER_ONLY_FLAGS.has(a));

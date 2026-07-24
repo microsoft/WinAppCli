@@ -489,12 +489,12 @@ internal partial class MsixService
 
         var manifestContent = $@"<?xml version=""1.0"" encoding=""UTF-8""?>
 <assembly xmlns=""urn:schemas-microsoft-com:asm.v1"" manifestVersion=""1.0"">
+    {assemblyIdentity}
   <msix xmlns=""urn:schemas-microsoft-com:msix.v1""
             publisher=""{SecurityElement.Escape(identityInfo.Publisher)}""
             packageName=""{SecurityElement.Escape(identityInfo.PackageName)}""
             applicationId=""{SecurityElement.Escape(identityInfo.ApplicationId)}""
         />
-    {assemblyIdentity}
 </assembly>";
 
         // Create a temporary manifest file

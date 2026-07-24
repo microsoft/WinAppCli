@@ -94,7 +94,7 @@ Want to inspect or interact with a running app's UI?
 - `--config-dir` — directory for `winapp.yaml` (default: the selected project directory)
 - `--config-only` — only create `winapp.yaml`, skip package installation
 - `--no-gitignore` — don't update `.gitignore`
-**Sparse mode (`--exe <exe> --sparse`):** generates an identity-only sparse `appxmanifest.xml` (with `AllowExternalContent`) plus placeholder assets for an existing executable, inferring name/publisher/version/description from the exe. Skips all SDK/package installation. `--exe` requires `--sparse`. Additional options: `--name`, `--publisher`, `--output-dir` (default: the exe's directory). This is **step 1** of the production sparse packaging workflow.
+**Sparse mode (`--exe <exe> --sparse`):** generates an identity-only sparse `appxmanifest.xml` (with `AllowExternalContent`) plus placeholder assets for an existing executable, inferring name/publisher/version/description from the exe. Skips all SDK/package installation. `--exe` requires `--sparse`. Additional options: `--name`, `--publisher`, `--output-dir` (default: a `sparse/` folder in the current directory). This is **step 1** of the production sparse packaging workflow.
 **Creates:** `winapp.yaml`, `appxmanifest.xml`, `Assets/` folder, `.winapp/` (if SDKs installed)
 
 ### `winapp restore [base-directory]`
@@ -139,7 +139,7 @@ Want to inspect or interact with a running app's UI?
 **When to use:** After building a signed identity-only `.msix` for an unpackaged app, to make Windows associate the exe with that package at runtime.
 **Modes:** `.exe` target → embeds via `mt.exe`; `.xml`/`.manifest` target → inserts/replaces the `<msix>` element in an external side-by-side manifest (rebuild the app afterward).
 **Key options:**
-- `--manifest <path>` — sparse `appxmanifest.xml` to read identity from (defaults to one beside the target, then `./appxmanifest.xml`)
+- `--manifest <path>` — sparse `appxmanifest.xml` to read identity from (defaults to a `sparse/` folder in the current directory and beside the target — where `winapp init --exe --sparse` writes it — then beside the target and in the current directory)
 **Requires:** a sparse `appxmanifest.xml` + the target `.exe` or `.xml`/`.manifest`
 
 ### `winapp run <input-folder>`
@@ -315,9 +315,9 @@ winapp create-debug-identity ./myapp.exe   # Register sparse package for exe
 
 ### Ship production sparse identity (unpackaged app + installer)
 ```bash
-winapp init --exe ./bin/MyApp.exe --sparse        # Step 1: generate identity-only manifest + assets
-winapp cert generate                              # dev/test cert (use a trusted cert for production)
-winapp pack ./appxmanifest.xml --cert dev.pfx     # Step 2: build + sign the identity .msix
+winapp init --exe ./bin/MyApp.exe --sparse         # Step 1: generate identity-only manifest + assets into ./sparse/
+winapp cert generate                               # dev/test cert (use a trusted cert for production)
+winapp pack ./sparse/appxmanifest.xml --cert devcert.pfx  # Step 2: build + sign the identity .msix
 winapp embed-identity ./bin/MyApp.exe             # Step 3: embed <msix> into the exe fusion manifest
 # Your installer registers it: Add-AppxPackage -Path MyApp.identity.msix -ExternalLocation <install-dir>
 ```

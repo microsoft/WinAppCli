@@ -747,7 +747,7 @@ public class SparsePackRoutingTests : BaseCommandTests
         // Assert
         Assert.AreEqual(1, exitCode, "A missing manifest file should fail");
         Assert.AreEqual(0, _fakeMsixService.CreateSparseIdentityCalls.Count, "Should not route to the sparse path");
-        var output = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        var output = ConsoleStdOut.ToString() + ConsoleStdErr;
         Assert.Contains("Manifest file not found", output, "A missing manifest path should be reported as a missing file");
     }
 
@@ -767,7 +767,7 @@ public class SparsePackRoutingTests : BaseCommandTests
         // Assert
         Assert.AreEqual(1, exitCode, "A malformed manifest should fail");
         Assert.AreEqual(0, _fakeMsixService.CreateSparseIdentityCalls.Count, "Should not route to the sparse path");
-        var output = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        var output = ConsoleStdOut.ToString() + ConsoleStdErr;
         Assert.Contains("could not be read as valid XML", output, "A malformed manifest should be reported as a parse error");
         Assert.DoesNotContain("missing uap10:AllowExternalContent", output, "A parse failure must not be reported as a missing element");
     }
