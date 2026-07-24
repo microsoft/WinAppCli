@@ -71,9 +71,14 @@ Describe 'winui-unpackaged-app sample' {
         if ($script:launchedPid) {
             Stop-Process -Id $script:launchedPid -Force -ErrorAction SilentlyContinue
         }
-        # Belt-and-suspenders: clean up any lingering sample process by name.
-        Get-Process -Name $script:appProcessName -ErrorAction SilentlyContinue |
-            ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
+        # Belt-and-suspenders: clean up any lingering sample process by name — but ONLY when the
+        # launch phase actually ran. Otherwise a local run without -AllowRuntimeInstall would kill
+        # unrelated processes that happen to share the sample's name. (PID cleanup above is always
+        # safe — it only targets what we launched.)
+        if (-not $script:skipRuntimeInstall) {
+            Get-Process -Name $script:appProcessName -ErrorAction SilentlyContinue |
+                ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
+        }
 
         if (-not $SkipCleanup) {
             if ($script:tempDir) { Remove-TempTestDirectory -Path $script:tempDir }
