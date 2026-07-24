@@ -125,6 +125,7 @@ public class NewCommandTests : BaseCommandTests
     [DataRow("1.0.0-preview.2", true)]
     [DataRow("1.0", true)]
     [DataRow("1.0.0+build.5", true)]  // valid build metadata
+    [DataRow("1.2.3.4", true)]        // four numeric components is the NuGet maximum
     [DataRow("", false)]
     [DataRow("   ", false)]
     [DataRow("latest", false)]      // does not start with a digit
@@ -136,6 +137,7 @@ public class NewCommandTests : BaseCommandTests
     [DataRow("1.0.0-", false)]      // trailing dash, empty prerelease
     [DataRow("1.0.0-alpha..1", false)] // empty prerelease identifier
     [DataRow("-alpha", false)]      // no numeric release
+    [DataRow("1.2.3.4.5", false)]   // more than four numeric components
     public void IsPlausibleVersion_AcceptsOnlyVersionShapedInput(string version, bool expected)
     {
         Assert.AreEqual(expected, NuGetVersionHelper.IsPlausibleVersion(version));

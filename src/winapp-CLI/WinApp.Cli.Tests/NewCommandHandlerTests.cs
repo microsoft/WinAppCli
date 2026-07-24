@@ -375,19 +375,25 @@ public class NewCommandHandlerTests : BaseCommandTests
     }
 
     [TestMethod]
+    [DoNotParallelize] // InvokeWithAmbientConsoleCaptureAsync swaps the process-wide AnsiConsole.
     public async Task Handler_QuietSuppressesHumanOutput()
     {
         ScriptHappyPath();
         var command = GetRequiredService<NewCommand>();
 
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--quiet", "--name", "QuietApp"]);
+        // The install-progress line is written via ILogger -> the process-wide ambient AnsiConsole
+        // (TextWriterLogger routes non-error levels there), NOT the injected TestAnsiConsole. Capture
+        // the ambient console so this assertion actually exercises the !quiet gate in EnsureTemplatePackAsync.
+        var (exitCode, ambientOutput) = await InvokeWithAmbientConsoleCaptureAsync(
+            command, ["--use-defaults", "--quiet", "--name", "QuietApp"]);
 
         Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        // The completion/next-step output goes through the injected console.
         Assert.IsFalse(TestAnsiConsole.Output.Contains("QuietApp", StringComparison.Ordinal),
             "--quiet should suppress the human-readable progress and completion output.");
-        // The happy path takes the pack-install branch (nothing installed yet), so this also guards the
+        // The happy path takes the pack-install branch (nothing installed yet), so this guards the
         // informational "Installing WinUI template pack..." log against leaking under --quiet.
-        Assert.IsFalse(TestAnsiConsole.Output.Contains("Installing", StringComparison.Ordinal),
+        Assert.IsFalse(ambientOutput.Contains("Installing", StringComparison.Ordinal),
             "--quiet should suppress the template-pack install progress message.");
     }
 
@@ -541,13 +547,20 @@ public class NewCommandHandlerTests : BaseCommandTests
         TestAnsiConsole.Profile.Capabilities.Interactive = false;
         var command = GetRequiredService<NewCommand>();
 
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--json"]);
+        // Invoke without --json so this pins the CI/piped-stdin fallback itself, not the
+        // JSON-implies-defaults shortcut (already covered by the interactive-console JSON test).
+        // Inspect the scaffold args to prove the defaulted template + name reach dotnet new.
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, []);
 
         Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
-        var json = ParseJson(TestAnsiConsole.Output);
-        Assert.AreEqual("WinUIApp", json.GetProperty("Name").GetString(),
+        var scaffold = ScaffoldInvocation();
+        Assert.IsNotNull(scaffold, "A non-interactive host must scaffold using defaults without prompting.");
+        var tokens = scaffold.ToArray();
+        CollectionAssert.Contains(tokens, "winui", "The default 'winui' template must be scaffolded.");
+        var nameIdx = Array.IndexOf(tokens, "-n");
+        Assert.IsTrue(nameIdx >= 0 && nameIdx + 1 < tokens.Length, "The scaffold must pass a project name.");
+        Assert.AreEqual("WinUIApp", tokens[nameIdx + 1],
             "A non-interactive host must default the name without prompting.");
-        Assert.AreEqual("winui", json.GetProperty("Template").GetString());
     }
 
     [TestMethod]

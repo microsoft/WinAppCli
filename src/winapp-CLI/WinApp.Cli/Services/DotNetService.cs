@@ -406,8 +406,10 @@ internal partial class DotNetService : IDotNetService
             CreateNoWindow = true
         };
 
-        // ArgumentList passes each token verbatim to the child process, so user-derived values
-        // (e.g. project name, template version) cannot inject additional dotnet options.
+        // ArgumentList passes each token to the child process as a distinct argv entry, so no shell or
+        // string splitting can inject extra tokens. It does NOT, however, stop an option-shaped value
+        // (e.g. "--force") from being interpreted as a switch by dotnet's own parser — callers must
+        // validate user-derived values against the child command's option grammar, as NewCommand does.
         foreach (var argument in arguments)
         {
             processStartInfo.ArgumentList.Add(argument);

@@ -89,6 +89,15 @@ internal static class NuGetVersionHelper
         }
 
         var parts = value.Split('.');
+
+        // NuGet versions have at most four numeric components (Major.Minor.Patch.Revision); reject
+        // anything longer (e.g. "1.2.3.4.5") so it fails fast as invalid args instead of reaching
+        // network installation and reporting a misleading later failure stage.
+        if (parts.Length > 4)
+        {
+            return null;
+        }
+
         var numbers = new List<int>(parts.Length);
         foreach (var part in parts)
         {
