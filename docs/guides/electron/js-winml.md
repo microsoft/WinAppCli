@@ -274,7 +274,7 @@ npm start
 You should see the available execution providers and model output in the console.
 
 > [!TIP]
-> For a complete image-classification pipeline with image decoding via JS bindings (`StorageFile`, `BitmapDecoder`, `BitmapTransform`), see the [Electron Gallery WinML sample](https://github.com/microsoft/electron-on-windows-gallery).
+> For more end-to-end samples of calling Windows APIs from Electron, see the [Electron on Windows gallery](https://github.com/microsoft/electron-on-windows-gallery).
 
 ## Next Steps
 

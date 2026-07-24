@@ -23,8 +23,9 @@
         alert syntax (> [!NOTE] / [!IMPORTANT] / [!TIP] / [!WARNING] / [!CAUTION]).
         Converting these is a judgement call, so they are surfaced but never fail CI.
 
-    Keep this in sync with Get-FrontMatter in port-mslearn-docs.ps1 (description
-    resolution + quoting regex).
+    Front-matter resolution + quoting rules live in mslearn-doc-lib.ps1, which
+    both this validator and port-mslearn-docs.ps1 dot-source, so the gate and the
+    generator cannot drift.
 .PARAMETER DocsRoot
     Root of the docs tree to validate (default: <repo>/docs).
 .EXAMPLE
@@ -39,19 +40,20 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = $PSScriptRoot | Split-Path -Parent
 if (-not $DocsRoot) { $DocsRoot = Join-Path $ProjectRoot "docs" }
 
+# Shared MS Learn front-matter rules (title/description/topic resolution + the
+# YAML-quoting rule). Sourcing them here — instead of re-implementing — is what
+# guarantees this gate and port-mslearn-docs.ps1 stay in lock-step.
+. (Join-Path $PSScriptRoot 'mslearn-doc-lib.ps1')
+
 # Display paths relative to the docs root's parent so they read like "docs/..."
 # regardless of whether DocsRoot is inside this repo or an external/temp path.
 $DocsRootFull = [System.IO.Path]::GetFullPath($DocsRoot)
 $DisplayBase = Split-Path $DocsRootFull -Parent
 
-# ─── Rules (keep in sync with port-mslearn-docs.ps1) ────────────────────────────
+# ─── Rules (front-matter quoting/resolution live in mslearn-doc-lib.ps1) ─────────
 
 $DescriptionMin = 115
 $DescriptionMax = 145
-
-# Characters that Get-FrontMatter would quote — a resolved description containing
-# any of these renders as a quoted YAML scalar, which the docs reviewer flags.
-$YamlSpecialPattern = '[:\[\]{}#&*!|>''"%@`]'
 
 # Marketing / promotional words disallowed by the docs style guidance. Scanned
 # across the whole file (including sample strings, which is where they hide).
@@ -98,17 +100,17 @@ foreach ($file in $docFiles) {
     if ($head -notmatch '<!--\s*mslearn:\s*true\s*-->') { continue }
     $checked++
 
-    # Title = first H1
-    $title = $null
-    if ($raw -match '(?m)^#\s+(.+?)\s*$') { $title = $Matches[1].Trim() }
+    # Title = first H1 (shared resolver)
+    $title = Get-MsLearnTitle $raw
     if (-not $title) {
         Add-Error $relPath "no H1 title found (required to derive front matter)."
         continue
     }
 
     # Resolve description exactly like Get-FrontMatter: marker override, else title.
-    $hasMarker = $raw -match '<!--\s*description:\s*(.+?)\s*-->'
-    $description = if ($hasMarker) { $Matches[1].Trim() } else { $title }
+    $resolved = Resolve-MsLearnDescription -Content $raw -Title $title
+    $description = $resolved.Description
+    $hasMarker = $resolved.HasMarker
 
     if (-not $hasMarker -or $description -eq $title) {
         Add-Error $relPath "description is missing or duplicates the title; add a <!-- description: ... --> marker distinct from the H1."
@@ -118,27 +120,48 @@ foreach ($file in $docFiles) {
         if ($len -lt $DescriptionMin -or $len -gt $DescriptionMax) {
             Add-Error $relPath "description length $len is outside $DescriptionMin-$DescriptionMax characters."
         }
-        if ($description -match $YamlSpecialPattern) {
-            Add-Error $relPath "description contains a YAML-special character (would be emitted as a quoted value); reword to avoid $YamlSpecialPattern."
+        if (Test-MsLearnYamlUnsafe $description) {
+            Add-Error $relPath "description would be emitted as a quoted YAML value (contains a special character or a leading/trailing indicator); reword so it is a plain scalar."
         }
     }
 
-    # Banned marketing words (whole-file, case-insensitive, word-boundary)
+    # Banned marketing words (whole-file, case-insensitive, word-boundary).
+    # Report the offending line number(s) to speed up CI fixes.
+    $rawLines = $raw -split "`r?`n"
     foreach ($word in $BannedWords) {
-        if ($raw -match "(?i)\b$([regex]::Escape($word))\b") {
-            Add-Error $relPath "contains banned marketing word '$word'; use neutral, instructional language."
+        $wordRe = "(?i)\b$([regex]::Escape($word))\b"
+        $hitLines = for ($li = 0; $li -lt $rawLines.Count; $li++) {
+            if ($rawLines[$li] -match $wordRe) { $li + 1 }
+        }
+        if ($hitLines) {
+            Add-Error $relPath "contains banned marketing word '$word' on line(s) $($hitLines -join ', '); use neutral, instructional language."
         }
     }
 
-    # Blockquote-as-callout (warn only)
+    # Blockquote-as-callout (warn only). A callout ("> **Lead-in**") is fine when
+    # it belongs to a contiguous blockquote that opened with an MS Learn alert
+    # marker — track the block's opening line rather than only the previous line,
+    # so multi-paragraph alerts (marker, prose, "> ", then "> **Details**") don't
+    # produce false warnings.
     $body = Remove-CodeFences $raw
     $lines = $body -split "`r?`n"
+    $inBlockquote = $false
+    $blockHasAlert = $false
     for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i] -match $CalloutPattern) {
-            $prev = if ($i -gt 0) { $lines[$i - 1] } else { '' }
-            if ($prev -notmatch $AlertPattern) {
+        $isQuote = $lines[$i] -match '^\s*>'
+        if ($isQuote) {
+            if (-not $inBlockquote) {
+                $inBlockquote = $true
+                $blockHasAlert = ($lines[$i] -match $AlertPattern)
+            }
+            if (($lines[$i] -match $CalloutPattern) -and -not $blockHasAlert) {
                 Add-Warning $relPath "blockquote callout on line $($i + 1) does not use MS Learn alert syntax ([!NOTE]/[!IMPORTANT]/[!TIP]/[!WARNING]/[!CAUTION])."
             }
+        }
+        else {
+            # Any non-blockquote line (including a blank line) ends the block.
+            $inBlockquote = $false
+            $blockHasAlert = $false
         }
     }
 }

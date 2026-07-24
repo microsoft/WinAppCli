@@ -33,6 +33,10 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = $PSScriptRoot | Split-Path -Parent
 $DocsRoot = Join-Path $ProjectRoot "docs"
 
+# Shared MS Learn front-matter rules (title/description/topic + YAML quoting),
+# kept in one place so this generator and validate-mslearn-docs.ps1 can't drift.
+. (Join-Path $PSScriptRoot 'mslearn-doc-lib.ps1')
+
 # ─── Helpers ────────────────────────────────────────────────────────────────────
 
 function Write-Step  { param([string]$msg) Write-Host "`n==> $msg" -ForegroundColor Cyan }
@@ -281,26 +285,18 @@ function Get-FrontMatter {
         [string]$DestRelPath
     )
 
-    # Extract title from first # heading
-    $title = "winapp CLI"
-    if ($Content -match '(?m)^#\s+(.+)$') {
-        $title = $Matches[1].Trim()
-    }
+    # Title = first H1 (fall back to a sane default for untitled docs).
+    $title = Get-MsLearnTitle $Content
+    if (-not $title) { $title = "winapp CLI" }
 
-    # Read per-file overrides from HTML-comment markers anywhere in the source.
-    # Supported: <!-- description: ... --> and <!-- ms.topic: ... -->
-    $description = $title
-    if ($Content -match '<!--\s*description:\s*(.+?)\s*-->') {
-        $description = $Matches[1].Trim()
-    }
-    $topic = "how-to"
-    if ($Content -match '<!--\s*ms\.topic:\s*(.+?)\s*-->') {
-        $topic = $Matches[1].Trim()
-    }
+    # Description + ms.topic resolved via the shared rules (marker override,
+    # else defaults). Quoting is applied through Format-MsLearnYamlValue so the
+    # emitted values always match what the validator gates on.
+    $description = (Resolve-MsLearnDescription -Content $Content -Title $title).Description
+    $topic = Get-MsLearnTopic -Content $Content
 
-    # Quote values that contain YAML-special characters (colons, brackets, etc.)
-    $safeTitle = if ($title -match '[:\[\]{}#&*!|>''"%@`]') { "`"$($title -replace '"', '\"')`"" } else { $title }
-    $safeDesc  = if ($description -match '[:\[\]{}#&*!|>''"%@`]') { "`"$($description -replace '"', '\"')`"" } else { $description }
+    $safeTitle = Format-MsLearnYamlValue $title
+    $safeDesc  = Format-MsLearnYamlValue $description
 
     $lines = @(
         "---"
@@ -578,13 +574,6 @@ Get-ChildItem $outFull -Recurse -File -Filter "*.md" | ForEach-Object {
     $portedDest[$rel] = $true
 }
 
-function Format-YamlValue {
-    param([string]$Value)
-    if ($Value -match '[:\[\]{}#&*!|>''"%@`]') {
-        return '"' + ($Value -replace '"', '\"') + '"'
-    }
-    return $Value
-}
 
 function Get-PortedTitle {
     param([string]$DestRel)
@@ -610,7 +599,7 @@ function ConvertTo-TocLines {
             Write-Warn "  Skipping TOC entry for un-ported file: $($node.Href)"
             continue
         }
-        $lines.Add("$pad- name: $(Format-YamlValue $node.Name)")
+        $lines.Add("$pad- name: $(Format-MsLearnYamlValue $node.Name)")
         $lines.Add("$pad  href: $($node.Href)")
         if ($node.Items -and $node.Items.Count -gt 0) {
             $childLines = ConvertTo-TocLines -Nodes $node.Items -Indent ($Indent + 2)
