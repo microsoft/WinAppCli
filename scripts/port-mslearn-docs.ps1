@@ -78,7 +78,10 @@ Write-Info "Output: $OutputPath"
 
 Write-Step "Validating source docs"
 $validator = Join-Path $PSScriptRoot "validate-mslearn-docs.ps1"
-& $validator -DocsRoot $DocsRoot
+# Run in a separate process so the validator's `exit 1` can't terminate this
+# script before we inspect the exit code and emit our own error (matches how the
+# release stage and the Pester tests invoke it).
+& pwsh -NoProfile -File $validator -DocsRoot $DocsRoot
 if ($LASTEXITCODE -ne 0) {
     Write-Error "MS Learn doc validation failed. Fix the reported issues before porting."
     exit $LASTEXITCODE
@@ -579,8 +582,10 @@ function Get-PortedTitle {
     param([string]$DestRel)
     $p = Join-Path $outFull ($DestRel -replace '/', '\')
     if (-not (Test-Path $p)) { return $DestRel }
-    $c = Get-Content $p -Raw
-    if ($c -match '(?m)^#\s+(.+)$') { return $Matches[1].Trim() }
+    # Reuse the shared H1 parser so title extraction is identical to the
+    # validator and front-matter generation.
+    $title = Get-MsLearnTitle (Get-Content $p -Raw)
+    if ($title) { return $title }
     return $DestRel
 }
 

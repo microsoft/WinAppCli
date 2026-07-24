@@ -423,6 +423,9 @@ try
             $pesterMod = Get-Module -Name Pester -ListAvailable | Where-Object { $_.Version.Major -ge 5 } | Select-Object -First 1
             if ($pesterMod) {
                 Write-Host "[TEST] Running MS Learn docs tooling Pester tests..." -ForegroundColor Blue
+                # Import the selected v5+ module explicitly so the v5 config APIs
+                # don't bind to a different Pester version already in the session.
+                Import-Module $pesterMod -Force
                 $pesterConfig = New-PesterConfiguration
                 $pesterConfig.Run.Path = $MsLearnTestsPath
                 $pesterConfig.Run.Exit = $false
