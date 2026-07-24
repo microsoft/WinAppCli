@@ -331,6 +331,12 @@ public class SparsePackagingTests : BaseCommandTests
         Assert.IsNull(ManifestService.NormalizeManifestVersion("not-a-version"));
         Assert.IsNull(ManifestService.NormalizeManifestVersion(null));
         Assert.IsNull(ManifestService.NormalizeManifestVersion(""));
+
+        // MSIX Identity/@Version components are 16-bit; out-of-range values must be rejected so the
+        // caller falls back to a packable default instead of emitting a manifest MakeAppx rejects.
+        Assert.AreEqual("65535.65535.65535.65535", ManifestService.NormalizeManifestVersion("65535.65535.65535.65535"));
+        Assert.IsNull(ManifestService.NormalizeManifestVersion("70000.0.0.0"));
+        Assert.IsNull(ManifestService.NormalizeManifestVersion("1.65536.0.0"));
     }
 
     [TestMethod]

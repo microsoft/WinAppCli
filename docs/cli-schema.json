@@ -592,7 +592,7 @@
       },
       "options": {
         "--manifest": {
-          "description": "Path to the sparse appxmanifest.xml to read identity from (default: ./appxmanifest.xml)",
+          "description": "Path to the sparse appxmanifest.xml to read identity from. When omitted, searched next to the target first (where 'winapp init --exe --sparse' writes it), then the current directory.",
           "hidden": false,
           "valueType": "System.IO.FileInfo",
           "hasDefaultValue": false,

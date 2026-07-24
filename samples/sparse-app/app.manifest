@@ -9,7 +9,7 @@
     (XML mode) and embedded into the exe at build time via <ApplicationManifest>.
 
     Regenerate/update it after changing appxmanifest.xml with:
-        winapp embed-identity app.manifest --manifest appxmanifest.xml
+        winapp embed-identity app.manifest
   -->
   <msix xmlns="urn:schemas-microsoft-com:msix.v1"
         publisher="CN=Sparse App Sample"

@@ -24,7 +24,7 @@ internal class EmbedIdentityCommand : Command, IShortDescription
         };
         ManifestOption = new Option<FileInfo>("--manifest")
         {
-            Description = "Path to the sparse appxmanifest.xml to read identity from (default: ./appxmanifest.xml)"
+            Description = "Path to the sparse appxmanifest.xml to read identity from. When omitted, searched next to the target first (where 'winapp init --exe --sparse' writes it), then the current directory."
         };
         ManifestOption.AcceptExistingOnly();
     }

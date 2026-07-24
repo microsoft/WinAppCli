@@ -304,6 +304,16 @@ internal partial class ManifestService(
             return null;
         }
 
+        // Each MSIX Identity/@Version component is a 16-bit unsigned integer. System.Version accepts
+        // larger values, but MakeAppx rejects them, so treat out-of-range metadata as unusable and let
+        // the caller fall back to a packable default (e.g. 1.0.0.0).
+        const int maxComponent = ushort.MaxValue;
+        if (parsed.Major > maxComponent || parsed.Minor > maxComponent
+            || parsed.Build > maxComponent || parsed.Revision > maxComponent)
+        {
+            return null;
+        }
+
         var major = Math.Max(parsed.Major, 0);
         var minor = Math.Max(parsed.Minor, 0);
         var build = Math.Max(parsed.Build, 0);

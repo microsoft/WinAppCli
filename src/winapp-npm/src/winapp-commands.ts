@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.4.1
+ * Source schema version: 0.5.1
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -223,7 +223,7 @@ export async function createExternalCatalog(options: CreateExternalCatalogOption
 export interface EmbedIdentityOptions extends CommonOptions {
   /** Path to the .exe (embeds identity into its side-by-side manifest via mt.exe) or an .xml/.manifest side-by-side manifest file (inserts/replaces the <msix> element; created if it doesn't exist). */
   target: string;
-  /** Path to the sparse appxmanifest.xml to read identity from (default: ./appxmanifest.xml) */
+  /** Path to the sparse appxmanifest.xml to read identity from. When omitted, searched next to the target first (where 'winapp init --exe --sparse' writes it), then the current directory. */
   manifest?: string;
 }
 

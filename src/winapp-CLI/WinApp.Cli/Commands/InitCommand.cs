@@ -126,11 +126,24 @@ internal class InitCommand : Command, IShortDescription
             var publisher = parseResult.GetValue(PublisherOption);
             var outputDir = parseResult.GetValue(OutputDirOption);
 
-            // --exe is only valid together with --sparse.
-            if (exe != null && !sparse)
+            // --exe and the sparse-only overrides (--name / --publisher / --output-dir) apply only to
+            // the sparse identity flow. Reject them without --sparse so scripts don't report success
+            // after their input is silently discarded by the normal initialization path.
+            if (!sparse)
             {
-                logger.LogError("--exe requires --sparse. Use 'winapp init' without --exe for full package initialization.");
-                return 1;
+                var sparseOnly = new List<string>();
+                if (exe != null) { sparseOnly.Add("--exe"); }
+                if (name != null) { sparseOnly.Add("--name"); }
+                if (publisher != null) { sparseOnly.Add("--publisher"); }
+                if (outputDir != null) { sparseOnly.Add("--output-dir"); }
+
+                if (sparseOnly.Count > 0)
+                {
+                    logger.LogError(
+                        "{Options} require --sparse. Use 'winapp init --exe <exe> --sparse' for identity packaging, or remove these options for full package initialization.",
+                        string.Join(", ", sparseOnly));
+                    return 1;
+                }
             }
 
             // Detect non-interactive environments (piped stdin, CI, etc.) and fall back

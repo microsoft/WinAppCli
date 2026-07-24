@@ -200,4 +200,4 @@ Connect a desktop exe to its sparse identity package by embedding the <msix> ele
 <!-- auto-generated from cli-schema.json -->
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--manifest` | Path to the sparse appxmanifest.xml to read identity from (default: ./appxmanifest.xml) | (none) |
+| `--manifest` | Path to the sparse appxmanifest.xml to read identity from. When omitted, searched next to the target first (where 'winapp init --exe --sparse' writes it), then the current directory. | (none) |
