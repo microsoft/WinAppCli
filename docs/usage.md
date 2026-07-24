@@ -874,7 +874,7 @@ winapp get-winapp-path [options]
 
 ### find-ui
 
-Search **WinUI** controls and samples for a working code example. WinUI-only: the corpus is the [WinUI 3 Gallery](https://github.com/microsoft/WinUI-Gallery), the [Windows Community Toolkit](https://github.com/CommunityToolkit/Windows), and the [microsoft-ui-reactor ReactorGallery](https://github.com/microsoft/microsoft-ui-reactor) (plus a few curated core patterns) — it does **not** cover WPF, WinForms, or other UI frameworks.
+Search **WinUI** controls and samples for a working code example. WinUI-only: the corpus is the [WinUI 3 Gallery](https://github.com/microsoft/WinUI-Gallery) and the [Windows Community Toolkit](https://github.com/CommunityToolkit/Windows) (plus a few curated core patterns) — it does **not** cover WPF, WinForms, or other UI frameworks. A third source, the [microsoft-ui-reactor ReactorGallery](https://github.com/microsoft/microsoft-ui-reactor), is **opt-in**: it is excluded from a normal search and only searched when you pass `--source reactor` (its C#-only declarative samples don't paste into a standard XAML app, so reach for it only when building a Reactor/MVU project).
 
 ```bash
 winapp find-ui "<query>" [options]
@@ -885,8 +885,8 @@ The corpus is fetched from GitHub on first use and cached per-user under `<globa
 **Options:**
 
 - `--id <id>` - Fetch the code (Gallery/Toolkit return XAML and/or C#; Reactor is C#-only) plus prerequisite notes for one or more scenario ids from a prior search (e.g. `gallery-tabview-1`). Repeatable.
-- `--list` - List every discoverable control/sample id instead of searching.
-- `--source <gallery|toolkit|reactor|core>` - Restrict search results to a single source. (Search only — not valid with `--list`/`--id`.)
+- `--list` - List every discoverable control/sample id instead of searching (Gallery + Toolkit + core; the opt-in Reactor source is excluded).
+- `--source <gallery|toolkit|reactor|core>` - Restrict search results to a single source. (Search only — not valid with `--list`/`--id`.) **Reactor is opt-in** — it is excluded from a normal search, so `--source reactor` is the only way to search it.
 - `--max <N>` - Maximum number of matched controls to return (default: 3).
 - `--refresh` - Bypass the local cache and re-fetch the WinUI corpus from GitHub.
 - `--json` - Emit structured JSON (agent-friendly): a compact list of matches (`id`, `control`, `source`, `header`, `score`) for search, or full code for `--id`.
@@ -902,7 +902,7 @@ winapp find-ui "tabbed layout"
 # Restrict to the Windows Community Toolkit
 winapp find-ui "swipeable list rows" --source toolkit
 
-# Restrict to Reactor (C#-only declarative WinUI)
+# Restrict to Reactor (opt-in; C#-only declarative WinUI — Reactor projects only)
 winapp find-ui "flex layout" --source reactor
 
 # Fetch the full XAML + C# for a specific scenario

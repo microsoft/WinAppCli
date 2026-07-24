@@ -4,12 +4,19 @@ Use this skill when building a **WinUI 3** UI and you need to discover which
 control fits an intent and get a real, working code example — without leaving the
 CLI or guessing at control names and APIs.
 
-`winapp find-ui` searches the **WinUI 3 Gallery**, the **Windows Community
-Toolkit**, and the **microsoft-ui-reactor ReactorGallery** (plus a few curated
-core patterns) and returns a working code snippet plus where it came from.
+`winapp find-ui` searches the **WinUI 3 Gallery** and the **Windows Community
+Toolkit** (plus a few curated **core** patterns) and returns a working code
+snippet plus where it came from. A third source, the **microsoft-ui-reactor
+ReactorGallery**, is **opt-in**: it is excluded from a normal search and is only
+searched when you pass `--source reactor`.
 
-- **WinUI-only.** The corpus is WinUI 3 Gallery + Windows Community Toolkit +
-  Reactor. It does **not** cover WPF, WinForms, or other UI frameworks.
+- **WinUI-only.** The corpus is WinUI 3 Gallery + Windows Community Toolkit (+
+  Reactor when opted in). It does **not** cover WPF, WinForms, or other UI
+  frameworks.
+- **Reactor is opt-in and for Reactor projects only.** Reactor is a C#-only
+  declarative/MVU framework — its samples can't paste into a standard `dotnet new
+  winui` XAML + code-behind app, so a default search deliberately omits it. Only
+  reach for `--source reactor` when you're actually building a Reactor app.
 - **Result shape varies by source.** Gallery and Toolkit scenarios return XAML,
   C#, or both (one-sided samples are kept); Reactor scenarios are C#-only
   declarative WinUI (no XAML).
@@ -43,12 +50,15 @@ winapp find-ui "swipeable list rows"
 # Restrict to one source
 winapp find-ui "settings card" --source toolkit
 winapp find-ui "color picker" --source gallery
+
+# Reactor is opt-in: excluded from a normal search, only searched with --source reactor
+# (use this only for a Reactor/MVU project — its C#-only samples don't fit standard XAML apps)
 winapp find-ui "flex layout" --source reactor
 
 # Return more candidates
 winapp find-ui "navigation" --max 6
 
-# Browse everything (heavy — prefer search)
+# Browse everything (heavy — prefer search; excludes opt-in Reactor)
 winapp find-ui --list
 
 # Force a corpus refresh from GitHub
@@ -72,15 +82,23 @@ winapp find-ui "color picker" --json
 
 - **One mode at a time.** A search query, `--id`, and `--list` are mutually
   exclusive — combining them is rejected. `--source` applies to search only.
+- **Reactor is opt-in.** A normal search and `--list` cover Gallery + Toolkit +
+  core only. Pass `--source reactor` to search Reactor (reactor-only results);
+  a `reactor-<control>-<n>` `--id` still fetches even without the flag. Skipping
+  Reactor by default keeps its C#-only samples from outranking usable controls in
+  a standard XAML app.
 - **First run needs network.** The corpus is fetched from GitHub on first use and
   cached per-user under `<global .winapp>/cache/find-ui`. Subsequent runs are
   served from the cache (refreshed at most every 7 days, or on demand with
   `--refresh`). If the very first run is offline you'll get a clear "connect and
   run once" message.
-- **Scenario ids** are stable within a cached corpus and look like
-  `gallery-<control>-<n>` / `toolkit-<control>-<n>` / `reactor-<control>-<n>`; the
-  `<source>-` prefix disambiguates controls that exist in more than one gallery
-  (e.g. `ColorPicker`).
+- **Scenario ids** are stable within a cached corpus. Gallery/Toolkit/Reactor ids
+  look like `gallery-<control>-<n>` / `toolkit-<control>-<n>` /
+  `reactor-<control>-<n>`; the `<source>-` prefix disambiguates controls that
+  exist in more than one gallery (e.g. `ColorPicker`). Curated **core** patterns
+  use a plain descriptive id with **no** `<source>-<control>-<n>` shape (e.g.
+  `file-picker-desktop`, `live-charts`); fetch them the same way with `--id`, and
+  browse them with `--source core`.
 - **Exit codes** are script-friendly: `0` on a hit, `1` on no match / error.
 - Keep queries **focused** (one feature per query) — the lexical ranker rewards
   specific phrasing. Batch multiple focused queries rather than one broad one.

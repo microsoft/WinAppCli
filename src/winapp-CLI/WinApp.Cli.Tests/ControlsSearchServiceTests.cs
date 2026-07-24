@@ -124,6 +124,105 @@ public class ControlsSearchServiceTests
     }
 
     [TestMethod]
+    public async Task GetEngineAsync_DefaultExcludesReactor_DoesNotLoadProvider()
+    {
+        var gallery = new FakeSearchProvider("gallery", Data("gallery", "tabview"));
+        var toolkit = new FakeSearchProvider("toolkit", Data("toolkit", "datagrid"));
+        var reactor = new FakeSearchProvider("reactor", Data("reactor", "flex"));
+        var sut = new ControlsSearchService([gallery, toolkit, reactor]);
+
+        var engine = await sut.GetEngineAsync();
+        var ids = engine.ListAll().Select(x => x.id).ToList();
+
+        Assert.AreEqual(0, reactor.LoadCalls, "Reactor is opt-in; a default search must not even load (or fetch) it");
+        Assert.IsFalse(ids.Any(id => id.Contains("flex", StringComparison.Ordinal)),
+            "Reactor scenarios must be absent from the default corpus");
+    }
+
+    [TestMethod]
+    public async Task GetEngineAsync_IncludeReactor_LoadsProviderAndSurfacesScenarios()
+    {
+        var gallery = new FakeSearchProvider("gallery", Data("gallery", "tabview"));
+        var toolkit = new FakeSearchProvider("toolkit", Data("toolkit", "datagrid"));
+        var reactor = new FakeSearchProvider("reactor", Data("reactor", "flex"));
+        var sut = new ControlsSearchService([gallery, toolkit, reactor]);
+
+        var engine = await sut.GetEngineAsync(includeReactor: true);
+        var ids = engine.ListAll().Select(x => x.id).ToList();
+
+        Assert.AreEqual(1, reactor.LoadCalls, "opting in (--source reactor / reactor-* id) must load the Reactor provider");
+        Assert.IsTrue(ids.Any(id => id.Contains("flex", StringComparison.Ordinal)),
+            "Reactor scenarios must be present when opted in");
+    }
+
+    [TestMethod]
+    public async Task GetEngineAsync_MemoizesReactorVariantSeparately()
+    {
+        var gallery = new FakeSearchProvider("gallery", Data("gallery", "tabview"));
+        var toolkit = new FakeSearchProvider("toolkit", Data("toolkit", "datagrid"));
+        var reactor = new FakeSearchProvider("reactor", Data("reactor", "flex"));
+        var sut = new ControlsSearchService([gallery, toolkit, reactor]);
+
+        var def1 = await sut.GetEngineAsync();
+        var rea1 = await sut.GetEngineAsync(includeReactor: true);
+        var def2 = await sut.GetEngineAsync();
+        var rea2 = await sut.GetEngineAsync(includeReactor: true);
+
+        Assert.AreNotSame(def1, rea1, "the with- and without-Reactor corpora are distinct engines");
+        Assert.AreSame(def1, def2, "the default (no-Reactor) engine is memoized independently");
+        Assert.AreSame(rea1, rea2, "the with-Reactor engine is memoized independently");
+        Assert.AreEqual(1, reactor.LoadCalls, "Reactor loads once (for the with-Reactor engine) and never for the default");
+    }
+
+    [TestMethod]
+    public async Task GetEngineAsync_ForceRefresh_InvalidatesSiblingReactorEngine()
+    {
+        // Warm both the default and the with-Reactor engines, then force-refresh the
+        // default. A refresh re-fetches the whole corpus, so the with-Reactor engine
+        // must NOT keep serving its pre-refresh in-memory data: the next opt-in call
+        // has to rebuild it (reloading the reactor provider).
+        var gallery = new FakeSearchProvider("gallery", Data("gallery", "tabview"));
+        var toolkit = new FakeSearchProvider("toolkit", Data("toolkit", "datagrid"));
+        var reactor = new FakeSearchProvider("reactor", Data("reactor", "flex"));
+        var sut = new ControlsSearchService([gallery, toolkit, reactor]);
+
+        await sut.GetEngineAsync();                       // build default (reactor skipped)
+        var rea1 = await sut.GetEngineAsync(includeReactor: true); // build with-reactor (reactor loads once)
+        Assert.AreEqual(1, reactor.LoadCalls);
+
+        await sut.GetEngineAsync(forceRefresh: true);     // refresh default → invalidate both slots
+        var rea2 = await sut.GetEngineAsync(includeReactor: true); // must rebuild with-reactor
+
+        Assert.AreEqual(2, reactor.LoadCalls, "a forced refresh must invalidate the sibling engine so Reactor reloads");
+        Assert.AreNotSame(rea1, rea2, "the with-Reactor engine must be rebuilt after a refresh, not served stale");
+    }
+
+    [TestMethod]
+    public async Task ClearCache_ResetsBothMemoizedEngines()
+    {
+        // Warm the default and with-Reactor engines, clear, then re-request both.
+        // Every provider (including reactor, for the opt-in engine) must reload,
+        // proving both _engine and _engineWithReactor were reset.
+        var gallery = new FakeSearchProvider("gallery", Data("gallery", "tabview"));
+        var toolkit = new FakeSearchProvider("toolkit", Data("toolkit", "datagrid"));
+        var reactor = new FakeSearchProvider("reactor", Data("reactor", "flex"));
+        var sut = new ControlsSearchService([gallery, toolkit, reactor]);
+
+        var def1 = await sut.GetEngineAsync();
+        var rea1 = await sut.GetEngineAsync(includeReactor: true);
+        Assert.AreEqual(1, reactor.LoadCalls, "reactor loads once (only for the opt-in engine) while both are warm");
+
+        sut.ClearCache();
+
+        var def2 = await sut.GetEngineAsync();
+        var rea2 = await sut.GetEngineAsync(includeReactor: true);
+
+        Assert.AreNotSame(def1, def2, "the default engine must be rebuilt after ClearCache");
+        Assert.AreNotSame(rea1, rea2, "the with-Reactor engine must be rebuilt after ClearCache");
+        Assert.AreEqual(2, reactor.LoadCalls, "ClearCache must reset the with-Reactor memo slot so reactor reloads");
+    }
+
+    [TestMethod]
     public void ClearCache_DelegatesToEveryProvider()
     {
         var gallery = new FakeSearchProvider("gallery", Data("gallery", "tabview"));

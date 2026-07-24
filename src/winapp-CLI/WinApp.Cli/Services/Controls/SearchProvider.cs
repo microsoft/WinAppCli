@@ -284,6 +284,24 @@ internal static class ProviderRegistry
     public static bool IsValidSourceFilter(string source) =>
         SourceFilterValues.Any(s => string.Equals(s, source, StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>The opt-in Reactor source id. Reactor's C#-only declarative
+    /// samples don't paste into a standard XAML app, so it is excluded from a
+    /// default search and only loaded when a caller explicitly asks for it via
+    /// <c>--source reactor</c> or a <c>reactor-*</c> id. This is the single
+    /// source of truth for that id so the command and the search service don't
+    /// drift.</summary>
+    public const string ReactorSourceId = "reactor";
+
+    /// <summary>True when <paramref name="source"/> is the opt-in Reactor
+    /// <c>--source</c> value (case-insensitive).</summary>
+    public static bool IsReactorSource(string? source) =>
+        string.Equals(source, ReactorSourceId, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>True when <paramref name="scenarioId"/> belongs to the Reactor
+    /// source (its <c>reactor-</c> prefix maps to the Reactor provider).</summary>
+    public static bool IsReactorScenarioId(string scenarioId) =>
+        string.Equals(ForScenarioId(scenarioId)?.Id, ReactorSourceId, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Descriptor whose <c>{Id}-</c> prefix matches <paramref name="scenarioId"/>, if any.</summary>
     public static ProviderDescriptor? ForScenarioId(string scenarioId) =>
         Descriptors.FirstOrDefault(d => scenarioId.StartsWith($"{d.Id}-", StringComparison.Ordinal));

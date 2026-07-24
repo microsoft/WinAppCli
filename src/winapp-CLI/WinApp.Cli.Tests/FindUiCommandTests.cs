@@ -164,6 +164,69 @@ public class FindUiCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task Search_DoesNotIncludeReactor()
+    {
+        var fake = FakeControlsSearchService.WithEngine(BuildEngine());
+        _fakeService = fake;
+        await ParseAndInvokeWithCaptureAsync(Command(), ["data grid"]);
+        Assert.IsFalse(fake.LastIncludeReactor, "a default search must exclude the opt-in Reactor source");
+    }
+
+    [TestMethod]
+    public async Task List_DoesNotIncludeReactor()
+    {
+        var fake = FakeControlsSearchService.WithEngine(BuildEngine());
+        _fakeService = fake;
+        await ParseAndInvokeWithCaptureAsync(Command(), ["--list"]);
+        Assert.IsFalse(fake.LastIncludeReactor, "--list browses the default corpus; Reactor stays opt-in");
+    }
+
+    [TestMethod]
+    public async Task SourceReactor_IncludesReactor()
+    {
+        var fake = FakeControlsSearchService.WithEngine(BuildEngine());
+        _fakeService = fake;
+        await ParseAndInvokeWithCaptureAsync(Command(), ["flex layout", "--source", "reactor"]);
+        Assert.IsTrue(fake.LastIncludeReactor, "--source reactor is the explicit opt-in and must load Reactor");
+    }
+
+    [TestMethod]
+    public async Task SourceGallery_DoesNotIncludeReactor()
+    {
+        var fake = FakeControlsSearchService.WithEngine(BuildEngine());
+        _fakeService = fake;
+        await ParseAndInvokeWithCaptureAsync(Command(), ["tabview", "--source", "gallery"]);
+        Assert.IsFalse(fake.LastIncludeReactor, "a non-reactor --source must not pull in Reactor");
+    }
+
+    [TestMethod]
+    public async Task IdReactor_IncludesReactor()
+    {
+        var fake = FakeControlsSearchService.WithEngine(BuildEngine());
+        _fakeService = fake;
+        await ParseAndInvokeWithCaptureAsync(Command(), ["--id", "reactor-flex-1"]);
+        Assert.IsTrue(fake.LastIncludeReactor, "fetching a reactor-* id must load Reactor so the id resolves");
+    }
+
+    [TestMethod]
+    public async Task IdGallery_DoesNotIncludeReactor()
+    {
+        var fake = FakeControlsSearchService.WithEngine(BuildEngine());
+        _fakeService = fake;
+        await ParseAndInvokeWithCaptureAsync(Command(), ["--id", "gallery-tabview-1"]);
+        Assert.IsFalse(fake.LastIncludeReactor, "a non-reactor id must not load Reactor");
+    }
+
+    [TestMethod]
+    public async Task IdMixedWithReactor_IncludesReactor()
+    {
+        var fake = FakeControlsSearchService.WithEngine(BuildEngine());
+        _fakeService = fake;
+        await ParseAndInvokeWithCaptureAsync(Command(), ["--id", "gallery-tabview-1", "--id", "reactor-flex-1"]);
+        Assert.IsTrue(fake.LastIncludeReactor, "any reactor-* id in a batch must load Reactor");
+    }
+
+    [TestMethod]
     public async Task NoArgs_PrintsGuidance_Exit1()
     {
         _fakeService = FakeControlsSearchService.WithEngine(BuildEngine());

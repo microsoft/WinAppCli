@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.4.1
+ * Source schema version: 0.5.1
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -227,18 +227,18 @@ export interface FindUiOptions extends CommonOptions {
   id?: string | string[];
   /** Format output as JSON */
   json?: boolean;
-  /** List every discoverable control/sample id instead of searching. */
+  /** List every discoverable control/sample id instead of searching. Covers Gallery, Toolkit, and core; the opt-in Reactor source is excluded (search it with --source reactor). */
   list?: boolean;
   /** Maximum number of matched controls to return. */
   max?: number;
   /** Bypass the local cache and re-fetch the WinUI corpus from GitHub. */
   refresh?: boolean;
-  /** Restrict results to a single source: gallery (WinUI 3 Gallery), toolkit (Windows Community Toolkit), reactor (microsoft-ui-reactor, C#-only declarative WinUI), or core (curated patterns). */
+  /** Restrict results to a single source: gallery (WinUI 3 Gallery), toolkit (Windows Community Toolkit), reactor (microsoft-ui-reactor, C#-only declarative WinUI), or core (curated patterns). Reactor is opt-in — it is excluded from a normal search, so pass --source reactor to search it (only do this for a Reactor/MVU project; its C#-only samples don't paste into a standard XAML app). */
   source?: string;
 }
 
 /**
- * Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery, the Windows Community Toolkit, and the microsoft-ui-reactor ReactorGallery (not WPF/WinForms). The corpus is fetched from GitHub on first use and cached per-user, so the first run requires network access.
+ * Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery and the Windows Community Toolkit by default (plus the microsoft-ui-reactor ReactorGallery as an opt-in source via --source reactor); not WPF/WinForms. The corpus is fetched from GitHub on first use and cached per-user, so the first run requires network access.
  */
 export async function findUi(options: FindUiOptions = {}): Promise<WinappResult> {
   const args: string[] = ['find-ui'];

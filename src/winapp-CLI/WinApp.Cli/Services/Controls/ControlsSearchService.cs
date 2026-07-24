@@ -28,12 +28,18 @@ internal interface IControlsSearchService
     /// loaded (offline cold cache), a core-only engine is returned instead of
     /// throwing — the embedded core patterns are always available, so
     /// <c>--list</c>, <c>--source core</c>, and <c>--id &lt;core-id&gt;</c> keep
-    /// working offline. <paramref name="onFetchStarting"/> is invoked (with a
+    /// working offline. <paramref name="includeReactor"/> gates the opt-in Reactor
+    /// source: when false (the default — e.g. a plain search or <c>--list</c>) the
+    /// Reactor provider is neither loaded nor fetched, so its C#-only samples never
+    /// pollute results for standard XAML apps; the command sets it true only for a
+    /// <c>--source reactor</c> search or a <c>reactor-*</c> <c>--id</c> fetch. The
+    /// with- and without-Reactor engines are memoized separately.
+    /// <paramref name="onFetchStarting"/> is invoked (with a
     /// provider display name) the first time any provider starts a network fetch,
     /// so the caller can show a one-time "fetching…" notice; it is never invoked
     /// when everything is served from cache or the memoized engine.
     /// </summary>
-    Task<SearchEngine> GetEngineAsync(bool forceRefresh = false, bool allowCoreOnly = false, Action<string>? onFetchStarting = null, CancellationToken cancellationToken = default);
+    Task<SearchEngine> GetEngineAsync(bool forceRefresh = false, bool allowCoreOnly = false, bool includeReactor = false, Action<string>? onFetchStarting = null, CancellationToken cancellationToken = default);
 
     /// <summary>Delete every provider's per-user cache so the next load re-fetches.</summary>
     void ClearCache();
@@ -50,6 +56,11 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly ISearchProvider[] _providers;
     private SearchEngine? _engine;
+    // Reactor is opt-in, so the corpus differs by whether it's included. Memoize
+    // the two shapes separately: a default (Gallery + Toolkit + core) engine and a
+    // with-Reactor engine, so switching between a normal search and a
+    // `--source reactor` search within one process doesn't clobber either cache.
+    private SearchEngine? _engineWithReactor;
 
     /// <summary>Production constructor: providers are rooted at the managed
     /// global <c>.winapp</c> cache directory so environment/test path overrides
@@ -66,19 +77,32 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
         _providers = providers;
     }
 
-    public async Task<SearchEngine> GetEngineAsync(bool forceRefresh = false, bool allowCoreOnly = false, Action<string>? onFetchStarting = null, CancellationToken cancellationToken = default)
+    public async Task<SearchEngine> GetEngineAsync(bool forceRefresh = false, bool allowCoreOnly = false, bool includeReactor = false, Action<string>? onFetchStarting = null, CancellationToken cancellationToken = default)
     {
-        if (_engine != null && !forceRefresh)
+        var memoized = includeReactor ? _engineWithReactor : _engine;
+        if (memoized != null && !forceRefresh)
         {
-            return _engine;
+            return memoized;
         }
 
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_engine != null && !forceRefresh)
+            memoized = includeReactor ? _engineWithReactor : _engine;
+            if (memoized != null && !forceRefresh)
             {
-                return _engine;
+                return memoized;
+            }
+
+            // A forced refresh re-fetches the corpus from GitHub and rewrites the
+            // on-disk cache for every provider it loads. Invalidate BOTH memoized
+            // engines up front so the OTHER variant (which this call won't rebuild)
+            // can't keep serving pre-refresh, in-memory scenario data on a later
+            // call — a `--refresh` must not leave one engine shape stale.
+            if (forceRefresh)
+            {
+                _engine = null;
+                _engineWithReactor = null;
             }
 
             var allScenarios = new List<Scenario>();
@@ -91,6 +115,16 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
 
             foreach (var provider in _providers)
             {
+                // Reactor is opt-in. Unless this invocation explicitly needs it
+                // (a --source reactor search or a reactor-* --id fetch), skip the
+                // provider entirely — no load, no network fetch — so Reactor's
+                // C#-only samples never compete in a default search for a standard
+                // XAML app.
+                if (!includeReactor && ProviderRegistry.IsReactorSource(provider.Id))
+                {
+                    continue;
+                }
+
                 var data = await provider.LoadAsync(forceRefresh, onFetchStarting, cancellationToken).ConfigureAwait(false);
                 if (data.Scenarios.Length == 0)
                 {
@@ -133,10 +167,18 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
             // Only memoize a COMPLETE corpus. If a provider came back empty (its
             // cold-cache fetch failed), serve the partial result for this call but
             // don't cache it in-memory, so a later invocation re-attempts the
-            // missing source instead of being pinned to a degraded engine.
+            // missing source instead of being pinned to a degraded engine. The
+            // with- and without-Reactor corpora memoize into separate slots.
             if (!anyProviderEmpty)
             {
-                _engine = engine;
+                if (includeReactor)
+                {
+                    _engineWithReactor = engine;
+                }
+                else
+                {
+                    _engine = engine;
+                }
             }
             return engine;
         }
@@ -149,6 +191,7 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
     public void ClearCache()
     {
         _engine = null;
+        _engineWithReactor = null;
 
         var failures = new List<Exception>();
         foreach (var provider in _providers)

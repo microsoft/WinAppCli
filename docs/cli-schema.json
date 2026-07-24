@@ -575,7 +575,7 @@
       }
     },
     "find-ui": {
-      "description": "Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery, the Windows Community Toolkit, and the microsoft-ui-reactor ReactorGallery (not WPF/WinForms). The corpus is fetched from GitHub on first use and cached per-user, so the first run requires network access.",
+      "description": "Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery and the Windows Community Toolkit by default (plus the microsoft-ui-reactor ReactorGallery as an opt-in source via --source reactor); not WPF/WinForms. The corpus is fetched from GitHub on first use and cached per-user, so the first run requires network access.",
       "hidden": false,
       "arguments": {
         "query": {
@@ -616,7 +616,7 @@
           "recursive": false
         },
         "--list": {
-          "description": "List every discoverable control/sample id instead of searching.",
+          "description": "List every discoverable control/sample id instead of searching. Covers Gallery, Toolkit, and core; the opt-in Reactor source is excluded (search it with --source reactor).",
           "hidden": false,
           "valueType": "System.Boolean",
           "hasDefaultValue": true,
@@ -671,7 +671,7 @@
           "recursive": false
         },
         "--source": {
-          "description": "Restrict results to a single source: gallery (WinUI 3 Gallery), toolkit (Windows Community Toolkit), reactor (microsoft-ui-reactor, C#-only declarative WinUI), or core (curated patterns).",
+          "description": "Restrict results to a single source: gallery (WinUI 3 Gallery), toolkit (Windows Community Toolkit), reactor (microsoft-ui-reactor, C#-only declarative WinUI), or core (curated patterns). Reactor is opt-in — it is excluded from a normal search, so pass --source reactor to search it (only do this for a Reactor/MVU project; its C#-only samples don't paste into a standard XAML app).",
           "hidden": false,
           "valueType": "System.String",
           "hasDefaultValue": false,

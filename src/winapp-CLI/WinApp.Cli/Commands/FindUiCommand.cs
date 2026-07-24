@@ -47,12 +47,12 @@ internal sealed class FindUiCommand : Command, IShortDescription
 
         ListOption = new Option<bool>("--list")
         {
-            Description = "List every discoverable control/sample id instead of searching."
+            Description = "List every discoverable control/sample id instead of searching. Covers Gallery, Toolkit, and core; the opt-in Reactor source is excluded (search it with --source reactor)."
         };
 
         SourceOption = new Option<string?>("--source")
         {
-            Description = "Restrict results to a single source: gallery (WinUI 3 Gallery), toolkit (Windows Community Toolkit), reactor (microsoft-ui-reactor, C#-only declarative WinUI), or core (curated patterns)."
+            Description = "Restrict results to a single source: gallery (WinUI 3 Gallery), toolkit (Windows Community Toolkit), reactor (microsoft-ui-reactor, C#-only declarative WinUI), or core (curated patterns). Reactor is opt-in — it is excluded from a normal search, so pass --source reactor to search it (only do this for a Reactor/MVU project; its C#-only samples don't paste into a standard XAML app)."
         };
 
         MaxOption = new Option<int>("--max")
@@ -68,7 +68,7 @@ internal sealed class FindUiCommand : Command, IShortDescription
     }
 
     public FindUiCommand()
-        : base("find-ui", "Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery, the Windows Community Toolkit, and the microsoft-ui-reactor ReactorGallery (not WPF/WinForms). The corpus is fetched from GitHub on first use and cached per-user, so the first run requires network access.")
+        : base("find-ui", "Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery and the Windows Community Toolkit by default (plus the microsoft-ui-reactor ReactorGallery as an opt-in source via --source reactor); not WPF/WinForms. The corpus is fetched from GitHub on first use and cached per-user, so the first run requires network access.")
     {
         Arguments.Add(QueryArgument);
         Options.Add(IdOption);
@@ -137,9 +137,16 @@ internal sealed class FindUiCommand : Command, IShortDescription
             var allowCoreOnly = list
                 || string.Equals(source, "core", StringComparison.OrdinalIgnoreCase)
                 || (ids.Length > 0 && ids.All(id => ProviderRegistry.ForScenarioId(id) is null));
+
+            // Reactor is opt-in: its C#-only declarative samples can't paste into a
+            // standard XAML app, so they must never surface in a default search.
+            // Only load/fetch Reactor when the caller explicitly asks for it — a
+            // "--source reactor" search or a "reactor-*" id fetch.
+            var includeReactor = ProviderRegistry.IsReactorSource(source)
+                || ids.Any(ProviderRegistry.IsReactorScenarioId);
             try
             {
-                engine = await searchService.GetEngineAsync(refresh, allowCoreOnly, BuildFetchNotice(json), cancellationToken).ConfigureAwait(false);
+                engine = await searchService.GetEngineAsync(refresh, allowCoreOnly, includeReactor, BuildFetchNotice(json), cancellationToken).ConfigureAwait(false);
             }
             catch (ControlsDataUnavailableException ex)
             {
@@ -194,6 +201,14 @@ internal sealed class FindUiCommand : Command, IShortDescription
             if (groups.Count == 0)
             {
                 logger.LogInformation("No WinUI controls matched \"{Query}\".", query);
+                // A default search excludes the opt-in Reactor source. If the user
+                // hasn't already scoped to a source, nudge them toward it so a
+                // Reactor-only match isn't silently invisible.
+                if (source is null)
+                {
+                    logger.LogInformation(
+                        "Reactor samples are excluded by default; add --source reactor to search them (Reactor/MVU projects only).");
+                }
                 return 1;
             }
 
