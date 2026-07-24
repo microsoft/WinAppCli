@@ -1,5 +1,5 @@
 name: Collect Build Metrics
-description: Measure artifact sizes, test results, and CLI startup time
+description: Measure artifact sizes, test results, coverage, and CLI startup time, and render them to the run's job summary
 
 inputs:
   solution-path:
@@ -25,7 +25,6 @@ runs:
         $msixX64 = Get-ChildItem "$artifacts/msix-packages/*x64*.msix" -ErrorAction SilentlyContinue | Select-Object -First 1
         $msixArm64 = Get-ChildItem "$artifacts/msix-packages/*arm64*.msix" -ErrorAction SilentlyContinue | Select-Object -First 1
         $nugetPkg = Get-ChildItem "$artifacts/nuget/*.nupkg" -ErrorAction SilentlyContinue | Select-Object -First 1
-        $vsixPkg = Get-ChildItem "$artifacts/*.vsix" -ErrorAction SilentlyContinue | Select-Object -First 1
 
         if ($x64Files) { $sizes["cli-win-x64"] = ($x64Files | Measure-Object -Property Length -Sum).Sum }
         if ($arm64Files) { $sizes["cli-win-arm64"] = ($arm64Files | Measure-Object -Property Length -Sum).Sum }
@@ -33,7 +32,6 @@ runs:
         if ($msixX64) { $sizes["msix-x64"] = $msixX64.Length }
         if ($msixArm64) { $sizes["msix-arm64"] = $msixArm64.Length }
         if ($nugetPkg) { $sizes["nuget-package"] = $nugetPkg.Length }
-        if ($vsixPkg) { $sizes["vscode-extension"] = $vsixPkg.Length }
 
         $sizes | ConvertTo-Json | Set-Content "$artifacts/binary-sizes.json"
 
@@ -141,3 +139,79 @@ runs:
         $startup | ConvertTo-Json | Set-Content "${{ inputs.artifacts-path }}/startup-time.json"
 
         Write-Host "CLI startup time (--version): ${median}ms median (samples: $($times -join ', ')ms)"
+
+    # Render the collected metrics into the run's job summary so every build
+    # (including pushes to main, which never get a PR comment) surfaces its
+    # coverage/tests/startup/sizes on the run page without digging into logs.
+    - name: Write metrics job summary
+      if: ${{ !cancelled() }}
+      shell: pwsh
+      run: |
+        $artifacts = "${{ inputs.artifacts-path }}"
+        $summaryPath = $env:GITHUB_STEP_SUMMARY
+        if (-not $summaryPath) {
+          Write-Host "GITHUB_STEP_SUMMARY not set; skipping job summary"
+          exit 0
+        }
+
+        function Read-JsonOrNull($path) {
+          if (Test-Path $path) {
+            try { return Get-Content $path -Raw | ConvertFrom-Json } catch { return $null }
+          }
+          return $null
+        }
+
+        $coverage = Read-JsonOrNull "$artifacts/coverage-summary.json"
+        $tests    = Read-JsonOrNull "$artifacts/test-summary.json"
+        $startup  = Read-JsonOrNull "$artifacts/startup-time.json"
+        $sizes    = Read-JsonOrNull "$artifacts/binary-sizes.json"
+
+        $md = New-Object System.Collections.Generic.List[string]
+        $md.Add('## Build Metrics')
+        $md.Add('')
+
+        # Coverage first — this is the value that has no other surface on main.
+        $lineCov   = if ($coverage -and $null -ne $coverage.lineCoverage)   { "$($coverage.lineCoverage)%" }   else { 'n/a' }
+        $branchCov = if ($coverage -and $null -ne $coverage.branchCoverage) { "$($coverage.branchCoverage)%" } else { 'n/a' }
+        $md.Add('### Test Coverage')
+        $md.Add('')
+        $md.Add('| Metric | Value |')
+        $md.Add('| --- | --- |')
+        $md.Add("| Line coverage | $lineCov |")
+        $md.Add("| Branch coverage | $branchCov |")
+        $md.Add('')
+
+        if ($tests -and $tests.total -gt 0) {
+          $durSec = [math]::Round(([double]$tests.durationMs) / 1000, 1)
+          $md.Add('### Test Results')
+          $md.Add('')
+          $md.Add('| Total | Passed | Failed | Skipped | Duration |')
+          $md.Add('| --- | --- | --- | --- | --- |')
+          $md.Add("| $($tests.total) | $($tests.passed) | $($tests.failed) | $($tests.skipped) | ${durSec}s |")
+          $md.Add('')
+        }
+
+        if ($startup -and $startup.medianMs) {
+          $md.Add('### CLI Startup Time')
+          $md.Add('')
+          $md.Add("Median: **$($startup.medianMs) ms** (x64, " + '`winapp --version`' + ')')
+          $md.Add('')
+        }
+
+        if ($sizes) {
+          $sizeProps = @($sizes.PSObject.Properties | Sort-Object Name)
+          if ($sizeProps.Count -gt 0) {
+            $md.Add('### Binary Sizes')
+            $md.Add('')
+            $md.Add('| Artifact | Size |')
+            $md.Add('| --- | --- |')
+            foreach ($p in $sizeProps) {
+              $mb = [math]::Round([double]$p.Value / 1MB, 2)
+              $md.Add("| $($p.Name) | $mb MB |")
+            }
+            $md.Add('')
+          }
+        }
+
+        ($md -join "`n") | Add-Content -Path $summaryPath -Encoding utf8
+        Write-Host "Wrote build metrics to job summary"

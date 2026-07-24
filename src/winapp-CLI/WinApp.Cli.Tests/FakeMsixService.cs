@@ -14,7 +14,29 @@ internal class FakeMsixService : IMsixService
 {
     public MsixIdentityResult FakeIdentityResult { get; set; } = new("TestPackage", "CN=TestPublisher", "TestApp");
     public List<(string ManifestPath, bool Clean)> AddLooseLayoutCalls { get; } = [];
+    public List<(string? EntryPoint, string? ManifestPath, bool NoInstall, bool KeepIdentity)> AddSparseIdentityCalls { get; } = [];
     public Exception? ExceptionToThrow { get; set; }
+
+    /// <summary>When set, <see cref="AddSparseIdentityAsync"/> throws this exception.</summary>
+    public Exception? SparseExceptionToThrow { get; set; }
+
+    /// <summary>Records the input folder passed to each <see cref="CreateMsixPackageAsync"/> call.</summary>
+    public List<DirectoryInfo> CreatePackageCalls { get; } = [];
+
+    /// <summary>Controls the <c>Signed</c> flag returned by <see cref="CreateMsixPackageAsync"/>.</summary>
+    public bool PackageSigned { get; set; }
+
+    /// <summary>When set, <see cref="CreateMsixPackageAsync"/> throws this exception.</summary>
+    public Exception? PackageExceptionToThrow { get; set; }
+
+    /// <summary>Records the input folders passed to each <see cref="CreateMsixBundleAsync"/> call.</summary>
+    public List<DirectoryInfo[]> CreateBundleCalls { get; } = [];
+
+    /// <summary>Controls the <c>Signed</c> flag returned by <see cref="CreateMsixBundleAsync"/>.</summary>
+    public bool BundleSigned { get; set; }
+
+    /// <summary>When set, <see cref="CreateMsixBundleAsync"/> throws this exception.</summary>
+    public Exception? BundleExceptionToThrow { get; set; }
 
     public Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(
         FileInfo appxManifestPath,
@@ -41,6 +63,11 @@ internal class FakeMsixService : IMsixService
         TaskContext taskContext,
         CancellationToken cancellationToken = default)
     {
+        AddSparseIdentityCalls.Add((entryPointPath, appxManifestPath?.FullName, noInstall, keepIdentity));
+        if (SparseExceptionToThrow != null)
+        {
+            throw SparseExceptionToThrow;
+        }
         return Task.FromResult(FakeIdentityResult);
     }
 
@@ -98,7 +125,12 @@ internal class FakeMsixService : IMsixService
         string? executable = null,
         CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(new CreateMsixPackageResult(new FileInfo("fake.msix"), false));
+        CreatePackageCalls.Add(inputFolder);
+        if (PackageExceptionToThrow != null)
+        {
+            throw PackageExceptionToThrow;
+        }
+        return Task.FromResult(new CreateMsixPackageResult(new FileInfo("fake.msix"), PackageSigned));
     }
 
     public Task<CreateMsixBundleResult> CreateMsixBundleAsync(
@@ -118,6 +150,11 @@ internal class FakeMsixService : IMsixService
         string? executable = null,
         CancellationToken cancellationToken = default)
     {
-        return Task.FromResult(new CreateMsixBundleResult(new FileInfo("fake.msixbundle"), false, []));
+        CreateBundleCalls.Add(inputFolders);
+        if (BundleExceptionToThrow != null)
+        {
+            throw BundleExceptionToThrow;
+        }
+        return Task.FromResult(new CreateMsixBundleResult(new FileInfo("fake.msixbundle"), BundleSigned, []));
     }
 }

@@ -47,32 +47,37 @@ internal class CodeIntegrityCatalogService(ILogger<CodeIntegrityCatalogService> 
     private static void ParseErrorCallback(uint errorArea, uint localError, PWSTR line)
     {
         string lineStr = line.ToString();
-
-        string areaDescription = errorArea switch
-        {
-            PInvoke.CRYPTCAT_E_AREA_HEADER => "The header section of the CDF",
-            PInvoke.CRYPTCAT_E_AREA_MEMBER => "A member file entry in the CatalogFiles section of the CDF",
-            PInvoke.CRYPTCAT_E_AREA_ATTRIBUTE => "An attribute entry in the CDF",
-            _ => $"Unknown ({errorArea})"
-        };
-
-        string errorDescription = localError switch
-        {
-            PInvoke.CRYPTCAT_E_CDF_MEMBER_FILE_PATH => "The member file name or path is missing.",
-            PInvoke.CRYPTCAT_E_CDF_MEMBER_INDIRECTDATA => "The function failed to create a hash of the member subject.",
-            PInvoke.CRYPTCAT_E_CDF_MEMBER_FILENOTFOUND => "The function failed to find the member file.",
-            PInvoke.CRYPTCAT_E_CDF_BAD_GUID_CONV => "The function failed to convert the subject string to a GUID.",
-            PInvoke.CRYPTCAT_E_CDF_ATTR_TYPECOMBO => "The attribute contains an invalid OID, or the combination of type, name or OID, and value is not valid.",
-            PInvoke.CRYPTCAT_E_CDF_ATTR_TOOFEWVALUES => "The attribute line is missing one or more elements of its composition including type, object identifier (OID) or name, or value.",
-            PInvoke.CRYPTCAT_E_CDF_UNSUPPORTED => "The function does not support the attribute.",
-            PInvoke.CRYPTCAT_E_CDF_DUPLICATE => "The file member already exists.",
-            PInvoke.CRYPTCAT_E_CDF_TAGNOTFOUND => "The CatalogHeader or Name tag is missing.",
-            _ => $"Unknown ({localError})"
-        };
+        string areaDescription = DescribeCatalogErrorArea(errorArea);
+        string errorDescription = DescribeCatalogLocalError(localError);
 
         t_callbackLogger?.LogError("CDF Parsing Error - Area: {ErrorArea} : {AreaDescription}, Error: {LocalError} : {ErrorDescription}, Line: {Line}",
             errorArea, areaDescription, localError, errorDescription, lineStr);
     }
+
+    // The error-code → human-readable description maps are extracted from the
+    // [UnmanagedCallersOnly] ParseErrorCallback (which cannot be invoked from managed test
+    // code) so the mapping logic can be verified directly by unit tests.
+    internal static string DescribeCatalogErrorArea(uint errorArea) => errorArea switch
+    {
+        PInvoke.CRYPTCAT_E_AREA_HEADER => "The header section of the CDF",
+        PInvoke.CRYPTCAT_E_AREA_MEMBER => "A member file entry in the CatalogFiles section of the CDF",
+        PInvoke.CRYPTCAT_E_AREA_ATTRIBUTE => "An attribute entry in the CDF",
+        _ => $"Unknown ({errorArea})"
+    };
+
+    internal static string DescribeCatalogLocalError(uint localError) => localError switch
+    {
+        PInvoke.CRYPTCAT_E_CDF_MEMBER_FILE_PATH => "The member file name or path is missing.",
+        PInvoke.CRYPTCAT_E_CDF_MEMBER_INDIRECTDATA => "The function failed to create a hash of the member subject.",
+        PInvoke.CRYPTCAT_E_CDF_MEMBER_FILENOTFOUND => "The function failed to find the member file.",
+        PInvoke.CRYPTCAT_E_CDF_BAD_GUID_CONV => "The function failed to convert the subject string to a GUID.",
+        PInvoke.CRYPTCAT_E_CDF_ATTR_TYPECOMBO => "The attribute contains an invalid OID, or the combination of type, name or OID, and value is not valid.",
+        PInvoke.CRYPTCAT_E_CDF_ATTR_TOOFEWVALUES => "The attribute line is missing one or more elements of its composition including type, object identifier (OID) or name, or value.",
+        PInvoke.CRYPTCAT_E_CDF_UNSUPPORTED => "The function does not support the attribute.",
+        PInvoke.CRYPTCAT_E_CDF_DUPLICATE => "The file member already exists.",
+        PInvoke.CRYPTCAT_E_CDF_TAGNOTFOUND => "The CatalogHeader or Name tag is missing.",
+        _ => $"Unknown ({localError})"
+    };
 
     private List<string> CollectExecutableFiles(IReadOnlyCollection<string> directories, SearchOption searchOption)
     {

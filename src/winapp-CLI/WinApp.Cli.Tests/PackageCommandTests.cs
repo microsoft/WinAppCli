@@ -1827,6 +1827,83 @@ public class PackageCommandTests : BaseCommandTests
             $"Warning should mention the relative path to the PFX file. Messages:\n{string.Join("\n", statusMessages)}");
     }
 
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_AppXDirectory_ExcludedWithWarningAndNameFromManifest()
+    {
+        // Arrange - valid package structure plus a build-artifact 'AppX' directory
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "PackageWithAppX"));
+        CreateTestPackageStructure(packageDir);
+        var appxDir = Path.Combine(packageDir.FullName, "AppX");
+        Directory.CreateDirectory(appxDir);
+        await File.WriteAllTextAsync(Path.Combine(appxDir, "leftover.txt"), "build artifact", TestContext.CancellationToken);
+
+        // Act - no packageName provided, so the name is derived from the manifest Identity.
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: null,
+            skipPri: true,
+            autoSign: false,
+            cancellationToken: TestContext.CancellationToken
+        );
+
+        // Assert - package built, named from manifest identity, AppX exclusion warned.
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package should be created");
+        StringAssert.Contains(result.MsixPath.Name, "TestPackage", "Filename should use the manifest identity name");
+
+        var statusMessages = TestTask.SubTasks
+            .OfType<StatusMessageTask>()
+            .Select(t => t.CompletedMessage ?? string.Empty)
+            .ToList();
+        Assert.IsTrue(
+            statusMessages.Any(m => m.Contains("AppX", StringComparison.Ordinal) && m.Contains("excluded", StringComparison.OrdinalIgnoreCase)),
+            $"Should warn that the AppX directory is excluded. Messages:\n{string.Join("\n", statusMessages)}");
+
+        // Prove the warning is real: the build-artifact AppX directory (and its leftover.txt)
+        // must be genuinely absent from the produced package, not merely warned about.
+        using var archive = ZipFile.OpenRead(result.MsixPath.FullName);
+        var appxEntries = archive.Entries
+            .Where(e => e.FullName.Replace('\\', '/').StartsWith("AppX/", StringComparison.OrdinalIgnoreCase))
+            .Select(e => e.FullName)
+            .ToList();
+        Assert.AreEqual(
+            0,
+            appxEntries.Count,
+            $"The build-artifact 'AppX' directory must be excluded from the package. Present entries:\n{string.Join("\n", appxEntries)}");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_ExistingResourcesPri_SkipsPriGenerationAndPackagesItAsIs()
+    {
+        // Arrange - valid package with a pre-existing resources.pri (as a prior build would leave).
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "PackageWithExistingPri"));
+        CreateTestPackageStructure(packageDir);
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "resources.pri"), "prebuilt-pri-marker", TestContext.CancellationToken);
+
+        // Act - skipPri is false, but the existing resources.pri short-circuits PRI generation.
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "TestPackage",
+            skipPri: false,
+            autoSign: false,
+            cancellationToken: TestContext.CancellationToken
+        );
+
+        // Assert - the pre-existing PRI is packaged verbatim (generation was skipped, not overwritten).
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package should be created");
+        var extractDir = Path.Combine(_tempDirectory.FullName, "extract-existing-pri");
+        Directory.CreateDirectory(extractDir);
+        ZipFile.ExtractToDirectory(result.MsixPath.FullName, extractDir);
+        var extractedPri = Path.Combine(extractDir, "resources.pri");
+        Assert.IsTrue(File.Exists(extractedPri), "resources.pri should be present in the package");
+        Assert.AreEqual("prebuilt-pri-marker",
+            await File.ReadAllTextAsync(extractedPri, TestContext.CancellationToken),
+            "Existing resources.pri should be packaged as-is (PRI generation skipped)");
+    }
+
     #endregion
 
     /// <summary>
@@ -2507,5 +2584,138 @@ public class PackageCommandTests : BaseCommandTests
         Assert.IsTrue(
             expected.RawData.AsSpan().SequenceEqual(actual.RawData.AsSpan()),
             message ?? $"DN mismatch.\nExpected: {expectedDN}\nActual:   {actualDN}");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_AutoSignWithGenerateDevCert_GeneratesAndSignsWithDevCertificate()
+    {
+        // Arrange - use a UNIQUE publisher subject for this test. The autoSign + generateDevCert
+        // flow generates a dev certificate that is installed into the shared CurrentUser\My store.
+        // This class runs in parallel and many other tests generate and blanket-remove the shared
+        // "CN=TestPublisher" subject, so reusing it here would race concurrent store add/remove of
+        // the same entry (the flagged flaky failure). A dedicated subject, cleaned up only by this
+        // test, isolates the store interaction and keeps the class fully parallel-safe.
+        const string uniquePublisher = "CN=AutoSignGenDevCertPublisher";
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "GenDevCertPackage"));
+        CreateTestPackageStructure(packageDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(packageDir.FullName, "AppxManifest.xml"),
+            StandardTestManifestContent.Replace("CN=TestPublisher", uniquePublisher, StringComparison.Ordinal),
+            TestContext.CancellationToken);
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        try
+        {
+            // Act - autoSign + generateDevCert with NO external certificate path forces the service to
+            // generate a dev certificate for the manifest publisher, validate the publisher match, and
+            // sign the package with it.
+            var result = await _msixService.CreateMsixPackageAsync(
+                inputFolder: packageDir,
+                outputPath: _tempDirectory,
+                TestTaskContext,
+                packageName: "GenDevCertPackage",
+                skipPri: true,
+                autoSign: true,
+                certificatePassword: "testpassword123",
+                generateDevCert: true,
+                cancellationToken: CancellationToken.None);
+
+            // Assert
+            Assert.IsNotNull(result, "Result should not be null");
+            Assert.IsTrue(result.Signed, "Package should be signed with the generated dev certificate");
+            Assert.IsTrue(result.MsixPath.Exists, "MSIX package file should exist");
+            var generatedCert = new FileInfo(Path.Combine(_tempDirectory.FullName, "GenDevCertPackage_cert.pfx"));
+            Assert.IsTrue(generatedCert.Exists, "The generated dev certificate PFX should be written next to the package");
+        }
+        finally
+        {
+            // Clean up only this test's own unique subject (matches the SignCommandTests self-cleanup pattern).
+            CleanupInvalidTestCertificatesFromStore(uniquePublisher);
+        }
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_NativeExecutable_IncludesDetectedArchitectureInPackageName()
+    {
+        // Arrange - real native x64 PE so ProcessorArchitecture is auto-detected from the executable.
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "ArchPackage"));
+        CreateTestPackageStructure(packageDir);
+        File.WriteAllBytes(Path.Combine(packageDir.FullName, "TestApp.exe"), BuildMinimalNativePe(0x8664));
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "TestPackage",
+            skipPri: true,
+            autoSign: false,
+            cancellationToken: CancellationToken.None);
+
+        // Assert - default file name is "{name}_{version}_{arch}.msix" when both are known.
+        Assert.IsNotNull(result, "Result should not be null");
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package file should exist");
+        StringAssert.Contains(result.MsixPath.Name, "1.0.0.0", "Package name should include the manifest version");
+        StringAssert.Contains(result.MsixPath.Name, "x64", "Package name should include the detected x64 architecture");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_SelfContainedWithoutSdkRuntime_ThrowsWithRuntimeNotFound()
+    {
+        // Arrange - a self-contained package request with no Windows App SDK version resolvable
+        // (empty winapp.yaml, no .csproj). The runtime preparation step must fail clearly rather
+        // than silently producing a package without the bundled runtime.
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "SelfContainedPackage"));
+        CreateTestPackageStructure(packageDir);
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        // Act & Assert
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
+            await _msixService.CreateMsixPackageAsync(
+                inputFolder: packageDir,
+                outputPath: _tempDirectory,
+                TestTaskContext,
+                packageName: "SelfContainedPackage",
+                skipPri: true,
+                autoSign: false,
+                selfContained: true,
+                cancellationToken: CancellationToken.None));
+
+        StringAssert.Contains(
+            ex.Message,
+            "Failed to create MSIX package",
+            "The self-contained packaging failure should surface through the standard MSIX creation error wrapper");
+        StringAssert.Contains(
+            ex.Message,
+            "Runtime",
+            "The failure should explain that the Windows App SDK runtime could not be located for self-contained packaging");
+    }
+
+    /// <summary>
+    /// Builds a minimal but structurally valid native PE image with the given COFF machine type,
+    /// sufficient for architecture auto-detection.
+    /// </summary>
+    private static byte[] BuildMinimalNativePe(ushort machineType)
+    {
+        bool is64Bit = machineType is 0x8664 or 0xAA64;
+        ushort optionalHeaderSize = is64Bit ? (ushort)0xF0 : (ushort)0xE0;
+        int coffHeaderOffset = 0x84;
+        var peBytes = new byte[coffHeaderOffset + 20 + optionalHeaderSize + 64];
+
+        peBytes[0] = 0x4D; // 'M'
+        peBytes[1] = 0x5A; // 'Z'
+        BitConverter.GetBytes(0x80).CopyTo(peBytes, 0x3C);
+        peBytes[0x80] = 0x50; // 'P'
+        peBytes[0x81] = 0x45; // 'E'
+
+        BitConverter.GetBytes(machineType).CopyTo(peBytes, coffHeaderOffset);
+        BitConverter.GetBytes(optionalHeaderSize).CopyTo(peBytes, coffHeaderOffset + 16);
+        peBytes[coffHeaderOffset + 18] = 0x02;
+
+        ushort optionalHeaderMagic = is64Bit ? (ushort)0x20B : (ushort)0x10B;
+        BitConverter.GetBytes(optionalHeaderMagic).CopyTo(peBytes, coffHeaderOffset + 20);
+
+        return peBytes;
     }
 }

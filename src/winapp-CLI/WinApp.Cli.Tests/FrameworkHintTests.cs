@@ -31,8 +31,4 @@ public class FrameworkHintTests
     [DataRow("")]
     public void IsXamlClassName_NullOrEmpty_ReturnsFalse(string? className)
         => Assert.IsFalse(FrameworkHint.IsXamlClassName(className));
-
-    [TestMethod]
-    public void IsLikelyXaml_ZeroHandle_ReturnsFalse()
-        => Assert.IsFalse(FrameworkHint.IsLikelyXaml(0));
 }

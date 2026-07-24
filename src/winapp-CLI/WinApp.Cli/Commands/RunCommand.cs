@@ -86,7 +86,7 @@ internal partial class RunCommand : Command, IShortDescription
 
         DebugOutputOption = new Option<bool>("--debug-output")
         {
-            Description = "Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json."
+            Description = "Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. For WinUI apps, a crash also triggers a stowed-exception triage pass; the first run downloads debugger components (cached under the winapp global directory) and can be pointed at an existing debugger install via the WINAPP_DBGTOOLS_DIR environment variable. Cannot be combined with --no-launch or --json."
         };
 
         UnregisterOnExitOption = new Option<bool>("--unregister-on-exit")
@@ -106,7 +106,7 @@ internal partial class RunCommand : Command, IShortDescription
 
         SymbolsOption = new Option<bool>("--symbols")
         {
-            Description = "Download symbols from Microsoft Symbol Server for richer native crash analysis. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache."
+            Description = "Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache."
         };
 
         ExecutableOption = new Option<string?>("--executable")
@@ -144,6 +144,15 @@ internal partial class RunCommand : Command, IShortDescription
         IStatusService statusService,
         ILogger<RunCommand> logger) : AsynchronousCommandLineAction
     {
+        // Test seams for the execution-alias launch path. They isolate the two operating-system
+        // boundaries — resolving the Windows App Execution Alias proxy location and starting the
+        // resolved process — so tests can exercise all of the surrounding validation, debug,
+        // cancellation and error-handling logic without registering a real alias proxy under
+        // %LOCALAPPDATA%\Microsoft\WindowsApps or spawning the resolved binary. Both default to
+        // the production behavior, so runtime behavior is unchanged.
+        internal Func<string, FileInfo?> ResolveAliasProxy { get; set; } = alias => ExecutionAliasResolver.ResolveAliasPath(alias);
+        internal Func<ProcessStartInfo, Process?> ProcessStarter { get; set; } = Process.Start;
+
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var inputFolder = parseResult.GetRequiredValue(InputFolderArgument);
@@ -212,7 +221,13 @@ internal partial class RunCommand : Command, IShortDescription
 
             if (isJson && debugOutput)
             {
-                logger.LogError("{UISymbol} --json and --debug-output cannot be used together.", UiSymbols.Error);
+                const string msg = "--json and --debug-output cannot be used together.";
+                logger.LogError("{UISymbol} {Message}", UiSymbols.Error, msg);
+
+                // In --json mode the logger above is suppressed (LogLevel.None), so users would
+                // otherwise see only an empty stdout and exit code 1. Emit a structured error so
+                // machine-readable callers can surface a useful message.
+                PrintJson(aumid: null, processId: null, errorMessage: msg);
                 return 1;
             }
 
@@ -250,6 +265,13 @@ internal partial class RunCommand : Command, IShortDescription
             {
                 logger.LogError("{UISymbol} --detach and --unregister-on-exit cannot be used together.", UiSymbols.Error);
                 return 1;
+            }
+
+            // --symbols only affects the stowed-exception triage that runs under --debug-output.
+            // Warn (non-fatal) when it is supplied on its own so the flag isn't silently ignored.
+            if (useSymbols && !debugOutput)
+            {
+                logger.LogWarning("{UISymbol} --symbols has no effect without --debug-output; ignoring.", UiSymbols.Warning);
             }
 
             // Validate the input folder path early so the command fails fast with a clear
@@ -580,7 +602,7 @@ internal partial class RunCommand : Command, IShortDescription
             // mitigation for the bare-filename CWD/PATH lookup that CreateProcess would
             // otherwise perform — passing just "a.exe" would let an attacker-supplied
             // a.exe in the project folder hijack the launch.
-            var aliasFile = ExecutionAliasResolver.ResolveAliasPath(alias);
+            var aliasFile = ResolveAliasProxy(alias);
             if (aliasFile is null || !aliasFile.Exists)
             {
                 logger.LogError(
@@ -599,7 +621,7 @@ internal partial class RunCommand : Command, IShortDescription
 
             try
             {
-                using var process = Process.Start(psi);
+                using var process = ProcessStarter(psi);
                 if (process == null)
                 {
                     logger.LogError("{UISymbol} Failed to start process via execution alias '{Alias}' ({Path}).", UiSymbols.Error, alias, aliasFile.FullName);

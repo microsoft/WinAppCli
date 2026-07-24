@@ -20,6 +20,14 @@ internal partial class ManifestService(
     IImageAssetService imageAssetService,
     IAnsiConsole ansiConsole) : IManifestService
 {
+    /// <summary>
+    /// Seam for extracting an icon from an executable. Defaults to the real shell-based
+    /// extractor. Tests override it so the extracted-icon -> app.ico path is exercised
+    /// deterministically, independent of whether the headless CI session has a populated
+    /// shell image list (<see cref="ShellIcon.GetJumboIcon"/> can return null there).
+    /// </summary>
+    internal Func<string, Icon?> ExecutableIconExtractor { get; set; } = ShellIcon.GetJumboIcon;
+
     public async Task<ManifestGenerationInfo> PromptForManifestInfoAsync(
         DirectoryInfo directory,
         string? packageName,
@@ -221,12 +229,12 @@ internal partial class ManifestService(
     /// Returns the path to the temp PNG (the caller owns cleanup of the file and its directory),
     /// or null if the executable has no extractable icon.
     /// </summary>
-    private static string? ExtractExeIconToTempPng(string executablePath)
+    private string? ExtractExeIconToTempPng(string executablePath)
     {
         Icon? extractedIcon = null;
         try
         {
-            extractedIcon = ShellIcon.GetJumboIcon(executablePath);
+            extractedIcon = ExecutableIconExtractor(executablePath);
             if (extractedIcon == null)
             {
                 return null;

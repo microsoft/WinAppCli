@@ -220,6 +220,67 @@ public class WinmdsLockfileServiceTests
             $"No tmp staging file should remain after a successful write. Found: {string.Join(", ", entries)}");
     }
 
+    [TestMethod]
+    public async Task WriteAsync_WhenTargetPathIsDirectory_LogsAndSwallows()
+    {
+        // The lockfile is best-effort: any non-cancellation failure during the atomic
+        // write must be swallowed so restore/discovery can continue. Pre-creating a
+        // directory at the lockfile path makes the final File.Move fail.
+        var winapp = _temp.CreateSubdirectory("winapp");
+        var cache = _temp.CreateSubdirectory("packages");
+        var winmd = MakeFile(cache, "microsoft.windowsappsdk.ai", "1.8.39", "metadata", "AI.winmd");
+        Directory.CreateDirectory(Path.Combine(winapp.FullName, "winmds.lock.json"));
+
+        // Must NOT throw despite the write failing.
+        await _svc.WriteAsync(
+            winapp,
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["Microsoft.WindowsAppSDK.AI"] = "1.8.39" },
+            new[] { winmd },
+            cache,
+            cancellationToken: default);
+
+        // The path is still the pre-existing directory (no file clobbered it).
+        Assert.IsTrue(Directory.Exists(Path.Combine(winapp.FullName, "winmds.lock.json")),
+            "A failed write must leave the pre-existing entry untouched.");
+    }
+
+    [TestMethod]
+    public async Task TryReadAsync_JsonLiteralNull_ReturnsNull()
+    {
+        // A file whose entire content is the JSON literal `null` deserializes to a null
+        // object; the reader must treat that as "no lockfile" rather than dereferencing it.
+        var path = _svc.GetLockfilePath(_temp);
+        await File.WriteAllTextAsync(path.FullName, "null");
+
+        var result = await _svc.TryReadAsync(_temp, default);
+
+        Assert.IsNull(result, "A `null` JSON body must be treated as a missing lockfile.");
+    }
+
+    [TestMethod]
+    public async Task TryReadAsync_CancellationRequested_PropagatesOperationCanceled()
+    {
+        // Cancellation must NOT be swallowed by the generic fallback catch; it has to
+        // surface so callers can abort. A pre-canceled token trips the first stream read.
+        var path = _svc.GetLockfilePath(_temp);
+        await File.WriteAllTextAsync(path.FullName, "{\"schema\": 3, \"packages\": []}");
+
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        OperationCanceledException? caught = null;
+        try
+        {
+            await _svc.TryReadAsync(_temp, cts.Token);
+        }
+        catch (OperationCanceledException ex)
+        {
+            caught = ex;
+        }
+
+        Assert.IsNotNull(caught, "A canceled token must propagate as OperationCanceledException, not be swallowed.");
+    }
+
     private static FileInfo MakeFile(DirectoryInfo cache, params string[] segments)
     {
         var path = Path.Combine(new[] { cache.FullName }.Concat(segments).ToArray());
@@ -227,10 +288,6 @@ public class WinmdsLockfileServiceTests
         File.WriteAllText(path, "");
         return new FileInfo(path);
     }
-
-    // ---------------------------------------------------------------------
-    // Reparse-point ancestors
-    // ---------------------------------------------------------------------
 
     [TestMethod]
     public async Task WriteAsync_WinappDirIsJunction_LogsAndSkipsWithoutWriting()

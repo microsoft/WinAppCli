@@ -172,6 +172,13 @@ internal partial class ManifestTemplateService : IManifestTemplateService
         // Reassemble
         var result = string.Join(".", fixedSegments);
 
+        // If the input was made up entirely of separators (e.g. "..."), every segment
+        // was empty and reassembly yields "", which is not a valid Windows id. Fall back.
+        if (string.IsNullOrEmpty(result))
+        {
+            return "Default";
+        }
+
         // Enforce max length
         if (result.Length > 255)
         {

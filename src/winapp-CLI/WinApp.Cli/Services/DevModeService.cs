@@ -64,29 +64,47 @@ Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModel
 
     public bool IsEnabled()
     {
-        using var hklm64 = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
-        using var key = hklm64.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock");
-        if (key == null)
-        {
-            return false;
-        }
-
-        return (int?)key.GetValue("AllowDevelopmentWithoutDevLicense") == 1;
+        return DevModeRegistryValueProvider() == 1;
     }
 
-    private static int RunElevated(string fileName, string arguments)
+    /// <summary>
+    /// Reads the <c>AllowDevelopmentWithoutDevLicense</c> DWORD from the 64-bit
+    /// HKLM AppModelUnlock key, returning <c>null</c> when the key or value is absent.
+    /// Overridable in tests so the enablement logic can be exercised deterministically
+    /// without depending on the host machine's Developer Mode state.
+    /// </summary>
+    internal Func<int?> DevModeRegistryValueProvider { get; set; } = ReadDevModeRegistryValue;
+
+    private static int? ReadDevModeRegistryValue()
     {
-        using var p = new Process
+        using var hklm64 = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+        using var key = hklm64.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock");
+        return (int?)key?.GetValue("AllowDevelopmentWithoutDevLicense");
+    }
+
+    private int RunElevated(string fileName, string arguments)
+    {
+        var startInfo = new ProcessStartInfo
         {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = fileName,
-                Arguments = arguments,
-                UseShellExecute = true,   // required for Verb=runas
-                Verb = "runas",           // triggers UAC
-                WindowStyle = ProcessWindowStyle.Hidden
-            }
+            FileName = fileName,
+            Arguments = arguments,
+            UseShellExecute = true,   // required for Verb=runas
+            Verb = "runas",           // triggers UAC
+            WindowStyle = ProcessWindowStyle.Hidden
         };
+        return RunElevatedProcess(startInfo);
+    }
+
+    /// <summary>
+    /// Starts the (elevated) process described by <paramref name="startInfo"/> and returns
+    /// its exit code. Isolated behind a seam so tests can exercise the surrounding fallback
+    /// logic without triggering a real UAC prompt.
+    /// </summary>
+    internal Func<ProcessStartInfo, int> RunElevatedProcess { get; set; } = StartAndWaitForExit;
+
+    private static int StartAndWaitForExit(ProcessStartInfo startInfo)
+    {
+        using var p = new Process { StartInfo = startInfo };
         p.Start();
         p.WaitForExit();
         return p.ExitCode;

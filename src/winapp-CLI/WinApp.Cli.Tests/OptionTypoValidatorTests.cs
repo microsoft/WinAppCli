@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.CommandLine;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Helpers;
 
@@ -92,5 +93,59 @@ public class OptionTypoValidatorTests : BaseCommandTests
         var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, parseResult);
 
         Assert.IsNull(typo);
+    }
+
+    [TestMethod]
+    public void DoesNotFlagOnPassthroughCommand()
+    {
+        // Commands that pass unknown tokens through (ms-store, tool) must be honored, so even a
+        // token that looks like a long-option typo is left untouched.
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+        var args = new[] { "ms-store", "-app" };
+        var parseResult = rootCommand.Parse(args, WinAppParserConfiguration.Default);
+
+        var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, parseResult);
+
+        Assert.IsNull(typo);
+    }
+
+    [TestMethod]
+    public void ReturnsNullWhenLeafHasNoLongOptions()
+    {
+        // A command with no long options can't have a "did you mean --x?" candidate.
+        var command = new Command("test");
+        var args = new[] { "-ab" };
+        var parseResult = command.Parse(args);
+
+        var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, parseResult);
+
+        Assert.IsNull(typo);
+    }
+
+    [TestMethod]
+    public void DoesNotFlagTokenWithInvalidOptionCharacters()
+    {
+        // "-a.b" contains a '.', which is not a valid option-name character, so it is skipped.
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+        var args = new[] { "ui", "inspect", "-a.b" };
+        var parseResult = rootCommand.Parse(args, WinAppParserConfiguration.Default);
+
+        var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, parseResult);
+
+        Assert.IsNull(typo);
+    }
+
+    [TestMethod]
+    public void FlagsTypoMatchingLongAlias()
+    {
+        // The candidate matches a long *alias* (not the primary name), exercising alias collection.
+        var command = new Command("test");
+        command.Options.Add(new Option<string>("--foo", "--foobar"));
+        var args = new[] { "-foobar" };
+        var parseResult = command.Parse(args);
+
+        var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, parseResult);
+
+        Assert.AreEqual("-foobar", typo);
     }
 }

@@ -103,6 +103,77 @@ Current test coverage includes comprehensive testing across multiple areas:
 
 The E2E tests provide comprehensive coverage of real-world scenarios, ensuring the CLI works correctly for typical developer workflows.
 
+## Code coverage
+
+We gate coverage on the **testable surface** of the CLI, not the raw line count. The raw
+`--coverage` denominator is dominated by generated interop (CsWin32 `NativeMethods.g.cs`,
+`ComInterfaceGenerator` COM shims for D3D11/UI Automation, `RegexGenerator`) emitted into
+`obj\`, which — together with Release-build brace under-counting (see **Why a Debug build**
+below) — made the reported number misleading (~18% raw vs. ~59% real over hand-written
+source). See issue #630.
+
+### Measuring
+
+```powershell
+# Whole CLI, per-directory + top uncovered files, overall %:
+pwsh scripts\coverage-report.ps1
+
+# Focus one area and fail under a threshold (what sub-agents use):
+pwsh scripts\coverage-report.ps1 -Area Services -Filter "FullyQualifiedName~MsixService" -Threshold 95
+```
+
+`build-cli.ps1` runs the suite the same way — a **Debug** build with
+`src\winapp-CLI\coverage.runsettings` — so the coverage number CI posts on your PR matches
+what `coverage-report.ps1` prints locally.
+
+### Why a Debug build
+
+Coverage is collected on a **Debug** build, not Release. On optimized Release builds the C#
+compiler often drops or merges the sequence points for standalone block braces (and duplicate
+`return` statements), so the Microsoft coverage engine reports many `{`/`}` lines as `hits=0`
+**even when the method fully executes** — systematically under-counting line coverage and
+capping control-flow-heavy files around 70–80%. Debug builds map every line faithfully, so the
+number reflects what the tests actually exercised. This is the standard configuration for
+coverage measurement.
+
+The shipped CLI is still the Release `dotnet publish`, and it's exercised end-to-end by the
+sample and npm E2E suites — so moving the C# unit suite to Debug for coverage doesn't drop
+Release-artifact validation. The Debug solution build passes `-p:TreatWarningsAsErrors=true`
+so it keeps the warning-as-error gate that `Directory.Build.props` otherwise applies only to
+Release.
+
+### What's excluded (and why)
+
+**Only generated code is excluded** — via `coverage.runsettings` (`obj\**`, `*.g.cs`,
+`*.Designer.cs`, plus the `[GeneratedCode]` attribute). This is the CsWin32 P/Invoke thunks,
+`ComInterfaceGenerator` COM shims, and `RegexGenerator` state machines. It isn't hand-written,
+so it doesn't belong in the denominator. That change is the biggest single correction to the
+raw ~18%; the Debug build (above) closes the remaining brace-undercount gap.
+
+**Hardware / COM / GPU code is _not_ excluded.** `UiAutomationService`, `WgcCapture`, and the
+keyboard/mouse input helpers are real product code and stay in the denominator. This foundation
+PR sets up the measurement; the tests that cover them land in follow-up PRs, two ways:
+
+1. **Unit tests** for their pure-logic seams (selector parsing, element tree → JSON,
+   property/value formatting, foreground classification in `ForegroundGuard`, gesture
+   targeting) — these need no live desktop.
+2. **A real, in-process UI test** that launches the WinUI sample app and drives the genuine
+   `UiAutomationService` — inspect / search / invoke / set-value / wait-for / screenshot, plus
+   real type/click through the input helpers. Because it runs in-process in the MSTest host,
+   `--coverage` instruments those COM/input paths automatically — no separate collector or
+   coverage-merge step. It will be gated to **skip** when no interactive desktop is available,
+   so it never blocks a run; its coverage counts when the environment can host it.
+
+> `coverage.runsettings` intentionally contains **no XML comments** — the `--coverage-settings`
+> parser rejects them. Document rationale here, not in that file.
+
+### Policy
+
+- **Don't exclude services (or any logic) to grow the number.** The only exclusion is generated
+  code. Everything hand-written — including the hardware/COM/GPU interop — stays in the
+  denominator and is covered by real tests.
+- Write meaningful use-case tests first, then unit tests to close the remaining gaps.
+
 ## Framework Used
 
 - **MSTest** - Microsoft's testing framework for .NET

@@ -4,7 +4,6 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
-using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
@@ -19,17 +18,17 @@ internal class UiDragCommand : Command, IShortDescription
     public string ShortDescription => "Drag from one element/point to another element/point";
 
     // drag <from> <to> — each endpoint is an element selector (drags from/to the element's center)
-    // or app x,y coordinates in the same space 'ui inspect' reports.
+    // or screen x,y coordinates in the same space 'ui inspect' reports.
     public static Argument<string?> FromArgument { get; } = new("from")
     {
-        Description = "Start point — an element selector (drags from its center) or app coordinates x,y as reported by " +
+        Description = "Start point — an element selector (drags from its center) or screen coordinates x,y as reported by " +
                       "'ui inspect' (e.g. pn-list-d736 or 100,200).",
         Arity = ArgumentArity.ZeroOrOne
     };
 
     public static Argument<string?> ToArgument { get; } = new("to")
     {
-        Description = "End point — an element selector (drops at its center) or app coordinates x,y as reported by " +
+        Description = "End point — an element selector (drops at its center) or screen coordinates x,y as reported by " +
                       "'ui inspect' (e.g. pn-target-d746 or 300,400).",
         Arity = ArgumentArity.ZeroOrOne
     };
@@ -56,7 +55,7 @@ internal class UiDragCommand : Command, IShortDescription
     public UiDragCommand()
         : base("drag", "Press the mouse button at one point, move to another, then release. " +
                "'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or " +
-               "app-relative x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures " +
+               "screen x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures " +
                "and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and " +
                "--dwell-ms to settle on a drop target before releasing.")
     {
@@ -283,14 +282,14 @@ internal class UiDragCommand : Command, IShortDescription
 
         /// <summary>
         /// Resolves a drag endpoint token into screen coordinates. A token of the form <c>x,y</c> is taken as
-        /// app coordinates (the same space <c>ui inspect</c> reports); anything else is treated as an element
+        /// screen coordinates (the same space <c>ui inspect</c> reports); anything else is treated as an element
         /// selector and resolves to that element's center. Emits the appropriate error and returns
         /// <see cref="Endpoint.Ok"/> = <see langword="false"/> on failure.
         /// </summary>
         private async Task<Endpoint> ResolveEndpointAsync(
             string token, string label, UiSessionInfo session, bool json, CancellationToken cancellationToken)
         {
-            if (TryParsePoint(token, out int px, out int py))
+            if (CoordinateParser.TryParsePoint(token, out int px, out int py))
             {
                 return new Endpoint(true, px, py, 0, null, null, null);
             }
@@ -299,7 +298,7 @@ internal class UiDragCommand : Command, IShortDescription
             // didn't parse (a trailing/extra field or a non-numeric one — "100,", "100,200,300", "100,x").
             // Surface a precise "expected x,y" error instead of falling through to a selector lookup that
             // reports a misleading "element not found".
-            if (LooksLikeCoordinates(token))
+            if (CoordinateParser.LooksLikeCoordinates(token))
             {
                 logger.LogError("{Symbol} <{Label}> looks like coordinates but isn't a valid x,y pair: '{Token}'. Use two integers, e.g. 100,200.",
                     UiSymbols.Error, label, token);
@@ -329,37 +328,5 @@ internal class UiDragCommand : Command, IShortDescription
             return new Endpoint(true, centerX, centerY, element.WindowHandle ?? 0, selector, element, token);
         }
 
-        private static bool TryParsePoint(string? value, out int x, out int y)
-        {
-            x = 0;
-            y = 0;
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return false;
-            }
-
-            var parts = value.Split(',', StringSplitOptions.TrimEntries);
-            if (parts.Length != 2)
-            {
-                return false;
-            }
-
-            return int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out x)
-                && int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out y);
-        }
-
-        /// <summary>
-        /// Whether a token that failed to parse as a point was nonetheless meant as coordinates: it has a
-        /// comma and its first field is an integer. Selectors are ids / <c>name=…</c> expressions that
-        /// don't start with a bare integer followed by a comma, so this only fires on malformed coordinate
-        /// input (e.g. <c>100,</c>, <c>100,200,300</c>, <c>100,abc</c>) — not on a selector that merely
-        /// contains a comma (e.g. <c>name=Save, Continue</c>).
-        /// </summary>
-        private static bool LooksLikeCoordinates(string token)
-        {
-            var parts = token.Split(',');
-            return parts.Length >= 2
-                && int.TryParse(parts[0].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out _);
-        }
     }
 }

@@ -213,6 +213,53 @@ public class CertGenerateCommandTests : BaseCommandTests
         Assert.IsNotEmpty(parseResult.Errors,
             "--json should be rejected on commands that do not opt in (e.g., sign)");
     }
+
+    // ── --if-exists handling (non-JSON) ─────────────────────────────────
+
+    [TestMethod]
+    public async Task FileAlreadyExists_DefaultErrorMode_NonJson_ReturnsError()
+    {
+        var command = GetRequiredService<CertGenerateCommand>();
+        var pfxPath = Path.Combine(_tempDirectory.FullName, "existing.pfx");
+        await File.WriteAllTextAsync(pfxPath, "placeholder");
+
+        // Default --if-exists is Error; without --json the error is logged to stderr.
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["--publisher", "CN=ExistsTest", "--output", pfxPath, "--password", "testpw"]);
+
+        Assert.AreEqual(1, exitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "already exists");
+    }
+
+    [TestMethod]
+    public async Task FileAlreadyExists_SkipMode_ReturnsZeroWithoutOverwriting()
+    {
+        var command = GetRequiredService<CertGenerateCommand>();
+        var pfxPath = Path.Combine(_tempDirectory.FullName, "existing.pfx");
+        await File.WriteAllTextAsync(pfxPath, "placeholder");
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["--publisher", "CN=SkipTest", "--output", pfxPath, "--if-exists", "Skip"]);
+
+        Assert.AreEqual(0, exitCode, "Skip mode should succeed without regenerating");
+        Assert.AreEqual("placeholder", await File.ReadAllTextAsync(pfxPath, TestContext.CancellationToken),
+            "Skip mode must leave the existing certificate file untouched");
+    }
+
+    [TestMethod]
+    public async Task FileAlreadyExists_OverwriteMode_RegeneratesCertificate()
+    {
+        var command = GetRequiredService<CertGenerateCommand>();
+        var pfxPath = Path.Combine(_tempDirectory.FullName, "existing.pfx");
+        await File.WriteAllTextAsync(pfxPath, "placeholder");
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["--publisher", "CN=OverwriteTest", "--output", pfxPath, "--if-exists", "Overwrite"]);
+
+        Assert.AreEqual(0, exitCode, "Overwrite mode should regenerate the certificate");
+        Assert.AreNotEqual("placeholder", await File.ReadAllTextAsync(pfxPath, TestContext.CancellationToken),
+            "Overwrite mode must replace the existing file with a real certificate");
+    }
 }
 
 /// <summary>
