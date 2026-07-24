@@ -330,7 +330,7 @@ public class ProgramJsonBridgeTests : BaseCommandTests
         // `new --json --template bogus` fails at parse time. Without the bridge, System.CommandLine
         // prints human help/error text and JSON callers (agents) get no machine-readable result. The
         // bridge must emit a flat NewCommandResult on stdout (where `new`'s success JSON also goes).
-        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+        var (stdout, _, exitCode) = await InvokeProgramAsync(
             ["new", "--json", "--template", "bogus"]);
 
         Assert.AreEqual(1, exitCode, "Parse error must exit 1");

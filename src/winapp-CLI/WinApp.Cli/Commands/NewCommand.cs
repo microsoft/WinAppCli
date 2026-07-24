@@ -5,6 +5,7 @@ using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
 using System.ComponentModel;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
@@ -135,12 +136,11 @@ internal class NewCommand : Command, IShortDescription
     internal static WinUiTemplate? ParseTemplate(ArgumentResult result)
     {
         var token = result.Tokens.Count > 0 ? result.Tokens[0].Value : string.Empty;
-        foreach (var name in Enum.GetNames<WinUiTemplate>())
+        var match = Enum.GetNames<WinUiTemplate>()
+            .FirstOrDefault(name => string.Equals(name, token, StringComparison.OrdinalIgnoreCase));
+        if (match is not null)
         {
-            if (string.Equals(name, token, StringComparison.OrdinalIgnoreCase))
-            {
-                return Enum.Parse<WinUiTemplate>(name);
-            }
+            return Enum.Parse<WinUiTemplate>(match);
         }
 
         result.AddError($"Invalid template '{token}'. Valid templates: blank, navview, tabview, mvvm, lib, unittest.");
@@ -278,7 +278,7 @@ internal class NewCommand : Command, IShortDescription
                 if (idx >= 0)
                 {
                     var installedVersion = line[(idx + marker.Length)..].Trim();
-                    return installedVersion.Equals(requestedVersion, StringComparison.OrdinalIgnoreCase);
+                    return NuGetVersionsEquivalent(installedVersion, requestedVersion);
                 }
             }
 
@@ -286,6 +286,83 @@ internal class NewCommand : Command, IShortDescription
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Returns true when two NuGet version strings are equivalent. NuGet normalizes equal versions
+    /// (for example <c>1.0</c>, <c>1.0.0</c>, and <c>1.0.0.0</c>), and <c>dotnet new uninstall</c>
+    /// prints the normalized form, so an exact string compare against the requested spelling would
+    /// spuriously miss and force a redundant install/network operation on every run. Compares the
+    /// numeric release (padding to at least three parts, dropping a trailing zero revision) and the
+    /// prerelease label (case-insensitively, per the NuGet spec), ignoring build metadata.
+    /// </summary>
+    internal static bool NuGetVersionsEquivalent(string a, string b)
+    {
+        var normA = NormalizeNuGetVersion(a);
+        var normB = NormalizeNuGetVersion(b);
+        return normA is not null && normB is not null
+            ? string.Equals(normA, normB, StringComparison.Ordinal)
+            : string.Equals(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Reduces a NuGet version to a canonical <c>Major.Minor.Patch[.Revision][-prerelease]</c> string
+    /// for equivalence comparison, or <c>null</c> when the release portion isn't purely numeric (so the
+    /// caller can fall back to an ordinal compare). Build metadata (<c>+...</c>) is dropped.
+    /// </summary>
+    private static string? NormalizeNuGetVersion(string version)
+    {
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            return null;
+        }
+
+        var value = version.Trim();
+
+        // Drop build metadata (ignored for version equality).
+        var plus = value.IndexOf('+');
+        if (plus >= 0)
+        {
+            value = value[..plus];
+        }
+
+        // Separate the prerelease label from the numeric release.
+        var prerelease = string.Empty;
+        var dash = value.IndexOf('-');
+        if (dash >= 0)
+        {
+            prerelease = value[(dash + 1)..];
+            value = value[..dash];
+        }
+
+        var parts = value.Split('.');
+        var numbers = new List<int>(parts.Length);
+        foreach (var part in parts)
+        {
+            if (!int.TryParse(part, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out var number))
+            {
+                return null;
+            }
+
+            numbers.Add(number);
+        }
+
+        // NuGet keeps at least Major.Minor.Patch and omits a zero-valued Revision.
+        while (numbers.Count < 3)
+        {
+            numbers.Add(0);
+        }
+
+        while (numbers.Count > 3 && numbers[^1] == 0)
+        {
+            numbers.RemoveAt(numbers.Count - 1);
+        }
+
+        var numeric = string.Join('.', numbers);
+        return prerelease.Length > 0
+            ? $"{numeric}-{prerelease.ToLowerInvariant()}"
+            : numeric;
     }
 
     /// <summary>Number of leading space/tab characters (indentation) on a line, ignoring a trailing CR.</summary>
@@ -320,8 +397,10 @@ internal class NewCommand : Command, IShortDescription
             var name = nameFromOption;
 
             // Non-interactive environments (CI, piped stdin) behave like --use-defaults to avoid
-            // prompt exceptions — mirrors InitCommand.
-            if (!useDefaults && !ansiConsole.Profile.Capabilities.Interactive)
+            // prompt exceptions — mirrors InitCommand. --json also implies the no-prompt path: Spectre
+            // prompt bytes written to stdout would otherwise precede the JSON payload and break
+            // JSON.parse for machine callers, even on an interactive TTY.
+            if (!useDefaults && (isJson || !ansiConsole.Profile.Capabilities.Interactive))
             {
                 if (!isJson)
                 {
@@ -406,13 +485,13 @@ internal class NewCommand : Command, IShortDescription
             }
 
             // 5. Ensure the WinUI template pack is installed (idempotent)
-            var packOk = await EnsureTemplatePackAsync(currentDir, templateVersion, isJson, quiet, cancellationToken);
+            var (packOk, packError) = await EnsureTemplatePackAsync(currentDir, templateVersion, isJson, quiet, cancellationToken);
             if (!packOk)
             {
                 if (isJson)
                 {
                     PrintJson(false, template.Value, name!, outputDir.FullName,
-                        $"Failed to install the WinUI template pack '{TemplatePackageId}::{templateVersion}'.");
+                        packError ?? $"Failed to install the WinUI template pack '{TemplatePackageId}::{templateVersion}'.");
                 }
                 return ExitTemplatePackFailed;
             }
@@ -581,9 +660,11 @@ internal class NewCommand : Command, IShortDescription
 
         /// <summary>
         /// Ensures the WinUI template pack is installed. Checks the currently installed packs first so
-        /// repeated runs don't hit the network; installs the pinned version only when missing.
+        /// repeated runs don't hit the network; installs the pinned version only when missing. On
+        /// failure returns the specific <c>dotnet new install</c> exit code and stderr/stdout so JSON
+        /// callers can distinguish an unavailable version from a feed/network/configuration failure.
         /// </summary>
-        private async Task<bool> EnsureTemplatePackAsync(DirectoryInfo cwd, string version, bool isJson, bool quiet, CancellationToken cancellationToken)
+        private async Task<(bool Ok, string? Error)> EnsureTemplatePackAsync(DirectoryInfo cwd, string version, bool isJson, bool quiet, CancellationToken cancellationToken)
         {
             // `dotnet new uninstall` with no args lists installed template packages (and versions).
             // Force English output so the "Version:" label we parse is locale-independent.
@@ -591,7 +672,7 @@ internal class NewCommand : Command, IShortDescription
                 cwd, ListTemplatePacksArgs, EnglishUiEnvironment, cancellationToken);
             if (listExit == 0 && IsTemplatePackInstalled(listOut, version))
             {
-                return true;
+                return (true, null);
             }
 
             // Suppress the informational progress line under --json (structured output) and --quiet
@@ -606,15 +687,22 @@ internal class NewCommand : Command, IShortDescription
 
             if (installExit != 0)
             {
+                var detail = !string.IsNullOrWhiteSpace(installErr) ? installErr.Trim() : installOut.Trim();
                 if (!isJson)
                 {
-                    var detail = !string.IsNullOrWhiteSpace(installErr) ? installErr.Trim() : installOut.Trim();
                     logger.LogError("{Error} Failed to install the WinUI template pack: {Detail}", UiSymbols.Error, detail);
                 }
-                return false;
+
+                var error = $"Failed to install the WinUI template pack '{TemplatePackageId}::{version}' (dotnet new install exit code {installExit})";
+                if (!string.IsNullOrWhiteSpace(detail))
+                {
+                    error += $": {detail}";
+                }
+
+                return (false, error);
             }
 
-            return true;
+            return (true, null);
         }
 
         private void PrintJson(bool created, WinUiTemplate template, string name, string path, string? error)

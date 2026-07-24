@@ -133,6 +133,43 @@ public class NewCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public void IsTemplatePackInstalled_EquivalentNormalizedVersion_ReturnsTrue()
+    {
+        // NuGet normalizes equal versions and `dotnet new uninstall` prints the normalized form. A
+        // request for "1.0" must match an installed "1.0.0.0"; otherwise the documented idempotency
+        // breaks and every run repeats the install/network operation.
+        var listing =
+            "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n" +
+            "   Version: 1.0.0.0\n";
+
+        Assert.IsTrue(NewCommand.IsTemplatePackInstalled(listing, "1.0"),
+            "Version-equivalent spellings (1.0 vs 1.0.0.0) must be treated as installed.");
+        Assert.IsTrue(NewCommand.IsTemplatePackInstalled(listing, "1.0.0"));
+    }
+
+    [TestMethod]
+    [DataRow("1.0", "1.0.0")]
+    [DataRow("1.0", "1.0.0.0")]
+    [DataRow("1.2.3", "1.2.3.0")]
+    [DataRow("1.0.0-Alpha", "1.0.0-alpha")]
+    [DataRow("1.0.0+build.5", "1.0.0")]
+    public void NuGetVersionsEquivalent_EqualVersions_ReturnsTrue(string a, string b)
+    {
+        Assert.IsTrue(NewCommand.NuGetVersionsEquivalent(a, b), $"'{a}' and '{b}' should be equivalent.");
+        Assert.IsTrue(NewCommand.NuGetVersionsEquivalent(b, a), $"'{b}' and '{a}' should be equivalent.");
+    }
+
+    [TestMethod]
+    [DataRow("1.0.0", "1.0.1")]
+    [DataRow("1.0.0", "2.0.0")]
+    [DataRow("1.0.0-alpha", "1.0.0")]
+    [DataRow("1.0.0.1", "1.0.0")]
+    public void NuGetVersionsEquivalent_DifferentVersions_ReturnsFalse(string a, string b)
+    {
+        Assert.IsFalse(NewCommand.NuGetVersionsEquivalent(a, b), $"'{a}' and '{b}' should not be equivalent.");
+    }
+
+    [TestMethod]
     public void IsTemplatePackInstalled_MatchingVersion_ReturnsTrue()
     {
         var listing =

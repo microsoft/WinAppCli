@@ -262,6 +262,30 @@ public class NewCommandHandlerTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task Handler_JsonWithInteractiveConsole_DoesNotPromptAndEmitsCleanJson()
+    {
+        // TestConsole is interactive (Capabilities.Interactive = true). Without --use-defaults, the
+        // handler would normally prompt; under --json those Spectre prompt bytes would precede the JSON
+        // and break JSON.parse. JSON mode must imply the default (no-prompt) path.
+        Assert.IsTrue(TestAnsiConsole.Profile.Capabilities.Interactive,
+            "Test precondition: the console must be interactive to exercise the prompt-suppression path.");
+        ScriptHappyPath();
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--json"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        // The entire stdout payload must be parseable JSON (no leading prompt text).
+        var trimmed = TestAnsiConsole.Output.TrimStart();
+        Assert.IsTrue(trimmed.StartsWith('{'),
+            $"Under --json the output must begin with JSON, with no interactive prompt text before it. Got:\n{TestAnsiConsole.Output}");
+        var json = ParseJson(TestAnsiConsole.Output);
+        Assert.IsTrue(json.GetProperty("Created").GetBoolean());
+        Assert.AreEqual("WinUIApp", json.GetProperty("Name").GetString(),
+            "JSON mode must fall back to the default name instead of prompting.");
+    }
+
+    [TestMethod]
     public async Task Handler_TemplatePackInstallFails_ReturnsTemplatePackFailed()
     {
         _dotnet.RunDotnetArgumentListHandler = args =>
@@ -286,6 +310,15 @@ public class NewCommandHandlerTests : BaseCommandTests
 
         Assert.AreEqual(NewCommand.ExitTemplatePackFailed, exitCode);
         Assert.IsNull(ScaffoldInvocation(), "Scaffold must not run when the template pack fails to install.");
+
+        // The JSON error must preserve the actual dotnet diagnostic (exit code + stderr) so an agent can
+        // tell an unavailable version apart from a feed/network/configuration failure.
+        var json = ParseJson(TestAnsiConsole.Output);
+        var error = json.GetProperty("Error").GetString();
+        Assert.IsTrue(error is not null && error.Contains("NU1101", StringComparison.Ordinal),
+            $"The install failure detail (NU1101) must be surfaced in the JSON Error, not a generic message. Got: {error}");
+        Assert.IsTrue(error.Contains("exit code 1", StringComparison.Ordinal),
+            $"The install exit code must be preserved in the JSON Error. Got: {error}");
     }
 
     [TestMethod]

@@ -4,6 +4,7 @@
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace WinApp.Cli.Tests;
 
@@ -1720,34 +1721,133 @@ public class DotNetServiceTests : BaseCommandTests
         var pid = await pidTcs.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.CancellationToken);
         Assert.IsFalse(Process.GetProcessById(pid).HasExited, "The child process should be running before cancellation.");
 
+        // Capture the ping *descendant* too: a bare Kill() (no tree) would still terminate cmd.exe and
+        // make the root assertion pass while leaving ping running. Asserting the descendant also exits
+        // is what actually guards the entireProcessTree behavior this test is named for.
+        var pingPid = await WaitForChildProcessAsync(pid, TimeSpan.FromSeconds(10), TestContext.CancellationToken);
+        Assert.IsFalse(Process.GetProcessById(pingPid).HasExited, "The ping descendant should be running before cancellation.");
+
         cts.Cancel();
 
         await Assert.ThrowsAsync<OperationCanceledException>(async () => await runTask);
 
-        // The root of the spawned tree must be gone. Kill(entireProcessTree) also reaps the ping child.
-        // GetProcessById throws ArgumentException once the id no longer maps to a running process.
-        var exited = false;
-        for (var attempt = 0; attempt < 100 && !exited; attempt++)
+        // Both the root of the spawned tree AND its ping descendant must be gone. Kill(entireProcessTree)
+        // reaps the whole tree; GetProcessById throws ArgumentException once an id no longer maps to a
+        // running process.
+        Assert.IsTrue(await WaitForProcessExitAsync(pid, TestContext.CancellationToken),
+            "The spawned root process (cmd.exe) should be killed on cancellation.");
+        Assert.IsTrue(await WaitForProcessExitAsync(pingPid, TestContext.CancellationToken),
+            "The ping descendant should be killed on cancellation (proves the whole process tree was terminated).");
+    }
+
+    /// <summary>Polls until the process with <paramref name="pid"/> has exited (or its id is reused/freed).</summary>
+    private static async Task<bool> WaitForProcessExitAsync(int pid, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < 100; attempt++)
         {
             try
             {
                 if (Process.GetProcessById(pid).HasExited)
                 {
-                    exited = true;
+                    return true;
                 }
             }
             catch (ArgumentException)
             {
-                exited = true;
+                return true;
             }
 
-            if (!exited)
-            {
-                await Task.Delay(20, TestContext.CancellationToken);
-            }
+            await Task.Delay(20, cancellationToken);
         }
 
-        Assert.IsTrue(exited, "The spawned process tree should be killed on cancellation.");
+        return false;
+    }
+
+    /// <summary>
+    /// Polls the process table for a direct child of <paramref name="parentPid"/> and returns its id.
+    /// Used to grab the ping descendant of the spawned cmd.exe so the test can prove the whole tree is
+    /// killed, not just the root.
+    /// </summary>
+    private static async Task<int> WaitForChildProcessAsync(int parentPid, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            var childPid = FindChildProcessId(parentPid);
+            if (childPid.HasValue)
+            {
+                return childPid.Value;
+            }
+
+            await Task.Delay(20, cancellationToken);
+        }
+
+        throw new TimeoutException($"No child process of PID {parentPid} appeared within {timeout}.");
+    }
+
+    private const uint TH32CS_SNAPPROCESS = 0x00000002;
+    private const int INVALID_HANDLE_VALUE = -1;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct PROCESSENTRY32
+    {
+        public uint dwSize;
+        public uint cntUsage;
+        public uint th32ProcessID;
+        public IntPtr th32DefaultHeapID;
+        public uint th32ModuleID;
+        public uint cntThreads;
+        public uint th32ParentProcessID;
+        public int pcPriClassBase;
+        public uint dwFlags;
+
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+        public string szExeFile;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool Process32First(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool Process32Next(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr hObject);
+
+    private static int? FindChildProcessId(int parentPid)
+    {
+        var snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snapshot == new IntPtr(INVALID_HANDLE_VALUE))
+        {
+            return null;
+        }
+
+        try
+        {
+            var entry = new PROCESSENTRY32 { dwSize = (uint)Marshal.SizeOf<PROCESSENTRY32>() };
+            if (!Process32First(snapshot, ref entry))
+            {
+                return null;
+            }
+
+            do
+            {
+                if (entry.th32ParentProcessID == (uint)parentPid)
+                {
+                    return (int)entry.th32ProcessID;
+                }
+            }
+            while (Process32Next(snapshot, ref entry));
+        }
+        finally
+        {
+            CloseHandle(snapshot);
+        }
+
+        return null;
     }
 
     #endregion
