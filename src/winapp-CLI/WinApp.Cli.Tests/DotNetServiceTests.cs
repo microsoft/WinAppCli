@@ -1703,7 +1703,7 @@ public class DotNetServiceTests : BaseCommandTests
         // The descendant PID is captured via a fully-managed handshake: the PowerShell root starts ping
         // with -PassThru, writes ping's PID to a temp file, then blocks on Wait-Process. The test polls
         // that file — no WMI or Win32 process enumeration required.
-        var pidFile = Path.Combine(Path.GetTempPath(), $"winapp_treekill_{Guid.NewGuid():N}.pid");
+        var pidFile = Path.Join(Path.GetTempPath(), $"winapp_treekill_{Guid.NewGuid():N}.pid");
         var script =
             "$p = Start-Process -FilePath ping.exe -ArgumentList '-n','60','127.0.0.1' -PassThru -WindowStyle Hidden; " +
             $"Set-Content -LiteralPath '{pidFile}' -Value $p.Id; " +
