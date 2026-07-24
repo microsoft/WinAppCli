@@ -122,11 +122,19 @@ public class NewCommandTests : BaseCommandTests
     [DataRow("0.0.6-alpha", true)]
     [DataRow("1.2.3", true)]
     [DataRow("1.0.0-preview.2", true)]
+    [DataRow("1.0", true)]
+    [DataRow("1.0.0+build.5", true)]  // valid build metadata
     [DataRow("", false)]
     [DataRow("   ", false)]
     [DataRow("latest", false)]      // does not start with a digit
     [DataRow("1.0 --add-source http://evil", false)] // whitespace / injection shape
     [DataRow("1.0\"", false)]       // quote
+    [DataRow("1.0-", false)]        // empty prerelease label
+    [DataRow("1.0+", false)]        // empty build metadata
+    [DataRow("1..0", false)]        // repeated separator / empty part
+    [DataRow("1.0.0-", false)]      // trailing dash, empty prerelease
+    [DataRow("1.0.0-alpha..1", false)] // empty prerelease identifier
+    [DataRow("-alpha", false)]      // no numeric release
     public void IsPlausibleVersion_AcceptsOnlyVersionShapedInput(string version, bool expected)
     {
         Assert.AreEqual(expected, NewCommand.IsPlausibleVersion(version));
@@ -164,6 +172,8 @@ public class NewCommandTests : BaseCommandTests
     [DataRow("1.0.0", "2.0.0")]
     [DataRow("1.0.0-alpha", "1.0.0")]
     [DataRow("1.0.0.1", "1.0.0")]
+    [DataRow("1.0-", "1.0")]   // malformed request must not normalize into a match
+    [DataRow("1.0+", "1.0")]   // malformed build metadata must not normalize into a match
     public void NuGetVersionsEquivalent_DifferentVersions_ReturnsFalse(string a, string b)
     {
         Assert.IsFalse(NewCommand.NuGetVersionsEquivalent(a, b), $"'{a}' and '{b}' should not be equivalent.");

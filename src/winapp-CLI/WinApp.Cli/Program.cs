@@ -89,6 +89,13 @@ internal static class Program
             {
                 var message =
                     $"Cannot parse argument '{invalidBoolValue}' for option '{invalidBoolOption}' as expected type 'System.Boolean'.";
+                if (IsNewCommandJson(parseResult))
+                {
+                    // `new` owns a bespoke NewCommandResult envelope; emit it (and use its
+                    // invalid-argument exit code) so machine callers get structured output here too.
+                    NewCommand.EmitParseErrorJson(message);
+                    return NewCommand.ExitInvalidArgs;
+                }
                 if (ResolveEffectiveJson(parseResult) && IsUiDescendant(parseResult))
                 {
                     UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments, message);
@@ -149,6 +156,22 @@ internal static class Program
             if (typo is not null)
             {
                 var suggested = "-" + typo;
+                var typoMessage = $"Unknown option '{typo}'. Did you mean '{suggested}'?";
+                if (IsNewCommandJson(parsedArgs))
+                {
+                    // Route `new --json` typo failures through its structured envelope with paired
+                    // telemetry, mirroring the ui branch below and the main parse-error bridge.
+                    if (!isCompleteMode)
+                    {
+                        CommandInvokedEvent.Log(parsedArgs.CommandResult);
+                    }
+                    NewCommand.EmitParseErrorJson(typoMessage);
+                    if (!isCompleteMode)
+                    {
+                        CommandCompletedEvent.Log(parsedArgs.CommandResult, NewCommand.ExitInvalidArgs);
+                    }
+                    return NewCommand.ExitInvalidArgs;
+                }
                 if (effectiveJson && IsUiDescendant(parsedArgs))
                 {
                     // Gate on IsUiDescendant so that non-ui commands (e.g. cert info) fall through
@@ -157,8 +180,7 @@ internal static class Program
                     {
                         CommandInvokedEvent.Log(parsedArgs.CommandResult);
                     }
-                    UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments,
-                        $"Unknown option '{typo}'. Did you mean '{suggested}'?");
+                    UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments, typoMessage);
                     if (!isCompleteMode)
                     {
                         CommandCompletedEvent.Log(parsedArgs.CommandResult, 1);
@@ -166,7 +188,7 @@ internal static class Program
                 }
                 else
                 {
-                    Console.Error.WriteLine($"Unknown option '{typo}'. Did you mean '{suggested}'?");
+                    Console.Error.WriteLine(typoMessage);
                     Console.Error.WriteLine(
                         "(Single-dash flags are reserved for short aliases like '-a'. Long options use a double dash.)");
                 }
@@ -245,6 +267,8 @@ internal static class Program
             // Parse-error → JSON bridge for `winapp new`: it owns a bespoke NewCommandResult schema
             // (not the ui error envelope), so a parse failure like `--template bogus --json` must be
             // reported in that shape rather than falling through to SCL's help/error text on stdout.
+            // Return ExitInvalidArgs (2) — the same code the handler uses for invalid names/versions —
+            // so agents can branch on the invalid-argument stage regardless of where it was caught.
             if (effectiveJson && parsedArgs.Errors.Count > 0
                 && parsedArgs.CommandResult.Command.Name == "new")
             {
@@ -252,9 +276,9 @@ internal static class Program
                 NewCommand.EmitParseErrorJson(errorMsg);
                 if (!isCompleteMode)
                 {
-                    logCommandCompleted(parsedArgs.CommandResult, 1);
+                    logCommandCompleted(parsedArgs.CommandResult, NewCommand.ExitInvalidArgs);
                 }
-                return 1;
+                return NewCommand.ExitInvalidArgs;
             }
 
             var returnCode = await invoke();
@@ -297,6 +321,17 @@ internal static class Program
             return false;
         }
     }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when the selected command is <c>new</c> with <c>--json</c> in
+    /// effect. Callers use this to route an early parse failure (invalid boolean value, single-dash
+    /// typo) through <see cref="NewCommand.EmitParseErrorJson(string, System.IO.TextWriter?)"/> and
+    /// return <see cref="NewCommand.ExitInvalidArgs"/>, so <c>new --json</c> yields a machine-readable
+    /// <c>NewCommandResult</c> — with the same invalid-argument exit code the handler uses — for
+    /// EVERY parse error, not only those reaching the main bridge in <see cref="RunWithTelemetryAsync(System.CommandLine.ParseResult, bool, Func{Task{int}})"/>.
+    /// </summary>
+    private static bool IsNewCommandJson(System.CommandLine.ParseResult parseResult) =>
+        ResolveEffectiveJson(parseResult) && parseResult.CommandResult.Command.Name == "new";
 
     /// <summary>
     /// Returns <see langword="true"/> when the selected command is the <c>ui</c> command

@@ -1722,22 +1722,25 @@ public class DotNetServiceTests : BaseCommandTests
         startInfo.ArgumentList.Add("-Command");
         startInfo.ArgumentList.Add(script);
 
+        using var cts = new CancellationTokenSource();
+        Task<(int, string, string)>? runTask = null;
+        int? rootPid = null;
+        int? pingPid = null;
         try
         {
-            using var cts = new CancellationTokenSource();
             var pidTcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var runTask = DotNetService.RunDotnetProcessAsync(
+            runTask = DotNetService.RunDotnetProcessAsync(
                 startInfo,
                 cts.Token,
                 onProcessStarted: p => pidTcs.TrySetResult(p.Id));
 
             // Wait until the root process is actually running (capture its id before the service disposes it).
-            var pid = await pidTcs.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.CancellationToken);
-            Assert.IsFalse(Process.GetProcessById(pid).HasExited, "The root process should be running before cancellation.");
+            rootPid = await pidTcs.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.CancellationToken);
+            Assert.IsFalse(Process.GetProcessById(rootPid.Value).HasExited, "The root process should be running before cancellation.");
 
             // Capture the ping descendant via the PID file the root script writes.
-            var pingPid = await WaitForPidFileAsync(pidFile, TimeSpan.FromSeconds(15), TestContext.CancellationToken);
-            Assert.IsFalse(Process.GetProcessById(pingPid).HasExited, "The ping descendant should be running before cancellation.");
+            pingPid = await WaitForPidFileAsync(pidFile, TimeSpan.FromSeconds(15), TestContext.CancellationToken);
+            Assert.IsFalse(Process.GetProcessById(pingPid.Value).HasExited, "The ping descendant should be running before cancellation.");
 
             cts.Cancel();
 
@@ -1746,17 +1749,56 @@ public class DotNetServiceTests : BaseCommandTests
             // Both the root of the spawned tree AND its ping descendant must be gone. Kill(entireProcessTree)
             // reaps the whole tree; GetProcessById throws ArgumentException once an id no longer maps to a
             // running process.
-            Assert.IsTrue(await WaitForProcessExitAsync(pid, TestContext.CancellationToken),
+            Assert.IsTrue(await WaitForProcessExitAsync(rootPid.Value, TestContext.CancellationToken),
                 "The spawned root process (powershell.exe) should be killed on cancellation.");
-            Assert.IsTrue(await WaitForProcessExitAsync(pingPid, TestContext.CancellationToken),
+            Assert.IsTrue(await WaitForProcessExitAsync(pingPid.Value, TestContext.CancellationToken),
                 "The ping descendant should be killed on cancellation (proves the whole process tree was terminated).");
         }
         finally
         {
+            // If an assertion or WaitForPidFileAsync threw before (or during) cancellation, the spawned
+            // powershell/ping tree could still be running — and the root script would keep re-creating
+            // the PID file. Cancel, await the run task, and force-kill any survivors so a failed run
+            // can't pollute subsequent tests for up to a minute.
+            cts.Cancel();
+            if (runTask is not null)
+            {
+                try
+                {
+                    await runTask;
+                }
+                catch
+                {
+                    // Expected on cancellation, or already-failed run — cleanup must not mask the real failure.
+                }
+            }
+
+            KillProcessTreeIfRunning(rootPid);
+            KillProcessTreeIfRunning(pingPid);
+
             if (File.Exists(pidFile))
             {
                 File.Delete(pidFile);
             }
+        }
+    }
+
+    /// <summary>Best-effort force-kill of a process (and its tree) by id, ignoring already-exited processes.</summary>
+    private static void KillProcessTreeIfRunning(int? pid)
+    {
+        if (pid is null)
+        {
+            return;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(pid.Value);
+            process.Kill(entireProcessTree: true);
+        }
+        catch
+        {
+            // The process already exited (ArgumentException) or could not be killed — nothing to clean up.
         }
     }
 

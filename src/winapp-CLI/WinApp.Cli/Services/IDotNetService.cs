@@ -70,8 +70,18 @@ internal interface IDotNetService
     /// <summary>
     /// Runs a dotnet CLI command passing each argument as a discrete token via
     /// <see cref="System.Diagnostics.ProcessStartInfo.ArgumentList"/>. Prefer this overload when any
-    /// argument is derived from user input, since it is immune to argument injection (no manual
-    /// quoting/escaping of interpolated values).
+    /// argument is derived from user input: passing tokens discretely prevents shell/string
+    /// splitting, so a value cannot be broken into multiple arguments by embedded whitespace or
+    /// quotes.
+    /// <para>
+    /// This is <b>not</b> a substitute for validating values against the invoked command's option
+    /// grammar. A single option-shaped token (e.g. a project name of <c>--force</c> or a version of
+    /// <c>-p</c>) is still passed intact to the child process, where dotnet's own parser may
+    /// interpret it as a switch rather than a value. Callers must therefore still validate
+    /// user-supplied values (as the <c>new</c> command does for project names and template
+    /// versions), or place them after a <c>--</c> end-of-options separator where the child command
+    /// supports one.
+    /// </para>
     /// </summary>
     /// <param name="environmentOverrides">
     /// Optional environment variables to set on the child process (merged over the inherited
