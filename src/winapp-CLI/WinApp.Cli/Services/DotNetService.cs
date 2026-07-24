@@ -415,9 +415,10 @@ internal partial class DotNetService : IDotNetService
         return RunDotnetProcessAsync(processStartInfo, cancellationToken);
     }
 
-    private static async Task<(int ExitCode, string Output, string Error)> RunDotnetProcessAsync(
+    internal static async Task<(int ExitCode, string Output, string Error)> RunDotnetProcessAsync(
         ProcessStartInfo processStartInfo,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<Process>? onProcessStarted = null)
     {
         using var process = new Process { StartInfo = processStartInfo };
 
@@ -441,6 +442,7 @@ internal partial class DotNetService : IDotNetService
         };
 
         process.Start();
+        onProcessStarted?.Invoke(process);
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 

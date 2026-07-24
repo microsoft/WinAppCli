@@ -98,6 +98,23 @@ public class NewCommandHandlerTests : BaseCommandTests
     }
 
     [TestMethod]
+    [DataRow("--force")]
+    [DataRow("-o")]
+    [DataRow("--dotnet-version")]
+    public async Task Handler_OptionShapedName_IsRejected(string optionShapedName)
+    {
+        ScriptHappyPath();
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json", "--name", optionShapedName]);
+
+        Assert.AreEqual(NewCommand.ExitInvalidArgs, exitCode,
+            "A leading '-' name would be parsed by dotnet new as one of its own switches, so it must be rejected.");
+        Assert.AreEqual(0, _dotnet.ArgumentListInvocations.Count,
+            "An option-shaped name must fail fast before any dotnet call runs.");
+    }
+
+    [TestMethod]
     public async Task Handler_OutputPathWithSpaces_PassesPathAsSingleToken()
     {
         ScriptHappyPath();
@@ -284,6 +301,10 @@ public class NewCommandHandlerTests : BaseCommandTests
         Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
         Assert.IsFalse(TestAnsiConsole.Output.Contains("QuietApp", StringComparison.Ordinal),
             "--quiet should suppress the human-readable progress and completion output.");
+        // The happy path takes the pack-install branch (nothing installed yet), so this also guards the
+        // informational "Installing WinUI template pack..." log against leaking under --quiet.
+        Assert.IsFalse(TestAnsiConsole.Output.Contains("Installing", StringComparison.Ordinal),
+            "--quiet should suppress the template-pack install progress message.");
     }
 
     [TestMethod]

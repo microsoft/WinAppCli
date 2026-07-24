@@ -148,6 +148,15 @@ internal class NewCommand : Command, IShortDescription
             return false;
         }
 
+        // Reject option-shaped names. Even though every token is passed to dotnet new via ArgumentList
+        // (so nothing is re-parsed by a shell), a leading '-' makes the child dotnet new parser treat
+        // the value as another switch — e.g. a name of "--force" derived from "--output .\--force" would
+        // be consumed as dotnet new's own --force flag rather than the project name.
+        if (name[0] is '-')
+        {
+            return false;
+        }
+
         // Windows cannot create directories whose name ends in a space or dot.
         if (name[^1] is ' ' or '.')
         {
@@ -347,7 +356,7 @@ internal class NewCommand : Command, IShortDescription
             }
 
             // 5. Ensure the WinUI template pack is installed (idempotent)
-            var packOk = await EnsureTemplatePackAsync(currentDir, templateVersion, isJson, cancellationToken);
+            var packOk = await EnsureTemplatePackAsync(currentDir, templateVersion, isJson, quiet, cancellationToken);
             if (!packOk)
             {
                 if (isJson)
@@ -522,7 +531,7 @@ internal class NewCommand : Command, IShortDescription
         /// Ensures the WinUI template pack is installed. Checks the currently installed packs first so
         /// repeated runs don't hit the network; installs the pinned version only when missing.
         /// </summary>
-        private async Task<bool> EnsureTemplatePackAsync(DirectoryInfo cwd, string version, bool isJson, CancellationToken cancellationToken)
+        private async Task<bool> EnsureTemplatePackAsync(DirectoryInfo cwd, string version, bool isJson, bool quiet, CancellationToken cancellationToken)
         {
             // `dotnet new uninstall` with no args lists installed template packages (and versions).
             var (listExit, listOut, _) = await dotNetService.RunDotnetCommandAsync(cwd, ListTemplatePacksArgs, cancellationToken);
@@ -531,7 +540,9 @@ internal class NewCommand : Command, IShortDescription
                 return true;
             }
 
-            if (!isJson)
+            // Suppress the informational progress line under --json (structured output) and --quiet
+            // (minimal output), but always surface install failures below.
+            if (!isJson && !quiet)
             {
                 logger.LogInformation("{Info}  Installing WinUI template pack {Pack}...", UiSymbols.Info, TemplatePackageId);
             }

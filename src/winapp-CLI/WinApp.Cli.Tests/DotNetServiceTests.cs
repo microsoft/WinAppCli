@@ -3,6 +3,7 @@
 
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
+using System.Diagnostics;
 
 namespace WinApp.Cli.Tests;
 
@@ -1684,6 +1685,69 @@ public class DotNetServiceTests : BaseCommandTests
 
         // Assert
         Assert.IsFalse(result, "Should return false when there is no </Project> to insert before");
+    }
+
+    #endregion
+
+    #region Process cancellation Tests
+
+    [TestMethod]
+    public async Task RunDotnetProcessAsync_Cancellation_KillsProcessTree()
+    {
+        // Spawn a long-lived process tree (cmd -> ping) so the entireProcessTree kill path is
+        // genuinely exercised, then cancel and assert the root process is actually terminated.
+        // Before the kill-on-cancel fix, WaitForExitAsync only stopped awaiting and left the child
+        // running; this test guards against that regression.
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        startInfo.ArgumentList.Add("/c");
+        startInfo.ArgumentList.Add("ping -n 60 127.0.0.1 >nul");
+
+        using var cts = new CancellationTokenSource();
+        var pidTcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var runTask = DotNetService.RunDotnetProcessAsync(
+            startInfo,
+            cts.Token,
+            onProcessStarted: p => pidTcs.TrySetResult(p.Id));
+
+        // Wait until the process is actually running (and capture its id before the service disposes it).
+        var pid = await pidTcs.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.CancellationToken);
+        Assert.IsFalse(Process.GetProcessById(pid).HasExited, "The child process should be running before cancellation.");
+
+        cts.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(async () => await runTask);
+
+        // The root of the spawned tree must be gone. Kill(entireProcessTree) also reaps the ping child.
+        // GetProcessById throws ArgumentException once the id no longer maps to a running process.
+        var exited = false;
+        for (var attempt = 0; attempt < 100 && !exited; attempt++)
+        {
+            try
+            {
+                if (Process.GetProcessById(pid).HasExited)
+                {
+                    exited = true;
+                }
+            }
+            catch (ArgumentException)
+            {
+                exited = true;
+            }
+
+            if (!exited)
+            {
+                await Task.Delay(20, TestContext.CancellationToken);
+            }
+        }
+
+        Assert.IsTrue(exited, "The spawned process tree should be killed on cancellation.");
     }
 
     #endregion
