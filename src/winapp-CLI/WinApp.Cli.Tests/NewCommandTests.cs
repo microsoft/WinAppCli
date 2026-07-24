@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using WinApp.Cli.Commands;
+using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Tests;
 
@@ -137,7 +138,7 @@ public class NewCommandTests : BaseCommandTests
     [DataRow("-alpha", false)]      // no numeric release
     public void IsPlausibleVersion_AcceptsOnlyVersionShapedInput(string version, bool expected)
     {
-        Assert.AreEqual(expected, NewCommand.IsPlausibleVersion(version));
+        Assert.AreEqual(expected, NuGetVersionHelper.IsPlausibleVersion(version));
     }
 
     [TestMethod]
@@ -163,8 +164,8 @@ public class NewCommandTests : BaseCommandTests
     [DataRow("1.0.0+build.5", "1.0.0")]
     public void NuGetVersionsEquivalent_EqualVersions_ReturnsTrue(string a, string b)
     {
-        Assert.IsTrue(NewCommand.NuGetVersionsEquivalent(a, b), $"'{a}' and '{b}' should be equivalent.");
-        Assert.IsTrue(NewCommand.NuGetVersionsEquivalent(b, a), $"'{b}' and '{a}' should be equivalent.");
+        Assert.IsTrue(NuGetVersionHelper.NuGetVersionsEquivalent(a, b), $"'{a}' and '{b}' should be equivalent.");
+        Assert.IsTrue(NuGetVersionHelper.NuGetVersionsEquivalent(b, a), $"'{b}' and '{a}' should be equivalent.");
     }
 
     [TestMethod]
@@ -176,7 +177,7 @@ public class NewCommandTests : BaseCommandTests
     [DataRow("1.0+", "1.0")]   // malformed build metadata must not normalize into a match
     public void NuGetVersionsEquivalent_DifferentVersions_ReturnsFalse(string a, string b)
     {
-        Assert.IsFalse(NewCommand.NuGetVersionsEquivalent(a, b), $"'{a}' and '{b}' should not be equivalent.");
+        Assert.IsFalse(NuGetVersionHelper.NuGetVersionsEquivalent(a, b), $"'{a}' and '{b}' should not be equivalent.");
     }
 
     [TestMethod]

@@ -1704,9 +1704,12 @@ public class DotNetServiceTests : BaseCommandTests
         // with -PassThru, writes ping's PID to a temp file, then blocks on Wait-Process. The test polls
         // that file — no WMI or Win32 process enumeration required.
         var pidFile = Path.Join(Path.GetTempPath(), $"winapp_treekill_{Guid.NewGuid():N}.pid");
+        // Escape single quotes for the single-quoted PowerShell string literal so a temp path
+        // containing an apostrophe (e.g. a profile like O'Brien) still produces a valid script.
+        var pidFileLiteral = pidFile.Replace("'", "''");
         var script =
             "$p = Start-Process -FilePath ping.exe -ArgumentList '-n','60','127.0.0.1' -PassThru -WindowStyle Hidden; " +
-            $"Set-Content -LiteralPath '{pidFile}' -Value $p.Id; " +
+            $"Set-Content -LiteralPath '{pidFileLiteral}' -Value $p.Id; " +
             "Wait-Process -Id $p.Id";
 
         var startInfo = new ProcessStartInfo
@@ -1736,11 +1739,13 @@ public class DotNetServiceTests : BaseCommandTests
 
             // Wait until the root process is actually running (capture its id before the service disposes it).
             rootPid = await pidTcs.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.CancellationToken);
-            Assert.IsFalse(Process.GetProcessById(rootPid.Value).HasExited, "The root process should be running before cancellation.");
+            var rootPidValue = rootPid.Value;
+            Assert.IsFalse(Process.GetProcessById(rootPidValue).HasExited, "The root process should be running before cancellation.");
 
             // Capture the ping descendant via the PID file the root script writes.
             pingPid = await WaitForPidFileAsync(pidFile, TimeSpan.FromSeconds(15), TestContext.CancellationToken);
-            Assert.IsFalse(Process.GetProcessById(pingPid.Value).HasExited, "The ping descendant should be running before cancellation.");
+            var pingPidValue = pingPid.Value;
+            Assert.IsFalse(Process.GetProcessById(pingPidValue).HasExited, "The ping descendant should be running before cancellation.");
 
             cts.Cancel();
 
@@ -1749,9 +1754,9 @@ public class DotNetServiceTests : BaseCommandTests
             // Both the root of the spawned tree AND its ping descendant must be gone. Kill(entireProcessTree)
             // reaps the whole tree; GetProcessById throws ArgumentException once an id no longer maps to a
             // running process.
-            Assert.IsTrue(await WaitForProcessExitAsync(rootPid.Value, TestContext.CancellationToken),
+            Assert.IsTrue(await WaitForProcessExitAsync(rootPidValue, TestContext.CancellationToken),
                 "The spawned root process (powershell.exe) should be killed on cancellation.");
-            Assert.IsTrue(await WaitForProcessExitAsync(pingPid.Value, TestContext.CancellationToken),
+            Assert.IsTrue(await WaitForProcessExitAsync(pingPidValue, TestContext.CancellationToken),
                 "The ping descendant should be killed on cancellation (proves the whole process tree was terminated).");
         }
         finally
@@ -1767,9 +1772,14 @@ public class DotNetServiceTests : BaseCommandTests
                 {
                     await runTask;
                 }
-                catch
+                catch (OperationCanceledException)
                 {
-                    // Expected on cancellation, or already-failed run — cleanup must not mask the real failure.
+                    // Expected once the token is cancelled — cleanup must not mask the real failure.
+                }
+                catch (Exception) when (cts.IsCancellationRequested)
+                {
+                    // A run that already failed (or failed due to cancellation) — swallow only while
+                    // tearing down; the original assertion failure, if any, still surfaces.
                 }
             }
 
@@ -1796,9 +1806,21 @@ public class DotNetServiceTests : BaseCommandTests
             using var process = Process.GetProcessById(pid.Value);
             process.Kill(entireProcessTree: true);
         }
-        catch
+        catch (ArgumentException)
         {
-            // The process already exited (ArgumentException) or could not be killed — nothing to clean up.
+            // No process with this id is running (already exited / id freed) — nothing to clean up.
+        }
+        catch (InvalidOperationException)
+        {
+            // The process has already exited between lookup and Kill — nothing to clean up.
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // The OS refused to terminate the process (access/termination failure) — best-effort only.
+        }
+        catch (NotSupportedException)
+        {
+            // Killing the process tree isn't supported in this environment — best-effort only.
         }
     }
 
