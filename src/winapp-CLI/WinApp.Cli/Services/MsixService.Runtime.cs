@@ -24,8 +24,6 @@ internal partial class MsixService
     // at the call site, not by this regex.
     [GeneratedRegex(@"^Microsoft\.WindowsAppRuntime\.\d+(\.\d+)?.*\.msix$", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex WindowsAppRuntimeMsixRegex();
-    [GeneratedRegex(@"<assemblyIdentity[^>]*name\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
-    private static partial Regex AssemblyIdentityNameRegex();
 
     // DLL dedup regex — extract registered file names from SxS manifest StringBuilder
     [GeneratedRegex(@"<asmv3:file\s+name='([^']+)'", RegexOptions.IgnoreCase, "en-US")]

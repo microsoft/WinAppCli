@@ -83,6 +83,19 @@ export async function main(): Promise<void> {
     // JS-binding hooks wrap init/restore; help/completion and SDK-less init pass through.
     if (INTERCEPTED_COMMANDS.has(command) && !commandArgs.some((a) => HELP_FLAGS.has(a))) {
       if (command === 'init') {
+        if (commandArgs.includes('--sparse')) {
+          // Sparse identity init has no SDK dependencies, so JS bindings (which need
+          // SDK winmds) make no sense. Reject the flag, then pass through to native
+          // init without the JS-binding hooks.
+          if (commandArgs.includes('--add-js-bindings')) {
+            console.error(
+              '❌ --add-js-bindings is incompatible with --sparse ' + '(identity-only packages have no SDK bindings).'
+            );
+            process.exit(1);
+          }
+          await callWinappCli(['init', ...stripWrapperOnlyFlags(commandArgs)], { exitOnError: true });
+          return;
+        }
         // `--add-js-bindings` is a non-interactive opt-in: it only makes sense
         // when the entire init flow can run without prompts. Accept any signal
         // native init treats as non-interactive (Spectre.Console's interactive

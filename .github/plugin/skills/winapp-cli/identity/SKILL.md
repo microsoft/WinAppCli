@@ -140,7 +140,7 @@ For full details including IDE setup examples, see the [Debugging Guide](https:/
 winapp init --exe ./bin/Release/MyApp.exe --sparse --use-defaults
 
 # 2. Build and sign the identity-only .msix (just the manifest, no binaries)
-winapp pack ./sparse/appxmanifest.xml --cert ./dev.pfx
+winapp pack ./sparse/appxmanifest.xml --cert ./devcert.pfx
 
 # 3. Embed the <msix> identity element into the exe's fusion manifest
 winapp embed-identity ./bin/Release/MyApp.exe

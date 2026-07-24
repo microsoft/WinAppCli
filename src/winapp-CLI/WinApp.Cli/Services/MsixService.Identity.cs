@@ -458,20 +458,28 @@ internal partial class MsixService
         try
         {
             bool hasExistingManifest = await TryExtractManifestFromExeAsync(exePath, existingManifestPath, taskContext, cancellationToken);
-            if (!hasExistingManifest)
+            if (hasExistingManifest)
             {
-                assemblyIdentity = string.Empty;
+                taskContext.AddDebugMessage("Existing manifest found in executable, checking for a top-level AssemblyIdentity...");
+                var existingManifestContent = await File.ReadAllTextAsync(existingManifestPath.FullName, Encoding.UTF8, cancellationToken);
+                if (HasTopLevelAssemblyIdentity(existingManifestContent))
+                {
+                    taskContext.AddDebugMessage("Top-level AssemblyIdentity already present in manifest, will not add a new one.");
+                    assemblyIdentity = string.Empty;
+                }
+                else
+                {
+                    // A manifest with only a nested/dependency <assemblyIdentity> (e.g.
+                    // Microsoft.Windows.Common-Controls) does not give the assembly its own
+                    // identity, so we still add a top-level one alongside the <msix> element.
+                    taskContext.AddDebugMessage("No top-level AssemblyIdentity found, adding one so identity can be granted.");
+                }
             }
             else
             {
-                taskContext.AddDebugMessage("Existing manifest found in executable, checking for AssemblyIdentity...");
-                var existingManifestContent = await File.ReadAllTextAsync(existingManifestPath.FullName, Encoding.UTF8, cancellationToken);
-                var assemblyIdentityMatch = AssemblyIdentityNameRegex().Match(existingManifestContent);
-                if (assemblyIdentityMatch.Success)
-                {
-                    taskContext.AddDebugMessage("Existing AssemblyIdentity found in manifest, will not add a new one.");
-                    assemblyIdentity = string.Empty;
-                }
+                // A bare exe (Rust / C++ / trimmed .NET) has no embedded manifest; mt.exe will
+                // create one from ours, so it must carry the top-level <assemblyIdentity>.
+                taskContext.AddDebugMessage("No embedded manifest in executable, adding a top-level AssemblyIdentity.");
             }
         }
         finally
@@ -502,6 +510,26 @@ internal partial class MsixService
         finally
         {
             TryDeleteFile(tempManifestPath);
+        }
+    }
+
+    /// <summary>
+    /// Returns true if the side-by-side manifest XML has a top-level (root-child)
+    /// &lt;assemblyIdentity&gt; element. Unlike a whole-file scan, this ignores nested
+    /// &lt;assemblyIdentity&gt; elements (e.g. a &lt;dependency&gt; on
+    /// Microsoft.Windows.Common-Controls), which do not grant the assembly its own identity.
+    /// Returns false if the content cannot be parsed as XML.
+    /// </summary>
+    private static bool HasTopLevelAssemblyIdentity(string manifestContent)
+    {
+        try
+        {
+            var root = XDocument.Parse(manifestContent).Root;
+            return root is not null && root.Elements().Any(e => e.Name.LocalName == "assemblyIdentity");
+        }
+        catch (System.Xml.XmlException)
+        {
+            return false;
         }
     }
 

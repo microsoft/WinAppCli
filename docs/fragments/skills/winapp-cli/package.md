@@ -178,7 +178,7 @@ To grant identity to an app distributed by an existing installer (not as MSIX), 
 # 1. Generate the sparse manifest for your exe (skips SDK install)
 winapp init --exe ./bin/Release/MyApp.exe --sparse --use-defaults
 # 2. Build & sign the identity-only .msix (just the manifest)
-winapp pack ./sparse/appxmanifest.xml --cert ./dev.pfx
+winapp pack ./sparse/appxmanifest.xml --cert ./devcert.pfx
 # 3. Embed identity into the exe, then register in your installer
 winapp embed-identity ./bin/Release/MyApp.exe
 ```

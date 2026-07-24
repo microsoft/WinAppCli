@@ -166,6 +166,16 @@ internal class InitCommand : Command, IShortDescription
             // existing exe. This intentionally skips all SDK/package installation.
             if (sparse)
             {
+                // The positional base-directory argument configures the normal init flow only.
+                // Reject it in sparse mode rather than silently ignoring it — output location is
+                // controlled by --output-dir (default: a 'sparse/' folder in the current directory).
+                if (baseDirectoryExplicit)
+                {
+                    logger.LogError(
+                        "A positional directory is not used with --sparse. Use --output-dir <dir> to choose where the sparse manifest and Assets/ are written (default: ./sparse).");
+                    return 1;
+                }
+
                 return await RunSparseInitAsync(exe, name, publisher, outputDir, useDefaults, force, cancellationToken);
             }
 
@@ -268,15 +278,21 @@ internal class InitCommand : Command, IShortDescription
             var targetDir = outputDir ?? new DirectoryInfo(
                 Path.Combine(currentDirectoryProvider.GetCurrentDirectory(), "sparse"));
 
-            // Guard against silently overwriting a hand-authored manifest. Generation uses
+            // Guard against silently overwriting a hand-authored manifest or assets. Generation uses
             // File.WriteAllTextAsync/File.Create, which would replace an existing appxmanifest.xml
-            // (and matching Assets/) in place. Require --force to opt into that.
+            // (and matching Assets/) in place — including the narrow case where assets exist but the
+            // manifest does not. Require --force to opt into overwriting either.
             var existingManifest = new FileInfo(Path.Combine(targetDir.FullName, "appxmanifest.xml"));
-            if (!force && existingManifest.Exists)
+            var existingAssets = new DirectoryInfo(Path.Combine(targetDir.FullName, "Assets"));
+            var assetsHaveContent = existingAssets.Exists && existingAssets.EnumerateFiles("*", SearchOption.AllDirectories).Any();
+            if (!force && (existingManifest.Exists || assetsHaveContent))
             {
+                var whatExists = existingManifest.Exists
+                    ? $"An appxmanifest.xml already exists at '{existingManifest.FullName}'"
+                    : $"Generated assets already exist in '{existingAssets.FullName}'";
                 logger.LogError(
-                    "An appxmanifest.xml already exists at '{Path}'. Re-run with --force to overwrite it, or choose a different --output-dir.",
-                    existingManifest.FullName);
+                    "{WhatExists}. Re-run with --force to overwrite, or choose a different --output-dir.",
+                    whatExists);
                 return 1;
             }
 

@@ -239,7 +239,7 @@ When the input is a **sparse `appxmanifest.xml` file** (one declaring `<uap10:Al
 
 ```bash
 # Build a signed identity package from a sparse manifest
-winapp pack ./sparse/appxmanifest.xml --cert ./dev.pfx
+winapp pack ./sparse/appxmanifest.xml --cert ./devcert.pfx
 ```
 
 - Output defaults to `<PackageName>.identity.msix` in the current directory (override with `--output`).

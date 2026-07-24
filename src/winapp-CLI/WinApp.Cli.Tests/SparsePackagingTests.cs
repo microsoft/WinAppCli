@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.DependencyInjection;
+using System.Xml.Linq;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
@@ -227,6 +228,40 @@ public class SparsePackagingTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task InitSparse_WithoutExe_ReturnsError()
+    {
+        // Arrange — --sparse requires --exe; without it the flow must fail cleanly.
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--sparse", "--use-defaults" };
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "--sparse without --exe should fail");
+        Assert.IsFalse(File.Exists(SparseManifestPath), "No manifest should be generated");
+    }
+
+    [TestMethod]
+    public async Task InitSparse_WithPositionalDirectory_ReturnsError()
+    {
+        // Arrange — the positional base directory is not used by the sparse flow; passing it
+        // should be rejected (pointing at --output-dir) rather than silently ignored.
+        var exe = CopyTestExe();
+        var ignoreDir = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "ignoreme")).FullName;
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { ignoreDir, "--exe", exe, "--sparse", "--use-defaults" };
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "A positional directory with --sparse should be rejected");
+        Assert.IsFalse(File.Exists(SparseManifestPath), "No manifest should be generated when input is rejected");
+        Assert.Contains("--output-dir", ConsoleStdErr.ToString(), "Error should point the user at --output-dir");
+    }
+
+    [TestMethod]
     public async Task EmbedIdentity_XmlMode_InsertsMsixElement()
     {
         // Arrange: generate a sparse manifest to read identity from
@@ -289,6 +324,63 @@ public class SparsePackagingTests : BaseCommandTests
         Assert.AreEqual(0, exitCode, "embed-identity should auto-discover the manifest in ./sparse/");
         var content = await File.ReadAllTextAsync(targetManifest, TestContext.CancellationToken);
         Assert.Contains("packageName=\"AutoFound\"", content, "Discovered manifest identity should be embedded");
+    }
+
+    [TestMethod]
+    public async Task EmbedIdentity_XmlMode_NewFile_AddsTopLevelAssemblyIdentity()
+    {
+        // A newly created fusion manifest must carry a top-level <assemblyIdentity> alongside
+        // <msix>, or Windows won't grant identity (per the MS grant-identity docs).
+        var exe = CopyTestExe();
+        var initCommand = GetRequiredService<InitCommand>();
+        await ParseAndInvokeWithCaptureAsync(initCommand, ["--exe", exe, "--sparse", "--use-defaults", "--name", "IdentityApp", "--publisher", "CN=Contoso"]);
+        var manifestPath = SparseManifestPath;
+        var targetManifest = Path.Combine(_tempDirectory.FullName, "app.manifest");
+        var embedCommand = GetRequiredService<EmbedIdentityCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(embedCommand, [targetManifest, "--manifest", manifestPath]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode);
+        var root = XDocument.Load(targetManifest).Root!;
+        var topLevelIdentity = root.Elements().Where(e => e.Name.LocalName == "assemblyIdentity").ToList();
+        Assert.AreEqual(1, topLevelIdentity.Count, "Exactly one top-level <assemblyIdentity> must be present");
+        Assert.AreEqual("IdentityApp", topLevelIdentity[0].Attribute("name")?.Value);
+        Assert.AreEqual(1, root.Elements().Count(e => e.Name.LocalName == "msix"), "The <msix> identity element must be present");
+    }
+
+    [TestMethod]
+    public async Task EmbedIdentity_XmlMode_DependencyOnlyManifest_AddsTopLevelAssemblyIdentity()
+    {
+        // A fusion manifest whose only <assemblyIdentity> is nested under <dependency> (e.g.
+        // Common-Controls) has no identity of its own, so a top-level one must still be added.
+        var exe = CopyTestExe();
+        var initCommand = GetRequiredService<InitCommand>();
+        await ParseAndInvokeWithCaptureAsync(initCommand, ["--exe", exe, "--sparse", "--use-defaults", "--name", "DepApp", "--publisher", "CN=Contoso"]);
+        var manifestPath = SparseManifestPath;
+        var targetManifest = Path.Combine(_tempDirectory.FullName, "app.manifest");
+        await File.WriteAllTextAsync(targetManifest, """
+            <?xml version="1.0" encoding="utf-8"?>
+            <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+              <dependency>
+                <dependentAssembly>
+                  <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" publicKeyToken="6595b64144ccf1df" language="*" processorArchitecture="*" />
+                </dependentAssembly>
+              </dependency>
+            </assembly>
+            """, TestContext.CancellationToken);
+        var embedCommand = GetRequiredService<EmbedIdentityCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(embedCommand, [targetManifest, "--manifest", manifestPath]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode);
+        var root = XDocument.Load(targetManifest).Root!;
+        var topLevelIdentity = root.Elements().Where(e => e.Name.LocalName == "assemblyIdentity").ToList();
+        Assert.AreEqual(1, topLevelIdentity.Count, "A top-level <assemblyIdentity> must be added even when a nested dependency identity exists");
+        Assert.AreEqual("DepApp", topLevelIdentity[0].Attribute("name")?.Value);
     }
 
     [TestMethod]
@@ -639,5 +731,23 @@ public class SparsePackRoutingTests : BaseCommandTests
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(1, _fakeMsixService.CreateSparseIdentityCalls.Count);
         Assert.IsTrue(_fakeMsixService.CreateSparseIdentityCalls[0].AutoSign, "Providing --cert should request signing");
+    }
+
+    [TestMethod]
+    public async Task Pack_MissingManifestFile_ReportsMissingManifestNotFolder()
+    {
+        // A path that looks like a manifest file (.xml/.appxmanifest) but doesn't exist should be
+        // reported as a missing manifest file with the sparse-init hint — not "input folder not found".
+        var packageCommand = GetRequiredService<PackageCommand>();
+        var missing = Path.Combine(_tempDirectory.FullName, "does-not-exist.appxmanifest.xml");
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(packageCommand, [missing]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "A missing manifest file should fail");
+        Assert.AreEqual(0, _fakeMsixService.CreateSparseIdentityCalls.Count, "Should not route to the sparse path");
+        var output = ConsoleStdOut.ToString() + ConsoleStdErr.ToString();
+        Assert.Contains("Manifest file not found", output, "A missing manifest path should be reported as a missing file");
     }
 }

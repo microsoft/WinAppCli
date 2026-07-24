@@ -104,6 +104,14 @@ internal class PackageCommand : Command, IShortDescription
     public class Handler(IMsixService msixService, IStatusService statusService) : AsynchronousCommandLineAction
     {
         /// <summary>
+        /// Heuristic for whether a non-existent input path was intended as a manifest file
+        /// (rather than an input folder), so a missing path can be reported with the right error.
+        /// </summary>
+        private static bool LooksLikeManifestPath(string name)
+            => name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)
+                || name.EndsWith(".appxmanifest", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
         /// Returns true when the file is an appx manifest that declares
         /// a &lt;uap10:AllowExternalContent&gt;true&lt;/uap10:AllowExternalContent&gt; element (i.e. a sparse identity package manifest).
         /// </summary>
@@ -211,6 +219,21 @@ internal class PackageCommand : Command, IShortDescription
                 return await statusService.ExecuteWithStatusAsync("Validating input...", (taskContext, _) =>
                 {
                     return Task.FromResult((1, $"{UiSymbols.Error} Input is a file but not a sparse manifest (missing uap10:AllowExternalContent). Pass an input folder, or generate a sparse manifest with 'winapp init --exe <exe> --sparse'."));
+                }, cancellationToken);
+            }
+
+            // A path that looks like a manifest file (ends in .xml/.appxmanifest) but doesn't
+            // exist should be reported as a missing manifest file — not a missing input folder —
+            // since it can never enter the sparse-manifest branch above. Include the init hint.
+            var missingManifestFiles = inputFolders
+                .Where(d => !d.Exists && LooksLikeManifestPath(d.Name))
+                .ToList();
+            if (missingManifestFiles.Count > 0)
+            {
+                var manifestPaths = string.Join(Environment.NewLine, missingManifestFiles.Select(d => $"  {d.FullName}"));
+                return await statusService.ExecuteWithStatusAsync("Validating input...", (taskContext, _) =>
+                {
+                    return Task.FromResult((1, $"{UiSymbols.Error} Manifest file not found:{Environment.NewLine}{manifestPaths}{Environment.NewLine}Generate a sparse manifest with 'winapp init --exe <exe> --sparse'."));
                 }, cancellationToken);
             }
 

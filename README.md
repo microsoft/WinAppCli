@@ -215,6 +215,7 @@ npx winapp --help
 - [`pack`](./docs/usage.md#pack) - Create MSIX packages from directories
 - [`run`](./docs/usage.md#run) - Run app as a packaged application for debugging (loose layout registration)
 - [`create-debug-identity`](./docs/usage.md#create-debug-identity) - Add sparse package identity to an existing exe
+- [`embed-identity`](./docs/usage.md#embed-identity) - Connect an exe to its sparse identity package by embedding the `<msix>` element
 - [`unregister`](./docs/usage.md#unregister) - Remove sideloaded dev packages registered by `run` or `create-debug-identity`
 - [`manifest`](./docs/usage.md#manifest) - Generate and manage AppxManifest.xml files
 
