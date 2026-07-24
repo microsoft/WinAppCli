@@ -732,7 +732,7 @@ internal partial class MsixService
         try
         {
             var xdoc = XDocument.Load(manifestPath.FullName);
-            var msixElements = xdoc.Descendants().Where(e => e.Name.LocalName == "msix").ToList();
+            var msixElements = xdoc.Descendants(MsixV1Ns + "msix").ToList();
             if (msixElements.Count == 0)
             {
                 return;

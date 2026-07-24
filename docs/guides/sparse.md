@@ -167,18 +167,29 @@ end;
 
 See the [sparse-app](../../samples/sparse-app) sample for a complete, working `setup.iss`.
 
+The WiX and NSIS examples below invoke a small `register-sparse.ps1` via `-File` so the install path is passed as a **parameter** (PowerShell binds it as data) instead of being interpolated into a `-Command` string. This avoids script injection through a crafted install directory (e.g. a folder name containing a quote or `$(...)`):
+
+```powershell
+# register-sparse.ps1 — ship this alongside your installer
+param(
+  [Parameter(Mandatory)] [string] $MsixPath,
+  [Parameter(Mandatory)] [string] $ExternalLocation
+)
+Add-AppxPackage -Path $MsixPath -ExternalLocation $ExternalLocation
+```
+
 ### WiX (v3)
 
 ```xml
 <CustomAction Id="RegisterSparse" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no"
-  ExeCommand="powershell.exe -NoProfile -ExecutionPolicy Bypass -Command &quot;Add-AppxPackage -Path '[INSTALLFOLDER]MyApp.identity.msix' -ExternalLocation '[INSTALLFOLDER]'&quot;" />
+  ExeCommand="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]register-sparse.ps1&quot; -MsixPath &quot;[INSTALLFOLDER]MyApp.identity.msix&quot; -ExternalLocation &quot;[INSTALLFOLDER]&quot;" />
 ```
 
 ### NSIS
 
 ```nsis
 Section
-  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Add-AppxPackage -Path \"$INSTDIR\MyApp.identity.msix\" -ExternalLocation \"$INSTDIR\""'
+  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\register-sparse.ps1" -MsixPath "$INSTDIR\MyApp.identity.msix" -ExternalLocation "$INSTDIR"'
 SectionEnd
 ```
 

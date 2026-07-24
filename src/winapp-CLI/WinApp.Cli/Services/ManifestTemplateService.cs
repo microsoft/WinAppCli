@@ -272,15 +272,15 @@ internal partial class ManifestTemplateService : IManifestTemplateService
             content = content.Replace("$targetnametoken$.exe", PublisherDnHelper.XmlEscape(executableName));
         }
 
-        // Write manifest file. Guard against a rooted or nested manifestFileName, which would make
-        // Path.Combine silently drop outputDirectory and write outside the intended folder.
+        // Write manifest file. manifestFileName must be a bare file name; a rooted or nested value
+        // would make Path.Combine silently drop outputDirectory and write outside the intended folder.
         if (Path.IsPathRooted(manifestFileName) || manifestFileName != Path.GetFileName(manifestFileName))
         {
             throw new ArgumentException(
                 $"manifestFileName must be a bare file name, not a path: '{manifestFileName}'.", nameof(manifestFileName));
         }
 
-        var manifestPath = Path.Combine(outputDirectory.FullName, manifestFileName);
+        var manifestPath = Path.Combine(outputDirectory.FullName, Path.GetFileName(manifestFileName));
         await File.WriteAllTextAsync(manifestPath, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
 
         // Generate default assets
