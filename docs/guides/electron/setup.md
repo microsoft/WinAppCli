@@ -21,22 +21,24 @@ npm create electron-app@latest my-windows-app
 cd my-windows-app
 ```
 
-`create-electron-app` is non-interactive — it scaffolds with its default template rather than prompting you. The default is exactly what this guide wants:
-- **No bundler** — native addons and the generated JS bindings work without extra bundler configuration.
-- **JavaScript** — this guide uses JS (TypeScript works too).
+`create-electron-app` is non-interactive: it scaffolds its **default template — no bundler + JavaScript**, which is exactly what these guides use (native addons and the generated JS bindings work without extra bundler configuration). It also installs the current `latest` Electron version and initializes a git repository.
 
-It also installs the current `latest` Electron version and initializes a git repository. To customize, pass flags after a `--` separator (npm forwards them to `create-electron-app`), for example:
+<details>
+<summary>Use a bundler, TypeScript, or a specific Electron version</summary>
+
+Pass flags after a `--` separator (npm forwards them to `create-electron-app`):
 
 ```bash
-# Use a bundler and/or TypeScript (optional):
+# Bundler and/or TypeScript:
 npm create electron-app@latest my-windows-app -- --template=webpack
 npm create electron-app@latest my-windows-app -- --template=vite-typescript
 
-# Pin a specific Electron version, or skip git init:
+# Pin an Electron version, or skip git init:
 npm create electron-app@latest my-windows-app -- --electron-version=38.3.0 --skip-git
 ```
 
 The official Forge templates are `webpack`, `webpack-typescript`, `vite`, and `vite-typescript`. Run `npx create-electron-app@latest --help` to see all flags.
+</details>
 
 Verify the app runs:
 
@@ -54,57 +56,51 @@ The Electron workflow requires the **npm package** (`@microsoft/winappcli`) rath
 npm install --save-dev @microsoft/winappcli
 ```
 
-## Step 3: Initialize the project for Windows development
+## Step 3: Initialize for Windows and generate your JS bindings
 
-The `winapp init` command sets up everything you need in one go: app manifest, assets, and SDKs.
-
-Run the following command and follow the prompts:
+`winapp init` sets up everything your Electron app needs to call Windows APIs from JavaScript — the Windows SDK and Windows App SDK, the `Package.appxmanifest` and `Assets/`, `winapp.yaml`, the Windows App SDK runtime, and the **JS bindings** you import as `#winapp/bindings`:
 
 ```bash
-npx winapp init .
+npx winapp init . --add-js-bindings --use-defaults
 ```
 
-When prompted:
-- **Package name**: Press Enter to accept the default (my-windows-app)
-- **Publisher name**: Press Enter to accept the default or enter your name
-- **Version**: Press Enter to accept 1.0.0.0
-- **Entry point**: Press Enter to accept the default (my-windows-app.exe)
-- **Setup SDKs**: Select "Stable SDKs"
-- **Add JS/TypeScript bindings**: Press Enter to accept the default (**Yes**) to generate JS bindings for Windows App SDK APIs
+When it finishes you'll see `Generated JS bindings → .winapp/bindings` and `Added "#winapp/bindings" package imports to package.json`. Confirm you can import Windows APIs from JavaScript:
+
+```bash
+node -e "console.log(Object.keys(require('#winapp/bindings')).length + ' Windows classes available')"
+```
+
+That's the whole setup — you're ready to [call Windows APIs from JavaScript](js-file-picker.md). The command uses sensible defaults for app identity; customize them anytime by editing `Package.appxmanifest`.
 
 > [!NOTE]
-> `--use-defaults` and non-interactive init skip JS bindings unless you pass `--add-js-bindings`. Run interactive `npx winapp init .` to opt in at the prompt, or use `npx winapp init . --use-defaults --add-js-bindings` for automation.
+> The `.winapp/` folder is added to `.gitignore` and shouldn't be checked in — `winapp restore` regenerates it (see [Step 4](#step-4-add-restore-to-your-build-pipeline)).
 
-### What Does `winapp init` Do?
+<details>
+<summary>Prefer to set package name, publisher, and version interactively?</summary>
 
-This command sets up everything you need for Windows development:
+Run `npx winapp init .` with no flags and follow the prompts:
+- **Package name / Publisher / Version / Entry point** — press Enter to accept the defaults, or type your own
+- **Setup SDKs** — select **Stable SDKs**
+- **Add JS/TypeScript bindings** — accept the default **Yes**
 
-1. **Creates `.winapp/` folder** containing:
-   - Headers and libraries from the **Windows SDK**
-   - Headers and libraries from the **Windows App SDK**
-   - NuGet packages with the required binaries
+Interactive init opts into bindings at that prompt. The non-interactive `--use-defaults` path skips bindings unless you also pass `--add-js-bindings` (as shown above).
+</details>
 
-2. **Generates `Package.appxmanifest`** - The app manifest required for app identity and MSIX packaging
+<details>
+<summary>What did <code>winapp init</code> set up?</summary>
 
-3. **Creates `Assets/` folder** - Contains app icons and visual assets for your app
+1. **`.winapp/`** — headers and libraries from the Windows SDK and Windows App SDK, plus the required NuGet binaries (and your generated JS bindings)
+2. **`Package.appxmanifest`** — app manifest required for app identity and MSIX packaging
+3. **`Assets/`** — app icons and visual assets
+4. **`winapp.yaml`** — tracks SDK versions and project configuration
+5. **Windows App SDK runtime** — required runtime components for modern APIs
+6. **Developer Mode** — enabled in Windows for debugging
+7. **JS bindings** — generated into `.winapp/bindings/`, with the `winapp.jsBindings` block and the `#winapp/bindings` imports map added to `package.json` (see [Enable the `#winapp/bindings` import](#enable-the-winappbindings-import) below), plus two dependencies:
+   - `@microsoft/dynwinrt-codegen` (devDependency) — build-time codegen, pinned to the registry's `latest` on first run
+   - `@microsoft/dynwinrt` (dependency) — the runtime the bindings import, version chosen by codegen for ABI compatibility
 
-4. **Creates `winapp.yaml`** - Tracks SDK versions and project configuration
-
-5. **Installs Windows App SDK runtime** - Required runtime components for modern APIs
-
-6. **Enables Developer Mode in Windows** - Required for debugging our application
-
-7. **Generates JS bindings** - When you opt in, it:
-   - Writes the `winapp.jsBindings` block to `package.json`
-   - Adds `@microsoft/dynwinrt-codegen` to `devDependencies` — the build-time tool that produces the bindings (pinned to the registry's `latest` version on first run, then left alone)
-   - Adds `@microsoft/dynwinrt` to `dependencies` — the runtime that the generated bindings import at execution time (version is chosen by the installed codegen to guarantee ABI compatibility)
-   - Generates JS bindings for Windows App SDK APIs into `.winapp/bindings/`
-   - Adds the `#winapp/bindings` imports map to `package.json` so `require('#winapp/bindings')` resolves (see [Enable the `#winapp/bindings` import](#enable-the-winappbindings-import) below)
-
-> [!NOTE]
-> The `.winapp/` folder is automatically added to `.gitignore` and should not be checked in to source.
-
-You can open `Package.appxmanifest` to further customize properties like the display name, publisher, and capabilities.
+Open `Package.appxmanifest` anytime to customize the display name, publisher, and capabilities.
+</details>
 
 > [!TIP]
 > **About the Windows SDKs:**
@@ -117,13 +113,16 @@ You can open `Package.appxmanifest` to further customize properties like the dis
 
 ### Enable the `#winapp/bindings` import
 
-`winapp init` generates the bindings into `.winapp/bindings/` (an `index.js` + `index.mjs` + `index.d.ts`, plus one file per emitted class). The rest of these guides import them with the clean `#winapp/bindings` specifier:
+`winapp init --add-js-bindings` already wired the `#winapp/bindings` specifier into your `package.json` `imports` map — the confirm command above verifies it. It's how every JavaScript guide imports Windows APIs:
 
 ```js
 const { FileOpenPicker } = require('#winapp/bindings');
 ```
 
-That specifier only resolves if your `package.json` has a matching [subpath `imports`](https://nodejs.org/api/packages.html#subpath-imports) map. **`winapp init --add-js-bindings` writes this map for you** — you'll see `Added "#winapp/bindings" package imports to package.json` in the init output. If it's ever missing (for example, `require('#winapp/bindings')` fails with `ERR_MODULE_NOT_FOUND`), add it yourself:
+<details>
+<summary><code>require('#winapp/bindings')</code> fails with <code>ERR_MODULE_NOT_FOUND</code>, or you skipped bindings during init?</summary>
+
+The specifier resolves through a [subpath `imports`](https://nodejs.org/api/packages.html#subpath-imports) map in `package.json`. If it's missing, add it:
 
 ```jsonc
 // package.json
@@ -143,14 +142,8 @@ That specifier only resolves if your `package.json` has a matching [subpath `imp
 }
 ```
 
-Confirm it resolves:
-
-```bash
-node -e "console.log(Object.keys(require('#winapp/bindings')).length + ' Windows classes available')"
-```
-
-> [!NOTE]
-> The paths are relative to `package.json` (the folder that also holds `.winapp/`), so they're the same no matter where your entry file lives. If you'd rather not add an `imports` map, you can instead import the generated `index.js` by a path relative to the importing file — for example `require('../.winapp/bindings/index.js')` from `src/index.js`.
+The paths are relative to `package.json` (the folder that also holds `.winapp/`), so they work no matter where your entry file lives. Prefer not to add an `imports` map? Import the generated `index.js` by a path relative to the importing file — for example `require('../.winapp/bindings/index.js')` from `src/index.js`.
+</details>
 
 ## Step 4: Add Restore to Your Build Pipeline
 

@@ -31,13 +31,20 @@ First, you'll set up your development environment with the necessary tools and S
 - Creating or configuring an Electron app
 - Installing winapp CLI
 - Initializing Windows SDKs and required assets
+- **Generating JS bindings** so you can call Windows APIs from JavaScript
 - Setting up your build pipeline
 
 [Get Started with Setup →](setup.md)
 
 ### 2. Call Windows APIs from JavaScript
 
-If you enabled JS bindings during setup, `.winapp/bindings/` contains generated `.js` wrapper classes and matching `.d.ts` declarations for Windows App SDK APIs. Import `#winapp/bindings` to access all exported classes. `winapp init --add-js-bindings` wires this specifier into your `package.json` `imports` map. If `require('#winapp/bindings')` ever fails with `ERR_MODULE_NOT_FOUND`, follow [Enable the `#winapp/bindings` import](setup.md#enable-the-winappbindings-import) to add it, or import the generated `index.js` by a path relative to the importing file (for example `require('../.winapp/bindings/index.js')` from `src/index.js`).
+Setup generated `.winapp/bindings/` — `.js` wrapper classes with matching `.d.ts` declarations for Windows App SDK APIs — and wired the `#winapp/bindings` specifier into your `package.json`. Import it to reach every exported class:
+
+```js
+const { FileOpenPicker } = require('#winapp/bindings');
+```
+
+If `require('#winapp/bindings')` ever fails with `ERR_MODULE_NOT_FOUND`, see [Enable the `#winapp/bindings` import](setup.md#enable-the-winappbindings-import).
 
 - **[Show a Notification from JavaScript →](js-notification.md)** — call the same Windows App SDK notification surface without a native addon.
 - **[Call Windows APIs from JavaScript →](js-file-picker.md)** — pick a file with Windows App SDK and inspect it with Windows SDK imaging APIs.
