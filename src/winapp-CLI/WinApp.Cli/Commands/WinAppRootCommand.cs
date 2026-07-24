@@ -70,6 +70,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         MSStoreCommand msStoreCommand,
         IAnsiConsole ansiConsole,
         CreateExternalCatalogCommand createExternalCatalogCommand,
+        MigrateCommand migrateCommand,
         UiCommand uiCommand) : base("CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows")
     {
         Subcommands.Add(initCommand);
@@ -86,6 +87,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Subcommands.Add(toolCommand);
         Subcommands.Add(msStoreCommand);
         Subcommands.Add(createExternalCatalogCommand);
+        Subcommands.Add(migrateCommand);
         Subcommands.Add(uiCommand);
 
         Options.Add(CliSchemaOption);
@@ -100,6 +102,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
             ("Setup", [typeof(InitCommand), typeof(RestoreCommand), typeof(UpdateCommand)]),
             ("Packaging & Signing", [typeof(PackageCommand), typeof(SignCommand), typeof(CertCommand), typeof(ManifestCommand), typeof(CreateExternalCatalogCommand)]),
             ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand), typeof(RunCommand), typeof(UnregisterCommand)]),
+            ("Migration", [typeof(MigrateCommand)]),
             ("UI Automation", [typeof(UiCommand)])
         );
     }
