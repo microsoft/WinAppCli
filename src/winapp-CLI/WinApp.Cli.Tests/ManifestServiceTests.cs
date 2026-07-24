@@ -97,7 +97,7 @@ public class ManifestServiceTests
     [TestMethod]
     public async Task PromptForManifestInfo_Interactive_UsesPromptedValues()
     {
-        var console = new TestConsole();
+        using var console = new TestConsole();
         console.Profile.Capabilities.Interactive = true;
         console.Input.PushTextWithEnter("MyPkg");
         console.Input.PushTextWithEnter("CN=Me");
@@ -119,7 +119,7 @@ public class ManifestServiceTests
     {
         // A raw interactive override with invalid Identity characters must be re-cleaned so it
         // cannot produce malformed XML or an unpackable Identity name.
-        var console = new TestConsole();
+        using var console = new TestConsole();
         console.Profile.Capabilities.Interactive = true;
         console.Input.PushTextWithEnter("A&B App");
         console.Input.PushTextWithEnter("CN=Me");

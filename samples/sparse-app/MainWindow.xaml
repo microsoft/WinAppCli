@@ -10,7 +10,7 @@
         <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
             <TextBlock FontSize="26" FontWeight="SemiBold" Text="Sparse Packaging Sample" HorizontalAlignment="Center" />
             <TextBlock x:Name="StatusTextBlock" Margin="0,24,0,8" FontSize="20" HorizontalAlignment="Center" />
-            <TextBlock x:Name="DetailTextBlock" FontSize="14" Foreground="Gray" HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" />
+            <TextBlock x:Name="DetailTextBlock" FontSize="14" Foreground="#595959" HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" />
         </StackPanel>
     </Grid>
 </Window>

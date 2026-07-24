@@ -13,6 +13,7 @@ namespace WinApp.Cli.Tests;
 /// and version normalization. Uses real services (no build tools required for these paths).
 /// </summary>
 [TestClass]
+[DoNotParallelize]
 public class SparsePackagingTests : BaseCommandTests
 {
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
@@ -408,6 +409,12 @@ public class SparsePackagingTests : BaseCommandTests
         Assert.AreEqual("65535.65535.65535.65535", ManifestService.NormalizeManifestVersion("65535.65535.65535.65535"));
         Assert.IsNull(ManifestService.NormalizeManifestVersion("70000.0.0.0"));
         Assert.IsNull(ManifestService.NormalizeManifestVersion("1.65536.0.0"));
+
+        // FileVersionInfo.FileVersion is often decorated (e.g. notepad.exe reports
+        // "10.0.26100.32860 (WinBuild.160101.0800)"). The leading numeric token must be parsed so
+        // common executables get their real inferred version instead of the 1.0.0.0 fallback.
+        Assert.AreEqual("10.0.26100.32860", ManifestService.NormalizeManifestVersion("10.0.26100.32860 (WinBuild.160101.0800)"));
+        Assert.AreEqual("1.2.0.0", ManifestService.NormalizeManifestVersion("1.2 beta"));
     }
 
     [TestMethod]

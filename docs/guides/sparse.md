@@ -182,10 +182,14 @@ Add-AppxPackage -Path $MsixPath -ExternalLocation $ExternalLocation
 
 ### WiX (v3)
 
+Register **per user** (`Impersonate="yes"`), because `Add-AppxPackage` registers the package for the account that runs it. A deferred action with `Impersonate="no"` runs as `LocalSystem`, which does **not** grant identity to the installing user (and is commonly rejected). For a per-machine MSI, run the registration impersonated so it applies to the invoking user:
+
 ```xml
-<CustomAction Id="RegisterSparse" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no"
+<CustomAction Id="RegisterSparse" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="yes"
   ExeCommand="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]register-sparse.ps1&quot; -MsixPath &quot;[INSTALLFOLDER]MyApp.identity.msix&quot; -ExternalLocation &quot;[INSTALLFOLDER]&quot;" />
 ```
+
+> A single impersonated action registers identity only for the user running the installer. To provision every user of a per-machine install, register on first launch (per-user) instead, or use a provisioning mechanism such as `Add-AppxProvisionedPackage`.
 
 ### NSIS
 

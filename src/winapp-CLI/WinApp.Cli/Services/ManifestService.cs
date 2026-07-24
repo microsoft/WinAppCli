@@ -69,7 +69,17 @@ internal partial class ManifestService(
         {
             packageName = await PromptForValueAsync(ansiConsole, "Package name", packageName, cancellationToken);
             publisherName = await PromptForValueAsync(ansiConsole, "Publisher name", publisherName, cancellationToken);
-            version = await PromptForValueAsync(ansiConsole, "Version", version, cancellationToken);
+            var promptedVersion = await PromptForValueAsync(ansiConsole, "Version", version, cancellationToken);
+            // Normalize the (possibly hand-typed) version to MSIX's required four in-range
+            // components. An override like '2.0' becomes '2.0.0.0'; anything unparseable or
+            // out-of-range falls back to the inferred default so 'pack' can't fail later on a
+            // manifest that 'init' reported as successful.
+            var normalizedVersion = NormalizeManifestVersion(promptedVersion);
+            if (normalizedVersion == null && !string.Equals(promptedVersion?.Trim(), version.Trim(), StringComparison.Ordinal))
+            {
+                ansiConsole.MarkupLineInterpolated($"[yellow]Warning:[/] '{promptedVersion}' is not a valid MSIX version (needs up to four 0–65535 components). Using {version} instead.");
+            }
+            version = normalizedVersion ?? version;
             description = await PromptForValueAsync(ansiConsole, "Description", description, cancellationToken);
         }
 
@@ -303,7 +313,11 @@ internal partial class ManifestService(
             return null;
         }
 
-        if (!Version.TryParse(version.Trim(), out var parsed))
+        // FileVersionInfo.FileVersion (and hand-typed input) is frequently decorated, e.g.
+        // "10.0.26100.32860 (WinBuild.160101.0800)". Parse the leading numeric version token so a
+        // common executable still yields its real version instead of falling back to the default.
+        var match = LeadingVersionRegex().Match(version.Trim());
+        if (!match.Success || !Version.TryParse(match.Value, out var parsed))
         {
             return null;
         }
@@ -385,6 +399,9 @@ internal partial class ManifestService(
 
     [GeneratedRegex(@"[^A-Za-z0-9.\-]")]
     private static partial Regex InvalidPackageNameCharRegex();
+
+    [GeneratedRegex(@"^\d+(\.\d+){0,3}")]
+    private static partial Regex LeadingVersionRegex();
 
     public async Task UpdateManifestAssetsAsync(
         FileInfo manifestPath,

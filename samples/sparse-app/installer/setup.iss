@@ -58,15 +58,8 @@ Source: "{#MyMsixName}"; DestDir: "{app}"; Flags: ignoreversion
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 
 [Run]
-; Register the sparse identity package against the install directory (external location).
-; The PowerShell arguments are built in [Code] (RegisterParams) so the install path is safely
-; escaped for a single-quoted PowerShell literal — an install directory containing a quote
-; must not be able to inject additional script.
-Filename: "powershell.exe"; \
-  Parameters: "{code:RegisterParams}"; \
-  StatusMsg: "Registering package identity..."; \
-  Flags: runhidden waituntilterminated
-; Launch the app after install (optional).
+; Launch the app after install (optional). Registration happens in [Code] (CurStepChanged)
+; so a failure aborts setup instead of silently completing without identity.
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
@@ -90,14 +83,35 @@ begin
 end;
 
 { Builds the full powershell.exe argument string for registering the sparse package,
-  escaping the runtime-resolved install directory so it cannot break out of the literal. }
+  escaping the runtime-resolved install directory so it cannot break out of the literal.
+  Add-AppxPackage runs with -ErrorAction Stop inside try/catch so any failure produces a
+  nonzero process exit code, which the caller inspects to abort the install. }
 function RegisterParams(Param: string): string;
 var
   AppDir: string;
 begin
   AppDir := ExpandConstant('{app}');
   Result :=
-    '-NoProfile -ExecutionPolicy Bypass -Command "Add-AppxPackage -Path ''' +
+    '-NoProfile -ExecutionPolicy Bypass -Command "try { Add-AppxPackage -Path ''' +
     EscapePSLiteral(AppDir + '\{#MyMsixName}') +
-    ''' -ExternalLocation ''' + EscapePSLiteral(AppDir) + '''"';
+    ''' -ExternalLocation ''' + EscapePSLiteral(AppDir) +
+    ''' -ErrorAction Stop } catch { Write-Error $_; exit 1 }"';
+end;
+
+{ Registers the sparse identity package as a post-install step. Because Inno Setup's [Run]
+  section ignores process exit codes, registration is done here so a failure raises an
+  exception, which aborts setup and rolls back the installed files instead of leaving an app
+  installed without the package identity it requires. }
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    if not Exec('powershell.exe', RegisterParams(''), '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      RaiseException('Could not start PowerShell to register the sparse identity package.');
+    if ResultCode <> 0 then
+      RaiseException('Registering the sparse identity package failed (exit code ' + IntToStr(ResultCode) + '). ' +
+        'This app requires package identity, so setup has been aborted.');
+  end;
 end;
