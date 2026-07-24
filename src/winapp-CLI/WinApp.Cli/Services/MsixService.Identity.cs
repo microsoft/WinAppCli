@@ -47,7 +47,7 @@ internal partial class MsixService
         if (!doc.AllowsExternalContent)
         {
             throw new InvalidOperationException(
-                "The manifest does not declare uap10:AllowExternalContent=\"true\", so it is not a sparse identity package. " +
+                "The manifest does not declare <uap10:AllowExternalContent>true</uap10:AllowExternalContent> under <Properties>, so it is not a sparse identity package. " +
                 "Generate one with 'winapp init --exe <exe> --sparse', or pass an input folder to package a full MSIX.");
         }
 
@@ -91,9 +91,9 @@ internal partial class MsixService
                     stagingDir.Delete(recursive: true);
                 }
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException)
             {
-                taskContext.AddDebugMessage($"{UiSymbols.Warning} Could not clean up staging directory: {stagingDir.FullName}");
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} Could not clean up staging directory: {stagingDir.FullName} ({ex.Message})");
             }
         }
 
@@ -210,6 +210,15 @@ internal partial class MsixService
 
         var root = xdoc.Root
             ?? throw new InvalidOperationException($"The manifest '{target.FullName}' has no root element.");
+
+        // Only touch genuine side-by-side (fusion) manifests. Refuse to append <msix> to an
+        // arbitrary .xml file (e.g. app.config) that happens to be passed as the target.
+        if (root.Name != AsmV1Ns + "assembly")
+        {
+            throw new InvalidOperationException(
+                $"The target '{target.FullName}' is not a side-by-side manifest (its root is <{root.Name.LocalName}>, expected <assembly xmlns=\"{AsmV1Ns.NamespaceName}\">). " +
+                "Point embed-identity at your app's .manifest/.xml side-by-side manifest.");
+        }
 
         // Remove any existing <msix> element(s) so re-running the command is idempotent.
         root.Elements(MsixV1Ns + "msix").Remove();
@@ -737,7 +746,7 @@ internal partial class MsixService
             xdoc.Save(manifestPath.FullName);
             taskContext.AddDebugMessage("Removed existing <msix> identity from embedded manifest before merge.");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException or System.Xml.XmlException)
         {
             taskContext.AddDebugMessage($"Could not strip existing <msix> identity (continuing): {ex.Message}");
         }

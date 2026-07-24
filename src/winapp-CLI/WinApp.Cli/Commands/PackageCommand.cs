@@ -105,7 +105,7 @@ internal class PackageCommand : Command, IShortDescription
     {
         /// <summary>
         /// Returns true when the file is an appx manifest that declares
-        /// uap10:AllowExternalContent="true" (i.e. a sparse identity package manifest).
+        /// a &lt;uap10:AllowExternalContent&gt;true&lt;/uap10:AllowExternalContent&gt; element (i.e. a sparse identity package manifest).
         /// </summary>
         private static async Task<bool> IsSparseManifestAsync(FileInfo file, CancellationToken cancellationToken)
         {

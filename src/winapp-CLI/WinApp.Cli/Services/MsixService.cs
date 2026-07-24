@@ -33,7 +33,7 @@ internal partial class MsixService(
     ICurrentDirectoryProvider currentDirectoryProvider) : IMsixService
 {
     /// <summary>
-    /// Returns true when the manifest content declares uap10:AllowExternalContent="true",
+    /// Returns true when the manifest content declares a &lt;uap10:AllowExternalContent&gt;true&lt;/uap10:AllowExternalContent&gt; element,
     /// indicating a sparse identity package whose binaries/assets live at an external location.
     /// </summary>
     public static bool ManifestHasAllowExternalContent(string manifestContent)
@@ -42,7 +42,7 @@ internal partial class MsixService(
         {
             return AppxManifestDocument.Parse(manifestContent).AllowsExternalContent;
         }
-        catch
+        catch (Exception ex) when (ex is System.Xml.XmlException or FormatException or InvalidOperationException or ArgumentException)
         {
             return false;
         }

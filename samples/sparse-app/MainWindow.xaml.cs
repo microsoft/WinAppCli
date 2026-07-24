@@ -33,7 +33,7 @@ public partial class MainWindow : Window
             StatusTextBlock.Foreground = Brushes.OrangeRed;
             DetailTextBlock.Text =
                 "This exe is running unpackaged. Register the sparse identity package with:\n" +
-                "Add-AppxPackage -Path sparse-app.identity.msix -ExternalLocation <install-dir>\n" +
+                "Add-AppxPackage -Path SparseAppSample.identity.msix -ExternalLocation <install-dir>\n" +
                 "and make sure the exe's manifest was updated with 'winapp embed-identity'.";
         }
     }

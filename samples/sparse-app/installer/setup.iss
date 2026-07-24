@@ -37,6 +37,11 @@ AppName={#MyAppName}
 AppVersion=1.0.0.0
 DefaultDirName={autopf}\SparseAppSample
 DefaultGroupName={#MyAppName}
+; Install and register per-user (no elevation). Add-AppxPackage registers the sparse
+; package for the user who runs it; if the installer were elevated, registration would
+; happen for the admin account instead of the installing user. PrivilegesRequired=lowest
+; keeps the whole install per-user, so {autopf} resolves to {localappdata}\Programs.
+PrivilegesRequired=lowest
 UninstallDisplayIcon={app}\{#MyAppExeName}
 OutputBaseFilename=SparseAppSampleSetup
 Compression=lzma2

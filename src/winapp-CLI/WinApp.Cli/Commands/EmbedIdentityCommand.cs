@@ -123,6 +123,7 @@ internal class EmbedIdentityCommand : Command, IShortDescription
             }
 
             return SparseManifestCandidateNames
+                .Where(name => !Path.IsPathRooted(name))
                 .Select(name => Path.Combine(directory, name))
                 .Where(path => File.Exists(path) && IsSparseManifest(path))
                 .Select(path => new FileInfo(path))

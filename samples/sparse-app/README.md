@@ -37,10 +37,10 @@ dotnet build
 
 ### 2. Generate the sparse identity manifest (optional — one is checked in)
 
-The repo ships a ready-made `appxmanifest.xml`. To regenerate it from the built exe:
+The repo ships a ready-made `appxmanifest.xml`. To regenerate it in place from the built exe (sparse init defaults to the exe's directory, so pass `--output-dir .` to write next to the checked-in sample files):
 
 ```powershell
-winapp init --exe .\bin\Debug\net10.0-windows10.0.19041.0\sparse-app.exe --sparse --use-defaults
+winapp init --exe .\bin\Debug\net10.0-windows10.0.19041.0\sparse-app.exe --sparse --output-dir . --use-defaults
 ```
 
 > This **skips SDK installation** — sparse identity packages have no SDK dependencies. It only writes `appxmanifest.xml` and `Assets/`.

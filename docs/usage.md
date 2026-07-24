@@ -234,7 +234,7 @@ winapp pack <input-folder> [input-folder...] [options]
 
 #### Sparse identity packages
 
-When the input is a **sparse `appxmanifest.xml` file** (one declaring `uap10:AllowExternalContent="true"`) rather than a folder, `winapp pack` builds an **identity-only** `.msix` — it packages just the manifest, with no application binaries or assets. This is step 2 of the [sparse packaging workflow](guides/sparse.md).
+When the input is a **sparse `appxmanifest.xml` file** (one declaring `<uap10:AllowExternalContent>true</uap10:AllowExternalContent>` under `<Properties>`) rather than a folder, `winapp pack` builds an **identity-only** `.msix` — it packages just the manifest, with no application binaries or assets. This is step 2 of the [sparse packaging workflow](guides/sparse.md).
 
 ```bash
 # Build a signed identity package from a sparse manifest
