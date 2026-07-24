@@ -43,15 +43,17 @@ internal class EmbedIdentityCommand : Command, IShortDescription
 
             // Resolve the identity manifest: explicit --manifest wins; otherwise look next to the
             // target (where 'winapp init --exe --sparse' writes appxmanifest.xml by default) and
-            // finally fall back to the current directory.
+            // finally fall back to the current directory. Prefer a *sparse* manifest so a full
+            // Package.appxmanifest sitting alongside the sparse appxmanifest.xml doesn't get picked
+            // and then rejected by embed-identity's sparse-only check.
             var manifest = parseResult.GetValue(ManifestOption);
             if (manifest == null)
             {
                 var targetDir = target.Directory?.FullName;
-                var besideTarget = targetDir != null ? ManifestHelper.FindManifest(targetDir) : null;
-                manifest = besideTarget?.Exists == true
-                    ? besideTarget
-                    : ManifestHelper.FindManifest(currentDirectoryProvider.GetCurrentDirectory());
+                var currentDir = currentDirectoryProvider.GetCurrentDirectory();
+                manifest = FindSparseManifest(targetDir)
+                    ?? FindSparseManifest(currentDir)
+                    ?? FallbackManifest(targetDir, currentDir);
             }
 
             if (!manifest.Exists)
@@ -91,6 +93,56 @@ internal class EmbedIdentityCommand : Command, IShortDescription
                     return (1, $"{UiSymbols.Error} Failed to embed package identity: {baseEx.Message}");
                 }
             }, cancellationToken);
+        }
+
+        /// <summary>
+        /// Returns the first existing manifest candidate in <paramref name="directory"/> that is a
+        /// sparse identity manifest (declares <c>uap10:AllowExternalContent</c>), preferring the
+        /// sparse <c>appxmanifest.xml</c> name. Returns null if the directory is null/empty or no
+        /// sparse manifest is present.
+        /// </summary>
+        private static FileInfo? FindSparseManifest(string? directory)
+        {
+            if (string.IsNullOrEmpty(directory))
+            {
+                return null;
+            }
+
+            foreach (var name in new[] { "appxmanifest.xml", "Package.appxmanifest" })
+            {
+                var path = Path.Combine(directory, name);
+                if (File.Exists(path) && IsSparseManifest(path))
+                {
+                    return new FileInfo(path);
+                }
+            }
+
+            return null;
+        }
+
+        private static bool IsSparseManifest(string path)
+        {
+            try
+            {
+                return AppxManifestDocument.Parse(File.ReadAllText(path)).AllowsExternalContent;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Fallback used when no sparse manifest is found: preserves the original auto-detect order
+        /// (beside the target, then the current directory) so the downstream "not found" or
+        /// "not a sparse manifest" error still reports a sensible path.
+        /// </summary>
+        private static FileInfo FallbackManifest(string? targetDir, string currentDir)
+        {
+            var besideTarget = targetDir != null ? ManifestHelper.FindManifest(targetDir) : null;
+            return besideTarget?.Exists == true
+                ? besideTarget
+                : ManifestHelper.FindManifest(currentDir);
         }
     }
 }

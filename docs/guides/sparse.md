@@ -65,7 +65,7 @@ Make sure the `Publisher` in the generated manifest matches the certificate you'
 Point `winapp pack` at the sparse manifest (a file, not a folder):
 
 ```powershell
-winapp pack ./bin/Release/net8.0-windows/appxmanifest.xml --cert ./dev.pfx
+winapp pack ./bin/Release/net8.0-windows/appxmanifest.xml --cert ./devcert.pfx
 ```
 
 Because the manifest declares `AllowExternalContent`, `winapp pack` builds an **identity-only** `.msix` containing just the manifest — no binaries, no assets. The output defaults to `<PackageName>.identity.msix` in the current directory; use `--output` to change it. Signing happens only when you pass `--cert` (or `--generate-cert`).

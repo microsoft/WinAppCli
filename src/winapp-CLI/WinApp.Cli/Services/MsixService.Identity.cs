@@ -652,8 +652,8 @@ internal partial class MsixService
     private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityResult identityInfo, TaskContext taskContext, CancellationToken cancellationToken)
     {
         // Create the MSIX element for the win32 manifest
-        string assemblyIdentity = $@"<assemblyIdentity version=""1.0.0.0"" name=""{SecurityElement.Escape(identityInfo.PackageName)}"" type=""win32""/>;";
-        var existingManifestPath = new FileInfo(Path.Combine(exePath.DirectoryName!, "temp_extracted.manifest"));
+        string assemblyIdentity = $@"<assemblyIdentity version=""1.0.0.0"" name=""{SecurityElement.Escape(identityInfo.PackageName)}"" type=""win32""/>";
+        var existingManifestPath = CreateTempManifestFile("extracted");
 
         try
         {
@@ -690,7 +690,7 @@ internal partial class MsixService
 </assembly>";
 
         // Create a temporary manifest file
-        var tempManifestPath = new FileInfo(Path.Combine(exePath.DirectoryName!, "msix_identity_temp.manifest"));
+        var tempManifestPath = CreateTempManifestFile("identity");
 
         try
         {
@@ -702,6 +702,44 @@ internal partial class MsixService
         finally
         {
             TryDeleteFile(tempManifestPath);
+        }
+    }
+
+    /// <summary>
+    /// Creates a uniquely named temp manifest file path under the system temp directory. Callers own
+    /// deletion. Using the temp directory rather than the executable's own directory avoids silently
+    /// clobbering any same-named files a user keeps next to their exe.
+    /// </summary>
+    private static FileInfo CreateTempManifestFile(string label)
+        => new(Path.Combine(Path.GetTempPath(), $"winapp_{label}_{Guid.NewGuid():N}.manifest"));
+
+    /// <summary>
+    /// Removes any &lt;msix&gt; identity element(s) from a side-by-side manifest file on disk so a
+    /// subsequent mt.exe merge can insert a fresh identity without colliding with a stale one.
+    /// No-ops if the file cannot be parsed as XML.
+    /// </summary>
+    private static void RemoveMsixElements(FileInfo manifestPath, TaskContext taskContext)
+    {
+        try
+        {
+            var xdoc = XDocument.Load(manifestPath.FullName);
+            var msixElements = xdoc.Descendants().Where(e => e.Name.LocalName == "msix").ToList();
+            if (msixElements.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var element in msixElements)
+            {
+                element.Remove();
+            }
+
+            xdoc.Save(manifestPath.FullName);
+            taskContext.AddDebugMessage("Removed existing <msix> identity from embedded manifest before merge.");
+        }
+        catch (Exception ex)
+        {
+            taskContext.AddDebugMessage($"Could not strip existing <msix> identity (continuing): {ex.Message}");
         }
     }
 
@@ -731,9 +769,8 @@ internal partial class MsixService
         taskContext.AddDebugMessage($"Processing executable: {exePath}");
         taskContext.AddDebugMessage($"Embedding manifest: {manifestPath}");
 
-        var exeDir = exePath.DirectoryName!;
-        var tempManifestPath = new FileInfo(Path.Combine(exeDir, "temp_extracted.manifest"));
-        var mergedManifestPath = new FileInfo(Path.Combine(exeDir, "merged.manifest"));
+        var tempManifestPath = CreateTempManifestFile("extracted");
+        var mergedManifestPath = CreateTempManifestFile("merged");
 
         try
         {
@@ -741,6 +778,12 @@ internal partial class MsixService
 
             if (hasExistingManifest)
             {
+                // Drop any <msix> identity already embedded in the exe. Otherwise mt.exe refuses to
+                // merge when the new identity differs from the old one (error c1010001: "Values of
+                // attribute ... not equal in different manifest snippets"), which would make
+                // re-branding an exe a hard failure instead of an idempotent update.
+                RemoveMsixElements(tempManifestPath, taskContext);
+
                 taskContext.AddDebugMessage("Merging with existing manifest using mt.exe...");
 
                 // Use mt.exe to merge existing manifest with new manifest
