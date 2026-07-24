@@ -280,7 +280,10 @@ internal partial class ManifestTemplateService : IManifestTemplateService
                 $"manifestFileName must be a bare file name, not a path: '{manifestFileName}'.", nameof(manifestFileName));
         }
 
-        var manifestPath = Path.Combine(outputDirectory.FullName, Path.GetFileName(manifestFileName));
+        // Validated above to be a bare file name; use the sanitized local so the combine is
+        // unambiguously within outputDirectory.
+        var safeManifestFileName = Path.GetFileName(manifestFileName);
+        var manifestPath = Path.Combine(outputDirectory.FullName, safeManifestFileName);
         await File.WriteAllTextAsync(manifestPath, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
 
         // Generate default assets

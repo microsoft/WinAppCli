@@ -66,11 +66,11 @@ internal partial class MsixService
 
         // Stage a directory containing ONLY the manifest. Sparse identity packages carry no
         // binaries or assets — those are resolved from the external content location at runtime.
-        var stagingDir = new DirectoryInfo(Path.Combine(Path.GetTempPath(), Path.GetFileName($"winapp-sparse-{Guid.NewGuid():N}")));
+        var stagingDir = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"winapp-sparse-{Guid.NewGuid():N}"));
         stagingDir.Create();
         try
         {
-            var stagedManifest = Path.Combine(stagingDir.FullName, Path.GetFileName("appxmanifest.xml"));
+            var stagedManifest = Path.Combine(stagingDir.FullName, "appxmanifest.xml");
             await File.WriteAllTextAsync(stagedManifest, manifestContent, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
 
             taskContext.AddDebugMessage($"{UiSymbols.Package} Packaging sparse identity manifest (external content): {manifestPath.Name}");
@@ -119,9 +119,13 @@ internal partial class MsixService
                 $"Internal error: sparse output file name must be a bare file name, not a path: '{defaultFileName}'.");
         }
 
+        // Validated above to be a bare file name; use it consistently so the combines below are
+        // unambiguously relative to the target directory.
+        var safeFileName = Path.GetFileName(defaultFileName);
+
         if (outputPath == null)
         {
-            return (new FileInfo(Path.Combine(currentDirectory.FullName, Path.GetFileName(defaultFileName))), currentDirectory);
+            return (new FileInfo(Path.Combine(currentDirectory.FullName, safeFileName)), currentDirectory);
         }
 
         if (Directory.Exists(outputPath.FullName))
@@ -129,7 +133,7 @@ internal partial class MsixService
             // An existing directory is always treated as the output folder, even if its name
             // contains a dot (e.g. './release.v2') that Path.HasExtension would misread as a file.
             var dir = new DirectoryInfo(outputPath.FullName);
-            return (new FileInfo(Path.Combine(dir.FullName, Path.GetFileName(defaultFileName))), dir);
+            return (new FileInfo(Path.Combine(dir.FullName, safeFileName)), dir);
         }
 
         if (Path.HasExtension(outputPath.Name))
@@ -149,7 +153,7 @@ internal partial class MsixService
         }
 
         var folder = new DirectoryInfo(outputPath.FullName);
-        return (new FileInfo(Path.Combine(folder.FullName, Path.GetFileName(defaultFileName))), folder);
+        return (new FileInfo(Path.Combine(folder.FullName, safeFileName)), folder);
     }
 
     public async Task<MsixIdentityResult> EmbedIdentityAsync(
