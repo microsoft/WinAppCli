@@ -207,6 +207,38 @@ public class AzureSigningServiceTests
     }
 
     [TestMethod]
+    public async Task ListSubscriptionsAsync_WhenCancelledMidPagination_ThrowsAndStopsRequesting()
+    {
+        const string page1 = """
+        {
+            "value": [ { "subscriptionId": "sub-1", "displayName": "Page 1 Sub", "state": "Enabled" } ],
+            "nextLink": "https://management.azure.com/subscriptions?api-version=2022-12-01&$skiptoken=page2"
+        }
+        """;
+        using var cts = new CancellationTokenSource();
+        var handler = new BlockingSecondPageHandler(page1, cts);
+
+        var service = new AzureSigningService(NullLogger<AzureSigningService>.Instance, new HttpClient(handler));
+
+        var threw = false;
+        try
+        {
+            await service.ListSubscriptionsAsync("token", cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            threw = true;
+        }
+
+        Assert.IsTrue(threw, "A cancelled paginated request must surface an OperationCanceledException");
+        // The initial page and the (blocked, then cancelled) nextLink request are attempted; no page
+        // beyond the cancellation point may be requested — a regression dropping the token would
+        // otherwise keep paging.
+        Assert.AreEqual(2, handler.RequestUris.Count,
+            "Only the first page and the cancelled nextLink request should be attempted");
+    }
+
+    [TestMethod]
     public async Task GetSigningAccountAsync_Success_ParsesAccountAndTargetsResourceScopedUrl()
     {
         const string json = """
@@ -364,6 +396,35 @@ public class AzureSigningServiceTests
                 }
             }
             base.Dispose(disposing);
+        }
+    }
+
+    /// <summary>
+    /// Returns a first page (with a nextLink) on the initial request, then — on the nextLink
+    /// request — cancels the shared token and blocks on it so the paginated call is cancelled
+    /// mid-flight, exercising cancellation propagation through <c>GetArmResponseAsync</c>.
+    /// </summary>
+    private sealed class BlockingSecondPageHandler(string firstPageBody, CancellationTokenSource cts) : HttpMessageHandler
+    {
+        private int _requestCount;
+
+        public List<string> RequestUris { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestUris.Add(request.RequestUri!.ToString());
+            _requestCount++;
+
+            if (_requestCount == 1)
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(firstPageBody) };
+            }
+
+            // The nextLink request: cancel and then block on the token so the service observes
+            // cancellation while awaiting the second page.
+            cts.Cancel();
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            throw new InvalidOperationException("Unreachable: the request should have been cancelled.");
         }
     }
 }

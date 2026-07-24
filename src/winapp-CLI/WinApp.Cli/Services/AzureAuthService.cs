@@ -236,14 +236,12 @@ internal partial class AzureAuthService(ILogger<AzureAuthService> logger, IAnsiC
 
     protected virtual string? FindAzureCli()
     {
-        // Check common install locations on Windows
-        var candidates = new[]
-        {
-            Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Microsoft SDKs", "Azure", "CLI2", "wbin", "az.cmd"),
-            Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Microsoft SDKs", "Azure", "CLI2", "wbin", "az.cmd"),
-        };
-
-        var installed = candidates.FirstOrDefault(File.Exists);
+        // Check common install locations on Windows. Derive them from the same trusted-root helper
+        // used to validate a PATH-resolved az.cmd so the two lists cannot drift (the roots include
+        // ProgramFilesX86, the default Azure CLI MSI location on 64-bit Windows).
+        var installed = GetAzureCliInstallRoots()
+            .Select(root => Path.Join(root, "wbin", "az.cmd"))
+            .FirstOrDefault(File.Exists);
         if (installed != null)
         {
             return installed;

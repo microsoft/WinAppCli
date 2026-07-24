@@ -221,7 +221,7 @@ Code-sign a file using Azure Trusted Signing. Signs executables, MSIX packages, 
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--account` | Signing account name. Must be used with --resource-group | (none) |
-| `--metadata-file` | Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. Authentication may still be interactive (tenant prompt or 'az login') if no non-interactive credential is available. | (none) |
+| `--metadata-file` | Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. A non-interactive Azure credential should already be available; the CLI can otherwise fall back to an interactive tenant prompt or 'az login', but the npm programmatic API is always non-interactive and fails instead of prompting. | (none) |
 | `--profile` | Certificate profile name. Must be used with --account | (none) |
 | `--resource-group` | Resource group to narrow down signing accounts | (none) |
 | `--subscription` | Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted. | (none) |

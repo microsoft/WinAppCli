@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.5.1
+ * Source schema version: 1.0.0
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -75,7 +75,7 @@ export interface AzSignOptions extends CommonOptions {
   filePath: string;
   /** Signing account name. Must be used with --resource-group */
   account?: string;
-  /** Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. Authentication may still be interactive (tenant prompt or 'az login') if no non-interactive credential is available. */
+  /** Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. A non-interactive Azure credential should already be available; the CLI can otherwise fall back to an interactive tenant prompt or 'az login', but the npm programmatic API is always non-interactive and fails instead of prompting. */
   metadataFile?: string;
   /** Certificate profile name. Must be used with --account */
   profile?: string;

@@ -484,6 +484,59 @@ public class AzSignCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task AzSign_DiscoveredAccountUriUntrusted_ReturnsError()
+    {
+        var filePath = Path.Join(_tempDirectory.FullName, "test.exe");
+        await File.WriteAllTextAsync(filePath, "MZ");
+
+        // The auto-discovery path must apply the same trusted-host pin as --metadata-file. Here ARM
+        // returns an accountUri on an attacker-controlled host; signing must be refused before the
+        // access token could ever be handed to the dlib for that endpoint.
+        _fakeSigningService.Subscriptions = [new AzureSubscription("sub-123", "Test Subscription")];
+        _fakeSigningService.SigningAccounts = [new SigningAccount("myaccount", "myrg", "eastus", "https://evil.example.com")];
+        _fakeSigningService.CertificateProfiles = [new CertificateProfile("myprofile", "PublicTrust", "Active")];
+
+        var result = await ParseAndInvokeWithCaptureAsync(_command,
+            ["--subscription", "sub-123", "--resource-group", "myrg", "--account", "myaccount", "--profile", "myprofile", filePath]);
+
+        Assert.AreEqual(1, result);
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
+        StringAssert.Contains(allOutput, "untrusted Endpoint");
+        Assert.AreEqual(0, _fakeSignToolService.CallCount, "Must not sign with an untrusted discovered endpoint");
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task GenerateMetadataFileAsync_WhenCancelledDuringWrite_LeavesNoTempFile()
+    {
+        // The cleanup catch in GenerateMetadataFileAsync must delete the partially-created temp file
+        // when generation is cancelled (or faults) mid-write, so no orphaned winapp-az-sign-*.json is
+        // left in %TEMP%.
+        var before = Directory.GetFiles(Path.GetTempPath(), "winapp-az-sign-*.json").Length;
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var metadata = new AzSignCommand.Handler.SigningMetadata("https://eus.codesigning.azure.net", "myaccount", "myprofile");
+
+        var threw = false;
+        try
+        {
+            await AzSignCommand.Handler.GenerateMetadataFileAsync(metadata, cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            threw = true;
+        }
+
+        Assert.IsTrue(threw, "Cancellation during metadata generation should surface as an OperationCanceledException");
+
+        var after = Directory.GetFiles(Path.GetTempPath(), "winapp-az-sign-*.json").Length;
+        Assert.AreEqual(before, after,
+            "A cancelled metadata generation must not leave an orphaned temp file behind");
+    }
+
+    [TestMethod]
     public async Task AzSign_MetadataFileMissingEndpoint_ReturnsError()
     {
         var filePath = Path.Join(_tempDirectory.FullName, "test.exe");

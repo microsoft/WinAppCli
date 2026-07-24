@@ -750,11 +750,11 @@ winapp az-sign <file-path> [options]
 
 **Options:**
 
-- `--subscription`, `-s` - Azure subscription ID. If omitted and multiple exist, you are prompted
+- `--subscription`, `-s` - Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted
 - `--resource-group`, `-r` - Resource group to narrow down signing accounts
 - `--account` - Signing account name. Must be used with `--resource-group`
 - `--profile`, `-p` - Certificate profile name. Must be used with `--account`
-- `--metadata-file`, `-m` - Path to an existing `metadata.json`. Skips resource discovery and account/profile selection prompts and signs directly. Authentication may still be interactive (tenant prompt or `az login`) if no non-interactive credential is available
+- `--metadata-file`, `-m` - Path to an existing `metadata.json`. Skips resource discovery and account/profile selection prompts and signs directly. A non-interactive Azure credential should already be available; the CLI can otherwise fall back to an interactive tenant prompt or `az login`, but the npm programmatic API is always non-interactive and fails instead of prompting
 
 **Authentication:**
 
@@ -762,12 +762,9 @@ winapp az-sign <file-path> [options]
 
 **Prerequisites:**
 
-- An Azure Code Signing account and a certificate profile (created in the Azure portal after identity validation), plus the **Code Signing Certificate Profile Signer** role assigned to your identity.
+- An Azure Code Signing account and a certificate profile (created in the Azure portal after identity validation), plus the **Code Signing Certificate Profile Signer** role assigned to your identity. For more guidance, visit [Azure Artifact Signing quickstart docs.](https://learn.microsoft.com/azure/artifact-signing/quickstart)
 - A machine-wide **x64 .NET 8 (or later) runtime** installed. The Azure signing client library is a managed assembly that `signtool.exe` loads in a separate process; winapp's own self-contained runtime does not satisfy it. Install it from https://dotnet.microsoft.com/download if signing fails with a runtime-load error.
 - The **Microsoft Visual C++ Redistributable (x64)**. The Azure signing client library depends on the VC++ runtime, and because winapp downloads the raw NuGet package rather than the official client-tools installer, this dependency is **not** installed automatically. A clean machine can load-fail even with .NET and SignTool present. Install the latest x64 redistributable from https://aka.ms/vs/17/release/vc_redist.x64.exe if signing fails with a `0xc000007b`, "The application was unable to start correctly", or missing-DLL error from the dlib.
-- **SignTool 10.0.22621.755 or later** (from the Windows SDK). winapp installs SDK build tools automatically, but an older pinned/cached SDK may need updating.
-
-> **Troubleshooting a dlib load failure:** If signing fails while loading the Azure signing library (rather than during authentication or the REST calls), verify both machine-wide runtimes are present: the **x64 .NET 8+ runtime** and the **x64 Visual C++ Redistributable**. These are the two dependencies the raw NuGet package cannot install for you.
 
 > **Least-privilege CI:** Auto-discovery (listing subscriptions, resource groups, accounts, and profiles) needs read access at a parent scope. To avoid *every* collection-listing call, pass all four of `--subscription`, `--resource-group`, `--account`, and `--profile`: `az-sign` then validates the account and profile with direct resource reads (a GET on each named resource) instead of enumerating the parent collection, so a principal scoped to just that account and profile is sufficient. Omitting any one of them re-introduces a listing call — for example, leaving out `--subscription` makes `az-sign` list the subscriptions your identity can access — which a narrowly-scoped principal may not be permitted to do. A principal scoped only to a single certificate profile can skip validation entirely by passing a pre-generated `--metadata-file` (which specifies the account endpoint and profile directly).
 

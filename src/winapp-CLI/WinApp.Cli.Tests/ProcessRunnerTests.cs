@@ -94,9 +94,18 @@ public class ProcessRunnerTests
         var runner = new ProcessRunner();
         using var cts = new CancellationTokenSource();
 
-        // A long sleep via ping so the process is still running when we cancel.
+        // A batch file that waits a few seconds and only then writes a marker file. If cancellation
+        // truly kills the process tree, the child 'ping' is terminated before the marker is written,
+        // so the marker never appears — proving termination, not merely that an exception surfaced.
+        var markerFile = Path.Join(_tempDirectory.FullName, "child-completed.marker");
+        var batchFile = Path.Join(_tempDirectory.FullName, "slow-child.cmd");
+        await File.WriteAllTextAsync(
+            batchFile,
+            $"@echo off\r\nping -n 6 127.0.0.1 >nul\r\necho done> \"{markerFile}\"\r\n",
+            TestContext.CancellationToken);
+
         var runTask = runner.RunAsync(
-            new ProcessRunRequest(CmdExe, ["/c", "ping", "-n", "30", "127.0.0.1"]),
+            new ProcessRunRequest(batchFile, []),
             cancellationToken: cts.Token);
 
         cts.CancelAfter(TimeSpan.FromMilliseconds(250));
@@ -112,6 +121,11 @@ public class ProcessRunnerTests
         }
 
         Assert.IsTrue(threw, "Cancellation should surface as an OperationCanceledException");
+
+        // Wait past the child's own delay; if the tree was killed, the marker is never written.
+        await Task.Delay(TimeSpan.FromSeconds(7), TestContext.CancellationToken);
+        Assert.IsFalse(File.Exists(markerFile),
+            "The child process (and its 'ping' descendant) must be killed on cancellation, so its delayed marker file is never written");
     }
 
     [TestMethod]

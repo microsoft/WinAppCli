@@ -51,7 +51,7 @@ internal class AzSignCommand : Command, IShortDescription
 
         MetadataFileOption = new Option<FileInfo?>("--metadata-file", "-m")
         {
-            Description = "Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. Authentication may still be interactive (tenant prompt or 'az login') if no non-interactive credential is available."
+            Description = "Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. A non-interactive Azure credential should already be available; the CLI can otherwise fall back to an interactive tenant prompt or 'az login', but the npm programmatic API is always non-interactive and fails instead of prompting."
         };
     }
 
@@ -444,6 +444,18 @@ internal class AzSignCommand : Command, IShortDescription
                     "or specify a metadata file with --metadata-file.");
             }
 
+            // Apply the same trusted-host pin the --metadata-file path enforces. The accountUri
+            // arrives from ARM (HTTPS, pinned to management.azure.com), but a compromised or MITM'd
+            // ARM response could otherwise steer the dlib's Azure access token to an attacker host.
+            // Pinning both paths keeps the token destination consistent (defense in depth).
+            if (!IsTrustedSigningEndpoint(accountUri))
+            {
+                throw new InvalidOperationException(
+                    $"Refusing to sign with untrusted Endpoint '{accountUri}' discovered for signing account " +
+                    $"'{resolvedAccountName}'. The Endpoint must be an https URL on a '*{SigningEndpointHostSuffix}' " +
+                    "host — this protects your Azure access token from being sent to an attacker-controlled endpoint.");
+            }
+
             return new SigningMetadata(accountUri, resolvedAccountName, resolvedProfileName);
         }
 
@@ -560,7 +572,7 @@ internal class AzSignCommand : Command, IShortDescription
             return selected.Name;
         }
 
-        private static async Task<FileInfo> GenerateMetadataFileAsync(SigningMetadata metadata, CancellationToken cancellationToken)
+        internal static async Task<FileInfo> GenerateMetadataFileAsync(SigningMetadata metadata, CancellationToken cancellationToken)
         {
             var tempPath = Path.Join(Path.GetTempPath(), $"winapp-az-sign-{Guid.NewGuid():N}.json");
 
@@ -619,6 +631,6 @@ internal class AzSignCommand : Command, IShortDescription
             }
         }
 
-        private readonly record struct SigningMetadata(string Endpoint, string AccountName, string ProfileName);
+        internal readonly record struct SigningMetadata(string Endpoint, string AccountName, string ProfileName);
     }
 }

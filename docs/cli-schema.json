@@ -80,7 +80,7 @@
           "recursive": false
         },
         "--metadata-file": {
-          "description": "Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. Authentication may still be interactive (tenant prompt or 'az login') if no non-interactive credential is available.",
+          "description": "Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. A non-interactive Azure credential should already be available; the CLI can otherwise fall back to an interactive tenant prompt or 'az login', but the npm programmatic API is always non-interactive and fails instead of prompting.",
           "hidden": false,
           "aliases": [
             "-m"

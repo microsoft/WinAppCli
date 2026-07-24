@@ -351,8 +351,12 @@ internal class AzureSignToolService(
                 return dlibFile;
             }
 
-            // Fallback: search recursively for the DLL
-            var found = versionDir.GetFiles("Azure.CodeSigning.Dlib.dll", SearchOption.AllDirectories).FirstOrDefault();
+            // Fallback: search recursively for the DLL, but never an x86 build. winapp ships and
+            // documents x64/arm64 runtime prerequisites only (x64 runs on ARM64 via emulation), so
+            // handing signtool an x86 dlib would load an architecture with no matching .NET/VC++
+            // runtime on the machine. Exclude any candidate under an "x86" directory.
+            var found = versionDir.GetFiles("Azure.CodeSigning.Dlib.dll", SearchOption.AllDirectories)
+                .FirstOrDefault(f => !IsX86Dlib(f));
             if (found != null)
             {
                 return found;
@@ -360,5 +364,23 @@ internal class AzureSignToolService(
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Returns true when the resolved dlib lives under an <c>x86</c> directory (e.g. <c>bin/x86</c>).
+    /// winapp only ships/documents x64 and arm64 runtime prerequisites, so an x86 dlib must never be
+    /// handed to signtool even though the recursive fallback might otherwise find one.
+    /// </summary>
+    private static bool IsX86Dlib(FileInfo dlibFile)
+    {
+        for (var dir = dlibFile.Directory; dir != null; dir = dir.Parent)
+        {
+            if (string.Equals(dir.Name, "x86", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
