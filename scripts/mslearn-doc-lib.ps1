@@ -41,9 +41,12 @@ function Test-MsLearnYamlUnsafe {
 
 function Format-MsLearnYamlValue {
     # Quote $Value if (and only if) it could not be emitted as a bare scalar.
+    # When quoting, escape backslashes *before* double quotes so values like a
+    # Windows path (C:\Windows) don't produce an invalid double-quoted escape.
     param([string]$Value)
     if (Test-MsLearnYamlUnsafe $Value) {
-        return '"' + ($Value -replace '"', '\"') + '"'
+        $escaped = $Value -replace '\\', '\\' -replace '"', '\"'
+        return '"' + $escaped + '"'
     }
     return $Value
 }

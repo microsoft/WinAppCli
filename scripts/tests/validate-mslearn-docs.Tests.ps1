@@ -74,6 +74,10 @@ Describe 'mslearn-doc-lib: Test-MsLearnYamlUnsafe' {
         Format-MsLearnYamlValue 'plain text' | Should -Be 'plain text'
         Format-MsLearnYamlValue '- dash' | Should -Be '"- dash"'
     }
+    It 'escapes backslashes before quotes so quoted Windows paths stay valid YAML' {
+        # ':' forces double-quoting; the backslash must be doubled, not left bare.
+        Format-MsLearnYamlValue 'C:\Windows: notes' | Should -Be '"C:\\Windows: notes"'
+    }
 }
 
 Describe 'mslearn-doc-lib: description + title resolution' {
@@ -156,5 +160,52 @@ Describe 'validate-mslearn-docs gate' {
         $r = Invoke-Validator $Root
         $r.ExitCode | Should -Be 0
         $r.Output | Should -Not -Match 'does not use MS Learn alert syntax'
+    }
+}
+
+Describe 'port-mslearn-docs: generated toc.yml + guides index' {
+    BeforeAll {
+        $script:PortScript = Join-Path $script:ScriptsDir 'port-mslearn-docs.ps1'
+        $script:PortOut = Join-Path ([System.IO.Path]::GetTempPath()) ("mslearn-port-" + [guid]::NewGuid().ToString('N'))
+        & pwsh -NoProfile -File $script:PortScript -OutputPath $script:PortOut -Version '0.0.0-test' *>&1 | Out-Null
+        $script:PortExit = $LASTEXITCODE
+        $script:TocPath = Join-Path $script:PortOut 'toc.yml'
+        $script:Toc = if (Test-Path $script:TocPath) { Get-Content $script:TocPath -Raw } else { '' }
+    }
+    AfterAll { Remove-Item $script:PortOut -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'runs to completion (exit 0) and writes toc.yml' {
+        $script:PortExit | Should -Be 0
+        Test-Path $script:TocPath | Should -BeTrue
+    }
+
+    It 'lists the overview as the first entry' {
+        $script:Toc | Should -Match '(?m)^- name: winapp CLI overview'
+    }
+
+    It 'nests the Electron guides under the Framework guides subtree' {
+        $script:Toc | Should -Match '(?m)^- name: Framework guides'
+        $script:Toc | Should -Match '(?m)^  - name: Electron'
+        $script:Toc | Should -Match 'href: guides/electron-setup.md'
+    }
+
+    It 'includes every ported markdown page as a toc href' {
+        $hrefs = [regex]::Matches($script:Toc, '(?m)href:\s*(\S+)') | ForEach-Object { $_.Groups[1].Value }
+        $ported = Get-ChildItem $script:PortOut -Recurse -File -Filter *.md | ForEach-Object {
+            [System.IO.Path]::GetRelativePath($script:PortOut, $_.FullName) -replace '\\', '/'
+        }
+        foreach ($p in $ported) { $hrefs | Should -Contain $p }
+    }
+
+    It 'produces valid, unquoted toc names (no accidental YAML quoting)' {
+        # Curated labels are all plain scalars; guard against a regression that
+        # would force quoting (which would signal an unexpected special char).
+        $script:Toc | Should -Not -Match '(?m)^\s*- name: "'
+    }
+
+    It 'generates a clean guides/index.md heading with no stray carriage return' {
+        $gi = Get-Content (Join-Path $script:PortOut 'guides\index.md') -Raw
+        $gi | Should -Match '# Framework guides'
+        $gi | Should -Not -Match "`r`r"
     }
 }
