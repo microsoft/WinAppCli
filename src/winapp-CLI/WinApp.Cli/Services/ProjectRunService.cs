@@ -566,7 +566,11 @@ internal sealed partial class ProjectRunService(
         if (options.Json || !logger.IsEnabled(LogLevel.Information))
         {
             var redirectedArgs = BuildBuildPassArguments(csproj, options, verbosity, csWinRTMetadataFolder);
-            Console.Error.WriteLine($"dotnet {RedactSecretsForDisplay(redirectedArgs)}");
+            // --json emits the invocation on stderr (the injected args stay discoverable); --quiet suppresses it.
+            if (options.Json)
+            {
+                Console.Error.WriteLine($"dotnet {RedactSecretsForDisplay(redirectedArgs)}");
+            }
             return await dotNetService.RunDotnetStreamingAsync(
                 workingDir, redirectedArgs,
                 onOutputLine: static line => Console.Error.WriteLine(line),

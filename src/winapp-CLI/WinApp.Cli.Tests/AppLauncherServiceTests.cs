@@ -149,6 +149,49 @@ public class AppLauncherServiceTests
         Assert.IsNull(result);
     }
 
+    // ---- LaunchExecutable (real stdio paths) -------------------------------
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task LaunchExecutable_SuppressMode_DrainsChattyOutputAndHonorsWorkingDir()
+    {
+        var workingDir = Directory.CreateTempSubdirectory("winapp-launch-suppress-");
+        try
+        {
+            // 500 echoed lines would fill and block on a full stdout pipe if the child's output weren't
+            // drained; the relative `marker.txt` write confirms the working directory + arguments took.
+            var args = "/c \"echo ok> marker.txt & for /L %i in (1,1,500) do @echo line%i\"";
+            using var launched = _service.LaunchExecutable("cmd.exe", args, workingDir.FullName, LaunchStdioMode.Suppress);
+
+            Assert.IsTrue(launched.ProcessId > 0);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            await launched.WaitForExitAsync(cts.Token);
+
+            Assert.AreEqual(0, launched.ExitCode, "Suppressed launch must drain output and exit, not deadlock on a full pipe");
+            Assert.IsTrue(File.Exists(Path.Combine(workingDir.FullName, "marker.txt")),
+                "The child must run in the supplied working directory with the given arguments");
+        }
+        finally
+        {
+            try { workingDir.Delete(recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task LaunchExecutable_InheritMode_HonorsArgumentsAndReturnsExitCode()
+    {
+        // Inherit mode leaves stdio unredirected (streams inline like `dotnet run`); a trivial child
+        // that just sets an exit code exercises the non-suppress path and confirms arguments are honored.
+        using var launched = _service.LaunchExecutable("cmd.exe", "/c exit 3", null, LaunchStdioMode.Inherit);
+
+        Assert.IsTrue(launched.ProcessId > 0);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await launched.WaitForExitAsync(cts.Token);
+
+        Assert.AreEqual(3, launched.ExitCode, "Inherit-mode launch must run the given arguments and surface the exit code");
+    }
+
     // ---- TerminatePackageProcesses -----------------------------------------
 
     [TestMethod]

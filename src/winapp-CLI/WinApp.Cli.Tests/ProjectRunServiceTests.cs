@@ -1558,6 +1558,46 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public async Task ResolveInput_DirectoryWithSolution_SdkUnavailable_FallsBackToFolderMode()
+    {
+        // H1 regression: a directory containing a .sln on a host with no usable SDK must degrade to folder
+        // mode (folder mode launches a prebuilt app and needs no SDK) instead of erroring — otherwise a
+        // build-output directory sitting next to a .sln fails where a directory without one would run.
+        WriteFile("App.sln", "");
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                args.Contains("--version", StringComparison.OrdinalIgnoreCase)
+                    ? (1, string.Empty, "SDK missing")
+                    : (0, string.Empty, string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+
+        var resolution = await service.ResolveInputAsync(_tempDir, CancellationToken.None);
+
+        Assert.AreEqual(WinAppRunMode.Folder, resolution.Mode, "a directory with a .sln but no usable SDK must fall back to folder mode");
+        Assert.IsNull(resolution.Csproj);
+    }
+
+    [TestMethod]
+    public async Task ResolveInput_ExplicitSolution_SdkUnavailable_Throws()
+    {
+        // Contrast with the directory case: an explicitly supplied .sln keeps the hard, actionable SDK
+        // error — its whole purpose is to build.
+        var solution = WriteFile("App.sln", "");
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = args =>
+                args.Contains("--version", StringComparison.OrdinalIgnoreCase)
+                    ? (1, string.Empty, "SDK missing")
+                    : (0, string.Empty, string.Empty),
+        };
+        var service = NewServiceWith(dotnet, out _);
+
+        await Assert.ThrowsExactlyAsync<ProjectRunException>(() => service.ResolveInputAsync(solution, CancellationToken.None));
+    }
+
+    [TestMethod]
     public async Task ResolveInput_Solution_AppPlusTestContainer_PicksApp()
     {
         // The real gallery scenario at the solution level: a solution with the app plus a WinUI MSTest
@@ -2887,9 +2927,10 @@ public class ProjectRunServiceTests
 
     [TestMethod]
     [DoNotParallelize] // redirects the process-wide Console.Error
-    public async Task RunBuildPassAsync_Quiet_KeepsStdoutClean_RoutesInvocationAndOutputToStderr()
+    public async Task RunBuildPassAsync_Quiet_KeepsStdoutClean_RoutesOutputToStderr_SuppressesInvocation()
     {
-        // --quiet (Information suppressed): stdout stays clean; invocation + output go to stderr.
+        // --quiet (Information suppressed): stdout stays clean; build output still goes to stderr, but the
+        // informational dotnet invocation is suppressed (unlike --json, which keeps it discoverable).
         var csproj = WriteFile("App.csproj", ExecutableCsproj);
         var dotnet = new FakeDotNetService
         {
@@ -2915,7 +2956,7 @@ public class ProjectRunServiceTests
         Assert.AreEqual(0, exit);
         Assert.IsFalse(console.Output.Contains("QUIET-BUILD-LINE"), "--quiet must not write build output to stdout");
         Assert.IsFalse(console.Output.Contains("dotnet build"), "--quiet must not write the invocation to stdout");
-        StringAssert.Contains(stderr.ToString(), "dotnet build", "--quiet must route the invocation to stderr");
+        Assert.IsFalse(stderr.ToString().Contains("dotnet build"), "--quiet must suppress the informational invocation");
         StringAssert.Contains(stderr.ToString(), "QUIET-BUILD-LINE", "--quiet must route build output to stderr");
     }
 

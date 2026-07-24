@@ -384,7 +384,7 @@ internal sealed partial class ProjectRunService
     private async Task<RunInputResolution> ResolveSolutionAsync(FileInfo solution, string? projectSelector, ProjectClassificationInputs? classificationInputs, CancellationToken cancellationToken, bool allowFolderFallback = false)
     {
         var solutionDir = solution.Directory ?? new DirectoryInfo(Directory.GetCurrentDirectory());
-        var projects = await GetSolutionProjectsAsync(solution, solutionDir, cancellationToken);
+        var projects = await GetSolutionProjectsAsync(solution, solutionDir, allowFolderFallback, cancellationToken);
 
         if (projects.Count == 0)
         {
@@ -579,13 +579,20 @@ internal sealed partial class ProjectRunService
     /// (<c>dotnet sln list</c> needs SDK 9.0.200+ for <c>.slnx</c>, but the target <c>.csproj</c> is what
     /// gets built, so no <c>.slnx</c>-aware SDK is required).
     /// </summary>
-    private async Task<List<FileInfo>> GetSolutionProjectsAsync(FileInfo solution, DirectoryInfo solutionDir, CancellationToken cancellationToken)
+    private async Task<List<FileInfo>> GetSolutionProjectsAsync(FileInfo solution, DirectoryInfo solutionDir, bool allowFolderFallback, CancellationToken cancellationToken)
     {
         // Check for a capable SDK first: the build/evaluate passes need it, and its failure message is far
-        // more actionable than "could not read the solution".
+        // more actionable than "could not read the solution". A directory input degrades to folder mode
+        // instead (launching a prebuilt app needs no SDK) — return no projects; an explicit .sln keeps the
+        // hard SDK error, since its whole purpose is to build.
         var sdkError = await CheckSdkAsync(solutionDir, cancellationToken);
         if (sdkError != null)
         {
+            if (allowFolderFallback)
+            {
+                return [];
+            }
+
             throw new ProjectRunException(sdkError);
         }
 

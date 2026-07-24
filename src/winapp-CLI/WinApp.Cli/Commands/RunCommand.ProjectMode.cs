@@ -404,10 +404,11 @@ internal partial class RunCommand
                 {
                     PrintJson(aumid: null, processId, errorMessage: null);
                 }
-                else
+                else if (logger.IsEnabled(LogLevel.Information))
                 {
                     // Confirm the launch so a windowed app (which streams no console output) doesn't look
                     // stuck while winapp waits for it to exit. Mirrors packaged mode's "launched (PID)" line.
+                    // Gated on Information so --quiet stays silent.
                     ansiConsole.MarkupLineInterpolated(
                         $"{UiSymbols.Check} Launched {Path.GetFileNameWithoutExtension(csproj.Name)} (PID: {processId})");
                 }

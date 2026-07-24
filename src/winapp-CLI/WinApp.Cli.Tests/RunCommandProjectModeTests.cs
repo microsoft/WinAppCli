@@ -523,6 +523,48 @@ public class RunCommandProjectModeTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task ProjectMode_Runtime_ResolvesArchIntoBuild()
+    {
+        var csproj = CreateCsproj();
+        var targetDir = CreateTargetDir(withManifest: false);
+        SetUnpackagedOutcome(csproj, targetDir, selfContained: false, arch: "arm64");
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [csproj.FullName, "--runtime", "win-arm64", "--detach"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual("arm64", _fakeProjectRunService.BuildOptions[0].Architecture,
+            "--runtime's architecture must reach the build options");
+    }
+
+    [TestMethod]
+    public async Task ProjectMode_Runtime_OverridesArch()
+    {
+        var csproj = CreateCsproj();
+        var targetDir = CreateTargetDir(withManifest: false);
+        SetUnpackagedOutcome(csproj, targetDir, selfContained: false, arch: "x64");
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [csproj.FullName, "--runtime", "win-x64", "--arch", "arm64", "--detach"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual("x64", _fakeProjectRunService.BuildOptions[0].Architecture,
+            "--runtime's architecture must win over --arch");
+    }
+
+    [TestMethod]
+    public async Task ProjectMode_NonWindowsRuntime_ErrorsBeforeBuild()
+    {
+        var csproj = CreateCsproj();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [csproj.FullName, "--runtime", "linux-x64", "--detach"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeProjectRunService.BuildAndResolveCalls.Count, "A non-Windows --runtime must fail before building");
+    }
+
+    [TestMethod]
     public async Task ResolveInputAmbiguity_Errors()
     {
         var csproj = CreateCsproj();
