@@ -353,9 +353,9 @@ internal partial class MsixService
                 {
                     File.Delete(tempPath);
                 }
-                catch
+                catch (Exception cleanupEx) when (cleanupEx is IOException or UnauthorizedAccessException)
                 {
-                    // Best-effort cleanup; ignore failures removing the temp file.
+                    // Best-effort cleanup; ignore expected I/O/permission failures removing the temp file.
                 }
             }
 
