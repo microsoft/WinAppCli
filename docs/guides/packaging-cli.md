@@ -1,4 +1,5 @@
 <!-- mslearn: true -->
+<!-- description: Package a standalone command-line executable as an MSIX installer with the winapp CLI, including manifest generation, signing, and install. -->
 # Packaging a CLI Executable as MSIX
 
 This guide walks you through packaging an existing command-line executable as an MSIX package for distribution via Windows Package Manager (winget), the Microsoft Store, or direct distribution.

@@ -1,4 +1,5 @@
 <!-- mslearn: true -->
+<!-- description: Use the winapp CLI with a Tauri Windows app to restore Windows App SDK headers, add package identity, and package the desktop app as MSIX. -->
 # Using winapp CLI with Tauri
 
 This guide demonstrates how to use the `winapp` CLI with a Tauri application to debug with package identity and package your application as an MSIX.

@@ -1,4 +1,5 @@
 <!-- mslearn: true -->
+<!-- description: Use the winapp CLI with a Flutter Windows app to restore Windows App SDK headers, add package identity, and package the desktop app as MSIX. -->
 # Using winapp CLI with Flutter
 
 For a complete working example, check out the [Flutter sample](../../samples/flutter-app) in this repository.

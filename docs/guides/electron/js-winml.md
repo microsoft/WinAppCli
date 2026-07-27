@@ -1,4 +1,5 @@
 <!-- mslearn: true -->
+<!-- description: Run machine learning inference with Windows ML from Electron JavaScript using winapp JS bindings, with no native addon or node-gyp build step. -->
 # Run WinML from JavaScript (JS bindings)
 
 This guide shows how to run ONNX model inference from Electron using JS bindings for Windows App SDK ML APIs (execution provider discovery via `ExecutionProviderCatalog` and model download via `ModelCatalog`) combined with `onnxruntime-node` for inference — no C# addon required. Inference runs in an Electron utility process so it doesn't block the main process.
@@ -273,7 +274,7 @@ npm start
 You should see the available execution providers and model output in the console.
 
 > [!TIP]
-> For a complete image-classification pipeline with image decoding via JS bindings (`StorageFile`, `BitmapDecoder`, `BitmapTransform`), see the [Electron Gallery WinML sample](https://github.com/nicknameisnotavailble/electron-on-windows-gallery).
+> For more end-to-end samples of calling Windows APIs from Electron, see the [Electron on Windows gallery](https://github.com/microsoft/electron-on-windows-gallery).
 
 ## Next Steps
 
