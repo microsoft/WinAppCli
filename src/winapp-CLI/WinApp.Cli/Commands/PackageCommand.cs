@@ -210,6 +210,10 @@ internal class PackageCommand : Command, IShortDescription
                             {
                                 taskContext.AddStatusMessage($"{UiSymbols.Lock} Package has been signed");
                             }
+                            else
+                            {
+                                taskContext.AddStatusMessage($"{UiSymbols.Warning} Package is unsigned. Windows requires sparse identity packages to be signed before they can be registered — sign it (e.g. pass --generate-cert or --cert <pfx>) and trust the certificate first, otherwise Add-AppxPackage will fail.");
+                            }
                             taskContext.AddStatusMessage($"{UiSymbols.Info} Next: winapp embed-identity <exe> — then register in your installer with Add-AppxPackage -Path <msix> -ExternalLocation <install-dir>");
 
                             return (0, "Sparse identity package creation completed.");

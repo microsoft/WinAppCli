@@ -41,21 +41,31 @@ internal partial class ManifestService(
         // Interactive mode if not --use-defaults (get defaults for prompts)
         if (!string.IsNullOrEmpty(executable))
         {
-            var fileVersionInfo = FileVersionInfo.GetVersionInfo(executable);
-            packageName ??= !string.IsNullOrWhiteSpace(fileVersionInfo.FileDescription)
-                ? fileVersionInfo.FileDescription
-                : Path.GetFileNameWithoutExtension(executable);
-            if (!string.IsNullOrWhiteSpace(fileVersionInfo.Comments))
+            try
             {
-                description = fileVersionInfo.Comments;
+                var fileVersionInfo = FileVersionInfo.GetVersionInfo(executable);
+                packageName ??= !string.IsNullOrWhiteSpace(fileVersionInfo.FileDescription)
+                    ? fileVersionInfo.FileDescription
+                    : Path.GetFileNameWithoutExtension(executable);
+                if (!string.IsNullOrWhiteSpace(fileVersionInfo.Comments))
+                {
+                    description = fileVersionInfo.Comments;
+                }
+                if (string.IsNullOrWhiteSpace(description) || description == packageName)
+                {
+                    description = fileVersionInfo.FileDescription;
+                }
+                if (!string.IsNullOrWhiteSpace(fileVersionInfo.CompanyName))
+                {
+                    publisherName ??= fileVersionInfo.CompanyName;
+                }
             }
-            if (string.IsNullOrWhiteSpace(description) || description == packageName)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                description = fileVersionInfo.FileDescription;
-            }
-            if (!string.IsNullOrWhiteSpace(fileVersionInfo.CompanyName))
-            {
-                publisherName ??= fileVersionInfo.CompanyName;
+                // Non-fatal: if the exe's version metadata can't be read (missing/locked file),
+                // fall back to the filename and system defaults rather than aborting. The version
+                // itself was already inferred (and guarded) by the caller and is passed in.
+                packageName ??= Path.GetFileNameWithoutExtension(executable);
             }
         }
         packageName ??= SystemDefaultsHelper.GetDefaultPackageName(directory);

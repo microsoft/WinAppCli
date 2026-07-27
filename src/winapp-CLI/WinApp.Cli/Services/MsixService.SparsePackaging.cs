@@ -330,7 +330,36 @@ internal partial class MsixService
             new XAttribute("applicationId", identity.ApplicationId));
         root.Add(msix);
 
-        await using var stream = new FileStream(target.FullName, FileMode.Create, FileAccess.Write);
-        await xdoc.SaveAsync(stream, SaveOptions.None, cancellationToken);
+        // Write to a uniquely named sibling file first, then atomically move it over the target.
+        // Saving directly with FileMode.Create truncates an existing hand-authored manifest up
+        // front, so a cancellation or I/O error mid-save could leave the original empty or partial.
+        var tempPath = Path.Join(
+            target.DirectoryName ?? Directory.GetCurrentDirectory(),
+            $".{target.Name}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await using (var stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write))
+            {
+                await xdoc.SaveAsync(stream, SaveOptions.None, cancellationToken);
+            }
+
+            File.Move(tempPath, target.FullName, overwrite: true);
+        }
+        catch
+        {
+            if (File.Exists(tempPath))
+            {
+                try
+                {
+                    File.Delete(tempPath);
+                }
+                catch
+                {
+                    // Best-effort cleanup; ignore failures removing the temp file.
+                }
+            }
+
+            throw;
+        }
     }
 }
