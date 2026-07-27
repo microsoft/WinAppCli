@@ -147,7 +147,7 @@ internal partial class MsixService
         try
         {
             var stagedManifest = Path.Join(stagingDir.FullName, "appxmanifest.xml");
-File.Copy(manifestPath.FullName, stagedManifest, overwrite: true);
+            File.Copy(manifestPath.FullName, stagedManifest, overwrite: true);
 
             taskContext.AddDebugMessage($"{UiSymbols.Package} Packaging sparse identity manifest (external content): {manifestPath.Name}");
 
