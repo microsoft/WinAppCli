@@ -475,7 +475,11 @@ internal partial class DotNetService : IDotNetService
                     await process.WaitForExitAsync(CancellationToken.None);
                 }
             }
-            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+            catch (InvalidOperationException)
+            {
+                // The process already exited between the HasExited check and Kill — nothing to do.
+            }
+            catch (System.ComponentModel.Win32Exception) when (process.HasExited)
             {
                 // The process already exited between the HasExited check and Kill — nothing to do.
             }
