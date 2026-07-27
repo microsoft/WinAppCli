@@ -143,22 +143,75 @@
     .card .titlebar {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 14px 18px;
+      height: 42px;
+      padding-left: 14px;
       background: rgba(255,255,255,0.03);
       border-bottom: 1px solid rgba(255,255,255,0.06);
     }
-    .card .titlebar .light {
-      width: 12px; height: 12px; border-radius: 50%;
+    .card .titlebar .app-icon {
+      position: relative;
+      width: 14px;
+      height: 14px;
+      margin-right: 10px;
+      border-radius: 2px;
+      background: linear-gradient(135deg, #4cc2ff, #0078d4);
+      box-shadow: 0 0 8px rgba(76, 194, 255, 0.35);
     }
-    .card .titlebar .light.r { background: #ff5f57; }
-    .card .titlebar .light.y { background: #febc2e; }
-    .card .titlebar .light.g { background: #28c840; }
+    .card .titlebar .app-icon::after {
+      content: 'JS';
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      font-family: 'Segoe UI', sans-serif;
+      font-size: 7px;
+      font-weight: 700;
+      color: #ffffff;
+    }
     .card .titlebar .file {
-      margin-left: 12px;
       font-family: 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
       font-size: 13px;
       color: #8ea3c8;
+    }
+    .card .titlebar .window-controls {
+      display: flex;
+      align-self: stretch;
+      margin-left: auto;
+    }
+    .card .titlebar .window-control {
+      position: relative;
+      width: 46px;
+    }
+    .card .titlebar .window-control::before,
+    .card .titlebar .window-control::after {
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+    }
+    .card .titlebar .minimize::before {
+      width: 10px;
+      height: 1px;
+      background: #a9b7ce;
+    }
+    .card .titlebar .maximize::before {
+      width: 9px;
+      height: 9px;
+      border: 1px solid #a9b7ce;
+      box-sizing: border-box;
+    }
+    .card .titlebar .close::before,
+    .card .titlebar .close::after {
+      width: 12px;
+      height: 1px;
+      background: #a9b7ce;
+    }
+    .card .titlebar .close::before {
+      transform: translate(-50%, -50%) rotate(45deg);
+    }
+    .card .titlebar .close::after {
+      transform: translate(-50%, -50%) rotate(-45deg);
     }
 
     .card pre {
@@ -219,10 +272,13 @@
       <div class="right">
         <div class="card">
           <div class="titlebar">
-            <span class="light r"></span>
-            <span class="light y"></span>
-            <span class="light g"></span>
+            <span class="app-icon"></span>
             <span class="file">main.js</span>
+            <span class="window-controls">
+              <span class="window-control minimize"></span>
+              <span class="window-control maximize"></span>
+              <span class="window-control close"></span>
+            </span>
           </div>
 <pre><span class="c">// On-device AI, from JS</span>
 <span class="k">const</span> { <span class="t">LanguageModel</span>,
