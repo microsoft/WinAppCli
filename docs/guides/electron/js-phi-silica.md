@@ -1,4 +1,5 @@
 <!-- mslearn: true -->
+<!-- description: Call the on-device Phi Silica language model from Electron JavaScript using winapp JS bindings, with no native addon or node-gyp build step. -->
 # Call Phi Silica from JavaScript (JS bindings)
 
 This guide shows how to call the Windows App SDK Phi Silica text summarization API directly from Electron JavaScript by using generated JS bindings.
@@ -56,7 +57,7 @@ const callPhiSilica = async () => {
   try {
     const summarizer = TextSummarizer.createInstance(languageModel);
     const result = await summarizer.summarizeParagraphAsync(
-      "The Windows App Development CLI is a powerful tool that bridges cross-platform development with Windows-native capabilities."
+      "The Windows App Development CLI lets Electron apps call Windows-native APIs from JavaScript. Package identity enables features such as notifications and background tasks."
     );
     console.log('Summary:', result.text);
   } finally {
