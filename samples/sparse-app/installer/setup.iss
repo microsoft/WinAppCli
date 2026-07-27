@@ -7,7 +7,7 @@
 ;   1. Installs the WPF app binaries and visual assets to {app}.
 ;   2. Copies the identity-only .msix alongside the app.
 ;   3. Registers the sparse package against the install directory (the external
-;      content location) as a post-install step.
+;      content location) during file installation, so a failure rolls back the install.
 ;   4. Unregisters the package on uninstall.
 ;
 ; Because the app is published framework-dependent (--self-contained false), the target
@@ -60,15 +60,19 @@ ArchitecturesInstallIn64BitMode=x64compatible
 [Files]
 ; App binaries + assets (everything from the publish output).
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
-; The identity-only MSIX, copied alongside the app so it can be registered from {app}.
-Source: "{#MyMsixName}"; DestDir: "{app}"; Flags: ignoreversion
+; The identity-only MSIX, copied alongside the app so it can be registered from {app}. Registration
+; runs from this entry's AfterInstall callback (RegisterSparsePackage) — i.e. during the file-copy
+; phase, while Inno's automatic rollback is still active — so a registration failure rolls back
+; exactly the files this run installed, rather than deleting a pre-existing {app} directory.
+Source: "{#MyMsixName}"; DestDir: "{app}"; Flags: ignoreversion; AfterInstall: RegisterSparsePackage
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 
 [Run]
-; Launch the app after install (optional). Registration happens in [Code] (CurStepChanged)
-; so a failure aborts setup instead of silently completing without identity.
+; Launch the app after install (optional). Registration happens in [Code] (RegisterSparsePackage,
+; an AfterInstall callback) so a failure aborts setup — with rollback — instead of silently
+; completing without identity.
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
@@ -94,7 +98,10 @@ end;
 { Builds the full powershell.exe argument string for registering the sparse package,
   escaping the runtime-resolved install directory so it cannot break out of the literal.
   Add-AppxPackage runs with -ErrorAction Stop inside try/catch so any failure produces a
-  nonzero process exit code, which the caller inspects to abort the install. }
+  nonzero process exit code, which the caller inspects to abort the install.
+  -ForceUpdateFromAnyVersion makes re-installs/upgrades a no-op update: registering the same
+  1.0.0.0 identity that is already registered (e.g. a repeat install) succeeds by re-pointing the
+  external location instead of failing with "package already exists". }
 function RegisterParams(Param: string): string;
 var
   AppDir: string;
@@ -104,44 +111,24 @@ begin
     '-NoProfile -ExecutionPolicy Bypass -Command "try { Add-AppxPackage -Path ''' +
     EscapePSLiteral(AppDir + '\{#MyMsixName}') +
     ''' -ExternalLocation ''' + EscapePSLiteral(AppDir) +
-    ''' -ErrorAction Stop } catch { Write-Error $_; exit 1 }"';
+    ''' -ForceUpdateFromAnyVersion -ErrorAction Stop } catch { Write-Error $_; exit 1 }"';
 end;
 
-{ Registers the sparse identity package as a post-install step. Inno Setup does NOT roll back
-  files once installation reaches ssPostInstall (it runs after [Files] has committed), so on a
-  registration failure this handler explicitly removes the files it just installed before aborting
-  — otherwise the machine would be left with the app installed but without the package identity it
-  requires. }
-procedure CurStepChanged(CurStep: TSetupStep);
+{ Registers the sparse identity package. Invoked as the AfterInstall callback of the .msix [Files]
+  entry, so it runs DURING file installation while Inno's automatic rollback is still active: a
+  RaiseException here makes Setup roll back exactly the files this run installed (it does NOT touch
+  a pre-existing {app} from an earlier install, and it does not run at ssPostInstall where rollback
+  is already unavailable). Registration is idempotent (-ForceUpdateFromAnyVersion), so reinstalling
+  the same identity is treated as an update rather than a failure. }
+procedure RegisterSparsePackage;
 var
   ResultCode: Integer;
-  AppDir: string;
-
-  { Best-effort removal of the just-installed payload so a registration failure doesn't leave a
-    half-installed app behind. Files are not locked at ssPostInstall (the app hasn't launched
-    yet — [Run] executes later), so DelTree can remove them. }
-  procedure CleanupInstalledFiles;
-  begin
-    AppDir := ExpandConstant('{app}');
-    if DirExists(AppDir) then
-      DelTree(AppDir, True, True, True);
-  end;
-
 begin
-  if CurStep = ssPostInstall then
-  begin
-    if not Exec('powershell.exe', RegisterParams(''), '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-    begin
-      CleanupInstalledFiles;
-      RaiseException('Could not start PowerShell to register the sparse identity package. The partial installation has been removed.');
-    end;
-    if ResultCode <> 0 then
-    begin
-      CleanupInstalledFiles;
-      RaiseException('Registering the sparse identity package failed (exit code ' + IntToStr(ResultCode) + '). ' +
-        'This app requires package identity, so setup has been aborted and the partial installation removed.');
-    end;
-  end;
+  if not Exec('powershell.exe', RegisterParams(''), '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    RaiseException('Could not start PowerShell to register the sparse identity package. Setup has been rolled back.');
+  if ResultCode <> 0 then
+    RaiseException('Registering the sparse identity package failed (exit code ' + IntToStr(ResultCode) + '). ' +
+      'This app requires package identity, so setup has been aborted and rolled back.');
 end;
 
 { Returns True if a .NET 10 Windows Desktop Runtime is present in the machine-wide shared
