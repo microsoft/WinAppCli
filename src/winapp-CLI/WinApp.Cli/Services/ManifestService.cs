@@ -310,7 +310,11 @@ internal partial class ManifestService(
     [GeneratedRegex(@"[^A-Za-z0-9.\-]")]
     private static partial Regex InvalidPackageNameCharRegex();
 
-    [GeneratedRegex(@"^\d+(\.\d+){0,3}")]
+    // Matches a leading numeric version token (up to four components) only when it is NOT followed
+    // by a further digit or dot. This lets a decorated value like "10.0.26100.32860 (WinBuild...)"
+    // parse to its four-part prefix, while a genuine five-part value such as "1.2.3.4.5" fails to
+    // match entirely (rather than being silently truncated to "1.2.3.4") so the caller falls back.
+    [GeneratedRegex(@"^\d+(\.\d+){0,3}(?![\d.])")]
     private static partial Regex LeadingVersionRegex();
 
     public async Task UpdateManifestAssetsAsync(

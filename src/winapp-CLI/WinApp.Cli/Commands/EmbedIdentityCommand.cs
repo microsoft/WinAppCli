@@ -41,6 +41,17 @@ internal class EmbedIdentityCommand : Command, IShortDescription
         {
             var target = parseResult.GetRequiredValue(TargetArgument);
 
+            // Validate the target type up front, before any manifest discovery, so an unsupported
+            // target (e.g. 'notes.txt') reports the actionable unsupported-target error rather than
+            // a confusing "manifest not found" from the probing below.
+            var extension = target.Extension.ToLowerInvariant();
+            var isSupported = extension is ".exe" or ".xml" or ".manifest";
+            if (!isSupported)
+            {
+                logger.LogError("Unsupported target '{Target}'. Provide a .exe (EXE mode) or an .xml/.manifest file (XML mode).", target.Name);
+                return 1;
+            }
+
             // Resolve the identity manifest: explicit --manifest wins; otherwise probe the
             // dedicated 'sparse/' folder (where 'winapp init --exe --sparse' now writes by default)
             // beside the target first, then in the current directory, then fall back to the older
@@ -69,13 +80,6 @@ internal class EmbedIdentityCommand : Command, IShortDescription
                 return 1;
             }
 
-            var extension = target.Extension.ToLowerInvariant();
-            var isSupported = extension is ".exe" or ".xml" or ".manifest";
-            if (!isSupported)
-            {
-                logger.LogError("Unsupported target '{Target}'. Provide a .exe (EXE mode) or an .xml/.manifest file (XML mode).", target.Name);
-                return 1;
-            }
 
             return await statusService.ExecuteWithStatusAsync("Embedding package identity...", async (taskContext, ct) =>
             {
@@ -95,7 +99,7 @@ internal class EmbedIdentityCommand : Command, IShortDescription
                     {
                         // mt.exe rewrites the exe in place, which invalidates any existing Authenticode
                         // signature. Remind the user to re-sign before distributing.
-                        taskContext.AddStatusMessage($"{UiSymbols.Warning} Embedding rewrote the exe and invalidated any existing signature. Re-sign it before distributing: winapp sign \"{target.Name}\" <cert.pfx>.");
+                        taskContext.AddStatusMessage($"{UiSymbols.Warning} Embedding rewrote the exe and invalidated any existing signature. Re-sign it before distributing: winapp sign \"{target.FullName}\" <cert.pfx>.");
                     }
 
                     return (0, "Package identity embedded successfully.");

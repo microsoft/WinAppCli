@@ -50,6 +50,11 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 OutputBaseFilename=SparseAppSampleSetup
 Compression=lzma2
 SolidCompression=yes
+; Restrict to 64-bit Windows and install in 64-bit mode. The sample publishes only win-x64, so
+; ArchitecturesAllowed blocks Setup from running on 32-bit Windows (where it would otherwise
+; install in 32-bit mode and leave an app that cannot launch); ArchitecturesInstallIn64BitMode
+; selects the native 64-bit install locations on the systems that are allowed.
+ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Files]
@@ -102,21 +107,40 @@ begin
     ''' -ErrorAction Stop } catch { Write-Error $_; exit 1 }"';
 end;
 
-{ Registers the sparse identity package as a post-install step. Because Inno Setup's [Run]
-  section ignores process exit codes, registration is done here so a failure raises an
-  exception, which aborts setup and rolls back the installed files instead of leaving an app
-  installed without the package identity it requires. }
+{ Registers the sparse identity package as a post-install step. Inno Setup does NOT roll back
+  files once installation reaches ssPostInstall (it runs after [Files] has committed), so on a
+  registration failure this handler explicitly removes the files it just installed before aborting
+  — otherwise the machine would be left with the app installed but without the package identity it
+  requires. }
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
+  AppDir: string;
+
+  { Best-effort removal of the just-installed payload so a registration failure doesn't leave a
+    half-installed app behind. Files are not locked at ssPostInstall (the app hasn't launched
+    yet — [Run] executes later), so DelTree can remove them. }
+  procedure CleanupInstalledFiles;
+  begin
+    AppDir := ExpandConstant('{app}');
+    if DirExists(AppDir) then
+      DelTree(AppDir, True, True, True);
+  end;
+
 begin
   if CurStep = ssPostInstall then
   begin
     if not Exec('powershell.exe', RegisterParams(''), '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-      RaiseException('Could not start PowerShell to register the sparse identity package.');
+    begin
+      CleanupInstalledFiles;
+      RaiseException('Could not start PowerShell to register the sparse identity package. The partial installation has been removed.');
+    end;
     if ResultCode <> 0 then
+    begin
+      CleanupInstalledFiles;
       RaiseException('Registering the sparse identity package failed (exit code ' + IntToStr(ResultCode) + '). ' +
-        'This app requires package identity, so setup has been aborted.');
+        'This app requires package identity, so setup has been aborted and the partial installation removed.');
+    end;
   end;
 end;
 

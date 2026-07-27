@@ -196,12 +196,30 @@ Add-AppxPackage -Path $MsixPath -ExternalLocation $ExternalLocation
 
 ### WiX (v3)
 
-Register **per user** (`Impersonate="yes"`), because `Add-AppxPackage` registers the package for the account that runs it. A deferred action with `Impersonate="no"` runs as `LocalSystem`, which does **not** grant identity to the installing user (and is commonly rejected). For a per-machine MSI, run the registration impersonated so it applies to the invoking user:
+Register **per user** (`Impersonate="yes"`), because `Add-AppxPackage` registers the package for the account that runs it. A deferred action with `Impersonate="no"` runs as `LocalSystem`, which does **not** grant identity to the installing user (and is commonly rejected). For a per-machine MSI, run the registration impersonated so it applies to the invoking user.
+
+A deferred custom action can't read `INSTALLFOLDER` directly (deferred actions run in a context without access to properties), and simply *declaring* the action doesn't run it. So marshal the paths in through `CustomActionData` — an immediate type-51 action whose `Property` name equals the deferred action's `Id` — and schedule **both** after `InstallFiles`:
 
 ```xml
-<CustomAction Id="RegisterSparse" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="yes"
-  ExeCommand="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]register-sparse.ps1&quot; -MsixPath &quot;[INSTALLFOLDER]MyApp.identity.msix&quot; -ExternalLocation &quot;[INSTALLFOLDER]&quot;" />
+<!-- Immediate: stash the command line (with the resolved paths) into the deferred action's
+     CustomActionData. Windows Installer copies the value of the property named the same as a
+     deferred action into that action's CustomActionData. -->
+<CustomAction Id="SetRegisterSparseCmd" Property="RegisterSparse" Execute="immediate"
+  Value="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]register-sparse.ps1&quot; -MsixPath &quot;[INSTALLFOLDER]MyApp.identity.msix&quot; -ExternalLocation &quot;[INSTALLFOLDER]&quot;" />
+
+<!-- Deferred + impersonated: CAQuietExec reads its command line from CustomActionData when run
+     deferred, so it registers the package for the invoking user. Return="check" fails the
+     install if registration fails. -->
+<CustomAction Id="RegisterSparse" BinaryKey="WixCA" DllEntry="CAQuietExec"
+  Execute="deferred" Impersonate="yes" Return="check" />
+
+<InstallExecuteSequence>
+  <Custom Action="SetRegisterSparseCmd" After="InstallFiles">NOT Installed</Custom>
+  <Custom Action="RegisterSparse" After="SetRegisterSparseCmd">NOT Installed</Custom>
+</InstallExecuteSequence>
 ```
+
+`CAQuietExec` ships in the WiX util extension (`WixUtilExtension`); reference it so the `WixCA` binary is available.
 
 > A single impersonated action registers identity only for the user running the installer. To provision every user of a per-machine install, register on first launch (per-user) instead, or use a provisioning mechanism such as `Add-AppxProvisionedPackage`.
 

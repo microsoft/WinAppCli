@@ -406,6 +406,27 @@ public class SparsePackagingTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task EmbedIdentity_UnsupportedExtension_NoManifest_ReportsUnsupportedTarget()
+    {
+        // Reproduces the reviewer's scenario: an unsupported target in a directory with no sparse
+        // manifest must report the actionable unsupported-target error, NOT a confusing
+        // "AppX manifest not found". Target-type validation runs before manifest discovery.
+        var isolated = Directory.CreateDirectory(Path.Join(_tempDirectory.FullName, "no-manifest"));
+        var badTarget = Path.Join(isolated.FullName, "notes.txt");
+        await File.WriteAllTextAsync(badTarget, "not a manifest", TestContext.CancellationToken);
+        var embedCommand = GetRequiredService<EmbedIdentityCommand>();
+
+        // Act (no --manifest, and nothing to auto-detect)
+        var exitCode = await ParseAndInvokeWithCaptureAsync(embedCommand, [badTarget]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "An unsupported target should fail even without a manifest");
+        var allOutput = $"{ConsoleStdOut}{ConsoleStdErr}";
+        StringAssert.Contains(allOutput, "Unsupported target");
+        Assert.IsFalse(allOutput.Contains("AppX manifest not found"), "Should not report a missing manifest for an unsupported target");
+    }
+
+    [TestMethod]
     public async Task EmbedIdentity_ManifestNotFound_ReturnsError()
     {
         // Arrange: target lives in a directory with no manifest, and there is none in cwd either.
@@ -582,6 +603,11 @@ public class SparsePackagingTests : BaseCommandTests
         Assert.IsNull(ManifestService.NormalizeManifestVersion("not-a-version"));
         Assert.IsNull(ManifestService.NormalizeManifestVersion(null));
         Assert.IsNull(ManifestService.NormalizeManifestVersion(""));
+
+        // A five-part value must be rejected outright rather than silently truncated to "1.2.3.4",
+        // so the caller falls back to a packable default instead of packaging a version the user
+        // never entered.
+        Assert.IsNull(ManifestService.NormalizeManifestVersion("1.2.3.4.5"));
 
         // MSIX Identity/@Version components are 16-bit; out-of-range values must be rejected so the
         // caller falls back to a packable default instead of emitting a manifest MakeAppx rejects.
