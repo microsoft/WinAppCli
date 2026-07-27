@@ -92,7 +92,7 @@ winapp embed-identity ./app.manifest
 
 In XML mode the `<msix>` element is inserted into (or replaced in) the target manifest. Reference that manifest from your project (for .NET, set `<ApplicationManifest>app.manifest</ApplicationManifest>`) and rebuild so the element is embedded in the exe.
 
-Both modes read identity from a sparse `appxmanifest.xml`. When you omit `--manifest`, winapp looks in a `sparse/` folder (where `winapp init --exe --sparse` writes it by default) in the current directory and beside the target, then falls back to beside the target and the current directory; pass `--manifest` to point elsewhere.
+Both modes read identity from a sparse `appxmanifest.xml`. When you omit `--manifest`, winapp looks in a `sparse/` folder (where `winapp init --exe --sparse` writes it by default) beside the target first, then in the current directory, then falls back to beside the target and the current directory; pass `--manifest` to point elsewhere.
 
 > **Note:** EXE mode rewrites the binary with `mt.exe`, which invalidates any existing Authenticode signature. Re-sign the exe (e.g. `winapp sign ./MyApp.exe <cert.pfx>`) before distributing it.
 

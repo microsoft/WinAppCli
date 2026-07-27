@@ -136,11 +136,11 @@ internal partial class MsixService
 
         // Stage a directory containing ONLY the manifest. Sparse identity packages carry no
         // binaries or assets — those are resolved from the external content location at runtime.
-        var stagingDir = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"winapp-sparse-{Guid.NewGuid():N}"));
+        var stagingDir = new DirectoryInfo(Path.Join(Path.GetTempPath(), $"winapp-sparse-{Guid.NewGuid():N}"));
         stagingDir.Create();
         try
         {
-            var stagedManifest = Path.Combine(stagingDir.FullName, "appxmanifest.xml");
+            var stagedManifest = Path.Join(stagingDir.FullName, "appxmanifest.xml");
             await File.WriteAllTextAsync(stagedManifest, manifestContent, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
 
             taskContext.AddDebugMessage($"{UiSymbols.Package} Packaging sparse identity manifest (external content): {manifestPath.Name}");
@@ -195,7 +195,7 @@ internal partial class MsixService
 
         if (outputPath == null)
         {
-            return (new FileInfo(Path.Combine(currentDirectory.FullName, safeFileName)), currentDirectory);
+            return (new FileInfo(Path.Join(currentDirectory.FullName, safeFileName)), currentDirectory);
         }
 
         if (Directory.Exists(outputPath.FullName))
@@ -203,7 +203,7 @@ internal partial class MsixService
             // An existing directory is always treated as the output folder, even if its name
             // contains a dot (e.g. './release.v2') that Path.HasExtension would misread as a file.
             var dir = new DirectoryInfo(outputPath.FullName);
-            return (new FileInfo(Path.Combine(dir.FullName, safeFileName)), dir);
+            return (new FileInfo(Path.Join(dir.FullName, safeFileName)), dir);
         }
 
         if (Path.HasExtension(outputPath.Name))

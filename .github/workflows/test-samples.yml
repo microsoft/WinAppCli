@@ -144,6 +144,20 @@ jobs:
         contains(fromJson('["rust-app", "tauri-app"]'), matrix.sample)
       uses: dtolnay/rust-toolchain@stable
 
+    # Install the Inno Setup compiler (ISCC.exe) so the sparse-app installer test
+    # actually compiles installer/setup.iss instead of being skipped for a missing ISCC.
+    - name: Setup Inno Setup
+      if: >-
+        steps.check.outputs.skip != 'true' &&
+        matrix.sample == 'sparse-app'
+      shell: pwsh
+      run: |
+        choco install innosetup --no-progress -y
+        $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+        if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc after install" }
+        Add-Content -Path $env:GITHUB_PATH -Value (Split-Path $iscc)
+        Write-Host "Inno Setup installed: $iscc"
+
     # --- Run the sample's self-contained Pester test ---
 
     - name: Install Pester

@@ -176,6 +176,24 @@ internal class InitCommand : Command, IShortDescription
                     return 1;
                 }
 
+                // Sparse identity packaging has no SDK/config/gitignore steps, so the normal-init
+                // options below do nothing in this mode. Reject any that were explicitly supplied
+                // rather than exiting 0 while silently discarding them.
+                var normalOnly = new List<string>();
+                if (configOnly) { normalOnly.Add("--config-only"); }
+                if (parseResult.GetResult(SetupSdksOption) is { Implicit: false }) { normalOnly.Add("--setup-sdks"); }
+                if (configDirExplicit) { normalOnly.Add("--config-dir"); }
+                if (ignoreConfig) { normalOnly.Add("--ignore-config"); }
+                if (noGitignore) { normalOnly.Add("--no-gitignore"); }
+
+                if (normalOnly.Count > 0)
+                {
+                    logger.LogError(
+                        "{Options} are not used with --sparse (identity packaging installs no SDKs and writes no winapp.yaml). Remove them, or drop --sparse for full package initialization.",
+                        string.Join(", ", normalOnly));
+                    return 1;
+                }
+
                 return await RunSparseInitAsync(exe, name, publisher, outputDir, useDefaults, force, cancellationToken);
             }
 

@@ -140,7 +140,7 @@ Want to inspect or interact with a running app's UI?
 **When to use:** After building a signed identity-only `.msix` for an unpackaged app, to make Windows associate the exe with that package at runtime.
 **Modes:** `.exe` target → embeds via `mt.exe`; `.xml`/`.manifest` target → inserts/replaces the `<msix>` element in an external side-by-side manifest (rebuild the app afterward).
 **Key options:**
-- `--manifest <path>` — sparse `appxmanifest.xml` to read identity from (defaults to a `sparse/` folder in the current directory and beside the target — where `winapp init --exe --sparse` writes it — then beside the target and in the current directory)
+- `--manifest <path>` — sparse `appxmanifest.xml` to read identity from (defaults to a `sparse/` folder beside the target first, then in the current directory — where `winapp init --exe --sparse` writes it — then beside the target and in the current directory)
 **Requires:** a sparse `appxmanifest.xml` + the target `.exe` or `.xml`/`.manifest`
 
 ### `winapp run <input-folder>`

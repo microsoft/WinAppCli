@@ -193,9 +193,9 @@ internal partial class ManifestService(
             return null;
         }
 
-        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        var tempDir = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString());
         Directory.CreateDirectory(tempDir);
-        var logoPath = Path.Combine(tempDir, "StoreLogo.png");
+        var logoPath = Path.Join(tempDir, "StoreLogo.png");
         using var stream = new FileStream(logoPath, FileMode.Create);
         using var bitmap = extractedIcon.ToBitmap();
         bitmap.Save(stream, ImageFormat.Png);

@@ -24,7 +24,7 @@ internal class EmbedIdentityCommand : Command, IShortDescription
         };
         ManifestOption = new Option<FileInfo>("--manifest")
         {
-            Description = "Path to the sparse appxmanifest.xml to read identity from. When omitted, searched in a 'sparse/' folder (where 'winapp init --exe --sparse' writes it by default) in the current directory and beside the target, then beside the target and in the current directory."
+            Description = "Path to the sparse appxmanifest.xml to read identity from. When omitted, searched in a 'sparse/' folder (where 'winapp init --exe --sparse' writes it by default) beside the target first, then in the current directory, then beside the target and in the current directory."
         };
         ManifestOption.AcceptExistingOnly();
     }
@@ -43,8 +43,10 @@ internal class EmbedIdentityCommand : Command, IShortDescription
 
             // Resolve the identity manifest: explicit --manifest wins; otherwise probe the
             // dedicated 'sparse/' folder (where 'winapp init --exe --sparse' now writes by default)
-            // in the current directory and beside the target, then fall back to the older
-            // "beside the target / current directory" locations for back-compat. Prefer a *sparse*
+            // beside the target first, then in the current directory, then fall back to the older
+            // "beside the target / current directory" locations for back-compat. Preferring the
+            // target's own sparse/ folder means an explicitly named exe outside the current project
+            // embeds its own identity rather than the current directory's. Prefer a *sparse*
             // manifest so a full Package.appxmanifest sitting nearby doesn't get picked and then
             // rejected by embed-identity's sparse-only check.
             var manifest = parseResult.GetValue(ManifestOption);
@@ -54,8 +56,8 @@ internal class EmbedIdentityCommand : Command, IShortDescription
                 var currentDir = currentDirectoryProvider.GetCurrentDirectory();
                 var currentSparseDir = Path.Join(currentDir, "sparse");
                 var targetSparseDir = targetDir != null ? Path.Join(targetDir, "sparse") : null;
-                manifest = FindSparseManifest(currentSparseDir)
-                    ?? FindSparseManifest(targetSparseDir)
+                manifest = FindSparseManifest(targetSparseDir)
+                    ?? FindSparseManifest(currentSparseDir)
                     ?? FindSparseManifest(targetDir)
                     ?? FindSparseManifest(currentDir)
                     ?? FallbackManifest(targetDir, currentDir);

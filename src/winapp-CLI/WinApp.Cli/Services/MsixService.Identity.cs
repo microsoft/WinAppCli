@@ -539,7 +539,7 @@ internal partial class MsixService
     /// clobbering any same-named files a user keeps next to their exe.
     /// </summary>
     private static FileInfo CreateTempManifestFile(string label)
-        => new(Path.Combine(Path.GetTempPath(), $"winapp_{label}_{Guid.NewGuid():N}.manifest"));
+        => new(Path.Join(Path.GetTempPath(), $"winapp_{label}_{Guid.NewGuid():N}.manifest"));
 
     /// <summary>
     /// Removes any &lt;msix&gt; identity element(s) from a side-by-side manifest file on disk so a
