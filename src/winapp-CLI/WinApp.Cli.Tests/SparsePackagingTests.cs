@@ -89,7 +89,7 @@ public class SparsePackagingTests : BaseCommandTests
         Assert.Contains("Executable=\"app.exe\"", content, "Executable should be substituted with the exe name");
         Assert.Contains("Name=\"MySparseApp\"", content, "Package name override should be applied");
 
-        Assert.IsTrue(Directory.Exists(Path.Combine(SparseDir, "Assets")), "Assets directory should be generated");
+        Assert.IsTrue(Directory.Exists(Path.Join(SparseDir, "Assets")), "Assets directory should be generated");
     }
 
     [TestMethod]
@@ -97,7 +97,7 @@ public class SparsePackagingTests : BaseCommandTests
     {
         // Arrange
         var exe = CopyTestExe();
-        var outDir = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "identity"));
+        var outDir = Directory.CreateDirectory(Path.Join(_tempDirectory.FullName, "identity"));
         var initCommand = GetRequiredService<InitCommand>();
         var args = new[] { "--exe", exe, "--sparse", "--use-defaults", "--output-dir", outDir.FullName };
 
@@ -106,7 +106,7 @@ public class SparsePackagingTests : BaseCommandTests
 
         // Assert
         Assert.AreEqual(0, exitCode, "Sparse init should succeed");
-        Assert.IsTrue(File.Exists(Path.Combine(outDir.FullName, "appxmanifest.xml")), "Manifest should be written to --output-dir");
+        Assert.IsTrue(File.Exists(Path.Join(outDir.FullName, "appxmanifest.xml")), "Manifest should be written to --output-dir");
     }
 
     [TestMethod]
@@ -143,7 +143,7 @@ public class SparsePackagingTests : BaseCommandTests
     {
         // Arrange — a non-.exe target must be rejected before any manifest is written,
         // because sparse identity is embedded into an .exe.
-        var notExe = Path.Combine(_tempDirectory.FullName, "notes.txt");
+        var notExe = Path.Join(_tempDirectory.FullName, "notes.txt");
         await File.WriteAllTextAsync(notExe, "not an executable", TestContext.CancellationToken);
         var initCommand = GetRequiredService<InitCommand>();
         var args = new[] { "--exe", notExe, "--sparse", "--use-defaults" };
@@ -248,7 +248,7 @@ public class SparsePackagingTests : BaseCommandTests
         // Arrange — the positional base directory is not used by the sparse flow; passing it
         // should be rejected (pointing at --output-dir) rather than silently ignored.
         var exe = CopyTestExe();
-        var ignoreDir = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "ignoreme")).FullName;
+        var ignoreDir = Directory.CreateDirectory(Path.Join(_tempDirectory.FullName, "ignoreme")).FullName;
         var initCommand = GetRequiredService<InitCommand>();
         var args = new[] { ignoreDir, "--exe", exe, "--sparse", "--use-defaults" };
 
@@ -269,7 +269,7 @@ public class SparsePackagingTests : BaseCommandTests
         var initCommand = GetRequiredService<InitCommand>();
         await ParseAndInvokeWithCaptureAsync(initCommand, ["--exe", exe, "--sparse", "--use-defaults", "--name", "EmbeddedApp", "--publisher", "CN=Contoso"]);
         var manifestPath = SparseManifestPath;
-        var targetManifest = Path.Combine(_tempDirectory.FullName, "app.manifest");
+        var targetManifest = Path.Join(_tempDirectory.FullName, "app.manifest");
 
         var embedCommand = GetRequiredService<EmbedIdentityCommand>();
 
@@ -292,7 +292,7 @@ public class SparsePackagingTests : BaseCommandTests
         var initCommand = GetRequiredService<InitCommand>();
         await ParseAndInvokeWithCaptureAsync(initCommand, ["--exe", exe, "--sparse", "--use-defaults", "--name", "IdempotentApp"]);
         var manifestPath = SparseManifestPath;
-        var targetManifest = Path.Combine(_tempDirectory.FullName, "app.manifest");
+        var targetManifest = Path.Join(_tempDirectory.FullName, "app.manifest");
         var embedCommand = GetRequiredService<EmbedIdentityCommand>();
 
         // Act: run twice
@@ -314,7 +314,7 @@ public class SparsePackagingTests : BaseCommandTests
         var exe = CopyTestExe();
         var initCommand = GetRequiredService<InitCommand>();
         await ParseAndInvokeWithCaptureAsync(initCommand, ["--exe", exe, "--sparse", "--use-defaults", "--name", "AutoFound"]);
-        var targetManifest = Path.Combine(_tempDirectory.FullName, "app.manifest");
+        var targetManifest = Path.Join(_tempDirectory.FullName, "app.manifest");
         var embedCommand = GetRequiredService<EmbedIdentityCommand>();
 
         // Act — no --manifest; discovery must locate ./sparse/appxmanifest.xml
@@ -335,7 +335,7 @@ public class SparsePackagingTests : BaseCommandTests
         var initCommand = GetRequiredService<InitCommand>();
         await ParseAndInvokeWithCaptureAsync(initCommand, ["--exe", exe, "--sparse", "--use-defaults", "--name", "IdentityApp", "--publisher", "CN=Contoso"]);
         var manifestPath = SparseManifestPath;
-        var targetManifest = Path.Combine(_tempDirectory.FullName, "app.manifest");
+        var targetManifest = Path.Join(_tempDirectory.FullName, "app.manifest");
         var embedCommand = GetRequiredService<EmbedIdentityCommand>();
 
         // Act
@@ -359,7 +359,7 @@ public class SparsePackagingTests : BaseCommandTests
         var initCommand = GetRequiredService<InitCommand>();
         await ParseAndInvokeWithCaptureAsync(initCommand, ["--exe", exe, "--sparse", "--use-defaults", "--name", "DepApp", "--publisher", "CN=Contoso"]);
         var manifestPath = SparseManifestPath;
-        var targetManifest = Path.Combine(_tempDirectory.FullName, "app.manifest");
+        var targetManifest = Path.Join(_tempDirectory.FullName, "app.manifest");
         await File.WriteAllTextAsync(targetManifest, """
             <?xml version="1.0" encoding="utf-8"?>
             <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
@@ -391,7 +391,7 @@ public class SparsePackagingTests : BaseCommandTests
         var initCommand = GetRequiredService<InitCommand>();
         await ParseAndInvokeWithCaptureAsync(initCommand, ["--exe", exe, "--sparse", "--use-defaults"]);
         var manifestPath = SparseManifestPath;
-        var badTarget = Path.Combine(_tempDirectory.FullName, "notes.txt");
+        var badTarget = Path.Join(_tempDirectory.FullName, "notes.txt");
 
         var embedCommand = GetRequiredService<EmbedIdentityCommand>();
 
@@ -406,8 +406,8 @@ public class SparsePackagingTests : BaseCommandTests
     public async Task EmbedIdentity_ManifestNotFound_ReturnsError()
     {
         // Arrange: target lives in a directory with no manifest, and there is none in cwd either.
-        var isolated = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "isolated"));
-        var target = Path.Combine(isolated.FullName, "app.manifest");
+        var isolated = Directory.CreateDirectory(Path.Join(_tempDirectory.FullName, "isolated"));
+        var target = Path.Join(isolated.FullName, "app.manifest");
         var embedCommand = GetRequiredService<EmbedIdentityCommand>();
 
         // Act (no --manifest, nothing to auto-detect)
@@ -422,7 +422,7 @@ public class SparsePackagingTests : BaseCommandTests
     public async Task CreateSparseIdentityPackage_MissingManifest_Throws()
     {
         var msixService = GetRequiredService<IMsixService>();
-        var missing = new FileInfo(Path.Combine(_tempDirectory.FullName, "does-not-exist.xml"));
+        var missing = new FileInfo(Path.Join(_tempDirectory.FullName, "does-not-exist.xml"));
 
         await Assert.ThrowsExactlyAsync<FileNotFoundException>(() =>
             msixService.CreateSparseIdentityPackageAsync(missing, null, TestTaskContext, cancellationToken: TestContext.CancellationToken));
@@ -431,7 +431,7 @@ public class SparsePackagingTests : BaseCommandTests
     [TestMethod]
     public async Task CreateSparseIdentityPackage_NonSparseManifest_Throws()
     {
-        var manifestPath = new FileInfo(Path.Combine(_tempDirectory.FullName, "appxmanifest.xml"));
+        var manifestPath = new FileInfo(Path.Join(_tempDirectory.FullName, "appxmanifest.xml"));
         await File.WriteAllTextAsync(manifestPath.FullName, NonSparseManifest, TestContext.CancellationToken);
         var msixService = GetRequiredService<IMsixService>();
 
@@ -444,9 +444,9 @@ public class SparsePackagingTests : BaseCommandTests
     {
         // A sparse identity package must be a single .msix, never a bundle. Passing a .msixbundle
         // output must be rejected rather than silently creating a directory with that name.
-        var manifestPath = new FileInfo(Path.Combine(_tempDirectory.FullName, "appxmanifest.xml"));
+        var manifestPath = new FileInfo(Path.Join(_tempDirectory.FullName, "appxmanifest.xml"));
         await File.WriteAllTextAsync(manifestPath.FullName, MinimalSparseManifest, TestContext.CancellationToken);
-        var output = new FileInfo(Path.Combine(_tempDirectory.FullName, "SparsePkg.msixbundle"));
+        var output = new FileInfo(Path.Join(_tempDirectory.FullName, "SparsePkg.msixbundle"));
         var msixService = GetRequiredService<IMsixService>();
 
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
@@ -459,9 +459,9 @@ public class SparsePackagingTests : BaseCommandTests
     {
         // embed-identity only applies to sparse (AllowExternalContent) packages. A full package
         // manifest must be rejected, and no SxS manifest should be written.
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        var manifestPath = Path.Join(_tempDirectory.FullName, "appxmanifest.xml");
         await File.WriteAllTextAsync(manifestPath, NonSparseManifest, TestContext.CancellationToken);
-        var target = Path.Combine(_tempDirectory.FullName, "app.manifest");
+        var target = Path.Join(_tempDirectory.FullName, "app.manifest");
         var embedCommand = GetRequiredService<EmbedIdentityCommand>();
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(embedCommand, [target, "--manifest", manifestPath]);
@@ -475,13 +475,13 @@ public class SparsePackagingTests : BaseCommandTests
     {
         // A directory whose name contains a dot (e.g. 'release.v2') must be treated as the output
         // folder, not misread as an invalid file extension.
-        var dottedDir = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "release.v2"));
+        var dottedDir = Directory.CreateDirectory(Path.Join(_tempDirectory.FullName, "release.v2"));
 
         var (outputMsix, outputFolder) = MsixService.ResolveSparseOutputPath(
             new DirectoryInfo(dottedDir.FullName), "SparsePkg.identity.msix", _tempDirectory);
 
         Assert.AreEqual(dottedDir.FullName, outputFolder.FullName);
-        Assert.AreEqual(Path.Combine(dottedDir.FullName, "SparsePkg.identity.msix"), outputMsix.FullName);
+        Assert.AreEqual(Path.Join(dottedDir.FullName, "SparsePkg.identity.msix"), outputMsix.FullName);
     }
 
     [TestMethod]
@@ -491,13 +491,13 @@ public class SparsePackagingTests : BaseCommandTests
             null, "SparsePkg.identity.msix", _tempDirectory);
 
         Assert.AreEqual(_tempDirectory.FullName, outputFolder.FullName);
-        Assert.AreEqual(Path.Combine(_tempDirectory.FullName, "SparsePkg.identity.msix"), outputMsix.FullName);
+        Assert.AreEqual(Path.Join(_tempDirectory.FullName, "SparsePkg.identity.msix"), outputMsix.FullName);
     }
 
     [TestMethod]
     public void ResolveSparseOutputPath_MsixFile_TreatedAsFile()
     {
-        var target = new FileInfo(Path.Combine(_tempDirectory.FullName, "custom.msix"));
+        var target = new FileInfo(Path.Join(_tempDirectory.FullName, "custom.msix"));
 
         var (outputMsix, outputFolder) = MsixService.ResolveSparseOutputPath(
             target, "SparsePkg.identity.msix", _tempDirectory);
@@ -509,7 +509,7 @@ public class SparsePackagingTests : BaseCommandTests
     [TestMethod]
     public void ResolveSparseOutputPath_MsixbundleFile_Throws()
     {
-        var target = new FileInfo(Path.Combine(_tempDirectory.FullName, "custom.msixbundle"));
+        var target = new FileInfo(Path.Join(_tempDirectory.FullName, "custom.msixbundle"));
 
         Assert.ThrowsExactly<InvalidOperationException>(() =>
             MsixService.ResolveSparseOutputPath(target, "SparsePkg.identity.msix", _tempDirectory));
@@ -533,7 +533,7 @@ public class SparsePackagingTests : BaseCommandTests
             executableName: "a&b.exe",
             cancellationToken: TestContext.CancellationToken);
 
-        var content = await File.ReadAllTextAsync(Path.Combine(_tempDirectory.FullName, "appxmanifest.xml"), TestContext.CancellationToken);
+        var content = await File.ReadAllTextAsync(Path.Join(_tempDirectory.FullName, "appxmanifest.xml"), TestContext.CancellationToken);
 
         // The manifest must parse as well-formed XML despite the special characters.
         var doc = System.Xml.Linq.XDocument.Parse(content);
@@ -569,8 +569,8 @@ public class SparsePackagingTests : BaseCommandTests
     public void GetSparseFolderContentWarnings_SparseManifest_WarnsOnAssetsAndBinaries()
     {
         var folder = _tempDirectory.CreateSubdirectory("sparse-folder");
-        File.WriteAllText(Path.Combine(folder.FullName, "StoreLogo.png"), "png");
-        File.WriteAllText(Path.Combine(folder.FullName, "app.exe"), "MZ");
+        File.WriteAllText(Path.Join(folder.FullName, "StoreLogo.png"), "png");
+        File.WriteAllText(Path.Join(folder.FullName, "app.exe"), "MZ");
 
         var warnings = MsixService.GetSparseFolderContentWarnings(folder, MinimalSparseManifest);
 
@@ -583,7 +583,7 @@ public class SparsePackagingTests : BaseCommandTests
     public void GetSparseFolderContentWarnings_OnlyManifest_NoWarnings()
     {
         var folder = _tempDirectory.CreateSubdirectory("manifest-only");
-        File.WriteAllText(Path.Combine(folder.FullName, "appxmanifest.xml"), MinimalSparseManifest);
+        File.WriteAllText(Path.Join(folder.FullName, "appxmanifest.xml"), MinimalSparseManifest);
 
         var warnings = MsixService.GetSparseFolderContentWarnings(folder, MinimalSparseManifest);
 
@@ -594,8 +594,8 @@ public class SparsePackagingTests : BaseCommandTests
     public void GetSparseFolderContentWarnings_NonSparseManifest_NoWarnings()
     {
         var folder = _tempDirectory.CreateSubdirectory("non-sparse");
-        File.WriteAllText(Path.Combine(folder.FullName, "StoreLogo.png"), "png");
-        File.WriteAllText(Path.Combine(folder.FullName, "app.exe"), "MZ");
+        File.WriteAllText(Path.Join(folder.FullName, "StoreLogo.png"), "png");
+        File.WriteAllText(Path.Join(folder.FullName, "app.exe"), "MZ");
 
         // Not a sparse manifest, so folder content warnings must not fire.
         var warnings = MsixService.GetSparseFolderContentWarnings(folder, NonSparseManifest);
@@ -669,7 +669,7 @@ public class SparsePackRoutingTests : BaseCommandTests
     public async Task Pack_SparseManifestFile_RoutesToSparseIdentityPath()
     {
         // Arrange
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        var manifestPath = Path.Join(_tempDirectory.FullName, "appxmanifest.xml");
         await File.WriteAllTextAsync(manifestPath, SparseManifest, TestContext.CancellationToken);
         var packageCommand = GetRequiredService<PackageCommand>();
 
@@ -686,7 +686,7 @@ public class SparsePackRoutingTests : BaseCommandTests
     public async Task Pack_SparseManifestFile_WithInapplicableOption_ReturnsError()
     {
         // Arrange
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        var manifestPath = Path.Join(_tempDirectory.FullName, "appxmanifest.xml");
         await File.WriteAllTextAsync(manifestPath, SparseManifest, TestContext.CancellationToken);
         var packageCommand = GetRequiredService<PackageCommand>();
 
@@ -702,7 +702,7 @@ public class SparsePackRoutingTests : BaseCommandTests
     public async Task Pack_NonSparseManifestFile_ReturnsError()
     {
         // Arrange
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        var manifestPath = Path.Join(_tempDirectory.FullName, "appxmanifest.xml");
         await File.WriteAllTextAsync(manifestPath, PackagedManifest, TestContext.CancellationToken);
         var packageCommand = GetRequiredService<PackageCommand>();
 
@@ -718,9 +718,9 @@ public class SparsePackRoutingTests : BaseCommandTests
     public async Task Pack_SparseManifestFile_WithCert_Signs()
     {
         // Arrange
-        var manifestPath = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        var manifestPath = Path.Join(_tempDirectory.FullName, "appxmanifest.xml");
         await File.WriteAllTextAsync(manifestPath, SparseManifest, TestContext.CancellationToken);
-        var certPath = Path.Combine(_tempDirectory.FullName, "dev.pfx");
+        var certPath = Path.Join(_tempDirectory.FullName, "dev.pfx");
         await File.WriteAllTextAsync(certPath, "not-a-real-cert", TestContext.CancellationToken);
         var packageCommand = GetRequiredService<PackageCommand>();
 
@@ -739,7 +739,7 @@ public class SparsePackRoutingTests : BaseCommandTests
         // A path that looks like a manifest file (.xml/.appxmanifest) but doesn't exist should be
         // reported as a missing manifest file with the sparse-init hint — not "input folder not found".
         var packageCommand = GetRequiredService<PackageCommand>();
-        var missing = Path.Combine(_tempDirectory.FullName, "does-not-exist.appxmanifest.xml");
+        var missing = Path.Join(_tempDirectory.FullName, "does-not-exist.appxmanifest.xml");
 
         // Act
         var exitCode = await ParseAndInvokeWithCaptureAsync(packageCommand, [missing]);
@@ -758,7 +758,7 @@ public class SparsePackRoutingTests : BaseCommandTests
         // XML must be reported as a parse failure — NOT misreported as "missing AllowExternalContent"
         // (which would hide the real syntax error and mislead the user).
         var packageCommand = GetRequiredService<PackageCommand>();
-        var malformed = Path.Combine(_tempDirectory.FullName, "appxmanifest.xml");
+        var malformed = Path.Join(_tempDirectory.FullName, "appxmanifest.xml");
         await File.WriteAllTextAsync(malformed, "<Package><Properties><AllowExternalContent>true</AllowExternalContent></Package>");
 
         // Act
