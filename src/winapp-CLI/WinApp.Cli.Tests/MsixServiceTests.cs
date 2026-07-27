@@ -1170,6 +1170,44 @@ public class MsixServiceTests
     }
 
     [TestMethod]
+    public async Task UpdateAppxManifestContentAsync_Sparse_FolderInput_CorrectsFromManifestExecutable()
+    {
+        // Arrange — folder packing supplies no explicit entryPointPath, so sparse status and the
+        // executable kind must be derived from the manifest itself. A folder whose manifest is
+        // sparse (AllowExternalContent) with a legacy RuntimeBehavior="packagedClassicApp" must
+        // still be corrected to win32App.
+        var service = CreateMsixServiceForManifestRewriteTests();
+        var manifest = """
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                 xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+                 xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+                 xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
+                 xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
+    <Identity Name="TestApp" Publisher="CN=Test" Version="1.0.0.0" />
+    <Properties>
+        <DisplayName>Test App</DisplayName>
+        <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
+    </Properties>
+    <Capabilities>
+        <rescap:Capability Name="runFullTrust" />
+    </Capabilities>
+    <Applications>
+        <Application Id="App" Executable="TestApp.exe" uap10:TrustLevel="mediumIL" uap10:RuntimeBehavior="packagedClassicApp" />
+    </Applications>
+</Package>
+""";
+
+        // Act — no explicit entry point (folder input); sparse status comes from the manifest.
+        var result = await InvokeUpdateAppxManifestContentAsync(service, manifest, entryPointPath: null, sparse: true);
+
+        // Assert — the sparse rewrite was applied using the manifest's own executable.
+        StringAssert.Contains(result, "uap10:RuntimeBehavior=\"win32App\"");
+        Assert.IsFalse(result.Contains("packagedClassicApp"), "Pre-existing packagedClassicApp must be corrected to win32App for folder inputs");
+        StringAssert.Contains(result, "uap10:TrustLevel=\"mediumIL\"");
+    }
+
+    [TestMethod]
     public async Task UpdateAppxManifestContentAsync_Sparse_CorrectsPreExistingRuntimeBehavior()
     {
         // Arrange — a manifest that already declares uap10:TrustLevel and an INCORRECT
@@ -1227,7 +1265,7 @@ public class MsixServiceTests
     private static Task<string> InvokeUpdateAppxManifestContentAsync(MsixService service, string manifest)
         => InvokeUpdateAppxManifestContentAsync(service, manifest, "TestApp.dll", sparse: true);
 
-    private static async Task<string> InvokeUpdateAppxManifestContentAsync(MsixService service, string manifest, string entryPointPath, bool sparse)
+    private static async Task<string> InvokeUpdateAppxManifestContentAsync(MsixService service, string manifest, string? entryPointPath, bool sparse)
     {
         var updateMethod = typeof(MsixService).GetMethod("UpdateAppxManifestContentAsync", BindingFlags.Instance | BindingFlags.NonPublic);
         Assert.IsNotNull(updateMethod, "Could not locate UpdateAppxManifestContentAsync via reflection");

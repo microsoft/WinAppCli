@@ -338,10 +338,14 @@ internal partial class MsixService(
         // Fetch dotnet package list once for all downstream operations
         var dotNetPackageList = await FetchDotNetPackageListAsync(cancellationToken);
 
-        // Determine executable path for ProcessorArchitecture auto-detection
+        // Determine executable path for ProcessorArchitecture auto-detection, and detect whether
+        // this is a sparse (AllowExternalContent) manifest so the rewrite applies sparse
+        // corrections (win32App/mediumIL, capabilities, AppListEntry) to folder inputs too.
         string? resolvedExePath = null;
+        bool isSparseManifest;
         {
             var tempDoc = AppxManifestDocument.Parse(manifestContent);
+            isSparseManifest = tempDoc.AllowsExternalContent;
             var appExe = tempDoc.ApplicationExecutable;
             if (appExe != null)
             {
@@ -349,7 +353,7 @@ internal partial class MsixService(
             }
         }
 
-        (manifestContent, var packageArch) = await UpdateAppxManifestContentAsync(manifestContent, null, null, resolvedExePath, sparse: false, selfContained: selfContained, dotNetPackageList, taskContext, cancellationToken);
+        (manifestContent, var packageArch) = await UpdateAppxManifestContentAsync(manifestContent, null, null, resolvedExePath, sparse: isSparseManifest, selfContained: selfContained, dotNetPackageList, taskContext, cancellationToken);
 
         // Parse the manifest to extract identity, executable, and architecture info
         var manifestDoc = AppxManifestDocument.Parse(manifestContent);
@@ -904,7 +908,11 @@ internal partial class MsixService(
             doc.ApplicationExecutable = relativeExecutablePath;
         }
 
-        bool isExe = Path.HasExtension(entryPointPath) && string.Equals(Path.GetExtension(entryPointPath), ".exe", StringComparison.OrdinalIgnoreCase);
+        // Determine whether the app entry point is an .exe. For folder packing no explicit
+        // entryPointPath is supplied, so fall back to the manifest's own <Application Executable>
+        // — otherwise sparse corrections (win32App/mediumIL) would never apply to folder inputs.
+        var executableForKind = entryPointPath ?? doc.ApplicationExecutable;
+        bool isExe = Path.HasExtension(executableForKind) && string.Equals(Path.GetExtension(executableForKind), ".exe", StringComparison.OrdinalIgnoreCase);
 
         if (sparse)
         {

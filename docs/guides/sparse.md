@@ -98,7 +98,17 @@ Both modes read identity from a sparse `appxmanifest.xml`. When you omit `--mani
 
 ### Step 4 — Register (for local testing)
 
-Register the identity package against the folder that contains your exe (the *external location*):
+The manifest's logos are resolved from the **external location** at runtime, not from the
+identity-only `.msix`. Step 1 wrote them under `./sparse/Assets`, so copy them next to your exe
+(the external location) before registering — otherwise Windows registers a layout missing every
+logo the manifest references:
+
+```powershell
+# Copy the generated assets into the external location (beside your exe)
+Copy-Item ./sparse/Assets -Destination .\bin\Release\net8.0-windows\Assets -Recurse -Force
+```
+
+Then register the identity package against that folder (the *external location*):
 
 ```powershell
 Add-AppxPackage -Path .\MyApp.identity.msix `
