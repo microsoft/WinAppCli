@@ -515,9 +515,10 @@ internal partial class MsixService
 
     /// <summary>
     /// Returns true if the side-by-side manifest XML has a top-level (root-child)
-    /// &lt;assemblyIdentity&gt; element. Unlike a whole-file scan, this ignores nested
+    /// asm.v1 &lt;assemblyIdentity&gt; element. Unlike a whole-file scan, this ignores nested
     /// &lt;assemblyIdentity&gt; elements (e.g. a &lt;dependency&gt; on
-    /// Microsoft.Windows.Common-Controls), which do not grant the assembly its own identity.
+    /// Microsoft.Windows.Common-Controls) and any identically named element from a different
+    /// namespace (e.g. asm.v3), which do not grant the assembly its own SxS identity.
     /// Returns false if the content cannot be parsed as XML.
     /// </summary>
     private static bool HasTopLevelAssemblyIdentity(string manifestContent)
@@ -525,7 +526,7 @@ internal partial class MsixService
         try
         {
             var root = XDocument.Parse(manifestContent).Root;
-            return root is not null && root.Elements().Any(e => e.Name.LocalName == "assemblyIdentity");
+            return root is not null && root.Elements(AsmV1Ns + "assemblyIdentity").Any();
         }
         catch (System.Xml.XmlException)
         {

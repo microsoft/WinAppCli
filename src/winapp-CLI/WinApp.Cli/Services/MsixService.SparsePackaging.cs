@@ -316,7 +316,7 @@ internal partial class MsixService
         // The fusion manifest must carry a top-level <assemblyIdentity> for Windows to grant
         // identity (see the MS "grant identity to non-packaged apps" docs). Add one if the file
         // (new or existing) has none at the root — ignoring nested/dependency identities.
-        if (!root.Elements().Any(e => e.Name.LocalName == "assemblyIdentity"))
+        if (!root.Elements(AsmV1Ns + "assemblyIdentity").Any())
         {
             root.AddFirst(new XElement(AsmV1Ns + "assemblyIdentity",
                 new XAttribute("version", "1.0.0.0"),

@@ -387,6 +387,36 @@ public class SparsePackagingTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task EmbedIdentity_XmlMode_ForeignNamespaceIdentity_AddsAsmV1AssemblyIdentity()
+    {
+        // A root-child <assemblyIdentity> in a non-asm.v1 namespace (e.g. asm.v3) does not grant
+        // the assembly its SxS identity, so the required asm.v1 <assemblyIdentity> must still be added.
+        var exe = CopyTestExe();
+        var initCommand = GetRequiredService<InitCommand>();
+        await ParseAndInvokeWithCaptureAsync(initCommand, ["--exe", exe, "--sparse", "--use-defaults", "--name", "NsApp", "--publisher", "CN=Contoso"]);
+        var manifestPath = SparseManifestPath;
+        var targetManifest = Path.Join(_tempDirectory.FullName, "app.manifest");
+        await File.WriteAllTextAsync(targetManifest, """
+            <?xml version="1.0" encoding="utf-8"?>
+            <assembly xmlns="urn:schemas-microsoft-com:asm.v1" xmlns:v3="urn:schemas-microsoft-com:asm.v3" manifestVersion="1.0">
+              <v3:assemblyIdentity version="1.0.0.0" name="Foreign.App" type="win32" />
+            </assembly>
+            """, TestContext.CancellationToken);
+        var embedCommand = GetRequiredService<EmbedIdentityCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(embedCommand, [targetManifest, "--manifest", manifestPath]);
+
+        // Assert
+        Assert.AreEqual(0, exitCode);
+        XNamespace asmV1 = "urn:schemas-microsoft-com:asm.v1";
+        var root = XDocument.Load(targetManifest).Root!;
+        var asmV1Identity = root.Elements(asmV1 + "assemblyIdentity").ToList();
+        Assert.AreEqual(1, asmV1Identity.Count, "An asm.v1 <assemblyIdentity> must be added even when a foreign-namespace one is present");
+        Assert.AreEqual("NsApp", asmV1Identity[0].Attribute("name")?.Value);
+    }
+
+    [TestMethod]
     public async Task EmbedIdentity_UnsupportedExtension_ReturnsError()
     {
         // Arrange: a valid sparse manifest exists, but the target is an unsupported file type.
