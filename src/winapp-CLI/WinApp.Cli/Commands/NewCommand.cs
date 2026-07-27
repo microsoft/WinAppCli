@@ -367,6 +367,19 @@ internal class NewCommand : Command, IShortDescription
             }
 
             var outputDir = output ?? new DirectoryInfo(Path.Join(currentDir.FullName, name!));
+            if (!force && outputDir.Exists && outputDir.EnumerateFileSystemInfos().Any())
+            {
+                var error = $"Output directory '{outputDir.FullName}' is not empty. Use --force to scaffold into it and overwrite conflicting files.";
+                if (isJson)
+                {
+                    PrintJson(false, template.Value, name!, outputDir.FullName, error);
+                }
+                else
+                {
+                    logger.LogError("{Error} {Message}", UiSymbols.Error, error);
+                }
+                return ExitInvalidArgs;
+            }
 
             // 3b. Validate the template-pack version (a NuGet version starts with a digit and contains
             // only version characters). This fails fast on clearly invalid input with exit code 2.
