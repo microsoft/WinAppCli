@@ -40,6 +40,113 @@ internal static class NuGetVersionHelper
     }
 
     /// <summary>
+    /// Compares two NuGet version strings by precedence and returns a negative value when
+    /// <paramref name="a"/> is older than <paramref name="b"/>, zero when they are equivalent, a
+    /// positive value when <paramref name="a"/> is newer, or <c>null</c> when either version is
+    /// malformed. Follows the SemVer rule that a prerelease has lower precedence than the otherwise
+    /// equal release, comparing prerelease identifiers numerically when both are numeric (numeric
+    /// identifiers rank below alphanumeric ones) and case-insensitively otherwise, with a shorter set
+    /// of identifiers ranking lower when all leading identifiers are equal.
+    /// </summary>
+    internal static int? Compare(string a, string b)
+    {
+        var normA = NormalizeNuGetVersion(a);
+        var normB = NormalizeNuGetVersion(b);
+        if (normA is null || normB is null)
+        {
+            return null;
+        }
+
+        SplitCanonical(normA, out var releaseA, out var prereleaseA);
+        SplitCanonical(normB, out var releaseB, out var prereleaseB);
+
+        var maxRelease = Math.Max(releaseA.Length, releaseB.Length);
+        for (var i = 0; i < maxRelease; i++)
+        {
+            var x = i < releaseA.Length ? releaseA[i] : 0;
+            var y = i < releaseB.Length ? releaseB[i] : 0;
+            if (x != y)
+            {
+                return x < y ? -1 : 1;
+            }
+        }
+
+        // Numeric release is equal: a prerelease has lower precedence than the release itself.
+        var aHasPre = prereleaseA.Length > 0;
+        var bHasPre = prereleaseB.Length > 0;
+        if (aHasPre == bHasPre)
+        {
+            return aHasPre ? ComparePrerelease(prereleaseA, prereleaseB) : 0;
+        }
+
+        return aHasPre ? -1 : 1;
+    }
+
+    /// <summary>Splits a canonical <c>Major.Minor.Patch[.Revision][-prerelease]</c> string (already
+    /// validated by <see cref="NormalizeNuGetVersion"/>) into numeric release components and the
+    /// prerelease label (empty when absent).</summary>
+    private static void SplitCanonical(string canonical, out int[] release, out string prerelease)
+    {
+        var dash = canonical.IndexOf('-');
+        var numeric = dash >= 0 ? canonical[..dash] : canonical;
+        prerelease = dash >= 0 ? canonical[(dash + 1)..] : string.Empty;
+        release = numeric.Split('.')
+            .Select(p => int.Parse(p, System.Globalization.CultureInfo.InvariantCulture))
+            .ToArray();
+    }
+
+    /// <summary>Compares two non-empty SemVer prerelease labels identifier-by-identifier.</summary>
+    private static int ComparePrerelease(string a, string b)
+    {
+        var idsA = a.Split('.');
+        var idsB = b.Split('.');
+        var max = Math.Max(idsA.Length, idsB.Length);
+        for (var i = 0; i < max; i++)
+        {
+            if (i >= idsA.Length)
+            {
+                return -1; // a ran out first — fewer identifiers ranks lower
+            }
+
+            if (i >= idsB.Length)
+            {
+                return 1;
+            }
+
+            var isNumA = int.TryParse(idsA[i], System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var numA);
+            var isNumB = int.TryParse(idsB[i], System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var numB);
+
+            if (isNumA && isNumB)
+            {
+                if (numA != numB)
+                {
+                    return numA < numB ? -1 : 1;
+                }
+            }
+            else if (isNumA)
+            {
+                return -1; // numeric identifiers have lower precedence than alphanumeric ones
+            }
+            else if (isNumB)
+            {
+                return 1;
+            }
+            else
+            {
+                var c = string.Compare(idsA[i], idsB[i], StringComparison.OrdinalIgnoreCase);
+                if (c != 0)
+                {
+                    return c < 0 ? -1 : 1;
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>
     /// Reduces a NuGet version to a canonical <c>Major.Minor.Patch[.Revision][-prerelease]</c> string
     /// for equivalence comparison, or <c>null</c> when the version is malformed (non-numeric release,
     /// empty release/prerelease/metadata segment, repeated separators, or invalid identifier

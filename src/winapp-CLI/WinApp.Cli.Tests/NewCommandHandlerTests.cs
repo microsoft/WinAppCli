@@ -466,7 +466,7 @@ public class NewCommandHandlerTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task Handler_AppTemplate_PrintsWinappRunNextStep()
+    public async Task Handler_AppTemplate_PrintsDotnetRunNextStep()
     {
         ScriptHappyPath();
         var command = GetRequiredService<NewCommand>();
@@ -474,8 +474,10 @@ public class NewCommandHandlerTests : BaseCommandTests
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--name", "MyApp"]);
 
         Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
-        Assert.IsTrue(TestAnsiConsole.Output.Contains("winapp run", StringComparison.Ordinal),
-            $"App templates should suggest 'winapp run' as the next step. Output:\n{TestAnsiConsole.Output}");
+        Assert.IsTrue(TestAnsiConsole.Output.Contains("dotnet run", StringComparison.Ordinal),
+            $"App templates should suggest 'dotnet run' as the next step (it builds and launches the fresh source). Output:\n{TestAnsiConsole.Output}");
+        Assert.IsFalse(TestAnsiConsole.Output.Contains("winapp run", StringComparison.Ordinal),
+            $"App templates must not suggest 'winapp run' — it launches an already-built packaged app, not fresh source. Output:\n{TestAnsiConsole.Output}");
     }
 
     [TestMethod]
@@ -488,9 +490,9 @@ public class NewCommandHandlerTests : BaseCommandTests
 
         Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
         Assert.IsTrue(TestAnsiConsole.Output.Contains("reference", StringComparison.OrdinalIgnoreCase),
-            $"The lib template should not suggest 'winapp run'. Output:\n{TestAnsiConsole.Output}");
-        Assert.IsFalse(TestAnsiConsole.Output.Contains("winapp run", StringComparison.Ordinal),
-            "A class library is not runnable, so 'winapp run' must not be suggested.");
+            $"The lib template should suggest adding a reference. Output:\n{TestAnsiConsole.Output}");
+        Assert.IsFalse(TestAnsiConsole.Output.Contains("dotnet run", StringComparison.Ordinal),
+            "A class library is not runnable, so 'dotnet run' must not be suggested.");
     }
 
     [TestMethod]
@@ -518,8 +520,8 @@ public class NewCommandHandlerTests : BaseCommandTests
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--template", "unittest", "--name", "MyTests"]);
 
         Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
-        Assert.IsTrue(TestAnsiConsole.Output.Contains("winapp run", StringComparison.Ordinal),
-            $"The unittest template is a packaged app; its tests run when launched with 'winapp run'. Output:\n{TestAnsiConsole.Output}");
+        Assert.IsTrue(TestAnsiConsole.Output.Contains("dotnet run", StringComparison.Ordinal),
+            $"The unittest template is a packaged app; its tests run when launched with 'dotnet run'. Output:\n{TestAnsiConsole.Output}");
         Assert.IsFalse(TestAnsiConsole.Output.Contains("dotnet test", StringComparison.OrdinalIgnoreCase)
             && !TestAnsiConsole.Output.Contains("not via", StringComparison.OrdinalIgnoreCase),
             "The unittest next step must not recommend 'dotnet test' — the packaged MSTest app runs its tests on launch.");

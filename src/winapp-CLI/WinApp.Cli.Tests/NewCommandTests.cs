@@ -322,4 +322,50 @@ public class NewCommandTests : BaseCommandTests
         Assert.IsFalse(NewCommand.IsTemplatePackInstalled(listing, "0.0.6-alpha"),
             "A sibling package's version line must not be read as the WinUI pack version.");
     }
+
+    [TestMethod]
+    public void TryGetInstalledPackVersion_ReturnsInstalledVersion()
+    {
+        var listing =
+            "Currently installed items:\n" +
+            "   Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n" +
+            "      Version: 0.0.7-alpha\n";
+
+        Assert.IsTrue(NewCommand.TryGetInstalledPackVersion(listing, out var version));
+        Assert.AreEqual("0.0.7-alpha", version);
+    }
+
+    [TestMethod]
+    public void TryGetInstalledPackVersion_NotInstalled_ReturnsFalse()
+    {
+        Assert.IsFalse(NewCommand.TryGetInstalledPackVersion("Currently installed items:\n", out var version));
+        Assert.IsNull(version);
+    }
+
+    [TestMethod]
+    [DataRow("1.0.0", "1.0.0", 0)]
+    [DataRow("1.0.0", "2.0.0", -1)]
+    [DataRow("2.0.0", "1.0.0", 1)]
+    [DataRow("1.2.0", "1.10.0", -1)]
+    [DataRow("0.0.7-alpha", "0.0.6-alpha", 1)]
+    [DataRow("0.0.6-alpha", "0.0.7-alpha", -1)]
+    // A prerelease has lower precedence than the otherwise-equal release.
+    [DataRow("1.0.0-alpha", "1.0.0", -1)]
+    [DataRow("1.0.0", "1.0.0-alpha", 1)]
+    // Numeric prerelease identifiers rank below alphanumeric ones and compare numerically.
+    [DataRow("1.0.0-alpha.2", "1.0.0-alpha.10", -1)]
+    [DataRow("1.0.0-1", "1.0.0-alpha", -1)]
+    public void Compare_OrdersVersionsBySemVerPrecedence(string a, string b, int expectedSign)
+    {
+        var result = NuGetVersionHelper.Compare(a, b);
+        Assert.IsNotNull(result);
+        Assert.AreEqual(expectedSign, Math.Sign(result.Value), $"Compare('{a}','{b}')");
+    }
+
+    [TestMethod]
+    public void Compare_MalformedVersion_ReturnsNull()
+    {
+        Assert.IsNull(NuGetVersionHelper.Compare("not-a-version", "1.0.0"));
+        Assert.IsNull(NuGetVersionHelper.Compare("1.0.0", ""));
+    }
 }
