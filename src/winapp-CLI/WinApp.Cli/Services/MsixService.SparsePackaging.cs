@@ -223,7 +223,7 @@ internal partial class MsixService
         }
 
         var folder = new DirectoryInfo(outputPath.FullName);
-        return (new FileInfo(Path.Combine(folder.FullName, safeFileName)), folder);
+        return (new FileInfo(Path.Join(folder.FullName, safeFileName)), folder);
     }
 
     public async Task<MsixIdentityResult> EmbedIdentityAsync(

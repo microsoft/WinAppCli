@@ -25,15 +25,15 @@ public class SparsePackagingTests : BaseCommandTests
     private string CopyTestExe(string fileName = "app.exe")
     {
         // A real PE file is needed so FileVersionInfo/icon extraction succeed.
-        var dest = Path.Combine(_tempDirectory.FullName, fileName);
-        File.Copy(Path.Combine(Environment.SystemDirectory, "notepad.exe"), dest, overwrite: true);
+        var dest = Path.Join(_tempDirectory.FullName, fileName);
+        File.Copy(Path.Join(Environment.SystemDirectory, "notepad.exe"), dest, overwrite: true);
         return dest;
     }
 
     // Sparse init defaults to a dedicated ./sparse/ folder under the current directory, which the
     // test harness sets to _tempDirectory.
-    private string SparseDir => Path.Combine(_tempDirectory.FullName, "sparse");
-    private string SparseManifestPath => Path.Combine(SparseDir, "appxmanifest.xml");
+    private string SparseDir => Path.Join(_tempDirectory.FullName, "sparse");
+    private string SparseManifestPath => Path.Join(SparseDir, "appxmanifest.xml");
 
     private const string MinimalSparseManifest = """
         <?xml version="1.0" encoding="utf-8"?>

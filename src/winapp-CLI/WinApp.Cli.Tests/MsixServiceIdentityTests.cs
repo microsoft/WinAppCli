@@ -757,9 +757,9 @@ public class MsixServiceIdentityTests : BaseCommandTests
         _fakeBuildTools.ThrowWhen = (tool, args) =>
             tool.Contains("mt", StringComparison.OrdinalIgnoreCase) &&
             args.Contains("-outputresource", StringComparison.OrdinalIgnoreCase);
-        var exe = new FileInfo(Path.Combine(_tempDirectory.FullName, "app.exe"));
+        var exe = new FileInfo(Path.Join(_tempDirectory.FullName, "app.exe"));
         await File.WriteAllTextAsync(exe.FullName, "pe", TestContext.CancellationToken);
-        var manifest = new FileInfo(Path.Combine(_tempDirectory.FullName, "new.manifest"));
+        var manifest = new FileInfo(Path.Join(_tempDirectory.FullName, "new.manifest"));
         await File.WriteAllTextAsync(manifest.FullName, "<assembly/>", TestContext.CancellationToken);
 
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(
@@ -775,14 +775,14 @@ public class MsixServiceIdentityTests : BaseCommandTests
         _fakeBuildTools.SimulateExistingExeManifest = true;
         var (_, exePath) = ArrangeSparseInputs();
         var exe = new FileInfo(exePath);
-        var manifest = new FileInfo(Path.Combine(_tempDirectory.FullName, "new.manifest"));
+        var manifest = new FileInfo(Path.Join(_tempDirectory.FullName, "new.manifest"));
         await File.WriteAllTextAsync(
             manifest.FullName,
             "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\"/>",
             TestContext.CancellationToken);
 
         var planted = LegacyTempManifestNames
-            .Select(n => new FileInfo(Path.Combine(exe.DirectoryName!, n)))
+            .Select(n => new FileInfo(Path.Join(exe.DirectoryName!, n)))
             .ToArray();
         foreach (var file in planted)
         {
@@ -805,7 +805,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
         // Regression: re-branding an exe must be idempotent. Any <msix> already present in the
         // extracted manifest has to be removed before the mt.exe merge, otherwise mt.exe fails
         // with c1010001 ("Values of attribute ... not equal") when the identity differs.
-        var manifestFile = new FileInfo(Path.Combine(_tempDirectory.FullName, "sxs.manifest"));
+        var manifestFile = new FileInfo(Path.Join(_tempDirectory.FullName, "sxs.manifest"));
         File.WriteAllText(
             manifestFile.FullName,
             "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">" +
