@@ -94,6 +94,15 @@ test('parseSparseFlag mirrors native --sparse boolean parsing', () => {
   assert.equal(parseSparseFlag(['init', '--sparse', '--exe', 'a.exe']), true);
 });
 
+test('parseSparseFlag resolves repeated occurrences from the last (like System.CommandLine)', () => {
+  // A repeated scalar boolean resolves from its final occurrence, so the wrapper must
+  // agree with the native parser rather than returning on the first match.
+  assert.equal(parseSparseFlag(['init', '--sparse=false', '--sparse', '--exe', 'a.exe']), true);
+  assert.equal(parseSparseFlag(['init', '--sparse', '--sparse=false']), false);
+  assert.equal(parseSparseFlag(['init', '--sparse', 'false', '--sparse']), true);
+  assert.equal(parseSparseFlag(['init', '--sparse=true', '--sparse:false']), false);
+});
+
 test('resolveYamlPath honours --config-dir (space and = forms)', () => {
   assert.equal(resolveYamlPath(['--config-dir', 'cfg']), path.join(path.resolve('cfg'), 'winapp.yaml'));
   assert.equal(resolveYamlPath(['--config-dir=cfg']), path.join(path.resolve('cfg'), 'winapp.yaml'));

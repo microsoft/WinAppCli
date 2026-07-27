@@ -121,8 +121,14 @@ internal partial class MsixService
                 "Generate one with 'winapp init --exe <exe> --sparse', or pass an input folder to package a full MSIX.");
         }
 
-        var packageName = ManifestService.CleanPackageName(doc.IdentityName ?? "Package");
-        var extractedPublisher = publisher ?? doc.IdentityPublisher;
+        // MakeAppx packages the sparse manifest with /nv (no semantic validation), so a
+        // structurally invalid manifest — a missing Identity Name/Publisher or Application Id —
+        // would otherwise pack (and possibly sign) "successfully" yet be rejected at deployment.
+        // Reuse the shared required-identity/application parser to fail fast with a clear error.
+        var identity = ParseAppxManifestAsync(manifestContent);
+
+        var packageName = ManifestService.CleanPackageName(identity.PackageName);
+        var extractedPublisher = publisher ?? identity.Publisher;
 
         // Resolve output path: default to <PackageName>.identity.msix in the current directory.
         var defaultFileName = $"{packageName}.identity.msix";

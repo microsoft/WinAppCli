@@ -47,6 +47,9 @@ public class SparsePackagingTests : BaseCommandTests
             <Logo>Assets\StoreLogo.png</Logo>
             <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
           </Properties>
+          <Applications>
+            <Application Id="SparsePkg" Executable="app.exe" uap10:RuntimeBehavior="win32App" uap10:TrustLevel="mediumIL" />
+          </Applications>
         </Package>
         """;
 
@@ -433,6 +436,34 @@ public class SparsePackagingTests : BaseCommandTests
     {
         var manifestPath = new FileInfo(Path.Join(_tempDirectory.FullName, "appxmanifest.xml"));
         await File.WriteAllTextAsync(manifestPath.FullName, NonSparseManifest, TestContext.CancellationToken);
+        var msixService = GetRequiredService<IMsixService>();
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+            msixService.CreateSparseIdentityPackageAsync(manifestPath, null, TestTaskContext, cancellationToken: TestContext.CancellationToken));
+    }
+
+    [TestMethod]
+    public async Task CreateSparseIdentityPackage_MissingApplication_Throws()
+    {
+        // MakeAppx runs with /nv, so a sparse manifest that declares AllowExternalContent but is
+        // missing its <Application Id> must be rejected here rather than packed into a package that
+        // deployment would later refuse.
+        var manifestPath = new FileInfo(Path.Join(_tempDirectory.FullName, "appxmanifest.xml"));
+        var noApp = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                     xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+                     IgnorableNamespaces="uap10">
+              <Identity Name="SparsePkg" Publisher="CN=TestPublisher" Version="1.0.0.0" ProcessorArchitecture="neutral" />
+              <Properties>
+                <DisplayName>SparsePkg</DisplayName>
+                <PublisherDisplayName>Test</PublisherDisplayName>
+                <Logo>Assets\StoreLogo.png</Logo>
+                <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
+              </Properties>
+            </Package>
+            """;
+        await File.WriteAllTextAsync(manifestPath.FullName, noApp, TestContext.CancellationToken);
         var msixService = GetRequiredService<IMsixService>();
 
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>

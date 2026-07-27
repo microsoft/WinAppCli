@@ -73,24 +73,24 @@ export function hasAddJsBindings(args: readonly string[]): boolean {
  *   - absent                           -> false
  * A `--sparse` immediately followed by a non-boolean token (e.g. another option or a
  * path) is treated as a bare `true`, matching the native option's 0..1 arity.
+ *
+ * The option may appear more than once. System.CommandLine resolves a repeated scalar
+ * boolean from its LAST occurrence, so scan every occurrence and keep the last effective
+ * value rather than returning on the first — otherwise wrapper routing (e.g. for
+ * `--sparse=false --sparse`) would disagree with the native parser.
  */
 export function parseSparseFlag(args: readonly string[]): boolean {
+  let value = false;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '--sparse') {
       const next = args[i + 1];
-      if (next !== undefined) {
-        const lowered = next.toLowerCase();
-        if (lowered === 'true') return true;
-        if (lowered === 'false') return false;
-      }
-      return true;
-    }
-    if (a.startsWith('--sparse=') || a.startsWith('--sparse:')) {
-      return a.substring('--sparse='.length).toLowerCase() !== 'false';
+      value = next?.toLowerCase() !== 'false';
+    } else if (a.startsWith('--sparse=') || a.startsWith('--sparse:')) {
+      value = a.substring('--sparse='.length).toLowerCase() !== 'false';
     }
   }
-  return false;
+  return value;
 }
 
 /** Remove wrapper-only flags before forwarding to native. */
