@@ -263,6 +263,21 @@ public class NewCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public void IsValidProjectName_EnforcesMaxLengthAccountingForCsprojSuffix()
+    {
+        // The scaffold writes "<name>.csproj", so the longest accepted name still fits within the
+        // 255-character Windows path-component limit once ".csproj" is appended, and one character
+        // longer is rejected up front instead of failing mid-scaffold.
+        var maxName = new string('a', NewCommand.MaxProjectNameLength);
+        var tooLong = new string('a', NewCommand.MaxProjectNameLength + 1);
+
+        Assert.AreEqual(255, NewCommand.MaxProjectNameLength + ".csproj".Length,
+            "MaxProjectNameLength must leave exactly room for the .csproj suffix within 255 chars.");
+        Assert.IsTrue(NewCommand.IsValidProjectName(maxName), "A name at the maximum length must be accepted.");
+        Assert.IsFalse(NewCommand.IsValidProjectName(tooLong), "A name one character over the limit must be rejected.");
+    }
+
+    [TestMethod]
     public void IsTemplatePackInstalled_RealDotnetFormat_ReturnsTrue()
     {
         // Mirrors actual `dotnet new uninstall` output: a "Currently installed items:" banner, then

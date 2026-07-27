@@ -414,6 +414,58 @@ public class NewCommandHandlerTests : BaseCommandTests
     }
 
     [TestMethod]
+    [DataRow("   ")]
+    [DataRow("")]
+    public async Task Handler_ExplicitBlankName_ReturnsInvalidArgs(string blankName)
+    {
+        ScriptHappyPath();
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["--use-defaults", "--json", "--name", blankName]);
+
+        Assert.AreEqual(NewCommand.ExitInvalidArgs, exitCode,
+            "An explicitly supplied blank --name must be rejected, not treated as an absent option that defaults to 'WinUIApp'.");
+        Assert.IsNull(ScaffoldInvocation(),
+            "A blank explicit name must fail fast before any scaffold runs.");
+    }
+
+    [TestMethod]
+    public async Task Handler_NonEmptyOutputDirectoryWithoutForce_ReturnsInvalidArgs()
+    {
+        ScriptHappyPath();
+        var existing = _tempDirectory.CreateSubdirectory("MyApp");
+        File.WriteAllText(Path.Combine(existing.FullName, "pre-existing.txt"), "keep me");
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["--use-defaults", "--json", "--output", existing.FullName]);
+
+        Assert.AreEqual(NewCommand.ExitInvalidArgs, exitCode,
+            "A non-empty output directory must be rejected without --force so the scaffold isn't mixed into unrelated files.");
+        Assert.IsNull(ScaffoldInvocation(),
+            "The non-empty directory must fail fast before dotnet new runs.");
+    }
+
+    [TestMethod]
+    public async Task Handler_NonEmptyOutputDirectoryWithForce_Scaffolds()
+    {
+        ScriptHappyPath();
+        var existing = _tempDirectory.CreateSubdirectory("MyApp");
+        File.WriteAllText(Path.Combine(existing.FullName, "pre-existing.txt"), "keep me");
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["--use-defaults", "--json", "--force", "--output", existing.FullName]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode,
+            "--force must allow scaffolding into a non-empty output directory.");
+        var scaffold = ScaffoldInvocation();
+        Assert.IsNotNull(scaffold);
+        CollectionAssert.Contains(scaffold.ToArray(), "--force");
+    }
+
+    [TestMethod]
     public async Task Handler_AppTemplate_PrintsWinappRunNextStep()
     {
         ScriptHappyPath();

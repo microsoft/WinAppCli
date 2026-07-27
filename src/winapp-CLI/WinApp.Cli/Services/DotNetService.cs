@@ -481,7 +481,9 @@ internal partial class DotNetService : IDotNetService
             }
             catch (System.ComponentModel.Win32Exception) when (process.HasExited)
             {
-                // The process already exited between the HasExited check and Kill — nothing to do.
+                // Kill raced with the process exiting on its own; it is already gone, nothing to do.
+                // A Win32Exception while the process is still running means termination genuinely
+                // failed, so it is intentionally left to propagate and surface the kill failure.
             }
 
             throw;

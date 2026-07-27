@@ -65,6 +65,11 @@ internal class NewCommand : Command, IShortDescription
     internal const int ExitTemplatePackFailed = 4;
     internal const int ExitScaffoldFailed = 5;
 
+    // Windows caps a single path component at 255 characters. The scaffold writes "<name>.csproj",
+    // so the project name must leave room for that suffix or dotnet new fails mid-scaffold instead of
+    // failing fast on the invalid argument.
+    internal const int MaxProjectNameLength = 255 - 7; // ".csproj".Length == 7
+
     public static Option<WinUiTemplate?> TemplateOption { get; }
     public static Option<string?> NameOption { get; }
     public static Option<DirectoryInfo?> OutputOption { get; }
@@ -176,12 +181,15 @@ internal class NewCommand : Command, IShortDescription
     /// Returns true only when <paramref name="name"/> is a safe single path segment. The resolved
     /// name becomes both the default output directory (<c>./&lt;name&gt;</c>) and the <c>dotnet new</c>
     /// project name, so path separators, <c>.</c>/<c>..</c>, rooted paths, invalid filename
-    /// characters, Windows reserved device names, and trailing dot/space names are rejected so the
-    /// scaffold can't escape the current directory or produce an unusable folder.
+    /// characters, Windows reserved device names, over-long names (that would push the generated
+    /// <c>&lt;name&gt;.csproj</c> past the 255-character path-component limit), and trailing dot/space
+    /// names are rejected so the scaffold can't escape the current directory or produce an unusable
+    /// folder.
     /// </summary>
     internal static bool IsValidProjectName(string? name)
     {
         if (string.IsNullOrWhiteSpace(name)
+            || name.Length > MaxProjectNameLength
             || name is "." or ".."
             || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
         {
@@ -328,8 +336,10 @@ internal class NewCommand : Command, IShortDescription
                 template = useDefaults ? WinUiTemplate.Blank : await PromptTemplateAsync(cancellationToken);
             }
 
-            // 2. Resolve name
-            if (string.IsNullOrWhiteSpace(name))
+            // 2. Resolve name. Only a genuinely absent --name enters the defaulting path; an explicitly
+            // supplied but blank value (e.g. --name "   ") is kept so the validation below rejects it
+            // instead of silently scaffolding the default 'WinUIApp'.
+            if (name is null)
             {
                 if (output is not null)
                 {
@@ -367,19 +377,6 @@ internal class NewCommand : Command, IShortDescription
             }
 
             var outputDir = output ?? new DirectoryInfo(Path.Join(currentDir.FullName, name!));
-            if (!force && outputDir.Exists && outputDir.EnumerateFileSystemInfos().Any())
-            {
-                var error = $"Output directory '{outputDir.FullName}' is not empty. Use --force to scaffold into it and overwrite conflicting files.";
-                if (isJson)
-                {
-                    PrintJson(false, template.Value, name!, outputDir.FullName, error);
-                }
-                else
-                {
-                    logger.LogError("{Error} {Message}", UiSymbols.Error, error);
-                }
-                return ExitInvalidArgs;
-            }
 
             // 3b. Validate the template-pack version (a NuGet version starts with a digit and contains
             // only version characters). This fails fast on clearly invalid input with exit code 2.
@@ -394,6 +391,25 @@ internal class NewCommand : Command, IShortDescription
                 {
                     logger.LogError("{Error} Invalid --template-version '{Version}'. Expected a NuGet version such as {Default}.",
                         UiSymbols.Error, templateVersion, DefaultTemplateVersion);
+                }
+                return ExitInvalidArgs;
+            }
+
+            // 3c. Preflight the output directory. dotnet new --force only overwrites files the template
+            // would otherwise conflict on; it never refuses a merely non-empty directory. To honour the
+            // documented --force contract ("Scaffold even if the output directory already contains
+            // files"), reject a non-empty output directory unless --force was passed, so the scaffold is
+            // not silently mixed into unrelated existing files.
+            if (!force && outputDir.Exists && outputDir.EnumerateFileSystemInfos().Any())
+            {
+                var dirError = $"Output directory '{outputDir.FullName}' is not empty. Use --force to scaffold into it anyway.";
+                if (isJson)
+                {
+                    PrintJson(false, template.Value, name!, outputDir.FullName, dirError);
+                }
+                else
+                {
+                    logger.LogError("{Error} {Detail}", UiSymbols.Error, dirError);
                 }
                 return ExitInvalidArgs;
             }
