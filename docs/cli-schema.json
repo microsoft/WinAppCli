@@ -863,7 +863,7 @@
           "recursive": false
         },
         "--use-defaults": {
-          "description": "Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults)",
+          "description": "Skip interactive prompts and use default answers. Normal init targets the positional project directory if given, otherwise the current directory (e.g., winapp init . --use-defaults). Sparse init (--exe --sparse) ignores the positional directory and writes to --output-dir instead.",
           "hidden": false,
           "aliases": [
             "--no-prompt"

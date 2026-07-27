@@ -116,3 +116,5 @@ winapp pack .\appxmanifest.xml --cert .\devcert.pfx
 ```
 
 The generated installer registers the package on install (`Add-AppxPackage -ExternalLocation`) and unregisters it on uninstall (`Remove-AppxPackage`).
+
+> **Runtime prerequisite:** because the app is published framework-dependent (`--self-contained false`), the target machine needs the [.NET 10 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0). The installer checks for it and warns before continuing if it's missing. To remove that dependency, publish self-contained instead (`dotnet publish -c Release -r win-x64 --self-contained true`).

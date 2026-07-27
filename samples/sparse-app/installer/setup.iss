@@ -10,6 +10,10 @@
 ;      content location) as a post-install step.
 ;   4. Unregisters the package on uninstall.
 ;
+; Because the app is published framework-dependent (--self-contained false), the target
+; machine needs the .NET 10 Desktop Runtime (x64). InitializeSetup checks for it and warns
+; before continuing. Publish self-contained instead to remove that runtime dependency.
+;
 ; Prerequisites before compiling with the Inno Setup Compiler (ISCC.exe):
 ;   - Publish the app:      dotnet publish -c Release -r win-x64 --self-contained false
 ;   - Build the identity:   winapp pack appxmanifest.xml --cert devcert.pfx
@@ -113,5 +117,48 @@ begin
     if ResultCode <> 0 then
       RaiseException('Registering the sparse identity package failed (exit code ' + IntToStr(ResultCode) + '). ' +
         'This app requires package identity, so setup has been aborted.');
+  end;
+end;
+
+{ Returns True if a .NET 10 Windows Desktop Runtime is present in the machine-wide shared
+  runtime folder. The sample publishes framework-dependent (dotnet publish --self-contained
+  false), so without this runtime the WPF app cannot launch even though the package registers. }
+function IsDotNetDesktopRuntimeInstalled: Boolean;
+var
+  RuntimeDir: string;
+  FindRec: TFindRec;
+begin
+  Result := False;
+  RuntimeDir := ExpandConstant('{commonpf}\dotnet\shared\Microsoft.WindowsDesktop.App');
+  if FindFirst(RuntimeDir + '\10.*', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
+        begin
+          Result := True;
+          Break;
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+{ Prerequisite gate: verify the .NET 10 Desktop Runtime is installed before proceeding. On a
+  clean machine the framework-dependent app would install and register but fail to launch, so
+  warn with the download link and let the user cancel rather than silently completing. }
+function InitializeSetup: Boolean;
+begin
+  Result := True;
+  if not IsDotNetDesktopRuntimeInstalled then
+  begin
+    if MsgBox('This app is published framework-dependent and requires the .NET 10 Desktop Runtime (x64), '
+        + 'which was not detected on this machine.' + #13#10#13#10
+        + 'Install it from:' + #13#10
+        + 'https://dotnet.microsoft.com/download/dotnet/10.0' + #13#10#13#10
+        + 'Continue with setup anyway?', mbConfirmation, MB_YESNO) = IDNO then
+      Result := False;
   end;
 end;

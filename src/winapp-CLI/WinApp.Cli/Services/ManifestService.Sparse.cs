@@ -73,8 +73,8 @@ internal partial class ManifestService
             executableName: executable.Name,
             cancellationToken: cancellationToken);
 
-        var manifestPath = new FileInfo(Path.Combine(outputDirectory.FullName, "appxmanifest.xml"));
-        var assetsDirectory = new DirectoryInfo(Path.Combine(outputDirectory.FullName, "Assets"));
+        var manifestPath = new FileInfo(Path.Join(outputDirectory.FullName, "appxmanifest.xml"));
+        var assetsDirectory = new DirectoryInfo(Path.Join(outputDirectory.FullName, "Assets"));
 
         // Best-effort: extract the app icon from the exe to replace the placeholder assets.
         await TryApplyExtractedLogoAsync(manifestPath, executable, taskContext, cancellationToken);

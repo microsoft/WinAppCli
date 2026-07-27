@@ -5,6 +5,15 @@ param(
 
 BeforeDiscovery {
     $script:skip = $null -eq (Get-Command dotnet -ErrorAction SilentlyContinue) -or $null -eq (Get-Command npm -ErrorAction SilentlyContinue)
+
+    # The installer compile test additionally needs the Inno Setup compiler (ISCC.exe),
+    # which is not on PATH by default and is absent on most CI agents — gate on its presence.
+    $script:isccPath = (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
+    if (-not $script:isccPath) {
+        $isccCandidate = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+        if (Test-Path $isccCandidate) { $script:isccPath = $isccCandidate }
+    }
+    $script:skipIscc = $script:skip -or (-not $script:isccPath)
 }
 
 Describe 'sparse-app sample' {
@@ -30,6 +39,7 @@ Describe 'sparse-app sample' {
             if ($script:tempDir) { Remove-TempTestDirectory -Path $script:tempDir }
             Remove-Item -Path (Join-Path $script:sampleDir 'bin') -Recurse -Force -ErrorAction SilentlyContinue
             Remove-Item -Path (Join-Path $script:sampleDir 'obj') -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path (Join-Path $script:sampleDir 'installer\Output') -Recurse -Force -ErrorAction SilentlyContinue
             Remove-Item -Path (Join-Path $script:sampleDir 'devcert.pfx') -Force -ErrorAction SilentlyContinue
             Get-ChildItem -Path $script:sampleDir -Filter '*.msix' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
         }
@@ -143,6 +153,20 @@ Describe 'sparse-app sample' {
             'devcert.pfx' | Should -Exist
             Invoke-WinappCommand -Arguments 'pack appxmanifest.xml --cert devcert.pfx'
             'SparseAppSample.identity.msix' | Should -Exist
+        }
+
+        It 'Compiles the Inno Setup installer script (ISCC)' -Skip:$script:skipIscc {
+            # Publish framework-dependent so the installer's [Files] publish glob resolves,
+            # then compile the checked-in installer to catch syntax/path regressions.
+            Invoke-Expression 'dotnet publish -c Release -r win-x64 --self-contained false'
+            $LASTEXITCODE | Should -Be 0
+            'SparseAppSample.identity.msix' | Should -Exist
+
+            $iscc = (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
+            if (-not $iscc) { $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe' }
+            & $iscc 'installer\setup.iss'
+            $LASTEXITCODE | Should -Be 0
+            (Join-Path $script:sampleDir 'installer\Output\SparseAppSampleSetup.exe') | Should -Exist
         }
     }
 }

@@ -18,6 +18,82 @@ namespace WinApp.Cli.Services;
 /// </summary>
 internal partial class MsixService
 {
+    /// <summary>
+    /// Classification of a manifest's sparse-identity status, distinguishing a valid non-sparse
+    /// manifest from one that could not be parsed so callers can report each case correctly.
+    /// </summary>
+    public enum SparseManifestKind
+    {
+        /// <summary>Parsed successfully and does NOT declare AllowExternalContent.</summary>
+        NotSparse,
+        /// <summary>Parsed successfully and declares &lt;uap10:AllowExternalContent&gt;true.</summary>
+        Sparse,
+        /// <summary>The content could not be parsed as XML (malformed / invalid manifest).</summary>
+        ParseError,
+    }
+
+    /// <summary>
+    /// Classifies whether a manifest declares a &lt;uap10:AllowExternalContent&gt;true&lt;/uap10:AllowExternalContent&gt;
+    /// element (a sparse identity package), returning <see cref="SparseManifestKind.ParseError"/> with the
+    /// parser message in <paramref name="parseError"/> when the content is not valid manifest XML — so a
+    /// malformed file is not silently reported as a valid non-sparse manifest.
+    /// </summary>
+    public static SparseManifestKind ClassifySparseManifest(string manifestContent, out string? parseError)
+    {
+        parseError = null;
+        try
+        {
+            return AppxManifestDocument.Parse(manifestContent).AllowsExternalContent
+                ? SparseManifestKind.Sparse
+                : SparseManifestKind.NotSparse;
+        }
+        catch (Exception ex) when (ex is System.Xml.XmlException or FormatException or InvalidOperationException or ArgumentException)
+        {
+            parseError = ex.Message;
+            return SparseManifestKind.ParseError;
+        }
+    }
+
+    /// <summary>
+    /// Returns true when the manifest content declares a &lt;uap10:AllowExternalContent&gt;true&lt;/uap10:AllowExternalContent&gt; element,
+    /// indicating a sparse identity package whose binaries/assets live at an external location.
+    /// Malformed manifests are treated as non-sparse; use <see cref="ClassifySparseManifest"/> to
+    /// distinguish a parse failure from a valid non-sparse manifest.
+    /// </summary>
+    public static bool ManifestHasAllowExternalContent(string manifestContent)
+        => ClassifySparseManifest(manifestContent, out _) == SparseManifestKind.Sparse;
+
+    /// <summary>
+    /// Returns warning messages for content found in a folder being packaged as a sparse
+    /// (AllowExternalContent) identity package. Assets and binaries should be deployed at the
+    /// external location alongside the application rather than inside the identity-only .msix.
+    /// Returns an empty list when the manifest is not a sparse manifest.
+    /// </summary>
+    public static IReadOnlyList<string> GetSparseFolderContentWarnings(DirectoryInfo inputFolder, string manifestContent)
+    {
+        var warnings = new List<string>();
+        if (!ManifestHasAllowExternalContent(manifestContent))
+        {
+            return warnings;
+        }
+
+        var imageExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".ico" };
+        var binaryExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".exe", ".dll", ".so" };
+
+        var files = inputFolder.EnumerateFiles("*", SearchOption.AllDirectories).ToList();
+
+        if (files.Any(f => imageExtensions.Contains(f.Extension)))
+        {
+            warnings.Add($"{UiSymbols.Warning} Assets found in package folder. For sparse packages, assets should be deployed at the external location alongside your application, not inside the .msix.");
+        }
+        if (files.Any(f => binaryExtensions.Contains(f.Extension)))
+        {
+            warnings.Add($"{UiSymbols.Warning} Binaries found in package folder. Sparse packages are identity-only — application binaries should not be included in the .msix.");
+        }
+
+        return warnings;
+    }
+
     public async Task<CreateMsixPackageResult> CreateSparseIdentityPackageAsync(
         FileInfo manifestPath,
         FileSystemInfo? outputPath,

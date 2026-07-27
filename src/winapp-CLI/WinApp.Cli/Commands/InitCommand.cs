@@ -56,7 +56,7 @@ internal class InitCommand : Command, IShortDescription
         };
         UseDefaults = new Option<bool>("--use-defaults", "--no-prompt")
         {
-            Description = "Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults)"
+            Description = "Skip interactive prompts and use default answers. Normal init targets the positional project directory if given, otherwise the current directory (e.g., winapp init . --use-defaults). Sparse init (--exe --sparse) ignores the positional directory and writes to --output-dir instead."
         };
         ConfigOnlyOption = new Option<bool>("--config-only")
         {
@@ -276,14 +276,14 @@ internal class InitCommand : Command, IShortDescription
             // Assets/ so 'winapp pack' has nothing to warn about. The manifest references the exe by
             // name, so its location is independent of where the exe lives.
             var targetDir = outputDir ?? new DirectoryInfo(
-                Path.Combine(currentDirectoryProvider.GetCurrentDirectory(), "sparse"));
+                Path.Join(currentDirectoryProvider.GetCurrentDirectory(), "sparse"));
 
             // Guard against silently overwriting a hand-authored manifest or assets. Generation uses
             // File.WriteAllTextAsync/File.Create, which would replace an existing appxmanifest.xml
             // (and matching Assets/) in place — including the narrow case where assets exist but the
             // manifest does not. Require --force to opt into overwriting either.
-            var existingManifest = new FileInfo(Path.Combine(targetDir.FullName, "appxmanifest.xml"));
-            var existingAssets = new DirectoryInfo(Path.Combine(targetDir.FullName, "Assets"));
+            var existingManifest = new FileInfo(Path.Join(targetDir.FullName, "appxmanifest.xml"));
+            var existingAssets = new DirectoryInfo(Path.Join(targetDir.FullName, "Assets"));
             var assetsHaveContent = existingAssets.Exists && existingAssets.EnumerateFiles("*", SearchOption.AllDirectories).Any();
             if (!force && (existingManifest.Exists || assetsHaveContent))
             {
