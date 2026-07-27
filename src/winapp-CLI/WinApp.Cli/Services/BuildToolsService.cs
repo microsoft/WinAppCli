@@ -296,14 +296,18 @@ internal partial class BuildToolsService(
     /// <param name="arguments">Arguments to pass to the tool</param>
     /// <param name="printErrors">Whether to print errors using the tool's PrintErrorText method</param>
     /// <param name="taskContext">Task context for logging</param>
+    /// <param name="toolPathOverride">Explicit executable path to run instead of resolving the tool by name</param>
+    /// <param name="environment">Additional environment variables to set on the child process</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Tuple containing (stdout, stderr)</returns>
-    public async Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, CancellationToken cancellationToken = default)
+    public async Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, FileInfo? toolPathOverride = null, IReadOnlyDictionary<string, string>? environment = null, string? workingDirectory = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        // Ensure the build tool is available, installing BuildTools if necessary
-        var toolPath = await EnsureBuildToolAvailableAsync(tool.ExecutableName, taskContext, cancellationToken: cancellationToken);
+        // Use the caller-supplied executable when provided (e.g. an architecture-matched
+        // signtool), otherwise ensure the build tool is available, installing BuildTools if necessary.
+        var toolPath = toolPathOverride
+            ?? await EnsureBuildToolAvailableAsync(tool.ExecutableName, taskContext, cancellationToken: cancellationToken);
 
         var psi = new ProcessStartInfo
         {
@@ -315,12 +319,51 @@ internal partial class BuildToolsService(
             CreateNoWindow = true
         };
 
+        // A caller-supplied working directory is used verbatim; otherwise the child inherits the
+        // caller's current directory. Signing supplies a trusted directory so that when the Trusted
+        // Signing dlib shells out to resolve 'az', a repo-local 'az.cmd' in the caller's working
+        // directory cannot be picked up ahead of a legitimate one on PATH.
+        if (!string.IsNullOrEmpty(workingDirectory))
+        {
+            psi.WorkingDirectory = workingDirectory;
+        }
+
+        if (environment != null)
+        {
+            foreach (var (key, value) in environment)
+            {
+                psi.Environment[key] = value;
+            }
+        }
+
         cancellationToken.ThrowIfCancellationRequested();
 
         using var p = Process.Start(psi) ?? throw new InvalidOperationException($"Failed to start {tool.ExecutableName} process");
-        var stdout = await p.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderr = await p.StandardError.ReadToEndAsync(cancellationToken);
-        await p.WaitForExitAsync(cancellationToken);
+
+        // Drain both pipes concurrently before awaiting exit. Reading stdout to completion
+        // before touching stderr can deadlock if the tool fills the stderr buffer (signtool
+        // /v /debug can) while we're still blocked on stdout.
+        var stdoutTask = p.StandardOutput.ReadToEndAsync(cancellationToken);
+        var stderrTask = p.StandardError.ReadToEndAsync(cancellationToken);
+
+        try
+        {
+            await p.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            TryKillProcessTree(p);
+
+            // We killed the process while its pipes were still being read. Observe both read tasks
+            // before rethrowing so their reads don't keep running and can't surface later as
+            // unobserved task exceptions; the failures they raise here are the expected result of
+            // cancelling/killing mid-read.
+            await DrainReadsQuietlyAsync(stdoutTask, stderrTask);
+            throw;
+        }
+
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
 
         if (!string.IsNullOrWhiteSpace(stdout))
         {
@@ -345,6 +388,46 @@ internal partial class BuildToolsService(
         }
 
         return (stdout, stderr);
+    }
+
+    private static void TryKillProcessTree(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // Best-effort cleanup on cancellation
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // Best-effort cleanup on cancellation
+        }
+        catch (NotSupportedException)
+        {
+            // Best-effort cleanup on cancellation
+        }
+    }
+
+    /// <summary>
+    /// Awaits the stdout/stderr read tasks after the process was killed on cancellation, swallowing
+    /// the expected failures (cancellation or a broken pipe from the kill) so the tasks are observed
+    /// and never surface as unobserved exceptions. Any unexpected exception is left to propagate.
+    /// </summary>
+    private static async Task DrainReadsQuietlyAsync(Task stdoutTask, Task stderrTask)
+    {
+        try
+        {
+            await Task.WhenAll(stdoutTask, stderrTask);
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or IOException)
+        {
+            // Expected: the reads were cancelled or their pipe closed when we killed the process.
+        }
     }
 
     internal class InvalidBuildToolException : InvalidOperationException

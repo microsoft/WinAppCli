@@ -59,6 +59,29 @@ Result returned by every command wrapper.
 
 These functions wrap native `winapp` CLI commands. All accept [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).
 
+### `azSign()`
+
+Code-sign a file using Azure Trusted Signing. Signs executables, MSIX packages, or MSIX bundles using a cloud-managed signing identity. Example: winapp az-sign ./app.msix
+
+```typescript
+function azSign(options: AzSignOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `filePath` | `string` | Yes | Path to the file to sign (exe, msix, or msixbundle) |
+| `account` | `string \| undefined` | No | Signing account name. Must be used with --resource-group |
+| `metadataFile` | `string \| undefined` | No | Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. A non-interactive Azure credential should already be available; the CLI can otherwise fall back to an interactive tenant prompt or 'az login', but the npm programmatic API is always non-interactive and fails instead of prompting. |
+| `profile` | `string \| undefined` | No | Certificate profile name. Must be used with --account |
+| `resourceGroup` | `string \| undefined` | No | Resource group to narrow down signing accounts |
+| `subscription` | `string \| undefined` | No | Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `certGenerate()`
 
 Create a self-signed certificate for local testing only. Publisher must match the manifest (auto-inferred if --manifest provided or Package.appxmanifest is in working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.
@@ -182,7 +205,7 @@ function embedIdentity(options: EmbedIdentityOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `target` | `string` | Yes | Path to the .exe (embeds identity into its side-by-side manifest via mt.exe) or an .xml/.manifest side-by-side manifest file (inserts/replaces the <msix> element; created if it doesn't exist). |
-| `manifest` | `string \| undefined` | No | Path to the sparse appxmanifest.xml to read identity from. When omitted, searched next to the target first (where 'winapp init --exe --sparse' writes it), then the current directory. |
+| `manifest` | `string \| undefined` | No | Path to the sparse appxmanifest.xml to read identity from. When omitted, searched in a 'sparse/' folder (where 'winapp init --exe --sparse' writes it by default) beside the target first, then in the current directory, then beside the target and in the current directory. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -230,7 +253,7 @@ function init(options?: InitOptions): Promise<WinappResult>
 | `publisher` | `string \| undefined` | No | Override the publisher CN (sparse only; default: inferred from the exe's company name). Bare names are auto-wrapped as CN=<name>. |
 | `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
 | `sparse` | `boolean \| undefined` | No | Generate a sparse identity manifest (appxmanifest.xml) for an existing desktop exe instead of a full package manifest. Use with --exe. Skips SDK/package installation. |
-| `useDefaults` | `boolean \| undefined` | No | Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults) |
+| `useDefaults` | `boolean \| undefined` | No | Skip interactive prompts and use default answers. Normal init targets the positional project directory if given, otherwise the current directory (e.g., winapp init . --use-defaults). Sparse init (--exe --sparse) ignores the positional directory and writes to --output-dir instead. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -1272,6 +1295,20 @@ ManifestTemplates values.
 type ManifestTemplates = "packaged" | "sparse"
 ```
 
+### `AzSignOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `filePath` | `string` | Yes | Path to the file to sign (exe, msix, or msixbundle) |
+| `account` | `string \| undefined` | No | Signing account name. Must be used with --resource-group |
+| `metadataFile` | `string \| undefined` | No | Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. A non-interactive Azure credential should already be available; the CLI can otherwise fall back to an interactive tenant prompt or 'az login', but the npm programmatic API is always non-interactive and fails instead of prompting. |
+| `profile` | `string \| undefined` | No | Certificate profile name. Must be used with --account |
+| `resourceGroup` | `string \| undefined` | No | Resource group to narrow down signing accounts |
+| `subscription` | `string \| undefined` | No | Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
 ### `CertGenerateOptions`
 
 | Property | Type | Required | Description |
@@ -1342,7 +1379,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `target` | `string` | Yes | Path to the .exe (embeds identity into its side-by-side manifest via mt.exe) or an .xml/.manifest side-by-side manifest file (inserts/replaces the <msix> element; created if it doesn't exist). |
-| `manifest` | `string \| undefined` | No | Path to the sparse appxmanifest.xml to read identity from. When omitted, searched next to the target first (where 'winapp init --exe --sparse' writes it), then the current directory. |
+| `manifest` | `string \| undefined` | No | Path to the sparse appxmanifest.xml to read identity from. When omitted, searched in a 'sparse/' folder (where 'winapp init --exe --sparse' writes it by default) beside the target first, then in the current directory, then beside the target and in the current directory. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
@@ -1372,7 +1409,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `publisher` | `string \| undefined` | No | Override the publisher CN (sparse only; default: inferred from the exe's company name). Bare names are auto-wrapped as CN=<name>. |
 | `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
 | `sparse` | `boolean \| undefined` | No | Generate a sparse identity manifest (appxmanifest.xml) for an existing desktop exe instead of a full package manifest. Use with --exe. Skips SDK/package installation. |
-| `useDefaults` | `boolean \| undefined` | No | Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults) |
+| `useDefaults` | `boolean \| undefined` | No | Skip interactive prompts and use default answers. Normal init targets the positional project directory if given, otherwise the current directory (e.g., winapp init . --use-defaults). Sparse init (--exe --sparse) ignores the positional directory and writes to --output-dir instead. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

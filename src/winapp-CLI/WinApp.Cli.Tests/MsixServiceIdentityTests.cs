@@ -987,7 +987,7 @@ internal sealed class ScriptedMtBuildToolsService : IBuildToolsService
     public Task<DirectoryInfo?> EnsureBuildToolsAsync(TaskContext taskContext, bool forceLatest = false, CancellationToken cancellationToken = default) =>
         _inner.EnsureBuildToolsAsync(taskContext, forceLatest, cancellationToken);
 
-    public Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, CancellationToken cancellationToken = default)
+    public Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, FileInfo? toolPathOverride = null, IReadOnlyDictionary<string, string>? environment = null, string? workingDirectory = null, CancellationToken cancellationToken = default)
     {
         if (ThrowWhen?.Invoke(tool.ExecutableName, arguments) == true)
         {
@@ -1010,6 +1010,6 @@ internal sealed class ScriptedMtBuildToolsService : IBuildToolsService
             return Task.FromResult<(string, string)>((string.Empty, string.Empty));
         }
 
-        return _inner.RunBuildToolAsync(tool, arguments, taskContext, printErrors, cancellationToken);
+        return _inner.RunBuildToolAsync(tool, arguments, taskContext, printErrors, toolPathOverride, environment, workingDirectory, cancellationToken);
     }
 }

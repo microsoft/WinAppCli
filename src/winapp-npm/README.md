@@ -53,6 +53,7 @@ npx winapp --help
 
 - [`cert`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#cert) - Generate and install development certificates
 - [`sign`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#sign) - Sign MSIX packages and executables
+- [`az-sign`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#az-sign) - Sign packages and executables with Azure Trusted Signing
 
 **Development Tools:**
 
@@ -80,6 +81,8 @@ await packageApp({ inputFolder: './dist', cert: './devcert.pfx' });
 ```
 
 Full programmatic API reference: [NPM API Documentation](https://github.com/microsoft/WinAppCli/blob/main/docs/npm-usage.md)
+
+> **Note — the programmatic API runs the CLI non-interactively.** The wrapper functions capture output and give the native process piped stdin, so commands that would normally prompt cannot do so. For `azSign` in particular this means you must pass either a `metadataFile` or a fully specified identity (`subscription`, `resourceGroup`, `account`, and `profile`), and a non-interactive Azure credential must already be available (for example `AZURE_TENANT_ID`/`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET`, OIDC, a managed identity, or an existing `az login` session). Calls that would otherwise require a selection prompt or an interactive `az login` fail instead of prompting.
 
 ## 🔧 Feedback
 

@@ -67,6 +67,39 @@ async function execCommand(args: string[], opts: CommonOptions): Promise<WinappR
 }
 
 // ---------------------------------------------------------------------------
+// az-sign
+// ---------------------------------------------------------------------------
+
+export interface AzSignOptions extends CommonOptions {
+  /** Path to the file to sign (exe, msix, or msixbundle) */
+  filePath: string;
+  /** Signing account name. Must be used with --resource-group */
+  account?: string;
+  /** Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. A non-interactive Azure credential should already be available; the CLI can otherwise fall back to an interactive tenant prompt or 'az login', but the npm programmatic API is always non-interactive and fails instead of prompting. */
+  metadataFile?: string;
+  /** Certificate profile name. Must be used with --account */
+  profile?: string;
+  /** Resource group to narrow down signing accounts */
+  resourceGroup?: string;
+  /** Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted. */
+  subscription?: string;
+}
+
+/**
+ * Code-sign a file using Azure Trusted Signing. Signs executables, MSIX packages, or MSIX bundles using a cloud-managed signing identity. Example: winapp az-sign ./app.msix
+ */
+export async function azSign(options: AzSignOptions): Promise<WinappResult> {
+  const args: string[] = ['az-sign'];
+  args.push(options.filePath);
+  if (options.account) args.push('--account', options.account);
+  if (options.metadataFile) args.push('--metadata-file', options.metadataFile);
+  if (options.profile) args.push('--profile', options.profile);
+  if (options.resourceGroup) args.push('--resource-group', options.resourceGroup);
+  if (options.subscription) args.push('--subscription', options.subscription);
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
 // cert generate
 // ---------------------------------------------------------------------------
 
@@ -223,7 +256,7 @@ export async function createExternalCatalog(options: CreateExternalCatalogOption
 export interface EmbedIdentityOptions extends CommonOptions {
   /** Path to the .exe (embeds identity into its side-by-side manifest via mt.exe) or an .xml/.manifest side-by-side manifest file (inserts/replaces the <msix> element; created if it doesn't exist). */
   target: string;
-  /** Path to the sparse appxmanifest.xml to read identity from. When omitted, searched next to the target first (where 'winapp init --exe --sparse' writes it), then the current directory. */
+  /** Path to the sparse appxmanifest.xml to read identity from. When omitted, searched in a 'sparse/' folder (where 'winapp init --exe --sparse' writes it by default) beside the target first, then in the current directory, then beside the target and in the current directory. */
   manifest?: string;
 }
 
@@ -284,7 +317,7 @@ export interface InitOptions extends CommonOptions {
   setupSdks?: SdkInstallMode;
   /** Generate a sparse identity manifest (appxmanifest.xml) for an existing desktop exe instead of a full package manifest. Use with --exe. Skips SDK/package installation. */
   sparse?: boolean;
-  /** Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults) */
+  /** Skip interactive prompts and use default answers. Normal init targets the positional project directory if given, otherwise the current directory (e.g., winapp init . --use-defaults). Sparse init (--exe --sparse) ignores the positional directory and writes to --output-dir instead. */
   useDefaults?: boolean;
 }
 

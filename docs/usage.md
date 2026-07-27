@@ -1,6 +1,6 @@
 <!-- mslearn: true -->
 <!-- ms.topic: reference -->
-<!-- description: Complete command reference for the Windows App Development CLI (winapp CLI) including setup, packaging, identity, certificates, signing, and utility commands. -->
+<!-- description: Complete command reference for the winapp CLI covering setup, packaging, identity, certificates, signing, and other utility commands. -->
 # CLI Documentation and Usage
 
 ## Shell Completion
@@ -803,6 +803,53 @@ winapp sign MyApp.msix --cert ./mycert.pfx
 
 # Sign executable
 winapp sign ./bin/MyApp.exe --cert ./mycert.pfx --cert-password mypassword
+```
+
+---
+
+### az-sign
+
+Code-sign a file (exe, MSIX, or MSIX bundle) using [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/) — a cloud-managed signing identity, so no private key (PFX) ever lives on the local machine.
+
+```bash
+winapp az-sign <file-path> [options]
+```
+
+**Arguments:**
+
+- `file-path` - Path to the file to sign (exe, msix, or msixbundle)
+
+**Options:**
+
+- `--subscription`, `-s` - Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted
+- `--resource-group`, `-r` - Resource group to narrow down signing accounts
+- `--account` - Signing account name. Must be used with `--resource-group`
+- `--profile`, `-p` - Certificate profile name. Must be used with `--account`
+- `--metadata-file`, `-m` - Path to an existing `metadata.json`. Skips resource discovery and account/profile selection prompts and signs directly. A non-interactive Azure credential should already be available; the CLI can otherwise fall back to an interactive tenant prompt or `az login`, but the npm programmatic API is always non-interactive and fails instead of prompting
+
+**Authentication:**
+
+`az-sign` uses Azure's standard credential chain (`DefaultAzureCredential`). For CI/CD, set `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET` (or use GitHub Actions OIDC / managed identity). An existing Azure CLI session (`az login`, including the `azure/login` GitHub Action) is also honored in any environment. Only when no credentials are found *and* the session is interactive will `az-sign` launch `az login` for you.
+
+**Prerequisites:**
+
+- An Azure Code Signing account and a certificate profile (created in the Azure portal after identity validation), plus the **Code Signing Certificate Profile Signer** role assigned to your identity. For more guidance, visit [Azure Artifact Signing quickstart docs.](https://learn.microsoft.com/azure/artifact-signing/quickstart)
+- A machine-wide **x64 .NET 8 (or later) runtime** installed. The Azure signing client library is a managed assembly that `signtool.exe` loads in a separate process; winapp's own self-contained runtime does not satisfy it. Install it from https://dotnet.microsoft.com/download if signing fails with a runtime-load error.
+- The **Microsoft Visual C++ Redistributable (x64)**. The Azure signing client library depends on the VC++ runtime, and because winapp downloads the raw NuGet package rather than the official client-tools installer, this dependency is **not** installed automatically. A clean machine can load-fail even with .NET and SignTool present. Install the latest x64 redistributable from https://aka.ms/vs/17/release/vc_redist.x64.exe if signing fails with a `0xc000007b`, "The application was unable to start correctly", or missing-DLL error from the dlib.
+
+> **Least-privilege CI:** Auto-discovery (listing subscriptions, resource groups, accounts, and profiles) needs read access at a parent scope. To avoid *every* collection-listing call, pass all four of `--subscription`, `--resource-group`, `--account`, and `--profile`: `az-sign` then validates the account and profile with direct resource reads (a GET on each named resource) instead of enumerating the parent collection, so a principal scoped to just that account and profile is sufficient. Omitting any one of them re-introduces a listing call — for example, leaving out `--subscription` makes `az-sign` list the subscriptions your identity can access — which a narrowly-scoped principal may not be permitted to do. A principal scoped only to a single certificate profile can skip validation entirely by passing a pre-generated `--metadata-file` (which specifies the account endpoint and profile directly).
+
+**Examples:**
+
+```bash
+# Interactive — discover/select subscription, account, and profile
+winapp az-sign ./app.msix
+
+# Fully specified — no prompting (ideal for CI/CD)
+winapp az-sign ./app.msix --subscription <sub-id> --resource-group <rg> --account <account> --profile <profile>
+
+# Reuse an existing metadata.json (skips resource discovery and selection; authentication may still prompt)
+winapp az-sign ./app.msix --metadata-file ./metadata.json
 ```
 
 ---
