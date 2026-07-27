@@ -1,4 +1,5 @@
 <!-- mslearn: true -->
+<!-- description: Package your Electron app as a signed MSIX installer with the winapp CLI, covering manifest setup, certificate generation, and installation. -->
 # Packaging Your Electron App for Distribution
 
 This guide shows you how to create an MSIX package for distributing your Electron app with Windows APIs.

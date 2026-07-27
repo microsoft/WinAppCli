@@ -1,6 +1,6 @@
 {
   "name": "winapp",
-  "version": "0.5.1",
+  "version": "1.0.0",
   "schemaVersion": "1.0",
   "description": "CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows",
   "hidden": false,
@@ -50,6 +50,129 @@
     }
   },
   "subcommands": {
+    "az-sign": {
+      "description": "Code-sign a file using Azure Trusted Signing. Signs executables, MSIX packages, or MSIX bundles using a cloud-managed signing identity. Example: winapp az-sign ./app.msix",
+      "hidden": false,
+      "arguments": {
+        "file-path": {
+          "description": "Path to the file to sign (exe, msix, or msixbundle)",
+          "order": 0,
+          "hidden": false,
+          "valueType": "System.IO.FileInfo",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          }
+        }
+      },
+      "options": {
+        "--account": {
+          "description": "Signing account name. Must be used with --resource-group",
+          "hidden": false,
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--metadata-file": {
+          "description": "Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. A non-interactive Azure credential should already be available; the CLI can otherwise fall back to an interactive tenant prompt or 'az login', but the npm programmatic API is always non-interactive and fails instead of prompting.",
+          "hidden": false,
+          "aliases": [
+            "-m"
+          ],
+          "valueType": "System.IO.FileInfo",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--profile": {
+          "description": "Certificate profile name. Must be used with --account",
+          "hidden": false,
+          "aliases": [
+            "-p"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--quiet": {
+          "description": "Suppress progress messages",
+          "hidden": false,
+          "aliases": [
+            "-q"
+          ],
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--resource-group": {
+          "description": "Resource group to narrow down signing accounts",
+          "hidden": false,
+          "aliases": [
+            "-r"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--subscription": {
+          "description": "Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted.",
+          "hidden": false,
+          "aliases": [
+            "-s"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--verbose": {
+          "description": "Enable verbose output",
+          "hidden": false,
+          "aliases": [
+            "-v"
+          ],
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        }
+      }
+    },
     "cert": {
       "description": "Manage development certificates for code signing. Use 'cert generate' to create a self-signed certificate for testing, or 'cert install' (requires elevation) to trust an existing certificate on this machine.",
       "hidden": false,

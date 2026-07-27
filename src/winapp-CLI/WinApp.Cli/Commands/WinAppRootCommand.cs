@@ -67,6 +67,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         GetWinappPathCommand getWinappPathCommand,
         CertCommand certCommand,
         SignCommand signCommand,
+        AzSignCommand azSignCommand,
         ToolCommand toolCommand,
         MSStoreCommand msStoreCommand,
         IAnsiConsole ansiConsole,
@@ -86,6 +87,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Subcommands.Add(getWinappPathCommand);
         Subcommands.Add(certCommand);
         Subcommands.Add(signCommand);
+        Subcommands.Add(azSignCommand);
         Subcommands.Add(toolCommand);
         Subcommands.Add(msStoreCommand);
         Subcommands.Add(createExternalCatalogCommand);
@@ -102,7 +104,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         var helpOption = Options.OfType<HelpOption>().First();
         helpOption.Action = new CustomHelpAction(this, ansiConsole,
             ("Setup", [typeof(InitCommand), typeof(NewCommand), typeof(RestoreCommand), typeof(UpdateCommand)]),
-            ("Packaging & Signing", [typeof(PackageCommand), typeof(SignCommand), typeof(CertCommand), typeof(ManifestCommand), typeof(CreateExternalCatalogCommand)]),
+            ("Packaging & Signing", [typeof(PackageCommand), typeof(SignCommand), typeof(AzSignCommand), typeof(CertCommand), typeof(ManifestCommand), typeof(CreateExternalCatalogCommand)]),
             ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand), typeof(RunCommand), typeof(UnregisterCommand)]),
             ("UI Automation", [typeof(UiCommand)])
         );

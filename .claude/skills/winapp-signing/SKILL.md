@@ -1,7 +1,7 @@
 ---
 name: winapp-signing
 description: Create and manage code signing certificates for Windows apps and MSIX packages. Use when generating a certificate, signing a Windows app or installer, or fixing certificate trust issues.
-version: 0.5.1
+version: 1.0.0
 ---
 ## When to use
 
@@ -9,6 +9,7 @@ Use this skill when:
 - **Generating a development certificate** for local MSIX signing and testing
 - **Installing (trusting) a certificate** on a machine so MSIX packages can be installed
 - **Signing an MSIX package or executable** for distribution
+- **Signing with Azure Trusted Signing** (cloud-managed signing identity) via `winapp az-sign`
 
 ## Prerequisites
 
@@ -80,6 +81,27 @@ When packaging multiple architectures into an `.msixbundle`, only the bundle nee
 
 Note: The `package` command can sign automatically when you pass `--cert`, so you often don't need `sign` separately.
 
+### Sign with Azure Trusted Signing (cloud signing)
+
+For production-grade signing without managing a PFX file, use `winapp az-sign` to sign with [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/). The signing identity (certificate) is managed in Azure, so no private key ever lives on the machine.
+
+```powershell
+# Interactive: discover subscription, account, and profile (prompts for any not provided)
+winapp az-sign ./app.msix
+
+# Fully specified — no prompting (ideal for CI/CD)
+winapp az-sign ./app.msix --subscription <sub-id> --resource-group <rg> --account <account> --profile <profile>
+
+# Reuse an existing metadata.json (skips resource discovery and identity selection; authentication may still be interactive)
+winapp az-sign ./app.msix --metadata-file ./metadata.json
+```
+
+**Authentication:** `az-sign` uses Azure's standard credential chain (`DefaultAzureCredential`). In CI/CD, set `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET` (or GitHub Actions OIDC / managed identity). An existing Azure CLI session (`az login`, including the `azure/login` GitHub Action) is also honored in any environment. Only when no credentials are found *and* the session is interactive will `az-sign` launch `az login` for you.
+
+**Prerequisites:** An Azure Code Signing account and certificate profile (created in the Azure portal after identity validation), plus a role assignment granting your identity the **Code Signing Certificate Profile Signer** role. Signing also requires two machine-wide x64 runtimes that winapp does **not** install for you (it downloads the raw NuGet signing package, not the official client-tools installer): the **x64 .NET 8+ runtime** (the signing library is a managed assembly loaded by `signtool.exe`; winapp's self-contained runtime does not satisfy it) and the **x64 Visual C++ Redistributable** (https://aka.ms/vs/17/release/vc_redist.x64.exe). Also requires **SignTool 10.0.22621.755 or later**. If signing fails while *loading* the dlib (e.g. `0xc000007b` or a missing-DLL error) rather than during authentication, install the missing runtime — most often the VC++ Redistributable.
+
+> **Least-privilege CI:** Auto-discovery (listing subscriptions, resource groups, accounts, and profiles) needs read access at a parent scope. To avoid *every* collection-listing call, pass all four of `--subscription`, `--resource-group`, `--account`, and `--profile`: `az-sign` then validates the account and profile with direct resource reads (a GET on each named resource) instead of enumerating the parent collection, so a principal scoped to just that account and profile is sufficient. Omitting any one of them re-introduces a listing call — for example, leaving out `--subscription` makes `az-sign` list the subscriptions your identity can access — which a narrowly-scoped principal may not be permitted to do. A principal scoped only to a single certificate profile can skip validation entirely by passing a pre-generated `--metadata-file` (which specifies the account endpoint and profile directly).
+
 ## Recommended workflow
 
 1. **Generate cert** — `winapp cert generate` (auto-infers publisher from manifest)
@@ -108,6 +130,8 @@ Note: The `package` command can sign automatically when you pass `--cert`, so yo
 | "Certificate not trusted" | Cert not installed on machine | `winapp cert install ./devcert.pfx` (admin) |
 | "Certificate file already exists" | `devcert.pfx` already present | Use `--if-exists overwrite` or `--if-exists skip` |
 | Signature invalid after time passes | No timestamp used during signing | Re-sign with `--timestamp http://timestamp.digicert.com` |
+| `az-sign` fails with "No credentials found" | No Azure auth in environment | Run `az login`, or set `AZURE_TENANT_ID`/`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET` for CI/CD |
+| `az-sign` "No Trusted Signing accounts found" | No account in the subscription/resource group | Create a Trusted Signing account and certificate profile in the Azure portal |
 
 
 ## Command Reference
@@ -181,3 +205,23 @@ Code-sign an MSIX package or executable. Example: winapp sign ./app.msix ./devce
 |--------|-------------|---------|
 | `--password` | Certificate password | `password` |
 | `--timestamp` | Timestamp server URL | (none) |
+
+### `winapp az-sign`
+
+Code-sign a file using Azure Trusted Signing. Signs executables, MSIX packages, or MSIX bundles using a cloud-managed signing identity. Example: winapp az-sign ./app.msix
+
+#### Arguments
+<!-- auto-generated from cli-schema.json -->
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<file-path>` | Yes | Path to the file to sign (exe, msix, or msixbundle) |
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--account` | Signing account name. Must be used with --resource-group | (none) |
+| `--metadata-file` | Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. A non-interactive Azure credential should already be available; the CLI can otherwise fall back to an interactive tenant prompt or 'az login', but the npm programmatic API is always non-interactive and fails instead of prompting. | (none) |
+| `--profile` | Certificate profile name. Must be used with --account | (none) |
+| `--resource-group` | Resource group to narrow down signing accounts | (none) |
+| `--subscription` | Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted. | (none) |

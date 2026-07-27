@@ -1,4 +1,5 @@
 <!-- mslearn: true -->
+<!-- description: Open a native Windows file picker and inspect images from Electron JavaScript using winapp JS bindings, with no native addon or node-gyp build. -->
 # Call Windows APIs from JavaScript (JS bindings)
 
 This guide shows you how to call Windows APIs — both Windows App SDK and Windows SDK — directly from your Electron app's JavaScript, with no native addon and no `node-gyp` / MSBuild step. You'll open a native file picker (Windows App SDK), then inspect the picked image with Windows SDK file and imaging APIs added through `winapp.jsBindings`.

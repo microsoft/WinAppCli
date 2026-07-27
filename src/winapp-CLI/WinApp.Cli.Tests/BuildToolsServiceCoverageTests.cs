@@ -271,7 +271,7 @@ public class BuildToolsServiceInstallCoverageTests : BaseCommandTests
         File.WriteAllText(failingTool, "@echo captured-stdout-marker\r\n@exit /b 1");
 
         var ex = await Assert.ThrowsExactlyAsync<BuildToolsService.InvalidBuildToolException>(async () =>
-            await _buildToolsService.RunBuildToolAsync(new GenericTool("failing.cmd"), "", TestTaskContext, true, TestContext.CancellationToken));
+            await _buildToolsService.RunBuildToolAsync(new GenericTool("failing.cmd"), "", TestTaskContext, true, cancellationToken: TestContext.CancellationToken));
 
         Assert.IsTrue(ex.ProcessId > 0, "Expected a captured process id.");
         Assert.Contains("captured-stdout-marker", ex.Stdout);
