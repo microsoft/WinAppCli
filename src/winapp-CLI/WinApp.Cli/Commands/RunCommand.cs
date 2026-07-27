@@ -162,7 +162,9 @@ internal partial class RunCommand : Command, IShortDescription
         PropertyOption = new Option<string[]>("--property")
         {
             Description = "Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode.",
-            Arity = ArgumentArity.OneOrMore,
+            // ZeroOrMore (not OneOrMore) so a valueless '-p' reaches the handler, which emits a
+            // --json-aware error; OneOrMore would raise a plain-text parser error, bypassing --json.
+            Arity = ArgumentArity.ZeroOrMore,
             AllowMultipleArgumentsPerToken = false,
         };
         PropertyOption.Aliases.Add("-p");
