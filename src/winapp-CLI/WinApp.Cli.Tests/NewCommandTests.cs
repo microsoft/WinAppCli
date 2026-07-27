@@ -359,7 +359,9 @@ public class NewCommandTests : BaseCommandTests
     {
         var result = NuGetVersionHelper.Compare(a, b);
         Assert.IsNotNull(result);
-        Assert.AreEqual(expectedSign, Math.Sign(result.Value), $"Compare('{a}','{b}')");
+        // Use GetValueOrDefault() rather than .Value: the IsNotNull assert already fails the test on
+        // null, and this avoids a nullable-dereference the analyzer can't see through the assertion.
+        Assert.AreEqual(expectedSign, Math.Sign(result.GetValueOrDefault()), $"Compare('{a}','{b}')");
     }
 
     [TestMethod]

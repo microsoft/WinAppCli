@@ -457,8 +457,14 @@ internal class NewCommand : Command, IShortDescription
                 }
             }
 
-            // 4. Prerequisite: .NET SDK (fail fast, do not install anything)
-            var (sdkVersion, sdkError) = await CheckDotnetSdkAsync(isJson, cancellationToken);
+            // 4. Prerequisite: .NET SDK (fail fast, do not install anything). Resolve it from the output
+            // location, not the caller's cwd: `global.json` is discovered by walking up from where the
+            // project lives, so an SDK pinned above --output (or above the default ./<name>) is what
+            // `dotnet build` will later use. Probing from the caller's directory could pick a different
+            // SDK and pin an unbuildable TFM (NETSDK1045). The output dir may not exist yet, so probe
+            // from its nearest existing ancestor — the same chain the built project resolves.
+            var sdkProbeDir = NearestExistingAncestor(outputDir) ?? currentDir;
+            var (sdkVersion, sdkError) = await CheckDotnetSdkAsync(sdkProbeDir, isJson, cancellationToken);
             if (sdkVersion is null)
             {
                 if (isJson)
@@ -507,7 +513,9 @@ internal class NewCommand : Command, IShortDescription
                 args.Add("--force");
             }
 
-            var (exitCode, stdout, stderr) = await dotNetService.RunDotnetCommandAsync(currentDir, args, cancellationToken: cancellationToken);
+            // Run scaffolding in the same directory context used for SDK detection so the TFM we pinned
+            // above matches the SDK `dotnet new` (and the eventual `dotnet build`) resolves via global.json.
+            var (exitCode, stdout, stderr) = await dotNetService.RunDotnetCommandAsync(sdkProbeDir, args, cancellationToken: cancellationToken);
             if (exitCode != 0)
             {
                 var detail = !string.IsNullOrWhiteSpace(stderr) ? stderr.Trim() : stdout.Trim();
@@ -578,20 +586,40 @@ internal class NewCommand : Command, IShortDescription
         }
 
         /// <summary>
+        /// Walks up from <paramref name="dir"/> to the nearest directory that already exists on disk, so
+        /// commands whose <c>global.json</c> resolution must match the eventual project can be run from a
+        /// real working directory even when the output directory hasn't been created yet. Returns
+        /// <c>null</c> only if no ancestor exists (e.g. a drive that isn't mounted).
+        /// </summary>
+        private static DirectoryInfo? NearestExistingAncestor(DirectoryInfo dir)
+        {
+            for (var d = dir; d is not null; d = d.Parent)
+            {
+                if (d.Exists)
+                {
+                    return d;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
         /// Verifies the .NET SDK is installed and meets the minimum version. Returns the detected SDK
         /// version, or <c>null</c> (without installing anything) with a specific failure reason if the
         /// SDK is missing, too old, or its version can't be determined. The caller uses the returned
         /// major version to pin the scaffolded project's target framework, and surfaces the reason in
         /// the JSON result so agent callers are told exactly what to fix (install vs update).
+        /// Runs <c>dotnet --version</c> in <paramref name="probeDir"/> so <c>global.json</c> is resolved
+        /// from the project's own directory chain rather than the caller's working directory.
         /// </summary>
-        private async Task<(Version? Version, string? Error)> CheckDotnetSdkAsync(bool isJson, CancellationToken cancellationToken)
+        private async Task<(Version? Version, string? Error)> CheckDotnetSdkAsync(DirectoryInfo probeDir, bool isJson, CancellationToken cancellationToken)
         {
-            var cwd = currentDirectoryProvider.GetCurrentDirectoryInfo();
             int exitCode;
             string stdout;
             try
             {
-                (exitCode, stdout, _) = await dotNetService.RunDotnetCommandAsync(cwd, VersionArgs, cancellationToken: cancellationToken);
+                (exitCode, stdout, _) = await dotNetService.RunDotnetCommandAsync(probeDir, VersionArgs, cancellationToken: cancellationToken);
             }
             catch (Win32Exception)
             {

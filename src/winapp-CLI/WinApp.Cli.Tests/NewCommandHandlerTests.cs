@@ -466,6 +466,36 @@ public class NewCommandHandlerTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task Handler_SdkProbeAndScaffold_RunFromOutputLocationNotCallerCwd()
+    {
+        ScriptHappyPath();
+        // Output lives under an existing subdirectory that is NOT the caller's cwd (_tempDirectory).
+        // The project itself doesn't exist yet, so SDK detection must resolve global.json from the
+        // nearest existing ancestor (the subdirectory) — the same chain `dotnet build` will later use —
+        // rather than from the caller's working directory, which could pin an unbuildable TFM.
+        var nested = _tempDirectory.CreateSubdirectory("nested");
+        var outDir = Path.Join(nested.FullName, "MyApp");
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["--use-defaults", "--json", "--output", outDir]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+
+        var versionIndex = _dotnet.ArgumentListInvocations
+            .Select((args, i) => (args, i))
+            .First(x => x.args.Count >= 1 && x.args[0] == "--version").i;
+        Assert.AreEqual(nested.FullName, _dotnet.ArgumentListWorkingDirectories[versionIndex].FullName,
+            "SDK detection must run from the output's nearest existing ancestor so global.json resolves like the built project.");
+
+        var scaffoldIndex = _dotnet.ArgumentListInvocations
+            .Select((args, i) => (args, i))
+            .First(x => x.args.Count >= 2 && x.args[0] == "new" && x.args[1] != "install" && x.args[1] != "uninstall").i;
+        Assert.AreEqual(nested.FullName, _dotnet.ArgumentListWorkingDirectories[scaffoldIndex].FullName,
+            "Scaffolding must run in the same directory context used for SDK detection.");
+    }
+
+    [TestMethod]
     public async Task Handler_AppTemplate_PrintsDotnetRunNextStep()
     {
         ScriptHappyPath();

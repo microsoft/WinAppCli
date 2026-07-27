@@ -100,10 +100,14 @@ internal class FakeDotNetService : IDotNetService
     /// <summary>Records the environment overrides passed alongside each argument-list invocation.</summary>
     public List<IReadOnlyDictionary<string, string>?> ArgumentListEnvironmentInvocations { get; } = [];
 
+    /// <summary>Records the working directory passed alongside each argument-list invocation.</summary>
+    public List<DirectoryInfo> ArgumentListWorkingDirectories { get; } = [];
+
     public Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(DirectoryInfo workingDirectory, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string>? environmentOverrides = null, CancellationToken cancellationToken = default)
     {
         ArgumentListInvocations.Add(arguments.ToArray());
         ArgumentListEnvironmentInvocations.Add(environmentOverrides);
+        ArgumentListWorkingDirectories.Add(workingDirectory);
         var result = RunDotnetArgumentListHandler?.Invoke(arguments) ?? (0, string.Empty, string.Empty);
         return Task.FromResult(result);
     }
