@@ -435,7 +435,7 @@ public class NewCommandHandlerTests : BaseCommandTests
     {
         ScriptHappyPath();
         var existing = _tempDirectory.CreateSubdirectory("MyApp");
-        File.WriteAllText(Path.Combine(existing.FullName, "pre-existing.txt"), "keep me");
+        File.WriteAllText(Path.Join(existing.FullName, "pre-existing.txt"), "keep me");
         var command = GetRequiredService<NewCommand>();
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(
@@ -452,7 +452,7 @@ public class NewCommandHandlerTests : BaseCommandTests
     {
         ScriptHappyPath();
         var existing = _tempDirectory.CreateSubdirectory("MyApp");
-        File.WriteAllText(Path.Combine(existing.FullName, "pre-existing.txt"), "keep me");
+        File.WriteAllText(Path.Join(existing.FullName, "pre-existing.txt"), "keep me");
         var command = GetRequiredService<NewCommand>();
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(
