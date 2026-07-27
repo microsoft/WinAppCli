@@ -175,9 +175,11 @@ function RegisterParams(Param: string): string;
 var AppDir: string;
 begin
   AppDir := ExpandConstant('{app}');
-  Result := '-NoProfile -ExecutionPolicy Bypass -Command "Add-AppxPackage -Path ''' +
+  { -ErrorAction Stop + try/catch make a registration failure terminating, so powershell.exe
+    exits nonzero and the AfterInstall callback (see the full sample) can abort with rollback. }
+  Result := '-NoProfile -ExecutionPolicy Bypass -Command "try { Add-AppxPackage -Path ''' +
     EscapePSLiteral(AppDir + '\MyApp.identity.msix') +
-    ''' -ExternalLocation ''' + EscapePSLiteral(AppDir) + '''"';
+    ''' -ExternalLocation ''' + EscapePSLiteral(AppDir) + ''' -ErrorAction Stop } catch { Write-Error $_; exit 1 }"';
 end;
 ```
 
@@ -189,9 +191,22 @@ The WiX and NSIS examples below invoke a small `register-sparse.ps1` via `-File`
 # register-sparse.ps1 — ship this alongside your installer
 param(
   [Parameter(Mandatory)] [string] $MsixPath,
-  [Parameter(Mandatory)] [string] $ExternalLocation
+  [Parameter(Mandatory)] [string] $ExternalLocation,
+  [Parameter(Mandatory)] [string] $PackageName
 )
-Add-AppxPackage -Path $MsixPath -ExternalLocation $ExternalLocation
+$ErrorActionPreference = 'Stop'
+try {
+  # Add-AppxPackage emits NON-terminating errors by default, so a failure would otherwise leave
+  # the process exit code at 0 and let the installer complete without identity. Remove any existing
+  # same-name registration first (a repeat install of the fixed identity version would otherwise be
+  # rejected), then register; -ErrorAction Stop + the trap make a real failure terminating so the
+  # installer (WiX Return="check" / NSIS ExecWait) sees a nonzero exit code.
+  Get-AppxPackage -Name $PackageName | Remove-AppxPackage -ErrorAction SilentlyContinue
+  Add-AppxPackage -Path $MsixPath -ExternalLocation $ExternalLocation -ErrorAction Stop
+} catch {
+  Write-Error $_
+  exit 1
+}
 ```
 
 ### WiX (v3)
@@ -205,7 +220,7 @@ A deferred custom action can't read `INSTALLFOLDER` directly (deferred actions r
      CustomActionData. Windows Installer copies the value of the property named the same as a
      deferred action into that action's CustomActionData. -->
 <CustomAction Id="SetRegisterSparseCmd" Property="RegisterSparse" Execute="immediate"
-  Value="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]register-sparse.ps1&quot; -MsixPath &quot;[INSTALLFOLDER]MyApp.identity.msix&quot; -ExternalLocation &quot;[INSTALLFOLDER]&quot;" />
+  Value="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]register-sparse.ps1&quot; -MsixPath &quot;[INSTALLFOLDER]MyApp.identity.msix&quot; -ExternalLocation &quot;[INSTALLFOLDER]&quot; -PackageName &quot;MyPackageIdentityName&quot;" />
 
 <!-- Deferred + impersonated: CAQuietExec reads its command line from CustomActionData when run
      deferred, so it registers the package for the invoking user. Return="check" fails the
@@ -227,7 +242,12 @@ A deferred custom action can't read `INSTALLFOLDER` directly (deferred actions r
 
 ```nsis
 Section
-  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\register-sparse.ps1" -MsixPath "$INSTDIR\MyApp.identity.msix" -ExternalLocation "$INSTDIR"'
+  # Capture the PowerShell exit code and abort if registration failed. register-sparse.ps1 exits
+  # nonzero on failure (it sets $ErrorActionPreference='Stop' and traps), so without this check the
+  # installer would complete even though the app has no identity.
+  ExecWait 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\register-sparse.ps1" -MsixPath "$INSTDIR\MyApp.identity.msix" -ExternalLocation "$INSTDIR" -PackageName "MyPackageIdentityName"' $0
+  IntCmp $0 0 +2
+    Abort "Registering the sparse identity package failed (exit code $0). The app requires package identity."
 SectionEnd
 ```
 

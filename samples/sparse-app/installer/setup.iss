@@ -56,6 +56,10 @@ SolidCompression=yes
 ; selects the native 64-bit install locations on the systems that are allowed.
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+; Sparse packages (external-location registration) require Windows 10, version 2004 (build 19041)
+; or later. Gate here so Setup refuses to run on older builds up front, instead of copying files
+; and only failing at Add-AppxPackage (which would then roll back after the copy).
+MinVersion=10.0.19041
 
 [Files]
 ; App binaries + assets (everything from the publish output).
@@ -97,29 +101,31 @@ end;
 
 { Builds the full powershell.exe argument string for registering the sparse package,
   escaping the runtime-resolved install directory so it cannot break out of the literal.
-  Add-AppxPackage runs with -ErrorAction Stop inside try/catch so any failure produces a
-  nonzero process exit code, which the caller inspects to abort the install.
-  -ForceUpdateFromAnyVersion makes re-installs/upgrades a no-op update: registering the same
-  1.0.0.0 identity that is already registered (e.g. a repeat install) succeeds by re-pointing the
-  external location instead of failing with "package already exists". }
+  The fixed 1.0.0.0 identity means a repair/reinstall would try to register a version that is
+  already registered, which Add-AppxPackage rejects. Per Microsoft's sparse-package guidance we
+  first unregister any existing registration of this exact package name (ignoring "not found"),
+  then register fresh. Add-AppxPackage runs with -ErrorAction Stop inside try/catch so any real
+  failure produces a nonzero process exit code, which the caller inspects to abort the install. }
 function RegisterParams(Param: string): string;
 var
   AppDir: string;
 begin
   AppDir := ExpandConstant('{app}');
   Result :=
-    '-NoProfile -ExecutionPolicy Bypass -Command "try { Add-AppxPackage -Path ''' +
+    '-NoProfile -ExecutionPolicy Bypass -Command "try { ' +
+    'Get-AppxPackage -Name ''' + EscapePSLiteral('{#MyPackageName}') + ''' | Remove-AppxPackage -ErrorAction SilentlyContinue; ' +
+    'Add-AppxPackage -Path ''' +
     EscapePSLiteral(AppDir + '\{#MyMsixName}') +
     ''' -ExternalLocation ''' + EscapePSLiteral(AppDir) +
-    ''' -ForceUpdateFromAnyVersion -ErrorAction Stop } catch { Write-Error $_; exit 1 }"';
+    ''' -ErrorAction Stop } catch { Write-Error $_; exit 1 }"';
 end;
 
 { Registers the sparse identity package. Invoked as the AfterInstall callback of the .msix [Files]
   entry, so it runs DURING file installation while Inno's automatic rollback is still active: a
   RaiseException here makes Setup roll back exactly the files this run installed (it does NOT touch
   a pre-existing {app} from an earlier install, and it does not run at ssPostInstall where rollback
-  is already unavailable). Registration is idempotent (-ForceUpdateFromAnyVersion), so reinstalling
-  the same identity is treated as an update rather than a failure. }
+  is already unavailable). Registration is idempotent (any existing same-name registration is
+  removed first), so reinstalling the same identity succeeds rather than failing. }
 procedure RegisterSparsePackage;
 var
   ResultCode: Integer;
