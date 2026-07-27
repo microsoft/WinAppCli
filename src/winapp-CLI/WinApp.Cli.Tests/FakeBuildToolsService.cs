@@ -55,7 +55,7 @@ internal sealed class FakeBuildToolsService : IBuildToolsService
         return Task.FromResult(BuildToolsResult);
     }
 
-    public Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, CancellationToken cancellationToken = default)
+    public Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, FileInfo? toolPathOverride = null, IReadOnlyDictionary<string, string>? environment = null, string? workingDirectory = null, CancellationToken cancellationToken = default)
     {
         Invocations.Add((tool.ExecutableName, arguments));
         OnRun?.Invoke(arguments);
