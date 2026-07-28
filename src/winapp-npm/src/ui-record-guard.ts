@@ -25,7 +25,10 @@ import type { UiRecordOptions as GeneratedUiRecordOptions, WinappResult } from '
  * This type is the public surface of `uiRecord`; the generated type has it optional.
  * Survives regeneration because it is defined here in the hand-written guard module.
  */
-export type UiRecordOptions = Omit<GeneratedUiRecordOptions, 'durationSec'> & { durationSec: number };
+export type UiRecordOptions = Omit<GeneratedUiRecordOptions, 'durationSec'> & {
+  durationSec: number;
+  framesDir?: string;
+};
 
 type UiRecordArgSpec = {
   property: keyof UiRecordOptions;
@@ -38,6 +41,7 @@ export const UI_RECORD_ARG_SPECS: readonly UiRecordArgSpec[] = [
   { property: 'captureScreen', flag: '--capture-screen', kind: 'boolean' },
   { property: 'durationSec', flag: '--duration-sec', kind: 'value' },
   { property: 'fps', flag: '--fps', kind: 'value' },
+  { property: 'framesDir', flag: '--frames-dir', kind: 'value' },
   { property: 'json', flag: '--json', kind: 'boolean' },
   { property: 'maxEdge', flag: '--max-edge', kind: 'value' },
   { property: 'output', flag: '--output', kind: 'value' },

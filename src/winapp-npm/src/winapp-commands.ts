@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 1.0.0
+ * Source schema version: 0.5.1
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -957,6 +957,8 @@ export interface UiRecordOptions extends CommonOptions {
   durationSec?: number;
   /** Frames per second to capture */
   fps?: number;
+  /** Also write agent-readable JPEG frames, frames.ndjson, and manifest.json to this new directory. Requires a timed recording; max-edge defaults to 1280 and must not exceed 4096. */
+  framesDir?: string;
   /** Format output as JSON */
   json?: boolean;
   /** Downscale so the longest edge is at most this many pixels (0 = no downscale) */

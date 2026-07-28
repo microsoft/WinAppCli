@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 using Windows.Win32.Foundation;
 using WinApp.Cli.Services;
 
@@ -156,6 +157,121 @@ public partial class RealUiAutomationTests
         Assert.AreEqual(1, windowCalls);
     }
 
+    [TestMethod]
+    public async Task RecordAsync_FrameArtifacts_UseTheProcessedMp4FrameStream()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var session = SessionFor(fx);
+        await ResolveAsync(svc, session, "btnInvoke");
+
+        var root = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var output = Path.Combine(root, "record.mp4");
+        var framesDirectory = Path.Combine(root, "record.frames");
+        var frame = Enumerable.Repeat((byte)0x88, 80 * 60 * 4).ToArray();
+
+        WgcCapture.s_isSupported = () => true;
+        WgcCapture.s_startGrabber = (_, _, _) => new FakeFrameGrabber(frame, 80, 60);
+        Mp4SinkWriterEncoder.s_createNoClobber =
+            (path, width, height, _, _) => new FakeVideoEncoder(path, width, height);
+
+        var result = await svc.RecordAsync(session, null, new RecordOptions
+        {
+            OutputPath = output,
+            FramesDirectory = framesDirectory,
+            DurationSec = 1,
+            Fps = 2,
+            MaxEdge = 64,
+            CaptureScreen = false,
+        }, CancellationToken.None);
+
+        Assert.AreEqual(2, result.Frames);
+        Assert.IsNotNull(result.FrameArtifacts);
+        Assert.AreEqual(2, result.FrameArtifacts.Samples);
+        Assert.AreEqual(1, result.FrameArtifacts.Images, "identical processed BGRA frames should share one JPEG");
+        Assert.AreEqual(1, result.FrameArtifacts.RepeatedSamples);
+        Assert.IsTrue(File.Exists(Path.Combine(framesDirectory, "manifest.json")));
+        Assert.IsTrue(File.Exists(Path.Combine(framesDirectory, "frames.ndjson")));
+        Assert.AreEqual(1, Directory.GetFiles(Path.Combine(framesDirectory, "frames"), "*.jpg").Length);
+    }
+
+    [TestMethod]
+    public async Task RecordAsync_FirstMp4WriteFailure_PreservesAcceptedFrameArtifact()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var session = SessionFor(fx);
+        await ResolveAsync(svc, session, "btnInvoke");
+
+        var root = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var framesDirectory = Path.Combine(root, "partial.frames");
+        WgcCapture.s_isSupported = () => true;
+        WgcCapture.s_startGrabber = (_, _, _) =>
+            new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
+            new FakeVideoEncoder(path, width, height)
+            {
+                WriteFrameException = new IOException("simulated encoder failure"),
+            };
+
+        var exception = await Assert.ThrowsExactlyAsync<RecordPartialOutputException>(
+            () => svc.RecordAsync(session, null, new RecordOptions
+            {
+                OutputPath = Path.Combine(root, "partial.mp4"),
+                FramesDirectory = framesDirectory,
+                DurationSec = 1,
+                Fps = 1,
+                MaxEdge = 64,
+            }, CancellationToken.None));
+
+        Assert.AreEqual(framesDirectory, exception.FramesDirectory);
+        var manifest = JsonSerializer.Deserialize<JsonElement>(
+            await File.ReadAllTextAsync(Path.Combine(framesDirectory, "manifest.json")));
+        Assert.AreEqual("partial", manifest.GetProperty("status").GetString());
+        Assert.AreEqual(1, manifest.GetProperty("timing").GetProperty("sampleCount").GetInt32());
+        Assert.AreEqual(0, manifest.GetProperty("video").GetProperty("frameCount").GetInt32());
+    }
+
+    [TestMethod]
+    public async Task RecordAsync_PostEncodingMetadataFailure_RemovesFrameStaging()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var session = SessionFor(fx);
+        await ResolveAsync(svc, session, "btnInvoke");
+
+        var root = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var output = Path.Combine(root, "missing.mp4");
+        var framesDirectory = Path.Combine(root, "missing.frames");
+        WgcCapture.s_isSupported = () => true;
+        WgcCapture.s_startGrabber = (_, _, _) =>
+            new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
+            new FakeVideoEncoder(path, width, height)
+            {
+                DeleteOutputOnComplete = true,
+            };
+
+        await Assert.ThrowsExactlyAsync<FileNotFoundException>(
+            () => svc.RecordAsync(session, null, new RecordOptions
+            {
+                OutputPath = output,
+                FramesDirectory = framesDirectory,
+                DurationSec = 1,
+                Fps = 1,
+                MaxEdge = 64,
+            }, CancellationToken.None));
+
+        Assert.IsFalse(Directory.Exists(framesDirectory));
+        Assert.IsFalse(Directory.EnumerateDirectories(
+            root,
+            ".*.staging",
+            SearchOption.TopDirectoryOnly).Any());
+    }
+
     private sealed class FakeFrameGrabber(byte[] pixels, int width, int height) : WgcCapture.IFrameGrabber
     {
         private long _version;
@@ -182,8 +298,17 @@ public partial class RealUiAutomationTests
 
         public bool Completed { get; private set; }
 
+        public Exception? WriteFrameException { get; init; }
+
+        public bool DeleteOutputOnComplete { get; init; }
+
         public void WriteFrame(ReadOnlySpan<byte> bgra, long sampleTimeHns, long sampleDurationHns)
         {
+            if (WriteFrameException is not null)
+            {
+                throw WriteFrameException;
+            }
+
             Assert.AreEqual(Width * Height * 4, bgra.Length);
             Assert.IsTrue(sampleDurationHns > 0);
             FramesWritten++;
@@ -193,6 +318,10 @@ public partial class RealUiAutomationTests
         {
             Completed = true;
             File.WriteAllBytes(path, [1, 2, 3, 4, 5]);
+            if (DeleteOutputOnComplete)
+            {
+                File.Delete(path);
+            }
         }
 
         public void Dispose()

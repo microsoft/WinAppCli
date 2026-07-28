@@ -26,6 +26,9 @@ internal static class UiJsonError
     public const string CodeNoTarget = "no_target";
     public const string CodeInjectionUnsupported = "injection_unsupported";
     public const string CodeAmbiguousSelector = "ambiguous_selector";
+    public const string CodeOutputExists = "output_exists";
+    public const string CodeFrameOutputFailed = "frame_output_failed";
+    public const string CodePartialOutput = "partial_output";
 
     /// <summary>Write a JSON error envelope to stderr. No-op when <paramref name="json"/> is false.</summary>
     /// <param name="errorOut">
@@ -35,7 +38,9 @@ internal static class UiJsonError
     /// </param>
     public static void Emit(bool json, string code, string message,
                             string? selector = null, string? details = null,
-                            TextWriter? errorOut = null)
+                            TextWriter? errorOut = null,
+                            string? recoveryHint = null,
+                            UiPartialOutputInfo? partialOutput = null)
     {
         if (!json) { return; }
 
@@ -47,6 +52,8 @@ internal static class UiJsonError
                 Message = message,
                 Selector = selector,
                 Details = details,
+                RecoveryHint = recoveryHint,
+                PartialOutput = partialOutput,
             },
         };
         var payload = JsonSerializer.Serialize(result, UiJsonContext.Default.UiErrorResult);

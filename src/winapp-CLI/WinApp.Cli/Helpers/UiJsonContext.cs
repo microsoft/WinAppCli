@@ -4,6 +4,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using WinApp.Cli.Models;
+using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Helpers;
 
@@ -26,6 +27,10 @@ namespace WinApp.Cli.Helpers;
 [JsonSerializable(typeof(UiScreenshotResult[]))]
 [JsonSerializable(typeof(UiRecordResult))]
 [JsonSerializable(typeof(UiRecordStartedEvent))]
+[JsonSerializable(typeof(UiRecordProgressEvent))]
+[JsonSerializable(typeof(RecordFrameArtifactResult))]
+[JsonSerializable(typeof(RecordFrameIndexEntry))]
+[JsonSerializable(typeof(RecordFrameBundleManifest))]
 [JsonSerializable(typeof(UiGetValueResult))]
 [JsonSerializable(typeof(UiWaitForResult))]
 [JsonSerializable(typeof(UiScrollResult))]
@@ -158,6 +163,12 @@ internal sealed class UiRecordResult
     public long FileSize { get; set; }
     public string Codec { get; set; } = "h264";
     public string Mode { get; set; } = "";
+    public long ElapsedMs { get; set; }
+    public double AchievedFps { get; set; }
+    public double CadenceRatio { get; set; }
+    public string StopReason { get; set; } = "";
+    public RecordFrameArtifactResult? FrameArtifacts { get; set; }
+    public string[]? Warnings { get; set; }
 }
 
 /// <summary>
@@ -170,6 +181,18 @@ internal sealed class UiRecordStartedEvent
     public string Path { get; set; } = "";
     public int Fps { get; set; }
     public int DurationSec { get; set; }
+    public string? FramesDirectory { get; set; }
+    public string? FramesManifest { get; set; }
+    public string? FramesIndex { get; set; }
+}
+
+internal sealed class UiRecordProgressEvent
+{
+    public string Event { get; set; } = "recording-progress";
+    public long ElapsedMs { get; set; }
+    public int Samples { get; set; }
+    public int Images { get; set; }
+    public double AchievedFps { get; set; }
 }
 
 internal sealed class UiWaitForResult
@@ -201,6 +224,14 @@ internal sealed class UiErrorInfo
     public string Message { get; set; } = "";
     public string? Selector { get; set; }
     public string? Details { get; set; }
+    public string? RecoveryHint { get; set; }
+    public UiPartialOutputInfo? PartialOutput { get; set; }
+}
+
+internal sealed class UiPartialOutputInfo
+{
+    public string? VideoPath { get; set; }
+    public string? FramesDirectory { get; set; }
 }
 
 internal sealed class WindowInfo

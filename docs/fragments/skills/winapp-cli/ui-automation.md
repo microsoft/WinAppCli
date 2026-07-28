@@ -107,6 +107,9 @@ captures never buffer in memory. By default records until stopped; use `--durati
 # Record a window for 10s at 15 fps
 winapp ui record -a myapp --duration-sec 10 --fps 15 --output demo.mp4
 
+# Recommended agent evidence: MP4 plus timestamped JPEGs and an NDJSON index
+winapp ui record -a myapp --duration-sec 5 --fps 10 --max-edge 1280 --output demo.mp4 --frames-dir demo.frames --json
+
 # Record until Ctrl+C (default — duration 0), downscaled so the longest edge is 1280px
 winapp ui record -a myapp --max-edge 1280 --output capture.mp4
 
@@ -120,9 +123,11 @@ winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups
 "" | winapp ui record -a myapp --json --output capture.mp4
 ```
 - Default `--duration-sec 0` records until stopped — **Ctrl+C** for interactive use, or a **newline / EOF on stdin** for programmatic callers (pipe `""` or close stdin to stop). A valid MP4 is always finalized on any graceful stop.
+- Use `--frames-dir` when an agent must inspect intermediate states without a video decoder. It requires a timed recording and writes `manifest.json`, `frames.ndjson`, and changed JPEGs under `frames/`; exact duplicate samples reuse the prior JPEG. Frame mode defaults `--max-edge` to 1280 and caps it at 4096. Use monotonic `elapsedMs` in the index to bound UI transitions.
+- Frame mode never replaces existing MP4 or directory paths. If only one artifact completes, the command returns `partial_output` with the preserved path and a recovery hint.
 - `--capture-screen` captures from the screen DC so overlays and popups are included; the window is brought to the foreground first. When WGC is unavailable and `--capture-screen` is not passed, the CLI returns an error — re-run with `--capture-screen` to consent to screen-DC capture.
 - Providing a selector that doesn't match any element fails immediately with `element_not_found` (rather than silently recording the whole window).
-- `--json` stdout result: `path`, `frames`, `width`, `height`, `fileSize`, `codec` (`"h264"`), `mode` (`wgc`, `printwindow`, or `screen`). A `{"event":"recording-started","path":"…","fps":N,"durationSec":N}` liveness event is emitted to **stderr** as soon as capture begins, before the final result.
+- `--json` stdout keeps the MP4 fields and adds cadence/stop metadata plus optional `frameArtifacts`. `recording-started` and five-second `recording-progress` events go to **stderr**.
 
 ### Hover (for tooltips, flyouts, hover states)
 `--dwell-time <ms>` sets how long to wait after hovering (default: 800, range: 0–10000).

@@ -3072,7 +3072,7 @@
           }
         },
         "record": {
-          "description": "Record the target window (or an element's region) to an H.264 MP4 video. Captures frames via Windows Graphics Capture and encodes with Media Foundation. By default records until stopped (Ctrl+C, or a newline/EOF on stdin for programmatic callers). Use --duration-sec N for a timed run. A valid MP4 is always finalized on graceful stop. Use --capture-screen to include overlays/popups.",
+          "description": "Record the target window (or an element's region) to an H.264 MP4 video. Captures frames via Windows Graphics Capture and encodes with Media Foundation. By default records until stopped (Ctrl+C, or a newline/EOF on stdin for programmatic callers). Use --duration-sec N for a timed run. A valid MP4 is always finalized on graceful stop. Use --frames-dir to add timestamped agent-readable frame artifacts without replacing the MP4. Use --capture-screen to include overlays/popups.",
           "hidden": false,
           "arguments": {
             "selector": {
@@ -3135,6 +3135,18 @@
               "valueType": "System.Int32",
               "hasDefaultValue": true,
               "defaultValue": 15,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--frames-dir": {
+              "description": "Also write agent-readable JPEG frames, frames.ndjson, and manifest.json to this new directory. Requires a timed recording; max-edge defaults to 1280 and must not exceed 4096.",
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
               "arity": {
                 "minimum": 1,
                 "maximum": 1

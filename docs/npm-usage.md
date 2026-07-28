@@ -1243,7 +1243,7 @@ This type is the public surface of `uiRecord`; the generated type has it optiona
 Survives regeneration because it is defined here in the hand-written guard module.
 
 ```typescript
-type UiRecordOptions = Omit<GeneratedUiRecordOptions, "durationSec"> & { durationSec: number; }
+type UiRecordOptions = Omit<GeneratedUiRecordOptions, "durationSec"> & { durationSec: number; framesDir?: string; }
 ```
 
 ### `IfExists`

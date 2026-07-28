@@ -185,6 +185,8 @@ internal class FakeUiAutomationService : IUiAutomationService
     /// <summary>Configurable result for <see cref="RecordAsync"/>. The fake writes a tiny placeholder file to the output path.</summary>
     public RecordCaptureResult RecordResult { get; set; } = new() { Frames = 3, Width = 2, Height = 2, FileSize = 0, Mode = "wgc" };
 
+    public RecordOptions? LastRecordOptions { get; private set; }
+
     /// <summary>When non-null, <see cref="RecordAsync"/> throws this exception instead of writing a file.</summary>
     public Exception? RecordException { get; set; }
 
@@ -197,11 +199,42 @@ internal class FakeUiAutomationService : IUiAutomationService
 
     public async Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action? onRecordingStarted = null)
     {
+        LastRecordOptions = options;
         if (RecordException is not null)
         {
             throw RecordException;
         }
         await File.WriteAllBytesAsync(options.OutputPath, new byte[16], CancellationToken.None);
+        RecordFrameArtifactResult? frameArtifacts = RecordResult.FrameArtifacts;
+        if (options.FramesDirectory is not null)
+        {
+            Directory.CreateDirectory(Path.Combine(options.FramesDirectory, "frames"));
+            await File.WriteAllTextAsync(
+                Path.Combine(options.FramesDirectory, "frames.ndjson"),
+                "{\"sampleIndex\":0}\n",
+                CancellationToken.None);
+            await File.WriteAllTextAsync(
+                Path.Combine(options.FramesDirectory, "manifest.json"),
+                "{\"schemaVersion\":1,\"status\":\"complete\"}",
+                CancellationToken.None);
+            frameArtifacts = new RecordFrameArtifactResult
+            {
+                Directory = options.FramesDirectory,
+                Manifest = Path.Combine(options.FramesDirectory, "manifest.json"),
+                Index = Path.Combine(options.FramesDirectory, "frames.ndjson"),
+                Samples = RecordResult.Frames,
+                Images = 1,
+                RepeatedSamples = Math.Max(0, RecordResult.Frames - 1),
+                TotalBytes = 64,
+            };
+            options.OnProgress?.Invoke(new RecordProgress
+            {
+                ElapsedMs = 5_000,
+                Samples = RecordResult.Frames,
+                Images = 1,
+                AchievedFps = RecordResult.Frames / 5.0,
+            });
+        }
         // Signal readiness before returning — mirrors the real service behavior (encoder is
         // initialized and the first frame has been captured at this point).
         onRecordingStarted?.Invoke();
@@ -220,6 +253,12 @@ internal class FakeUiAutomationService : IUiAutomationService
             Height = RecordResult.Height,
             FileSize = size,
             Mode = RecordResult.Mode,
+            ElapsedMs = RecordResult.ElapsedMs,
+            AchievedFps = RecordResult.AchievedFps,
+            CadenceRatio = RecordResult.CadenceRatio,
+            StopReason = RecordResult.StopReason,
+            FrameArtifacts = frameArtifacts,
+            Warnings = RecordResult.Warnings,
         };
     }
 
@@ -556,5 +595,3 @@ internal sealed class FakePollDelay : WinApp.Cli.Helpers.IPollDelay
         return Task.Delay(1, ct);
     }
 }
-
-

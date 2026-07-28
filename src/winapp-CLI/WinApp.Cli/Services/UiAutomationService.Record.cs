@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.Logging;
 using SkiaSharp;
 using Windows.Win32.Foundation;
@@ -74,7 +75,9 @@ internal sealed partial class UiAutomationService
         var useWgc = !useScreen && WgcCapture.IsSupported();
 
         WgcCapture.IFrameGrabber? grabber = null;
+        IRecordFrameSink? frameSink = null;
         var mode = useScreen ? "screen" : (useWgc ? "wgc" : "printwindow");
+        var captureHwnd = (long)(nint)hwnd;
 
         try
         {
@@ -185,6 +188,7 @@ internal sealed partial class UiAutomationService
 
                 if (captureTargetHwnd != (nint)hwnd)
                 {
+                    captureHwnd = (long)captureTargetHwnd;
                     var popupHwnd = new Windows.Win32.Foundation.HWND(captureTargetHwnd);
                     _logger.LogDebug(
                         "Selector '{Sel}' resolved to popup window HWND 0x{Hwnd:X}; retargeting capture",
@@ -254,137 +258,392 @@ internal sealed partial class UiAutomationService
 
             var (encoderW, encoderH, displayW, displayH) = ComputeTargetSize(cropW, cropH, options.MaxEdge);
             var bitrate = (uint)Math.Clamp((long)encoderW * encoderH * options.Fps / 8, 1_000_000, 24_000_000);
-
-            using var encoder = Mp4SinkWriterEncoder.s_create(options.OutputPath, encoderW, encoderH, options.Fps, bitrate);
+            var encoderFactory = options.FramesDirectory is null
+                ? Mp4SinkWriterEncoder.s_create
+                : Mp4SinkWriterEncoder.s_createNoClobber;
+            using var encoder = encoderFactory(options.OutputPath, encoderW, encoderH, options.Fps, bitrate);
 
             var frameDurationHns = 10_000_000L / options.Fps;
-            // Use long arithmetic to avoid int overflow for high fps × long duration combinations.
             var totalFrames = options.DurationSec > 0 ? (long)options.DurationSec * options.Fps : (long?)null;
             var stopwatch = Stopwatch.StartNew();
+            var startedUtc = DateTimeOffset.UtcNow;
             var frameIndex = 0;
+            var frameSamplesAccepted = 0;
             long lastEncodedVersion = -1;
             var startedSignaled = false;
+            var targetClosed = false;
+            var nextProgressMs = 5_000L;
+            Exception? frameSinkFailure = null;
+            RecordFrameArtifactResult? frameArtifacts = null;
 
-            while (!ct.IsCancellationRequested)
+            if (options.FramesDirectory is not null)
             {
-                if (totalFrames.HasValue && frameIndex >= totalFrames.Value)
+                var (contentX, contentY, contentW, contentH) = ComputeFittedContentRect(
+                    cropW, cropH, encoderW, encoderH, displayW, displayH);
+                try
                 {
-                    break;
-                }
-
-                // Wall-clock deadline: also break when the requested wall time has elapsed, so slow
-                // encoding (encoding takes longer than the sampling cadence) doesn't overshoot.
-                if (totalFrames.HasValue && stopwatch.Elapsed.TotalSeconds >= options.DurationSec)
-                {
-                    break;
-                }
-
-                // Stop immediately if the captured window closed mid-recording rather than
-                // re-encoding stale frames. M8: drain any available cached frame first so that
-                // a frame that was ready when Closed fired is not silently dropped.
-                if (useWgc && grabber!.IsClosed)
-                {
-                    var closedLatest = grabber.TryGetLatest();
-                    if (closedLatest is not null)
+                    frameSink = RecordFrameBundleWriter.s_create(new RecordFrameBundleConfiguration
                     {
-                        var (closedSrc, closedSw, closedSh, closedVersion) = closedLatest.Value;
-                        if (ShouldEncodeClosedDrainFrame(closedVersion, lastEncodedVersion))
+                        FinalDirectory = options.FramesDirectory,
+                        VideoPath = options.OutputPath,
+                        RecordingId = Guid.NewGuid().ToString("N"),
+                        StartedUtc = startedUtc,
+                        Width = encoderW,
+                        Height = encoderH,
+                        ContentRect = new RecordFrameRectManifest
                         {
-                            // H2: use current frame dims for whole-window WGC, fixed crop for element.
-                            var closedCropW = isWholeWindowWgc ? closedSw : cropW;
-                            var closedCropH = isWholeWindowWgc ? closedSh : cropH;
-                            var closedFrame = ProcessFrame(closedSrc, closedSw, closedSh, cropX, cropY, closedCropW, closedCropH, encoderW, encoderH, displayW, displayH);
-                            encoder.WriteFrame(closedFrame, frameIndex * frameDurationHns, frameDurationHns);
-                            lastEncodedVersion = closedVersion;
-                            frameIndex++;
-                            if (!startedSignaled)
+                            X = contentX,
+                            Y = contentY,
+                            Width = contentW,
+                            Height = contentH,
+                        },
+                        Requested = new RecordFrameRequestManifest
+                        {
+                            DurationSec = options.DurationSec,
+                            Fps = options.Fps,
+                            MaxEdge = options.MaxEdge,
+                            Selector = options.Selector,
+                            CaptureScreen = options.CaptureScreen,
+                        },
+                        Source = new RecordFrameSourceManifest
+                        {
+                            ProcessId = session.ProcessId,
+                            ProcessName = session.ProcessName,
+                            WindowTitle = session.WindowTitle,
+                            SessionHwnd = session.WindowHandle,
+                            CaptureHwnd = captureHwnd,
+                            CaptureMode = mode,
+                        },
+                        Crop = new RecordFrameCropManifest
+                        {
+                            Kind = string.IsNullOrEmpty(elementId) ? "window" : "element",
+                            Rect = new RecordFrameRectManifest
                             {
-                                startedSignaled = true;
-                                onRecordingStarted?.Invoke();
-                            }
-                        }
-                    }
-                    _logger.LogDebug("WGC capture item closed mid-recording; finalizing {Frames} frames captured so far", frameIndex);
-                    break;
+                                X = cropX,
+                                Y = cropY,
+                                Width = cropW,
+                                Height = cropH,
+                            },
+                        },
+                        Logger = _logger,
+                    });
                 }
-
-                byte[] frame;
-                long sourceVersion = -1;
-                if (useWgc)
+                catch (Exception ex)
                 {
-                    var latest = grabber!.TryGetLatest();
-                    if (latest is null)
+                    frameSinkFailure = ex;
+                    _logger.LogError(ex, "Could not initialize frame artifact output");
+                }
+            }
+
+            async ValueTask<bool> CommitFrameAsync(
+                byte[] processedFrame,
+                long sourceVersion,
+                int sourceWidth,
+                int sourceHeight)
+            {
+                var sampleIndex = frameIndex;
+                var elapsedMs = Math.Max(0, (long)Math.Round(stopwatch.Elapsed.TotalMilliseconds));
+
+                if (frameSink is not null)
+                {
+                    try
                     {
-                        await Task.Delay(5, ct).ConfigureAwait(false);
-                        continue;
+                        var (_, _, frameCropW, frameCropH) = isWholeWindowWgc
+                            ? (0, 0, sourceWidth, sourceHeight)
+                            : ClampCropRect(
+                                cropX,
+                                cropY,
+                                cropW,
+                                cropH,
+                                sourceWidth,
+                                sourceHeight);
+                        var (contentX, contentY, contentW, contentH) = ComputeFittedContentRect(
+                            frameCropW,
+                            frameCropH,
+                            encoderW,
+                            encoderH,
+                            displayW,
+                            displayH);
+                        await frameSink.WriteAsync(processedFrame, new RecordFrameSample
+                        {
+                            SampleIndex = sampleIndex,
+                            ElapsedMs = elapsedMs,
+                            MediaTimeMs = sampleIndex * 1000.0 / options.Fps,
+                            SourceVersion = sourceVersion >= 0 ? sourceVersion : null,
+                            SourceWidth = sourceWidth,
+                            SourceHeight = sourceHeight,
+                            ContentRect = new RecordFrameRectManifest
+                            {
+                                X = contentX,
+                                Y = contentY,
+                                Width = contentW,
+                                Height = contentH,
+                            },
+                        }, ct).ConfigureAwait(false);
+                        frameSamplesAccepted++;
                     }
-                    var (source, sw, sh, version) = latest.Value;
-                    sourceVersion = version;
-                    frame = ProcessFrame(source, sw, sh, cropX, cropY,
-                        // H2: for whole-window WGC, use the CURRENT frame's dimensions as the crop source
-                        // so that a resized window delivers its full content rather than the stale initial
-                        // sub-rect. Element-crop captures use the fixed cropW/cropH (element position).
-                        isWholeWindowWgc ? sw : cropW,
-                        isWholeWindowWgc ? sh : cropH,
-                        encoderW, encoderH, displayW, displayH);
-                }
-                else if (useScreen)
-                {
-                    frame = CaptureScreenFrame(
-                        captureOriginLeft + cropX,
-                        captureOriginTop + cropY,
-                        cropW,
-                        cropH,
-                        encoderW,
-                        encoderH,
-                        displayW,
-                        displayH);
-                }
-                else
-                {
-                    // PrintWindow fallback (WGC unsupported, not --capture-screen): render the window
-                    // into an offscreen DC. Unlike BitBlt-from-screen this excludes occluding windows,
-                    // matching `ui screenshot`. captureOrigin is the window's top-left so crop math holds.
-                    var source = CaptureFromWindowWithBlankRetry(hwnd, srcWidth, srcHeight);
-                    frame = ProcessFrame(source, srcWidth, srcHeight, cropX, cropY, cropW, cropH,
-                        encoderW, encoderH, displayW, displayH);
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        return false;
+                    }
+                    catch (Exception ex)
+                    {
+                        frameSinkFailure ??= ex;
+                        _logger.LogError(ex, "Frame artifact output failed; continuing MP4 recording");
+                        await frameSink.AbortAsync().ConfigureAwait(false);
+                        await frameSink.DisposeAsync().ConfigureAwait(false);
+                        frameSink = null;
+                    }
                 }
 
-                encoder.WriteFrame(frame, frameIndex * frameDurationHns, frameDurationHns);
-                if (useWgc)
-                {
-                    lastEncodedVersion = sourceVersion;
-                }
+                encoder.WriteFrame(
+                    processedFrame,
+                    sampleIndex * frameDurationHns,
+                    frameDurationHns);
                 frameIndex++;
-
-                // Signal readiness after the first frame is encoded: the encoder is initialized
-                // and live. Only now is it safe to arm the stdin-stop monitor and emit the
-                // liveness event, so that a newline pre-buffered in stdin triggers a graceful
-                // stop that finalizes a valid MP4 rather than canceling before the encoder exists.
                 if (!startedSignaled)
                 {
                     startedSignaled = true;
                     onRecordingStarted?.Invoke();
                 }
 
-                var targetMs = frameIndex * 1000.0 / options.Fps;
-                var delayMs = targetMs - stopwatch.Elapsed.TotalMilliseconds;
-                if (delayMs > 1)
+                if (options.OnProgress is not null && elapsedMs >= nextProgressMs)
                 {
-                    try
+                    options.OnProgress(new RecordProgress
                     {
-                        await Task.Delay((int)delayMs, ct).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
+                        ElapsedMs = elapsedMs,
+                        Samples = frameIndex,
+                        Images = frameSink?.ImageCount ?? 0,
+                        AchievedFps = elapsedMs > 0 ? frameIndex * 1000.0 / elapsedMs : 0,
+                    });
+                    nextProgressMs += 5_000;
+                }
+
+                return true;
+            }
+
+            Exception? mp4Failure = null;
+            var captureElapsedMs = 1L;
+            try
+            {
+                while (!ct.IsCancellationRequested)
+                {
+                    if (totalFrames.HasValue && frameIndex >= totalFrames.Value)
                     {
                         break;
                     }
+
+                    if (totalFrames.HasValue && stopwatch.Elapsed.TotalSeconds >= options.DurationSec)
+                    {
+                        break;
+                    }
+
+                    if (useWgc && grabber!.IsClosed)
+                    {
+                        var closedLatest = grabber.TryGetLatest();
+                        if (closedLatest is not null)
+                        {
+                            var (closedSrc, closedSw, closedSh, closedVersion) = closedLatest.Value;
+                            if (ShouldEncodeClosedDrainFrame(closedVersion, lastEncodedVersion))
+                            {
+                                var closedCropW = isWholeWindowWgc ? closedSw : cropW;
+                                var closedCropH = isWholeWindowWgc ? closedSh : cropH;
+                                var closedFrame = ProcessFrame(
+                                    closedSrc, closedSw, closedSh,
+                                    cropX, cropY, closedCropW, closedCropH,
+                                    encoderW, encoderH, displayW, displayH);
+                                if (await CommitFrameAsync(
+                                    closedFrame, closedVersion, closedSw, closedSh).ConfigureAwait(false))
+                                {
+                                    lastEncodedVersion = closedVersion;
+                                }
+                            }
+                        }
+                        targetClosed = true;
+                        _logger.LogDebug(
+                            "WGC capture item closed mid-recording; finalizing {Frames} frames captured so far",
+                            frameIndex);
+                        break;
+                    }
+
+                    byte[] frame;
+                    long sourceVersion = -1;
+                    var sourceWidth = srcWidth;
+                    var sourceHeight = srcHeight;
+                    if (useWgc)
+                    {
+                        var latest = grabber!.TryGetLatest();
+                        if (latest is null)
+                        {
+                            await Task.Delay(5, ct).ConfigureAwait(false);
+                            continue;
+                        }
+                        var (source, sw, sh, version) = latest.Value;
+                        sourceVersion = version;
+                        sourceWidth = sw;
+                        sourceHeight = sh;
+                        frame = ProcessFrame(
+                            source, sw, sh, cropX, cropY,
+                            isWholeWindowWgc ? sw : cropW,
+                            isWholeWindowWgc ? sh : cropH,
+                            encoderW, encoderH, displayW, displayH);
+                    }
+                    else if (useScreen)
+                    {
+                        frame = CaptureScreenFrame(
+                            captureOriginLeft + cropX,
+                            captureOriginTop + cropY,
+                            cropW,
+                            cropH,
+                            encoderW,
+                            encoderH,
+                            displayW,
+                            displayH);
+                    }
+                    else
+                    {
+                        var source = CaptureFromWindowWithBlankRetry(hwnd, srcWidth, srcHeight);
+                        frame = ProcessFrame(
+                            source, srcWidth, srcHeight,
+                            cropX, cropY, cropW, cropH,
+                            encoderW, encoderH, displayW, displayH);
+                    }
+
+                    if (!await CommitFrameAsync(
+                        frame, sourceVersion, sourceWidth, sourceHeight).ConfigureAwait(false))
+                    {
+                        break;
+                    }
+                    if (useWgc)
+                    {
+                        lastEncodedVersion = sourceVersion;
+                    }
+
+                    var targetMs = frameIndex * 1000.0 / options.Fps;
+                    var delayMs = targetMs - stopwatch.Elapsed.TotalMilliseconds;
+                    if (delayMs > 1)
+                    {
+                        try
+                        {
+                            await Task.Delay((int)delayMs, ct).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                captureElapsedMs = Math.Max(1, (long)Math.Round(stopwatch.Elapsed.TotalMilliseconds));
+                encoder.Complete();
+            }
+            catch (Exception ex)
+            {
+                captureElapsedMs = Math.Max(1, (long)Math.Round(stopwatch.Elapsed.TotalMilliseconds));
+                mp4Failure = ex;
+            }
+
+            var elapsedMs = captureElapsedMs;
+            var achievedFps = frameIndex * 1000.0 / elapsedMs;
+            var cadenceRatio = achievedFps / options.Fps;
+            var frameAchievedFps = frameSamplesAccepted * 1000.0 / elapsedMs;
+            var frameCadenceRatio = frameAchievedFps / options.Fps;
+            var stopReason = mp4Failure is not null
+                ? "mp4_failed"
+                : targetClosed
+                    ? "target_closed"
+                    : ct.IsCancellationRequested ? "cancelled" : "duration_elapsed";
+
+            if (mp4Failure is not null)
+            {
+                if (frameSink is not null && frameSamplesAccepted > 0)
+                {
+                    try
+                    {
+                        frameArtifacts = await frameSink.CompleteAsync(new RecordFrameCompletion
+                        {
+                            Status = "partial",
+                            StopReason = stopReason,
+                            ElapsedMs = elapsedMs,
+                            AchievedFps = frameAchievedFps,
+                            CadenceRatio = frameCadenceRatio,
+                            VideoStatus = "failed",
+                            VideoFrameCount = frameIndex,
+                        }).ConfigureAwait(false);
+                    }
+                    catch (Exception frameEx)
+                    {
+                        _logger.LogError(frameEx, "Could not preserve partial frame artifacts after MP4 failure");
+                        await frameSink.AbortAsync().ConfigureAwait(false);
+                    }
+                }
+                else if (frameSink is not null)
+                {
+                    await frameSink.AbortAsync().ConfigureAwait(false);
+                }
+
+                if (frameSink is not null)
+                {
+                    await frameSink.DisposeAsync().ConfigureAwait(false);
+                    frameSink = null;
+                }
+
+                if (frameArtifacts is not null)
+                {
+                    throw new RecordPartialOutputException(
+                        "MP4 recording failed, but partial frame artifacts were preserved.",
+                        videoPath: null,
+                        framesDirectory: frameArtifacts.Directory,
+                        "Inspect the partial frame bundle, then retry the recording to produce the MP4.",
+                        mp4Failure);
+                }
+
+                ExceptionDispatchInfo.Capture(mp4Failure).Throw();
+            }
+
+            var fileSize = new FileInfo(options.OutputPath).Length;
+            if (frameSink is not null)
+            {
+                var activeFrameSink = frameSink;
+                try
+                {
+                    frameArtifacts = await activeFrameSink.CompleteAsync(new RecordFrameCompletion
+                    {
+                        Status = "complete",
+                        StopReason = stopReason,
+                        ElapsedMs = elapsedMs,
+                        AchievedFps = achievedFps,
+                        CadenceRatio = cadenceRatio,
+                        VideoStatus = "complete",
+                        VideoFrameCount = frameIndex,
+                        VideoFileSize = fileSize,
+                    }).ConfigureAwait(false);
+                    await activeFrameSink.DisposeAsync().ConfigureAwait(false);
+                    frameSink = null;
+                }
+                catch (Exception ex)
+                {
+                    frameSinkFailure ??= ex;
+                    _logger.LogError(ex, "Could not finalize frame artifact output");
+                    await activeFrameSink.AbortAsync().ConfigureAwait(false);
+                    await activeFrameSink.DisposeAsync().ConfigureAwait(false);
+                    frameSink = null;
                 }
             }
 
-            encoder.Complete();
+            if (frameSinkFailure is not null)
+            {
+                throw new RecordPartialOutputException(
+                    "The MP4 was recorded successfully, but frame artifact output failed.",
+                    options.OutputPath,
+                    framesDirectory: null,
+                    "Use the MP4 as the durable recording and retry with new --output and --frames-dir paths.",
+                    frameSinkFailure);
+            }
 
-            var fileSize = new FileInfo(options.OutputPath).Length;
+            var warnings = cadenceRatio < 0.90
+                ? new[] { $"Capture cadence was {cadenceRatio:P0} of the requested {options.Fps} fps." }
+                : null;
             return new RecordCaptureResult
             {
                 Frames = frameIndex,
@@ -392,10 +651,27 @@ internal sealed partial class UiAutomationService
                 Height = encoderH,
                 FileSize = fileSize,
                 Mode = mode,
+                ElapsedMs = elapsedMs,
+                AchievedFps = achievedFps,
+                CadenceRatio = cadenceRatio,
+                StopReason = stopReason,
+                FrameArtifacts = frameArtifacts,
+                Warnings = warnings,
             };
         }
         finally
         {
+            if (frameSink is not null)
+            {
+                try
+                {
+                    await frameSink.DisposeAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Could not clean up unpublished frame artifacts");
+                }
+            }
             grabber?.Dispose();
         }
     }
@@ -635,10 +911,13 @@ internal sealed partial class UiAutomationService
         }
 
         // Clamp crop against the actual frame in case dimensions drifted between frames.
-        cropX = Math.Clamp(cropX, 0, Math.Max(0, sourceWidth - 1));
-        cropY = Math.Clamp(cropY, 0, Math.Max(0, sourceHeight - 1));
-        cropW = Math.Clamp(cropW, 1, sourceWidth - cropX);
-        cropH = Math.Clamp(cropH, 1, sourceHeight - cropY);
+        (cropX, cropY, cropW, cropH) = ClampCropRect(
+            cropX,
+            cropY,
+            cropW,
+            cropH,
+            sourceWidth,
+            sourceHeight);
 
         var srcInfo = new SKImageInfo(sourceWidth, sourceHeight, SKColorType.Bgra8888, SKAlphaType.Opaque);
         using var srcBitmap = new SKBitmap(srcInfo);
@@ -663,6 +942,21 @@ internal sealed partial class UiAutomationService
         var output = new byte[dstInfo.BytesSize];
         Marshal.Copy(dstBitmap.GetPixels(), output, 0, output.Length);
         return output;
+    }
+
+    internal static (int X, int Y, int Width, int Height) ClampCropRect(
+        int cropX,
+        int cropY,
+        int cropW,
+        int cropH,
+        int sourceWidth,
+        int sourceHeight)
+    {
+        cropX = Math.Clamp(cropX, 0, Math.Max(0, sourceWidth - 1));
+        cropY = Math.Clamp(cropY, 0, Math.Max(0, sourceHeight - 1));
+        cropW = Math.Clamp(cropW, 1, sourceWidth - cropX);
+        cropH = Math.Clamp(cropH, 1, sourceHeight - cropY);
+        return (cropX, cropY, cropW, cropH);
     }
 
     internal static (int OffsetX, int OffsetY, int FitW, int FitH) ComputeFittedContentRect(
