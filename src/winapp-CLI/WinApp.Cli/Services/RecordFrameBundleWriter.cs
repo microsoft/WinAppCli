@@ -100,9 +100,14 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
 
         Directory.CreateDirectory(parent);
         var leaf = Path.GetFileName(configuration.FinalDirectory);
-        _stagingDirectory = Path.Combine(parent, $".{leaf}.{Guid.NewGuid():N}.staging");
-        _framesDirectory = Path.Combine(_stagingDirectory, "frames");
-        _indexPath = Path.Combine(_stagingDirectory, "frames.ndjson");
+        if (string.IsNullOrEmpty(leaf) || Path.IsPathRooted(leaf))
+        {
+            throw new IOException("Frame artifact directory must end with a valid directory name.");
+        }
+        var stagingName = $".{leaf}.{Guid.NewGuid():N}.staging";
+        _stagingDirectory = Path.Join(parent, stagingName);
+        _framesDirectory = Path.Join(_stagingDirectory, "frames");
+        _indexPath = Path.Join(_stagingDirectory, "frames.ndjson");
 
         try
         {
@@ -212,7 +217,7 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
             Crop = _configuration.Crop,
         };
 
-        var manifestPath = Path.Combine(_stagingDirectory, "manifest.json");
+        var manifestPath = Path.Join(_stagingDirectory, "manifest.json");
         var manifestJson = JsonSerializer.Serialize(
             manifest,
             UiJsonContext.Default.RecordFrameBundleManifest);
@@ -243,8 +248,8 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
         var result = new RecordFrameArtifactResult
         {
             Directory = _configuration.FinalDirectory,
-            Manifest = Path.Combine(_configuration.FinalDirectory, "manifest.json"),
-            Index = Path.Combine(_configuration.FinalDirectory, "frames.ndjson"),
+            Manifest = Path.Join(_configuration.FinalDirectory, "manifest.json"),
+            Index = Path.Join(_configuration.FinalDirectory, "frames.ndjson"),
             Samples = SampleCount,
             Images = ImageCount,
             RepeatedSamples = SampleCount - ImageCount,
@@ -337,7 +342,7 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
                 {
                     currentImageIndex++;
                     var fileName = $"frame-{currentImageIndex:D6}-t{queued.Sample.ElapsedMs:D12}.jpg";
-                    var absolutePath = Path.Combine(_framesDirectory, fileName);
+                    var absolutePath = Path.Join(_framesDirectory, fileName);
                     var jpeg = EncodeJpeg(queued.Pixels, _configuration.Width, _configuration.Height);
                     await using (var imageStream = new FileStream(
                         absolutePath,

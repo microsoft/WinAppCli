@@ -3,6 +3,7 @@
 
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
+using System.Runtime.InteropServices;
 using Windows.Win32.Foundation;
 using WinApp.Cli.Services;
 
@@ -232,6 +233,44 @@ public partial class RealUiAutomationTests
         Assert.AreEqual("partial", manifest.GetProperty("status").GetString());
         Assert.AreEqual(1, manifest.GetProperty("timing").GetProperty("sampleCount").GetInt32());
         Assert.AreEqual(0, manifest.GetProperty("video").GetProperty("frameCount").GetInt32());
+    }
+
+    [TestMethod]
+    public async Task RecordAsync_Mp4FinalizeFailure_PreservesAcceptedFrameArtifact()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var session = SessionFor(fx);
+        await ResolveAsync(svc, session, "btnInvoke");
+
+        var root = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var framesDirectory = Path.Combine(root, "finalize-partial.frames");
+        WgcCapture.s_isSupported = () => true;
+        WgcCapture.s_startGrabber = (_, _, _) =>
+            new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
+            new FakeVideoEncoder(path, width, height)
+            {
+                CompleteException = new COMException("simulated finalize failure"),
+            };
+
+        var exception = await Assert.ThrowsExactlyAsync<RecordPartialOutputException>(
+            () => svc.RecordAsync(session, null, new RecordOptions
+            {
+                OutputPath = Path.Combine(root, "finalize-partial.mp4"),
+                FramesDirectory = framesDirectory,
+                DurationSec = 1,
+                Fps = 1,
+                MaxEdge = 64,
+            }, CancellationToken.None));
+
+        Assert.AreEqual(framesDirectory, exception.FramesDirectory);
+        var manifest = JsonSerializer.Deserialize<JsonElement>(
+            await File.ReadAllTextAsync(Path.Combine(framesDirectory, "manifest.json")));
+        Assert.AreEqual("partial", manifest.GetProperty("status").GetString());
+        Assert.AreEqual("failed", manifest.GetProperty("video").GetProperty("status").GetString());
+        Assert.AreEqual(1, manifest.GetProperty("video").GetProperty("frameCount").GetInt32());
     }
 
     [TestMethod]
@@ -468,6 +507,8 @@ public partial class RealUiAutomationTests
 
         public Exception? WriteFrameException { get; init; }
 
+        public Exception? CompleteException { get; init; }
+
         public bool DeleteOutputOnComplete { get; init; }
 
         public void WriteFrame(ReadOnlySpan<byte> bgra, long sampleTimeHns, long sampleDurationHns)
@@ -484,6 +525,11 @@ public partial class RealUiAutomationTests
 
         public void Complete()
         {
+            if (CompleteException is not null)
+            {
+                throw CompleteException;
+            }
+
             Completed = true;
             File.WriteAllBytes(path, [1, 2, 3, 4, 5]);
             if (DeleteOutputOnComplete)

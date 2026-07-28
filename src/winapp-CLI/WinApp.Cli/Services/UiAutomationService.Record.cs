@@ -560,7 +560,7 @@ internal sealed partial class UiAutomationService
                 {
                     encoder.Complete();
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (IsRecoverableVideoOutputFailure(ex))
                 {
                     mp4Failure = ex;
                 }
@@ -736,6 +736,12 @@ internal sealed partial class UiAutomationService
             or InvalidOperationException
             or ExternalException
             or OperationCanceledException;
+
+    private static bool IsRecoverableVideoOutputFailure(Exception exception)
+        => exception is IOException
+            or UnauthorizedAccessException
+            or InvalidOperationException
+            or ExternalException;
 
     /// <summary>
     /// Called when Windows Graphics Capture fails to initialize. If the user did NOT explicitly

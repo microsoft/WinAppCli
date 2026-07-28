@@ -132,7 +132,7 @@ winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups
 - Frame mode never replaces existing MP4 or directory paths. If only one artifact completes, the command returns `partial_output` with the preserved path and a recovery hint. If neither artifact can be preserved after a frame output failure, it returns `frame_output_failed`.
 - `--capture-screen` captures from the screen DC so overlays and popups are included; the window is brought to the foreground first. When WGC is unavailable and `--capture-screen` is not passed, the CLI returns an error — re-run with `--capture-screen` to consent to screen-DC capture.
 - Providing a selector that doesn't match any element fails immediately with `element_not_found` (rather than silently recording the whole window).
-- `--json` stdout keeps the MP4 fields and adds cadence/stop metadata plus optional `frameArtifacts`. `recording-started` and five-second `recording-progress` events go to **stderr**.
+- `--json` stdout keeps the MP4 fields (`path`, `durationSec`, `fps`, `frames`, `width`, `height`, `fileSize`, `codec`, and `mode`) and adds cadence/stop metadata plus optional `frameArtifacts`. `recording-started` and five-second `recording-progress` events go to **stderr**.
 
 ### Hover (for tooltips, flyouts, hover states)
 `--dwell-time <ms>` sets how long to wait after hovering (default: 800, range: 0–10000).

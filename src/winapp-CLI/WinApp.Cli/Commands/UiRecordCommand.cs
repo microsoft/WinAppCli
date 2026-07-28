@@ -276,8 +276,8 @@ internal class UiRecordCommand : Command, IShortDescription
                             Fps = fps,
                             DurationSec = durationSec,
                             FramesDirectory = framesDirectory,
-                            FramesManifest = framesDirectory is null ? null : Path.Combine(framesDirectory, "manifest.json"),
-                            FramesIndex = framesDirectory is null ? null : Path.Combine(framesDirectory, "frames.ndjson"),
+                            FramesManifest = framesDirectory is null ? null : Path.Join(framesDirectory, "manifest.json"),
+                            FramesIndex = framesDirectory is null ? null : Path.Join(framesDirectory, "frames.ndjson"),
                         };
                         parseResult.InvocationConfiguration.Error.WriteLine(
                             JsonSerializer.Serialize(startedEvent, UiJsonContext.Default.UiRecordStartedEvent));
