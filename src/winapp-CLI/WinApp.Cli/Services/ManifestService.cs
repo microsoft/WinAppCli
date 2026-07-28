@@ -53,7 +53,13 @@ internal partial class ManifestService(
                 }
                 if (string.IsNullOrWhiteSpace(description) || description == packageName)
                 {
-                    description = fileVersionInfo.FileDescription;
+                    // Only override with FileDescription when it actually carries text; otherwise
+                    // leave description null so the default fallback below applies (assigning an
+                    // empty FileDescription here would defeat the ??= and emit Description="").
+                    if (!string.IsNullOrWhiteSpace(fileVersionInfo.FileDescription))
+                    {
+                        description = fileVersionInfo.FileDescription;
+                    }
                 }
                 if (!string.IsNullOrWhiteSpace(fileVersionInfo.CompanyName))
                 {
@@ -69,7 +75,10 @@ internal partial class ManifestService(
             }
         }
         packageName ??= SystemDefaultsHelper.GetDefaultPackageName(directory);
-        description ??= SystemDefaultsHelper.GetDefaultDescription();
+        if (string.IsNullOrWhiteSpace(description))
+        {
+            description = SystemDefaultsHelper.GetDefaultDescription();
+        }
         publisherName ??= SystemDefaultsHelper.GetDefaultPublisherCN();
 
         packageName = CleanPackageName(packageName);

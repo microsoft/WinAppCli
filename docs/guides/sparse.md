@@ -197,12 +197,18 @@ param(
 $ErrorActionPreference = 'Stop'
 try {
   # Add-AppxPackage emits NON-terminating errors by default, so a failure would otherwise leave
-  # the process exit code at 0 and let the installer complete without identity. Remove any existing
-  # same-name registration first (a repeat install of the fixed identity version would otherwise be
-  # rejected), then register; -ErrorAction Stop + the trap make a real failure terminating so the
-  # installer (WiX Return="check" / NSIS ExecWait) sees a nonzero exit code.
-  Get-AppxPackage -Name $PackageName | Remove-AppxPackage -ErrorAction SilentlyContinue
-  Add-AppxPackage -Path $MsixPath -ExternalLocation $ExternalLocation -ErrorAction Stop
+  # the process exit code at 0 and let the installer complete without identity. Try the add
+  # directly first: a fresh install or a version-bumped upgrade registers/updates in place
+  # without touching any existing registration. Only if that fails (e.g. the same version is
+  # already registered, which Add-AppxPackage rejects) unregister and retry — so a working prior
+  # registration is never removed on an upgrade that would have succeeded. -ErrorAction Stop + the
+  # trap make a real failure terminating so the installer (WiX Return="check" / NSIS) sees it.
+  try {
+    Add-AppxPackage -Path $MsixPath -ExternalLocation $ExternalLocation -ErrorAction Stop
+  } catch {
+    Get-AppxPackage -Name $PackageName | Remove-AppxPackage -ErrorAction SilentlyContinue
+    Add-AppxPackage -Path $MsixPath -ExternalLocation $ExternalLocation -ErrorAction Stop
+  }
 } catch {
   Write-Error $_
   exit 1

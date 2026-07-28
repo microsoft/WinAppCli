@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Spectre.Console;
 using Spectre.Console.Testing;
 using WinApp.Cli.ConsoleTasks;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
@@ -92,6 +93,20 @@ public class ManifestServiceTests
         Assert.IsFalse(string.IsNullOrWhiteSpace(info.PackageName), "package name is derived from the executable metadata");
         Assert.IsTrue(Regex.IsMatch(info.PackageName, "^[-.A-Za-z0-9]+$"), "derived package name is schema-clean");
         Assert.IsFalse(string.IsNullOrWhiteSpace(info.PublisherName), "publisher is derived from the executable company name");
+    }
+
+    [TestMethod]
+    public async Task PromptForManifestInfo_EmptyDescription_FallsBackToDefault()
+    {
+        // An empty/whitespace description (e.g. an exe with no Comments/FileDescription) must be
+        // normalized to the default rather than emitting Description="" — the ??= path alone would
+        // keep the empty string.
+        var info = await NewService().PromptForManifestInfoAsync(
+            _tempDir, packageName: "MyApp", publisherName: "CN=Me", version: "1.0.0.0",
+            description: "   ", executable: null, useDefaults: true);
+
+        Assert.IsFalse(string.IsNullOrWhiteSpace(info.Description), "whitespace description is replaced with a default");
+        Assert.AreEqual(SystemDefaultsHelper.GetDefaultDescription(), info.Description);
     }
 
     [TestMethod]

@@ -74,6 +74,7 @@ winapp CLI works with a variety of app frameworks:
 
 Additional guides:
 - [Packaging an EXE/CLI](guides/packaging-cli.md): step-by-step guide for packaging an existing EXE/CLI as MSIX
+- [Sparse packaging](guides/sparse.md): give an unpackaged app package identity with an identity-only (sparse) MSIX and external content
 - [Shell Completion](guides/shell-completion.md): enable tab completion for commands, options, and values in PowerShell, bash, zsh, and fish
 
 ## Commands overview
@@ -81,7 +82,7 @@ Additional guides:
 | Category | Commands |
 |----------|----------|
 | **Setup** | [init](usage.md#init), [restore](usage.md#restore), [update](usage.md#update) |
-| **Identity & Debugging** | [run](usage.md#run), [create-debug-identity](usage.md#create-debug-identity), [unregister](usage.md#unregister) |
+| **Identity & Debugging** | [run](usage.md#run), [create-debug-identity](usage.md#create-debug-identity), [embed-identity](usage.md#embed-identity), [unregister](usage.md#unregister) |
 | **Packaging** | [pack](usage.md#pack) |
 | **Manifests** | [manifest generate](usage.md#manifest-generate), [manifest update-assets](usage.md#manifest-update-assets), [manifest add-alias](usage.md#manifest-add-alias) |
 | **Certificates & Signing** | [cert generate](usage.md#cert-generate), [cert install](usage.md#cert-install), [sign](usage.md#sign), [create-external-catalog](usage.md#create-external-catalog) |
