@@ -273,7 +273,7 @@ winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups
 - `--max-edge N` — Downscale so the longest edge is at most N pixels (0 = no downscale).
 - `--capture-screen` — Capture from the screen DC (includes overlays/popups; foregrounds the window).
 - `--output <path>` — Output MP4 path. Defaults to `recording-<timestamp>-<guid>.mp4` in the current directory.
-- `--frames-dir <path>` — Also write timestamped JPEG evidence to a new directory. Requires `--duration-sec > 0`, `--fps 1..30`, and at most 18,000 requested samples. Frame mode defaults `--max-edge` to 1280 and limits it to 4096 to bound memory use. The MP4 is still required.
+- `--frames-dir <path>` — Also write timestamped JPEG evidence to a new directory. Requires `--duration-sec > 0`, `--fps 1..30`, and at most 18,000 requested samples. Frame mode defaults `--max-edge` to 1280; when specified, it must be 64-4096 (`0` is not supported in frame mode). Very large, near-square outputs that exceed the 256 MiB frame-pipeline budget are rejected with guidance to lower `--max-edge`. The MP4 is still required.
 
 **Agent-readable frame artifacts:**
 

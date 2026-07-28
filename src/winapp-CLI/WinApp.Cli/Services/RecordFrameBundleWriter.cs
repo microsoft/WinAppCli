@@ -53,7 +53,9 @@ internal sealed class RecordFrameCompletion
 internal sealed class RecordFrameBundleWriter : IRecordFrameSink
 {
     internal const int JpegQuality = 85;
-    internal const long QueueBudgetBytes = 128L * 1024 * 1024;
+    internal const long FramePipelineMemoryBudgetBytes = 256L * 1024 * 1024;
+    private const int ReservedFrameBufferCount = 6;
+    private const int MaximumQueuedFrames = 4;
 
     internal static Func<RecordFrameBundleConfiguration, IRecordFrameSink> s_create =
         configuration => new RecordFrameBundleWriter(configuration);
@@ -80,13 +82,7 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
     internal RecordFrameBundleWriter(RecordFrameBundleConfiguration configuration)
     {
         _configuration = configuration;
-        var frameBytes = checked((long)configuration.Width * configuration.Height * 4);
-        if (frameBytes > QueueBudgetBytes / 2)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(configuration),
-                "Frame artifact dimensions exceed the 64 MiB per-frame memory limit.");
-        }
+        var capacity = ComputeQueueCapacity(configuration.Width, configuration.Height);
 
         if (Path.Exists(configuration.FinalDirectory))
         {
@@ -117,7 +113,6 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
                 new FileStream(_indexPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read),
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
-            var capacity = ComputeQueueCapacity(configuration.Width, configuration.Height);
             _channel = Channel.CreateBounded<QueuedFrame>(new BoundedChannelOptions(capacity)
             {
                 SingleReader = true,
@@ -137,7 +132,16 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
     internal static int ComputeQueueCapacity(int width, int height)
     {
         var frameBytes = checked((long)width * height * 4);
-        return Math.Clamp((int)(QueueBudgetBytes / Math.Max(1, frameBytes)), 1, 4);
+        var capacity = (int)(FramePipelineMemoryBudgetBytes / Math.Max(1, frameBytes))
+            - ReservedFrameBufferCount;
+        if (capacity < 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(width),
+                $"Frame artifacts at {width}x{height} exceed the 256 MiB pipeline memory budget. Lower --max-edge.");
+        }
+
+        return Math.Min(capacity, MaximumQueuedFrames);
     }
 
     public async ValueTask WriteAsync(
@@ -153,12 +157,21 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
                 nameof(bgra));
         }
 
-        var ownedPixels = bgra.ToArray();
         try
         {
-            await _channel.Writer.WriteAsync(
-                new QueuedFrame(ownedPixels, sample),
-                cancellationToken).ConfigureAwait(false);
+            while (await _channel.Writer.WaitToWriteAsync(cancellationToken).ConfigureAwait(false))
+            {
+                // Clone only after capacity is available so backpressure does not retain
+                // another full-frame buffer outside the bounded pipeline budget.
+                var queuedFrame = new QueuedFrame(bgra.ToArray(), sample);
+                if (_channel.Writer.TryWrite(queuedFrame))
+                {
+                    return;
+                }
+            }
+
+            await _worker.ConfigureAwait(false);
+            throw new ChannelClosedException();
         }
         catch (ChannelClosedException)
         {

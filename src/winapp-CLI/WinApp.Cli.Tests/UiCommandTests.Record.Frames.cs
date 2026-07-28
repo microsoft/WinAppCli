@@ -60,6 +60,19 @@ public partial class UiCommandTests
         Assert.AreEqual(1280, _fakeUia.LastRecordOptions?.MaxEdge);
 
         ConsoleStdErr.GetStringBuilder().Clear();
+        var unboundedExitCode = await ParseAndInvokeWithCaptureAsync(
+            command,
+            [
+                "-a", "TestApp",
+                "--duration-sec", "1",
+                "--max-edge", "0",
+                "--frames-dir", Path.Join(_tempDirectory.FullName, "unbounded-edge.frames"),
+                "--json",
+            ]);
+        Assert.AreEqual(1, unboundedExitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "does not support --max-edge 0");
+
+        ConsoleStdErr.GetStringBuilder().Clear();
         var rejectedExitCode = await ParseAndInvokeWithCaptureAsync(
             command,
             [
@@ -406,14 +419,19 @@ public partial class UiCommandTests
     public void RecordFrameBundleWriter_QueueCapacityIsBoundedByMemoryBudget()
     {
         Assert.AreEqual(4, RecordFrameBundleWriter.ComputeQueueCapacity(64, 64));
-        Assert.AreEqual(2, RecordFrameBundleWriter.ComputeQueueCapacity(4_096, 4_096));
+        Assert.AreEqual(2, RecordFrameBundleWriter.ComputeQueueCapacity(3_840, 2_160));
+        Assert.AreEqual(1, RecordFrameBundleWriter.ComputeQueueCapacity(4_096, 2_304));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(
+            () => RecordFrameBundleWriter.ComputeQueueCapacity(4_096, 4_096));
 
         var configuration = CreateFrameConfiguration(
             Path.Join(_tempDirectory.FullName, "oversized.frames"),
-            width: 8_192,
-            height: 8_192);
-        Assert.ThrowsExactly<ArgumentOutOfRangeException>(
+            width: 4_096,
+            height: 4_096);
+        var exception = Assert.ThrowsExactly<ArgumentOutOfRangeException>(
             () => new RecordFrameBundleWriter(configuration));
+        StringAssert.Contains(exception.Message, "256 MiB pipeline memory budget");
+        Assert.IsFalse(Directory.Exists(configuration.FinalDirectory));
     }
 
     [TestMethod]
@@ -446,20 +464,22 @@ public partial class UiCommandTests
                     CancellationToken.None);
             }
 
+            var blockedPixels = new byte[64 * 64 * 4];
             var blockedWrite = writer.WriteAsync(
-                pixels,
+                blockedPixels,
                 Sample(5, 500, 500),
                 CancellationToken.None).AsTask();
             await Task.Delay(100);
             Assert.IsFalse(blockedWrite.IsCompleted, "a full queue must apply backpressure");
 
+            blockedPixels[0] = 1;
             releaseEncoder.Set();
             await blockedWrite.WaitAsync(TimeSpan.FromSeconds(5));
             var result = await writer.CompleteAsync(Completion());
 
             Assert.AreEqual(6, result.Samples);
-            Assert.AreEqual(1, result.Images);
-            Assert.AreEqual(5, result.RepeatedSamples);
+            Assert.AreEqual(2, result.Images, "a blocked frame must be cloned only after queue capacity is available");
+            Assert.AreEqual(4, result.RepeatedSamples);
         }
         finally
         {

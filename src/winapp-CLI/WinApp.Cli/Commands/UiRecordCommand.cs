@@ -18,7 +18,7 @@ internal class UiRecordCommand : Command, IShortDescription
 
     internal static readonly Option<string?> FramesDirectoryOption = new("--frames-dir")
     {
-        Description = "Also write agent-readable JPEG frames, frames.ndjson, and manifest.json to this new directory. Requires a timed recording, fps 1-30, at most 18,000 requested samples, and max-edge no greater than 4096 (default 1280).",
+        Description = "Also write agent-readable JPEG frames, frames.ndjson, and manifest.json to this new directory. Requires a timed recording, fps 1-30, at most 18,000 requested samples, and max-edge 64-4096 when specified (default 1280; 0 is not supported).",
     };
 
     public string ShortDescription => "Record a window or element region to an MP4 (H.264) video";
@@ -68,6 +68,7 @@ internal class UiRecordCommand : Command, IShortDescription
             var durationSec = parseResult.GetValue(SharedUiOptions.DurationSecOption);
             var fps = parseResult.GetValue(SharedUiOptions.FpsOption);
             var maxEdge = parseResult.GetValue(SharedUiOptions.MaxEdgeOption);
+            var maxEdgeExplicit = parseResult.GetResult(SharedUiOptions.MaxEdgeOption)?.Implicit == false;
             var captureScreen = parseResult.GetValue(SharedUiOptions.CaptureScreenOption);
             var output = parseResult.GetValue(SharedUiOptions.OutputOption);
             var framesDirectoryOption = parseResult.GetValue(FramesDirectoryOption);
@@ -130,8 +131,15 @@ internal class UiRecordCommand : Command, IShortDescription
                     logger.LogError("{Symbol} --frames-dir supports --max-edge values up to 4096.", UiSymbols.Error);
                     return 1;
                 }
+                if (maxEdgeExplicit && maxEdge == 0)
+                {
+                    const string message = "--frames-dir does not support --max-edge 0; specify 64 through 4096, or omit --max-edge to use 1280.";
+                    UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, message);
+                    logger.LogError("{Symbol} {Message}", UiSymbols.Error, message);
+                    return 1;
+                }
 
-                if (maxEdge == 0)
+                if (!maxEdgeExplicit)
                 {
                     maxEdge = DefaultFrameArtifactMaxEdge;
                 }

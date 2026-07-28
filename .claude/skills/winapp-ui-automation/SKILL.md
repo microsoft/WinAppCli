@@ -128,7 +128,7 @@ winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups
 "" | winapp ui record -a myapp --json --output capture.mp4
 ```
 - Default `--duration-sec 0` records until stopped — **Ctrl+C** for interactive use, or a **newline / EOF on stdin** for programmatic callers (pipe `""` or close stdin to stop). A valid MP4 is always finalized on any graceful stop.
-- Use `--frames-dir` when an agent must inspect intermediate states without a video decoder. It requires a timed recording and writes `manifest.json`, `frames.ndjson`, and changed JPEGs under `frames/`; exact duplicate samples reuse the prior JPEG. Frame mode defaults `--max-edge` to 1280 and caps it at 4096. Use monotonic `elapsedMs` in the index to bound UI transitions.
+- Use `--frames-dir` when an agent must inspect intermediate states without a video decoder. It requires a timed recording and writes `manifest.json`, `frames.ndjson`, and changed JPEGs under `frames/`; exact duplicate samples reuse the prior JPEG. Frame mode defaults `--max-edge` to 1280; when specified, use 64-4096 (`0` is not supported). Very large, near-square output dimensions that exceed the 256 MiB frame-pipeline budget are rejected with guidance to lower `--max-edge`. Use monotonic `elapsedMs` in the index to bound UI transitions.
 - Frame mode never replaces existing MP4 or directory paths. If only one artifact completes, the command returns `partial_output` with the preserved path and a recovery hint. If neither artifact can be preserved after a frame output failure, it returns `frame_output_failed`.
 - `--capture-screen` captures from the screen DC so overlays and popups are included; the window is brought to the foreground first. When WGC is unavailable and `--capture-screen` is not passed, the CLI returns an error — re-run with `--capture-screen` to consent to screen-DC capture.
 - Providing a selector that doesn't match any element fails immediately with `element_not_found` (rather than silently recording the whole window).
@@ -467,7 +467,7 @@ Record the target window (or an element's region) to an H.264 MP4 video. Capture
 | `--capture-screen` | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). | (none) |
 | `--duration-sec` | Recording duration in seconds. Default 0 records until stopped — Ctrl+C, or (for programmatic callers) a newline or EOF on stdin. A valid MP4 is always finalized on graceful stop. | (none) |
 | `--fps` | Frames per second to capture | `15` |
-| `--frames-dir` | Also write agent-readable JPEG frames, frames.ndjson, and manifest.json to this new directory. Requires a timed recording, fps 1-30, at most 18,000 requested samples, and max-edge no greater than 4096 (default 1280). | (none) |
+| `--frames-dir` | Also write agent-readable JPEG frames, frames.ndjson, and manifest.json to this new directory. Requires a timed recording, fps 1-30, at most 18,000 requested samples, and max-edge 64-4096 when specified (default 1280; 0 is not supported). | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--max-edge` | Downscale so the longest edge is at most this many pixels (0 = no downscale) | (none) |
 | `--output` | Save output to this file path. | (none) |
