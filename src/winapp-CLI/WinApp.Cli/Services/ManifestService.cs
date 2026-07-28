@@ -51,15 +51,13 @@ internal partial class ManifestService(
                 {
                     description = fileVersionInfo.Comments;
                 }
-                if (string.IsNullOrWhiteSpace(description) || description == packageName)
+                if ((string.IsNullOrWhiteSpace(description) || description == packageName)
+                    && !string.IsNullOrWhiteSpace(fileVersionInfo.FileDescription))
                 {
                     // Only override with FileDescription when it actually carries text; otherwise
                     // leave description null so the default fallback below applies (assigning an
                     // empty FileDescription here would defeat the ??= and emit Description="").
-                    if (!string.IsNullOrWhiteSpace(fileVersionInfo.FileDescription))
-                    {
-                        description = fileVersionInfo.FileDescription;
-                    }
+                    description = fileVersionInfo.FileDescription;
                 }
                 if (!string.IsNullOrWhiteSpace(fileVersionInfo.CompanyName))
                 {
