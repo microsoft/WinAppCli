@@ -192,9 +192,9 @@ public partial class RealUiAutomationTests
         Assert.AreEqual(2, result.FrameArtifacts.Samples);
         Assert.AreEqual(1, result.FrameArtifacts.Images, "identical processed BGRA frames should share one JPEG");
         Assert.AreEqual(1, result.FrameArtifacts.RepeatedSamples);
-        Assert.IsTrue(File.Exists(Path.Combine(framesDirectory, "manifest.json")));
-        Assert.IsTrue(File.Exists(Path.Combine(framesDirectory, "frames.ndjson")));
-        Assert.AreEqual(1, Directory.GetFiles(Path.Combine(framesDirectory, "frames"), "*.jpg").Length);
+        Assert.IsTrue(File.Exists(Path.Join(framesDirectory, "manifest.json")));
+        Assert.IsTrue(File.Exists(Path.Join(framesDirectory, "frames.ndjson")));
+        Assert.AreEqual(1, Directory.GetFiles(Path.Join(framesDirectory, "frames"), "*.jpg").Length);
     }
 
     [TestMethod]
@@ -205,9 +205,9 @@ public partial class RealUiAutomationTests
         var session = SessionFor(fx);
         await ResolveAsync(svc, session, "btnInvoke");
 
-        var root = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        var framesDirectory = Path.Combine(root, "partial.frames");
+        var framesDirectory = Path.Join(root, "partial.frames");
         WgcCapture.s_isSupported = () => true;
         WgcCapture.s_startGrabber = (_, _, _) =>
             new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
@@ -220,7 +220,7 @@ public partial class RealUiAutomationTests
         var exception = await Assert.ThrowsExactlyAsync<RecordPartialOutputException>(
             () => svc.RecordAsync(session, null, new RecordOptions
             {
-                OutputPath = Path.Combine(root, "partial.mp4"),
+                OutputPath = Path.Join(root, "partial.mp4"),
                 FramesDirectory = framesDirectory,
                 DurationSec = 1,
                 Fps = 1,
@@ -229,7 +229,7 @@ public partial class RealUiAutomationTests
 
         Assert.AreEqual(framesDirectory, exception.FramesDirectory);
         var manifest = JsonSerializer.Deserialize<JsonElement>(
-            await File.ReadAllTextAsync(Path.Combine(framesDirectory, "manifest.json")));
+            await File.ReadAllTextAsync(Path.Join(framesDirectory, "manifest.json")));
         Assert.AreEqual("partial", manifest.GetProperty("status").GetString());
         Assert.AreEqual(1, manifest.GetProperty("timing").GetProperty("sampleCount").GetInt32());
         Assert.AreEqual(0, manifest.GetProperty("video").GetProperty("frameCount").GetInt32());
@@ -243,9 +243,9 @@ public partial class RealUiAutomationTests
         var session = SessionFor(fx);
         await ResolveAsync(svc, session, "btnInvoke");
 
-        var root = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        var framesDirectory = Path.Combine(root, "finalize-partial.frames");
+        var framesDirectory = Path.Join(root, "finalize-partial.frames");
         WgcCapture.s_isSupported = () => true;
         WgcCapture.s_startGrabber = (_, _, _) =>
             new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
@@ -258,7 +258,7 @@ public partial class RealUiAutomationTests
         var exception = await Assert.ThrowsExactlyAsync<RecordPartialOutputException>(
             () => svc.RecordAsync(session, null, new RecordOptions
             {
-                OutputPath = Path.Combine(root, "finalize-partial.mp4"),
+                OutputPath = Path.Join(root, "finalize-partial.mp4"),
                 FramesDirectory = framesDirectory,
                 DurationSec = 1,
                 Fps = 1,
@@ -267,7 +267,7 @@ public partial class RealUiAutomationTests
 
         Assert.AreEqual(framesDirectory, exception.FramesDirectory);
         var manifest = JsonSerializer.Deserialize<JsonElement>(
-            await File.ReadAllTextAsync(Path.Combine(framesDirectory, "manifest.json")));
+            await File.ReadAllTextAsync(Path.Join(framesDirectory, "manifest.json")));
         Assert.AreEqual("partial", manifest.GetProperty("status").GetString());
         Assert.AreEqual("failed", manifest.GetProperty("video").GetProperty("status").GetString());
         Assert.AreEqual(1, manifest.GetProperty("video").GetProperty("frameCount").GetInt32());
@@ -281,10 +281,10 @@ public partial class RealUiAutomationTests
         var session = SessionFor(fx);
         await ResolveAsync(svc, session, "btnInvoke");
 
-        var root = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        var output = Path.Combine(root, "missing.mp4");
-        var framesDirectory = Path.Combine(root, "missing.frames");
+        var output = Path.Join(root, "missing.mp4");
+        var framesDirectory = Path.Join(root, "missing.frames");
         WgcCapture.s_isSupported = () => true;
         WgcCapture.s_startGrabber = (_, _, _) =>
             new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
@@ -319,10 +319,10 @@ public partial class RealUiAutomationTests
         var session = SessionFor(fx);
         await ResolveAsync(svc, session, "btnInvoke");
 
-        var root = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        var output = Path.Combine(root, "cancelled.mp4");
-        var framesDirectory = Path.Combine(root, "cancelled.frames");
+        var output = Path.Join(root, "cancelled.mp4");
+        var framesDirectory = Path.Join(root, "cancelled.frames");
         using var cts = new CancellationTokenSource();
         var frameSink = new FakeFrameSink();
         FakeVideoEncoder? encoder = null;
@@ -363,9 +363,9 @@ public partial class RealUiAutomationTests
         var session = SessionFor(fx);
         await ResolveAsync(svc, session, "btnInvoke");
 
-        var root = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        var output = Path.Combine(root, "drained.mp4");
+        var output = Path.Join(root, "drained.mp4");
         using var cts = new CancellationTokenSource();
         var frameSink = new FakeFrameSink
         {
@@ -386,7 +386,7 @@ public partial class RealUiAutomationTests
         var result = await svc.RecordAsync(session, null, new RecordOptions
         {
             OutputPath = output,
-            FramesDirectory = Path.Combine(root, "drained.frames"),
+            FramesDirectory = Path.Join(root, "drained.frames"),
             DurationSec = 10,
             Fps = 1,
             MaxEdge = 64,
@@ -408,7 +408,7 @@ public partial class RealUiAutomationTests
         var session = SessionFor(fx);
         await ResolveAsync(svc, session, "btnInvoke");
 
-        var root = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         WgcCapture.s_isSupported = () => true;
         WgcCapture.s_startGrabber = (_, _, _) =>
@@ -426,8 +426,8 @@ public partial class RealUiAutomationTests
         var exception = await Assert.ThrowsExactlyAsync<RecordFrameOutputException>(
             () => svc.RecordAsync(session, null, new RecordOptions
             {
-                OutputPath = Path.Combine(root, "failed.mp4"),
-                FramesDirectory = Path.Combine(root, "failed.frames"),
+                OutputPath = Path.Join(root, "failed.mp4"),
+                FramesDirectory = Path.Join(root, "failed.frames"),
                 DurationSec = 1,
                 Fps = 1,
                 MaxEdge = 64,
@@ -445,9 +445,9 @@ public partial class RealUiAutomationTests
         var session = SessionFor(fx);
         await ResolveAsync(svc, session, "btnInvoke");
 
-        var root = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        var output = Path.Combine(root, "preserved.mp4");
+        var output = Path.Join(root, "preserved.mp4");
         FakeVideoEncoder? encoder = null;
         WgcCapture.s_isSupported = () => true;
         WgcCapture.s_startGrabber = (_, _, _) =>
@@ -464,7 +464,7 @@ public partial class RealUiAutomationTests
             () => svc.RecordAsync(session, null, new RecordOptions
             {
                 OutputPath = output,
-                FramesDirectory = Path.Combine(root, "failed.frames"),
+                FramesDirectory = Path.Join(root, "failed.frames"),
                 DurationSec = 1,
                 Fps = 1,
                 MaxEdge = 64,
