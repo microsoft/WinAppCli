@@ -16,7 +16,7 @@ public partial class UiCommandTests
     public async Task Record_FramesDirectory_RequiresTimedRecording()
     {
         var command = GetRequiredService<UiRecordCommand>();
-        var framesDirectory = Path.Combine(_tempDirectory.FullName, "unbounded.frames");
+        var framesDirectory = Path.Join(_tempDirectory.FullName, "unbounded.frames");
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(
             command,
@@ -31,7 +31,7 @@ public partial class UiCommandTests
     public async Task Record_FramesDirectory_RejectsExcessiveCadenceAndSampleCount()
     {
         var command = GetRequiredService<UiRecordCommand>();
-        var framesDirectory = Path.Combine(_tempDirectory.FullName, "limits.frames");
+        var framesDirectory = Path.Join(_tempDirectory.FullName, "limits.frames");
 
         var fpsExitCode = await ParseAndInvokeWithCaptureAsync(
             command,
@@ -51,7 +51,7 @@ public partial class UiCommandTests
     public async Task Record_FramesDirectory_DefaultsAndBoundsMaxEdge()
     {
         var command = GetRequiredService<UiRecordCommand>();
-        var framesDirectory = Path.Combine(_tempDirectory.FullName, "max-edge.frames");
+        var framesDirectory = Path.Join(_tempDirectory.FullName, "max-edge.frames");
 
         var successExitCode = await ParseAndInvokeWithCaptureAsync(
             command,
@@ -66,7 +66,7 @@ public partial class UiCommandTests
                 "-a", "TestApp",
                 "--duration-sec", "1",
                 "--max-edge", "4097",
-                "--frames-dir", Path.Combine(_tempDirectory.FullName, "too-large.frames"),
+                "--frames-dir", Path.Join(_tempDirectory.FullName, "too-large.frames"),
                 "--json",
             ]);
         Assert.AreEqual(1, rejectedExitCode);
@@ -77,8 +77,8 @@ public partial class UiCommandTests
     public async Task Record_FramesDirectory_NeverClobbersExistingMp4()
     {
         var command = GetRequiredService<UiRecordCommand>();
-        var outputPath = Path.Combine(_tempDirectory.FullName, "existing.mp4");
-        var framesDirectory = Path.Combine(_tempDirectory.FullName, "available.frames");
+        var outputPath = Path.Join(_tempDirectory.FullName, "existing.mp4");
+        var framesDirectory = Path.Join(_tempDirectory.FullName, "available.frames");
         await File.WriteAllTextAsync(outputPath, "video sentinel");
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(
@@ -101,10 +101,10 @@ public partial class UiCommandTests
     public async Task Record_FramesDirectory_NeverClobbersExistingFrameDirectory()
     {
         var command = GetRequiredService<UiRecordCommand>();
-        var outputPath = Path.Combine(_tempDirectory.FullName, "available.mp4");
-        var framesDirectory = Path.Combine(_tempDirectory.FullName, "existing.frames");
+        var outputPath = Path.Join(_tempDirectory.FullName, "available.mp4");
+        var framesDirectory = Path.Join(_tempDirectory.FullName, "existing.frames");
         Directory.CreateDirectory(framesDirectory);
-        var sentinelPath = Path.Combine(framesDirectory, "sentinel.txt");
+        var sentinelPath = Path.Join(framesDirectory, "sentinel.txt");
         await File.WriteAllTextAsync(sentinelPath, "frame sentinel");
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(
@@ -127,8 +127,8 @@ public partial class UiCommandTests
     public async Task Record_FramesDirectory_RejectsEitherPathContainingTheOther()
     {
         var command = GetRequiredService<UiRecordCommand>();
-        var outputPath = Path.Combine(_tempDirectory.FullName, "nested.mp4");
-        var framesDirectory = Path.Combine(outputPath, "frames");
+        var outputPath = Path.Join(_tempDirectory.FullName, "nested.mp4");
+        var framesDirectory = Path.Join(outputPath, "frames");
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(
             command,
@@ -145,8 +145,8 @@ public partial class UiCommandTests
         Assert.IsFalse(Path.Exists(outputPath), "validation must run before creating either path");
 
         ConsoleStdErr.GetStringBuilder().Clear();
-        var containingFramesDirectory = Path.Combine(_tempDirectory.FullName, "outer.frames");
-        var nestedOutputPath = Path.Combine(containingFramesDirectory, "nested.mp4");
+        var containingFramesDirectory = Path.Join(_tempDirectory.FullName, "outer.frames");
+        var nestedOutputPath = Path.Join(containingFramesDirectory, "nested.mp4");
         exitCode = await ParseAndInvokeWithCaptureAsync(
             command,
             [
@@ -166,7 +166,7 @@ public partial class UiCommandTests
     public async Task Record_FramesDirectory_AcceptsTrailingDirectorySeparator()
     {
         var command = GetRequiredService<UiRecordCommand>();
-        var framesDirectory = Path.Combine(_tempDirectory.FullName, "trailing.frames");
+        var framesDirectory = Path.Join(_tempDirectory.FullName, "trailing.frames");
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(
             command,
@@ -179,7 +179,7 @@ public partial class UiCommandTests
 
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(framesDirectory, _fakeUia.LastRecordOptions?.FramesDirectory);
-        Assert.IsTrue(File.Exists(Path.Combine(framesDirectory, "manifest.json")));
+        Assert.IsTrue(File.Exists(Path.Join(framesDirectory, "manifest.json")));
     }
 
     [TestMethod]
@@ -197,8 +197,8 @@ public partial class UiCommandTests
             StopReason = "duration_elapsed",
         };
         var command = GetRequiredService<UiRecordCommand>();
-        var outputPath = Path.Combine(_tempDirectory.FullName, "frames.mp4");
-        var framesDirectory = Path.Combine(_tempDirectory.FullName, "frames.bundle");
+        var outputPath = Path.Join(_tempDirectory.FullName, "frames.mp4");
+        var framesDirectory = Path.Join(_tempDirectory.FullName, "frames.bundle");
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(
             command,
@@ -220,8 +220,8 @@ public partial class UiCommandTests
         var artifacts = result.GetProperty("frameArtifacts");
         Assert.AreEqual(framesDirectory, artifacts.GetProperty("directory").GetString());
         Assert.AreEqual(10, artifacts.GetProperty("samples").GetInt32());
-        Assert.IsTrue(File.Exists(Path.Combine(framesDirectory, "manifest.json")));
-        Assert.IsTrue(File.Exists(Path.Combine(framesDirectory, "frames.ndjson")));
+        Assert.IsTrue(File.Exists(Path.Join(framesDirectory, "manifest.json")));
+        Assert.IsTrue(File.Exists(Path.Join(framesDirectory, "frames.ndjson")));
 
         var stderr = ConsoleStdErr.ToString();
         StringAssert.Contains(stderr, "\"recording-started\"");
@@ -232,7 +232,7 @@ public partial class UiCommandTests
     [TestMethod]
     public async Task Record_PartialOutput_EmitsStableRecoveryEnvelope()
     {
-        var videoPath = Path.Combine(_tempDirectory.FullName, "preserved.mp4");
+        var videoPath = Path.Join(_tempDirectory.FullName, "preserved.mp4");
         _fakeUia.RecordException = new RecordPartialOutputException(
             "Frame output failed.",
             videoPath,
@@ -255,7 +255,7 @@ public partial class UiCommandTests
     [TestMethod]
     public async Task Record_PartialOutput_HumanOutputIdentifiesPreservedArtifactAndRecovery()
     {
-        var framesDirectory = Path.Combine(_tempDirectory.FullName, "preserved.frames");
+        var framesDirectory = Path.Join(_tempDirectory.FullName, "preserved.frames");
         _fakeUia.RecordException = new RecordPartialOutputException(
             "MP4 recording failed.",
             videoPath: null,
@@ -278,8 +278,8 @@ public partial class UiCommandTests
     public async Task Record_FramesDirectory_HumanStatusShowsBothDestinations()
     {
         var command = GetRequiredService<UiRecordCommand>();
-        var outputPath = Path.Combine(_tempDirectory.FullName, "status.mp4");
-        var framesDirectory = Path.Combine(_tempDirectory.FullName, "status.frames");
+        var outputPath = Path.Join(_tempDirectory.FullName, "status.mp4");
+        var framesDirectory = Path.Join(_tempDirectory.FullName, "status.frames");
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(
             command,
@@ -317,7 +317,7 @@ public partial class UiCommandTests
     [TestMethod]
     public async Task RecordFrameBundleWriter_WritesCompleteTimelineAndDeduplicatesExactPixels()
     {
-        var finalDirectory = Path.Combine(_tempDirectory.FullName, "writer.frames");
+        var finalDirectory = Path.Join(_tempDirectory.FullName, "writer.frames");
         var writer = new RecordFrameBundleWriter(CreateFrameConfiguration(finalDirectory));
         var first = Enumerable.Repeat((byte)0x20, 64 * 64 * 4).ToArray();
         var changed = Enumerable.Repeat((byte)0xA0, 64 * 64 * 4).ToArray();
@@ -332,7 +332,7 @@ public partial class UiCommandTests
         Assert.AreEqual(2, result.Images);
         Assert.AreEqual(1, result.RepeatedSamples);
 
-        var images = Directory.GetFiles(Path.Combine(finalDirectory, "frames"), "*.jpg");
+        var images = Directory.GetFiles(Path.Join(finalDirectory, "frames"), "*.jpg");
         Assert.AreEqual(2, images.Length);
         CollectionAssert.Contains(
             images.Select(Path.GetFileName).ToArray(),
@@ -342,7 +342,7 @@ public partial class UiCommandTests
         Assert.AreEqual(64, decoded.Width);
         Assert.AreEqual(64, decoded.Height);
 
-        var lines = await File.ReadAllLinesAsync(Path.Combine(finalDirectory, "frames.ndjson"));
+        var lines = await File.ReadAllLinesAsync(Path.Join(finalDirectory, "frames.ndjson"));
         Assert.AreEqual(3, lines.Length);
         var firstEntry = JsonSerializer.Deserialize<JsonElement>(lines[0]);
         var repeatedEntry = JsonSerializer.Deserialize<JsonElement>(lines[1]);
@@ -367,7 +367,7 @@ public partial class UiCommandTests
         Assert.AreEqual(expectedHash, firstEntry.GetProperty("sha256").GetString());
 
         var manifest = JsonSerializer.Deserialize<JsonElement>(
-            await File.ReadAllTextAsync(Path.Combine(finalDirectory, "manifest.json")));
+            await File.ReadAllTextAsync(Path.Join(finalDirectory, "manifest.json")));
         Assert.AreEqual(1, manifest.GetProperty("schemaVersion").GetInt32());
         Assert.AreEqual("complete", manifest.GetProperty("status").GetString());
         Assert.AreEqual(3, manifest.GetProperty("timing").GetProperty("sampleCount").GetInt32());
@@ -379,23 +379,23 @@ public partial class UiCommandTests
         Assert.AreEqual("complete", manifest.GetProperty("video").GetProperty("status").GetString());
         Assert.AreEqual(3, manifest.GetProperty("video").GetProperty("frameCount").GetInt32());
         Assert.AreEqual(
-            Path.Combine(_tempDirectory.FullName, "video.mp4"),
+            Path.Join(_tempDirectory.FullName, "video.mp4"),
             manifest.GetProperty("video").GetProperty("path").GetString());
     }
 
     [TestMethod]
     public async Task RecordFrameBundleWriter_PublicationDoesNotReplaceExistingDirectory()
     {
-        var finalDirectory = Path.Combine(_tempDirectory.FullName, "race.frames");
+        var finalDirectory = Path.Join(_tempDirectory.FullName, "race.frames");
         var writer = new RecordFrameBundleWriter(CreateFrameConfiguration(finalDirectory));
         await writer.WriteAsync(new byte[64 * 64 * 4], Sample(0, 1, 0), CancellationToken.None);
         Directory.CreateDirectory(finalDirectory);
-        await File.WriteAllTextAsync(Path.Combine(finalDirectory, "sentinel.txt"), "keep");
+        await File.WriteAllTextAsync(Path.Join(finalDirectory, "sentinel.txt"), "keep");
 
         await Assert.ThrowsExactlyAsync<IOException>(() => writer.CompleteAsync(Completion()));
         await writer.AbortAsync();
 
-        Assert.AreEqual("keep", await File.ReadAllTextAsync(Path.Combine(finalDirectory, "sentinel.txt")));
+        Assert.AreEqual("keep", await File.ReadAllTextAsync(Path.Join(finalDirectory, "sentinel.txt")));
         Assert.IsFalse(Directory.EnumerateDirectories(
             _tempDirectory.FullName,
             ".*.staging",
@@ -409,7 +409,7 @@ public partial class UiCommandTests
         Assert.AreEqual(2, RecordFrameBundleWriter.ComputeQueueCapacity(4_096, 4_096));
 
         var configuration = CreateFrameConfiguration(
-            Path.Combine(_tempDirectory.FullName, "oversized.frames"),
+            Path.Join(_tempDirectory.FullName, "oversized.frames"),
             width: 8_192,
             height: 8_192);
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(
@@ -432,7 +432,7 @@ public partial class UiCommandTests
                 return [1, 2, 3];
             };
 
-            var finalDirectory = Path.Combine(_tempDirectory.FullName, "backpressure.frames");
+            var finalDirectory = Path.Join(_tempDirectory.FullName, "backpressure.frames");
             writer = new RecordFrameBundleWriter(CreateFrameConfiguration(finalDirectory));
             var pixels = new byte[64 * 64 * 4];
 
@@ -479,7 +479,7 @@ public partial class UiCommandTests
         => new()
         {
             FinalDirectory = finalDirectory,
-            VideoPath = Path.Combine(_tempDirectory.FullName, "video.mp4"),
+            VideoPath = Path.Join(_tempDirectory.FullName, "video.mp4"),
             RecordingId = "recording-test",
             StartedUtc = DateTimeOffset.Parse("2026-01-01T00:00:00Z"),
             Width = width,
