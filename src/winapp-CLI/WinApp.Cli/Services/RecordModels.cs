@@ -190,3 +190,6 @@ internal sealed class RecordPartialOutputException(
     public string? FramesDirectory { get; } = framesDirectory;
     public string RecoveryHint { get; } = recoveryHint;
 }
+
+internal sealed class RecordFrameOutputException(string message, Exception innerException)
+    : IOException(message, innerException);

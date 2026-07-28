@@ -268,24 +268,43 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
         _channel.Writer.TryComplete();
         try
         {
-            await _worker.ConfigureAwait(false);
+            try
+            {
+                await _worker.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException ex)
+            {
+                _configuration.Logger.LogDebug(ex, "Frame artifact worker stopped during cleanup");
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            _configuration.Logger.LogDebug(ex, "Frame artifact worker stopped during cleanup");
+            try
+            {
+                try
+                {
+                    await DisposeIndexWriterAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException
+                    and not OutOfMemoryException
+                    and not StackOverflowException
+                    and not AccessViolationException)
+                {
+                    _configuration.Logger.LogDebug(ex, "Could not close the frame artifact index during cleanup");
+                }
+            }
+            finally
+            {
+                try
+                {
+                    DeleteStagingDirectory();
+                }
+                finally
+                {
+                    _lifetimeCts.Dispose();
+                }
+            }
         }
-
-        try
-        {
-            await DisposeIndexWriterAsync().ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _configuration.Logger.LogDebug(ex, "Could not close the frame artifact index during cleanup");
-        }
-
-        DeleteStagingDirectory();
-        _lifetimeCts.Dispose();
     }
 
     public async ValueTask DisposeAsync()
@@ -405,7 +424,14 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
         {
             Directory.Delete(_stagingDirectory, recursive: true);
         }
-        catch (Exception ex)
+        catch (IOException ex)
+        {
+            _configuration.Logger.LogWarning(
+                ex,
+                "Could not remove incomplete frame artifact staging directory {StagingDirectory}",
+                _stagingDirectory);
+        }
+        catch (UnauthorizedAccessException ex)
         {
             _configuration.Logger.LogWarning(
                 ex,

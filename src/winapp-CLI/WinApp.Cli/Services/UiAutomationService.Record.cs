@@ -328,14 +328,14 @@ internal sealed partial class UiAutomationService
                         Logger = _logger,
                     });
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (IsRecoverableFrameOutputFailure(ex))
                 {
                     frameSinkFailure = ex;
                     _logger.LogError(ex, "Could not initialize frame artifact output");
                 }
             }
 
-            async ValueTask<bool> CommitFrameAsync(
+            async ValueTask CommitFrameAsync(
                 byte[] processedFrame,
                 long sourceVersion,
                 int sourceWidth,
@@ -379,18 +379,22 @@ internal sealed partial class UiAutomationService
                                 Width = contentW,
                                 Height = contentH,
                             },
-                        }, ct).ConfigureAwait(false);
+                        }, CancellationToken.None).ConfigureAwait(false);
                         frameSamplesAccepted++;
                     }
-                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                    {
-                        return false;
-                    }
-                    catch (Exception ex)
+                    catch (Exception ex) when (IsRecoverableFrameOutputFailure(ex))
                     {
                         frameSinkFailure ??= ex;
                         _logger.LogError(ex, "Frame artifact output failed; continuing MP4 recording");
-                        await frameSink.AbortAsync().ConfigureAwait(false);
+                        try
+                        {
+                            await frameSink.AbortAsync().ConfigureAwait(false);
+                        }
+                        catch (Exception cleanupEx) when (IsRecoverableFrameOutputFailure(cleanupEx))
+                        {
+                            frameSinkFailure = new AggregateException(frameSinkFailure, cleanupEx);
+                            _logger.LogDebug(cleanupEx, "Frame artifact cleanup also failed");
+                        }
                         await frameSink.DisposeAsync().ConfigureAwait(false);
                         frameSink = null;
                     }
@@ -416,14 +420,13 @@ internal sealed partial class UiAutomationService
                         Images = frameSink?.ImageCount ?? 0,
                         AchievedFps = elapsedMs > 0 ? frameIndex * 1000.0 / elapsedMs : 0,
                     });
-                    nextProgressMs += 5_000;
+                    nextProgressMs = elapsedMs + 5_000;
                 }
 
-                return true;
             }
 
             Exception? mp4Failure = null;
-            var captureElapsedMs = 1L;
+            long captureElapsedMs;
             try
             {
                 while (!ct.IsCancellationRequested)
@@ -452,11 +455,8 @@ internal sealed partial class UiAutomationService
                                     closedSrc, closedSw, closedSh,
                                     cropX, cropY, closedCropW, closedCropH,
                                     encoderW, encoderH, displayW, displayH);
-                                if (await CommitFrameAsync(
-                                    closedFrame, closedVersion, closedSw, closedSh).ConfigureAwait(false))
-                                {
-                                    lastEncodedVersion = closedVersion;
-                                }
+                                await CommitFrameAsync(
+                                    closedFrame, closedVersion, closedSw, closedSh).ConfigureAwait(false);
                             }
                         }
                         targetClosed = true;
@@ -509,11 +509,8 @@ internal sealed partial class UiAutomationService
                             encoderW, encoderH, displayW, displayH);
                     }
 
-                    if (!await CommitFrameAsync(
-                        frame, sourceVersion, sourceWidth, sourceHeight).ConfigureAwait(false))
-                    {
-                        break;
-                    }
+                    await CommitFrameAsync(
+                        frame, sourceVersion, sourceWidth, sourceHeight).ConfigureAwait(false);
                     if (useWgc)
                     {
                         lastEncodedVersion = sourceVersion;
@@ -535,12 +532,38 @@ internal sealed partial class UiAutomationService
                 }
 
                 captureElapsedMs = Math.Max(1, (long)Math.Round(stopwatch.Elapsed.TotalMilliseconds));
-                encoder.Complete();
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                captureElapsedMs = Math.Max(1, (long)Math.Round(stopwatch.Elapsed.TotalMilliseconds));
             }
             catch (Exception ex)
             {
                 captureElapsedMs = Math.Max(1, (long)Math.Round(stopwatch.Elapsed.TotalMilliseconds));
                 mp4Failure = ex;
+            }
+
+            if (frameIndex == 0 && ct.IsCancellationRequested)
+            {
+                if (frameSink is not null)
+                {
+                    await frameSink.AbortAsync().ConfigureAwait(false);
+                    await frameSink.DisposeAsync().ConfigureAwait(false);
+                    frameSink = null;
+                }
+                ct.ThrowIfCancellationRequested();
+            }
+
+            if (mp4Failure is null)
+            {
+                try
+                {
+                    encoder.Complete();
+                }
+                catch (Exception ex)
+                {
+                    mp4Failure = ex;
+                }
             }
 
             var elapsedMs = captureElapsedMs;
@@ -571,10 +594,21 @@ internal sealed partial class UiAutomationService
                             VideoFrameCount = frameIndex,
                         }).ConfigureAwait(false);
                     }
-                    catch (Exception frameEx)
+                    catch (Exception frameEx) when (frameEx is not OutOfMemoryException
+                        and not StackOverflowException
+                        and not AccessViolationException)
                     {
+                        frameSinkFailure ??= frameEx;
                         _logger.LogError(frameEx, "Could not preserve partial frame artifacts after MP4 failure");
-                        await frameSink.AbortAsync().ConfigureAwait(false);
+                        try
+                        {
+                            await frameSink.AbortAsync().ConfigureAwait(false);
+                        }
+                        catch (Exception cleanupEx) when (IsRecoverableFrameOutputFailure(cleanupEx))
+                        {
+                            frameSinkFailure = new AggregateException(frameSinkFailure, cleanupEx);
+                            _logger.LogDebug(cleanupEx, "Partial frame artifact cleanup also failed");
+                        }
                     }
                 }
                 else if (frameSink is not null)
@@ -596,6 +630,13 @@ internal sealed partial class UiAutomationService
                         framesDirectory: frameArtifacts.Directory,
                         "Inspect the partial frame bundle, then retry the recording to produce the MP4.",
                         mp4Failure);
+                }
+
+                if (frameSinkFailure is not null)
+                {
+                    throw new RecordFrameOutputException(
+                        "Frame artifact output failed and no recording artifact could be preserved.",
+                        frameSinkFailure);
                 }
 
                 ExceptionDispatchInfo.Capture(mp4Failure).Throw();
@@ -621,11 +662,19 @@ internal sealed partial class UiAutomationService
                     await activeFrameSink.DisposeAsync().ConfigureAwait(false);
                     frameSink = null;
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (IsRecoverableFrameOutputFailure(ex))
                 {
                     frameSinkFailure ??= ex;
                     _logger.LogError(ex, "Could not finalize frame artifact output");
-                    await activeFrameSink.AbortAsync().ConfigureAwait(false);
+                    try
+                    {
+                        await activeFrameSink.AbortAsync().ConfigureAwait(false);
+                    }
+                    catch (Exception cleanupEx) when (IsRecoverableFrameOutputFailure(cleanupEx))
+                    {
+                        frameSinkFailure = new AggregateException(frameSinkFailure, cleanupEx);
+                        _logger.LogDebug(cleanupEx, "Final frame artifact cleanup also failed");
+                    }
                     await activeFrameSink.DisposeAsync().ConfigureAwait(false);
                     frameSink = null;
                 }
@@ -667,7 +716,11 @@ internal sealed partial class UiAutomationService
                 {
                     await frameSink.DisposeAsync().ConfigureAwait(false);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is ObjectDisposedException
+                    or InvalidOperationException
+                    or IOException
+                    or UnauthorizedAccessException
+                    or COMException)
                 {
                     _logger.LogDebug(ex, "Could not clean up unpublished frame artifacts");
                 }
@@ -675,6 +728,14 @@ internal sealed partial class UiAutomationService
             grabber?.Dispose();
         }
     }
+
+    private static bool IsRecoverableFrameOutputFailure(Exception exception)
+        => exception is IOException
+            or UnauthorizedAccessException
+            or ArgumentException
+            or InvalidOperationException
+            or ExternalException
+            or OperationCanceledException;
 
     /// <summary>
     /// Called when Windows Graphics Capture fails to initialize. If the user did NOT explicitly

@@ -362,6 +362,18 @@ internal class UiRecordCommand : Command, IShortDescription
                 logger.LogError(partialEx, "{Symbol} {Message}", UiSymbols.Error, partialEx.Message);
                 return 1;
             }
+            catch (RecordFrameOutputException frameEx)
+            {
+                UiJsonError.Emit(
+                    json,
+                    UiJsonError.CodeFrameOutputFailed,
+                    frameEx.Message,
+                    details: frameEx.InnerException?.GetType().Name,
+                    errorOut: parseResult.InvocationConfiguration.Error,
+                    recoveryHint: "Retry with new --output and --frames-dir paths after checking available disk space and permissions.");
+                logger.LogError(frameEx, "{Symbol} {Message}", UiSymbols.Error, frameEx.Message);
+                return 1;
+            }
             catch (UiAmbiguousSelectorException ambiguousEx)
             {
                 UiErrors.AmbiguousSelector(logger, ambiguousEx.Message, json);
@@ -379,7 +391,7 @@ internal class UiRecordCommand : Command, IShortDescription
                 UiErrors.ElementNotFound(logger, notFoundEx.Selector, json);
                 return 1;
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (linkedCts.IsCancellationRequested)
             {
                 // Cancellation before any recording started (e.g. session resolution). The recorder
                 // itself finalizes the MP4 on Ctrl+C, so this only fires for pre-capture cancellation.

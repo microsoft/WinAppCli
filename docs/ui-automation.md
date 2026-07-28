@@ -313,6 +313,7 @@ The events on stderr provide liveness without polluting stdout; stdout remains o
 - `ambiguous_selector` — A plain-text selector matched multiple elements; use a slug from the suggestions shown in the error (or from `inspect` output) to target a specific element.
 - `invalid_arguments` — Invalid option value (e.g., `--duration-sec -1` or `> 86400`).
 - `output_exists` — A frame-mode destination already exists; choose new `--output` and `--frames-dir` paths.
+- `frame_output_failed` — Frame artifact output failed and neither the MP4 nor frame bundle could be preserved; check disk space and permissions, then retry with new paths.
 - `partial_output` — Only the MP4 or frame bundle completed. The JSON error includes `partialOutput` paths and a `recoveryHint`.
 
 **Known limitation — windowed popups:** When you record a *specific element* (by selector) that lives inside a popup which renders in its own top-level window — e.g. a WinUI/XAML flyout, teaching tip, tooltip, or menu (`Xaml_WindowedPopupClass`) — the recorder may capture the underlying main window instead of the popup, producing blank or stale frames. Record the **whole window** (omit the selector), or use `winapp ui screenshot --capture-screen` for popup stills. Tracked in [#646](https://github.com/microsoft/winappCli/issues/646).

@@ -211,6 +211,25 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
+    public async Task Record_FrameOutputFailureWithoutArtifact_EmitsStableRecoveryEnvelope()
+    {
+        _fakeUia.RecordException = new RecordFrameOutputException(
+            "Frame output failed.",
+            new IOException("disk full"));
+        var command = GetRequiredService<UiRecordCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command,
+            ["-a", "TestApp", "--duration-sec", "1", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        var stderr = ConsoleStdErr.ToString();
+        StringAssert.Contains(stderr, "\"frame_output_failed\"");
+        StringAssert.Contains(stderr, "\"recoveryHint\"");
+        StringAssert.Contains(stderr, "\"IOException\"");
+    }
+
+    [TestMethod]
     public async Task RecordFrameBundleWriter_WritesCompleteTimelineAndDeduplicatesExactPixels()
     {
         var finalDirectory = Path.Combine(_tempDirectory.FullName, "writer.frames");

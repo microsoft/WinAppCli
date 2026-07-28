@@ -272,6 +272,172 @@ public partial class RealUiAutomationTests
             SearchOption.TopDirectoryOnly).Any());
     }
 
+    [TestMethod]
+    public async Task RecordAsync_CancellationBeforeFirstSamplePublishesNoArtifacts()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var session = SessionFor(fx);
+        await ResolveAsync(svc, session, "btnInvoke");
+
+        var root = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var output = Path.Combine(root, "cancelled.mp4");
+        var framesDirectory = Path.Combine(root, "cancelled.frames");
+        using var cts = new CancellationTokenSource();
+        var frameSink = new FakeFrameSink();
+        FakeVideoEncoder? encoder = null;
+        WgcCapture.s_isSupported = () => true;
+        WgcCapture.s_startGrabber = (_, _, _) =>
+            new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
+            encoder = new FakeVideoEncoder(path, width, height);
+        RecordFrameBundleWriter.s_create = _ =>
+        {
+            cts.Cancel();
+            return frameSink;
+        };
+
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(
+            () => svc.RecordAsync(session, null, new RecordOptions
+            {
+                OutputPath = output,
+                FramesDirectory = framesDirectory,
+                DurationSec = 1,
+                Fps = 1,
+                MaxEdge = 64,
+            }, cts.Token));
+
+        Assert.IsFalse(File.Exists(output));
+        Assert.IsFalse(Directory.Exists(framesDirectory));
+        Assert.IsTrue(frameSink.Aborted);
+        Assert.IsNotNull(encoder);
+        Assert.IsFalse(encoder!.Completed);
+        Assert.IsTrue(encoder.Disposed);
+    }
+
+    [TestMethod]
+    public async Task RecordAsync_CancellationAfterProcessedFrameCommitsSampleBeforeStopping()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var session = SessionFor(fx);
+        await ResolveAsync(svc, session, "btnInvoke");
+
+        var root = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var output = Path.Combine(root, "drained.mp4");
+        using var cts = new CancellationTokenSource();
+        var frameSink = new FakeFrameSink
+        {
+            OnWrite = cancellationToken =>
+            {
+                cts.Cancel();
+                cancellationToken.ThrowIfCancellationRequested();
+            },
+        };
+        FakeVideoEncoder? encoder = null;
+        WgcCapture.s_isSupported = () => true;
+        WgcCapture.s_startGrabber = (_, _, _) =>
+            new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
+            encoder = new FakeVideoEncoder(path, width, height);
+        RecordFrameBundleWriter.s_create = _ => frameSink;
+
+        var result = await svc.RecordAsync(session, null, new RecordOptions
+        {
+            OutputPath = output,
+            FramesDirectory = Path.Combine(root, "drained.frames"),
+            DurationSec = 10,
+            Fps = 1,
+            MaxEdge = 64,
+        }, cts.Token);
+
+        Assert.AreEqual(1, result.Frames);
+        Assert.AreEqual(1, frameSink.SampleCount);
+        Assert.AreEqual("cancelled", result.StopReason);
+        Assert.IsNotNull(encoder);
+        Assert.AreEqual(1, encoder!.FramesWritten);
+        Assert.IsTrue(encoder.Completed);
+    }
+
+    [TestMethod]
+    public async Task RecordAsync_FrameAndMp4FailureWithoutArtifactThrowsFrameOutputException()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var session = SessionFor(fx);
+        await ResolveAsync(svc, session, "btnInvoke");
+
+        var root = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        WgcCapture.s_isSupported = () => true;
+        WgcCapture.s_startGrabber = (_, _, _) =>
+            new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
+            new FakeVideoEncoder(path, width, height)
+            {
+                WriteFrameException = new IOException("simulated encoder failure"),
+            };
+        RecordFrameBundleWriter.s_create = _ => new FakeFrameSink
+        {
+            WriteException = new IOException("simulated frame failure"),
+        };
+
+        var exception = await Assert.ThrowsExactlyAsync<RecordFrameOutputException>(
+            () => svc.RecordAsync(session, null, new RecordOptions
+            {
+                OutputPath = Path.Combine(root, "failed.mp4"),
+                FramesDirectory = Path.Combine(root, "failed.frames"),
+                DurationSec = 1,
+                Fps = 1,
+                MaxEdge = 64,
+            }, CancellationToken.None));
+
+        Assert.IsInstanceOfType<IOException>(exception.InnerException);
+        StringAssert.Contains(exception.InnerException.Message, "frame failure");
+    }
+
+    [TestMethod]
+    public async Task RecordAsync_FrameAndAbortFailureStillPreservesMp4()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var session = SessionFor(fx);
+        await ResolveAsync(svc, session, "btnInvoke");
+
+        var root = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var output = Path.Combine(root, "preserved.mp4");
+        FakeVideoEncoder? encoder = null;
+        WgcCapture.s_isSupported = () => true;
+        WgcCapture.s_startGrabber = (_, _, _) =>
+            new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
+            encoder = new FakeVideoEncoder(path, width, height);
+        RecordFrameBundleWriter.s_create = _ => new FakeFrameSink
+        {
+            WriteException = new IOException("simulated frame failure"),
+            AbortException = new IOException("simulated cleanup failure"),
+        };
+
+        var exception = await Assert.ThrowsExactlyAsync<RecordPartialOutputException>(
+            () => svc.RecordAsync(session, null, new RecordOptions
+            {
+                OutputPath = output,
+                FramesDirectory = Path.Combine(root, "failed.frames"),
+                DurationSec = 1,
+                Fps = 1,
+                MaxEdge = 64,
+            }, CancellationToken.None));
+
+        Assert.AreEqual(output, exception.VideoPath);
+        Assert.IsTrue(File.Exists(output));
+        Assert.IsNotNull(encoder);
+        Assert.AreEqual(1, encoder!.FramesWritten);
+        Assert.IsTrue(encoder.Completed);
+    }
+
     private sealed class FakeFrameGrabber(byte[] pixels, int width, int height) : WgcCapture.IFrameGrabber
     {
         private long _version;
@@ -297,6 +463,8 @@ public partial class RealUiAutomationTests
         public int FramesWritten { get; private set; }
 
         public bool Completed { get; private set; }
+
+        public bool Disposed { get; private set; }
 
         public Exception? WriteFrameException { get; init; }
 
@@ -326,6 +494,58 @@ public partial class RealUiAutomationTests
 
         public void Dispose()
         {
+            Disposed = true;
         }
+    }
+
+    private sealed class FakeFrameSink : IRecordFrameSink
+    {
+        public int SampleCount { get; private set; }
+
+        public int ImageCount => SampleCount;
+
+        public bool Aborted { get; private set; }
+
+        public Action<CancellationToken>? OnWrite { get; init; }
+
+        public Exception? WriteException { get; init; }
+
+        public Exception? AbortException { get; init; }
+
+        public ValueTask WriteAsync(
+            ReadOnlyMemory<byte> bgra,
+            RecordFrameSample sample,
+            CancellationToken cancellationToken)
+        {
+            OnWrite?.Invoke(cancellationToken);
+            if (WriteException is not null)
+            {
+                throw WriteException;
+            }
+            SampleCount++;
+            return ValueTask.CompletedTask;
+        }
+
+        public Task<RecordFrameArtifactResult> CompleteAsync(RecordFrameCompletion completion)
+            => Task.FromResult(new RecordFrameArtifactResult
+            {
+                Directory = "frames",
+                Manifest = "frames/manifest.json",
+                Index = "frames/frames.ndjson",
+                Samples = SampleCount,
+                Images = ImageCount,
+            });
+
+        public Task AbortAsync()
+        {
+            Aborted = true;
+            if (AbortException is not null)
+            {
+                throw AbortException;
+            }
+            return Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }
