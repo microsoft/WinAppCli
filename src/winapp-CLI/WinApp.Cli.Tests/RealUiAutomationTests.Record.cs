@@ -166,10 +166,10 @@ public partial class RealUiAutomationTests
         var session = SessionFor(fx);
         await ResolveAsync(svc, session, "btnInvoke");
 
-        var root = Path.Combine(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        var output = Path.Combine(root, "record.mp4");
-        var framesDirectory = Path.Combine(root, "record.frames");
+        var output = Path.Join(root, "record.mp4");
+        var framesDirectory = Path.Join(root, "record.frames");
         var frame = Enumerable.Repeat((byte)0x88, 80 * 60 * 4).ToArray();
 
         WgcCapture.s_isSupported = () => true;

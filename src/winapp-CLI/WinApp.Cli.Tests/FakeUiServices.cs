@@ -208,20 +208,20 @@ internal class FakeUiAutomationService : IUiAutomationService
         RecordFrameArtifactResult? frameArtifacts = RecordResult.FrameArtifacts;
         if (options.FramesDirectory is not null)
         {
-            Directory.CreateDirectory(Path.Combine(options.FramesDirectory, "frames"));
+            Directory.CreateDirectory(Path.Join(options.FramesDirectory, "frames"));
             await File.WriteAllTextAsync(
-                Path.Combine(options.FramesDirectory, "frames.ndjson"),
+                Path.Join(options.FramesDirectory, "frames.ndjson"),
                 "{\"sampleIndex\":0}\n",
                 CancellationToken.None);
             await File.WriteAllTextAsync(
-                Path.Combine(options.FramesDirectory, "manifest.json"),
+                Path.Join(options.FramesDirectory, "manifest.json"),
                 "{\"schemaVersion\":1,\"status\":\"complete\"}",
                 CancellationToken.None);
             frameArtifacts = new RecordFrameArtifactResult
             {
                 Directory = options.FramesDirectory,
-                Manifest = Path.Combine(options.FramesDirectory, "manifest.json"),
-                Index = Path.Combine(options.FramesDirectory, "frames.ndjson"),
+                Manifest = Path.Join(options.FramesDirectory, "manifest.json"),
+                Index = Path.Join(options.FramesDirectory, "frames.ndjson"),
                 Samples = RecordResult.Frames,
                 Images = 1,
                 RepeatedSamples = Math.Max(0, RecordResult.Frames - 1),
