@@ -2163,6 +2163,80 @@ public class ProjectRunServiceTests
         Assert.IsNull(resolved.Platform);
     }
 
+    [TestMethod]
+    public void ResolvePlatformInjection_AnalyzerReferenceLacksPlatforms_StillInjects()
+    {
+        // Real-world: files-community/Files references its Roslyn source generator as an analyzer
+        // (OutputItemType="Analyzer", ReferenceOutputAssembly="false"). That generator is netstandard2.0
+        // with no <Platforms>, but it emits no arch-specific output or PRI, so it must NOT veto injection
+        // for the app whose runtime references all declare the arch.
+        var app = WriteFileAt("app\\App.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>WinExe</OutputType>
+                <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+                <Platforms>x86;x64;arm64</Platforms>
+              </PropertyGroup>
+              <ItemGroup>
+                <ProjectReference Include="..\lib\Lib.csproj" />
+                <ProjectReference Include="..\gen\Gen.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+              </ItemGroup>
+            </Project>
+            """);
+        WriteFileAt("lib\\Lib.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+                <Platforms>x86;x64;arm64</Platforms>
+              </PropertyGroup>
+            </Project>
+            """);
+        WriteFileAt("gen\\Gen.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>netstandard2.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var resolved = ProjectRunService.ResolvePlatformInjection(app, PlatformOptions("arm64"));
+
+        Assert.AreEqual("arm64", resolved.Platform);
+    }
+
+    [TestMethod]
+    public void ResolvePlatformInjection_AnalyzerReferenceViaChildMetadata_IsExcluded()
+    {
+        // The build-only marker may be authored as a child element instead of an attribute; both forms must
+        // exclude the reference from the closure so a no-<Platforms> generator doesn't suppress injection.
+        var app = WriteFileAt("app\\App.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>WinExe</OutputType>
+                <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+                <Platforms>x86;x64;arm64</Platforms>
+              </PropertyGroup>
+              <ItemGroup>
+                <ProjectReference Include="..\gen\Gen.csproj">
+                  <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+                  <OutputItemType>Analyzer</OutputItemType>
+                </ProjectReference>
+              </ItemGroup>
+            </Project>
+            """);
+        WriteFileAt("gen\\Gen.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>netstandard2.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var resolved = ProjectRunService.ResolvePlatformInjection(app, PlatformOptions("arm64"));
+
+        Assert.AreEqual("arm64", resolved.Platform);
+    }
+
     #endregion
 
     [TestMethod]

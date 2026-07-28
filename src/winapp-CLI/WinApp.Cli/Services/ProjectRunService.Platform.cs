@@ -120,11 +120,13 @@ internal sealed partial class ProjectRunService
 
     /// <summary>
     /// Walks the transitive <c>ProjectReference</c> closure of <paramref name="start"/> (via static XML,
-    /// no MSBuild) and returns <see langword="true"/> only when EVERY referenced project declares a
-    /// <c>&lt;Platforms&gt;</c> that includes <paramref name="architecture"/>. Any reference that lacks the
-    /// arch — including one with no <c>&lt;Platforms&gt;</c> at all, an unresolvable <c>Include</c>
-    /// (property/wildcard expansion), or a missing file — returns <see langword="false"/> so injection
-    /// falls back to the safe RID-only default. Cycles are de-duped and the walk is depth-bounded.
+    /// no MSBuild) and returns <see langword="true"/> only when EVERY referenced <em>runtime</em> project
+    /// declares a <c>&lt;Platforms&gt;</c> that includes <paramref name="architecture"/>. Build-only
+    /// references (analyzers / source generators — see <c>IsBuildOnlyReference</c>) are excluded from the
+    /// walk. Any runtime reference that lacks the arch — including one with no <c>&lt;Platforms&gt;</c> at
+    /// all, an unresolvable <c>Include</c> (property/wildcard expansion), or a missing file — returns
+    /// <see langword="false"/> so injection falls back to the safe RID-only default. Cycles are de-duped and
+    /// the walk is depth-bounded.
     /// </summary>
     private static bool ProjectReferenceClosureSupportsArch(FileInfo start, string architecture)
     {
@@ -183,8 +185,13 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
-    /// Reads the <c>Include</c> of every <c>&lt;ProjectReference&gt;</c> in the project XML (splitting a
-    /// semicolon list), namespace-agnostic. Returns an empty list when the file is missing/unreadable.
+    /// Reads the <c>Include</c> of every <em>runtime</em> <c>&lt;ProjectReference&gt;</c> in the project XML
+    /// (splitting a semicolon list), namespace-agnostic. Build-only references — analyzers / source
+    /// generators, marked <c>OutputItemType="Analyzer"</c> or <c>ReferenceOutputAssembly="false"</c> — are
+    /// skipped: they emit no arch-specific output and no PRI, so they can neither be desynced by a global
+    /// <c>Platform</c> nor trigger MSB3030/PRI252, and a common netstandard2.0 generator (no
+    /// <c>&lt;Platforms&gt;</c>) must not veto injection for the app that consumes it. Returns an empty list
+    /// when the file is missing/unreadable.
     /// </summary>
     private static List<string> ReadProjectReferenceIncludes(FileInfo project)
     {
@@ -207,6 +214,11 @@ internal sealed partial class ProjectRunService
                 continue;
             }
 
+            if (IsBuildOnlyReference(element))
+            {
+                continue;
+            }
+
             foreach (var segment in include.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
                 includes.Add(segment);
@@ -214,5 +226,37 @@ internal sealed partial class ProjectRunService
         }
 
         return includes;
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when a <c>&lt;ProjectReference&gt;</c> is a build-time-only reference —
+    /// an analyzer / source generator (<c>OutputItemType="Analyzer"</c>) or one whose output assembly is not
+    /// consumed at runtime (<c>ReferenceOutputAssembly="false"</c>). The marker may be an attribute or a
+    /// child element; matching is case-insensitive.
+    /// </summary>
+    private static bool IsBuildOnlyReference(XElement reference)
+    {
+        if (string.Equals(ReadMetadata(reference, "OutputItemType"), "Analyzer", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return string.Equals(ReadMetadata(reference, "ReferenceOutputAssembly"), "false", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Reads MSBuild item metadata that may be authored either as an attribute or a child element on the
+    /// item, namespace-agnostic; <see langword="null"/> when absent.
+    /// </summary>
+    private static string? ReadMetadata(XElement item, string name)
+    {
+        var attribute = item.Attribute(name)?.Value;
+        if (!string.IsNullOrWhiteSpace(attribute))
+        {
+            return attribute.Trim();
+        }
+
+        var child = item.Elements().FirstOrDefault(e => string.Equals(e.Name.LocalName, name, StringComparison.OrdinalIgnoreCase));
+        return string.IsNullOrWhiteSpace(child?.Value) ? null : child.Value.Trim();
     }
 }
