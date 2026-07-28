@@ -442,7 +442,7 @@ public partial class UiCommandTests
             {
                 await writer.WriteAsync(
                     pixels,
-                    Sample(index, index * 100, index * 100),
+                    Sample(index, index * 100L, index * 100d),
                     CancellationToken.None);
             }
 
