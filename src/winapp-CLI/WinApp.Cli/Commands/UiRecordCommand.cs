@@ -18,7 +18,7 @@ internal class UiRecordCommand : Command, IShortDescription
 
     internal static readonly Option<string?> FramesDirectoryOption = new("--frames-dir")
     {
-        Description = "Also write agent-readable JPEG frames, frames.ndjson, and manifest.json to this new directory. Requires a timed recording; max-edge defaults to 1280 and must not exceed 4096.",
+        Description = "Also write agent-readable JPEG frames, frames.ndjson, and manifest.json to this new directory. Requires a timed recording, fps 1-30, at most 18,000 requested samples, and max-edge no greater than 4096 (default 1280).",
     };
 
     public string ShortDescription => "Record a window or element region to an MP4 (H.264) video";
@@ -233,7 +233,10 @@ internal class UiRecordCommand : Command, IShortDescription
                     var until = durationSec > 0
                         ? $"{durationSec}s"
                         : isStdinRedirected ? "Ctrl+C, newline/EOF on stdin" : "Ctrl+C";
-                    ansiConsole.MarkupLine($"[grey]Recording \"{Markup.Escape(session.WindowTitle ?? "")}\" (PID {session.ProcessId}) to {Markup.Escape(filePath)} — until {until}, {fps} fps…[/]");
+                    var destinations = framesDirectory is null
+                        ? filePath
+                        : $"{filePath}; frame artifacts: {framesDirectory}";
+                    ansiConsole.MarkupLine($"[grey]Recording \"{Markup.Escape(session.WindowTitle ?? "")}\" (PID {session.ProcessId}) to {Markup.Escape(destinations)} — until {until}, {fps} fps…[/]");
                 }
 
                 // Readiness gate: completed by OnRecordingStarted after the first frame is encoded.
@@ -360,6 +363,21 @@ internal class UiRecordCommand : Command, IShortDescription
                         FramesDirectory = partialEx.FramesDirectory,
                     });
                 logger.LogError(partialEx, "{Symbol} {Message}", UiSymbols.Error, partialEx.Message);
+                if (!json)
+                {
+                    if (partialEx.VideoPath is not null)
+                    {
+                        logger.LogError("{Symbol} Preserved MP4: {Path}", UiSymbols.Error, partialEx.VideoPath);
+                    }
+                    if (partialEx.FramesDirectory is not null)
+                    {
+                        logger.LogError(
+                            "{Symbol} Preserved frame artifacts: {Path}",
+                            UiSymbols.Error,
+                            partialEx.FramesDirectory);
+                    }
+                    logger.LogError("{Symbol} Recovery: {RecoveryHint}", UiSymbols.Error, partialEx.RecoveryHint);
+                }
                 return 1;
             }
             catch (RecordFrameOutputException frameEx)

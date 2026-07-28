@@ -5,7 +5,6 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.Logging;
-using SkiaSharp;
 using Windows.Win32.Foundation;
 using Windows.Win32.UI.Accessibility;
 using WinApp.Cli.Models;
@@ -75,7 +74,7 @@ internal sealed partial class UiAutomationService
         var useWgc = !useScreen && WgcCapture.IsSupported();
 
         WgcCapture.IFrameGrabber? grabber = null;
-        IRecordFrameSink? frameSink = null;
+        RecordFrameArtifactCoordinator? frameOutput = null;
         var mode = useScreen ? "screen" : (useWgc ? "wgc" : "printwindow");
         var captureHwnd = (long)(nint)hwnd;
 
@@ -268,71 +267,61 @@ internal sealed partial class UiAutomationService
             var stopwatch = Stopwatch.StartNew();
             var startedUtc = DateTimeOffset.UtcNow;
             var frameIndex = 0;
-            var frameSamplesAccepted = 0;
             long lastEncodedVersion = -1;
             var startedSignaled = false;
             var targetClosed = false;
             var nextProgressMs = 5_000L;
-            Exception? frameSinkFailure = null;
             RecordFrameArtifactResult? frameArtifacts = null;
 
             if (options.FramesDirectory is not null)
             {
                 var (contentX, contentY, contentW, contentH) = ComputeFittedContentRect(
                     cropW, cropH, encoderW, encoderH, displayW, displayH);
-                try
+                frameOutput = RecordFrameArtifactCoordinator.Create(new RecordFrameBundleConfiguration
                 {
-                    frameSink = RecordFrameBundleWriter.s_create(new RecordFrameBundleConfiguration
+                    FinalDirectory = options.FramesDirectory,
+                    VideoPath = options.OutputPath,
+                    RecordingId = Guid.NewGuid().ToString("N"),
+                    StartedUtc = startedUtc,
+                    Width = encoderW,
+                    Height = encoderH,
+                    ContentRect = new RecordFrameRectManifest
                     {
-                        FinalDirectory = options.FramesDirectory,
-                        VideoPath = options.OutputPath,
-                        RecordingId = Guid.NewGuid().ToString("N"),
-                        StartedUtc = startedUtc,
-                        Width = encoderW,
-                        Height = encoderH,
-                        ContentRect = new RecordFrameRectManifest
+                        X = contentX,
+                        Y = contentY,
+                        Width = contentW,
+                        Height = contentH,
+                    },
+                    Requested = new RecordFrameRequestManifest
+                    {
+                        DurationSec = options.DurationSec,
+                        Fps = options.Fps,
+                        MaxEdge = options.MaxEdge,
+                        Selector = options.Selector,
+                        CaptureScreen = options.CaptureScreen,
+                    },
+                    Source = new RecordFrameSourceManifest
+                    {
+                        ProcessId = session.ProcessId,
+                        ProcessName = session.ProcessName,
+                        WindowTitle = session.WindowTitle,
+                        SessionHwnd = session.WindowHandle,
+                        CaptureHwnd = captureHwnd,
+                        CaptureMode = mode,
+                    },
+                    Crop = new RecordFrameCropManifest
+                    {
+                        Kind = string.IsNullOrEmpty(elementId) ? "window" : "element",
+                        Rect = new RecordFrameRectManifest
                         {
-                            X = contentX,
-                            Y = contentY,
-                            Width = contentW,
-                            Height = contentH,
+                            X = cropX,
+                            Y = cropY,
+                            Width = cropW,
+                            Height = cropH,
                         },
-                        Requested = new RecordFrameRequestManifest
-                        {
-                            DurationSec = options.DurationSec,
-                            Fps = options.Fps,
-                            MaxEdge = options.MaxEdge,
-                            Selector = options.Selector,
-                            CaptureScreen = options.CaptureScreen,
-                        },
-                        Source = new RecordFrameSourceManifest
-                        {
-                            ProcessId = session.ProcessId,
-                            ProcessName = session.ProcessName,
-                            WindowTitle = session.WindowTitle,
-                            SessionHwnd = session.WindowHandle,
-                            CaptureHwnd = captureHwnd,
-                            CaptureMode = mode,
-                        },
-                        Crop = new RecordFrameCropManifest
-                        {
-                            Kind = string.IsNullOrEmpty(elementId) ? "window" : "element",
-                            Rect = new RecordFrameRectManifest
-                            {
-                                X = cropX,
-                                Y = cropY,
-                                Width = cropW,
-                                Height = cropH,
-                            },
-                        },
-                        Logger = _logger,
-                    });
-                }
-                catch (Exception ex) when (IsRecoverableFrameOutputFailure(ex))
-                {
-                    frameSinkFailure = ex;
-                    _logger.LogError(ex, "Could not initialize frame artifact output");
-                }
+                    },
+                    Logger = _logger,
+                });
             }
 
             async ValueTask CommitFrameAsync(
@@ -344,60 +333,40 @@ internal sealed partial class UiAutomationService
                 var sampleIndex = frameIndex;
                 var elapsedMs = Math.Max(0, (long)Math.Round(stopwatch.Elapsed.TotalMilliseconds));
 
-                if (frameSink is not null)
+                if (frameOutput is not null)
                 {
-                    try
+                    var (_, _, frameCropW, frameCropH) = isWholeWindowWgc
+                        ? (0, 0, sourceWidth, sourceHeight)
+                        : ClampCropRect(
+                            cropX,
+                            cropY,
+                            cropW,
+                            cropH,
+                            sourceWidth,
+                            sourceHeight);
+                    var (contentX, contentY, contentW, contentH) = ComputeFittedContentRect(
+                        frameCropW,
+                        frameCropH,
+                        encoderW,
+                        encoderH,
+                        displayW,
+                        displayH);
+                    await frameOutput.WriteAsync(processedFrame, new RecordFrameSample
                     {
-                        var (_, _, frameCropW, frameCropH) = isWholeWindowWgc
-                            ? (0, 0, sourceWidth, sourceHeight)
-                            : ClampCropRect(
-                                cropX,
-                                cropY,
-                                cropW,
-                                cropH,
-                                sourceWidth,
-                                sourceHeight);
-                        var (contentX, contentY, contentW, contentH) = ComputeFittedContentRect(
-                            frameCropW,
-                            frameCropH,
-                            encoderW,
-                            encoderH,
-                            displayW,
-                            displayH);
-                        await frameSink.WriteAsync(processedFrame, new RecordFrameSample
+                        SampleIndex = sampleIndex,
+                        ElapsedMs = elapsedMs,
+                        MediaTimeMs = sampleIndex * 1000.0 / options.Fps,
+                        SourceVersion = sourceVersion >= 0 ? sourceVersion : null,
+                        SourceWidth = sourceWidth,
+                        SourceHeight = sourceHeight,
+                        ContentRect = new RecordFrameRectManifest
                         {
-                            SampleIndex = sampleIndex,
-                            ElapsedMs = elapsedMs,
-                            MediaTimeMs = sampleIndex * 1000.0 / options.Fps,
-                            SourceVersion = sourceVersion >= 0 ? sourceVersion : null,
-                            SourceWidth = sourceWidth,
-                            SourceHeight = sourceHeight,
-                            ContentRect = new RecordFrameRectManifest
-                            {
-                                X = contentX,
-                                Y = contentY,
-                                Width = contentW,
-                                Height = contentH,
-                            },
-                        }, CancellationToken.None).ConfigureAwait(false);
-                        frameSamplesAccepted++;
-                    }
-                    catch (Exception ex) when (IsRecoverableFrameOutputFailure(ex))
-                    {
-                        frameSinkFailure ??= ex;
-                        _logger.LogError(ex, "Frame artifact output failed; continuing MP4 recording");
-                        try
-                        {
-                            await frameSink.AbortAsync().ConfigureAwait(false);
-                        }
-                        catch (Exception cleanupEx) when (IsRecoverableFrameOutputFailure(cleanupEx))
-                        {
-                            frameSinkFailure = new AggregateException(frameSinkFailure, cleanupEx);
-                            _logger.LogDebug(cleanupEx, "Frame artifact cleanup also failed");
-                        }
-                        await frameSink.DisposeAsync().ConfigureAwait(false);
-                        frameSink = null;
-                    }
+                            X = contentX,
+                            Y = contentY,
+                            Width = contentW,
+                            Height = contentH,
+                        },
+                    }).ConfigureAwait(false);
                 }
 
                 encoder.WriteFrame(
@@ -417,7 +386,7 @@ internal sealed partial class UiAutomationService
                     {
                         ElapsedMs = elapsedMs,
                         Samples = frameIndex,
-                        Images = frameSink?.ImageCount ?? 0,
+                        Images = frameOutput?.ImageCount ?? 0,
                         AchievedFps = elapsedMs > 0 ? frameIndex * 1000.0 / elapsedMs : 0,
                     });
                     nextProgressMs = elapsedMs + 5_000;
@@ -545,11 +514,9 @@ internal sealed partial class UiAutomationService
 
             if (frameIndex == 0 && ct.IsCancellationRequested)
             {
-                if (frameSink is not null)
+                if (frameOutput is not null)
                 {
-                    await frameSink.AbortAsync().ConfigureAwait(false);
-                    await frameSink.DisposeAsync().ConfigureAwait(false);
-                    frameSink = null;
+                    await frameOutput.AbortAsync().ConfigureAwait(false);
                 }
                 ct.ThrowIfCancellationRequested();
             }
@@ -569,6 +536,7 @@ internal sealed partial class UiAutomationService
             var elapsedMs = captureElapsedMs;
             var achievedFps = frameIndex * 1000.0 / elapsedMs;
             var cadenceRatio = achievedFps / options.Fps;
+            var frameSamplesAccepted = frameOutput?.SamplesAccepted ?? 0;
             var frameAchievedFps = frameSamplesAccepted * 1000.0 / elapsedMs;
             var frameCadenceRatio = frameAchievedFps / options.Fps;
             var stopReason = mp4Failure is not null
@@ -579,11 +547,10 @@ internal sealed partial class UiAutomationService
 
             if (mp4Failure is not null)
             {
-                if (frameSink is not null && frameSamplesAccepted > 0)
+                if (frameOutput is not null)
                 {
-                    try
-                    {
-                        frameArtifacts = await frameSink.CompleteAsync(new RecordFrameCompletion
+                    frameArtifacts = await frameOutput.CompleteAfterVideoFailureAsync(
+                        new RecordFrameCompletion
                         {
                             Status = "partial",
                             StopReason = stopReason,
@@ -593,33 +560,6 @@ internal sealed partial class UiAutomationService
                             VideoStatus = "failed",
                             VideoFrameCount = frameIndex,
                         }).ConfigureAwait(false);
-                    }
-                    catch (Exception frameEx) when (frameEx is not OutOfMemoryException
-                        and not StackOverflowException
-                        and not AccessViolationException)
-                    {
-                        frameSinkFailure ??= frameEx;
-                        _logger.LogError(frameEx, "Could not preserve partial frame artifacts after MP4 failure");
-                        try
-                        {
-                            await frameSink.AbortAsync().ConfigureAwait(false);
-                        }
-                        catch (Exception cleanupEx) when (IsRecoverableFrameOutputFailure(cleanupEx))
-                        {
-                            frameSinkFailure = new AggregateException(frameSinkFailure, cleanupEx);
-                            _logger.LogDebug(cleanupEx, "Partial frame artifact cleanup also failed");
-                        }
-                    }
-                }
-                else if (frameSink is not null)
-                {
-                    await frameSink.AbortAsync().ConfigureAwait(false);
-                }
-
-                if (frameSink is not null)
-                {
-                    await frameSink.DisposeAsync().ConfigureAwait(false);
-                    frameSink = null;
                 }
 
                 if (frameArtifacts is not null)
@@ -632,23 +572,21 @@ internal sealed partial class UiAutomationService
                         mp4Failure);
                 }
 
-                if (frameSinkFailure is not null)
+                if (frameOutput?.Failure is not null)
                 {
                     throw new RecordFrameOutputException(
                         "Frame artifact output failed and no recording artifact could be preserved.",
-                        frameSinkFailure);
+                        frameOutput.Failure);
                 }
 
                 ExceptionDispatchInfo.Capture(mp4Failure).Throw();
             }
 
             var fileSize = new FileInfo(options.OutputPath).Length;
-            if (frameSink is not null)
+            if (frameOutput is not null)
             {
-                var activeFrameSink = frameSink;
-                try
-                {
-                    frameArtifacts = await activeFrameSink.CompleteAsync(new RecordFrameCompletion
+                frameArtifacts = await frameOutput.CompleteAfterVideoSuccessAsync(
+                    new RecordFrameCompletion
                     {
                         Status = "complete",
                         StopReason = stopReason,
@@ -659,35 +597,16 @@ internal sealed partial class UiAutomationService
                         VideoFrameCount = frameIndex,
                         VideoFileSize = fileSize,
                     }).ConfigureAwait(false);
-                    await activeFrameSink.DisposeAsync().ConfigureAwait(false);
-                    frameSink = null;
-                }
-                catch (Exception ex) when (IsRecoverableFrameOutputFailure(ex))
-                {
-                    frameSinkFailure ??= ex;
-                    _logger.LogError(ex, "Could not finalize frame artifact output");
-                    try
-                    {
-                        await activeFrameSink.AbortAsync().ConfigureAwait(false);
-                    }
-                    catch (Exception cleanupEx) when (IsRecoverableFrameOutputFailure(cleanupEx))
-                    {
-                        frameSinkFailure = new AggregateException(frameSinkFailure, cleanupEx);
-                        _logger.LogDebug(cleanupEx, "Final frame artifact cleanup also failed");
-                    }
-                    await activeFrameSink.DisposeAsync().ConfigureAwait(false);
-                    frameSink = null;
-                }
             }
 
-            if (frameSinkFailure is not null)
+            if (frameOutput?.Failure is not null)
             {
                 throw new RecordPartialOutputException(
                     "The MP4 was recorded successfully, but frame artifact output failed.",
                     options.OutputPath,
                     framesDirectory: null,
                     "Use the MP4 as the durable recording and retry with new --output and --frames-dir paths.",
-                    frameSinkFailure);
+                    frameOutput.Failure);
             }
 
             var warnings = cadenceRatio < 0.90
@@ -710,11 +629,11 @@ internal sealed partial class UiAutomationService
         }
         finally
         {
-            if (frameSink is not null)
+            if (frameOutput is not null)
             {
                 try
                 {
-                    await frameSink.DisposeAsync().ConfigureAwait(false);
+                    await frameOutput.DisposeAsync().ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is ObjectDisposedException
                     or InvalidOperationException
@@ -728,14 +647,6 @@ internal sealed partial class UiAutomationService
             grabber?.Dispose();
         }
     }
-
-    private static bool IsRecoverableFrameOutputFailure(Exception exception)
-        => exception is IOException
-            or UnauthorizedAccessException
-            or ArgumentException
-            or InvalidOperationException
-            or ExternalException
-            or OperationCanceledException;
 
     private static bool IsRecoverableVideoOutputFailure(Exception exception)
         => exception is IOException
@@ -768,76 +679,6 @@ internal sealed partial class UiAutomationService
     }
 
     internal static bool ShouldEncodeClosedDrainFrame(long cachedVersion, long lastEncodedVersion) => cachedVersion != lastEncodedVersion;
-
-    // Minimum dimensions accepted by the Windows MF H.264 encoder.
-    // Empirically, the encoder rejects frames narrower or shorter than 64 pixels with
-    // COM error 0xC00D36B4 ("media type is invalid"). Frames smaller than this are
-    // centered on a black letterbox canvas padded to the minimum, preserving aspect ratio.
-    private const int MfH264MinWidth = 64;
-    private const int MfH264MinHeight = 64;
-
-    /// <summary>
-    /// Computes the encoder output size and display (content) size for the given crop dimensions.
-    /// The encoder size is at least <see cref="MfH264MinWidth"/>×<see cref="MfH264MinHeight"/> to
-    /// satisfy the Windows MF H.264 encoder's minimum requirements; if the content is smaller it is
-    /// letterboxed (centered on a black background) rather than stretched.
-    /// Both dimensions are always even (H.264 requirement).
-    /// </summary>
-    internal static (int EncoderW, int EncoderH, int DisplayW, int DisplayH) ComputeTargetSize(int width, int height, int maxEdge)
-    {
-        var scale = 1.0;
-        var longest = Math.Max(width, height);
-        if (maxEdge > 0 && longest > maxEdge)
-        {
-            // Scale so the longest DISPLAY edge does not EXCEED maxEdge.
-            // EvenRound (nearest-even) can round up past the limit, so we compute the exact
-            // ratio here and clamp the scaled long edge to the greatest even number ≤ maxEdge.
-            scale = (double)maxEdge / longest;
-        }
-
-        // Round the short edge to nearest-even to minimise aspect-ratio distortion.
-        // Round the long edge DOWN to the greatest even number ≤ maxEdge (when capped) so
-        // "at most N pixels" is honoured — nearest-even could round UP past the cap.
-        int displayW, displayH;
-        if (maxEdge > 0 && longest > maxEdge)
-        {
-            var evenMaxEdge = EvenFloor(maxEdge);
-            if (width >= height)
-            {
-                // width is the long edge — clamp it down to even ≤ maxEdge
-                displayW = evenMaxEdge;
-                // M9: clamp the short edge too — EvenRound can round UP past the cap for
-                // near-square inputs (e.g. 100×100 at maxEdge=99: round(99)=100 > 99).
-                displayH = Math.Min(EvenRound(height * scale), evenMaxEdge);
-            }
-            else
-            {
-                // height is the long edge — clamp it down to even ≤ maxEdge
-                displayH = evenMaxEdge;
-                // M9: clamp the short edge for the same reason.
-                displayW = Math.Min(EvenRound(width * scale), evenMaxEdge);
-            }
-        }
-        else
-        {
-            displayW = EvenRound(width * scale);
-            displayH = EvenRound(height * scale);
-        }
-
-        // Pad up to the encoder minimum while preserving even dimensions.
-        var encoderW = Math.Max(displayW, MfH264MinWidth);
-        var encoderH = Math.Max(displayH, MfH264MinHeight);
-
-        return (encoderW, encoderH, displayW, displayH);
-
-        // Round a scaled double to the nearest even integer ≥ 2.
-        static int EvenRound(double v)
-            => Math.Max(2, (int)(Math.Round(v / 2.0, MidpointRounding.AwayFromZero) * 2));
-
-        // Floor to the greatest even integer ≤ v (and ≥ 2).
-        static int EvenFloor(int v)
-            => Math.Max(2, v % 2 == 0 ? v : v - 1);
-    }
 
     /// <summary>
     /// When the resolved UI element lives in a popup or owned window (a top-level HWND different
@@ -955,86 +796,6 @@ internal sealed partial class UiAutomationService
         var interBottom = Math.Min((int)elemY + (int)elemHeight,     captureOriginTop  + srcHeight);
 
         return interRight <= interLeft || interBottom <= interTop;
-    }
-
-    /// <summary>
-    /// Crops and scales a captured BGRA frame to the encoder target dimensions (top-down output).
-    /// When the display size is smaller than the encoder size, the content is centered on a black
-    /// letterbox background rather than stretched — aspect ratio is always preserved.
-    /// </summary>
-    internal static byte[] ProcessFrame(
-        byte[] source, int sourceWidth, int sourceHeight,
-        int cropX, int cropY, int cropW, int cropH,
-        int encoderWidth, int encoderHeight,
-        int displayWidth, int displayHeight)
-    {
-        // Fast path: whole frame at native encoder size with no letterbox needed.
-        if (cropX == 0 && cropY == 0 && cropW == sourceWidth && cropH == sourceHeight
-            && encoderWidth == sourceWidth && encoderHeight == sourceHeight
-            && displayWidth == encoderWidth && displayHeight == encoderHeight
-            && source.Length == encoderWidth * encoderHeight * 4)
-        {
-            return source;
-        }
-
-        // Clamp crop against the actual frame in case dimensions drifted between frames.
-        (cropX, cropY, cropW, cropH) = ClampCropRect(
-            cropX,
-            cropY,
-            cropW,
-            cropH,
-            sourceWidth,
-            sourceHeight);
-
-        var srcInfo = new SKImageInfo(sourceWidth, sourceHeight, SKColorType.Bgra8888, SKAlphaType.Opaque);
-        using var srcBitmap = new SKBitmap(srcInfo);
-        Marshal.Copy(source, 0, srcBitmap.GetPixels(), Math.Min(source.Length, srcInfo.BytesSize));
-
-        var dstInfo = new SKImageInfo(encoderWidth, encoderHeight, SKColorType.Bgra8888, SKAlphaType.Opaque);
-        using var dstBitmap = new SKBitmap(dstInfo);
-        using (var canvas = new SKCanvas(dstBitmap))
-        {
-            // Black letterbox background (covers padding regions when encoderW > displayW or encoderH > displayH).
-            canvas.Clear(SKColors.Black);
-
-            var (offsetX, offsetY, fitW, fitH) = ComputeFittedContentRect(
-                cropW, cropH, encoderWidth, encoderHeight, displayWidth, displayHeight);
-
-            var srcRect = SKRect.Create(cropX, cropY, cropW, cropH);
-            var dstRect = SKRect.Create(offsetX, offsetY, fitW, fitH);
-            using var paint = new SKPaint { FilterQuality = SKFilterQuality.Medium, IsAntialias = false };
-            canvas.DrawBitmap(srcBitmap, srcRect, dstRect, paint);
-        }
-
-        var output = new byte[dstInfo.BytesSize];
-        Marshal.Copy(dstBitmap.GetPixels(), output, 0, output.Length);
-        return output;
-    }
-
-    internal static (int X, int Y, int Width, int Height) ClampCropRect(
-        int cropX,
-        int cropY,
-        int cropW,
-        int cropH,
-        int sourceWidth,
-        int sourceHeight)
-    {
-        cropX = Math.Clamp(cropX, 0, Math.Max(0, sourceWidth - 1));
-        cropY = Math.Clamp(cropY, 0, Math.Max(0, sourceHeight - 1));
-        cropW = Math.Clamp(cropW, 1, sourceWidth - cropX);
-        cropH = Math.Clamp(cropH, 1, sourceHeight - cropY);
-        return (cropX, cropY, cropW, cropH);
-    }
-
-    internal static (int OffsetX, int OffsetY, int FitW, int FitH) ComputeFittedContentRect(
-        int cropW, int cropH, int encoderWidth, int encoderHeight, int displayWidth, int displayHeight)
-    {
-        var scale = Math.Min(displayWidth / (double)cropW, displayHeight / (double)cropH);
-        var fitW = Math.Clamp((int)Math.Round(cropW * scale), 1, displayWidth);
-        var fitH = Math.Clamp((int)Math.Round(cropH * scale), 1, displayHeight);
-        var offsetX = (encoderWidth - fitW) / 2;
-        var offsetY = (encoderHeight - fitH) / 2;
-        return (offsetX, offsetY, fitW, fitH);
     }
 
     /// <summary>

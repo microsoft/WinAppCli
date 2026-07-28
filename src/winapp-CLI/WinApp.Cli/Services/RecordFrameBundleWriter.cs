@@ -57,6 +57,7 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
 
     internal static Func<RecordFrameBundleConfiguration, IRecordFrameSink> s_create =
         configuration => new RecordFrameBundleWriter(configuration);
+    internal static Func<byte[], int, int, byte[]> s_encodeJpeg = EncodeJpeg;
 
     private readonly RecordFrameBundleConfiguration _configuration;
     private readonly string _stagingDirectory;
@@ -343,7 +344,7 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
                     currentImageIndex++;
                     var fileName = $"frame-{currentImageIndex:D6}-t{queued.Sample.ElapsedMs:D12}.jpg";
                     var absolutePath = Path.Join(_framesDirectory, fileName);
-                    var jpeg = EncodeJpeg(queued.Pixels, _configuration.Width, _configuration.Height);
+                    var jpeg = s_encodeJpeg(queued.Pixels, _configuration.Width, _configuration.Height);
                     await using (var imageStream = new FileStream(
                         absolutePath,
                         FileMode.CreateNew,

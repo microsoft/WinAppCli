@@ -467,7 +467,7 @@ Record the target window (or an element's region) to an H.264 MP4 video. Capture
 | `--capture-screen` | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). | (none) |
 | `--duration-sec` | Recording duration in seconds. Default 0 records until stopped — Ctrl+C, or (for programmatic callers) a newline or EOF on stdin. A valid MP4 is always finalized on graceful stop. | (none) |
 | `--fps` | Frames per second to capture | `15` |
-| `--frames-dir` | Also write agent-readable JPEG frames, frames.ndjson, and manifest.json to this new directory. Requires a timed recording; max-edge defaults to 1280 and must not exceed 4096. | (none) |
+| `--frames-dir` | Also write agent-readable JPEG frames, frames.ndjson, and manifest.json to this new directory. Requires a timed recording, fps 1-30, at most 18,000 requested samples, and max-edge no greater than 4096 (default 1280). | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--max-edge` | Downscale so the longest edge is at most this many pixels (0 = no downscale) | (none) |
 | `--output` | Save output to this file path. | (none) |

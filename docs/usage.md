@@ -1162,6 +1162,9 @@ winapp ui record -a "My App" --duration-sec 0 --max-edge 1280 -o capture.mp4
 
 # Record just one element's region
 winapp ui record -a "My App" btn-save-1234 -o button.mp4
+
+# Keep an agent-readable timeline alongside the MP4
+winapp ui record -a Calculator --duration-sec 5 --fps 10 -o demo.mp4 --frames-dir demo.frames
 ```
 
 **Record options:**
@@ -1170,10 +1173,12 @@ winapp ui record -a "My App" btn-save-1234 -o button.mp4
 - `--max-edge <px>` - Downscale so the longest edge is at most this many pixels (`0` = no downscale).
 - `--capture-screen` - Capture from the screen so overlays/popups are included (may capture occluding windows).
 - `-o, --output <path>` - Output `.mp4` path (defaults to `recording-<timestamp>-<guid>.mp4`).
+- `--frames-dir <path>` - Also write timestamped JPEGs, `frames.ndjson`, and `manifest.json` to a new directory. Requires a timed recording, 1-30 fps, no more than 18,000 requested samples, and `--max-edge` no greater than 4096 (default 1280 in frame mode).
 
 With `--json`, emits a `UiRecordResult` envelope including the output `path`, `frames`, `width`,
-`height`, `fileSize`, `codec` (`"h264"`), and `mode` — the capture path actually used
-(`wgc`, `printwindow`, or `screen`).
+`height`, `fileSize`, `codec` (`"h264"`), `mode` (the capture path actually used), `elapsedMs`,
+`achievedFps`, `cadenceRatio`, and `stopReason`. Frame mode also includes `frameArtifacts`;
+cadence shortfalls are reported in `warnings`. Capture modes are `wgc`, `printwindow`, and `screen`.
 
 > **Known limitation:** recording a *specific element* inside a popup that renders in its own
 > top-level window (WinUI/XAML flyout, teaching tip, tooltip) may capture the underlying main
