@@ -149,6 +149,12 @@ internal sealed partial class ProjectRunService(
         // SHIM (temporary): on hosts with no registered Windows SDK, resolve ref-pack winmds to inject as
         // -p:CsWinRTWindowsMetadata. Skipped when the user set the property. null = no injection.
         var csWinRTMetadata = ResolveCsWinRTMetadataShim(options, shimFramework);
+
+        // Decide whether to inject an explicit -p:Platform (else arch is conveyed by the RID alone). Injected
+        // only when the target AND its whole ProjectReference closure declare a <Platforms> including the
+        // arch, so it can't desync a no-<Platforms> reference (MSB3030/PRI252). Threaded into every pass
+        // below (restore/build/evaluate) via `options`, keeping them in lock-step.
+        options = ResolvePlatformInjection(csproj, options);
         var buildOptions = options;
 
         // When the target lives in a solution, restore the whole solution's managed projects up front so
@@ -682,11 +688,10 @@ internal sealed partial class ProjectRunService(
             }
             else if (name.Equals("Platform", StringComparison.OrdinalIgnoreCase))
             {
-                // Project mode conveys arch via the RuntimeIdentifier only and does NOT inject a global
-                // Platform, so a user -p:Platform is forwarded as-is. The RID still follows --arch, so an
-                // inconsistent pair (e.g. --arch x86 -p:Platform=ARM64) builds a mismatched app — warn so the
-                // divergence isn't silent. (Forcing -p:Platform on a multi-project WinUI app can reintroduce
-                // the MSB3030/PRI252 split with no-<Platforms> library references.)
+                // A user -p:Platform is authoritative: it is forwarded as-is and SUPPRESSES winapp's own
+                // conditional Platform injection (ResolvePlatformInjection). The RID still follows --arch, so
+                // an inconsistent pair (e.g. --arch x86 -p:Platform=ARM64) builds a mismatched app — warn so
+                // the divergence isn't silent.
                 logger.LogDebug(
                     "{UISymbol} -p:{Property} is forwarded as-is; the RuntimeIdentifier still follows --arch, so ensure they are consistent.",
                     UiSymbols.Note, property);

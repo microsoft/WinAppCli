@@ -81,6 +81,7 @@ internal sealed record ProjectRunResolution(
 /// <param name="Properties">Raw repeatable <c>-p Name=Value</c> passthrough, forwarded to both build and evaluation.</param>
 /// <param name="Json">When true, suppress human-readable stdout (banner) and route build diagnostics to stderr so stdout stays pure JSON.</param>
 /// <param name="Solution">The solution the target was resolved from; when set, the build/evaluate passes define <c>$(SolutionDir)</c> and sibling <c>Solution*</c> properties so referencing projects build as they do in VS. Null for a bare <c>.csproj</c>.</param>
+/// <param name="Platform">The MSBuild <c>Platform</c> winapp injects (<c>-p:Platform=…</c>) into every pass when the target — and its whole <c>ProjectReference</c> closure — declares a <c>&lt;Platforms&gt;</c> that includes the target arch. A RESOLVED input (see <c>ResolvePlatformInjection</c>), never user-supplied; null means arch is conveyed by the RID alone (the safe default). Older WindowsAppSDK targets hard-reject the default <c>Platform=AnyCPU</c> for self-contained / packaged builds, so the explicit Platform is what makes those projects build.</param>
 internal sealed record ProjectRunOptions(
     string Configuration,
     string Architecture,
@@ -89,7 +90,8 @@ internal sealed record ProjectRunOptions(
     bool NoRestore,
     IReadOnlyList<string> Properties,
     bool Json = false,
-    FileInfo? Solution = null);
+    FileInfo? Solution = null,
+    string? Platform = null);
 
 /// <summary>
 /// The effective build inputs used to classify runnable candidates (multi-<c>.csproj</c> directory or

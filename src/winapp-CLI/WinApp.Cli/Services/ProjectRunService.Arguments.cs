@@ -34,6 +34,13 @@ internal sealed partial class ProjectRunService
             $"-p:Configuration={options.Configuration}",
         };
 
+        // Mirror the build pass's injected Platform (when resolved) so platform-conditional
+        // <PackageReference> restore under the same Platform the build resolves. Null = RID-only default.
+        if (!string.IsNullOrWhiteSpace(options.Platform))
+        {
+            tokens.Add($"-p:Platform={options.Platform}");
+        }
+
         // Drop dedicated-flag user -p (RID/Configuration/TFM) so the restored graph can't diverge from
         // what the --no-restore build resolves; WarnOnOverriddenFlags surfaces the conflict.
         foreach (var property in ForwardableProperties(options.Properties))
@@ -48,10 +55,13 @@ internal sealed partial class ProjectRunService
 
     /// <summary>
     /// Builds the arguments for the streaming BUILD pass (a plain <c>dotnet build</c> that streams its
-    /// console log). Omits <c>--getProperty</c> (which suppresses that log). Architecture is conveyed by
-    /// the RID (<c>-r win-&lt;arch&gt;</c>) ONLY — project mode never injects <c>-p:Platform</c> (nor
-    /// <c>EnableDynamicPlatformResolution</c>), which would desync a no-<c>&lt;Platforms&gt;</c> WinUI
-    /// library reference → MSB3030/PRI252. A user-supplied <c>-p:Platform</c> still flows through.
+    /// console log). Omits <c>--getProperty</c> (which suppresses that log). Architecture is normally
+    /// conveyed by the RID (<c>-r win-&lt;arch&gt;</c>) alone; an explicit <c>-p:Platform</c> is injected
+    /// ONLY when <see cref="ProjectRunOptions.Platform"/> was resolved (the target and its whole
+    /// <c>ProjectReference</c> closure declare a <c>&lt;Platforms&gt;</c> including the arch — see
+    /// <c>ResolvePlatformInjection</c>), which older WindowsAppSDK targets require but a
+    /// no-<c>&lt;Platforms&gt;</c> reference would break (MSB3030/PRI252). <c>EnableDynamicPlatformResolution</c>
+    /// is never injected. A user-supplied <c>-p:Platform</c> still flows through (and suppresses injection).
     /// </summary>
     internal static string BuildBuildPassArguments(FileInfo csproj, ProjectRunOptions options, string verbosity, string? csWinRTMetadataFolder = null, bool nativeTerminal = false)
     {
@@ -96,6 +106,13 @@ internal sealed partial class ProjectRunService
             tokens.Add($"-p:{property}");
         }
 
+        // Inject the resolved Platform (guard-gated in ResolvePlatformInjection) so WindowsAppSDK
+        // self-contained / packaged builds don't fail on the default Platform=AnyCPU. Null = RID-only.
+        if (!string.IsNullOrWhiteSpace(options.Platform))
+        {
+            tokens.Add($"-p:Platform={options.Platform}");
+        }
+
         AppendSolutionProperties(tokens, options);
 
         // SHIM (temporary): inject the resolved ref-pack winmd folder so cswinrt.exe finds contract winmds
@@ -111,9 +128,10 @@ internal sealed partial class ProjectRunService
     /// <summary>
     /// Builds the arguments for the EVALUATE pass: a fast, side-effect-free <c>dotnet msbuild
     /// --getProperty</c> returning resolved output paths as JSON. Fed the SAME effective build inputs as
-    /// the build pass so its <c>TargetDir</c>/<c>RunCommand</c> match what was built. <c>dotnet msbuild</c>
-    /// rejects <c>-c</c>/<c>-r</c> (MSB1001), so Configuration/RID/TFM go as <c>-p:</c> emitted LAST
-    /// (MSBuild last-wins beats a conflicting user <c>-p</c>).
+    /// the build pass (including a resolved <c>-p:Platform</c>, when any) so its <c>TargetDir</c>/
+    /// <c>RunCommand</c> match what was built. <c>dotnet msbuild</c> rejects <c>-c</c>/<c>-r</c> (MSB1001),
+    /// so Configuration/RID/TFM/Platform go as <c>-p:</c> emitted LAST (MSBuild last-wins beats a
+    /// conflicting user <c>-p</c>).
     /// </summary>
     internal static string BuildEvaluateArguments(FileInfo csproj, ProjectRunOptions options, string? csWinRTMetadataFolder = null)
     {
@@ -139,6 +157,13 @@ internal sealed partial class ProjectRunService
         if (!string.IsNullOrWhiteSpace(options.Framework))
         {
             tokens.Add($"-p:TargetFramework={options.Framework}");
+        }
+
+        // Same resolved Platform the build pass injected (or none) so the evaluate reads TargetDir/RunCommand
+        // from the SAME bin\<Platform>\… the build wrote. Emitted last so it beats a stray user -p.
+        if (!string.IsNullOrWhiteSpace(options.Platform))
+        {
+            tokens.Add($"-p:Platform={options.Platform}");
         }
 
         // SHIM (temporary): keep the evaluate pass's inputs identical to the build pass.

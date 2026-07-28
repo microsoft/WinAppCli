@@ -320,9 +320,10 @@ public class ProjectRunServiceTests
         StringAssert.Contains(args, "-c Debug");
         StringAssert.Contains(args, "-r win-x64");
         StringAssert.Contains(args, "-v minimal");
-        // Project mode conveys arch via the RID only — it must NOT force a global -p:Platform (which
-        // de-synchronizes no-<Platforms> WinUI library references → MSB3030/PRI252).
-        Assert.IsFalse(args.Contains("-p:Platform="), "project mode must not inject a forced -p:Platform");
+        // With no resolved Platform (options.Platform is null), the arg builder conveys arch via the RID
+        // alone — it must NOT emit a Platform derived from --arch (injection is decided upstream by
+        // ResolvePlatformInjection and only for projects whose <Platforms> closure supports the arch).
+        Assert.IsFalse(args.Contains("-p:Platform="), "no resolved Platform → arg builder emits none");
         Assert.IsFalse(args.Contains("EnableDynamicPlatformResolution"), "project mode must not inject EDPR");
         // The build pass must NOT request properties: --getProperty SUPPRESSES MSBuild's console log,
         // which is exactly the streamed output we want the user to see (Change #1). Nor does it need
@@ -341,7 +342,7 @@ public class ProjectRunServiceTests
 
         StringAssert.Contains(args, "-c Release");
         StringAssert.Contains(args, "-r win-arm64");
-        Assert.IsFalse(args.Contains("-p:Platform="), "arch is conveyed by the RID only; no forced Platform");
+        Assert.IsFalse(args.Contains("-p:Platform="), "no resolved Platform → arch is conveyed by the RID alone");
     }
 
     [TestMethod]
@@ -385,8 +386,9 @@ public class ProjectRunServiceTests
     [TestMethod]
     public void BuildBuildPassArguments_UserPlatformProperty_ForwardedAsIs()
     {
-        // Project mode never injects Platform, but a user-supplied -p:Platform still flows through the
-        // user -p loop and is respected (the only -p:Platform present is the user's).
+        // A user-supplied -p:Platform flows through the user -p loop and is respected; ResolvePlatformInjection
+        // suppresses its own injection when the user set Platform, so options.Platform stays null here and
+        // the only -p:Platform present is the user's.
         var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: ["Platform=ARM64"]);
 
@@ -472,7 +474,7 @@ public class ProjectRunServiceTests
         Assert.IsFalse(args.Contains("-r win-x64"), "evaluate pass must not pass -r");
         StringAssert.Contains(args, "-p:Configuration=Debug");
         StringAssert.Contains(args, "-p:RuntimeIdentifier=win-x64");
-        Assert.IsFalse(args.Contains("-p:Platform="), "evaluate pass must not inject a forced -p:Platform");
+        Assert.IsFalse(args.Contains("-p:Platform="), "no resolved Platform → evaluate pass emits none");
         Assert.IsFalse(args.Contains("EnableDynamicPlatformResolution"), "evaluate pass must not inject EDPR");
         StringAssert.Contains(args, "--getProperty:TargetDir");
         StringAssert.Contains(args, "--getProperty:RunCommand");
@@ -537,8 +539,8 @@ public class ProjectRunServiceTests
     [TestMethod]
     public void BuildEvaluateArguments_UserPlatformProperty_ForwardedAsIs()
     {
-        // The evaluate pass never injects Platform either; a user -p:Platform flows through and is the
-        // only Platform present.
+        // A user -p:Platform flows through and is the only Platform present; the resolver leaves
+        // options.Platform null when the user set Platform, so no injected Platform is added.
         var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: ["Platform=ARM64"]);
 
@@ -1986,6 +1988,182 @@ public class ProjectRunServiceTests
         Assert.IsFalse(args.Contains("Configuration=Release", StringComparison.Ordinal), "conflicting user -p:Configuration must be dropped");
         Assert.IsFalse(args.Contains("net8.0", StringComparison.Ordinal), "conflicting user -p:TargetFramework must be dropped");
     }
+
+    #region ResolvePlatformInjection (conditional -p:Platform for AnyCPU-rejecting WindowsAppSDK targets)
+
+    // A single-project WinUI app declaring <Platforms> that includes the arch (real-world: IconExtractor's
+    // unpackaged self-contained app). Older WindowsAppSDK hard-rejects the default Platform=AnyCPU, so
+    // winapp must inject the explicit Platform.
+    private const string PlatformAwareExeCsproj = """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>WinExe</OutputType>
+            <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+            <Platforms>x86;x64;ARM64</Platforms>
+            <WindowsPackageType>None</WindowsPackageType>
+            <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+          </PropertyGroup>
+        </Project>
+        """;
+
+    private static ProjectRunOptions PlatformOptions(string arch, params string[] properties) =>
+        new("Debug", arch, null, NoBuild: false, NoRestore: false, Properties: properties);
+
+    [TestMethod]
+    public void ResolvePlatformInjection_SingleProjectDeclaresArch_InjectsDeclaredToken()
+    {
+        var csproj = WriteFile("App.csproj", PlatformAwareExeCsproj);
+
+        var resolved = ProjectRunService.ResolvePlatformInjection(csproj, PlatformOptions("arm64"));
+
+        // Preserves the exact declared casing ("ARM64", not the canonical "arm64") so it matches the
+        // solution configuration the project defines.
+        Assert.AreEqual("ARM64", resolved.Platform);
+    }
+
+    [TestMethod]
+    public void ResolvePlatformInjection_InjectedPlatformFlowsIntoBuildAndEvaluatePasses()
+    {
+        var csproj = WriteFile("App.csproj", PlatformAwareExeCsproj);
+
+        var resolved = ProjectRunService.ResolvePlatformInjection(csproj, PlatformOptions("arm64"));
+        var buildArgs = ProjectRunService.BuildBuildPassArguments(csproj, resolved, "minimal");
+        var evaluateArgs = ProjectRunService.BuildEvaluateArguments(csproj, resolved);
+        var restoreArgs = ProjectRunService.BuildRestorePassArguments(csproj, resolved);
+
+        StringAssert.Contains(buildArgs, "-p:Platform=ARM64");
+        StringAssert.Contains(evaluateArgs, "-p:Platform=ARM64");
+        StringAssert.Contains(restoreArgs, "-p:Platform=ARM64");
+    }
+
+    [TestMethod]
+    public void ResolvePlatformInjection_NoPlatformsDeclared_DoesNotInject()
+    {
+        // The default no-<Platforms> project builds as AnyCPU today; injecting a Platform is exactly what
+        // the RID-only default avoids, so leave it alone (ExecutableCsproj declares no <Platforms>).
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+
+        var resolved = ProjectRunService.ResolvePlatformInjection(csproj, PlatformOptions("arm64"));
+
+        Assert.IsNull(resolved.Platform);
+    }
+
+    [TestMethod]
+    public void ResolvePlatformInjection_PlatformsMissingArch_DoesNotInject()
+    {
+        // The project declares <Platforms> but not the requested arch — winapp cannot inject a Platform
+        // the project doesn't define, so fall back to RID-only.
+        var csproj = WriteFile("App.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>WinExe</OutputType>
+                <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+                <Platforms>x86;x64</Platforms>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var resolved = ProjectRunService.ResolvePlatformInjection(csproj, PlatformOptions("arm64"));
+
+        Assert.IsNull(resolved.Platform);
+    }
+
+    [TestMethod]
+    public void ResolvePlatformInjection_UserSuppliedPlatform_IsRespected()
+    {
+        // A user -p:Platform is authoritative and suppresses winapp's own injection (it flows through as-is).
+        var csproj = WriteFile("App.csproj", PlatformAwareExeCsproj);
+
+        var resolved = ProjectRunService.ResolvePlatformInjection(csproj, PlatformOptions("arm64", "Platform=x64"));
+
+        Assert.IsNull(resolved.Platform);
+    }
+
+    [TestMethod]
+    public void ResolvePlatformInjection_MultiProjectAllDeclareArch_Injects()
+    {
+        // Real-world: WINUI3_BOOKMS (app + Core lib) both declare <Platforms> including arm64, so the whole
+        // closure supports the arch and injection is safe.
+        var app = WriteFileAt("app\\App.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>WinExe</OutputType>
+                <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+                <Platforms>x86;x64;arm64</Platforms>
+              </PropertyGroup>
+              <ItemGroup>
+                <ProjectReference Include="..\lib\Lib.csproj" />
+              </ItemGroup>
+            </Project>
+            """);
+        WriteFileAt("lib\\Lib.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net8.0</TargetFramework>
+                <Platforms>AnyCPU;x64;x86;arm64</Platforms>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var resolved = ProjectRunService.ResolvePlatformInjection(app, PlatformOptions("arm64"));
+
+        Assert.AreEqual("arm64", resolved.Platform);
+    }
+
+    [TestMethod]
+    public void ResolvePlatformInjection_MultiProjectReferenceLacksPlatforms_DoesNotInject()
+    {
+        // The multi-project guard: a referenced library with NO <Platforms> (implicit AnyCPU) is the exact
+        // case a global -p:Platform desyncs → MSB3030/PRI252. Skip injection to preserve the invariant.
+        var app = WriteFileAt("app\\App.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>WinExe</OutputType>
+                <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+                <Platforms>x86;x64;arm64</Platforms>
+              </PropertyGroup>
+              <ItemGroup>
+                <ProjectReference Include="..\lib\Lib.csproj" />
+              </ItemGroup>
+            </Project>
+            """);
+        WriteFileAt("lib\\Lib.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net8.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """);
+
+        var resolved = ProjectRunService.ResolvePlatformInjection(app, PlatformOptions("arm64"));
+
+        Assert.IsNull(resolved.Platform);
+    }
+
+    [TestMethod]
+    public void ResolvePlatformInjection_UnresolvableReferenceInclude_DoesNotInject()
+    {
+        // An MSBuild-expression Include can't be statically verified, so the guard cannot prove the closure
+        // is clean — fall back to RID-only rather than force a Platform onto an unknown project.
+        var app = WriteFileAt("app\\App.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>WinExe</OutputType>
+                <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+                <Platforms>x86;x64;arm64</Platforms>
+              </PropertyGroup>
+              <ItemGroup>
+                <ProjectReference Include="$(LibDir)\Lib.csproj" />
+              </ItemGroup>
+            </Project>
+            """);
+
+        var resolved = ProjectRunService.ResolvePlatformInjection(app, PlatformOptions("arm64"));
+
+        Assert.IsNull(resolved.Platform);
+    }
+
+    #endregion
 
     [TestMethod]
     public async Task IsDefinitivelyUnpackagedAsync_WindowsPackageTypeNone_ReturnsTrue()
