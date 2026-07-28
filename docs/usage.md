@@ -144,7 +144,7 @@ winapp new [options]
 - Installs the official WinUI template pack (`Microsoft.WindowsAppSDK.WinUI.CSharp.Templates`) on demand
 - Delegates scaffolding to `dotnet new <template>`
 
-WinUI templates already include Windows packaging and identity (`Package.appxmanifest`) — except the `lib` class-library template, which has no app manifest — so no separate `winapp init` step is required. For app templates (`blank`, `navview`, `tabview`, `mvvm`), use `winapp run` to build and launch the app. The `lib` template produces a class library to reference from an app project. The `unittest` template is a **packaged MSTest app whose tests run when the app is launched** (`winapp run .` or `dotnet run`) — not via `dotnet test`. `winapp new` scaffolds against your installed .NET SDK's target framework and prints the appropriate next step for the template you choose.
+WinUI templates already include Windows packaging and identity (`Package.appxmanifest`) — except the `lib` class-library template, which has no app manifest — so no separate `winapp init` step is required. For app templates (`blank`, `navview`, `tabview`, `mvvm`), use `dotnet run` to build and launch the app. The `lib` template produces a class library to reference from an app project. The `unittest` template is a **packaged MSTest app whose tests run when the app is launched** (`dotnet run`) — not via `dotnet test`. `winapp new` scaffolds against your installed .NET SDK's target framework and prints the appropriate next step for the template you choose.
 
 **Examples:**
 
