@@ -122,6 +122,35 @@ function Get-HostArch {
     }
 }
 
+function Get-GhAccounts {
+    <# Logins gh has configured, so a permissions error can suggest a real alternative. #>
+    $status = & gh auth status 2>&1 | Out-String
+    $logins = [regex]::Matches($status, 'account (\S+)') | ForEach-Object { $_.Groups[1].Value }
+    return @($logins | Select-Object -Unique)
+}
+
+function Get-AccessHint {
+    param([string]$Url)
+
+    $repo = if ($Url -match 'repos/([^/?]+/[^/?]+)') { $Matches[1] } else { 'that repository' }
+
+    $active = & gh api user --jq '.login' 2>$null
+    $active = if ($LASTEXITCODE -eq 0 -and $active) { $active.Trim() } else { 'unknown' }
+
+    $others = @(Get-GhAccounts | Where-Object { $_ -ne $active })
+    $lines = @(
+        "Cannot see $repo as GitHub user '$active'.",
+        '',
+        'The repository may not exist, or this account may not have access to it.'
+    )
+    if ($others) {
+        $lines += "Other accounts gh has configured: $($others -join ', ')"
+        $lines += "Switch with:  gh auth switch --user $($others[0])"
+    }
+    $lines += 'For a private org repo the token must also be SSO-authorized for that organization.'
+    return ($lines -join "`n")
+}
+
 function Invoke-Gh {
     <# Runs gh and returns parsed JSON. stderr is kept out of the result so notices can't corrupt it. #>
     param([string[]]$Arguments, [switch]$Raw)
@@ -130,7 +159,10 @@ function Invoke-Gh {
     try {
         $output = & gh @Arguments 2>$errFile
         if ($LASTEXITCODE -ne 0) {
-            $stderr = Get-Content $errFile -Raw -ErrorAction SilentlyContinue
+            $stderr = (Get-Content $errFile -Raw -ErrorAction SilentlyContinue)
+            if ($stderr -match 'HTTP 404') {
+                Fail (Get-AccessHint -Url ($Arguments -join ' '))
+            }
             Fail "gh $($Arguments -join ' ') failed:`n$stderr"
         }
     }
