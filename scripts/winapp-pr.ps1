@@ -1,4 +1,5 @@
 #!/usr/bin/env pwsh
+
 <#
 .SYNOPSIS
     Install a winapp CLI MSIX built by CI, from a PR, a branch, or a specific run.
@@ -12,8 +13,12 @@
     CI mints a fresh self-signed certificate on every build, so trusting it needs admin. Only
     that one step elevates -- the download runs unelevated so your `gh` credentials still apply.
 
-    Run with -AddToPath once to install this script to a directory on your user PATH so
-    `winapp-pr` works from anywhere.
+    Install it on any machine, no clone required (needs the GitHub CLI):
+
+        & ([scriptblock]::Create((irm https://raw.githubusercontent.com/microsoft/winappCli/main/scripts/winapp-pr.ps1))) -AddToPath
+
+    From a clone, run with -AddToPath instead. Either way the script is copied to a directory
+    on your user PATH so `winapp-pr` works from anywhere; -Update refreshes it later.
 
 .PARAMETER Target
     A PR number (690) or a branch name (main, zt/new-command). Omit it to choose interactively.
