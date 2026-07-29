@@ -118,6 +118,12 @@ $WorkflowName = 'Build and Package'
 $ArtifactName = 'msix-packages'
 $PackageNames = @('winapp', 'winapp-dev')
 $SourceUrl    = 'https://raw.githubusercontent.com/microsoft/winappCli/main/scripts/winapp-pr.ps1'
+
+# Control flow uses exceptions rather than `exit`: when this script is run straight from the
+# web as a scriptblock, `exit` terminates the caller's whole session instead of just the script.
+$FailSentinel   = 'winapp-pr:failed'
+$CancelSentinel = 'winapp-pr:cancelled'
+
 $ToolHome     = Join-Path $env:LOCALAPPDATA 'winapp-dev'
 $CacheRoot    = Join-Path $ToolHome 'cache'
 $StateFile    = Join-Path $ToolHome 'current.json'
@@ -131,7 +137,7 @@ function Write-Warn   { param([string]$m) Write-Host "   [WARN] $m" -ForegroundC
 function Fail {
     param([string]$Message)
     Write-Host "`n[ERROR] $Message" -ForegroundColor Red
-    exit 1
+    throw $FailSentinel
 }
 
 function Get-HostArch {
@@ -460,7 +466,7 @@ function Select-InstallTarget {
 
     if (-not $choice) {
         Write-Host "`nCancelled." -ForegroundColor Yellow
-        exit 0
+        throw $CancelSentinel
     }
     Write-Host ''
     return $choice.Spec
@@ -731,131 +737,152 @@ function Show-Status {
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
-if ($Update) {
-    Write-Step 'Updating winapp-pr from main'
-    Update-Self
-    exit 0
-}
-
-if ($AddToPath) {
-    Write-Step 'Installing winapp-pr to your user PATH'
-    Install-ToPath
-    exit 0
-}
-
-if ($Status) {
-    Write-Step 'Installed winapp package'
-    Show-Status
-    exit 0
-}
-
-if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
-    Fail 'The GitHub CLI (gh) is required. Install it from https://cli.github.com and run: gh auth login'
-}
-
-$repoName = Resolve-Repo
-if ($repoName -notmatch '^[^/]+/[^/]+$') {
-    Fail "Repo must be in owner/name form, got '$repoName'."
-}
-
-$architecture = if ($Arch) { $Arch } else { Get-HostArch }
-
-if ($PruneCerts) {
-    Write-Step 'Pruning stale CI certificates'
-    $state = Get-InstallState
-    $keep = ''
-    if ($state -and $state.Thumbprint) {
-        $keep = $state.Thumbprint
-        Write-Detail "Keeping $($keep.Substring(0,12))... (used by the installed build)"
+function Invoke-Main {
+    if ($Update) {
+        Write-Step 'Updating winapp-pr from main'
+        Update-Self
+        return
     }
-    else {
-        Write-Warn 'No install record found; reinstalling the current build will need re-trusting.'
-    }
-    Remove-StaleCertificates -KeepThumbprint $keep
-    exit 0
-}
 
-if ($Run) {
-    Write-Step "Resolving build from $repoName"
-    $runDetail = Invoke-Gh @('api', "repos/$repoName/actions/runs/$Run")
-    $runs = @($runDetail)
-    Write-Detail "Run $Run  ($($runDetail.head_branch))"
-}
-else {
-    $spec = $Target
-    if (-not $spec) {
-        $spec = if ($NonInteractive -or $List) {
-            Resolve-CurrentBranch -RepoName $repoName
+    if ($AddToPath) {
+        Write-Step 'Installing winapp-pr to your user PATH'
+        Install-ToPath
+        return
+    }
+
+    if ($Status) {
+        Write-Step 'Installed winapp package'
+        Show-Status
+        return
+    }
+
+    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+        Fail 'The GitHub CLI (gh) is required. Install it from https://cli.github.com and run: gh auth login'
+    }
+
+    $repoName = Resolve-Repo
+    if ($repoName -notmatch '^[^/]+/[^/]+$') {
+        Fail "Repo must be in owner/name form, got '$repoName'."
+    }
+
+    $architecture = if ($Arch) { $Arch } else { Get-HostArch }
+
+    if ($PruneCerts) {
+        Write-Step 'Pruning stale CI certificates'
+        $state = Get-InstallState
+        $keep = ''
+        if ($state -and $state.Thumbprint) {
+            $keep = $state.Thumbprint
+            Write-Detail "Keeping $($keep.Substring(0,12))... (used by the installed build)"
         }
         else {
-            Select-InstallTarget -RepoName $repoName
+            Write-Warn 'No install record found; reinstalling the current build will need re-trusting.'
+        }
+        Remove-StaleCertificates -KeepThumbprint $keep
+        return
+    }
+
+    if ($Run) {
+        Write-Step "Resolving build from $repoName"
+        $runDetail = Invoke-Gh @('api', "repos/$repoName/actions/runs/$Run")
+        $runs = @($runDetail)
+        Write-Detail "Run $Run  ($($runDetail.head_branch))"
+    }
+    else {
+        $spec = $Target
+        if (-not $spec) {
+            $spec = if ($NonInteractive -or $List) {
+                Resolve-CurrentBranch -RepoName $repoName
+            }
+            else {
+                Select-InstallTarget -RepoName $repoName
+            }
+        }
+        Write-Step "Resolving build from $repoName"
+        $runs = Get-CandidateRuns -RepoName $repoName -TargetSpec $spec
+        if (-not $runs) {
+            Fail "No '$WorkflowName' runs found for '$spec' in $repoName."
         }
     }
-    Write-Step "Resolving build from $repoName"
-    $runs = Get-CandidateRuns -RepoName $repoName -TargetSpec $spec
-    if (-not $runs) {
-        Fail "No '$WorkflowName' runs found for '$spec' in $repoName."
+
+    if ($List) {
+        Write-Step 'Recent runs'
+        $runs | Select-Object -First 10 | ForEach-Object {
+            $when = ([datetime]$_.created_at).ToLocalTime().ToString('yyyy-MM-dd HH:mm')
+            $state = if ($_.conclusion) { $_.conclusion } else { $_.status }
+            Write-Detail ("{0,-12} {1}  {2,-10} {3}" -f $_.id, $when, $state, $_.head_sha.Substring(0, 8))
+        }
+        Write-Host "`nInstall a specific one with: winapp-pr -Run <id>" -ForegroundColor Cyan
+        return
+    }
+
+    $selected = Get-MsixArtifact -RepoName $repoName -Runs $runs
+    if (-not $selected) {
+        Fail "No run for this target has an unexpired '$ArtifactName' artifact (they expire after 90 days)."
+    }
+
+    $runState = if ($selected.Run.conclusion) { $selected.Run.conclusion } else { $selected.Run.status }
+    Write-Ok "Run $($selected.Run.id)  [$runState]  $($selected.Run.head_sha.Substring(0,8))"
+    if ($runState -ne 'success') {
+        Write-Warn "That run did not succeed; the package may be from a failing build."
+    }
+    if ($script:TargetHeadSha -and $selected.Run.head_sha -ne $script:TargetHeadSha) {
+        Write-Warn "No package for the PR's head commit ($($script:TargetHeadSha.Substring(0,8))) yet -- using an earlier build."
+    }
+
+    Write-Step "Fetching $architecture package"
+    $package = Get-CachedMsixPackage -RepoName $repoName -Run $selected.Run -Architecture $architecture
+
+    Write-Step 'Trusting signing certificate'
+    $certificate = Get-PackageCertificate -PackagePath $package.FullName
+    if (-not $certificate) {
+        Fail "Could not read a signing certificate from $($package.Name)."
+    }
+    Grant-CertificateTrust -Certificate $certificate
+
+    Write-Step 'Installing package'
+    Install-WinappPackage -PackagePath $package.FullName
+
+    Write-Step 'Verifying'
+    $installed = Get-InstalledWinapp | Select-Object -First 1
+    if ($installed) {
+        Write-Ok "$($installed.Name) $($installed.Version)"
+        Set-InstallState @{
+            Repo        = $repoName
+            RunId       = $selected.Run.id
+            Branch      = $selected.Run.head_branch
+            HeadSha     = $selected.Run.head_sha.Substring(0, 8)
+            Version     = $installed.Version
+            Thumbprint  = $certificate.Thumbprint
+            InstalledAt = (Get-Date).ToString('s')
+        }
+    }
+    $version = & winapp --version 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Detail "winapp --version -> $version"
+    }
+    else {
+        Write-Warn "'winapp --version' failed; open a new terminal and try again."
+    }
+
+    Write-Host "`nDone. Run 'winapp-pr -PruneCerts' occasionally to clear old CI certificates.`n" -ForegroundColor Green
+}
+
+$exitCode = 0
+try {
+    Invoke-Main
+}
+catch {
+    switch ($_.Exception.Message) {
+        $CancelSentinel { $exitCode = 0 }
+        $FailSentinel   { $exitCode = 1 }
+        default {
+            Write-Host "`n[ERROR] $($_.Exception.Message)" -ForegroundColor Red
+            $exitCode = 1
+        }
     }
 }
 
-if ($List) {
-    Write-Step 'Recent runs'
-    $runs | Select-Object -First 10 | ForEach-Object {
-        $when = ([datetime]$_.created_at).ToLocalTime().ToString('yyyy-MM-dd HH:mm')
-        $state = if ($_.conclusion) { $_.conclusion } else { $_.status }
-        Write-Detail ("{0,-12} {1}  {2,-10} {3}" -f $_.id, $when, $state, $_.head_sha.Substring(0, 8))
-    }
-    Write-Host "`nInstall a specific one with: winapp-pr -Run <id>" -ForegroundColor Cyan
-    exit 0
-}
-
-$selected = Get-MsixArtifact -RepoName $repoName -Runs $runs
-if (-not $selected) {
-    Fail "No run for this target has an unexpired '$ArtifactName' artifact (they expire after 90 days)."
-}
-
-$runState = if ($selected.Run.conclusion) { $selected.Run.conclusion } else { $selected.Run.status }
-Write-Ok "Run $($selected.Run.id)  [$runState]  $($selected.Run.head_sha.Substring(0,8))"
-if ($runState -ne 'success') {
-    Write-Warn "That run did not succeed; the package may be from a failing build."
-}
-if ($script:TargetHeadSha -and $selected.Run.head_sha -ne $script:TargetHeadSha) {
-    Write-Warn "No package for the PR's head commit ($($script:TargetHeadSha.Substring(0,8))) yet -- using an earlier build."
-}
-
-Write-Step "Fetching $architecture package"
-$package = Get-CachedMsixPackage -RepoName $repoName -Run $selected.Run -Architecture $architecture
-
-Write-Step 'Trusting signing certificate'
-$certificate = Get-PackageCertificate -PackagePath $package.FullName
-if (-not $certificate) {
-    Fail "Could not read a signing certificate from $($package.Name)."
-}
-Grant-CertificateTrust -Certificate $certificate
-
-Write-Step 'Installing package'
-Install-WinappPackage -PackagePath $package.FullName
-
-Write-Step 'Verifying'
-$installed = Get-InstalledWinapp | Select-Object -First 1
-if ($installed) {
-    Write-Ok "$($installed.Name) $($installed.Version)"
-    Set-InstallState @{
-        Repo        = $repoName
-        RunId       = $selected.Run.id
-        Branch      = $selected.Run.head_branch
-        HeadSha     = $selected.Run.head_sha.Substring(0, 8)
-        Version     = $installed.Version
-        Thumbprint  = $certificate.Thumbprint
-        InstalledAt = (Get-Date).ToString('s')
-    }
-}
-$version = & winapp --version 2>&1
-if ($LASTEXITCODE -eq 0) {
-    Write-Detail "winapp --version -> $version"
-}
-else {
-    Write-Warn "'winapp --version' failed; open a new terminal and try again."
-}
-
-Write-Host "`nDone. Run 'winapp-pr -PruneCerts' occasionally to clear old CI certificates.`n" -ForegroundColor Green
+# Only a real script file may call exit: from a scriptblock it would close the caller's session.
+if ($PSCommandPath) { exit $exitCode }
+$global:LASTEXITCODE = $exitCode
