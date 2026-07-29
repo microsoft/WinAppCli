@@ -41,11 +41,19 @@
 .PARAMETER AddToPath
     Copy this script to %LOCALAPPDATA%\Programs\winapp-dev, add it to the user PATH, and exit.
 
+.PARAMETER Update
+    Download the latest winapp-pr from main and reinstall it to the user PATH.
+
 .PARAMETER NonInteractive
     Skip the picker when no target is given and use the current git branch instead.
 
 .PARAMETER Force
     Re-download the artifact even if a cached copy exists.
+
+.EXAMPLE
+    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/microsoft/winappCli/main/scripts/winapp-pr.ps1))) -AddToPath
+
+    Install winapp-pr on a machine that has no clone of the repo. Requires the GitHub CLI.
 
 .EXAMPLE
     winapp-pr
@@ -88,6 +96,8 @@ param(
 
     [switch]$AddToPath,
 
+    [switch]$Update,
+
     [switch]$NonInteractive,
 
     [switch]$Force
@@ -95,9 +105,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Captured at script scope so -AddToPath works when the script is run straight from the web,
+# where there is no file on disk to copy from.
+$SelfSource = $MyInvocation.MyCommand.ScriptBlock.ToString()
+
 $WorkflowName = 'Build and Package'
 $ArtifactName = 'msix-packages'
 $PackageNames = @('winapp', 'winapp-dev')
+$SourceUrl    = 'https://raw.githubusercontent.com/microsoft/winappCli/main/scripts/winapp-pr.ps1'
 $ToolHome     = Join-Path $env:LOCALAPPDATA 'winapp-dev'
 $CacheRoot    = Join-Path $ToolHome 'cache'
 $StateFile    = Join-Path $ToolHome 'current.json'
@@ -199,10 +214,19 @@ function Set-InstallState {
 # ── Self-install ─────────────────────────────────────────────────────────────
 
 function Install-ToPath {
-    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+    param([string]$Source)
 
+    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
     $targetPs1 = Join-Path $InstallDir 'winapp-pr.ps1'
-    if ($PSCommandPath -ne $targetPs1) {
+
+    if ($Source) {
+        Set-Content -Path $targetPs1 -Value $Source -Encoding UTF8
+    }
+    elseif (-not $PSCommandPath) {
+        # Running straight from the web: our own source is the freshest copy there is.
+        Set-Content -Path $targetPs1 -Value $SelfSource -Encoding UTF8
+    }
+    elseif ((Test-Path $PSCommandPath) -and $PSCommandPath -ne $targetPs1) {
         Copy-Item $PSCommandPath $targetPs1 -Force
     }
 
@@ -225,7 +249,21 @@ where pwsh >nul 2>nul && (pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0wi
     }
 
     Write-Detail "Installed: $targetPs1"
-    Write-Host "`nUsage: winapp-pr 690   |   winapp-pr main   |   winapp-pr -List" -ForegroundColor Cyan
+    Write-Host "`nUsage: winapp-pr   |   winapp-pr 690   |   winapp-pr main   |   winapp-pr -Status" -ForegroundColor Cyan
+}
+
+function Update-Self {
+    Write-Detail "Downloading $SourceUrl"
+    try {
+        $latest = Invoke-RestMethod -Uri $SourceUrl -UseBasicParsing
+    }
+    catch {
+        Fail "Could not download the latest winapp-pr: $_"
+    }
+    if (-not $latest -or $latest -notmatch 'winapp-pr') {
+        Fail 'Downloaded content does not look like winapp-pr.ps1.'
+    }
+    Install-ToPath -Source $latest
 }
 
 # ── Target resolution ────────────────────────────────────────────────────────
@@ -687,6 +725,12 @@ function Show-Status {
 }
 
 # ── Main ─────────────────────────────────────────────────────────────────────
+
+if ($Update) {
+    Write-Step 'Updating winapp-pr from main'
+    Update-Self
+    exit 0
+}
 
 if ($AddToPath) {
     Write-Step 'Installing winapp-pr to your user PATH'
