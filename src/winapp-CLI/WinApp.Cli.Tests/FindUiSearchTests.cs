@@ -86,7 +86,7 @@ public class FindUiSearchTests
     public void GetPattern_ReactorScenario_TagsAndNuGetSetup_NoXaml()
     {
         var engine = BuildEngine();
-        var (formatted, found) = engine.GetPattern("reactor-flex-1");
+        var (formatted, found, _) = engine.GetPattern("reactor-flex-1");
         Assert.IsTrue(found);
         StringAssert.Contains(formatted, "[Reactor]");
         StringAssert.Contains(formatted, "**Setup:** NuGet `Microsoft.UI.Reactor`");
@@ -108,9 +108,23 @@ public class FindUiSearchTests
     public void GetPattern_ByPrefixedId_ReturnsScenario()
     {
         var engine = BuildEngine();
-        var (formatted, found) = engine.GetPattern("gallery-tabview-1");
+        var (formatted, found, canonicalId) = engine.GetPattern("gallery-tabview-1");
         Assert.IsTrue(found);
         StringAssert.Contains(formatted, "TabView");
+        Assert.AreEqual("gallery-tabview-1", canonicalId, "an exact id resolves to itself");
+    }
+
+    [TestMethod]
+    public void GetPattern_ByBareControlId_ReturnsCanonicalScenarioId()
+    {
+        // The fallback resolver accepts a bare control id ("gallery-tabview") and
+        // returns the lowest-numbered scenario. GetPattern must report the CANONICAL
+        // scenario id (gallery-tabview-1), not echo the caller's bare token — this is
+        // what usage telemetry emits, so it must never be the raw user input.
+        var engine = BuildEngine();
+        var (_, found, canonicalId) = engine.GetPattern("gallery-tabview");
+        Assert.IsTrue(found, "a bare control id must still resolve");
+        Assert.AreEqual("gallery-tabview-1", canonicalId, "must be the canonical scenario id, not the bare input");
     }
 
     [TestMethod]
@@ -118,20 +132,23 @@ public class FindUiSearchTests
     {
         var engine = BuildEngine();
         // Both gallery and toolkit expose colorpicker-1; the prefix must disambiguate.
-        var (gallery, gFound) = engine.GetPattern("gallery-colorpicker-1");
-        var (toolkit, tFound) = engine.GetPattern("toolkit-colorpicker-1");
+        var (gallery, gFound, gId) = engine.GetPattern("gallery-colorpicker-1");
+        var (toolkit, tFound, tId) = engine.GetPattern("toolkit-colorpicker-1");
         Assert.IsTrue(gFound);
         Assert.IsTrue(tFound);
         StringAssert.Contains(gallery, "ColorPicker properties");
         StringAssert.Contains(toolkit, "Basic usage");
+        Assert.AreEqual("gallery-colorpicker-1", gId);
+        Assert.AreEqual("toolkit-colorpicker-1", tId);
     }
 
     [TestMethod]
     public void GetPattern_UnknownId_ReturnsNotFound()
     {
         var engine = BuildEngine();
-        var (_, found) = engine.GetPattern("does-not-exist");
+        var (_, found, canonicalId) = engine.GetPattern("does-not-exist");
         Assert.IsFalse(found);
+        Assert.IsNull(canonicalId, "an unresolved id has no canonical id (and is never emitted)");
     }
 
     [TestMethod]

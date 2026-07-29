@@ -593,11 +593,11 @@ internal sealed class SearchEngine
         return scenarios[bestIdx];
     }
 
-    public (string formatted, bool found) GetPattern(string id)
+    public (string formatted, bool found, string? canonicalId) GetPattern(string id)
     {
         // Check core patterns
         var core = _corePatterns.FirstOrDefault(p => p.Id == id);
-        if (core != null) return (FormatCorePattern(core), true);
+        if (core != null) return (FormatCorePattern(core), true, core.Id);
 
         // Strip a known "{source}-" prefix and remember which source the caller asked
         // for, so we don't return a Gallery scenario for a "toolkit-..." id (or
@@ -634,8 +634,8 @@ internal sealed class SearchEngine
                 .FirstOrDefault();
         }
 
-        if (scenario != null) return (FormatScenario(scenario), true);
-        return ($"Pattern '{id}' not found.", false);
+        if (scenario != null) return (FormatScenario(scenario), true, $"{scenario.Source}-{scenario.Id}");
+        return ($"Pattern '{id}' not found.", false, null);
     }
 
     /// <summary>Parse the integer after the last <c>-</c> in <paramref name="id"/>,

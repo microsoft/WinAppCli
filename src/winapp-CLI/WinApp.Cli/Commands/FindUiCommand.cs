@@ -9,6 +9,7 @@ using Spectre.Console;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services.Controls;
+using WinApp.Cli.Telemetry.Events;
 
 namespace WinApp.Cli.Commands;
 
@@ -169,15 +170,19 @@ internal sealed class FindUiCommand : Command, IShortDescription
 
             if (ids.Length > 0)
             {
-                return EmitCode(engine, ids, json);
+                return EmitCode(engine, ids, includeReactor, json);
             }
 
-            return EmitSearch(engine, query!, max, source, json);
+            return EmitSearch(engine, query!, max, source, includeReactor, json);
         }
 
-        private int EmitSearch(SearchEngine engine, string query, int max, string? source, bool json)
+        private int EmitSearch(SearchEngine engine, string query, int max, string? source, bool includeReactor, bool json)
         {
             var groups = engine.SearchGrouped(query, maxControls: max, maxScenariosPerControl: 3, sourceFilter: source);
+
+            // Usage telemetry: mode + registry-validated source + match count. The
+            // free-form query is never captured. Emitted for both output formats.
+            FindUiUsageEvent.LogSearch(source, includeReactor, json, groups.Count);
 
             if (json)
             {
@@ -226,13 +231,26 @@ internal sealed class FindUiCommand : Command, IShortDescription
             return 0;
         }
 
-        private int EmitCode(SearchEngine engine, string[] ids, bool json)
+        private int EmitCode(SearchEngine engine, string[] ids, bool includeReactor, bool json)
         {
-            var entries = ids.Select(id =>
+            var entries = new List<FindUiCodeEntryJson>(ids.Length);
+            // Telemetry uses the corpus-canonical id (e.g. "gallery-tabview-1"), never
+            // the caller's raw --id token — the fallback resolver accepts bare control
+            // ids ("gallery-gridview"), so echoing the request would both misreport the
+            // fetched scenario and leak an unvalidated user string. Unresolved ids are
+            // reflected in the count only (RequestedIdCount - resolved), never emitted.
+            var resolvedCanonicalIds = new List<string>(ids.Length);
+            foreach (var id in ids)
             {
-                var (formatted, found) = engine.GetPattern(id);
-                return new FindUiCodeEntryJson { Id = id, Found = found, Content = formatted };
-            }).ToList();
+                var (formatted, found, canonicalId) = engine.GetPattern(id);
+                entries.Add(new FindUiCodeEntryJson { Id = id, Found = found, Content = formatted });
+                if (found && canonicalId is not null)
+                {
+                    resolvedCanonicalIds.Add(canonicalId);
+                }
+            }
+
+            FindUiUsageEvent.LogFetch(includeReactor, json, resolvedCanonicalIds, ids.Length);
 
             if (json)
             {
@@ -363,6 +381,10 @@ internal sealed class FindUiCommand : Command, IShortDescription
         private int EmitList(SearchEngine engine, bool json)
         {
             var items = engine.ListAll().Select(x => new FindUiScenarioJson { Id = x.id, Header = x.scenario }).ToList();
+
+            // Usage telemetry: mode + item count. No per-id detail (a browse isn't a
+            // targeted lookup) and no free-form input to capture.
+            FindUiUsageEvent.LogList(json, items.Count);
 
             if (json)
             {
