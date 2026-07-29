@@ -274,6 +274,66 @@ function manifestUpdateAssets(options: ManifestUpdateAssetsOptions): Promise<Win
 
 ---
 
+### `migrateAnalyze()`
+
+Analyze UWP source (C#/XAML/manifest) pre-build, source-only (no restore or build), and emit a stable JSON migration plan to stdout: per-file disposition + per-line findings + severity + fix refs + feature area. The analysis runs out-of-process via the bundled analyzer driver.
+
+```typescript
+function migrateAnalyze(options?: MigrateAnalyzeOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `directory` | `string \| undefined` | No | UWP project directory to analyze (default: current directory) |
+| `fromUwp` | `boolean \| undefined` | No | Analyze UWP source (currently the only supported migration source). |
+| `project` | `string \| undefined` | No | Target a specific .csproj (default: scan the whole directory). |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `migrateScaffold()`
+
+Copy UWP source (C#/XAML/assets) into an existing WinUI 3 scaffold and apply the mechanical, deterministic transforms a migration always needs: merge SDK-sample shared/ + SharedContent/ assets, preserve the original .csproj/.appxmanifest under .uwp-source/, patch the csproj RuntimeIdentifier for x86/x64/ARM64 F5, rewrite Windows.UI.Xaml -> Microsoft.UI.Xaml, neutralize content-filter-prone helper classes, and wire the MainWindow RootFrame + initial Navigate. Triage / per-line findings are produced separately by 'migrate analyze'.
+
+```typescript
+function migrateScaffold(options: MigrateScaffoldOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `source` | `string` | Yes | UWP project source folder (contains the .csproj and Package.appxmanifest). |
+| `fromUwp` | `boolean \| undefined` | No | Migrate from UWP source (currently the only supported source). |
+| `target` | `string \| undefined` | No | Existing WinUI 3 scaffold to migrate into (produced by 'dotnet new winui'). |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `migrateValidate()`
+
+Validate a migrated WinUI 3 project before declaring the migration done. Runs source-only static gates: UWP API/namespace residue (backed by the analyzer), single-project layout, MainWindow shell wiring, and Package.appxmanifest packaging requirements. Emits sanitized [PASS]/[FAIL]/[WARN] lines to stdout with full diagnostics in .validator-diagnostics.txt, and returns non-zero when any [FAIL] remains. Build/run health is covered separately by 'winapp build' / 'winapp run'.
+
+```typescript
+function migrateValidate(options?: MigrateValidateOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `directory` | `string \| undefined` | No | Migrated WinUI 3 project root to validate (default: current directory) |
+| `fromUwp` | `boolean \| undefined` | No | Validate a UWP→WinUI 3 migration (currently the only supported direction). |
+| `project` | `string \| undefined` | No | Target a specific .csproj (default: scan the whole directory). |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `packageApp()`
 
 Create MSIX installer from your built app. Run after building your app. A manifest (Package.appxmanifest or appxmanifest.xml) is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest Package.appxmanifest --cert ./devcert.pfx
@@ -731,7 +791,7 @@ function uiWaitFor(options?: UiWaitForOptions): Promise<WinappResult>
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `property` | `string \| undefined` | No | Property name to read or filter on |
 | `timeout` | `number \| undefined` | No | Timeout in milliseconds |
-| `value` | `string \| undefined` | No | Wait for element value to equal this string. Uses smart fallback (TextPattern → ValuePattern → Name). Combine with --property to check a specific property instead. |
+| `value` | `string \| undefined` | No | Wait for element value to equal this string. Uses smart fallback (TextPattern -> ValuePattern -> Name). Combine with --property to check a specific property instead. |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -1208,6 +1268,39 @@ type ManifestTemplates = "packaged" | "sparse"
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
 
+### `MigrateAnalyzeOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `directory` | `string \| undefined` | No | UWP project directory to analyze (default: current directory) |
+| `fromUwp` | `boolean \| undefined` | No | Analyze UWP source (currently the only supported migration source). |
+| `project` | `string \| undefined` | No | Target a specific .csproj (default: scan the whole directory). |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `MigrateScaffoldOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `source` | `string` | Yes | UWP project source folder (contains the .csproj and Package.appxmanifest). |
+| `fromUwp` | `boolean \| undefined` | No | Migrate from UWP source (currently the only supported source). |
+| `target` | `string \| undefined` | No | Existing WinUI 3 scaffold to migrate into (produced by 'dotnet new winui'). |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `MigrateValidateOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `directory` | `string \| undefined` | No | Migrated WinUI 3 project root to validate (default: current directory) |
+| `fromUwp` | `boolean \| undefined` | No | Validate a UWP→WinUI 3 migration (currently the only supported direction). |
+| `project` | `string \| undefined` | No | Target a specific .csproj (default: scan the whole directory). |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
 ### `PackageOptions`
 
 | Property | Type | Required | Description |
@@ -1477,7 +1570,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `property` | `string \| undefined` | No | Property name to read or filter on |
 | `timeout` | `number \| undefined` | No | Timeout in milliseconds |
-| `value` | `string \| undefined` | No | Wait for element value to equal this string. Uses smart fallback (TextPattern → ValuePattern → Name). Combine with --property to check a specific property instead. |
+| `value` | `string \| undefined` | No | Wait for element value to equal this string. Uses smart fallback (TextPattern -> ValuePattern -> Name). Combine with --property to check a specific property instead. |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |

@@ -361,6 +361,78 @@ export async function manifestUpdateAssets(options: ManifestUpdateAssetsOptions)
 }
 
 // ---------------------------------------------------------------------------
+// migrate analyze
+// ---------------------------------------------------------------------------
+
+export interface MigrateAnalyzeOptions extends CommonOptions {
+  /** UWP project directory to analyze (default: current directory) */
+  directory?: string;
+  /** Analyze UWP source (currently the only supported migration source). */
+  fromUwp?: boolean;
+  /** Target a specific .csproj (default: scan the whole directory). */
+  project?: string;
+}
+
+/**
+ * Analyze UWP source (C#/XAML/manifest) pre-build, source-only (no restore or build), and emit a stable JSON migration plan to stdout: per-file disposition + per-line findings + severity + fix refs + feature area. The analysis runs out-of-process via the bundled analyzer driver.
+ */
+export async function migrateAnalyze(options: MigrateAnalyzeOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['migrate', 'analyze'];
+  if (options.directory) args.push(options.directory);
+  if (options.fromUwp) args.push('--from-uwp');
+  if (options.project) args.push('--project', options.project);
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// migrate scaffold
+// ---------------------------------------------------------------------------
+
+export interface MigrateScaffoldOptions extends CommonOptions {
+  /** UWP project source folder (contains the .csproj and Package.appxmanifest). */
+  source: string;
+  /** Migrate from UWP source (currently the only supported source). */
+  fromUwp?: boolean;
+  /** Existing WinUI 3 scaffold to migrate into (produced by 'dotnet new winui'). */
+  target?: string;
+}
+
+/**
+ * Copy UWP source (C#/XAML/assets) into an existing WinUI 3 scaffold and apply the mechanical, deterministic transforms a migration always needs: merge SDK-sample shared/ + SharedContent/ assets, preserve the original .csproj/.appxmanifest under .uwp-source/, patch the csproj RuntimeIdentifier for x86/x64/ARM64 F5, rewrite Windows.UI.Xaml -> Microsoft.UI.Xaml, neutralize content-filter-prone helper classes, and wire the MainWindow RootFrame + initial Navigate. Triage / per-line findings are produced separately by 'migrate analyze'.
+ */
+export async function migrateScaffold(options: MigrateScaffoldOptions): Promise<WinappResult> {
+  const args: string[] = ['migrate', 'scaffold'];
+  args.push(options.source);
+  if (options.fromUwp) args.push('--from-uwp');
+  if (options.target) args.push('--target', options.target);
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// migrate validate
+// ---------------------------------------------------------------------------
+
+export interface MigrateValidateOptions extends CommonOptions {
+  /** Migrated WinUI 3 project root to validate (default: current directory) */
+  directory?: string;
+  /** Validate a UWP→WinUI 3 migration (currently the only supported direction). */
+  fromUwp?: boolean;
+  /** Target a specific .csproj (default: scan the whole directory). */
+  project?: string;
+}
+
+/**
+ * Validate a migrated WinUI 3 project before declaring the migration done. Runs source-only static gates: UWP API/namespace residue (backed by the analyzer), single-project layout, MainWindow shell wiring, and Package.appxmanifest packaging requirements. Emits sanitized [PASS]/[FAIL]/[WARN] lines to stdout with full diagnostics in .validator-diagnostics.txt, and returns non-zero when any [FAIL] remains. Build/run health is covered separately by 'winapp build' / 'winapp run'.
+ */
+export async function migrateValidate(options: MigrateValidateOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['migrate', 'validate'];
+  if (options.directory) args.push(options.directory);
+  if (options.fromUwp) args.push('--from-uwp');
+  if (options.project) args.push('--project', options.project);
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
 // package
 // ---------------------------------------------------------------------------
 
@@ -975,7 +1047,7 @@ export interface UiWaitForOptions extends CommonOptions {
   property?: string;
   /** Timeout in milliseconds */
   timeout?: number;
-  /** Wait for element value to equal this string. Uses smart fallback (TextPattern → ValuePattern → Name). Combine with --property to check a specific property instead. */
+  /** Wait for element value to equal this string. Uses smart fallback (TextPattern -> ValuePattern -> Name). Combine with --property to check a specific property instead. */
   value?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
