@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using Spectre.Console.Testing;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Helpers;
@@ -2206,6 +2207,54 @@ public class RunCommandTests : BaseCommandTests
     public void CombineLaunchArguments_HandlesMissingSides(string? runArguments, string? appArgs, string? expected)
     {
         Assert.AreEqual(expected, RunCommand.Handler.CombineLaunchArguments(runArguments, appArgs));
+    }
+
+    #endregion
+
+    #region F2 cross-arch launch diagnostics
+
+    // The reviewer's F2 repro (arm64 target on an x64 host) can't be reproduced on an arm64 machine,
+    // because arm64 Windows executes arm64 AND x64 AND x86. These assert the decision table in a
+    // host-agnostic way so the behavior is pinned on whichever machine runs the suite.
+
+    [TestMethod]
+    public void CanCurrentOsRunArchitecture_HostOwnArchitecture_IsAlwaysRunnable()
+    {
+        var hostArch = RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant();
+
+        Assert.IsTrue(RunCommand.Handler.CanCurrentOsRunArchitecture(hostArch),
+            $"the host's own architecture ('{hostArch}') must always be considered runnable");
+    }
+
+    [TestMethod]
+    public void CanCurrentOsRunArchitecture_Arm64_RunnableOnlyOnArm64Host()
+    {
+        var expected = RuntimeInformation.OSArchitecture == Architecture.Arm64;
+
+        Assert.AreEqual(expected, RunCommand.Handler.CanCurrentOsRunArchitecture("arm64"),
+            "arm64 binaries run only on an arm64 host — this is the case that triggers the F2 hint on x64");
+    }
+
+    [TestMethod]
+    public void CanCurrentOsRunArchitecture_X86_RunnableOnEveryWindowsHostArch()
+    {
+        // x86 is emulated on x64 and arm64, and native on x86.
+        Assert.IsTrue(RunCommand.Handler.CanCurrentOsRunArchitecture("x86"));
+    }
+
+    [TestMethod]
+    public void CanCurrentOsRunArchitecture_UnknownMoniker_TreatedAsRunnable()
+    {
+        // Never mask a genuine launch failure behind a bogus "wrong architecture" message.
+        Assert.IsTrue(RunCommand.Handler.CanCurrentOsRunArchitecture("sparc"));
+    }
+
+    [TestMethod]
+    public void CanCurrentOsRunArchitecture_IsCaseInsensitive()
+    {
+        Assert.AreEqual(
+            RunCommand.Handler.CanCurrentOsRunArchitecture("arm64"),
+            RunCommand.Handler.CanCurrentOsRunArchitecture("ARM64"));
     }
 
     #endregion

@@ -131,12 +131,18 @@ internal sealed partial class ProjectRunService
     /// the build pass (including a resolved <c>-p:Platform</c>, when any) so its <c>TargetDir</c>/
     /// <c>RunCommand</c> match what was built. <c>dotnet msbuild</c> rejects <c>-c</c>/<c>-r</c> (MSB1001),
     /// so Configuration/RID/TFM/Platform go as <c>-p:</c> emitted LAST (MSBuild last-wins beats a
-    /// conflicting user <c>-p</c>). <paramref name="includeRuntimeIdentifier"/> is <see langword="false"/>
-    /// only for the <c>--no-build</c> no-RID fallback (see <c>BuildAndResolveAsync</c>): an app previously
-    /// built by Visual Studio or a plain <c>dotnet build</c> has its output at the NON-RID
-    /// <c>bin\&lt;cfg&gt;\&lt;tfm&gt;\</c> path, which only resolves when the RID is omitted.
+    /// conflicting user <c>-p</c>). <paramref name="includeRuntimeIdentifier"/> and
+    /// <paramref name="includePlatform"/> are <see langword="false"/> only for the <c>--no-build</c>
+    /// output-discovery fallback (see <c>BuildAndResolveAsync</c>): an app previously built by Visual Studio
+    /// or a plain <c>dotnet build</c> injects NEITHER a RID nor a Platform, so its output sits at
+    /// <c>bin\&lt;cfg&gt;\&lt;tfm&gt;\</c> — which only resolves when both are omitted.
     /// </summary>
-    internal static string BuildEvaluateArguments(FileInfo csproj, ProjectRunOptions options, string? csWinRTMetadataFolder = null, bool includeRuntimeIdentifier = true)
+    internal static string BuildEvaluateArguments(
+        FileInfo csproj,
+        ProjectRunOptions options,
+        string? csWinRTMetadataFolder = null,
+        bool includeRuntimeIdentifier = true,
+        bool includePlatform = true)
     {
         var rid = RunArchHelper.ToRuntimeIdentifier(options.Architecture);
 
@@ -167,7 +173,7 @@ internal sealed partial class ProjectRunService
 
         // Same resolved Platform the build pass injected (or none) so the evaluate reads TargetDir/RunCommand
         // from the SAME bin\<Platform>\… the build wrote. Emitted last so it beats a stray user -p.
-        if (!string.IsNullOrWhiteSpace(options.Platform))
+        if (includePlatform && !string.IsNullOrWhiteSpace(options.Platform))
         {
             tokens.Add($"-p:Platform={options.Platform}");
         }

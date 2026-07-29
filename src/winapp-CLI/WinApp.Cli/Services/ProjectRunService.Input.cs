@@ -179,7 +179,32 @@ internal sealed partial class ProjectRunService
         var (apps, tests) = await ClassifyRunnablesAsync(projects, workingDirectory, props, classificationInputs, solution, cancellationToken);
         var runnable = apps.Concat(tests).Select(p => p.Name).ToList();
         var names = runnable.Count > 0 ? runnable : projects.Select(p => p.Name);
-        return string.Join(", ", names.OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+        return FormatProjectNameList(names);
+    }
+
+    /// <summary>
+    /// Maximum project names shown in a "which project?" error before the list is elided. A 100+ project
+    /// solution otherwise emits an unreadable single-line wall of names; showing the first few alphabetically
+    /// plus an accurate total keeps the message scannable while still conveying the scale (reviewer F5:
+    /// "it gets long fast on a real solution").
+    /// </summary>
+    private const int MaxListedProjectNames = 12;
+
+    /// <summary>
+    /// Renders project names alphabetically as a comma-separated list, eliding the tail beyond
+    /// <see cref="MaxListedProjectNames"/> as <c>… (+N more of M)</c> so the caller can still see the
+    /// total. Used by every "specify --project" error so they stay consistent with each other.
+    /// </summary>
+    private static string FormatProjectNameList(IEnumerable<string> names)
+    {
+        var ordered = names.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+        if (ordered.Count <= MaxListedProjectNames)
+        {
+            return string.Join(", ", ordered);
+        }
+
+        var shown = string.Join(", ", ordered.Take(MaxListedProjectNames));
+        return $"{shown}, … (+{ordered.Count - MaxListedProjectNames} more of {ordered.Count})";
     }
 
     /// <summary>True when the file is a solution (<c>.sln</c> or the newer XML <c>.slnx</c>).</summary>
@@ -495,9 +520,7 @@ internal sealed partial class ProjectRunService
         }
 
         var candidatePool = apps.Count > 0 ? apps : (tests.Count > 0 ? tests : projects);
-        var candidateList = string.Join(", ", candidatePool
-            .Select(p => p.Name)
-            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+        var candidateList = FormatProjectNameList(candidatePool.Select(p => p.Name));
         string reason;
         if (apps.Count > 1)
         {

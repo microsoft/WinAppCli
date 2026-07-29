@@ -483,6 +483,31 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public void BuildEvaluateArguments_IncludePlatformFalse_OmitsPlatform()
+    {
+        // F10: the injected -p:Platform moves output to bin\<Platform>\<cfg>\<tfm>\, so the --no-build
+        // fallback must be able to drop it to find a plain `dotnet build` / VS layout (bin\<cfg>\<tfm>\).
+        var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
+        var options = new ProjectRunOptions("Debug", "arm64", null, NoBuild: true, NoRestore: false, Properties: [])
+        {
+            Platform = "ARM64"
+        };
+
+        var withPlatform = ProjectRunService.BuildEvaluateArguments(csproj, options);
+        StringAssert.Contains(withPlatform, "-p:Platform=ARM64", "default evaluate must keep the resolved Platform");
+
+        var withoutPlatform = ProjectRunService.BuildEvaluateArguments(
+            csproj, options, includeRuntimeIdentifier: false, includePlatform: false);
+
+        Assert.IsFalse(withoutPlatform.Contains("-p:Platform=", StringComparison.Ordinal),
+            "fallback must be able to drop the injected Platform");
+        Assert.IsFalse(withoutPlatform.Contains("-p:RuntimeIdentifier=", StringComparison.Ordinal),
+            "fallback must be able to drop the injected RID");
+        StringAssert.Contains(withoutPlatform, "-p:Configuration=Debug");
+        StringAssert.Contains(withoutPlatform, "--getProperty:TargetDir");
+    }
+
+    [TestMethod]
     public void BuildEvaluateArguments_IncludeRuntimeIdentifierFalse_OmitsRid()
     {
         // F10: under --no-build the RID-qualified output may not exist (a prior plain VS/dotnet build

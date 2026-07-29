@@ -225,14 +225,18 @@ internal sealed partial class ProjectRunService(
 
         // F1: A non-runnable project (e.g. a class library) is otherwise only rejected by the POST-build
         // evaluate below — after the user has already paid for a full build. Reject it up front instead.
-        // Scope: only a directly-specified single project (a solution-resolved target was already
-        // classified as runnable while resolving the solution, so re-checking it would just add cost) and
-        // only when we're actually going to build. A project that explicitly declares an executable
-        // OutputType is the common app hot path — trust it and skip the probe (zero added cost). Only when
-        // the declared OutputType is absent (an SDK default) or non-executable do we run the side-effect-free
-        // evaluate to resolve the effective value, and we fast-fail ONLY on a CONFIDENT evaluated
-        // non-executable result, so a real app whose evaluate is inconclusive is never wrongly rejected.
-        if (!options.NoBuild && options.Solution is null)
+        // Cost is controlled by the DECLARED OutputType, not by how the project was selected: a project
+        // that explicitly declares an executable OutputType is the common app hot path, so we trust it and
+        // skip the probe entirely (zero added cost — 31 of 33 real sample apps hit this). Only when the
+        // declared OutputType is absent (an SDK default, which is what a bare class library looks like) or
+        // is non-executable do we run the side-effect-free evaluate to resolve the effective value, and we
+        // fast-fail ONLY on a CONFIDENT evaluated non-executable result, so a real app whose evaluate is
+        // inconclusive is never wrongly rejected.
+        // NOTE: this must NOT be gated on `options.Solution is null`. An explicitly-specified .csproj still
+        // carries the ambient solution (for $(SolutionDir) and siblings), so that condition skipped the
+        // reviewer's exact repro — `winapp run src\Some.Library\Some.Library.csproj` inside a repo with a
+        // .sln — and the library got fully built before rejection.
+        if (!options.NoBuild)
         {
             var declaredOutputType = ProjectDetectionService.TryGetDeclaredOutputType(csproj);
             if (string.IsNullOrEmpty(declaredOutputType) || !ProjectDetectionService.IsExecutableOutputType(declaredOutputType))
@@ -294,29 +298,52 @@ internal sealed partial class ProjectRunService(
 
         var props = MsBuildPropertyReader.Parse(stdout, RequestedProperties);
 
-        // F10: Under --no-build the evaluate pass injected -r win-<arch>, so TargetDir/RunCommand point at
-        // bin\<cfg>\<tfm>\win-<arch>\. An app previously built by Visual Studio or a plain `dotnet build`
-        // (neither injects a RID) has its output at the NON-RID path bin\<cfg>\<tfm>\, so the RID-qualified
-        // directory doesn't exist and the launch would fail with a confusing "executable not found". When
-        // that happens, re-evaluate WITHOUT the RID and prefer that output when it's the one actually on
-        // disk — making `winapp run --no-build` usable after a normal IDE/CLI build. Only the --no-build
-        // path is affected; a winapp build always writes the RID path, so its evaluate matches as before.
+        // F10: Under --no-build, winapp's evaluate pass injects build inputs the user's own build never had
+        // — `-r win-<arch>` always, and `-p:Platform=<arch>` when the project declares <Platforms>. Each one
+        // moves the output directory: the RID adds a `win-<arch>\` leaf and the Platform adds a `<Platform>\`
+        // segment (bin\ARM64\Debug\<tfm>\win-arm64\ vs. the bin\Debug\<tfm>\ that Visual Studio and a plain
+        // `dotnet build` produce). So the evaluated TargetDir points at a tree that doesn't exist and the
+        // launch fails with a confusing "executable not found" — exactly what makes --no-build unusable
+        // after a normal build. Since --no-build means "run what's already built", progressively drop the
+        // winapp-injected knobs and take the FIRST variant whose TargetDir actually exists on disk.
+        // Only --no-build is affected; a winapp build writes the fully-qualified path, so its own evaluate
+        // matches on the first try and never reaches this fallback.
         if (options.NoBuild)
         {
-            var ridTargetDir = GetProp(props, "TargetDir");
-            if (!string.IsNullOrEmpty(ridTargetDir) && !Directory.Exists(ridTargetDir))
+            var primaryTargetDir = GetProp(props, "TargetDir");
+            if (!string.IsNullOrEmpty(primaryTargetDir) && !Directory.Exists(primaryTargetDir))
             {
-                var noRidArgs = BuildEvaluateArguments(csproj, options, csWinRTMetadata, includeRuntimeIdentifier: false);
-                logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(noRidArgs));
-                var (noRidExit, noRidStdout, _) = await dotNetService.RunDotnetCommandAsync(workingDir, noRidArgs, cancellationToken);
-                if (noRidExit == 0)
+                // Ordered from "closest to what winapp would have built" to "plain dotnet build".
+                (bool Rid, bool Platform)[] fallbacks =
+                [
+                    (false, true),   // no RID, keep resolved Platform
+                    (false, false),  // no RID, no Platform  → plain `dotnet build` / VS layout
+                    (true, false),   // RID, no Platform
+                ];
+
+                foreach (var (includeRid, includePlatform) in fallbacks)
                 {
-                    var noRidProps = MsBuildPropertyReader.Parse(noRidStdout, RequestedProperties);
-                    var noRidTargetDir = GetProp(noRidProps, "TargetDir");
-                    if (!string.IsNullOrEmpty(noRidTargetDir) && Directory.Exists(noRidTargetDir))
+                    var args = BuildEvaluateArguments(
+                        csproj, options, csWinRTMetadata,
+                        includeRuntimeIdentifier: includeRid,
+                        includePlatform: includePlatform);
+                    logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(args));
+
+                    var (fallbackExit, fallbackStdout, _) = await dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken);
+                    if (fallbackExit != 0)
                     {
-                        logger.LogDebug("{UISymbol} --no-build: RID output '{RidDir}' not found; using non-RID output '{NoRidDir}'.", UiSymbols.Note, ridTargetDir, noRidTargetDir);
-                        props = noRidProps;
+                        continue;
+                    }
+
+                    var fallbackProps = MsBuildPropertyReader.Parse(fallbackStdout, RequestedProperties);
+                    var fallbackTargetDir = GetProp(fallbackProps, "TargetDir");
+                    if (!string.IsNullOrEmpty(fallbackTargetDir) && Directory.Exists(fallbackTargetDir))
+                    {
+                        logger.LogDebug(
+                            "{UISymbol} --no-build: '{Primary}' not found; using existing output '{Fallback}' (RID={Rid}, Platform={Platform}).",
+                            UiSymbols.Note, primaryTargetDir, fallbackTargetDir, includeRid, includePlatform);
+                        props = fallbackProps;
+                        break;
                     }
                 }
             }
