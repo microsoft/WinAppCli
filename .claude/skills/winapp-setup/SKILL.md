@@ -118,10 +118,7 @@ Use `winapp run` during iterative development — it creates a loose layout pack
 For .NET SDK projects you can point `winapp run` **at the project instead of the build output** — it builds the `.csproj` and launches it in one step, so there's no separate `dotnet build` and no need to know the output path:
 
 ```powershell
-# Build and run the WinUI project in the current directory
-winapp run .
-
-# Same as above — with no input, winapp run defaults to the current directory
+# Build and run the project in the current directory (input defaults to ".")
 winapp run
 
 # Run a specific project, configuration, and architecture
@@ -134,7 +131,11 @@ winapp run . -p WindowsPackageType=None
 winapp run . --verbose
 ```
 
-Project mode supports both **packaged** and **unpackaged** WinUI apps. It detects which from the project's effective `WindowsPackageType` MSBuild property (`MSIX` ⇒ packaged loose-layout + AUMID launch; `None` ⇒ launch the built `.exe` directly), and installs the matching-architecture Windows App Runtime the app needs before launching. Build inputs: `-c/--configuration`, `--arch`, `-r/--runtime`, `-f/--framework`, `--no-build`, `--no-restore`, `-p/--property` (repeatable). Requires the .NET SDK 8.0.100+. Identity-only options (`--manifest`, `--no-launch`, `--with-alias`, `--clean`, `--unregister-on-exit`, `--output-appx-directory`, `--executable`) apply to packaged apps only and are rejected for unpackaged ones. winapp always prints the exact `dotnet build …` invocation it runs (arguments and all) so failures are self-describing, and build output **streams live** — including any warnings on a successful build. In a real interactive terminal it hands the console to dotnet so its **native terminal-logger** renders the live build (each warning shown once); in agents/CI or when output is redirected it streams plain build lines instead, and under `--json` or `--quiet` the invocation and build output go to **stderr** so stdout stays pure JSON / clean. The build runs at dotnet's `minimal` verbosity; `--verbose` keeps dotnet at `minimal` but adds winapp's own build decision traces (`--trace` raises dotnet to `-v normal`).
+Project mode supports both **packaged** and **unpackaged** WinUI apps, detected from the project's effective `WindowsPackageType` (`MSIX` ⇒ loose-layout register + AUMID launch; `None` ⇒ launch the built `.exe`), and installs the matching-architecture Windows App Runtime before launching. Requires .NET SDK 8.0.100+.
+
+- **Build inputs:** `-c/--configuration`, `--arch`, `-r/--runtime`, `-f/--framework`, `--no-build`, `--no-restore`, `-p/--property` (repeatable).
+- **Packaged-only options:** `--manifest`, `--no-launch`, `--with-alias`, `--clean`, `--unregister-on-exit`, `--output-appx-directory`, `--executable` — rejected for unpackaged apps.
+- **Output:** winapp prints the exact `dotnet build …` invocation, then streams build output live (warnings included on success). Under `--json`/`--quiet` both go to **stderr** so stdout stays clean.
 
 #### Choosing between `run` and `create-debug-identity`
 

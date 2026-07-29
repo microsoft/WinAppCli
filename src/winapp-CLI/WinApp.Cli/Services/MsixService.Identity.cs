@@ -428,21 +428,15 @@ internal partial class MsixService
         var packageList = await ResolveDotNetPackageListAsync(projectFile, framework, noRestore, cancellationToken);
 
         // A framework-dependent app needs the Windows App Runtime only if it actually uses the Windows
-        // App SDK. A plain console/desktop Exe (no WindowsAppSDK reference) doesn't — preparing the
-        // runtime for it is wasted work and prints a noisy "could not determine runtime" warning. Skip
-        // only when we can positively confirm no reference; an unresolved list falls through to prep so
-        // a real WinUI app is never left without its runtime.
+        // App SDK. A plain console/desktop Exe doesn't — preparing the runtime for it is wasted work and
+        // prints a noisy "could not determine runtime" warning. Skip only on a positive no-reference
+        // result; an unresolved list falls through to prep so a real WinUI app keeps its runtime.
         //
-        // Documented tradeoff (Copilot review): the package list comes from `dotnet list package`, which
-        // evaluates the DEFAULT Configuration/RuntimeIdentifier (it rejects -c/-r/-p, so this run's -c /
-        // --arch can't be forwarded). A Windows App SDK <PackageReference> gated on a non-default
-        // Configuration or RID (e.g. Condition="'$(Configuration)'=='Release'") would therefore be absent
-        // from the list under the default evaluation, and this skip would wrongly bypass runtime prep.
-        // Resolving it precisely needs a full MSBuild evaluation of the package graph under the effective
-        // inputs, which is disproportionate to the risk: config-conditional Windows App SDK references are
-        // effectively unseen in practice, and the skip only ever fires on a POSITIVE no-reference result
-        // (an unresolved/failed list fails open into prep above). Accepted as-is; revisit if a real app
-        // hits it.
+        // Known limitation: `dotnet list package` rejects -c/-r/-p, so it evaluates the default
+        // Configuration/RID. A Windows App SDK reference conditioned on a non-default Configuration
+        // would be missed here and runtime prep wrongly skipped. Resolving that needs a full package-graph
+        // evaluation under the effective inputs, which isn't worth it while the skip only fires on a
+        // positive result and conditional SDK references remain unseen in practice.
         var referencesWindowsAppSdk = packageList is not null && ReferencesWindowsAppSdk(packageList);
         if (packageList is not null && !referencesWindowsAppSdk)
         {
@@ -452,23 +446,21 @@ internal partial class MsixService
         }
 
         // requireExactVersion:true — this unpackaged path must resolve the runtime the app was actually
-        // built against, never an unrelated cached WinAppSDK version (a general-scan fallback would let the
-        // presence gate below pass against the wrong runtime family; see C40).
+        // built against, never an unrelated cached WinAppSDK version, or the presence gate below could
+        // pass against the wrong runtime family.
         var expectedRuntimePackages = await EnsureWindowsAppRuntimeInstalledAsync(packageList, architecture, taskContext, cancellationToken, requireExactVersion: true);
 
-        // L1-residual: this is the project-mode UNPACKAGED path (callers gate on WindowsAppSDKSelfContained
-        // before calling), so a framework-dependent app here always needs a Framework + DDLM. An empty
-        // expected list means the exact runtime MSIX packages couldn't be located (requireExactVersion
-        // returned null rather than an unrelated version), so the version-specific identities can't be
-        // derived and the gate below would fall open to the generic prefix check — which could accept a
-        // wrong (unrelated) runtime version that happens to be registered.
+        // Callers gate on WindowsAppSDKSelfContained, so a framework-dependent app here always needs a
+        // Framework + DDLM. An empty list means the exact runtime packages couldn't be located, so the
+        // version-specific identities can't be derived and the gate below would fall open to a generic
+        // prefix check that could accept an unrelated registered version.
         if (expectedRuntimePackages.Count == 0)
         {
             if (referencesWindowsAppSdk)
             {
-                // We positively confirmed the app references the Windows App SDK yet couldn't locate the
-                // exact runtime it needs. Falling open here risks launching against an unrelated registered
-                // runtime, so fail closed with an actionable error instead (C40).
+                // The app references the Windows App SDK but we couldn't locate the exact runtime it
+                // needs. Falling open risks launching against an unrelated registered runtime, so fail
+                // closed with an actionable error.
                 var arch = architecture ?? WorkspaceSetupService.GetSystemArchitecture();
                 throw new InvalidOperationException(
                     $"The exact Windows App Runtime the app requires for architecture '{arch}' could not be located, so it can't be " +
@@ -484,13 +476,10 @@ internal partial class MsixService
                 "matching Windows App SDK runtime manually.");
         }
 
-        // Presence gate: after the install attempt, verify the framework-dependent
-        // runtime (Framework + matching-arch DDLM) is actually registered for the target arch. A
-        // missing runtime dir was previously treated as success, so a cross-arch run could skip the
-        // install and the app would crash at bootstrap. The expected identities pin the check to the
-        // SPECIFIC version the app needs, so a different (or older-patch) registered version
-        // can't mask a failed install. Fail loudly instead so the caller aborts the launch with an
-        // actionable error.
+        // Presence gate: after the install attempt, verify the framework-dependent runtime (Framework +
+        // matching-arch DDLM) is actually registered for the target arch, so a failed or skipped install
+        // can't reach the launch. The expected identities pin the check to the specific version the app
+        // needs, so a different (or older-patch) registered version can't mask the failure.
         if (!windowsAppRuntimeService.IsWindowsAppRuntimeRegistered(architecture, expectedRuntimePackages))
         {
             var arch = architecture ?? WorkspaceSetupService.GetSystemArchitecture();

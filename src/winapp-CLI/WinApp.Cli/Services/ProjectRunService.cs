@@ -223,19 +223,14 @@ internal sealed partial class ProjectRunService(
                 csproj, options, workingDir, setStatus: null, cancellationToken);
         }
 
-        // F1: A non-runnable project (e.g. a class library) is otherwise only rejected by the POST-build
-        // evaluate below — after the user has already paid for a full build. Reject it up front instead.
-        // Cost is controlled by the DECLARED OutputType, not by how the project was selected: a project
-        // that explicitly declares an executable OutputType is the common app hot path, so we trust it and
-        // skip the probe entirely (zero added cost — 31 of 33 real sample apps hit this). Only when the
-        // declared OutputType is absent (an SDK default, which is what a bare class library looks like) or
-        // is non-executable do we run the side-effect-free evaluate to resolve the effective value, and we
-        // fast-fail ONLY on a CONFIDENT evaluated non-executable result, so a real app whose evaluate is
-        // inconclusive is never wrongly rejected.
-        // NOTE: this must NOT be gated on `options.Solution is null`. An explicitly-specified .csproj still
-        // carries the ambient solution (for $(SolutionDir) and siblings), so that condition skipped the
-        // reviewer's exact repro — `winapp run src\Some.Library\Some.Library.csproj` inside a repo with a
-        // .sln — and the library got fully built before rejection.
+        // Reject a non-runnable project (e.g. a class library) before building it — the post-build
+        // evaluate below would otherwise only catch it after the user paid for a full build.
+        // A project declaring an executable OutputType is the common case, so trust it and skip the
+        // probe. Otherwise (absent — the SDK default a bare class library relies on — or non-executable)
+        // resolve the effective value, and fast-fail only on a confident non-executable result so an
+        // inconclusive evaluate never rejects a real app.
+        // The ambient solution is irrelevant here: an explicitly-specified .csproj carries one too, so
+        // gating on it would skip this check for `winapp run path\To\Some.csproj` inside a solution.
         if (!options.NoBuild)
         {
             var declaredOutputType = ProjectDetectionService.TryGetDeclaredOutputType(csproj);
@@ -250,7 +245,7 @@ internal sealed partial class ProjectRunService(
             }
         }
 
-        // Two passes (Change #1): (1) BUILD — a plain `dotnet build` whose console log
+        // Two passes: (1) BUILD — a plain `dotnet build` whose console log
         // STREAMS live so the user sees progress (skipped under --no-build); then (2) EVALUATE — a
         // fast `dotnet msbuild --getProperty` that returns the resolved output paths as JSON. The
         // split is required because `--getProperty` SUPPRESSES normal MSBuild console output, so a
@@ -298,16 +293,12 @@ internal sealed partial class ProjectRunService(
 
         var props = MsBuildPropertyReader.Parse(stdout, RequestedProperties);
 
-        // F10: Under --no-build, winapp's evaluate pass injects build inputs the user's own build never had
-        // — `-r win-<arch>` always, and `-p:Platform=<arch>` when the project declares <Platforms>. Each one
-        // moves the output directory: the RID adds a `win-<arch>\` leaf and the Platform adds a `<Platform>\`
-        // segment (bin\ARM64\Debug\<tfm>\win-arm64\ vs. the bin\Debug\<tfm>\ that Visual Studio and a plain
-        // `dotnet build` produce). So the evaluated TargetDir points at a tree that doesn't exist and the
-        // launch fails with a confusing "executable not found" — exactly what makes --no-build unusable
-        // after a normal build. Since --no-build means "run what's already built", progressively drop the
-        // winapp-injected knobs and take the FIRST variant whose TargetDir actually exists on disk.
-        // Only --no-build is affected; a winapp build writes the fully-qualified path, so its own evaluate
-        // matches on the first try and never reaches this fallback.
+        // `--no-build` means "run what's already built", but winapp's evaluate injects `-r win-<arch>`
+        // and (when the project declares <Platforms>) `-p:Platform=<arch>`, and each adds a segment to
+        // the output path — bin\ARM64\Debug\<tfm>\win-arm64\ versus the bin\Debug\<tfm>\ that Visual
+        // Studio and a plain `dotnet build` produce. So drop those injected knobs progressively and take
+        // the first variant whose TargetDir exists. A winapp build writes the fully-qualified path, so it
+        // matches on the first try and never gets here.
         if (options.NoBuild)
         {
             var primaryTargetDir = GetProp(props, "TargetDir");

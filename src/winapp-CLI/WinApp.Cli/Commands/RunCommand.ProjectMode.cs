@@ -467,11 +467,9 @@ internal partial class RunCommand
         }
 
         /// <summary>
-        /// Builds an actionable message for the case where an app was built for an architecture this
-        /// machine can't execute — replacing the opaque OS "InvalidApplication" error with a clear fix
-        /// (rebuild for the host arch or run on a matching machine). <paramref name="detail"/> carries the
-        /// raw OS error for diagnostics. Uses "an" rather than "a": every architecture moniker we emit
-        /// (arm64, x64, x86) starts with a vowel sound, so "a arm64 machine" was simply wrong.
+        /// Builds an actionable message for an app built for an architecture this machine can't execute,
+        /// replacing the opaque OS "InvalidApplication" error. <paramref name="detail"/> carries the raw
+        /// OS error for diagnostics.
         /// </summary>
         private static string BuildArchMismatchMessage(string targetArch, string detail)
         {

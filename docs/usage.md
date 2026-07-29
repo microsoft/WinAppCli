@@ -490,7 +490,7 @@ Create a loose layout package from a build output folder, register it with Windo
 
 `winapp run` operates in one of two modes, chosen automatically from the input:
 
-- **Folder mode** — the input is a build-output folder (contains a `Package.appxmanifest`/`AppxManifest.xml`). This is the original behavior and is unchanged.
+- **Folder mode** — the input is a build-output folder (contains a `Package.appxmanifest`/`AppxManifest.xml`).
 - **Project mode** — the input is a `.csproj`, a `.sln`/`.slnx` solution, or a directory containing one. `winapp run` builds the project and launches it, supporting both **packaged** and **unpackaged** WinUI apps. See [Project mode](#project-mode-net-sdk-projects) below.
 
 > **This is the preferred command for debugging with package identity** for most frameworks (.NET, C++, Rust, Flutter, Tauri). Unlike [`create-debug-identity`](#create-debug-identity) which registers a sparse package for a single exe, `winapp run` registers the entire folder as a loose layout package, just like a real MSIX install. See the [Debugging Guide](debugging.md) for common debugging workflows.
@@ -578,7 +578,11 @@ winapp run ./bin/Debug --clean
 
 When the input is a `.csproj`, a `.sln`/`.slnx` solution, or a directory containing one (including `.`), `winapp run` **builds the project** with `dotnet build` and then launches it. It supports both packaged and unpackaged WinUI apps, and installs the matching-architecture Windows App Runtime the app needs before launching.
 
-**Solution input:** point `winapp run` at a `.sln`/`.slnx` (or a directory containing one — a solution is preferred over loose `.csproj` files) and it resolves the runnable app project from the solution, then builds that project with the solution's `$(SolutionDir)` (and the sibling `Solution*` properties) defined — so projects that depend on `$(SolutionDir)` build exactly as they do in Visual Studio. A **test project is skipped** during this auto-selection: a solution that contains an app plus its test project (for example the AI Dev Gallery or WinUI Gallery layout) resolves to the app with no `--project` needed. A project is treated as a test project when it sets `IsTestProject`, declares the `TestContainer` project capability, or references a known test framework (MSTest/xUnit/NUnit or the .NET test SDK/host) — this is needed because a WinUI test project is itself a packaged app and can't be told apart by output type alone. If the only runnable project in the solution is a test project, `winapp run` runs it. When a solution (or a directory) contains more than one runnable app project, `winapp run` does not guess a startup project; use `--project <name>` to choose one (it is always honored, even to select a test project), otherwise it errors listing the candidates.
+**Solution input:** point `winapp run` at a `.sln`/`.slnx` (or a directory containing one — a solution is preferred over loose `.csproj` files) and it resolves the runnable app project, then builds it with `$(SolutionDir)` and the sibling `Solution*` properties defined, so projects that depend on them build as they do in Visual Studio. Resolution rules:
+
+- **Test projects are skipped** when auto-selecting, so a solution containing an app plus its tests resolves to the app with no `--project` needed. (A WinUI test project is itself a packaged app, so output type alone can't distinguish it.)
+- **If the only runnable project is a test project**, it runs.
+- **If more than one runnable app project exists**, `winapp run` does not guess a startup project — it errors listing the candidates. Use `--project <name>` to choose, which is always honored, including to select a test project.
 
 Packaged vs. unpackaged is detected automatically from the project's effective `WindowsPackageType` MSBuild property (never from manifest presence):
 
@@ -598,17 +602,22 @@ Project mode requires the **.NET SDK 8.0.100 or newer** (for MSBuild `--getPrope
 - `--no-restore` - Skip restoring the project before building.
 - `-p, --property <Name=Value>` - MSBuild property, forwarded to both the build and the property evaluation. Repeatable (e.g. `-p WindowsPackageType=None`).
 
-**Build output & verbosity:** the project is built in two steps — a `dotnet build` whose output **streams live** to your console, followed by a fast property-evaluation pass. winapp prints the exact `dotnet build …` invocation it runs (arguments and all) before the output, and streams live including any warnings on a successful build so nothing is swallowed. In a real interactive terminal winapp hands the console to dotnet so its **native terminal-logger** renders the live build (each warning shown once, matching a bare `dotnet build`); in agents/CI or when output is redirected it streams plain build lines instead. The build runs at dotnet's `minimal` verbosity; `--verbose` keeps dotnet at `minimal` but adds winapp's own build decision traces, and `--trace` raises dotnet to `-v normal` for the deeper MSBuild log. Under `--json` or `--quiet` the invocation and build output are routed to stderr so stdout stays pure JSON / clean.
+**Build output & verbosity:** the project is built in two steps — a `dotnet build` whose output **streams live** to your console, followed by a fast property-evaluation pass. winapp prints the exact `dotnet build …` invocation before the output, and streams warnings even on a successful build. Verbosity:
+
+| Flag | dotnet verbosity | Adds |
+|------|------------------|------|
+| *(default)* | `minimal` | — |
+| `--verbose` | `minimal` | winapp's build decision traces |
+| `--trace` | `normal` | deeper MSBuild log |
+
+Under `--json` or `--quiet` the invocation and build output go to stderr so stdout stays pure JSON / clean.
 
 **Option applicability:** the identity/loose-layout options (`--manifest`, `--output-appx-directory`, `--no-launch`, `--with-alias`, `--unregister-on-exit`, `--clean`, `--executable`) apply to packaged apps only. They are rejected with a clear error for unpackaged apps (which have no MSIX package). Launch/debug options (`--args`/`--`, `--detach`, `--debug-output`, `--symbols`, `--json`) work in both.
 
 **Project-mode examples:**
 
 ```bash
-# Build and run the WinUI project in the current directory
-winapp run .
-
-# Same as above — with no input, winapp run defaults to the current directory
+# Build and run the project in the current directory (input defaults to ".")
 winapp run
 
 # Run a specific project

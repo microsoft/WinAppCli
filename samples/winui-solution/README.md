@@ -15,12 +15,10 @@ This sample is a **multi-project Visual Studio solution** used to exercise
 - `winapp run` auto-selecting the runnable **`App`** from the solution and
   **skipping `App.Core`** (a library) and **`App.Tests`**, with no ambiguity error.
 - Explicit project selection via `--project` when you want a specific project.
-- A **multi-project arch regression guard**: because `App` references the
-  no-`<Platforms>` `App.Core` library, this sample fails to build under the old
-  `winapp run` behavior (which forced `-p:Platform=<arch>` + `EnableDynamicPlatformResolution`,
-  desynchronizing the library's XAML/PRI output path from the app's lookup →
-  `MSB3030`/`PRI252`). `winapp run` now conveys arch via the **RID only**, keeping
-  both sides consistent — so a green build here proves the fix.
+- A **multi-project arch regression guard**: `App` references `App.Core`, which
+  declares no `<Platforms>`. A global `-p:Platform=<arch>` would desynchronize the
+  library's XAML/PRI output path from the app's lookup (`MSB3030`/`PRI252`), so a
+  green build here proves winapp keeps the two consistent.
 
 ## The projects
 
@@ -30,22 +28,18 @@ This sample is a **multi-project Visual Studio solution** used to exercise
 | `App.Core` | WinUI 3 class library (arch regression guard) | `UseWinUI=true`, **no `<Platforms>`** (effective Platform `AnyCPU`), a `Themes/Generic.xaml` ResourceDictionary so the XAML compiler emits a `.pri`/`.xbf` |
 | `App.Tests` | Test-shaped (skipped by auto-select) | `OutputType=WinExe`, `<ProjectCapability Include="TestContainer" />`, `MSTest.TestFramework` ref, **`IsTestProject` deliberately NOT set** |
 
-`App.Core` intentionally declares **no `<Platforms>`**. That is the exact shape
-that used to break multi-project WinUI apps under `winapp run`: forcing a global
-`-p:Platform=<arch>` while `EnableDynamicPlatformResolution` negotiated the
-library's compile back down to `AnyCPU` sent the library's `Generic.xbf`/`.pri` to
-`bin\Debug\…` while the consuming app looked in `bin\<arch>\Debug\…`. Because
-`winapp run` now passes the architecture only via `-r win-<arch>` (matching Visual
-Studio and `dotnet build -r win-<arch>`), both sides agree and the build is green.
-The solution maps `App.Core` to `Any CPU` for every configuration — the
-VS-canonical mapping for a no-`<Platforms>` library — so a plain
-`dotnet build WinUISolution.sln -p:Platform=<arch>` stays consistent too.
+`App.Core` intentionally declares **no `<Platforms>`** (effective Platform `AnyCPU`).
+Because winapp only injects an explicit `-p:Platform=<arch>` when the target *and its
+whole `ProjectReference` closure* declare that arch, this sample builds with the
+architecture conveyed by `-r win-<arch>` alone — so the library's `Generic.xbf`/`.pri`
+and the consuming app agree on one output path. The solution maps `App.Core` to
+`Any CPU` for every configuration (the VS-canonical mapping for a no-`<Platforms>`
+library) so a plain `dotnet build WinUISolution.sln -p:Platform=<arch>` stays consistent too.
 
-`App.Tests` intentionally does **not** set `IsTestProject`. A naive
-"is this a test project?" check that only looks at `IsTestProject` (or at the
-`.Tests` name suffix) would miss it. `winapp run` classifies it as a test project
-from its *evaluated* signals — the `TestContainer` project capability and the
-MSTest package reference — which is the realistic gallery shape.
+`App.Tests` intentionally does **not** set `IsTestProject`, so a naive check on that
+property (or on a `.Tests` name suffix) would miss it. `winapp run` classifies it from
+evaluated signals — the `TestContainer` capability and the MSTest package reference —
+which is the realistic gallery shape.
 
 ## How `winapp run` picks the project
 
