@@ -195,5 +195,19 @@ internal sealed class RecordPartialOutputException(
     public string RecoveryHint { get; } = recoveryHint;
 }
 
-internal sealed class RecordFrameOutputException(string message, Exception innerException)
-    : IOException(message, innerException);
+internal sealed class RecordFrameOutputException(
+    string message,
+    string recoveryHint,
+    Exception innerException)
+    : IOException(message, innerException)
+{
+    public string RecoveryHint { get; } = recoveryHint;
+}
+
+internal sealed class RecordFramePipelineLimitException(
+    string message,
+    bool lowerMaxEdgeCanHelp)
+    : ArgumentOutOfRangeException("frameDimensions", message)
+{
+    public bool LowerMaxEdgeCanHelp { get; } = lowerMaxEdgeCanHelp;
+}

@@ -66,6 +66,10 @@ export const UI_RECORD_ARG_SPECS: readonly UiRecordArgSpec[] = [
  * @internal
  */
 export function buildUiRecordArgs(options: UiRecordOptions): string[] {
+  if (options.framesDir !== undefined && options.framesDir.trim().length === 0) {
+    throw new Error('uiRecord: framesDir must be a non-empty, non-whitespace directory path.');
+  }
+
   const args: string[] = ['ui', 'record'];
   for (const spec of UI_RECORD_ARG_SPECS) {
     const value = options[spec.property];

@@ -74,9 +74,17 @@ internal sealed partial class UiAutomationService
         int encoderWidth, int encoderHeight,
         int displayWidth, int displayHeight)
     {
-        if (cropX == 0 && cropY == 0 && cropW == sourceWidth && cropH == sourceHeight
-            && encoderWidth == sourceWidth && encoderHeight == sourceHeight
-            && displayWidth == encoderWidth && displayHeight == encoderHeight
+        if (!RequiresFrameTransform(
+                sourceWidth,
+                sourceHeight,
+                cropX,
+                cropY,
+                cropW,
+                cropH,
+                encoderWidth,
+                encoderHeight,
+                displayWidth,
+                displayHeight)
             && source.Length == encoderWidth * encoderHeight * 4)
         {
             return source;
@@ -111,6 +119,26 @@ internal sealed partial class UiAutomationService
         Marshal.Copy(dstBitmap.GetPixels(), output, 0, output.Length);
         return output;
     }
+
+    internal static bool RequiresFrameTransform(
+        int sourceWidth,
+        int sourceHeight,
+        int cropX,
+        int cropY,
+        int cropW,
+        int cropH,
+        int encoderWidth,
+        int encoderHeight,
+        int displayWidth,
+        int displayHeight)
+        => cropX != 0
+            || cropY != 0
+            || cropW != sourceWidth
+            || cropH != sourceHeight
+            || encoderWidth != sourceWidth
+            || encoderHeight != sourceHeight
+            || displayWidth != encoderWidth
+            || displayHeight != encoderHeight;
 
     internal static (int X, int Y, int Width, int Height) ClampCropRect(
         int cropX,

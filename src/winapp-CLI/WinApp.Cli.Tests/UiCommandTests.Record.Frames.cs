@@ -362,6 +362,7 @@ public partial class UiCommandTests
     {
         _fakeUia.RecordException = new RecordFrameOutputException(
             "Frame output failed.",
+            "Retry with a new frame path.",
             new IOException("disk full"));
         var command = GetRequiredService<UiRecordCommand>();
 
@@ -374,6 +375,24 @@ public partial class UiCommandTests
         StringAssert.Contains(stderr, "\"frame_output_failed\"");
         StringAssert.Contains(stderr, "\"recoveryHint\"");
         StringAssert.Contains(stderr, "\"IOException\"");
+    }
+
+    [TestMethod]
+    public async Task Record_FrameOutputFailure_HumanOutputIncludesRecoveryHint()
+    {
+        const string recoveryHint = "Capture a smaller window or retry without --frames-dir.";
+        _fakeUia.RecordException = new RecordFrameOutputException(
+            "Frame output failed.",
+            recoveryHint,
+            new RecordFramePipelineLimitException("Source buffers exceed the budget.", false));
+        var command = GetRequiredService<UiRecordCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command,
+            ["-a", "TestApp", "--duration-sec", "1"]);
+
+        Assert.AreEqual(1, exitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), recoveryHint);
     }
 
     [TestMethod]
@@ -566,20 +585,52 @@ public partial class UiCommandTests
     [TestMethod]
     public void RecordFrameBundleWriter_QueueCapacityIsBoundedByMemoryBudget()
     {
-        Assert.AreEqual(4, RecordFrameBundleWriter.ComputeQueueCapacity(64, 64));
-        Assert.AreEqual(2, RecordFrameBundleWriter.ComputeQueueCapacity(3_840, 2_160));
-        Assert.AreEqual(1, RecordFrameBundleWriter.ComputeQueueCapacity(4_096, 2_304));
-        Assert.ThrowsExactly<ArgumentOutOfRangeException>(
-            () => RecordFrameBundleWriter.ComputeQueueCapacity(4_096, 4_096));
+        Assert.AreEqual(4, RecordFrameBundleWriter.ComputeQueueCapacity(64, 64, 64, 64, 0));
+        Assert.AreEqual(2, RecordFrameBundleWriter.ComputeQueueCapacity(
+            3_840, 2_160, 3_840, 2_160, 0));
+        Assert.AreEqual(1, RecordFrameBundleWriter.ComputeQueueCapacity(
+            4_096, 2_304, 4_096, 2_304, 0));
+        Assert.AreEqual(4, RecordFrameBundleWriter.ComputeQueueCapacity(
+            3_840, 2_160, 1_280, 720, 4));
+        Assert.ThrowsExactly<RecordFramePipelineLimitException>(
+            () => RecordFrameBundleWriter.ComputeQueueCapacity(
+                4_096, 4_096, 4_096, 4_096, 0));
+        Assert.ThrowsExactly<RecordFramePipelineLimitException>(
+            () => RecordFrameBundleWriter.ComputeQueueCapacity(
+                5_120, 2_880, 4_096, 2_304, 4));
+        Assert.ThrowsExactly<RecordFramePipelineLimitException>(
+            () => RecordFrameBundleWriter.ComputeQueueCapacity(
+                7_680, 4_320, 1_280, 720, 4));
+        Assert.ThrowsExactly<RecordFramePipelineLimitException>(
+            () => RecordFrameBundleWriter.ComputeQueueCapacity(
+                4_096, 4_096, 1_280, 1_280, 4));
 
         var configuration = CreateFrameConfiguration(
             Path.Join(_tempDirectory.FullName, "oversized.frames"),
             width: 4_096,
             height: 4_096);
-        var exception = Assert.ThrowsExactly<ArgumentOutOfRangeException>(
+        var exception = Assert.ThrowsExactly<RecordFramePipelineLimitException>(
             () => new RecordFrameBundleWriter(configuration));
         StringAssert.Contains(exception.Message, "256 MiB pipeline memory budget");
         Assert.IsFalse(Directory.Exists(configuration.FinalDirectory));
+    }
+
+    [TestMethod]
+    public void RecordFrameBundleWriter_SourceResizeCannotExceedConfiguredMemoryBudget()
+    {
+        var writer = new RecordFrameBundleWriter(CreateFrameConfiguration(
+            Path.Join(_tempDirectory.FullName, "resize.frames"),
+            width: 1_280,
+            height: 720,
+            sourceWidth: 3_840,
+            sourceHeight: 2_160,
+            sourceBufferCount: 4));
+
+        var exception = Assert.ThrowsExactly<RecordFramePipelineLimitException>(
+            () => writer.ValidatePipelineDimensions(7_680, 4_320, 4));
+
+        StringAssert.Contains(exception.Message, "256 MiB pipeline memory budget");
+        writer.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
     [TestMethod]
@@ -644,6 +695,9 @@ public partial class UiCommandTests
         string finalDirectory,
         int width = 64,
         int height = 64,
+        int? sourceWidth = null,
+        int? sourceHeight = null,
+        int sourceBufferCount = 0,
         long maximumBundleBytes = RecordFrameBundleConfiguration.DefaultMaximumBundleBytes)
         => new()
         {
@@ -653,6 +707,9 @@ public partial class UiCommandTests
             StartedUtc = DateTimeOffset.Parse("2026-01-01T00:00:00Z"),
             Width = width,
             Height = height,
+            SourceWidth = sourceWidth ?? width,
+            SourceHeight = sourceHeight ?? height,
+            SourceBufferCount = sourceBufferCount,
             MaximumBundleBytes = maximumBundleBytes,
             ContentRect = new RecordFrameRectManifest { Width = width, Height = height },
             Requested = new RecordFrameRequestManifest

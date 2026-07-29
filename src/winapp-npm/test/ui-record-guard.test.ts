@@ -88,6 +88,28 @@ test('buildUiRecordArgs: minimal options (only durationSec)', () => {
   assert.deepEqual(args, ['ui', 'record', '--duration-sec', '5']);
 });
 
+test('buildUiRecordArgs rejects an empty or whitespace framesDir', () => {
+  for (const framesDir of ['', '   ']) {
+    assert.throws(
+      () => buildUiRecordArgs({ durationSec: 5, framesDir }),
+      /framesDir must be a non-empty, non-whitespace directory path/
+    );
+  }
+});
+
+test('_uiRecordWithCapture rejects a blank framesDir before capture', async () => {
+  let captureCalled = false;
+  await assert.rejects(
+    () =>
+      _uiRecordWithCapture({ durationSec: 5, framesDir: ' ' }, async () => {
+        captureCalled = true;
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }),
+    /framesDir must be a non-empty, non-whitespace directory path/
+  );
+  assert.equal(captureCalled, false);
+});
+
 test('buildUiRecordArgs: all options produce correct arg list', () => {
   const opts: UiRecordOptions = {
     app: 'myapp',

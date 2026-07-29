@@ -400,8 +400,12 @@ internal class UiRecordCommand : Command, IShortDescription
                     frameEx.Message,
                     details: frameEx.InnerException?.GetType().Name,
                     errorOut: parseResult.InvocationConfiguration.Error,
-                    recoveryHint: "Retry with new --output and --frames-dir paths after checking available disk space and permissions.");
+                    recoveryHint: frameEx.RecoveryHint);
                 logger.LogError(frameEx, "{Symbol} {Message}", UiSymbols.Error, frameEx.Message);
+                if (!json)
+                {
+                    logger.LogError("{Symbol} Recovery: {RecoveryHint}", UiSymbols.Error, frameEx.RecoveryHint);
+                }
                 return 1;
             }
             catch (UiAmbiguousSelectorException ambiguousEx)

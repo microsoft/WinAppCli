@@ -275,6 +275,24 @@ internal sealed partial class UiAutomationService
 
             if (options.FramesDirectory is not null)
             {
+                var initialCropW = isWholeWindowWgc ? srcWidth : cropW;
+                var initialCropH = isWholeWindowWgc ? srcHeight : cropH;
+                var requiresTransform = RequiresFrameTransform(
+                    srcWidth,
+                    srcHeight,
+                    cropX,
+                    cropY,
+                    initialCropW,
+                    initialCropH,
+                    encoderW,
+                    encoderH,
+                    displayW,
+                    displayH);
+                var sourceBufferCount = useScreen || !requiresTransform
+                    ? 0
+                    // WGC may retain a published latest frame and allocate the following
+                    // copy while the recorder and Skia each retain the current source.
+                    : useWgc ? 4 : 2;
                 var (contentX, contentY, contentW, contentH) = ComputeFittedContentRect(
                     cropW, cropH, encoderW, encoderH, displayW, displayH);
                 frameOutput = RecordFrameArtifactCoordinator.Create(new RecordFrameBundleConfiguration
@@ -285,6 +303,9 @@ internal sealed partial class UiAutomationService
                     StartedUtc = startedUtc,
                     Width = encoderW,
                     Height = encoderH,
+                    SourceWidth = srcWidth,
+                    SourceHeight = srcHeight,
+                    SourceBufferCount = sourceBufferCount,
                     ContentRect = new RecordFrameRectManifest
                     {
                         X = contentX,
@@ -420,6 +441,26 @@ internal sealed partial class UiAutomationService
                             {
                                 var closedCropW = isWholeWindowWgc ? closedSw : cropW;
                                 var closedCropH = isWholeWindowWgc ? closedSh : cropH;
+                                if (frameOutput is not null)
+                                {
+                                    var sourceBufferCount = RequiresFrameTransform(
+                                        closedSw,
+                                        closedSh,
+                                        cropX,
+                                        cropY,
+                                        closedCropW,
+                                        closedCropH,
+                                        encoderW,
+                                        encoderH,
+                                        displayW,
+                                        displayH)
+                                            ? 3
+                                            : 0;
+                                    await frameOutput.ValidatePipelineDimensionsAsync(
+                                        closedSw,
+                                        closedSh,
+                                        sourceBufferCount).ConfigureAwait(false);
+                                }
                                 var closedFrame = ProcessFrame(
                                     closedSrc, closedSw, closedSh,
                                     cropX, cropY, closedCropW, closedCropH,
@@ -451,6 +492,28 @@ internal sealed partial class UiAutomationService
                         sourceVersion = version;
                         sourceWidth = sw;
                         sourceHeight = sh;
+                        if (frameOutput is not null)
+                        {
+                            var frameCropW = isWholeWindowWgc ? sw : cropW;
+                            var frameCropH = isWholeWindowWgc ? sh : cropH;
+                            var sourceBufferCount = RequiresFrameTransform(
+                                sw,
+                                sh,
+                                cropX,
+                                cropY,
+                                frameCropW,
+                                frameCropH,
+                                encoderW,
+                                encoderH,
+                                displayW,
+                                displayH)
+                                    ? 4
+                                    : 0;
+                            await frameOutput.ValidatePipelineDimensionsAsync(
+                                sw,
+                                sh,
+                                sourceBufferCount).ConfigureAwait(false);
+                        }
                         frame = ProcessFrame(
                             source, sw, sh, cropX, cropY,
                             isWholeWindowWgc ? sw : cropW,
@@ -576,6 +639,7 @@ internal sealed partial class UiAutomationService
                 {
                     throw new RecordFrameOutputException(
                         "Frame artifact output failed and no recording artifact could be preserved.",
+                        GetFrameOutputRecoveryHint(frameOutput.Failure, videoPreserved: false),
                         frameOutput.Failure);
                 }
 
@@ -605,7 +669,7 @@ internal sealed partial class UiAutomationService
                     "The MP4 was recorded successfully, but frame artifact output failed.",
                     options.OutputPath,
                     framesDirectory: null,
-                    "Use the MP4 as the durable recording and retry with new --output and --frames-dir paths.",
+                    GetFrameOutputRecoveryHint(frameOutput.Failure, videoPreserved: true),
                     frameOutput.Failure);
             }
 
@@ -663,6 +727,52 @@ internal sealed partial class UiAutomationService
             or UnauthorizedAccessException
             or InvalidOperationException
             or ExternalException;
+
+    private static string GetFrameOutputRecoveryHint(Exception failure, bool videoPreserved)
+    {
+        var pipelineLimit = FindFramePipelineLimitFailure(failure);
+        if (pipelineLimit is not null)
+        {
+            if (!pipelineLimit.LowerMaxEdgeCanHelp)
+            {
+                return videoPreserved
+                    ? "Use the preserved MP4. Capture a smaller window or source, or retry without --frames-dir. If frame artifacts are still needed, use new --output and --frames-dir paths; existing artifacts are never replaced."
+                    : "Capture a smaller window or source, or retry without --frames-dir. Use new --output and --frames-dir paths when retrying frame artifacts.";
+            }
+
+            return videoPreserved
+                ? "Use the preserved MP4. Lower --max-edge, then retry with new --output and --frames-dir paths; existing artifacts are never replaced."
+                : "Lower --max-edge, then retry with new --output and --frames-dir paths.";
+        }
+
+        return videoPreserved
+            ? "Use the MP4 as the durable recording and retry with new --output and --frames-dir paths after checking available disk space and permissions."
+            : "Retry with new --output and --frames-dir paths after checking available disk space and permissions.";
+    }
+
+    private static RecordFramePipelineLimitException? FindFramePipelineLimitFailure(Exception exception)
+    {
+        if (exception is RecordFramePipelineLimitException pipelineLimit)
+        {
+            return pipelineLimit;
+        }
+
+        if (exception is AggregateException aggregate)
+        {
+            foreach (var innerException in aggregate.InnerExceptions)
+            {
+                var nested = FindFramePipelineLimitFailure(innerException);
+                if (nested is not null)
+                {
+                    return nested;
+                }
+            }
+        }
+
+        return exception.InnerException is null
+            ? null
+            : FindFramePipelineLimitFailure(exception.InnerException);
+    }
 
     /// <summary>
     /// Called when Windows Graphics Capture fails to initialize. If the user did NOT explicitly

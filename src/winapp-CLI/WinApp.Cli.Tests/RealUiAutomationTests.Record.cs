@@ -517,6 +517,81 @@ public partial class RealUiAutomationTests
     }
 
     [TestMethod]
+    public async Task RecordAsync_FramePipelineLimitPreservesMp4WithActionableRecovery()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var session = SessionFor(fx);
+        await ResolveAsync(svc, session, "btnInvoke");
+
+        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var output = Path.Join(root, "pipeline-limit.mp4");
+        WgcCapture.s_isSupported = () => true;
+        WgcCapture.s_startGrabber = (_, _, _) =>
+            new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
+            new FakeVideoEncoder(path, width, height);
+        RecordFrameBundleWriter.s_create = _ =>
+            throw new RecordFramePipelineLimitException(
+                "Frame artifacts exceed the 256 MiB pipeline memory budget. Lower --max-edge.",
+                lowerMaxEdgeCanHelp: true);
+
+        var exception = await Assert.ThrowsExactlyAsync<RecordPartialOutputException>(
+            () => svc.RecordAsync(session, null, new RecordOptions
+            {
+                OutputPath = output,
+                FramesDirectory = Path.Join(root, "pipeline-limit.frames"),
+                DurationSec = 1,
+                Fps = 1,
+                MaxEdge = 64,
+            }, CancellationToken.None));
+
+        Assert.AreEqual(output, exception.VideoPath);
+        Assert.IsTrue(File.Exists(output));
+        Assert.IsInstanceOfType<RecordFramePipelineLimitException>(exception.InnerException);
+        StringAssert.Contains(exception.RecoveryHint, "Lower --max-edge");
+        StringAssert.Contains(exception.RecoveryHint, "new --output and --frames-dir paths");
+    }
+
+    [TestMethod]
+    public async Task RecordAsync_SourcePipelineLimitRecommendsSmallerCaptureOrNoFrames()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var session = SessionFor(fx);
+        await ResolveAsync(svc, session, "btnInvoke");
+
+        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var output = Path.Join(root, "source-limit.mp4");
+        WgcCapture.s_isSupported = () => true;
+        WgcCapture.s_startGrabber = (_, _, _) =>
+            new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
+            new FakeVideoEncoder(path, width, height);
+        RecordFrameBundleWriter.s_create = _ =>
+            throw new RecordFramePipelineLimitException(
+                "Source capture buffers exceed the memory budget.",
+                lowerMaxEdgeCanHelp: false);
+
+        var exception = await Assert.ThrowsExactlyAsync<RecordPartialOutputException>(
+            () => svc.RecordAsync(session, null, new RecordOptions
+            {
+                OutputPath = output,
+                FramesDirectory = Path.Join(root, "source-limit.frames"),
+                DurationSec = 1,
+                Fps = 1,
+                MaxEdge = 64,
+            }, CancellationToken.None));
+
+        Assert.IsTrue(File.Exists(output));
+        StringAssert.Contains(exception.RecoveryHint, "Capture a smaller window or source");
+        StringAssert.Contains(exception.RecoveryHint, "without --frames-dir");
+        Assert.IsFalse(exception.RecoveryHint.Contains("Lower --max-edge", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task RecordAsync_TruncatedFrameBundleReturnsActionableWarning()
     {
         using var fx = new UiaTestFixture();
@@ -636,6 +711,10 @@ public partial class RealUiAutomationTests
         public Exception? WriteException { get; init; }
 
         public Exception? AbortException { get; init; }
+
+        public void ValidatePipelineDimensions(int sourceWidth, int sourceHeight, int sourceBufferCount)
+        {
+        }
 
         public ValueTask WriteAsync(
             ReadOnlyMemory<byte> bgra,
