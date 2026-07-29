@@ -197,7 +197,9 @@ internal class FakeUiAutomationService : IUiAutomationService
     /// </summary>
     public bool RecordShouldWaitForCancellation { get; set; }
 
-    public async Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action? onRecordingStarted = null)
+    public bool? RecordingStartedFrameArtifactsActiveOverride { get; set; }
+
+    public async Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action<bool>? onRecordingStarted = null)
     {
         LastRecordOptions = options;
         if (RecordException is not null)
@@ -237,7 +239,9 @@ internal class FakeUiAutomationService : IUiAutomationService
         }
         // Signal readiness before returning — mirrors the real service behavior (encoder is
         // initialized and the first frame has been captured at this point).
-        onRecordingStarted?.Invoke();
+        onRecordingStarted?.Invoke(
+            RecordingStartedFrameArtifactsActiveOverride
+            ?? (options.FramesDirectory is not null));
         if (RecordShouldWaitForCancellation)
         {
             // Block until cancelled — simulates a long recording that is stopped early

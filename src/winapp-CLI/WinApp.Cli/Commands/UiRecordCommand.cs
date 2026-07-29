@@ -270,7 +270,7 @@ internal class UiRecordCommand : Command, IShortDescription
 
                 // Readiness callback: invoked by RecordAsync after the encoder is initialized and the
                 // first frame has been captured — i.e., recording is genuinely live.
-                void OnRecordingStarted()
+                void OnRecordingStarted(bool frameArtifactsActive)
                 {
                     // Signal readiness so the stdin monitor can now apply any latched stop.
                     readyTcs.TrySetResult();
@@ -286,9 +286,9 @@ internal class UiRecordCommand : Command, IShortDescription
                             Path = filePath,
                             Fps = fps,
                             DurationSec = durationSec,
-                            FramesDirectory = framesDirectory,
-                            FramesManifest = framesDirectory is null ? null : Path.Join(framesDirectory, "manifest.json"),
-                            FramesIndex = framesDirectory is null ? null : Path.Join(framesDirectory, "frames.ndjson"),
+                            FramesDirectory = frameArtifactsActive ? framesDirectory : null,
+                            FramesManifest = frameArtifactsActive ? Path.Join(framesDirectory!, "manifest.json") : null,
+                            FramesIndex = frameArtifactsActive ? Path.Join(framesDirectory!, "frames.ndjson") : null,
                         };
                         parseResult.InvocationConfiguration.Error.WriteLine(
                             JsonSerializer.Serialize(startedEvent, UiJsonContext.Default.UiRecordStartedEvent));
@@ -374,7 +374,7 @@ internal class UiRecordCommand : Command, IShortDescription
                         VideoPath = partialEx.VideoPath,
                         FramesDirectory = partialEx.FramesDirectory,
                     });
-                logger.LogError(partialEx, "{Symbol} {Message}", UiSymbols.Error, partialEx.Message);
+                logger.LogError("{Symbol} {Message}", UiSymbols.Error, partialEx.Message);
                 if (!json)
                 {
                     if (partialEx.VideoPath is not null)
@@ -401,7 +401,7 @@ internal class UiRecordCommand : Command, IShortDescription
                     details: frameEx.InnerException?.GetType().Name,
                     errorOut: parseResult.InvocationConfiguration.Error,
                     recoveryHint: frameEx.RecoveryHint);
-                logger.LogError(frameEx, "{Symbol} {Message}", UiSymbols.Error, frameEx.Message);
+                logger.LogError("{Symbol} {Message}", UiSymbols.Error, frameEx.Message);
                 if (!json)
                 {
                     logger.LogError("{Symbol} Recovery: {RecoveryHint}", UiSymbols.Error, frameEx.RecoveryHint);

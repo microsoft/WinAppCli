@@ -24,7 +24,7 @@ internal sealed partial class UiAutomationService
     /// fault arms, and cancellation timing races that require mutating real desktop windows or native
     /// WGC failures and are not safe to trigger on the shared coverage host.
     /// </remarks>
-    public async Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action? onRecordingStarted = null)
+    public async Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action<bool>? onRecordingStarted = null)
     {
         _logger.LogDebug("Recording process {Pid} (duration={Dur}s, fps={Fps}, maxEdge={MaxEdge}, captureScreen={Screen})",
             session.ProcessId, options.DurationSec, options.Fps, options.MaxEdge, options.CaptureScreen);
@@ -398,7 +398,7 @@ internal sealed partial class UiAutomationService
                 if (!startedSignaled)
                 {
                     startedSignaled = true;
-                    onRecordingStarted?.Invoke();
+                    onRecordingStarted?.Invoke(frameOutput?.IsActive == true);
                 }
 
                 if (options.OnProgress is not null && elapsedMs >= nextProgressMs)

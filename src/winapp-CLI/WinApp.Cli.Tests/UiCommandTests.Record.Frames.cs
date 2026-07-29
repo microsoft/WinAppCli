@@ -334,6 +334,8 @@ public partial class UiCommandTests
         var stderr = ConsoleStdErr.ToString();
         StringAssert.Contains(stderr, framesDirectory);
         StringAssert.Contains(stderr, "Inspect the frame bundle and retry.");
+        Assert.IsFalse(stderr.Contains("RecordPartialOutputException", StringComparison.Ordinal));
+        Assert.IsFalse(stderr.Contains("   at ", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -392,7 +394,36 @@ public partial class UiCommandTests
             ["-a", "TestApp", "--duration-sec", "1"]);
 
         Assert.AreEqual(1, exitCode);
-        StringAssert.Contains(ConsoleStdErr.ToString(), recoveryHint);
+        var stderr = ConsoleStdErr.ToString();
+        StringAssert.Contains(stderr, recoveryHint);
+        Assert.IsFalse(stderr.Contains("RecordFrameOutputException", StringComparison.Ordinal));
+        Assert.IsFalse(stderr.Contains("   at ", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task Record_StartedEventOmitsUnavailableFrameArtifactPaths()
+    {
+        _fakeUia.RecordingStartedFrameArtifactsActiveOverride = false;
+        var command = GetRequiredService<UiRecordCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command,
+            [
+                "-a", "TestApp",
+                "--duration-sec", "1",
+                "--output", Path.Join(_tempDirectory.FullName, "recording.mp4"),
+                "--frames-dir", Path.Join(_tempDirectory.FullName, "recording.frames"),
+                "--json",
+            ]);
+
+        Assert.AreEqual(0, exitCode);
+        var startedLine = ConsoleStdErr.ToString()
+            .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Single(line => line.Contains("\"recording-started\"", StringComparison.Ordinal));
+        var startedEvent = JsonSerializer.Deserialize<JsonElement>(startedLine);
+        Assert.IsFalse(startedEvent.TryGetProperty("framesDirectory", out _));
+        Assert.IsFalse(startedEvent.TryGetProperty("framesManifest", out _));
+        Assert.IsFalse(startedEvent.TryGetProperty("framesIndex", out _));
     }
 
     [TestMethod]
@@ -479,11 +510,9 @@ public partial class UiCommandTests
     [TestMethod]
     public async Task RecordFrameBundleWriter_ByteLimitPublishesIndexedPrefixAndDrains()
     {
-        var originalEncodeJpeg = RecordFrameBundleWriter.s_encodeJpeg;
         RecordFrameBundleWriter? writer = null;
         try
         {
-            RecordFrameBundleWriter.s_encodeJpeg = (_, _, _) => new byte[800];
             var finalDirectory = Path.Join(_tempDirectory.FullName, "limited.frames");
             writer = new RecordFrameBundleWriter(CreateFrameConfiguration(
                 finalDirectory,
@@ -515,6 +544,29 @@ public partial class UiCommandTests
             Assert.AreEqual(
                 result.Samples,
                 (await File.ReadAllLinesAsync(Path.Join(finalDirectory, "frames.ndjson"))).Length);
+
+            var indexedFiles = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var line in await File.ReadAllLinesAsync(Path.Join(finalDirectory, "frames.ndjson")))
+            {
+                var entry = JsonSerializer.Deserialize<JsonElement>(line);
+                var relativePath = entry.GetProperty("file").GetString()!;
+                indexedFiles.Add(relativePath);
+                var imagePath = Path.Join(
+                    finalDirectory,
+                    relativePath.Replace('/', Path.DirectorySeparatorChar));
+                var bytes = await File.ReadAllBytesAsync(imagePath);
+                var expectedHash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+                Assert.AreEqual(expectedHash, entry.GetProperty("sha256").GetString());
+                using var decoded = SKBitmap.Decode(bytes);
+                Assert.IsNotNull(decoded);
+                Assert.AreEqual(64, decoded.Width);
+                Assert.AreEqual(64, decoded.Height);
+            }
+
+            var publishedFiles = Directory.GetFiles(Path.Join(finalDirectory, "frames"), "*.jpg")
+                .Select(path => $"frames/{Path.GetFileName(path)}")
+                .ToHashSet(StringComparer.Ordinal);
+            CollectionAssert.AreEquivalent(indexedFiles.ToArray(), publishedFiles.ToArray());
         }
         finally
         {
@@ -522,7 +574,6 @@ public partial class UiCommandTests
             {
                 await writer.DisposeAsync();
             }
-            RecordFrameBundleWriter.s_encodeJpeg = originalEncodeJpeg;
         }
     }
 

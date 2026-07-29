@@ -303,7 +303,7 @@ The frame bundle is written to a randomized sibling staging directory and publis
 
 **JSON output (`--json`):**
 - **stdout** (final result): existing fields plus `elapsedMs`, `achievedFps`, `cadenceRatio`, `stopReason`, optional `frameArtifacts`, and optional `warnings`. `frameArtifacts` includes `truncated` and `byteLimit`; when truncated, `warnings` explains how to retain a complete frame timeline on retry.
-- **stderr** (liveness event): `{ "event": "recording-started", "path", "fps", "durationSec", "framesDirectory"?, "framesManifest"?, "framesIndex"? }`
+- **stderr** (liveness event): `{ "event": "recording-started", "path", "fps", "durationSec", "framesDirectory"?, "framesManifest"?, "framesIndex"? }`. Frame paths are present only when frame output initialized successfully.
 - **stderr** (frame mode, at most every five seconds): `{ "event": "recording-progress", "elapsedMs", "samples", "images", "achievedFps" }`
 
 The events on stderr provide liveness without polluting stdout; stdout remains one final JSON object. `achievedFps = frames × 1000 / elapsedMs`, where elapsed time covers capture and excludes MP4 container finalization. A cadence ratio below 0.90 produces a warning rather than failing an otherwise valid recording.

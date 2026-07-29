@@ -45,10 +45,11 @@ internal interface IUiAutomationService
     /// </summary>
     /// <param name="onRecordingStarted">
     /// Optional callback invoked once the encoder is initialized and the first frame has been
-    /// captured — i.e., recording is genuinely underway. Use this to arm a stdin-stop monitor or
-    /// emit a liveness event so that programmatic callers never trigger a premature cancel.
+    /// captured — i.e., recording is genuinely underway. The boolean reports whether frame artifact
+    /// output is active. Use this to arm a stdin-stop monitor or emit a liveness event so that
+    /// programmatic callers never trigger a premature cancel.
     /// </param>
-    Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action? onRecordingStarted = null);
+    Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action<bool>? onRecordingStarted = null);
     Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct);
     Task SetValueAsync(UiSessionInfo session, UiElement element, string text, CancellationToken ct);
     Task FocusAsync(UiSessionInfo session, UiElement element, CancellationToken ct);

@@ -46,7 +46,7 @@ public partial class RealUiAutomationTests
             Fps = 2,
             MaxEdge = 64,
             CaptureScreen = false,
-        }, CancellationToken.None, () => started++);
+        }, CancellationToken.None, _ => started++);
 
         Assert.AreEqual("wgc", result.Mode);
         Assert.AreEqual(2, result.Frames);
@@ -537,6 +537,7 @@ public partial class RealUiAutomationTests
                 "Frame artifacts exceed the 256 MiB pipeline memory budget. Lower --max-edge.",
                 lowerMaxEdgeCanHelp: true);
 
+        bool? frameArtifactsActiveWhenStarted = null;
         var exception = await Assert.ThrowsExactlyAsync<RecordPartialOutputException>(
             () => svc.RecordAsync(session, null, new RecordOptions
             {
@@ -545,9 +546,10 @@ public partial class RealUiAutomationTests
                 DurationSec = 1,
                 Fps = 1,
                 MaxEdge = 64,
-            }, CancellationToken.None));
+            }, CancellationToken.None, active => frameArtifactsActiveWhenStarted = active));
 
         Assert.AreEqual(output, exception.VideoPath);
+        Assert.AreEqual(false, frameArtifactsActiveWhenStarted);
         Assert.IsTrue(File.Exists(output));
         Assert.IsInstanceOfType<RecordFramePipelineLimitException>(exception.InnerException);
         StringAssert.Contains(exception.RecoveryHint, "Lower --max-edge");
