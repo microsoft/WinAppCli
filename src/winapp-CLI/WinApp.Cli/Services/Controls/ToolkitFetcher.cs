@@ -89,12 +89,13 @@ internal static partial class ToolkitFetcher
     private const string XmlnsAnimations = "xmlns:animations=\"using:CommunityToolkit.WinUI.Animations\"";
     private const string XmlnsBehaviors = "xmlns:behaviors=\"using:CommunityToolkit.WinUI.Behaviors\"";
     private const string XmlnsConverters = "xmlns:converters=\"using:CommunityToolkit.WinUI.Converters\"";
+    private const string XmlnsMuxc = "xmlns:muxc=\"using:Microsoft.UI.Xaml.Controls\"";
 
     /// <summary>
     /// Scan a XAML body for which Toolkit-related xmlns prefixes are actually used,
     /// so we only emit the namespaces an agent really needs to add.
     /// </summary>
-    private static string[] DetectXmlnsImports(string xaml)
+    internal static string[] DetectXmlnsImports(string xaml)
     {
         var imports = new List<string>();
         // controls is always required for any toolkit sample we keep
@@ -103,6 +104,9 @@ internal static partial class ToolkitFetcher
         if (UsesPrefix(xaml, "animations")) imports.Add(XmlnsAnimations);
         if (UsesPrefix(xaml, "behaviors"))  imports.Add(XmlnsBehaviors);
         if (UsesPrefix(xaml, "converters")) imports.Add(XmlnsConverters);
+        // muxc (Microsoft.UI.Xaml.Controls) rides along in some Toolkit samples
+        // (e.g. muxc:ItemsRepeater); without the import the pasted snippet won't parse.
+        if (UsesPrefix(xaml, "muxc"))       imports.Add(XmlnsMuxc);
         return imports.ToArray();
     }
 
@@ -504,12 +508,20 @@ internal static partial class ToolkitFetcher
         return m.Success ? m.Groups[1].Value.Trim() : xaml;
     }
 
-    private static string CleanXaml(string xaml)
+    internal static string CleanXaml(string xaml)
     {
+        // Collect what the surviving markup still references BEFORE any destructive edit,
+        // so we never strip an x:Name, a Resources definition, or a Border that something
+        // still binds to (which would ship a snippet that fails to parse).
+        var referencedNames = CollectReferencedNames(xaml);
+
         // Demo bindings + names
         xaml = Regex.Replace(xaml, @"\s+IsEnabled=""\{x:Bind\s+\w+,\s*Mode=OneWay\}""", "");
         xaml = Regex.Replace(xaml, @"\s+IsExpanded=""\{x:Bind\s+\w+,\s*Mode=OneWay\}""", "");
-        xaml = Regex.Replace(xaml, @"\s+x:Name=""\w+""", "");
+        // Strip x:Name only for elements nothing references by name — keep names that a
+        // surviving x:Bind / ElementName / TargetControl binding points at.
+        xaml = Regex.Replace(xaml, @"\s+x:Name=""(\w+)""",
+            m => referencedNames.Contains(m.Groups[1].Value) ? m.Value : "");
         xaml = Regex.Replace(xaml, @"\s+AutomationProperties\.AutomationId=""[^""]*""", "");
         xaml = Regex.Replace(xaml, @"<!--\s*TODO:.*?-->", "", RegexOptions.Singleline);
         xaml = Regex.Replace(xaml, @"<!--.*?-->", "", RegexOptions.Singleline);
@@ -529,9 +541,9 @@ internal static partial class ToolkitFetcher
         xaml = Regex.Replace(xaml, @"\s+BorderThickness=""[\d,]+""", "");
         xaml = Regex.Replace(xaml, @"\s+CornerRadius=""\d+""", "");
         xaml = Regex.Replace(xaml, @"\s+Style=""\{StaticResource\s+(?:CardStyle|EmployeeDataTemplate|EmailTemplate|StaggeredTemplate|PhotoTemplate|SuggestionTemplate)\}""", "");
-        // Drop Page.Resources / Style / VisualStateManager / Resources blocks
-        xaml = Regex.Replace(xaml, @"<Page\.Resources>.*?</Page\.Resources>\s*", "", RegexOptions.Singleline);
-        xaml = Regex.Replace(xaml, @"<\w+\.Resources>.*?</\w+\.Resources>\s*", "", RegexOptions.Singleline);
+        // Drop Page.Resources / *.Resources blocks — but keep any that still define a key
+        // referenced by a surviving {StaticResource}/{ThemeResource} in the body.
+        xaml = RemoveUnreferencedResourceBlocks(xaml);
         xaml = Regex.Replace(xaml, @"<VisualStateManager\.VisualStateGroups>.*?</VisualStateManager\.VisualStateGroups>\s*", "", RegexOptions.Singleline);
         // Drop standalone descriptive TextBlocks (Text > 60 chars, only Text attribute, no x:Bind)
         xaml = Regex.Replace(
@@ -545,14 +557,60 @@ internal static partial class ToolkitFetcher
             @"<TextBlock\s*>\s*(?:<Run\b[^>]*?(?:>[^<]*</Run>|/>)\s*){1,}</TextBlock>\s*",
             "",
             RegexOptions.Singleline);
-        // Drop empty Border placeholders
-        xaml = Regex.Replace(xaml, @"<Border[^/>]*?/>\s*", "");
-        xaml = Regex.Replace(xaml, @"<Border[^>]*?>\s*</Border>\s*", "");
+        // Drop empty Border placeholders — but never one that kept an x:Name (i.e. is
+        // referenced by a binding such as TargetControl="{x:Bind SomeContent}").
+        xaml = Regex.Replace(xaml, @"<Border(?![^>]*\bx:Name=)[^/>]*?/>\s*", "");
+        xaml = Regex.Replace(xaml, @"<Border(?![^>]*\bx:Name=)[^>]*?>\s*</Border>\s*", "");
         // Drop empty Grid cells used as demo placeholders
         xaml = Regex.Replace(xaml, @"<Grid\s+Grid\.(?:Row|Column)=""\d+""[^>]*?>\s*</Grid>\s*", "");
         // Compress whitespace
         var lines = xaml.Split('\n').Where(l => !string.IsNullOrWhiteSpace(l));
         return string.Join('\n', lines);
+    }
+
+    /// <summary>
+    /// Element names that a binding still points at — <c>{x:Bind Name...}</c>,
+    /// <c>ElementName=Name</c>. Used to protect those elements' <c>x:Name</c> (and the
+    /// elements themselves) from the demo-cleanup passes so the emitted snippet's
+    /// bindings don't dangle.
+    /// </summary>
+    private static HashSet<string> CollectReferencedNames(string xaml)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (Match m in Regex.Matches(xaml, @"\{x:Bind\s+(\w+)"))
+            names.Add(m.Groups[1].Value);
+        foreach (Match m in Regex.Matches(xaml, @"ElementName=""?(\w+)"))
+            names.Add(m.Groups[1].Value);
+        return names;
+    }
+
+    /// <summary>
+    /// Remove <c>&lt;X.Resources&gt;</c> blocks (demo styles/templates) EXCEPT those that
+    /// still define an <c>x:Key</c> referenced by a surviving
+    /// <c>{StaticResource}</c>/<c>{ThemeResource}</c> outside the block — dropping a
+    /// referenced definition (e.g. a <c>DataTemplate</c> used by <c>ItemTemplate</c>)
+    /// would make the snippet fail XAML parsing. Blocks with no keyed resources (implicit
+    /// styles only) are safe to drop.
+    /// </summary>
+    private static string RemoveUnreferencedResourceBlocks(string xaml)
+    {
+        var source = xaml;
+        return Regex.Replace(source, @"<((?:\w+:)?\w+)\.Resources>(.*?)</\1\.Resources>\s*", m =>
+        {
+            var keys = Regex.Matches(m.Groups[2].Value, @"x:Key=""(\w+)""")
+                .Select(k => k.Groups[1].Value)
+                .ToList();
+            if (keys.Count == 0)
+            {
+                return ""; // no keyed resources — safe to drop
+            }
+
+            // References that live OUTSIDE this block (source minus this block's text).
+            var outside = source.Replace(m.Value, "");
+            var referenced = keys.Any(k =>
+                Regex.IsMatch(outside, $@"\{{(?:Static|Theme)Resource\s+{Regex.Escape(k)}\}}"));
+            return referenced ? m.Value : "";
+        }, RegexOptions.Singleline);
     }
 
     /// <summary>
