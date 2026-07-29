@@ -6,6 +6,7 @@ using WinApp.Cli.Commands;
 namespace WinApp.Cli.Tests;
 
 [TestClass]
+[DoNotParallelize] // migrate commands write to the process-wide System.Console.Out
 public class MigrateValidateCommandTests : MigrateCommandTestBase
 {
     [TestMethod]
@@ -78,5 +79,43 @@ public class MigrateValidateCommandTests : MigrateCommandTestBase
         StringAssert.Contains(output, "[WARN] Residue (API)");
         StringAssert.Contains(output, "not found");
         StringAssert.Contains(output, "[PASS] Validation gate");
+    }
+
+    [TestMethod]
+    public async Task Validate_EmptyDirectory_FailsGate()
+    {
+        var project = _tempDirectory.CreateSubdirectory("empty");
+
+        var command = GetRequiredService<MigrateValidateCommand>();
+        var (exit, output) = await InvokeCapturingConsoleAsync(command, project.FullName);
+
+        Assert.AreEqual(1, exit, output);
+        StringAssert.Contains(output, "[FAIL] Project layout");
+    }
+
+    [TestMethod]
+    public async Task Validate_MissingShell_FailsGate()
+    {
+        var project = _tempDirectory.CreateSubdirectory("noshell");
+        await File.WriteAllTextAsync(Path.Combine(project.FullName, "App.csproj"), CleanCsproj, TestContext.CancellationToken);
+
+        var command = GetRequiredService<MigrateValidateCommand>();
+        var (exit, output) = await InvokeCapturingConsoleAsync(command, project.FullName);
+
+        Assert.AreEqual(1, exit, output);
+        StringAssert.Contains(output, "[FAIL] Shell wiring");
+    }
+
+    [TestMethod]
+    public async Task Validate_DriverThrows_FailsGate()
+    {
+        var project = await CreateProjectDirAsync("driver-throws");
+        FakeDriver.ThrowOnRun = new InvalidOperationException("driver crashed");
+
+        var command = GetRequiredService<MigrateValidateCommand>();
+        var (exit, output) = await InvokeCapturingConsoleAsync(command, project.FullName);
+
+        Assert.AreEqual(1, exit, output);
+        StringAssert.Contains(output, "[FAIL] Residue (API)");
     }
 }

@@ -394,7 +394,7 @@ export interface MigrateScaffoldOptions extends CommonOptions {
   /** Migrate from UWP source (currently the only supported source). */
   fromUwp?: boolean;
   /** Existing WinUI 3 scaffold to migrate into (produced by 'dotnet new winui'). */
-  target?: string;
+  target: string;
 }
 
 /**
@@ -404,7 +404,7 @@ export async function migrateScaffold(options: MigrateScaffoldOptions): Promise<
   const args: string[] = ['migrate', 'scaffold'];
   args.push(options.source);
   if (options.fromUwp) args.push('--from-uwp');
-  if (options.target) args.push('--target', options.target);
+  args.push('--target', options.target);
   return execCommand(args, options);
 }
 

@@ -112,10 +112,16 @@ internal partial class MigrateValidateCommand : Command, IShortDescription
             {
                 run = await driver.RunAsync(target, project, fromUwp: true, ct);
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
-                Console.Out.WriteLine($"[WARN] Residue (API) — analyzer driver failed to run: {ex.Message}. Skipped API-residue check.");
-                return 0;
+                // Fail closed: the API-residue gate was declared but could not execute.
+                Console.Out.WriteLine($"[FAIL] Residue (API) — analyzer driver failed to run: {ex.Message}. Cannot verify API residue.");
+                diag.AppendLine("[Residue — API]").AppendLine($"  analyzer driver failed to run: {ex.Message}").AppendLine();
+                return 1;
             }
 
             if (!run.DriverFound)
@@ -136,9 +142,10 @@ internal partial class MigrateValidateCommand : Command, IShortDescription
 
             if (report is null)
             {
-                Console.Out.WriteLine("[WARN] Residue (API) — analyzer produced no parseable output; skipped API-residue check.");
+                // Fail closed: the driver ran but produced no usable plan, so residue is unverifiable.
+                Console.Out.WriteLine("[FAIL] Residue (API) — analyzer produced no parseable output; cannot verify API residue.");
                 if (run.StdErr.Length > 0) { diag.AppendLine("[Residue API driver stderr]").AppendLine(run.StdErr.TrimEnd()).AppendLine(); }
-                return 0;
+                return 1;
             }
 
             // A migrated (non-deferred) file must carry no must-fix API residue.
@@ -220,7 +227,11 @@ internal partial class MigrateValidateCommand : Command, IShortDescription
             var mainWindowXaml = FindFirst(root, "MainWindow.xaml");
             var mainWindowCs = FindFirst(root, "MainWindow.xaml.cs");
 
-            if (mainWindowXaml is not null)
+            if (mainWindowXaml is null)
+            {
+                fails.Add("MainWindow.xaml not found — the WinUI 3 app shell is missing, so app content cannot render.");
+            }
+            else
             {
                 var xaml = SafeRead(mainWindowXaml);
                 if (!RootFrame().IsMatch(xaml))
@@ -252,7 +263,13 @@ internal partial class MigrateValidateCommand : Command, IShortDescription
         private static int CheckSingleProject(string root, StringBuilder diag)
         {
             var projects = EnumerateSource(root, ".csproj").ToList();
-            if (projects.Count <= 1)
+            if (projects.Count == 0)
+            {
+                Console.Out.WriteLine("[FAIL] Project layout — no .csproj found; a migrated WinUI 3 project must contain exactly one project file.");
+                diag.AppendLine("[Project layout]").AppendLine("  No .csproj found under the project root.").AppendLine();
+                return 1;
+            }
+            if (projects.Count == 1)
             {
                 Console.Out.WriteLine("[PASS] Project layout — single project, no nested duplicate .csproj.");
                 return 0;

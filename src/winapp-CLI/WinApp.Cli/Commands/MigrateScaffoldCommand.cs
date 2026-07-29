@@ -320,7 +320,7 @@ internal partial class MigrateScaffoldCommand : Command, IShortDescription
             if (extensions.Count > 0)
             {
                 Console.Out.WriteLine($"    WARNING: UWP manifest declares {extensions.Count} Extension(s): {string.Join(", ", extensions)}");
-                Console.Out.WriteLine("      Do NOT copy them verbatim — see MIGRATION-PATTERNS.md#manifest-extensions.");
+                Console.Out.WriteLine("      Do NOT copy them verbatim — most UWP manifest extensions have no WinUI 3 desktop equivalent and must be re-implemented or dropped. Run 'winapp migrate analyze --from-uwp' for per-item guidance.");
             }
         }
 
@@ -470,6 +470,7 @@ internal partial class MigrateScaffoldCommand : Command, IShortDescription
             var mainWindowXaml = FindFile(targetRoot, "MainWindow.xaml");
             var mainWindowCs = FindFile(targetRoot, "MainWindow.xaml.cs");
 
+            bool rootFrameReady = false;
             if (mainWindowXaml is not null)
             {
                 var body = File.ReadAllText(mainWindowXaml);
@@ -487,6 +488,16 @@ internal partial class MigrateScaffoldCommand : Command, IShortDescription
                 {
                     Console.Out.WriteLine("    MainWindow.xaml already has RootFrame — skipped");
                 }
+
+                // Only inject the code-behind Navigate call if a RootFrame is actually present now
+                // (either pre-existing or just inserted); otherwise the reference would not compile.
+                rootFrameReady = body.Contains("x:Name=\"RootFrame\"");
+            }
+
+            if (!rootFrameReady)
+            {
+                Console.Out.WriteLine("    WARNING: MainWindow.xaml has no <Frame x:Name=\"RootFrame\"> (unrecognized layout) — Navigate injection skipped to avoid a broken build.");
+                return;
             }
 
             if (mainWindowCs is null)

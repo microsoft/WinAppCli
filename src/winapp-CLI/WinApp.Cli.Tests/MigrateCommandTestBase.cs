@@ -32,7 +32,7 @@ public abstract class MigrateCommandTestBase : BaseCommandTests
     {
         await ConsoleGate.WaitAsync(TestContext.CancellationToken);
         var original = Console.Out;
-        var writer = new StringWriter();
+        using var writer = new StringWriter();
         try
         {
             Console.SetOut(writer);
@@ -50,6 +50,9 @@ public abstract class MigrateCommandTestBase : BaseCommandTests
     {
         var dir = _tempDirectory.CreateSubdirectory(name);
         await File.WriteAllTextAsync(Path.Combine(dir.FullName, csprojName), CleanCsproj, TestContext.CancellationToken);
+        // A migrated WinUI 3 project shell — satisfies the validate shell-wiring gate.
+        await File.WriteAllTextAsync(Path.Combine(dir.FullName, "MainWindow.xaml"),
+            "<Window><Grid><Frame x:Name=\"RootFrame\" /></Grid></Window>", TestContext.CancellationToken);
         return dir;
     }
 

@@ -308,7 +308,7 @@ function migrateScaffold(options: MigrateScaffoldOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `source` | `string` | Yes | UWP project source folder (contains the .csproj and Package.appxmanifest). |
 | `fromUwp` | `boolean \| undefined` | No | Migrate from UWP source (currently the only supported source). |
-| `target` | `string \| undefined` | No | Existing WinUI 3 scaffold to migrate into (produced by 'dotnet new winui'). |
+| `target` | `string` | Yes | Existing WinUI 3 scaffold to migrate into (produced by 'dotnet new winui'). |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -1285,7 +1285,7 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `source` | `string` | Yes | UWP project source folder (contains the .csproj and Package.appxmanifest). |
 | `fromUwp` | `boolean \| undefined` | No | Migrate from UWP source (currently the only supported source). |
-| `target` | `string \| undefined` | No | Existing WinUI 3 scaffold to migrate into (produced by 'dotnet new winui'). |
+| `target` | `string` | Yes | Existing WinUI 3 scaffold to migrate into (produced by 'dotnet new winui'). |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

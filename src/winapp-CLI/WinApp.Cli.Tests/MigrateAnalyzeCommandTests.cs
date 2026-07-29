@@ -6,6 +6,7 @@ using WinApp.Cli.Commands;
 namespace WinApp.Cli.Tests;
 
 [TestClass]
+[DoNotParallelize] // migrate commands write to the process-wide System.Console.Out
 public class MigrateAnalyzeCommandTests : MigrateCommandTestBase
 {
     [TestMethod]
