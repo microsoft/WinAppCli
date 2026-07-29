@@ -4,6 +4,7 @@
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using System.CommandLine;
+using System.Runtime.InteropServices;
 using System.Text;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
@@ -223,7 +224,7 @@ internal partial class RunCommand
             return resolution.Packaging == ProjectPackaging.Packaged
                 ? await RunPackagedProjectAsync(
                     resolution, csproj, manifest, outputAppXDirectory, appArgs,
-                    noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, isJson,
+                    noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, noBuild, isJson,
                     cancellationToken)
                 : await RunUnpackagedProjectAsync(
                     resolution, csproj, appArgs,
@@ -250,6 +251,7 @@ internal partial class RunCommand
             bool clean,
             bool useSymbols,
             string? executable,
+            bool noBuild,
             bool isJson,
             CancellationToken cancellationToken)
         {
@@ -260,9 +262,13 @@ internal partial class RunCommand
             // "manifest not found" from the shared pipeline (which would also probe the cwd).
             if (manifest == null && !FindManifest(targetDir.FullName).Exists)
             {
-                var message =
-                    $"'{csproj.Name}' resolves to a packaged (MSIX) app but no AppxManifest.xml was found in the build output ({targetDir.FullName}). " +
-                    "Ensure the project is a packaged WinUI app (EnableMsixTooling=true with a Package.appxmanifest), or force an unpackaged run with -p:WindowsPackageType=None.";
+                // Under --no-build the missing manifest most often means --no-build is pointing at a stale
+                // or unpackaged build output, not that the project is misconfigured — lead with that.
+                var message = noBuild
+                    ? $"'{csproj.Name}' resolves to a packaged (MSIX) app but no AppxManifest.xml was found in the build output ({targetDir.FullName}). " +
+                      "Remove --no-build to rebuild the packaged layout, or point the run at an up-to-date packaged build."
+                    : $"'{csproj.Name}' resolves to a packaged (MSIX) app but no AppxManifest.xml was found in the build output ({targetDir.FullName}). " +
+                      "Ensure the project is a packaged WinUI app (EnableMsixTooling=true with a Package.appxmanifest), or force an unpackaged run with -p:WindowsPackageType=None.";
                 return Fail(message, isJson);
             }
 
@@ -326,8 +332,11 @@ internal partial class RunCommand
                     {
                         try
                         {
-                            await msixService.EnsureWindowsAppRuntimeInstalledAsync(csproj, resolution.Architecture, resolution.Framework, resolution.NoRestore, taskContext, ct);
-                            return (0, "Windows App Runtime ready");
+                            // Report whether the runtime was actually prepared: a plain console/desktop app
+                            // with no Windows App SDK reference is skipped inside, so claiming "ready" would
+                            // be a lie. Surface the skip honestly instead.
+                            var prepared = await msixService.EnsureWindowsAppRuntimeInstalledAsync(csproj, resolution.Architecture, resolution.Framework, resolution.NoRestore, taskContext, ct);
+                            return (0, prepared ? "Windows App Runtime ready" : "No Windows App SDK reference — runtime not needed");
                         }
                         catch (OperationCanceledException) when (ct.IsCancellationRequested)
                         {
@@ -375,10 +384,16 @@ internal partial class RunCommand
             }
             catch (Exception ex)
             {
-                logger.LogError("{UISymbol} Failed to launch '{Exe}': {Message}", UiSymbols.Error, exePath, ex.Message);
+                // A cross-arch apphost (e.g. an arm64 build on an x64 host) fails here with an opaque
+                // Win32 "not a valid application" error. If the resolved arch can't run on this machine,
+                // enrich the message with actionable guidance instead of surfacing the raw OS error.
+                var detail = resolution.Architecture is { Length: > 0 } arch && !CanCurrentOsRunArchitecture(arch)
+                    ? BuildArchMismatchMessage(arch, ex.Message)
+                    : ex.Message;
+                logger.LogError("{UISymbol} Failed to launch '{Exe}': {Message}", UiSymbols.Error, exePath, detail);
                 if (isJson)
                 {
-                    PrintJson(aumid: null, processId: null, ex.Message);
+                    PrintJson(aumid: null, processId: null, detail);
                 }
                 return 1;
             }
@@ -431,6 +446,37 @@ internal partial class RunCommand
 
                 return await WaitForLaunchedProcessAsync(launched, cancellationToken);
             }
+        }
+
+        /// <summary>
+        /// True when the current OS can execute a process of <paramref name="targetArch"/>, accounting for
+        /// Windows emulation: an arm64 host runs arm64/x64/x86; an x64 host runs x64/x86 but NOT arm64; an
+        /// x86 host runs x86 only. Unknown monikers are treated as runnable so a genuine launch error still
+        /// surfaces normally rather than being masked by a false "wrong architecture" message.
+        /// </summary>
+        internal static bool CanCurrentOsRunArchitecture(string targetArch)
+        {
+            var os = RuntimeInformation.OSArchitecture;
+            return targetArch.ToLowerInvariant() switch
+            {
+                "arm64" => os == Architecture.Arm64,
+                "x64" => os is Architecture.X64 or Architecture.Arm64,
+                "x86" => os is Architecture.X86 or Architecture.X64 or Architecture.Arm64,
+                _ => true,
+            };
+        }
+
+        /// <summary>
+        /// Builds an actionable message for the case where an app was built for an architecture this
+        /// machine can't execute — replacing the opaque OS "InvalidApplication" error with a clear fix
+        /// (rebuild for the host arch or run on a matching machine). <paramref name="detail"/> carries the
+        /// raw OS error for diagnostics.
+        /// </summary>
+        private static string BuildArchMismatchMessage(string targetArch, string detail)
+        {
+            var host = RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant();
+            return $"The app was built for {targetArch} but this machine runs {host}, which can't execute {targetArch} binaries. " +
+                   $"Rebuild for {host} (for example: --arch {host}) or run the app on a {targetArch} machine. ({detail})";
         }
 
         /// <summary>
