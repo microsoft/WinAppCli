@@ -1,6 +1,6 @@
 ---
 name: pr-review
-description: Multi-dimensional review of a PR or feature branch in the microsoft/winappcli repo. Activate when a contributor asks to "review my PR", "review my changes", "vet my branch before pushing", "do a full review", "PR review", "review this feature", or similar. Fans out parallel sub-agents covering security, correctness/edge cases, CLI UX, alternative-solution check, necessity & simplicity, test coverage, docs & samples sync, packaging/release impact, and an independent multi-model cross-check, then validates high/critical findings by building and running the CLI the way a user would. Reports a consolidated finding list to stdout. Does NOT apply fixes unless explicitly asked.
+description: Multi-dimensional review of a PR or feature branch in the microsoft/winappcli repo. Activate when a contributor asks to "review my PR", "review my changes", "vet my branch before pushing", "do a full review", "PR review", "review this feature", or similar. Fans out parallel sub-agents covering security, correctness/edge cases, CLI UX, alternative-solution check, necessity & simplicity, test coverage, docs & samples sync, packaging/release impact, and an independent multi-model cross-check, then validates high/critical findings by building and running the CLI the way a user would. Prefers the smallest (ideally subtractive) fix for each finding, tracks scope growth across review rounds, and clamps re-reviews to critical/high so repeated loops converge instead of over-engineering the PR. Reports a consolidated finding list to stdout. Does NOT apply fixes unless explicitly asked.
 infer: true
 ---
 
@@ -97,6 +97,45 @@ Before fanning out:
   to proceed, scope down to a subdirectory, or pick specific files. Use
   `ask_user`. Do not silently proceed.
 
+### 2b. Determine the review round and scope baseline
+
+Multi-round review is where PRs get over-engineered. Each round reads the diff
+fresh, so complexity the *previous* round asked for looks like settled design to
+the next one — a one-way ratchet that turns a focused feature into a maximalist
+one. Break the ratchet by making the branch's history across rounds explicit.
+
+1. **Read the round state** from `<git-dir>/winapp-pr-review-state.json`, where
+   `<git-dir>` is the output of `git rev-parse --git-dir` (**not** a literal
+   `.git/` — in a worktree checkout `.git` is a file, not a directory). The file
+   is untracked by construction and absent on a first review. Shape:
+
+   ```json
+   { "branch": "<name>", "round": 2, "head": "<sha>",
+     "files": 9, "added": 312, "deleted": 58,
+     "surface": { "commands": 1, "flags": 4, "services": 2, "interfaces": 1 } }
+   ```
+
+2. **Decide the round.** It is a **re-review (round 2+)** if the state file
+   matches this branch, *or* the user's phrasing says so ("review again",
+   "re-review", "I addressed the findings", "another pass", "check my fixes").
+   Otherwise it is **round 1**.
+3. **Compute the scope delta** (round 2+ only): current files / +lines / -lines
+   and public-surface counts vs. the stored values. Count public surface by
+   grepping the diff for new `Command` classes, new `Option`/`Argument`
+   registrations, and new files under `Services/`.
+4. **Write the state file back** at the end of the run with the current numbers
+   and `round + 1`.
+
+Carry `round`, the scope delta, and the previous round's critical/high findings
+(if you have them in this conversation) into every sub-agent prompt.
+
+**Converging re-review.** On round 2+, the review clamps to `critical` and
+`high` only. Medium and low findings are collected but **not reported as
+findings** — they are collapsed into a single `Deferred polish` line in the
+report. Rationale: by round 2 the remaining medium/low items cost more in added
+complexity than they return in quality, and a list of them reads as a to-do list
+the author feels obliged to complete.
+
 ### 3. Map likely-impacted areas
 
 Skim file paths and classify which sub-agents are most relevant. Every dimension
@@ -125,12 +164,15 @@ self-contained: include the diff, the base/head refs, the file classification,
 and the contents of the corresponding `dimensions/<name>.md` file as
 instructions.
 
-**#5 (necessity & simplicity) is conditional.** Launch it **only when the diff
-adds new user-facing surface** — a new command / verb / subcommand, a new public
-flag / option / API, or a materially new capability. For bug fixes, refactors,
-perf, docs, tests, and dependency / CI / packaging changes, **skip it** and mark
-it `n/a (no new surface)` in the Coverage block. A non-feature PR fans out 7
-specialists; a feature PR fans out all 8.
+**#5 (necessity & simplicity) is conditional.** Launch it when **any** of these
+holds: the diff adds new user-facing surface (a new command / verb / subcommand,
+a new public flag / option / API, or a materially new capability); the diff adds
+new internal structure (a new service, interface, abstraction, or config knob,
+even with no user-facing surface); **or this is a re-review (round 2+)** — on a
+re-review it is **always** launched, because auditing complexity accreted across
+rounds is its job and nothing else does it. Skip it only for small bug fixes,
+mechanical refactors, perf, docs, tests, and dependency / CI / packaging changes
+on round 1, and mark it `n/a (no new surface)` in the Coverage block.
 
 The 9 dimensions and their fragment files — **8 always-on + 1 conditional**
 (necessity & simplicity, feature PRs only):
@@ -141,7 +183,7 @@ The 9 dimensions and their fragment files — **8 always-on + 1 conditional**
 | 2 | correctness & edge cases (incl. regression) | `dimensions/correctness.md` | general-purpose |
 | 3 | CLI UX & usability | `dimensions/cli-ux.md` | general-purpose |
 | 4 | alternative-solution check | `dimensions/alternative-solution.md` | general-purpose |
-| 5 | necessity & simplicity — *conditional, feature PRs only* | `dimensions/necessity-and-simplicity.md` | general-purpose |
+| 5 | necessity & simplicity — *conditional; always on re-reviews* | `dimensions/necessity-and-simplicity.md` | general-purpose |
 | 6 | test coverage | `dimensions/test-coverage.md` | general-purpose |
 | 7 | docs & samples sync | `dimensions/docs-and-samples.md` | explore |
 | 8 | packaging & release impact | `dimensions/packaging.md` | general-purpose |
@@ -184,6 +226,26 @@ Collect all findings. Then:
 5. **Seed validation status.** Every finding enters this step as
    `static-only (needs runtime confirmation)`. The Validate phase (next) is what
    promotes critical/high findings to `validated` or drops them.
+6. **Run the net-complexity pass.** Nine sub-agents each proposing one
+   reasonable addition is how a PR gets over-engineered — individually rational,
+   collectively maximalist. Nobody but you sees the total, so total it up:
+   - **Reject `large` fixes that lack justification.** Per the Complexity Budget
+     Test, any recommendation adding a new command / flag / option / service /
+     interface / abstraction must state why a smaller fix won't do. If it
+     doesn't, rewrite it as the smaller fix or drop the finding.
+   - **Merge overlapping additive fixes.** If three findings each want a new
+     validation helper, guard, or option in the same area, collapse them into
+     one recommendation with one cost.
+   - **Prefer the subtractive sibling.** When two findings on the same code
+     offer an additive and a subtractive fix, keep the subtractive one.
+   - **Sum the cost.** Count findings by `Fix cost`. If the recommendations
+     collectively land at `large`-heavy — or would plausibly add more code than
+     the PR itself contains — say so explicitly in the report's `Recommended
+     action` block rather than presenting them as a flat checklist.
+7. **Clamp on re-review (round 2+).** Drop `medium` and `low` findings from the
+   Findings and Details sections. Report their count on one `Deferred polish`
+   line, with a one-clause summary of the themes. Do not enumerate them; do not
+   attach recommendations to them. If the user wants them, they will ask.
 
 ### 6. Validate findings for real
 
@@ -246,6 +308,11 @@ The header line varies by scope:
 Summary
   Critical: <n>   High: <n>   Medium: <n>   Low: <n>
 
+Scope
+  Round <n>            <first review | re-review; delta vs round n-1: +<files> files, +<add>/-<del> lines>
+  New public surface   <n commands, n flags, n services  ·  delta: +n flags, +n services>
+  Fix cost of findings <n subtractive, n small, n medium, n large>
+
 Coverage
   security              <✓ clean | ⚠ N findings | ✗ skipped + reason>
   correctness           ...
@@ -258,6 +325,11 @@ Coverage
   multi-model           <✓ X/Y critical+high confirmed  ·  models: opus,gpt>
   regression            <✓ no change to existing flows | ⚠ N regressions>
   validation            <✓ K/L critical+high validated at runtime | ⚠ static-only: ...>
+
+Recommended action
+  Must fix before merge  <C*/H* ids, or "none">
+  Safe to decline        <M*/L* ids the author can close as won't-fix, with why>
+  Complexity verdict     <one line: is the PR converged, or still growing?>
 
 Findings
   C1  <file>:<lines>   <domain>      <one-line>
@@ -272,12 +344,29 @@ Details
 - Validation: validated | static-only (needs runtime confirmation)
 - Domain: security
 - Multi-model: confirmed
+- Fix cost: small
 - Finding: <one-line>
 - Evidence: <code refs and quoted lines; runtime evidence if validated>
-- Recommendation: <concrete next step>
+- Recommendation: <smallest concrete next step>
 
 ## C2 ...
 ```
+
+**The `Recommended action` block is mandatory and is the most important part of
+the report.** It is the stop signal. Rules for it:
+
+- `Must fix before merge` lists critical and high only. If there are none, print
+  `none — this PR is mergeable as-is` and mean it.
+- `Safe to decline` must be **non-empty whenever medium/low findings exist**.
+  Naming which findings the author may reasonably close is what stops a review
+  list from being read as a to-do list. Give a one-clause reason each.
+- `Complexity verdict` is one line answering: *has this PR converged, or is each
+  round making it bigger without making it better?* On round 2+, if the delta is
+  mostly new options / abstractions rather than fixed bugs, say so plainly and
+  recommend stopping — "further review rounds will add complexity, not quality"
+  is a legitimate and useful verdict.
+- On a re-review, add a `Deferred polish  <n> items (<themes>)` line instead of
+  listing medium/low findings.
 
 If a sub-agent returned zero findings, list its dimension as `✓ clean` in the
 Coverage block and include its short "what I checked" note in a final
@@ -303,6 +392,15 @@ Coverage block and include its short "what I checked" note in a final
 - **Signal-to-noise.** Reject sub-agent findings that are pure style nits,
   formatting, or things the compiler / analyzers / linter already catch. The
   Team Lead Test (see any dimension file) is mandatory.
+- **Prefer subtractive fixes.** Enforce the Complexity Budget Test on every
+  recommendation you keep: it must be the smallest fix that resolves the
+  finding, and any `large` fix cost must justify why a smaller one won't do.
+  Rewrite or drop recommendations that fail. A review whose net effect is "add
+  nine things" is a failed review even if all nine are individually reasonable.
+- **Converge, don't accumulate.** On round 2+, clamp to critical/high, audit the
+  complexity the previous rounds caused, and be willing to conclude that the PR
+  is done. Recommending *no further changes* is a valid outcome the orchestrator
+  must be willing to print.
 - **Cite evidence.** Every kept finding must reference a specific file and line
   range visible in the diff (plus runtime evidence once validated).
 
@@ -319,9 +417,13 @@ from these blocks (in order):
    dimension's primary focus.
 4. **Shared contract.** Inline the contents of
    `.github/skills/pr-review/dimensions/_shared-contract.md`.
-5. **Dimension instructions.** Inline the contents of
+5. **Round context.** The round number; on round 2+, the scope delta since the
+   previous round and the previous round's critical/high findings (if you have
+   them), plus the instruction to clamp to critical/high and to treat
+   reviewer-suggested code as re-openable.
+6. **Dimension instructions.** Inline the contents of
    `.github/skills/pr-review/dimensions/<name>.md`.
-6. **Closing instruction.** "Return only the markdown specified by the shared
+7. **Closing instruction.** "Return only the markdown specified by the shared
    contract. No preamble, no apologies, no narration."
 
 For the multi-model sub-agent, pass the **raw diff and the actual changed code
@@ -336,12 +438,15 @@ only after its own pass.
 ```
 1. git diff --stat origin/main...HEAD          → 12 files, +340/-87
 2. git diff origin/main...HEAD                 → captured for sub-agents
-3. Map files to areas                          → mostly Services + Commands + 1 doc
-4. Fan out 7–8 task() calls in parallel        → skip #5 necessity if no new surface; retry any that died
-5. Fan out task() #9 (diff+code, model override) → wait, record model family
-6. Dedupe, sort, ID, reconcile multi-model, seed validation
-7. Validate: build + run the published single-file binary (npm/MSIX only if the change needs it) + run changed cmds → confirm/drop crit+high
-8. Print stdout report   (opt-in follow-through only if asked)
+3. Read $(git rev-parse --git-dir)/winapp-pr-review-state.json → round 1 (absent) | round 2+ (compute delta)
+4. Map files to areas                          → mostly Services + Commands + 1 doc
+5. Fan out 7–8 task() calls in parallel        → #5 necessity always on re-reviews; retry any that died
+6. Fan out task() #9 (diff+code, model override) → wait, record model family
+7. Dedupe, sort, ID, reconcile multi-model, seed validation
+8. Net-complexity pass                         → reject unjustified `large` fixes, merge overlaps, prefer subtractive
+9. Clamp to critical/high if round 2+          → medium/low become one `Deferred polish` line
+10. Validate: build + run the published single-file binary (npm/MSIX only if the change needs it) + run changed cmds → confirm/drop crit+high
+11. Print stdout report incl. Recommended action; write the round-state JSON back
 ```
 
 ## Example consolidated stdout (feature PR)
@@ -351,6 +456,11 @@ PR Review — feat/sparse-trustedlaunch vs origin/main  (4 commits, 9 files, +31
 
 Summary
   Critical: 0   High: 2   Medium: 4   Low: 1
+
+Scope
+  Round 1              first review
+  New public surface   1 command, 3 flags, 1 service
+  Fix cost of findings 2 subtractive, 3 small, 2 medium, 0 large
 
 Coverage
   security              ⚠ 1 finding
@@ -364,6 +474,14 @@ Coverage
   multi-model           ✓ 2/2 high confirmed  ·  models: gpt
   regression            ✓ no change to existing flows
   validation            ⚠ 1/2 high validated at runtime; H2 static-only (no signing cert)
+
+Recommended action
+  Must fix before merge  H1, H2
+  Safe to decline        M2 (a required flag is fine for a v1); M3 (the separate
+                         verb is defensible if you keep the flag set small);
+                         L1 (cosmetic ordering)
+  Complexity verdict     Appropriately scoped for a first cut — 1 command, 3
+                         flags. Fixing H1+H2 adds ~30 lines and no new surface.
 
 Findings
   H1  src/winapp-CLI/.../SparsePackageService.cs:142-160   security        Process.Start with manifest-derived path
@@ -381,6 +499,7 @@ Details
 - Validation: validated
 - Domain: security
 - Multi-model: confirmed
+- Fix cost: small
 - Finding: Process.Start invokes makeappx.exe with a path read from the input manifest without validation.
 - Evidence: Line 148 builds args via $"makeappx.exe pack /d {manifestPath} ..." where manifestPath comes from XElement.Attribute("Source").Value at line 131. Validate-phase red-team on the npm-installed CLI (cold cache): a manifest with Source='a b" /p x' made the extra /p flag reach makeappx.
 - Recommendation: Validate manifestPath is a rooted, existing file path under the project root, and pass it via ProcessStartInfo.ArgumentList rather than concatenating into Arguments.
@@ -391,6 +510,7 @@ Details
 - Validation: static-only (needs runtime confirmation)
 - Domain: test-coverage
 - Multi-model: confirmed
+- Fix cost: medium
 - Finding: New create-external-catalog command has no unit tests.
 - Evidence: Command added at lines 34-49; no matching test in WinApp.Cli.Tests. Could not exercise end-to-end — needs a signing cert to run against a scaffolded package (see Test-setup handoff).
 - Recommendation: Add a happy-path + error-path unit test; supply a dev cert to enable a runtime smoke test.
@@ -412,6 +532,11 @@ PR Review — fix/stream-empty-file vs origin/main  (2 commits, 3 files, +41/-12
 Summary
   Critical: 1   High: 0   Medium: 1   Low: 0
 
+Scope
+  Round 1              first review
+  New public surface   none
+  Fix cost of findings 0 subtractive, 1 small, 1 medium, 0 large
+
 Coverage
   security              ✓ clean
   correctness           ⚠ 1 finding
@@ -425,6 +550,12 @@ Coverage
   regression            ✓ fixes a regression; no new behavior change
   validation            ✓ 1/1 critical validated at runtime
 
+Recommended action
+  Must fix before merge  C1 (already fixed in the diff — keep it)
+  Safe to decline        M1 if you'd rather not grow the test file; the fix is
+                         self-evident from the diff
+  Complexity verdict     Converged. No new surface; nothing further to review.
+
 Findings
   C1  src/winapp-CLI/.../StreamService.cs:77-84   correctness    Watch writes an empty file when the source never flushes
   M1  src/winapp-CLI/.../StreamService.cs:77-84   test-coverage  No regression test pins the non-empty-output fix
@@ -436,9 +567,66 @@ Details
 - Validation: validated
 - Domain: correctness
 - Multi-model: confirmed
+- Fix cost: small
 - Finding: On a cold cache the streaming watch still closes the output file before the first flush, producing a 0-byte file.
 - Evidence: Reproduced on the npm-installed CLI (cold cache): `winapp ... --watch` left out.log empty until the fix at line 80 moved the flush ahead of Dispose.
 - Recommendation: Keep the fix; add the regression test from M1 so the empty-file case can't silently return.
+```
+
+## Example consolidated stdout (re-review — round 3, converging)
+
+This is the shape that guards against review-driven over-engineering. Note the
+clamp to critical/high, the `Deferred polish` line in place of a medium/low
+checklist, the subtractive finding aimed at what round 2 added, and a
+`Complexity verdict` that tells the author to stop.
+
+```
+PR Review — feat/ui-recording vs origin/main  (11 commits, 18 files, +1,240/-96)
+
+Summary
+  Critical: 0   High: 1   Medium: — (deferred)   Low: — (deferred)
+
+Scope
+  Round 3              re-review; delta vs round 2: +6 files, +512/-34 lines
+  New public surface   2 commands, 11 flags, 4 services  ·  delta: +5 flags, +2 services
+  Fix cost of findings 1 subtractive, 0 small, 0 medium, 0 large
+
+Coverage
+  security              ✓ clean
+  correctness           ✓ clean
+  cli-ux                ✓ clean (2 medium deferred)
+  alternative-solution  ✓ clean
+  necessity-simplicity  ⚠ 1 finding
+  test-coverage         ✓ clean (1 medium deferred)
+  docs-and-samples      ✓ clean
+  packaging             ✓ clean
+  multi-model           ✓ 1/1 high confirmed  ·  models: gemini
+  regression            ✓ no change to existing flows
+  validation            ✓ 1/1 high validated at runtime
+  deferred polish       5 items (test naming, help-text wording, doc ordering)
+
+Recommended action
+  Must fix before merge  none — H1 is a proposal to remove code, not a blocker
+  Safe to decline        all 5 deferred items; they are polish, not defects
+  Complexity verdict     NOT converged, but not because of defects: rounds 2–3
+                         added +5 flags and +2 services while fixing 1 bug. The
+                         feature is getting bigger, not better. Take H1, then
+                         stop reviewing and ship.
+
+Findings
+  H1  src/winapp-CLI/.../Services/RecordingExportService.cs:1-120  necessity-simplicity  Round-2 export-format indirection has one caller; cut it and 3 of the 5 new flags
+
+Details
+## H1  src/winapp-CLI/WinApp.Cli/Services/RecordingExportService.cs:1-120
+- Severity: high
+- Confidence: high
+- Validation: validated
+- Domain: necessity-and-simplicity
+- Multi-model: confirmed
+- Fix cost: subtractive
+- Finding: The IRecordingExporter abstraction and --format/--compress/--split flags were added in round 2 in response to review comments, not to a user request; only the JSONL path is ever used.
+- Evidence: IRecordingExporter (lines 1-40) has a single implementation, JsonlExporter, resolved unconditionally at line 88. Runtime check: `winapp ui record --format=csv` produces a file no other winapp command can read. No sample or doc uses a non-default --format.
+- Recommendation: Delete IRecordingExporter and inline the JSONL writer; drop --format, --compress, and --split. Removes ~180 lines and 3 flags you would otherwise support forever. Re-add a format switch when a second consumer actually exists.
 ```
 
 ## Opt-in follow-through
@@ -458,6 +646,12 @@ the user explicitly asks, offer these follow-ups:
 - **Open a follow-up fix PR — only on explicit request.** If (and only if) the
   user asks you to fix the findings, make the changes on a **new** branch and
   open a separate PR; never push fixes onto the branch under review.
+
+**When the user asks you to "fix the findings", fix critical and high only.**
+Then stop and ask before touching medium/low. Mechanically applying every
+finding is precisely how a review loop over-engineers a PR — the severity
+ladder exists so that not everything gets fixed. When you do apply a fix, apply
+the smallest version of it; if the finding offered a subtractive option, take it.
 
 ## Output discipline
 

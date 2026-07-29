@@ -26,6 +26,7 @@ Each finding is a level-2 heading followed by labeled bullets:
 - **Domain**: <dimension name>
 - **Finding**: <one-line statement of what is wrong>
 - **Evidence**: <specific code evidence — quote 1-3 lines, cite line refs in the diff>
+- **Fix cost**: subtractive | small | medium | large
 - **Recommendation**: <concrete actionable next step>
 ```
 
@@ -40,6 +41,15 @@ Notes:
   finding you emit — you are reading the diff, not running it. The orchestrator
   flips it to `validated` in the Validate phase when a runtime check confirms
   the finding, and drops the finding if a runtime check refutes it.
+- **Fix cost** describes what your *recommendation* would add to the codebase,
+  not how bad the bug is:
+
+  | Fix cost | Meaning |
+  |----------|---------|
+  | subtractive | Resolved by removing or narrowing code, deleting an option, collapsing two paths into one, or documenting a limitation. Adds nothing. |
+  | small | Under ~20 lines inside existing files. No new file, type, or public surface. |
+  | medium | A new test file, a new method group, or a new internal type. |
+  | large | A new command / flag / option / service / interface / abstraction, or any new public surface. |
 
 ## Trailing "what I checked" note
 
@@ -78,6 +88,34 @@ Specifically, **drop**:
 - Coverage gaps with concrete impact.
 - Doc/sample/packaging drift caused by this change.
 
+## The Complexity Budget Test (mandatory, applies to your recommendation)
+
+The Team Lead Test governs whether a *finding* is worth reporting. This test
+governs the *fix you propose*. A review that only ever says "add X" turns every
+round into net growth; over several rounds that is how a focused feature becomes
+an over-engineered one. Your recommendation is part of the design, so it carries
+the same burden the diff does.
+
+Before writing `Recommendation`, do all three:
+
+1. **Propose the smallest fix that actually resolves the finding.** Not the most
+   thorough, not the most general, not the one that also handles the adjacent
+   case you imagined. The smallest one.
+2. **Try the subtractive fix first.** Many findings are better resolved by
+   removing than by adding — delete the unused branch, drop the option nobody
+   asked for, collapse the second code path, reject the input instead of
+   handling it, or document the limitation in `docs/usage.md` and move on. If a
+   subtractive fix exists, lead with it, even if an additive fix is "better."
+3. **Justify any `large` fix cost explicitly.** If your recommendation adds a
+   new command / flag / option / service / interface / abstraction, the
+   `Recommendation` must say in one clause why a `subtractive` or `small` fix
+   does not work. A `large` recommendation with no such justification fails this
+   test — downgrade it to the smaller fix or drop the finding.
+
+Never recommend speculative generality: no "make this pluggable," no "extract an
+interface for future providers," no config knob without a user who asked for it.
+"YAGNI" is a valid and complete recommendation.
+
 ## No quotas — a clean result is a valid result
 
 No dimension is required to produce a finding. Zero findings is a legitimate,
@@ -85,6 +123,23 @@ valuable outcome that tells the developer this area is solid. **Never invent,
 inflate, or lower the bar on a finding just to avoid an empty report** — a
 manufactured finding fails the Team Lead Test by definition. When you have
 nothing to flag, say so and record what you checked in `## What I checked`.
+
+## Re-review rounds (round 2 and later)
+
+The orchestrator will tell you when the branch has already been through one or
+more review rounds, and may give you the previous round's findings. On a
+re-review:
+
+- **Raise the bar.** Emit only `critical` and `high` findings. Medium and low
+  observations belong in `## What I checked` as a one-line note, not as findings
+  the author feels obliged to fix.
+- **Code added in response to a previous review is fair game.** It is *not*
+  settled design. If a prior round's recommendation produced a new option,
+  abstraction, or code path that is not earning its keep, say so — a
+  `subtractive` finding recommending its removal is one of the most valuable
+  things you can return.
+- **Do not restate findings the author already addressed.** Confirm the fix and
+  move on.
 
 ## Severity guide
 

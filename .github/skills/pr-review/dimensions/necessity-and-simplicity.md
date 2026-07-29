@@ -12,17 +12,24 @@ say "this is well-built but shouldn't ship as-is" when that is genuinely true.
 
 ## When this dimension applies (gate)
 
-This dimension only produces findings when the PR **adds new user-facing surface
-area** — a new command / verb / subcommand, a new public flag / option / API, or
-a materially new capability. That is the only case where "should this exist, and
-is it too big?" is a live question rather than a re-litigation of settled work.
+This dimension produces findings when **any** of these is true:
 
-For changes that do **not** add new surface — bug fixes, internal refactors,
+1. The PR **adds new user-facing surface area** — a new command / verb /
+   subcommand, a new public flag / option / API, or a materially new capability.
+2. The PR **adds new internal structure** — a new service, interface, abstract
+   class, strategy/provider indirection, config knob, or a new file in
+   `Services/` — even with no user-facing surface. Over-engineering hides here.
+3. This is a **re-review round** (round 2+). Complexity accreted across review
+   rounds is exactly what this dimension exists to catch, and it is invisible to
+   a fresh read of the diff.
+
+For changes that hit none of the above — small bug fixes, mechanical refactors,
 perf work, docs, tests, dependency / CI / packaging tweaks — **do not hunt for
 scope concerns.** Return a clean pass: note in `## What I checked` that this is
-"Not a feature-adding change — necessity review N/A," and stop. When it *is* a
-feature PR, the guidance below applies in full (and the no-quota framing still
-holds — an appropriately scoped feature is a clean pass too).
+"Not a feature-adding change — necessity review N/A," and stop. Otherwise the
+guidance below applies in full (and the no-quota framing still holds — an
+appropriately scoped feature is a clean pass too).
+
 
 ## winapp's mission
 
@@ -55,6 +62,35 @@ a finding even if the code is clean.
   but silently misbehaves — say plainly that shipping it can be *reputationally
   worse than not shipping at all*.
 
+## Review-driven scope creep (round 2 and later)
+
+When the orchestrator tells you this is a re-review, you get one extra job that
+no other dimension has: **audit what the previous review rounds caused.**
+
+A PR that has been through several review loops is the highest-risk shape for
+over-engineering, because each round is individually reasonable and no one is
+watching the total. Nine reviewers each asking for one small addition produces
+nine additions, and the next round treats all nine as settled design.
+
+So on a re-review:
+
+- **Diff the diff.** The orchestrator gives you the scope delta since the last
+  round (files, lines, new commands / flags / services / types). Ask directly:
+  *did the feature get better, or just bigger?* Growth that is mostly new
+  options, new abstractions, or new code paths — rather than fixed bugs — is a
+  finding on its own.
+- **Reviewer-suggested code is not settled design.** The "don't re-litigate"
+  rule below protects decisions the *maintainers* made. It does **not** protect
+  a flag, hook, interface, or defensive branch that exists only because a
+  previous review round asked for it. Reopen those freely.
+- **Recommend deletion by name.** Your most useful output here is a concrete
+  cut-list: "drop `--x`, `--y`, and the `IFooProvider` indirection; they were
+  added in round 2, have one caller each, and no user asked for them." That is a
+  `Fix cost: subtractive` finding, and it is worth more than three additive ones.
+- **Say when it is time to stop reviewing.** If the remaining findings are all
+  medium/low polish, state plainly in `## What I checked` that the PR is
+  converged and further rounds will add complexity rather than quality.
+
 ## Reason about necessity, then state your conclusion
 
 Always *form and state* an opinion on necessity and size — this is the question
@@ -83,5 +119,7 @@ which is the gap this dimension exists to close).
   confidence → high.
 - Change earns little over extending an existing command; a materially smaller
   or staged alternative exists → medium.
+- Complexity added by a previous review round that is not earning its keep →
+  medium (high if it added user-facing surface — a flag or verb is forever).
 - Premature abstraction / speculative option with a marginal simplification →
   low.
