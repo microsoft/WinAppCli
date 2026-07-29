@@ -9,10 +9,7 @@ namespace WinApp.Cli.Services;
 
 internal sealed partial class UiAutomationService
 {
-    // Minimum dimensions accepted by the Windows MF H.264 encoder.
-    // Empirically, the encoder rejects frames narrower or shorter than 64 pixels with
-    // COM error 0xC00D36B4 ("media type is invalid"). Frames smaller than this are
-    // centered on a black letterbox canvas padded to the minimum, preserving aspect ratio.
+    // Media Foundation rejects H.264 frames smaller than 64 pixels.
     private const int MfH264MinWidth = 64;
     private const int MfH264MinHeight = 64;
 
@@ -44,13 +41,7 @@ internal sealed partial class UiAutomationService
         });
     }
 
-    /// <summary>
-    /// Computes the encoder output size and display (content) size for the given crop dimensions.
-    /// The encoder size is at least <see cref="MfH264MinWidth"/>×<see cref="MfH264MinHeight"/> to
-    /// satisfy the Windows MF H.264 encoder's minimum requirements; if the content is smaller it is
-    /// letterboxed (centered on a black background) rather than stretched.
-    /// Both dimensions are always even (H.264 requirement).
-    /// </summary>
+    /// <summary>Computes even content and encoder sizes, padding to Media Foundation's minimum.</summary>
     internal static (int EncoderW, int EncoderH, int DisplayW, int DisplayH) ComputeTargetSize(int width, int height, int maxEdge)
     {
         var scale = 1.0;
@@ -92,11 +83,7 @@ internal sealed partial class UiAutomationService
             => Math.Max(2, value % 2 == 0 ? value : value - 1);
     }
 
-    /// <summary>
-    /// Crops and scales a captured BGRA frame to the encoder target dimensions (top-down output).
-    /// When the display size is smaller than the encoder size, the content is centered on a black
-    /// letterbox background rather than stretched.
-    /// </summary>
+    /// <summary>Crops and scales BGRA pixels, centering content when padding is required.</summary>
     internal static byte[] ProcessFrame(
         byte[] source, int sourceWidth, int sourceHeight,
         int cropX, int cropY, int cropW, int cropH,

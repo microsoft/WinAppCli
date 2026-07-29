@@ -100,9 +100,7 @@ winapp ui screenshot -a myapp --focus --output focused.png
 ```
 
 ### Record video (H.264 MP4)
-Record the window — or a single element's region — to an MP4. Frames are captured via Windows
-Graphics Capture (PrintWindow/screen-DC fallback) and encoded incrementally with Media Foundation, so long
-captures never buffer in memory. By default records until stopped; use `--duration-sec N` for a timed run.
+Record a window or element region to MP4. By default recording continues until stopped; use `--duration-sec N` for a timed run.
 ```powershell
 # Record a window for 10s at 15 fps
 winapp ui record -a myapp --duration-sec 10 --fps 15 --output demo.mp4
@@ -110,24 +108,18 @@ winapp ui record -a myapp --duration-sec 10 --fps 15 --output demo.mp4
 # Recommended agent evidence: MP4 plus timestamped JPEGs and an NDJSON index
 winapp ui record -a myapp --frames --duration-sec 10 --fps 10 --output demo.mp4 --json
 
-# Record until Ctrl+C (default — duration 0), downscaled so the longest edge is 1280px
-winapp ui record -a myapp --max-edge 1280 --output capture.mp4
-
-# Record a single element's region (fails with element_not_found if selector doesn't match)
-winapp ui record itm-chart-9f8e -a myapp --output chart.mp4
-
 # Include overlays/popups (captures from screen DC; may include occluding windows)
 winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups.mp4
 
 # Programmatic stop: pipe a newline to stop and finalize the MP4 (for agent/script callers)
 "" | winapp ui record -a myapp --json --output capture.mp4
 ```
-- Default `--duration-sec 0` records until stopped — **Ctrl+C** for interactive use, or a **newline / EOF on stdin** for programmatic callers (pipe `""` or close stdin to stop). A valid MP4 is always finalized on any graceful stop.
-- Use `--frames` when an agent must inspect intermediate states without a video decoder. The CLI writes `<output-name>.frames` with `manifest.json`, `frames.ndjson`, and changed JPEGs under `frames/`; exact duplicates reuse the prior JPEG. It works with timed recordings or recordings stopped by Ctrl+C/stdin, supports 1-30 fps, and defaults `--max-edge` to 1280. Frame data is capped at 1 GiB; reaching the cap publishes the indexed prefix as `truncated` while the MP4 continues. Use monotonic `elapsedMs` to bound UI transitions.
-- Frame mode never replaces existing MP4 or directory paths. If the MP4 fails, preserved frames publish to a unique `.frames.partial-*` directory so they cannot be paired with another recording's MP4. If only one artifact completes, the command returns `partial_output` with the preserved path and a recovery hint. If neither artifact can be preserved after a frame output failure, it returns `frame_output_failed`.
+- Default `--duration-sec 0` records until Ctrl+C, a newline, or EOF on redirected stdin.
+- `--frames` writes `<output-name>.frames` with a manifest, NDJSON index, and changed JPEGs. It supports 1-30 fps and `--max-edge` 64-4096 (default 1280), with a 1 GiB cap. Use `elapsedMs` to bound transitions.
+- Output paths are never replaced. On partial failure, use the reported preserved path and `recoveryHint`.
 - `--capture-screen` captures from the screen DC so overlays and popups are included; the window is brought to the foreground first. When WGC is unavailable and `--capture-screen` is not passed, the CLI returns an error — re-run with `--capture-screen` to consent to screen-DC capture.
 - Providing a selector that doesn't match any element fails immediately with `element_not_found` (rather than silently recording the whole window).
-- `--json` stdout keeps the MP4 fields (`path`, `durationSec`, `fps`, `frames`, `width`, `height`, `fileSize`, `codec`, and `mode`) and adds cadence/stop metadata plus optional `frameArtifacts`. A `recording-started` event goes to **stderr** and includes frame paths only when frame output initialized successfully.
+- `--json` writes the final result to stdout and a `recording-started` event to stderr after the first frame.
 
 ### Hover (for tooltips, flyouts, hover states)
 `--dwell-time <ms>` sets how long to wait after hovering (default: 800, range: 0–10000).

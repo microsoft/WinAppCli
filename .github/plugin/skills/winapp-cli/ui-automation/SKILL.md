@@ -105,9 +105,7 @@ winapp ui screenshot -a myapp --focus --output focused.png
 ```
 
 ### Record video (H.264 MP4)
-Record the window — or a single element's region — to an MP4. Frames are captured via Windows
-Graphics Capture (PrintWindow/screen-DC fallback) and encoded incrementally with Media Foundation, so long
-captures never buffer in memory. By default records until stopped; use `--duration-sec N` for a timed run.
+Record a window or element region to MP4. By default recording continues until stopped; use `--duration-sec N` for a timed run.
 ```powershell
 # Record a window for 10s at 15 fps
 winapp ui record -a myapp --duration-sec 10 --fps 15 --output demo.mp4
@@ -115,24 +113,18 @@ winapp ui record -a myapp --duration-sec 10 --fps 15 --output demo.mp4
 # Recommended agent evidence: MP4 plus timestamped JPEGs and an NDJSON index
 winapp ui record -a myapp --frames --duration-sec 10 --fps 10 --output demo.mp4 --json
 
-# Record until Ctrl+C (default — duration 0), downscaled so the longest edge is 1280px
-winapp ui record -a myapp --max-edge 1280 --output capture.mp4
-
-# Record a single element's region (fails with element_not_found if selector doesn't match)
-winapp ui record itm-chart-9f8e -a myapp --output chart.mp4
-
 # Include overlays/popups (captures from screen DC; may include occluding windows)
 winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups.mp4
 
 # Programmatic stop: pipe a newline to stop and finalize the MP4 (for agent/script callers)
 "" | winapp ui record -a myapp --json --output capture.mp4
 ```
-- Default `--duration-sec 0` records until stopped — **Ctrl+C** for interactive use, or a **newline / EOF on stdin** for programmatic callers (pipe `""` or close stdin to stop). A valid MP4 is always finalized on any graceful stop.
-- Use `--frames` when an agent must inspect intermediate states without a video decoder. The CLI writes `<output-name>.frames` with `manifest.json`, `frames.ndjson`, and changed JPEGs under `frames/`; exact duplicates reuse the prior JPEG. It works with timed recordings or recordings stopped by Ctrl+C/stdin, supports 1-30 fps, and defaults `--max-edge` to 1280. Frame data is capped at 1 GiB; reaching the cap publishes the indexed prefix as `truncated` while the MP4 continues. Use monotonic `elapsedMs` to bound UI transitions.
-- Frame mode never replaces existing MP4 or directory paths. If the MP4 fails, preserved frames publish to a unique `.frames.partial-*` directory so they cannot be paired with another recording's MP4. If only one artifact completes, the command returns `partial_output` with the preserved path and a recovery hint. If neither artifact can be preserved after a frame output failure, it returns `frame_output_failed`.
+- Default `--duration-sec 0` records until Ctrl+C, a newline, or EOF on redirected stdin.
+- `--frames` writes `<output-name>.frames` with a manifest, NDJSON index, and changed JPEGs. It supports 1-30 fps and `--max-edge` 64-4096 (default 1280), with a 1 GiB cap. Use `elapsedMs` to bound transitions.
+- Output paths are never replaced. On partial failure, use the reported preserved path and `recoveryHint`.
 - `--capture-screen` captures from the screen DC so overlays and popups are included; the window is brought to the foreground first. When WGC is unavailable and `--capture-screen` is not passed, the CLI returns an error — re-run with `--capture-screen` to consent to screen-DC capture.
 - Providing a selector that doesn't match any element fails immediately with `element_not_found` (rather than silently recording the whole window).
-- `--json` stdout keeps the MP4 fields (`path`, `durationSec`, `fps`, `frames`, `width`, `height`, `fileSize`, `codec`, and `mode`) and adds cadence/stop metadata plus optional `frameArtifacts`. A `recording-started` event goes to **stderr** and includes frame paths only when frame output initialized successfully.
+- `--json` writes the final result to stdout and a `recording-started` event to stderr after the first frame.
 
 ### Hover (for tooltips, flyouts, hover states)
 `--dwell-time <ms>` sets how long to wait after hovering (default: 800, range: 0–10000).
@@ -451,7 +443,7 @@ Capture the target window or element as a PNG image. When multiple windows exist
 
 ### `winapp ui record`
 
-Record the target window (or an element's region) to an H.264 MP4 video. Captures frames via Windows Graphics Capture and encodes with Media Foundation. By default records until stopped (Ctrl+C, or a newline/EOF on stdin for programmatic callers). Use --duration-sec N for a timed run. A valid MP4 is always finalized on graceful stop. Use --frames to add timestamped agent-readable frame artifacts beside the MP4. Use --capture-screen to include overlays/popups.
+Record the target window (or an element's region) to an H.264 MP4 video. By default records until Ctrl+C or redirected-stdin newline/EOF. Use --duration-sec for a timed run, --frames for timestamped JPEG evidence, and --capture-screen for overlays and popups.
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->
@@ -465,9 +457,9 @@ Record the target window (or an element's region) to an H.264 MP4 video. Capture
 |--------|-------------|---------|
 | `--app` | Target app (process name, window title, or PID). Lists windows if ambiguous. | (none) |
 | `--capture-screen` | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). | (none) |
-| `--duration-sec` | Recording duration in seconds. Default 0 records until stopped — Ctrl+C, or (for programmatic callers) a newline or EOF on stdin. A valid MP4 is always finalized on graceful stop. | (none) |
+| `--duration-sec` | Recording duration in seconds. 0 records until Ctrl+C or redirected-stdin newline/EOF. | (none) |
 | `--fps` | Frames per second to capture | `15` |
-| `--frames` | Also write timestamped JPEG frames, frames.ndjson, and manifest.json to <output-name>.frames. Supports timed and stop-controlled recordings. Frame mode uses fps 1-30 and defaults max-edge to 1280; frame data is capped at 1 GiB. | (none) |
+| `--frames` | Write timestamped JPEGs, frames.ndjson, and manifest.json to <output-name>.frames. Supports 1-30 fps and max-edge 64-4096 (default 1280), with a 1 GiB frame-data cap. | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--max-edge` | Downscale so the longest edge is at most this many pixels (0 = no downscale) | (none) |
 | `--output` | Save output to this file path. | (none) |

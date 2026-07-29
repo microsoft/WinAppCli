@@ -170,10 +170,6 @@ internal sealed class UiRecordResult
     public string[]? Warnings { get; set; }
 }
 
-/// <summary>
-/// Structured liveness event emitted to stderr (JSON path only) when recording begins.
-/// Lets programmatic callers know the capture loop is live before the final result arrives.
-/// </summary>
 internal sealed class UiRecordStartedEvent
 {
     public string Event { get; set; } = "recording-started";

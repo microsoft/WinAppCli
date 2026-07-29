@@ -8,14 +8,7 @@ namespace WinApp.Cli.Services;
 
 internal sealed partial class UiAutomationService
 {
-    /// <summary>
-    /// Retargets capture to an element's popup or owned top-level window when it differs from
-    /// the session window, updating the capture origin and dimensions.
-    /// </summary>
-    /// <remarks>
-    /// Coverage ceiling (issue #630): unit tests cover the retargeting decisions through injected
-    /// ancestor/rect delegates. The real Win32 branches require live popup window topology.
-    /// </remarks>
+    /// <summary>Retargets capture to an element's popup or owned top-level window.</summary>
     internal static nint ResolvePopupCaptureHwnd(
         long? elementWindowHandle,
         nint sessionHwnd,
@@ -73,9 +66,6 @@ internal sealed partial class UiAutomationService
         return elementOwnerHwnd;
     }
 
-    /// <summary>
-    /// Returns whether an element rect has no positive-area intersection with the capture surface.
-    /// </summary>
     internal static bool IsElementOffscreen(
         double elementX,
         double elementY,
@@ -98,15 +88,7 @@ internal sealed partial class UiAutomationService
         return intersectionRight <= intersectionLeft || intersectionBottom <= intersectionTop;
     }
 
-    /// <summary>
-    /// Resolves the element's true top-level native window by walking the live UIA parent chain
-    /// to the nearest native-window ancestor and then to that handle's top-level window.
-    /// </summary>
-    /// <remarks>
-    /// Coverage ceiling (issue #630): this walks live UIA COM parents and Win32 ancestors. The safe
-    /// static decision helper is unit-tested; the remaining lines require a real popup/owned HWND
-    /// ancestor chain or a COM provider fault during parent walking.
-    /// </remarks>
+    /// <summary>Resolves the element's top-level native window through its UIA ancestors.</summary>
     private nint ResolveElementTopLevelHwnd(UiSessionInfo session, UiElement selectorElement)
     {
         try
@@ -142,14 +124,7 @@ internal sealed partial class UiAutomationService
         }
     }
 
-    /// <summary>
-    /// Retargets capture to an element's authoritative top-level native window when it differs
-    /// from the session window, updating the capture origin and dimensions.
-    /// </summary>
-    /// <remarks>
-    /// Coverage ceiling (issue #630): unit tests cover the decision logic through the injectable rect
-    /// delegate. The uncovered branch is the real GetWindowRect call for a live derived HWND.
-    /// </remarks>
+    /// <summary>Retargets capture to a resolved element window.</summary>
     internal static nint DeriveElementCaptureHwnd(
         nint sessionHwnd,
         ref int captureOriginLeft,

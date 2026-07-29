@@ -242,37 +242,29 @@ The default capture path uses **Windows.Graphics.Capture (WGC)**, reading the ac
 Use `--capture-screen` when you need to capture popup menus, dropdowns, flyouts, or tooltip overlays that aren't owned by the target window. `--capture-screen` reads from the screen DC and brings the window to the foreground first. Use `--focus` if you just want to foreground the window without switching capture modes (e.g., to ensure the screenshot matches what the user is currently looking at).
 
 ### record
-Record the target window (or an element's region) to an H.264 MP4 video. Frames are captured via Windows Graphics Capture (with PrintWindow/screen-DC fallback) and encoded incrementally with Media Foundation, so recordings never buffer the full video in memory.
-
-**Default behavior** (`--duration-sec 0`): records until stopped. Use Ctrl+C interactively, or (for programmatic / agent callers) write a newline to stdin or close stdin to stop and finalize the MP4 gracefully. A valid, playable MP4 is **always** finalized on any graceful stop — no corruption.
+Record a window or element region to an H.264 MP4. By default, recording continues until Ctrl+C or, for redirected stdin, a newline or EOF.
 
 ```bash
-# Timed: record for 10 s at 15 fps
+# Record for 10 seconds
 winapp ui record -a myapp --duration-sec 10 --fps 15 --output demo.mp4
 
-# Agent evidence: keep the MP4 and add timestamped JPEG frames plus an index
+# Add agent-readable frames
 winapp ui record -a myapp --frames --duration-sec 10 --fps 10 --output demo.mp4 --json
 
-# Unbounded (default): record until Ctrl+C, downscaled to max 1280px longest edge
-winapp ui record -a myapp --max-edge 1280 --output capture.mp4
-
-# Programmatic stop (agent/script): pipe a newline; the recorder stops and writes a valid MP4
+# Stop an unbounded recording through stdin
 "" | winapp ui record -a myapp --json --output capture.mp4
 
-# Record a single element's region (fails with element_not_found if the selector doesn't match)
-winapp ui record itm-chart-9f8e -a myapp --output chart.mp4
-
-# Include screen overlays / popups (captures from screen DC; brings window to foreground)
+# Include screen overlays and popups
 winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups.mp4
 ```
 
 **Options:**
-- `--duration-sec N` — Record for N seconds. Default **0** = record until stopped.
+- `--duration-sec N` — Record for N seconds. Default 0 records until stopped.
 - `--fps N` — Target frames per second (default 15).
 - `--max-edge N` — Downscale so the longest edge is at most N pixels (0 = no downscale).
 - `--capture-screen` — Capture from the screen DC (includes overlays/popups; foregrounds the window).
-- `--output <path>` — Output MP4 path. Defaults to `recording-<timestamp>-<guid>.mp4` in the current directory.
-- `--frames` — Also write timestamped JPEG evidence to `<output-name>.frames`. Works with timed recordings and recordings stopped by Ctrl+C or stdin. Frame mode supports 1-30 fps and defaults `--max-edge` to 1280; when specified, it must be 64-4096. A single-worker queue bounds frame encoding work. Frame data is capped at 1 GiB; reaching the cap publishes the valid indexed prefix as `truncated` while the MP4 continues.
+- `--output <path>` — Output MP4 path. Defaults to `recording-<timestamp>-<guid>.mp4`.
+- `--frames` — Write timestamped JPEG evidence to `<output-name>.frames`. Supports 1-30 fps and `--max-edge` 64-4096 (default 1280). Frame data is capped at 1 GiB; the MP4 continues if the cap is reached.
 
 **Agent-readable frame artifacts:**
 
@@ -285,17 +277,11 @@ demo.frames/
     frame-000000-t000000000012.jpg
 ```
 
-Each actual recording sample has one compact JSON line in `frames.ndjson` with `sampleIndex`, monotonic `elapsedMs`, MP4-relative `mediaTimeMs`, `imageIndex`, `file`, and `changed`. Exact consecutive processed-pixel duplicates reference the preceding JPEG (`changed: false`) instead of writing duplicate images. JPEGs use quality 85 and the same cropped, scaled, and letterboxed pixels sent to the H.264 encoder.
+`frames.ndjson` has one line per sample with `sampleIndex`, monotonic `elapsedMs`, MP4-relative `mediaTimeMs`, `imageIndex`, `file`, and `changed`. Consecutive pixel-identical samples reuse the preceding quality-85 JPEG.
 
-The manifest `timing` object describes the indexed frame timeline. For a truncated bundle, its `elapsedMs`, `sampleCount`, `achievedFps`, and `cadenceRatio` describe only the retained prefix; the `video` object separately describes the complete MP4.
+`manifest.json` records the request, timing, MP4 status, image dimensions, and status (`complete`, `partial`, or `truncated`). Truncated timing covers the retained prefix, while `video` describes the complete MP4.
 
-`manifest.json` records the request, indexed timing/counts, MP4 status, image dimensions, and truncation state. `status` is `complete`, `partial` when the MP4 failed, or `truncated` when the 1 GiB cap retained only a prefix. Frame output is local, unencrypted screen content; retain and share it with the same care as screenshots or the MP4.
-
-The frame bundle is written to a randomized sibling staging directory and published by directory rename only after its manifest is complete. In frame mode, neither the final MP4 path nor frame directory may already exist. A valid MP4 is preserved if frame output fails; if MP4 finalization fails, a valid frame bundle is preserved under a unique `<output-name>.frames.partial-*` directory so it cannot be mistaken for the successful MP4's matching bundle.
-
-**Stop mechanisms:**
-- Interactive: **Ctrl+C** (any platform).
-- Programmatic / agent: write a **newline** (`""`) or close stdin (EOF). The stop is applied as soon as the encoder is ready (first frame captured); any stop signal that arrives before the first frame is latched and applied immediately at readiness — there is no grace window and no wall-clock delay.
+Existing output paths are never replaced. If MP4 finalization fails, preserved frames are published under `<output-name>.frames.partial-*`. Frame artifacts contain unencrypted screen content; handle them like screenshots or video.
 
 **Capture modes** (reported in the JSON `mode` field):
 - `wgc` — Windows Graphics Capture (default; works while the window is occluded).
@@ -303,19 +289,18 @@ The frame bundle is written to a randomized sibling staging directory and publis
 - `screen` — Screen DC via `--capture-screen` (includes overlays/popups; brings the window to the foreground).
 
 **JSON output (`--json`):**
-- **stdout** (final result): existing fields plus `elapsedMs`, `achievedFps`, `cadenceRatio`, `stopReason`, optional `frameArtifacts`, and optional `warnings`. `frameArtifacts` includes `truncated` and `byteLimit`; when truncated, `warnings` explains how to retain a complete frame timeline on retry.
-- **stderr** (liveness event): `{ "event": "recording-started", "path", "fps", "durationSec", "framesDirectory"?, "framesManifest"?, "framesIndex"? }`. Frame paths are present only when frame output initialized successfully.
-The started event provides liveness without polluting stdout; stdout remains one final JSON object. `achievedFps = frames × 1000 / elapsedMs`, where elapsed time covers capture and excludes MP4 container finalization. A cadence ratio below 0.90 produces a warning rather than failing an otherwise valid recording.
+- **stdout:** Final recording result, including cadence, stop reason, optional `frameArtifacts`, and warnings.
+- **stderr:** A `recording-started` event after the first frame. Frame paths are included only when frame output is active.
 
 **Error codes:**
-- `element_not_found` — Selector given but no matching element found; fails immediately (no partial file written).
-- `ambiguous_selector` — A plain-text selector matched multiple elements; use a slug from the suggestions shown in the error (or from `inspect` output) to target a specific element.
-- `invalid_arguments` — Invalid option value (e.g., `--duration-sec -1` or `> 86400`).
-- `output_exists` — The MP4 or derived frame directory already exists; choose a new `--output` path.
-- `frame_output_failed` — Frame artifact output failed and neither the MP4 nor frame bundle could be preserved; check disk space and permissions, then retry with new paths.
-- `partial_output` — Only the MP4 or frame bundle completed. The JSON error includes `partialOutput` paths and a `recoveryHint`.
+- `element_not_found` — The selector did not match.
+- `ambiguous_selector` — The selector matched multiple elements; use a suggested slug.
+- `invalid_arguments` — An option value is invalid.
+- `output_exists` — The MP4 or frame directory already exists.
+- `frame_output_failed` — Neither artifact could be preserved after frame output failed.
+- `partial_output` — Only one artifact completed; inspect `partialOutput` and `recoveryHint`.
 
-**Known limitation — windowed popups:** When you record a *specific element* (by selector) that lives inside a popup which renders in its own top-level window — e.g. a WinUI/XAML flyout, teaching tip, tooltip, or menu (`Xaml_WindowedPopupClass`) — the recorder may capture the underlying main window instead of the popup, producing blank or stale frames. Record the **whole window** (omit the selector), or use `winapp ui screenshot --capture-screen` for popup stills. Tracked in [#646](https://github.com/microsoft/winappCli/issues/646).
+**Known limitation:** Recording an element inside a windowed popup may capture the underlying window. Record the whole window or use `ui screenshot --capture-screen`. See [#646](https://github.com/microsoft/winappCli/issues/646).
 
 
 Programmatically activate an element (click button, toggle checkbox, expand combo box).

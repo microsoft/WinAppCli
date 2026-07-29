@@ -953,11 +953,11 @@ export interface UiRecordOptions extends CommonOptions {
   app?: string;
   /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). */
   captureScreen?: boolean;
-  /** Recording duration in seconds. Default 0 records until stopped — Ctrl+C, or (for programmatic callers) a newline or EOF on stdin. A valid MP4 is always finalized on graceful stop. */
+  /** Recording duration in seconds. 0 records until Ctrl+C or redirected-stdin newline/EOF. */
   durationSec?: number;
   /** Frames per second to capture */
   fps?: number;
-  /** Also write timestamped JPEG frames, frames.ndjson, and manifest.json to <output-name>.frames. Supports timed and stop-controlled recordings. Frame mode uses fps 1-30 and defaults max-edge to 1280; frame data is capped at 1 GiB. */
+  /** Write timestamped JPEGs, frames.ndjson, and manifest.json to <output-name>.frames. Supports 1-30 fps and max-edge 64-4096 (default 1280), with a 1 GiB frame-data cap. */
   frames?: boolean;
   /** Format output as JSON */
   json?: boolean;

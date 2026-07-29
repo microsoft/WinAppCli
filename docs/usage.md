@@ -1149,9 +1149,7 @@ winapp ui [command] [options]
 
 #### ui record
 
-Record the target window — or a single element's region — to an H.264 MP4 video. Frames are
-captured via Windows Graphics Capture (with a PrintWindow fallback) and encoded incrementally with
-Media Foundation, so long recordings never buffer in memory.
+Record a window or element region to an H.264 MP4.
 
 ```bash
 # Record a window for 10 seconds at 15 fps
@@ -1173,13 +1171,10 @@ winapp ui record -a Calculator --frames --duration-sec 10 --fps 10 -o demo.mp4
 - `--max-edge <px>` - Downscale so the longest edge is at most this many pixels (`0` = no downscale).
 - `--capture-screen` - Capture from the screen so overlays/popups are included (may capture occluding windows).
 - `-o, --output <path>` - Output `.mp4` path (defaults to `recording-<timestamp>-<guid>.mp4`).
-- `--frames` - Also write timestamped JPEGs, `frames.ndjson`, and `manifest.json` to `<output-name>.frames`. Works for timed and stop-controlled recordings, supports 1-30 fps, and defaults `--max-edge` to 1280. Frame data is capped at 1 GiB; reaching the cap publishes the valid indexed prefix and lets the MP4 continue.
+- `--frames` - Write timestamped JPEGs, `frames.ndjson`, and `manifest.json` to `<output-name>.frames`. Supports 1-30 fps and `--max-edge` 64-4096 (default 1280), with a 1 GiB frame-data cap.
 
-With `--json`, emits a `UiRecordResult` envelope including the output `path`, `frames`, `width`,
-`height`, `fileSize`, `codec` (`"h264"`), `mode` (the capture path actually used), `elapsedMs`,
-`achievedFps`, `cadenceRatio`, and `stopReason`. Frame mode also includes `frameArtifacts`,
-including `truncated` and `byteLimit`; cadence shortfalls and frame-bundle truncation are reported
-in `warnings`. Capture modes are `wgc`, `printwindow`, and `screen`.
+With `--json`, the final result includes the output path, dimensions, codec, capture mode, cadence,
+stop reason, optional `frameArtifacts`, and warnings.
 
 > **Known limitation:** recording a *specific element* inside a popup that renders in its own
 > top-level window (WinUI/XAML flyout, teaching tip, tooltip) may capture the underlying main

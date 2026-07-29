@@ -82,8 +82,7 @@ export function buildUiRecordArgs(options: UiRecordOptions): string[] {
  * **`durationSec` is required and must be > 0.** Unbounded recording (durationSec == 0) is only
  * supported via the CLI with Ctrl+C or piped stdin. The npm wrapper has no mechanism to stop
  * an unbounded spawn, so passing durationSec == 0 or omitting it will throw a clear error.
- * With `frames`, the CLI also writes timestamped JPEG evidence, `frames.ndjson`, and
- * `manifest.json` beside the MP4.
+ * Set `frames` to write timestamped JPEG evidence beside the MP4.
  *
  * @throws {Error} if `options.durationSec` is not provided or is ≤ 0.
  */

@@ -54,9 +54,7 @@ internal sealed class RecordFrameArtifactCoordinator : IAsyncDisposable
 
         try
         {
-            // Once a processed sample is ready, bounded backpressure must not discard it on
-            // graceful cancellation. The capture loop observes cancellation before acquiring
-            // the next sample.
+            // Do not cancel a sample already accepted by the capture loop.
             await _sink.WriteAsync(processedFrame, sample, CancellationToken.None).ConfigureAwait(false);
             SamplesAccepted++;
         }

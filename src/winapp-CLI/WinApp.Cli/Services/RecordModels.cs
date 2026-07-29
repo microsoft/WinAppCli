@@ -21,9 +21,7 @@ internal sealed class RecordOptions
     /// <summary>Capture from the screen DC (BitBlt) so overlays/popups are included.</summary>
     public bool CaptureScreen { get; init; }
 
-    /// <summary>Absolute final directory for agent-readable frame artifacts, or null when disabled.</summary>
     public string? FramesDirectory { get; init; }
-
 }
 
 /// <summary>Result of an MP4 recording.</summary>

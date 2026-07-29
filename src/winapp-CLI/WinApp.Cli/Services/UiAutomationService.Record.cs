@@ -470,7 +470,7 @@ internal sealed partial class UiAutomationService
                             CadenceRatio = frameCadenceRatio,
                             VideoStatus = "failed",
                             VideoFrameCount = frameIndex,
-                            // Keep canonical <stem>.frames reserved for a successful MP4 pair.
+                            // Reserve canonical .frames for successful MP4 pairs.
                             PublicationDirectory = $"{options.FramesDirectory}.partial-{Guid.NewGuid():N}",
                         }).ConfigureAwait(false);
                 }

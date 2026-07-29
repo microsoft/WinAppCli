@@ -164,8 +164,7 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
         {
             while (await _channel.Writer.WaitToWriteAsync(cancellationToken).ConfigureAwait(false))
             {
-                // Clone only after capacity is available so backpressure does not retain
-                // another full-frame buffer outside the bounded pipeline budget.
+                // Clone only after capacity is available to keep buffering bounded.
                 var queuedFrame = new QueuedFrame(bgra.ToArray(), sample);
                 if (_channel.Writer.TryWrite(queuedFrame))
                 {
