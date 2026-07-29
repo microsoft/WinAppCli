@@ -242,7 +242,6 @@ Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In p
 | Argument | Required | Description |
 |----------|----------|-------------|
 | `<input>` | No | Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory). |
-| `<app-args>` | No | Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). |
 
 #### Options
 <!-- auto-generated from cli-schema.json -->
