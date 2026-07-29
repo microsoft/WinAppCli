@@ -608,7 +608,7 @@ Project mode requires the **.NET SDK 8.0.100 or newer** (for MSBuild `--getPrope
 |------|------------------|------|
 | *(default)* | `minimal` | — |
 | `--verbose` | `minimal` | winapp's build decision traces |
-| `--trace` | `normal` | deeper MSBuild log |
+| `--quiet` | `quiet` | — |
 
 Under `--json` or `--quiet` the invocation and build output go to stderr so stdout stays pure JSON / clean.
 

@@ -706,12 +706,13 @@ internal sealed partial class ProjectRunService(
     /// <summary>
     /// Maps the CLI's effective log level to a dotnet <c>-v</c> verbosity for the build pass. <c>--verbose</c>
     /// stays at <c>minimal</c> on purpose (it already streams the build live and unlocks winapp's decision
-    /// traces; <c>-v normal</c> would bury those under MSBuild task lines). Only <c>--trace</c> cranks dotnet
-    /// to <c>normal</c>; <c>--quiet</c> keeps it quiet; everything else is minimal.
+    /// traces; <c>-v normal</c> would bury those under MSBuild task lines). <c>--quiet</c> keeps dotnet quiet;
+    /// everything else is minimal.
     /// </summary>
     private static string ResolveBuildVerbosity(ILogger logger, bool json)
     {
-        // --trace: crank dotnet up so the deeper MSBuild log is available when diagnosing a build.
+        // Reserved: no CLI switch currently enables Trace (--verbose maps to Debug), so this branch is
+        // unreachable today. Kept so a future trace-level switch raises dotnet's verbosity with it.
         if (logger.IsEnabled(LogLevel.Trace))
         {
             return "normal";
