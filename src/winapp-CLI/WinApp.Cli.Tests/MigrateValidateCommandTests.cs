@@ -107,6 +107,38 @@ public class MigrateValidateCommandTests : MigrateCommandTestBase
     }
 
     [TestMethod]
+    public async Task Validate_DriverNonzeroExit_FailsGate()
+    {
+        var project = await CreateProjectDirAsync("nonzero-exit");
+        FakeDriver.DriverFound = true;
+        FakeDriver.ExitCode = 3;
+        FakeDriver.StdOut = """{"schemaVersion":"1.0","files":[]}""";
+
+        var command = GetRequiredService<MigrateValidateCommand>();
+        var (exit, output) = await InvokeCapturingConsoleAsync(command, project.FullName);
+
+        Assert.AreEqual(1, exit, output);
+        StringAssert.Contains(output, "[FAIL] Residue (API)");
+        StringAssert.Contains(output, "exited with code 3");
+    }
+
+    [TestMethod]
+    public async Task Validate_CleanRun_DeletesStaleDiagnostics()
+    {
+        var project = await CreateProjectDirAsync("stale-diag");
+        FakeDriver.DriverFound = true;
+        FakeDriver.StdOut = """{"schemaVersion":"1.0","files":[]}""";
+        var diagPath = Path.Combine(project.FullName, ".validator-diagnostics.txt");
+        await File.WriteAllTextAsync(diagPath, "stale failures from a previous run", TestContext.CancellationToken);
+
+        var command = GetRequiredService<MigrateValidateCommand>();
+        var (exit, output) = await InvokeCapturingConsoleAsync(command, project.FullName);
+
+        Assert.AreEqual(0, exit, output);
+        Assert.IsFalse(File.Exists(diagPath), "a clean pass must delete the stale diagnostics file");
+    }
+
+    [TestMethod]
     public async Task Validate_DriverThrows_FailsGate()
     {
         var project = await CreateProjectDirAsync("driver-throws");

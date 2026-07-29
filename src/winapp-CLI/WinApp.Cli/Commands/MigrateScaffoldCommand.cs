@@ -83,7 +83,34 @@ internal partial class MigrateScaffoldCommand : Command, IShortDescription
             Console.Out.WriteLine($"    Source : {sourceRoot}");
             Console.Out.WriteLine($"    Target : {targetRoot}");
 
+            // Reject overlapping paths: copying a directory onto itself, or into/from an
+            // ancestor, corrupts the source or loops the WinUI scaffold back through the copy.
+            if (PathsOverlap(sourceRoot, targetRoot))
+            {
+                Console.Out.WriteLine("[ERROR] Source and target must be two distinct, non-nested directories.");
+                return Task.FromResult(1);
+            }
+
+            // Verify the advertised prerequisites before mutating any files.
+            var sourceHasProject = EnumerateFiles(sourceRoot).Any(f =>
+                f.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(Path.GetFileName(f), "Package.appxmanifest", StringComparison.OrdinalIgnoreCase));
+            if (!sourceHasProject)
+            {
+                Console.Out.WriteLine("[ERROR] Source is not a UWP project — no .csproj or Package.appxmanifest found. Nothing to migrate.");
+                return Task.FromResult(1);
+            }
+
+            var targetHasScaffold = FindFile(targetRoot, "MainWindow.xaml") is not null
+                || EnumerateFiles(targetRoot).Any(f => f.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase));
+            if (!targetHasScaffold)
+            {
+                Console.Out.WriteLine("[ERROR] Target is not a WinUI 3 scaffold — no .csproj or MainWindow.xaml found. Run 'dotnet new winui' first.");
+                return Task.FromResult(1);
+            }
+
             var copied = new List<string>();
+            var preservedStartup = new List<string>();
 
             // ── 1. Copy source files (everything but the project) ────────────────
             foreach (var file in EnumerateFiles(sourceRoot))
@@ -94,10 +121,25 @@ internal partial class MigrateScaffoldCommand : Command, IShortDescription
                 }
 
                 var rel = Path.GetRelativePath(sourceRoot, file);
+
+                // Never overwrite the WinUI scaffold's own startup files with their UWP
+                // counterparts: a UWP App.xaml.cs launches via Window.Current, so replacing
+                // the scaffold's MainWindow bootstrap leaves the migrated app unable to start.
+                if (IsScaffoldStartupFile(rel))
+                {
+                    preservedStartup.Add(rel);
+                    continue;
+                }
+
                 CopyInto(file, Path.Combine(targetRoot, rel));
                 copied.Add(rel);
             }
             Console.Out.WriteLine($"    Copied {copied.Count} source files");
+            if (preservedStartup.Count > 0)
+            {
+                Console.Out.WriteLine($"    Preserved WinUI scaffold startup file(s), did NOT copy UWP: {string.Join(", ", preservedStartup)}");
+                Console.Out.WriteLine("      Migrate app-level resources from the UWP App.xaml manually (the WinUI startup bootstrap was kept).");
+            }
 
             // ── 1b. Merge sibling shared/ (cross-language SDK-sample layout) ─────
             MergeSiblingShared(sourceRoot, targetRoot, copied);
@@ -639,6 +681,30 @@ internal partial class MigrateScaffoldCommand : Command, IShortDescription
         private static string? FindFile(string root, string fileName)
         {
             return EnumerateFiles(root).FirstOrDefault(f => string.Equals(Path.GetFileName(f), fileName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // App.xaml / App.xaml.cs define the WinUI 3 startup bootstrap in the scaffold and must not
+        // be clobbered by the UWP originals (which launch via Window.Current, not MainWindow).
+        private static bool IsScaffoldStartupFile(string rel)
+        {
+            var name = Path.GetFileName(rel);
+            return string.Equals(name, "App.xaml", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(name, "App.xaml.cs", StringComparison.OrdinalIgnoreCase);
+        }
+
+        // True when source == target, or one directory contains the other.
+        private static bool PathsOverlap(string sourceRoot, string targetRoot)
+        {
+            var a = Path.GetFullPath(sourceRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var b = Path.GetFullPath(targetRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.Equals(a, b, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            var aSlash = a + Path.DirectorySeparatorChar;
+            var bSlash = b + Path.DirectorySeparatorChar;
+            return b.StartsWith(aSlash, StringComparison.OrdinalIgnoreCase)
+                || a.StartsWith(bSlash, StringComparison.OrdinalIgnoreCase);
         }
     }
 

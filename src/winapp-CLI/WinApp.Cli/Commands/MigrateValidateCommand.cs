@@ -94,6 +94,12 @@ internal partial class MigrateValidateCommand : Command, IShortDescription
             {
                 try { await File.WriteAllTextAsync(diagPath, diagnostics.ToString(), cancellationToken); } catch { /* best effort */ }
             }
+            else
+            {
+                // Clean run: remove any stale diagnostics from a previous failed run so a [PASS]
+                // is not contradicted by a leftover file describing old failures.
+                try { if (File.Exists(diagPath)) { File.Delete(diagPath); } } catch { /* best effort */ }
+            }
 
             if (failures == 0)
             {
@@ -128,6 +134,15 @@ internal partial class MigrateValidateCommand : Command, IShortDescription
             {
                 Console.Out.WriteLine("[WARN] Residue (API) — analyzer driver 'winui-analyze' not found; skipped API-residue check. Text-marker residue still enforced.");
                 return 0;
+            }
+
+            if (run.ExitCode != 0)
+            {
+                // Fail closed: a nonzero analyzer exit means the run is untrustworthy even if it
+                // emitted a (partial) JSON report, so we must not treat its findings as complete.
+                Console.Out.WriteLine($"[FAIL] Residue (API) — analyzer exited with code {run.ExitCode}; cannot trust its report.");
+                if (run.StdErr.Length > 0) { diag.AppendLine("[Residue API driver stderr]").AppendLine(run.StdErr.TrimEnd()).AppendLine(); }
+                return 1;
             }
 
             MigrateAnalyzeReport? report = null;
