@@ -470,13 +470,14 @@ internal partial class RunCommand
         /// Builds an actionable message for the case where an app was built for an architecture this
         /// machine can't execute — replacing the opaque OS "InvalidApplication" error with a clear fix
         /// (rebuild for the host arch or run on a matching machine). <paramref name="detail"/> carries the
-        /// raw OS error for diagnostics.
+        /// raw OS error for diagnostics. Uses "an" rather than "a": every architecture moniker we emit
+        /// (arm64, x64, x86) starts with a vowel sound, so "a arm64 machine" was simply wrong.
         /// </summary>
         private static string BuildArchMismatchMessage(string targetArch, string detail)
         {
             var host = RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant();
             return $"The app was built for {targetArch} but this machine runs {host}, which can't execute {targetArch} binaries. " +
-                   $"Rebuild for {host} (for example: --arch {host}) or run the app on a {targetArch} machine. ({detail})";
+                   $"Rebuild for {host} (for example: --arch {host}) or run the app on an {targetArch} machine. ({detail})";
         }
 
         /// <summary>
