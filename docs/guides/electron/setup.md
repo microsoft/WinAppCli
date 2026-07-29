@@ -1,4 +1,5 @@
 <!-- mslearn: true -->
+<!-- description: Set up your development environment for adding Windows APIs to an Electron app with the winapp CLI, including SDK install and project init. -->
 # Setting Up the Development Environment
 
 This guide walks you through setting up your Electron development environment for Windows API development. You'll install the necessary tools, initialize your project, and configure Windows SDKs.

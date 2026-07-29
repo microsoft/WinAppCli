@@ -415,6 +415,39 @@ try
         Write-Host "[NUGET] Skipping NuGet packages creation (use -SkipNuGet:`$false to enable)" -ForegroundColor Gray
     }
 
+    # Run MS Learn docs tooling Pester tests (validator + shared front-matter lib).
+    # These gate the release doc-porting job, so keep them green. Skipped with -SkipTests.
+    if (-not $SkipTests) {
+        $MsLearnTestsPath = Join-Path $ProjectRoot "scripts\tests\validate-mslearn-docs.Tests.ps1"
+        if (Test-Path $MsLearnTestsPath) {
+            $pesterMod = Get-Module -Name Pester -ListAvailable | Where-Object { $_.Version.Major -ge 5 } | Select-Object -First 1
+            if ($pesterMod) {
+                Write-Host "[TEST] Running MS Learn docs tooling Pester tests..." -ForegroundColor Blue
+                # Import the selected v5+ module explicitly so the v5 config APIs
+                # don't bind to a different Pester version already in the session.
+                Import-Module $pesterMod -Force
+                $pesterConfig = New-PesterConfiguration
+                $pesterConfig.Run.Path = $MsLearnTestsPath
+                $pesterConfig.Run.Exit = $false
+                $pesterConfig.Run.PassThru = $true
+                $pesterConfig.Output.Verbosity = 'Normal'
+                $pesterResult = Invoke-Pester -Configuration $pesterConfig
+                if (($pesterResult.FailedCount + $pesterResult.FailedBlocksCount + $pesterResult.FailedContainersCount) -gt 0) {
+                    if ($FailOnTestFailure) {
+                        Write-Error "Stopping build due to MS Learn docs tooling Pester test failures (FailOnTestFailure flag set): $($pesterResult.FailedCount) failed test(s), $($pesterResult.FailedBlocksCount) failed block(s), $($pesterResult.FailedContainersCount) failed container(s)"
+                        exit 1
+                    } else {
+                        Write-Warning "MS Learn docs tooling Pester tests had $($pesterResult.FailedCount) failed test(s), $($pesterResult.FailedBlocksCount) failed block(s), $($pesterResult.FailedContainersCount) failed container(s) — continuing"
+                    }
+                } else {
+                    Write-Host "[TEST] MS Learn docs tooling Pester tests passed: $($pesterResult.PassedCount) passed, $($pesterResult.SkippedCount) skipped" -ForegroundColor Green
+                }
+            } else {
+                Write-Warning "Pester 5.x not installed — skipping MS Learn docs tooling Pester tests. Install with: Install-Module Pester -Force -MinimumVersion 5.0"
+            }
+        }
+    }
+
     # Step 9: Create MSIX packages (optional)
     if (-not $SkipMsix) {
         Write-Host ""

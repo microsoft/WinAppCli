@@ -1,4 +1,5 @@
 <!-- mslearn: true -->
+<!-- description: Add Windows-native capabilities to an Electron app with the winapp CLI, from calling modern Windows APIs to testing identity and packaging. -->
 # Getting Started: Adding Windows APIs to Your Electron App
 
 This guide walks you through adding Windows-native capabilities to an Electron application using the Windows App Development CLI. You'll learn how to call modern Windows APIs from your Electron app, test with app identity, and package for distribution.
