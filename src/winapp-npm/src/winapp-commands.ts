@@ -957,8 +957,8 @@ export interface UiRecordOptions extends CommonOptions {
   durationSec?: number;
   /** Frames per second to capture */
   fps?: number;
-  /** Also write agent-readable JPEG frames, frames.ndjson, and manifest.json to this new directory. Requires a timed recording, fps 1-30, at most 18,000 requested samples, and max-edge 64-4096 when specified (default 1280; 0 is not supported). Frame data is capped at a 1 GiB bundle; a complete indexed prefix is retained if the cap is reached. */
-  framesDir?: string;
+  /** Also write timestamped JPEG frames, frames.ndjson, and manifest.json to <output-name>.frames. Supports timed and stop-controlled recordings. Frame mode uses fps 1-30 and defaults max-edge to 1280; frame data is capped at 1 GiB. */
+  frames?: boolean;
   /** Format output as JSON */
   json?: boolean;
   /** Downscale so the longest edge is at most this many pixels (0 = no downscale) */

@@ -16,9 +16,9 @@ internal class UiRecordCommand : Command, IShortDescription
     private const int DefaultFrameArtifactMaxEdge = 1280;
     private const int MaximumFrameArtifactMaxEdge = 4096;
 
-    internal static readonly Option<string?> FramesDirectoryOption = new("--frames-dir")
+    internal static readonly Option<bool> FramesOption = new("--frames")
     {
-        Description = "Also write agent-readable JPEG frames, frames.ndjson, and manifest.json to this new directory. Requires a timed recording, fps 1-30, at most 18,000 requested samples, and max-edge 64-4096 when specified (default 1280; 0 is not supported). Frame data is capped at a 1 GiB bundle; a complete indexed prefix is retained if the cap is reached.",
+        Description = "Also write timestamped JPEG frames, frames.ndjson, and manifest.json to <output-name>.frames. Supports timed and stop-controlled recordings. Frame mode uses fps 1-30 and defaults max-edge to 1280; frame data is capped at 1 GiB.",
     };
 
     public string ShortDescription => "Record a window or element region to an MP4 (H.264) video";
@@ -28,7 +28,7 @@ internal class UiRecordCommand : Command, IShortDescription
                "Captures frames via Windows Graphics Capture and encodes with Media Foundation. " +
                "By default records until stopped (Ctrl+C, or a newline/EOF on stdin for programmatic callers). " +
                "Use --duration-sec N for a timed run. A valid MP4 is always finalized on graceful stop. " +
-               "Use --frames-dir to add timestamped agent-readable frame artifacts without replacing the MP4. " +
+               "Use --frames to add timestamped agent-readable frame artifacts beside the MP4. " +
                "Use --capture-screen to include overlays/popups.")
     {
         Arguments.Add(SharedUiOptions.SelectorArgument);
@@ -39,7 +39,7 @@ internal class UiRecordCommand : Command, IShortDescription
         Options.Add(SharedUiOptions.MaxEdgeOption);
         Options.Add(SharedUiOptions.CaptureScreenOption);
         Options.Add(SharedUiOptions.OutputOption);
-        Options.Add(FramesDirectoryOption);
+        Options.Add(FramesOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -71,7 +71,7 @@ internal class UiRecordCommand : Command, IShortDescription
             var maxEdgeExplicit = parseResult.GetResult(SharedUiOptions.MaxEdgeOption)?.Implicit == false;
             var captureScreen = parseResult.GetValue(SharedUiOptions.CaptureScreenOption);
             var output = parseResult.GetValue(SharedUiOptions.OutputOption);
-            var framesDirectoryOption = parseResult.GetValue(FramesDirectoryOption);
+            var frames = parseResult.GetValue(FramesOption);
 
             // Validate all numeric/range arguments before requiring a target, so bad argument
             // values produce invalid_arguments regardless of whether a target was supplied.
@@ -93,41 +93,23 @@ internal class UiRecordCommand : Command, IShortDescription
                 logger.LogError("{Symbol} --fps must be at least 1.", UiSymbols.Error);
                 return 1;
             }
-            if (framesDirectoryOption is null && maxEdge != 0 && maxEdge < 64)
+            if (!frames && maxEdge != 0 && maxEdge < 64)
             {
                 UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--max-edge must be 0 (unbounded) or >= 64 (encoder minimum).");
                 logger.LogError("{Symbol} --max-edge must be 0 (unbounded) or >= 64 (encoder minimum).", UiSymbols.Error);
                 return 1;
             }
-            if (framesDirectoryOption is not null)
+            if (frames)
             {
-                if (string.IsNullOrWhiteSpace(framesDirectoryOption))
-                {
-                    UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--frames-dir must not be empty.");
-                    logger.LogError("{Symbol} --frames-dir must not be empty.", UiSymbols.Error);
-                    return 1;
-                }
-                if (durationSec <= 0)
-                {
-                    UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--frames-dir requires --duration-sec greater than 0.");
-                    logger.LogError("{Symbol} --frames-dir requires --duration-sec greater than 0.", UiSymbols.Error);
-                    return 1;
-                }
                 if (fps > 30)
                 {
-                    UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--frames-dir supports --fps values from 1 through 30.");
-                    logger.LogError("{Symbol} --frames-dir supports --fps values from 1 through 30.", UiSymbols.Error);
-                    return 1;
-                }
-                if ((long)durationSec * fps > 18_000)
-                {
-                    UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--frames-dir is limited to 18,000 requested samples (duration-sec × fps).");
-                    logger.LogError("{Symbol} --frames-dir is limited to 18,000 requested samples.", UiSymbols.Error);
+                    UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--frames supports --fps values from 1 through 30.");
+                    logger.LogError("{Symbol} --frames supports --fps values from 1 through 30.", UiSymbols.Error);
                     return 1;
                 }
                 if (maxEdgeExplicit && (maxEdge < 64 || maxEdge > MaximumFrameArtifactMaxEdge))
                 {
-                    const string message = "--frames-dir supports --max-edge values from 64 through 4096; omit --max-edge to use 1280.";
+                    const string message = "--frames supports --max-edge values from 64 through 4096; omit --max-edge to use 1280.";
                     UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, message);
                     logger.LogError("{Symbol} {Message}", UiSymbols.Error, message);
                     return 1;
@@ -163,9 +145,7 @@ internal class UiRecordCommand : Command, IShortDescription
                     // with UnauthorizedAccessException).
                     filePath = Path.GetFullPath(
                         output ?? $"recording-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.mp4");
-                    framesDirectory = framesDirectoryOption is null
-                        ? null
-                        : Path.TrimEndingDirectorySeparator(Path.GetFullPath(framesDirectoryOption));
+                    framesDirectory = frames ? GetFramesDirectory(filePath) : null;
 
                     if (framesDirectory is not null)
                     {
@@ -176,7 +156,7 @@ internal class UiRecordCommand : Command, IShortDescription
                                 UiJsonError.CodeOutputExists,
                                 $"MP4 output already exists: {filePath}",
                                 errorOut: parseResult.InvocationConfiguration.Error,
-                                recoveryHint: "Choose a new --output path; frame-output mode never replaces existing artifacts.");
+                                recoveryHint: "Choose a new --output path; recording never replaces existing artifacts.");
                             logger.LogError("{Symbol} MP4 output already exists: {Path}", UiSymbols.Error, filePath);
                             return 1;
                         }
@@ -187,19 +167,8 @@ internal class UiRecordCommand : Command, IShortDescription
                                 UiJsonError.CodeOutputExists,
                                 $"Frame artifact output already exists: {framesDirectory}",
                                 errorOut: parseResult.InvocationConfiguration.Error,
-                                recoveryHint: "Choose a new --frames-dir path; existing artifacts are never replaced.");
+                                recoveryHint: "Choose a new --output path; the derived frame directory already exists and is never replaced.");
                             logger.LogError("{Symbol} Frame artifact output already exists: {Path}", UiSymbols.Error, framesDirectory);
-                            return 1;
-                        }
-                        if (IsPathWithin(filePath, framesDirectory)
-                            || IsPathWithin(framesDirectory, filePath))
-                        {
-                            UiJsonError.Emit(
-                                json,
-                                UiJsonError.CodeInvalidArguments,
-                                "--output and --frames-dir must not contain one another.",
-                                errorOut: parseResult.InvocationConfiguration.Error);
-                            logger.LogError("{Symbol} --output and --frames-dir must not contain one another.", UiSymbols.Error);
                             return 1;
                         }
                     }
@@ -208,11 +177,6 @@ internal class UiRecordCommand : Command, IShortDescription
                     if (dir is not null)
                     {
                         Directory.CreateDirectory(dir);
-                    }
-                    var framesParent = framesDirectory is null ? null : Path.GetDirectoryName(framesDirectory);
-                    if (framesParent is not null)
-                    {
-                        Directory.CreateDirectory(framesParent);
                     }
                 }
                 catch (Exception pathEx)
@@ -289,24 +253,6 @@ internal class UiRecordCommand : Command, IShortDescription
                     }
                 }
 
-                void OnRecordingProgress(RecordProgress progress)
-                {
-                    if (!json)
-                    {
-                        return;
-                    }
-
-                    var progressEvent = new UiRecordProgressEvent
-                    {
-                        ElapsedMs = progress.ElapsedMs,
-                        Samples = progress.Samples,
-                        Images = progress.Images,
-                        AchievedFps = progress.AchievedFps,
-                    };
-                    parseResult.InvocationConfiguration.Error.WriteLine(
-                        JsonSerializer.Serialize(progressEvent, UiJsonContext.Default.UiRecordProgressEvent));
-                }
-
                 var options = new RecordOptions
                 {
                     OutputPath = filePath,
@@ -316,7 +262,6 @@ internal class UiRecordCommand : Command, IShortDescription
                     CaptureScreen = captureScreen,
                     FramesDirectory = framesDirectory,
                     Selector = selector,
-                    OnProgress = framesDirectory is null ? null : OnRecordingProgress,
                 };
 
                 var result = await uiAutomation.RecordAsync(session, selector, options, linkedCts.Token, OnRecordingStarted);
@@ -460,19 +405,14 @@ internal class UiRecordCommand : Command, IShortDescription
             }
         }
 
-        private static bool IsPathWithin(string candidatePath, string directoryPath)
+        internal static string GetFramesDirectory(string outputPath)
         {
-            if (string.Equals(
-                Path.TrimEndingDirectorySeparator(candidatePath),
-                Path.TrimEndingDirectorySeparator(directoryPath),
-                StringComparison.OrdinalIgnoreCase))
+            var framesDirectory = Path.ChangeExtension(outputPath, ".frames");
+            if (string.Equals(framesDirectory, outputPath, StringComparison.OrdinalIgnoreCase))
             {
-                return true;
+                framesDirectory += ".frames";
             }
-
-            var normalizedDirectory = Path.TrimEndingDirectorySeparator(directoryPath)
-                + Path.DirectorySeparatorChar;
-            return candidatePath.StartsWith(normalizedDirectory, StringComparison.OrdinalIgnoreCase);
+            return framesDirectory;
         }
     }
 }

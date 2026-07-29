@@ -27,7 +27,6 @@ namespace WinApp.Cli.Helpers;
 [JsonSerializable(typeof(UiScreenshotResult[]))]
 [JsonSerializable(typeof(UiRecordResult))]
 [JsonSerializable(typeof(UiRecordStartedEvent))]
-[JsonSerializable(typeof(UiRecordProgressEvent))]
 [JsonSerializable(typeof(RecordFrameArtifactResult))]
 [JsonSerializable(typeof(RecordFrameIndexEntry))]
 [JsonSerializable(typeof(RecordFrameBundleManifest))]
@@ -184,15 +183,6 @@ internal sealed class UiRecordStartedEvent
     public string? FramesDirectory { get; set; }
     public string? FramesManifest { get; set; }
     public string? FramesIndex { get; set; }
-}
-
-internal sealed class UiRecordProgressEvent
-{
-    public string Event { get; set; } = "recording-progress";
-    public long ElapsedMs { get; set; }
-    public int Samples { get; set; }
-    public int Images { get; set; }
-    public double AchievedFps { get; set; }
 }
 
 internal sealed class UiWaitForResult

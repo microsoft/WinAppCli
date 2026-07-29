@@ -45,31 +45,6 @@ internal sealed class RecordFrameArtifactCoordinator : IAsyncDisposable
         }
     }
 
-    public async ValueTask ValidatePipelineDimensionsAsync(
-        int sourceWidth,
-        int sourceHeight,
-        int sourceBufferCount)
-    {
-        if (_sink is null)
-        {
-            return;
-        }
-
-        try
-        {
-            _sink.ValidatePipelineDimensions(sourceWidth, sourceHeight, sourceBufferCount);
-        }
-        catch (Exception ex) when (IsRecoverableFrameOutputFailure(ex))
-        {
-            Failure ??= ex;
-            LogExpectedFailure(
-                _logger,
-                ex,
-                "Frame artifact source dimensions exceed the memory budget; continuing MP4 recording");
-            await AbortAndDisposeAsync("Frame artifact cleanup also failed").ConfigureAwait(false);
-        }
-    }
-
     public async ValueTask WriteAsync(
         ReadOnlyMemory<byte> processedFrame,
         RecordFrameSample sample)

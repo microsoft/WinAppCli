@@ -3072,7 +3072,7 @@
           }
         },
         "record": {
-          "description": "Record the target window (or an element's region) to an H.264 MP4 video. Captures frames via Windows Graphics Capture and encodes with Media Foundation. By default records until stopped (Ctrl+C, or a newline/EOF on stdin for programmatic callers). Use --duration-sec N for a timed run. A valid MP4 is always finalized on graceful stop. Use --frames-dir to add timestamped agent-readable frame artifacts without replacing the MP4. Use --capture-screen to include overlays/popups.",
+          "description": "Record the target window (or an element's region) to an H.264 MP4 video. Captures frames via Windows Graphics Capture and encodes with Media Foundation. By default records until stopped (Ctrl+C, or a newline/EOF on stdin for programmatic callers). Use --duration-sec N for a timed run. A valid MP4 is always finalized on graceful stop. Use --frames to add timestamped agent-readable frame artifacts beside the MP4. Use --capture-screen to include overlays/popups.",
           "hidden": false,
           "arguments": {
             "selector": {
@@ -3142,13 +3142,14 @@
               "required": false,
               "recursive": false
             },
-            "--frames-dir": {
-              "description": "Also write agent-readable JPEG frames, frames.ndjson, and manifest.json to this new directory. Requires a timed recording, fps 1-30, at most 18,000 requested samples, and max-edge 64-4096 when specified (default 1280; 0 is not supported). Frame data is capped at a 1 GiB bundle; a complete indexed prefix is retained if the cap is reached.",
+            "--frames": {
+              "description": "Also write timestamped JPEG frames, frames.ndjson, and manifest.json to <output-name>.frames. Supports timed and stop-controlled recordings. Frame mode uses fps 1-30 and defaults max-edge to 1280; frame data is capped at 1 GiB.",
               "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
               "arity": {
-                "minimum": 1,
+                "minimum": 0,
                 "maximum": 1
               },
               "required": false,

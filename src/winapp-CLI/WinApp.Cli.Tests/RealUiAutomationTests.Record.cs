@@ -3,7 +3,6 @@
 
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
-using System.Runtime.InteropServices;
 using Windows.Win32.Foundation;
 using WinApp.Cli.Services;
 
@@ -236,7 +235,7 @@ public partial class RealUiAutomationTests
     }
 
     [TestMethod]
-    public async Task RecordAsync_Mp4FinalizeFailure_PreservesAcceptedFrameArtifact()
+    public async Task RecordAsync_Mp4PublicationRaceDoesNotPublishMismatchedFrames()
     {
         using var fx = new UiaTestFixture();
         var svc = NewService();
@@ -245,56 +244,19 @@ public partial class RealUiAutomationTests
 
         var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        var framesDirectory = Path.Join(root, "finalize-partial.frames");
+        var output = Path.Join(root, "winner.mp4");
+        var framesDirectory = Path.Join(root, "loser.frames");
         WgcCapture.s_isSupported = () => true;
         WgcCapture.s_startGrabber = (_, _, _) =>
             new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
         Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
             new FakeVideoEncoder(path, width, height)
             {
-                CompleteException = new COMException("simulated finalize failure"),
+                WriteFrameException = new IOException("simulated publication race"),
             };
+        await File.WriteAllTextAsync(output, "winning recording");
 
-        var exception = await Assert.ThrowsExactlyAsync<RecordPartialOutputException>(
-            () => svc.RecordAsync(session, null, new RecordOptions
-            {
-                OutputPath = Path.Join(root, "finalize-partial.mp4"),
-                FramesDirectory = framesDirectory,
-                DurationSec = 1,
-                Fps = 1,
-                MaxEdge = 64,
-            }, CancellationToken.None));
-
-        Assert.AreEqual(framesDirectory, exception.FramesDirectory);
-        var manifest = JsonSerializer.Deserialize<JsonElement>(
-            await File.ReadAllTextAsync(Path.Join(framesDirectory, "manifest.json")));
-        Assert.AreEqual("partial", manifest.GetProperty("status").GetString());
-        Assert.AreEqual("failed", manifest.GetProperty("video").GetProperty("status").GetString());
-        Assert.AreEqual(1, manifest.GetProperty("video").GetProperty("frameCount").GetInt32());
-    }
-
-    [TestMethod]
-    public async Task RecordAsync_PostEncodingMetadataFailure_RemovesFrameStaging()
-    {
-        using var fx = new UiaTestFixture();
-        var svc = NewService();
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
-
-        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        var output = Path.Join(root, "missing.mp4");
-        var framesDirectory = Path.Join(root, "missing.frames");
-        WgcCapture.s_isSupported = () => true;
-        WgcCapture.s_startGrabber = (_, _, _) =>
-            new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
-        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
-            new FakeVideoEncoder(path, width, height)
-            {
-                DeleteOutputOnComplete = true,
-            };
-
-        await Assert.ThrowsExactlyAsync<FileNotFoundException>(
+        await Assert.ThrowsExactlyAsync<IOException>(
             () => svc.RecordAsync(session, null, new RecordOptions
             {
                 OutputPath = output,
@@ -304,55 +266,8 @@ public partial class RealUiAutomationTests
                 MaxEdge = 64,
             }, CancellationToken.None));
 
+        Assert.AreEqual("winning recording", await File.ReadAllTextAsync(output));
         Assert.IsFalse(Directory.Exists(framesDirectory));
-        Assert.IsFalse(Directory.EnumerateDirectories(
-            root,
-            ".*.staging",
-            SearchOption.TopDirectoryOnly).Any());
-    }
-
-    [TestMethod]
-    public async Task RecordAsync_CancellationBeforeFirstSamplePublishesNoArtifacts()
-    {
-        using var fx = new UiaTestFixture();
-        var svc = NewService();
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
-
-        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        var output = Path.Join(root, "cancelled.mp4");
-        var framesDirectory = Path.Join(root, "cancelled.frames");
-        using var cts = new CancellationTokenSource();
-        var frameSink = new FakeFrameSink();
-        FakeVideoEncoder? encoder = null;
-        WgcCapture.s_isSupported = () => true;
-        WgcCapture.s_startGrabber = (_, _, _) =>
-            new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
-        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
-            encoder = new FakeVideoEncoder(path, width, height);
-        RecordFrameBundleWriter.s_create = _ =>
-        {
-            cts.Cancel();
-            return frameSink;
-        };
-
-        await Assert.ThrowsExactlyAsync<OperationCanceledException>(
-            () => svc.RecordAsync(session, null, new RecordOptions
-            {
-                OutputPath = output,
-                FramesDirectory = framesDirectory,
-                DurationSec = 1,
-                Fps = 1,
-                MaxEdge = 64,
-            }, cts.Token));
-
-        Assert.IsFalse(File.Exists(output));
-        Assert.IsFalse(Directory.Exists(framesDirectory));
-        Assert.IsTrue(frameSink.Aborted);
-        Assert.IsNotNull(encoder);
-        Assert.IsFalse(encoder!.Completed);
-        Assert.IsTrue(encoder.Disposed);
     }
 
     [TestMethod]
@@ -401,83 +316,6 @@ public partial class RealUiAutomationTests
     }
 
     [TestMethod]
-    public async Task RecordAsync_FrameAndMp4FailureWithoutArtifactThrowsFrameOutputException()
-    {
-        using var fx = new UiaTestFixture();
-        var svc = NewService();
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
-
-        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        WgcCapture.s_isSupported = () => true;
-        WgcCapture.s_startGrabber = (_, _, _) =>
-            new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
-        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
-            new FakeVideoEncoder(path, width, height)
-            {
-                WriteFrameException = new IOException("simulated encoder failure"),
-            };
-        RecordFrameBundleWriter.s_create = _ => new FakeFrameSink
-        {
-            WriteException = new IOException("simulated frame failure"),
-        };
-
-        var exception = await Assert.ThrowsExactlyAsync<RecordFrameOutputException>(
-            () => svc.RecordAsync(session, null, new RecordOptions
-            {
-                OutputPath = Path.Join(root, "failed.mp4"),
-                FramesDirectory = Path.Join(root, "failed.frames"),
-                DurationSec = 1,
-                Fps = 1,
-                MaxEdge = 64,
-            }, CancellationToken.None));
-
-        Assert.IsInstanceOfType<IOException>(exception.InnerException);
-        StringAssert.Contains(exception.InnerException.Message, "frame failure");
-    }
-
-    [TestMethod]
-    public async Task RecordAsync_FrameAndAbortFailureStillPreservesMp4()
-    {
-        using var fx = new UiaTestFixture();
-        var svc = NewService();
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
-
-        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        var output = Path.Join(root, "preserved.mp4");
-        FakeVideoEncoder? encoder = null;
-        WgcCapture.s_isSupported = () => true;
-        WgcCapture.s_startGrabber = (_, _, _) =>
-            new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
-        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
-            encoder = new FakeVideoEncoder(path, width, height);
-        RecordFrameBundleWriter.s_create = _ => new FakeFrameSink
-        {
-            WriteException = new IOException("simulated frame failure"),
-            AbortException = new IOException("simulated cleanup failure"),
-        };
-
-        var exception = await Assert.ThrowsExactlyAsync<RecordPartialOutputException>(
-            () => svc.RecordAsync(session, null, new RecordOptions
-            {
-                OutputPath = output,
-                FramesDirectory = Path.Join(root, "failed.frames"),
-                DurationSec = 1,
-                Fps = 1,
-                MaxEdge = 64,
-            }, CancellationToken.None));
-
-        Assert.AreEqual(output, exception.VideoPath);
-        Assert.IsTrue(File.Exists(output));
-        Assert.IsNotNull(encoder);
-        Assert.AreEqual(1, encoder!.FramesWritten);
-        Assert.IsTrue(encoder.Completed);
-    }
-
-    [TestMethod]
     public async Task RecordAsync_JpegWorkerFailurePreservesMp4AndRemovesFrameStaging()
     {
         using var fx = new UiaTestFixture();
@@ -514,83 +352,6 @@ public partial class RealUiAutomationTests
             root,
             ".*.staging",
             SearchOption.TopDirectoryOnly).Any());
-    }
-
-    [TestMethod]
-    public async Task RecordAsync_FramePipelineLimitPreservesMp4WithActionableRecovery()
-    {
-        using var fx = new UiaTestFixture();
-        var svc = NewService();
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
-
-        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        var output = Path.Join(root, "pipeline-limit.mp4");
-        WgcCapture.s_isSupported = () => true;
-        WgcCapture.s_startGrabber = (_, _, _) =>
-            new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
-        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
-            new FakeVideoEncoder(path, width, height);
-        RecordFrameBundleWriter.s_create = _ =>
-            throw new RecordFramePipelineLimitException(
-                "Frame artifacts exceed the 256 MiB pipeline memory budget. Lower --max-edge.",
-                lowerMaxEdgeCanHelp: true);
-
-        bool? frameArtifactsActiveWhenStarted = null;
-        var exception = await Assert.ThrowsExactlyAsync<RecordPartialOutputException>(
-            () => svc.RecordAsync(session, null, new RecordOptions
-            {
-                OutputPath = output,
-                FramesDirectory = Path.Join(root, "pipeline-limit.frames"),
-                DurationSec = 1,
-                Fps = 1,
-                MaxEdge = 64,
-            }, CancellationToken.None, active => frameArtifactsActiveWhenStarted = active));
-
-        Assert.AreEqual(output, exception.VideoPath);
-        Assert.AreEqual(false, frameArtifactsActiveWhenStarted);
-        Assert.IsTrue(File.Exists(output));
-        Assert.IsInstanceOfType<RecordFramePipelineLimitException>(exception.InnerException);
-        StringAssert.Contains(exception.RecoveryHint, "Lower --max-edge");
-        StringAssert.Contains(exception.RecoveryHint, "new --output and --frames-dir paths");
-    }
-
-    [TestMethod]
-    public async Task RecordAsync_SourcePipelineLimitRecommendsSmallerCaptureOrNoFrames()
-    {
-        using var fx = new UiaTestFixture();
-        var svc = NewService();
-        var session = SessionFor(fx);
-        await ResolveAsync(svc, session, "btnInvoke");
-
-        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        var output = Path.Join(root, "source-limit.mp4");
-        WgcCapture.s_isSupported = () => true;
-        WgcCapture.s_startGrabber = (_, _, _) =>
-            new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
-        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
-            new FakeVideoEncoder(path, width, height);
-        RecordFrameBundleWriter.s_create = _ =>
-            throw new RecordFramePipelineLimitException(
-                "Source capture buffers exceed the memory budget.",
-                lowerMaxEdgeCanHelp: false);
-
-        var exception = await Assert.ThrowsExactlyAsync<RecordPartialOutputException>(
-            () => svc.RecordAsync(session, null, new RecordOptions
-            {
-                OutputPath = output,
-                FramesDirectory = Path.Join(root, "source-limit.frames"),
-                DurationSec = 1,
-                Fps = 1,
-                MaxEdge = 64,
-            }, CancellationToken.None));
-
-        Assert.IsTrue(File.Exists(output));
-        StringAssert.Contains(exception.RecoveryHint, "Capture a smaller window or source");
-        StringAssert.Contains(exception.RecoveryHint, "without --frames-dir");
-        Assert.IsFalse(exception.RecoveryHint.Contains("Lower --max-edge", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -660,10 +421,6 @@ public partial class RealUiAutomationTests
 
         public Exception? WriteFrameException { get; init; }
 
-        public Exception? CompleteException { get; init; }
-
-        public bool DeleteOutputOnComplete { get; init; }
-
         public void WriteFrame(ReadOnlySpan<byte> bgra, long sampleTimeHns, long sampleDurationHns)
         {
             if (WriteFrameException is not null)
@@ -678,17 +435,8 @@ public partial class RealUiAutomationTests
 
         public void Complete()
         {
-            if (CompleteException is not null)
-            {
-                throw CompleteException;
-            }
-
             Completed = true;
             File.WriteAllBytes(path, [1, 2, 3, 4, 5]);
-            if (DeleteOutputOnComplete)
-            {
-                File.Delete(path);
-            }
         }
 
         public void Dispose()
@@ -713,10 +461,6 @@ public partial class RealUiAutomationTests
         public Exception? WriteException { get; init; }
 
         public Exception? AbortException { get; init; }
-
-        public void ValidatePipelineDimensions(int sourceWidth, int sourceHeight, int sourceBufferCount)
-        {
-        }
 
         public ValueTask WriteAsync(
             ReadOnlyMemory<byte> bgra,

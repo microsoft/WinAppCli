@@ -88,35 +88,13 @@ test('buildUiRecordArgs: minimal options (only durationSec)', () => {
   assert.deepEqual(args, ['ui', 'record', '--duration-sec', '5']);
 });
 
-test('buildUiRecordArgs rejects an empty or whitespace framesDir', () => {
-  for (const framesDir of ['', '   ']) {
-    assert.throws(
-      () => buildUiRecordArgs({ durationSec: 5, framesDir }),
-      /framesDir must be a non-empty, non-whitespace directory path/
-    );
-  }
-});
-
-test('_uiRecordWithCapture rejects a blank framesDir before capture', async () => {
-  let captureCalled = false;
-  await assert.rejects(
-    () =>
-      _uiRecordWithCapture({ durationSec: 5, framesDir: ' ' }, async () => {
-        captureCalled = true;
-        return { exitCode: 0, stdout: '', stderr: '' };
-      }),
-    /framesDir must be a non-empty, non-whitespace directory path/
-  );
-  assert.equal(captureCalled, false);
-});
-
 test('buildUiRecordArgs: all options produce correct arg list', () => {
   const opts: UiRecordOptions = {
     app: 'myapp',
     captureScreen: true,
     durationSec: 10,
     fps: 30,
-    framesDir: 'out.frames',
+    frames: true,
     json: true,
     maxEdge: 1080,
     output: 'out.mp4',
@@ -143,8 +121,7 @@ test('buildUiRecordArgs: all options produce correct arg list', () => {
   assert.equal(args[args.indexOf('--duration-sec') + 1], '10');
   assert.ok(args.includes('--fps'));
   assert.equal(args[args.indexOf('--fps') + 1], '30');
-  assert.ok(args.includes('--frames-dir'));
-  assert.equal(args[args.indexOf('--frames-dir') + 1], 'out.frames');
+  assert.ok(args.includes('--frames'));
   assert.ok(args.includes('--json'));
   assert.ok(args.includes('--max-edge'));
   assert.equal(args[args.indexOf('--max-edge') + 1], '1080');

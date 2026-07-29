@@ -27,13 +27,6 @@ import type { UiRecordOptions as GeneratedUiRecordOptions, WinappResult } from '
  */
 export type UiRecordOptions = Omit<GeneratedUiRecordOptions, 'durationSec'> & {
   durationSec: number;
-  /**
-   * Also retain agent-readable JPEG evidence in a new directory. Requires fps 1-30,
-   * durationSec × fps <= 18,000, and maxEdge 64-4096 when specified. The MP4 remains
-   * mandatory. Frame data is capped at 1 GiB; a valid indexed prefix is retained if
-   * the cap is reached.
-   */
-  framesDir?: string;
 };
 
 type UiRecordArgSpec = {
@@ -47,7 +40,7 @@ export const UI_RECORD_ARG_SPECS: readonly UiRecordArgSpec[] = [
   { property: 'captureScreen', flag: '--capture-screen', kind: 'boolean' },
   { property: 'durationSec', flag: '--duration-sec', kind: 'value' },
   { property: 'fps', flag: '--fps', kind: 'value' },
-  { property: 'framesDir', flag: '--frames-dir', kind: 'value' },
+  { property: 'frames', flag: '--frames', kind: 'boolean' },
   { property: 'json', flag: '--json', kind: 'boolean' },
   { property: 'maxEdge', flag: '--max-edge', kind: 'value' },
   { property: 'output', flag: '--output', kind: 'value' },
@@ -66,10 +59,6 @@ export const UI_RECORD_ARG_SPECS: readonly UiRecordArgSpec[] = [
  * @internal
  */
 export function buildUiRecordArgs(options: UiRecordOptions): string[] {
-  if (options.framesDir !== undefined && options.framesDir.trim().length === 0) {
-    throw new Error('uiRecord: framesDir must be a non-empty, non-whitespace directory path.');
-  }
-
   const args: string[] = ['ui', 'record'];
   for (const spec of UI_RECORD_ARG_SPECS) {
     const value = options[spec.property];
@@ -93,8 +82,8 @@ export function buildUiRecordArgs(options: UiRecordOptions): string[] {
  * **`durationSec` is required and must be > 0.** Unbounded recording (durationSec == 0) is only
  * supported via the CLI with Ctrl+C or piped stdin. The npm wrapper has no mechanism to stop
  * an unbounded spawn, so passing durationSec == 0 or omitting it will throw a clear error.
- * With `framesDir`, the CLI also writes timestamped JPEG evidence, `frames.ndjson`, and
- * `manifest.json` without replacing the MP4. See `UiRecordOptions.framesDir` for limits.
+ * With `frames`, the CLI also writes timestamped JPEG evidence, `frames.ndjson`, and
+ * `manifest.json` beside the MP4.
  *
  * @throws {Error} if `options.durationSec` is not provided or is ≤ 0.
  */

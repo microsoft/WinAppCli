@@ -229,13 +229,6 @@ internal class FakeUiAutomationService : IUiAutomationService
                 RepeatedSamples = Math.Max(0, RecordResult.Frames - 1),
                 TotalBytes = 64,
             };
-            options.OnProgress?.Invoke(new RecordProgress
-            {
-                ElapsedMs = 5_000,
-                Samples = RecordResult.Frames,
-                Images = 1,
-                AchievedFps = RecordResult.Frames / 5.0,
-            });
         }
         // Signal readiness before returning — mirrors the real service behavior (encoder is
         // initialized and the first frame has been captured at this point).

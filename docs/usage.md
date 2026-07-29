@@ -1164,7 +1164,7 @@ winapp ui record -a "My App" --duration-sec 0 --max-edge 1280 -o capture.mp4
 winapp ui record -a "My App" btn-save-1234 -o button.mp4
 
 # Keep an agent-readable timeline alongside the MP4
-winapp ui record -a Calculator --duration-sec 5 --fps 10 -o demo.mp4 --frames-dir demo.frames
+winapp ui record -a Calculator --frames --fps 10 -o demo.mp4
 ```
 
 **Record options:**
@@ -1173,7 +1173,7 @@ winapp ui record -a Calculator --duration-sec 5 --fps 10 -o demo.mp4 --frames-di
 - `--max-edge <px>` - Downscale so the longest edge is at most this many pixels (`0` = no downscale).
 - `--capture-screen` - Capture from the screen so overlays/popups are included (may capture occluding windows).
 - `-o, --output <path>` - Output `.mp4` path (defaults to `recording-<timestamp>-<guid>.mp4`).
-- `--frames-dir <path>` - Also write timestamped JPEGs, `frames.ndjson`, and `manifest.json` to a new directory. Requires a timed recording, 1-30 fps, no more than 18,000 requested samples, and `--max-edge` from 64 through 4096 when specified (`0` is not supported; the frame-mode default is 1280). Source, transform, encoder, and queued frame buffers are included in a 256 MiB modeled CPU memory budget. Lower `--max-edge` for oversized transformed output; capture a smaller window/source or omit `--frames-dir` when source buffers alone exceed the budget. Frame data is capped at a 1 GiB bundle; reaching it publishes the valid indexed prefix as `truncated` and lets the MP4 finish.
+- `--frames` - Also write timestamped JPEGs, `frames.ndjson`, and `manifest.json` to `<output-name>.frames`. Works for timed and stop-controlled recordings, supports 1-30 fps, and defaults `--max-edge` to 1280. Frame data is capped at 1 GiB; reaching the cap publishes the valid indexed prefix and lets the MP4 continue.
 
 With `--json`, emits a `UiRecordResult` envelope including the output `path`, `frames`, `width`,
 `height`, `fileSize`, `codec` (`"h264"`), `mode` (the capture path actually used), `elapsedMs`,

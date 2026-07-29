@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 using System.Runtime.InteropServices;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -19,7 +18,6 @@ internal interface IRecordFrameSink : IAsyncDisposable
     int ImageCount { get; }
     bool IsTruncated { get; }
 
-    void ValidatePipelineDimensions(int sourceWidth, int sourceHeight, int sourceBufferCount);
     ValueTask WriteAsync(ReadOnlyMemory<byte> bgra, RecordFrameSample sample, CancellationToken cancellationToken);
     Task<RecordFrameArtifactResult> CompleteAsync(RecordFrameCompletion completion);
     Task AbortAsync();
@@ -31,17 +29,10 @@ internal sealed class RecordFrameBundleConfiguration
 
     public required string FinalDirectory { get; init; }
     public required string VideoPath { get; init; }
-    public required string RecordingId { get; init; }
     public required DateTimeOffset StartedUtc { get; init; }
     public required int Width { get; init; }
     public required int Height { get; init; }
-    public required int SourceWidth { get; init; }
-    public required int SourceHeight { get; init; }
-    public required int SourceBufferCount { get; init; }
-    public required RecordFrameRectManifest ContentRect { get; init; }
     public required RecordFrameRequestManifest Requested { get; init; }
-    public required RecordFrameSourceManifest Source { get; init; }
-    public required RecordFrameCropManifest Crop { get; init; }
     public required ILogger Logger { get; init; }
     public long MaximumBundleBytes { get; init; } = DefaultMaximumBundleBytes;
 }
@@ -61,13 +52,8 @@ internal sealed class RecordFrameCompletion
 internal sealed class RecordFrameBundleWriter : IRecordFrameSink
 {
     internal const int JpegQuality = 85;
-    internal const long FramePipelineMemoryBudgetBytes = 256L * 1024 * 1024;
     private const long ManifestByteReserve = 1024L * 1024;
-    // Current/next capture or transform output, MF input, active JPEG work,
-    // deduplication history, and JPEG bitmap. Queued clones are added separately.
-    private const int ReservedFrameBufferCount = 6;
-    private const long MinimumFrameBytes = 64L * 64 * 4;
-    private const int MaximumQueuedFrames = 4;
+    private const int QueueCapacity = 1;
 
     internal static Func<RecordFrameBundleConfiguration, IRecordFrameSink> s_create =
         configuration => new RecordFrameBundleWriter(configuration);
@@ -88,7 +74,6 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
     private readonly Task _worker;
     private readonly long _maximumBundleBytes;
     private readonly long _dataByteLimit;
-    private readonly int _queueCapacity;
     private readonly CancellationTokenSource _lifetimeCts = new();
     private int _sampleCount;
     private int _imageCount;
@@ -115,13 +100,6 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
         }
         _maximumBundleBytes = configuration.MaximumBundleBytes;
         _dataByteLimit = configuration.MaximumBundleBytes - ManifestByteReserve;
-        _queueCapacity = ComputeQueueCapacity(
-            configuration.SourceWidth,
-            configuration.SourceHeight,
-            configuration.Width,
-            configuration.Height,
-            configuration.SourceBufferCount);
-
         if (Path.Exists(configuration.FinalDirectory))
         {
             throw new IOException($"Frame artifact directory already exists: {configuration.FinalDirectory}");
@@ -152,7 +130,7 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
             _indexWriter.NewLine = "\n";
 
-            _channel = Channel.CreateBounded<QueuedFrame>(new BoundedChannelOptions(_queueCapacity)
+            _channel = Channel.CreateBounded<QueuedFrame>(new BoundedChannelOptions(QueueCapacity)
             {
                 SingleReader = true,
                 SingleWriter = true,
@@ -165,58 +143,6 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
         {
             DeleteStagingDirectory();
             throw;
-        }
-    }
-
-    internal static int ComputeQueueCapacity(
-        int sourceWidth,
-        int sourceHeight,
-        int width,
-        int height,
-        int sourceBufferCount)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegative(sourceBufferCount);
-        var sourceBytes = checked((long)sourceWidth * sourceHeight * 4);
-        var frameBytes = checked((long)width * height * 4);
-        var reservedSourceBytes = checked(sourceBytes * sourceBufferCount);
-        var availableFrameBytes = FramePipelineMemoryBudgetBytes - reservedSourceBytes;
-        var capacity = availableFrameBytes <= 0
-            ? 0
-            : (int)(availableFrameBytes / Math.Max(1, frameBytes)) - ReservedFrameBufferCount;
-        if (capacity < 1)
-        {
-            var lowerMaxEdgeCanHelp = (width > 64 || height > 64)
-                && availableFrameBytes >= (ReservedFrameBufferCount + 1) * MinimumFrameBytes;
-            var guidance = lowerMaxEdgeCanHelp
-                ? "Lower --max-edge."
-                : "Capture a smaller window or source, or retry without --frames-dir.";
-            throw new RecordFramePipelineLimitException(
-                $"Frame artifacts for a {sourceWidth}x{sourceHeight} source and {width}x{height} output " +
-                $"exceed the 256 MiB pipeline memory budget. {guidance}",
-                lowerMaxEdgeCanHelp);
-        }
-
-        return Math.Min(capacity, MaximumQueuedFrames);
-    }
-
-    public void ValidatePipelineDimensions(int sourceWidth, int sourceHeight, int sourceBufferCount)
-    {
-        var supportedCapacity = ComputeQueueCapacity(
-            sourceWidth,
-            sourceHeight,
-            _configuration.Width,
-            _configuration.Height,
-            sourceBufferCount);
-        if (supportedCapacity < _queueCapacity)
-        {
-            var lowerMaxEdgeCanHelp = _configuration.Width > 64 || _configuration.Height > 64;
-            var guidance = lowerMaxEdgeCanHelp
-                ? "Lower --max-edge."
-                : "Capture a smaller window or source, or retry without --frames-dir.";
-            throw new RecordFramePipelineLimitException(
-                $"The capture source grew to {sourceWidth}x{sourceHeight}, which cannot support the active " +
-                $"{_queueCapacity}-frame artifact queue within the 256 MiB pipeline memory budget. {guidance}",
-                lowerMaxEdgeCanHelp);
         }
     }
 
@@ -290,7 +216,6 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
             Status = completion.Status == "complete" && IsTruncated
                 ? "truncated"
                 : completion.Status,
-            RecordingId = _configuration.RecordingId,
             StartedUtc = _configuration.StartedUtc,
             CompletedUtc = DateTimeOffset.UtcNow,
             StopReason = completion.StopReason,
@@ -315,13 +240,9 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
             {
                 Width = _configuration.Width,
                 Height = _configuration.Height,
-                ContentRect = _configuration.ContentRect,
-                TotalBytes = _imageBytes + indexBytes,
                 Truncated = IsTruncated,
                 ByteLimit = _maximumBundleBytes,
             },
-            Source = _configuration.Source,
-            Crop = _configuration.Crop,
         };
 
         var manifestPath = Path.Join(_stagingDirectory, "manifest.json");
@@ -445,7 +366,6 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
         byte[]? previousPixels = null;
         var currentImageIndex = -1;
         var currentFile = "";
-        var currentHash = "";
 
         try
         {
@@ -460,14 +380,12 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
                 byte[]? jpeg = null;
                 var nextImageIndex = currentImageIndex;
                 var nextFile = currentFile;
-                var nextHash = currentHash;
                 if (changed)
                 {
                     nextImageIndex++;
                     var fileName = $"frame-{nextImageIndex:D6}-t{queued.Sample.ElapsedMs:D12}.jpg";
                     nextFile = $"frames/{fileName}";
                     jpeg = s_encodeJpeg(queued.Pixels, _configuration.Width, _configuration.Height);
-                    nextHash = Convert.ToHexString(SHA256.HashData(jpeg)).ToLowerInvariant();
                 }
 
                 var entry = new RecordFrameIndexEntry
@@ -478,11 +396,6 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
                     ImageIndex = nextImageIndex,
                     File = nextFile,
                     Changed = changed,
-                    Sha256 = nextHash,
-                    SourceVersion = queued.Sample.SourceVersion,
-                    SourceWidth = queued.Sample.SourceWidth,
-                    SourceHeight = queued.Sample.SourceHeight,
-                    ContentRect = queued.Sample.ContentRect,
                 };
                 var line = JsonSerializer.Serialize(
                     entry,
@@ -512,7 +425,6 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
 
                     currentImageIndex = nextImageIndex;
                     currentFile = nextFile;
-                    currentHash = nextHash;
                     Interlocked.Add(ref _imageBytes, jpeg.Length);
                     Interlocked.Increment(ref _imageCount);
                     previousPixels = queued.Pixels;

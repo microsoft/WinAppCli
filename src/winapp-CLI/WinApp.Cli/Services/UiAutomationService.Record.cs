@@ -270,7 +270,6 @@ internal sealed partial class UiAutomationService
             long lastEncodedVersion = -1;
             var startedSignaled = false;
             var targetClosed = false;
-            var nextProgressMs = 5_000L;
             RecordFrameArtifactResult? frameArtifacts = null;
 
             if (options.FramesDirectory is not null)
@@ -278,69 +277,24 @@ internal sealed partial class UiAutomationService
                 frameOutput = CreateRecordFrameArtifactCoordinator(new RecordFrameArtifactSetup
                 {
                     Options = options,
-                    Session = session,
                     StartedUtc = startedUtc,
-                    SourceWidth = srcWidth,
-                    SourceHeight = srcHeight,
-                    CropX = cropX,
-                    CropY = cropY,
-                    CropWidth = cropW,
-                    CropHeight = cropH,
                     EncoderWidth = encoderW,
                     EncoderHeight = encoderH,
-                    DisplayWidth = displayW,
-                    DisplayHeight = displayH,
-                    CaptureHwnd = captureHwnd,
-                    CaptureMode = mode,
-                    ElementId = elementId,
-                    IsWholeWindowWgc = isWholeWindowWgc,
-                    UseScreen = useScreen,
-                    UseWgc = useWgc,
                 });
             }
 
-            async ValueTask CommitFrameAsync(
-                byte[] processedFrame,
-                long sourceVersion,
-                int sourceWidth,
-                int sourceHeight)
+            async ValueTask CommitFrameAsync(byte[] processedFrame)
             {
                 var sampleIndex = frameIndex;
                 var elapsedMs = Math.Max(0, (long)Math.Round(stopwatch.Elapsed.TotalMilliseconds));
 
                 if (frameOutput is not null)
                 {
-                    var (_, _, frameCropW, frameCropH) = isWholeWindowWgc
-                        ? (0, 0, sourceWidth, sourceHeight)
-                        : ClampCropRect(
-                            cropX,
-                            cropY,
-                            cropW,
-                            cropH,
-                            sourceWidth,
-                            sourceHeight);
-                    var (contentX, contentY, contentW, contentH) = ComputeFittedContentRect(
-                        frameCropW,
-                        frameCropH,
-                        encoderW,
-                        encoderH,
-                        displayW,
-                        displayH);
                     await frameOutput.WriteAsync(processedFrame, new RecordFrameSample
                     {
                         SampleIndex = sampleIndex,
                         ElapsedMs = elapsedMs,
                         MediaTimeMs = sampleIndex * 1000.0 / options.Fps,
-                        SourceVersion = sourceVersion >= 0 ? sourceVersion : null,
-                        SourceWidth = sourceWidth,
-                        SourceHeight = sourceHeight,
-                        ContentRect = new RecordFrameRectManifest
-                        {
-                            X = contentX,
-                            Y = contentY,
-                            Width = contentW,
-                            Height = contentH,
-                        },
                     }).ConfigureAwait(false);
                 }
 
@@ -353,18 +307,6 @@ internal sealed partial class UiAutomationService
                 {
                     startedSignaled = true;
                     onRecordingStarted?.Invoke(frameOutput?.IsActive == true);
-                }
-
-                if (options.OnProgress is not null && elapsedMs >= nextProgressMs)
-                {
-                    options.OnProgress(new RecordProgress
-                    {
-                        ElapsedMs = elapsedMs,
-                        Samples = frameIndex,
-                        Images = frameOutput?.ImageCount ?? 0,
-                        AchievedFps = elapsedMs > 0 ? frameIndex * 1000.0 / elapsedMs : 0,
-                    });
-                    nextProgressMs = elapsedMs + 5_000;
                 }
 
             }
@@ -395,32 +337,11 @@ internal sealed partial class UiAutomationService
                             {
                                 var closedCropW = isWholeWindowWgc ? closedSw : cropW;
                                 var closedCropH = isWholeWindowWgc ? closedSh : cropH;
-                                if (frameOutput is not null)
-                                {
-                                    var sourceBufferCount = RequiresFrameTransform(
-                                        closedSw,
-                                        closedSh,
-                                        cropX,
-                                        cropY,
-                                        closedCropW,
-                                        closedCropH,
-                                        encoderW,
-                                        encoderH,
-                                        displayW,
-                                        displayH)
-                                            ? 3
-                                            : 0;
-                                    await frameOutput.ValidatePipelineDimensionsAsync(
-                                        closedSw,
-                                        closedSh,
-                                        sourceBufferCount).ConfigureAwait(false);
-                                }
                                 var closedFrame = ProcessFrame(
                                     closedSrc, closedSw, closedSh,
                                     cropX, cropY, closedCropW, closedCropH,
                                     encoderW, encoderH, displayW, displayH);
-                                await CommitFrameAsync(
-                                    closedFrame, closedVersion, closedSw, closedSh).ConfigureAwait(false);
+                                await CommitFrameAsync(closedFrame).ConfigureAwait(false);
                             }
                         }
                         targetClosed = true;
@@ -432,8 +353,6 @@ internal sealed partial class UiAutomationService
 
                     byte[] frame;
                     long sourceVersion = -1;
-                    var sourceWidth = srcWidth;
-                    var sourceHeight = srcHeight;
                     if (useWgc)
                     {
                         var latest = grabber!.TryGetLatest();
@@ -444,30 +363,6 @@ internal sealed partial class UiAutomationService
                         }
                         var (source, sw, sh, version) = latest.Value;
                         sourceVersion = version;
-                        sourceWidth = sw;
-                        sourceHeight = sh;
-                        if (frameOutput is not null)
-                        {
-                            var frameCropW = isWholeWindowWgc ? sw : cropW;
-                            var frameCropH = isWholeWindowWgc ? sh : cropH;
-                            var sourceBufferCount = RequiresFrameTransform(
-                                sw,
-                                sh,
-                                cropX,
-                                cropY,
-                                frameCropW,
-                                frameCropH,
-                                encoderW,
-                                encoderH,
-                                displayW,
-                                displayH)
-                                    ? 4
-                                    : 0;
-                            await frameOutput.ValidatePipelineDimensionsAsync(
-                                sw,
-                                sh,
-                                sourceBufferCount).ConfigureAwait(false);
-                        }
                         frame = ProcessFrame(
                             source, sw, sh, cropX, cropY,
                             isWholeWindowWgc ? sw : cropW,
@@ -495,8 +390,7 @@ internal sealed partial class UiAutomationService
                             encoderW, encoderH, displayW, displayH);
                     }
 
-                    await CommitFrameAsync(
-                        frame, sourceVersion, sourceWidth, sourceHeight).ConfigureAwait(false);
+                    await CommitFrameAsync(frame).ConfigureAwait(false);
                     if (useWgc)
                     {
                         lastEncodedVersion = sourceVersion;
@@ -566,17 +460,26 @@ internal sealed partial class UiAutomationService
             {
                 if (frameOutput is not null)
                 {
-                    frameArtifacts = await frameOutput.CompleteAfterVideoFailureAsync(
-                        new RecordFrameCompletion
-                        {
-                            Status = "partial",
-                            StopReason = stopReason,
-                            ElapsedMs = elapsedMs,
-                            AchievedFps = frameAchievedFps,
-                            CadenceRatio = frameCadenceRatio,
-                            VideoStatus = "failed",
-                            VideoFrameCount = frameIndex,
-                        }).ConfigureAwait(false);
+                    if (File.Exists(options.OutputPath))
+                    {
+                        // Another recording may have won the no-clobber MP4 publication race.
+                        // Never publish this run's frames beside an MP4 it did not produce.
+                        await frameOutput.AbortAsync().ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        frameArtifacts = await frameOutput.CompleteAfterVideoFailureAsync(
+                            new RecordFrameCompletion
+                            {
+                                Status = "partial",
+                                StopReason = stopReason,
+                                ElapsedMs = elapsedMs,
+                                AchievedFps = frameAchievedFps,
+                                CadenceRatio = frameCadenceRatio,
+                                VideoStatus = "failed",
+                                VideoFrameCount = frameIndex,
+                            }).ConfigureAwait(false);
+                    }
                 }
 
                 if (frameArtifacts is not null)
@@ -593,7 +496,7 @@ internal sealed partial class UiAutomationService
                 {
                     throw new RecordFrameOutputException(
                         "Frame artifact output failed and no recording artifact could be preserved.",
-                        GetFrameOutputRecoveryHint(frameOutput.Failure, videoPreserved: false),
+                        GetFrameOutputRecoveryHint(videoPreserved: false),
                         frameOutput.Failure);
                 }
 
@@ -623,7 +526,7 @@ internal sealed partial class UiAutomationService
                     "The MP4 was recorded successfully, but frame artifact output failed.",
                     options.OutputPath,
                     framesDirectory: null,
-                    GetFrameOutputRecoveryHint(frameOutput.Failure, videoPreserved: true),
+                    GetFrameOutputRecoveryHint(videoPreserved: true),
                     frameOutput.Failure);
             }
 
@@ -682,51 +585,10 @@ internal sealed partial class UiAutomationService
             or InvalidOperationException
             or ExternalException;
 
-    private static string GetFrameOutputRecoveryHint(Exception failure, bool videoPreserved)
-    {
-        var pipelineLimit = FindFramePipelineLimitFailure(failure);
-        if (pipelineLimit is not null)
-        {
-            if (!pipelineLimit.LowerMaxEdgeCanHelp)
-            {
-                return videoPreserved
-                    ? "Use the preserved MP4. Capture a smaller window or source, or retry without --frames-dir. If frame artifacts are still needed, use new --output and --frames-dir paths; existing artifacts are never replaced."
-                    : "Capture a smaller window or source, or retry without --frames-dir. Use new --output and --frames-dir paths when retrying frame artifacts.";
-            }
-
-            return videoPreserved
-                ? "Use the preserved MP4. Lower --max-edge, then retry with new --output and --frames-dir paths; existing artifacts are never replaced."
-                : "Lower --max-edge, then retry with new --output and --frames-dir paths.";
-        }
-
-        return videoPreserved
-            ? "Use the MP4 as the durable recording and retry with new --output and --frames-dir paths after checking available disk space and permissions."
-            : "Retry with new --output and --frames-dir paths after checking available disk space and permissions.";
-    }
-
-    private static RecordFramePipelineLimitException? FindFramePipelineLimitFailure(Exception exception)
-    {
-        if (exception is RecordFramePipelineLimitException pipelineLimit)
-        {
-            return pipelineLimit;
-        }
-
-        if (exception is AggregateException aggregate)
-        {
-            foreach (var innerException in aggregate.InnerExceptions)
-            {
-                var nested = FindFramePipelineLimitFailure(innerException);
-                if (nested is not null)
-                {
-                    return nested;
-                }
-            }
-        }
-
-        return exception.InnerException is null
-            ? null
-            : FindFramePipelineLimitFailure(exception.InnerException);
-    }
+    private static string GetFrameOutputRecoveryHint(bool videoPreserved)
+        => videoPreserved
+            ? "Use the preserved MP4. Check available disk space and permissions, then retry with --frames and a new --output path."
+            : "Check available disk space and permissions, then retry with --frames and a new --output path.";
 
     /// <summary>
     /// Called when Windows Graphics Capture fails to initialize. If the user did NOT explicitly

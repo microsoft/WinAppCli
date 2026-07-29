@@ -251,8 +251,7 @@ Record the target window (or an element's region) to an H.264 MP4 video. Frames 
 winapp ui record -a myapp --duration-sec 10 --fps 15 --output demo.mp4
 
 # Agent evidence: keep the MP4 and add timestamped JPEG frames plus an index
-winapp ui record -a myapp --duration-sec 5 --fps 10 --max-edge 1280 \
-  --output demo.mp4 --frames-dir demo.frames --json
+winapp ui record -a myapp --frames --fps 10 --output demo.mp4 --json
 
 # Unbounded (default): record until Ctrl+C, downscaled to max 1280px longest edge
 winapp ui record -a myapp --max-edge 1280 --output capture.mp4
@@ -273,7 +272,7 @@ winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups
 - `--max-edge N` — Downscale so the longest edge is at most N pixels (0 = no downscale).
 - `--capture-screen` — Capture from the screen DC (includes overlays/popups; foregrounds the window).
 - `--output <path>` — Output MP4 path. Defaults to `recording-<timestamp>-<guid>.mp4` in the current directory.
-- `--frames-dir <path>` — Also write timestamped JPEG evidence to a new directory. Requires `--duration-sec > 0`, `--fps 1..30`, and at most 18,000 requested samples. Frame mode defaults `--max-edge` to 1280; when specified, it must be 64-4096 (`0` is not supported in frame mode). Source, transform, encoder, and queued frame buffers are included in a 256 MiB modeled CPU memory budget. If transformed output is too large, lower `--max-edge`; if source buffers alone exceed the budget, capture a smaller window/source or omit `--frames-dir`. Frame data is capped at a 1 GiB bundle; if the cap is reached, the valid indexed prefix is published with `status: "truncated"`, `frames.truncated: true`, and a warning while the MP4 continues to completion. The MP4 is still required.
+- `--frames` — Also write timestamped JPEG evidence to `<output-name>.frames`. Works with timed recordings and recordings stopped by Ctrl+C or stdin. Frame mode supports 1-30 fps and defaults `--max-edge` to 1280; when specified, it must be 64-4096. A single-worker queue bounds frame encoding work. Frame data is capped at 1 GiB; reaching the cap publishes the valid indexed prefix as `truncated` while the MP4 continues.
 
 **Agent-readable frame artifacts:**
 
@@ -286,11 +285,11 @@ demo.frames/
     frame-000000-t000000000012.jpg
 ```
 
-Each actual recording sample has one compact JSON line in `frames.ndjson`. `elapsedMs` is the monotonic capture timestamp to use when bounding transitions; `mediaTimeMs` correlates the sample to the MP4 timeline. `contentRect` records that sample's non-letterboxed region, including after a live window resize. Exact consecutive processed-pixel duplicates reference the preceding JPEG (`changed: false`) instead of writing duplicate images. JPEGs use quality 85 and the same cropped, scaled, and letterboxed BGRA pixels sent to the H.264 encoder.
+Each actual recording sample has one compact JSON line in `frames.ndjson` with `sampleIndex`, monotonic `elapsedMs`, MP4-relative `mediaTimeMs`, `imageIndex`, `file`, and `changed`. Exact consecutive processed-pixel duplicates reference the preceding JPEG (`changed: false`) instead of writing duplicate images. JPEGs use quality 85 and the same cropped, scaled, and letterboxed pixels sent to the H.264 encoder.
 
 The manifest `timing` object describes the indexed frame timeline. For a truncated bundle, its `elapsedMs`, `sampleCount`, `achievedFps`, and `cadenceRatio` describe only the retained prefix; the `video` object separately describes the complete MP4.
 
-`manifest.json` describes the request, achieved cadence, capture mode/source window, crop and content rectangles, MP4 status, image dimensions, counts, and SHA-256 integrity metadata. `status` is `complete`, `partial` when the MP4 failed, or `truncated` when the 1 GiB frame-data cap retained only a prefix. `frames.truncated` and `frames.byteLimit` make that condition explicit. Frame output is local, unencrypted screen content; retain and share the directory with the same care as screenshots or the MP4.
+`manifest.json` records the request, indexed timing/counts, MP4 status, image dimensions, and truncation state. `status` is `complete`, `partial` when the MP4 failed, or `truncated` when the 1 GiB cap retained only a prefix. Frame output is local, unencrypted screen content; retain and share it with the same care as screenshots or the MP4.
 
 The frame bundle is written to a randomized sibling staging directory and published by directory rename only after its manifest is complete. In frame mode, neither the final MP4 path nor frame directory may already exist. A valid MP4 is preserved if frame output fails; a valid partial frame bundle is preserved if MP4 finalization fails.
 
@@ -306,15 +305,13 @@ The frame bundle is written to a randomized sibling staging directory and publis
 **JSON output (`--json`):**
 - **stdout** (final result): existing fields plus `elapsedMs`, `achievedFps`, `cadenceRatio`, `stopReason`, optional `frameArtifacts`, and optional `warnings`. `frameArtifacts` includes `truncated` and `byteLimit`; when truncated, `warnings` explains how to retain a complete frame timeline on retry.
 - **stderr** (liveness event): `{ "event": "recording-started", "path", "fps", "durationSec", "framesDirectory"?, "framesManifest"?, "framesIndex"? }`. Frame paths are present only when frame output initialized successfully.
-- **stderr** (frame mode, at most every five seconds): `{ "event": "recording-progress", "elapsedMs", "samples", "images", "achievedFps" }`
-
-The events on stderr provide liveness without polluting stdout; stdout remains one final JSON object. `achievedFps = frames × 1000 / elapsedMs`, where elapsed time covers capture and excludes MP4 container finalization. A cadence ratio below 0.90 produces a warning rather than failing an otherwise valid recording.
+The started event provides liveness without polluting stdout; stdout remains one final JSON object. `achievedFps = frames × 1000 / elapsedMs`, where elapsed time covers capture and excludes MP4 container finalization. A cadence ratio below 0.90 produces a warning rather than failing an otherwise valid recording.
 
 **Error codes:**
 - `element_not_found` — Selector given but no matching element found; fails immediately (no partial file written).
 - `ambiguous_selector` — A plain-text selector matched multiple elements; use a slug from the suggestions shown in the error (or from `inspect` output) to target a specific element.
 - `invalid_arguments` — Invalid option value (e.g., `--duration-sec -1` or `> 86400`).
-- `output_exists` — A frame-mode destination already exists; choose new `--output` and `--frames-dir` paths.
+- `output_exists` — The MP4 or derived frame directory already exists; choose a new `--output` path.
 - `frame_output_failed` — Frame artifact output failed and neither the MP4 nor frame bundle could be preserved; check disk space and permissions, then retry with new paths.
 - `partial_output` — Only the MP4 or frame bundle completed. The JSON error includes `partialOutput` paths and a `recoveryHint`.
 
