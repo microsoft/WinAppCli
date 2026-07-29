@@ -4,9 +4,10 @@
     Install a winapp CLI MSIX built by CI, from a PR, a branch, or a specific run.
 
 .DESCRIPTION
-    Dev-only selfhosting helper. Resolves a "Build and Package" workflow run, downloads its
-    msix-packages artifact, trusts the run's signing certificate, removes any previously
-    installed winapp package (they share an app execution alias), and installs the new one.
+    Dev-only selfhosting helper. Run it with no arguments to pick from a list of open pull
+    requests. It resolves a "Build and Package" workflow run, downloads its msix-packages
+    artifact, trusts the run's signing certificate, removes any previously installed winapp
+    package (they share an app execution alias), and installs the new one.
 
     CI mints a fresh self-signed certificate on every build, so trusting it needs admin. Only
     that one step elevates -- the download runs unelevated so your `gh` credentials still apply.
@@ -15,8 +16,7 @@
     `winapp-pr` works from anywhere.
 
 .PARAMETER Target
-    A PR number (690), a branch name (main, zt/new-command), or omitted to use the current
-    git branch, falling back to the repository's default branch.
+    A PR number (690) or a branch name (main, zt/new-command). Omit it to choose interactively.
 
 .PARAMETER Repo
     Repository to pull builds from, as owner/name. Defaults to $env:WINAPP_PR_REPO, then
@@ -41,8 +41,15 @@
 .PARAMETER AddToPath
     Copy this script to %LOCALAPPDATA%\Programs\winapp-dev, add it to the user PATH, and exit.
 
+.PARAMETER NonInteractive
+    Skip the picker when no target is given and use the current git branch instead.
+
 .PARAMETER Force
     Re-download the artifact even if a cached copy exists.
+
+.EXAMPLE
+    winapp-pr
+    Pick an open PR (or the default branch) from a list and install it.
 
 .EXAMPLE
     winapp-pr 690
@@ -80,6 +87,8 @@ param(
     [switch]$PruneCerts,
 
     [switch]$AddToPath,
+
+    [switch]$NonInteractive,
 
     [switch]$Force
 )
@@ -204,6 +213,182 @@ function Resolve-CurrentBranch {
     }
     $repoInfo = Invoke-Gh @('api', "repos/$RepoName", '--jq', '.default_branch') -Raw
     return $repoInfo.Trim()
+}
+
+function Get-LocalBranch {
+    $branch = & git rev-parse --abbrev-ref HEAD 2>$null
+    if ($LASTEXITCODE -eq 0 -and $branch -and $branch -ne 'HEAD') { return $branch.Trim() }
+    return ''
+}
+
+# ── Interactive picker ───────────────────────────────────────────────────────
+
+function Get-RelativeAge {
+    param([datetime]$When)
+
+    $span = (Get-Date) - $When.ToLocalTime()
+    if ($span.TotalMinutes -lt 60) { return "$([int]$span.TotalMinutes)m" }
+    if ($span.TotalHours -lt 24)   { return "$([int]$span.TotalHours)h" }
+    return "$([int]$span.TotalDays)d"
+}
+
+function Get-MenuItems {
+    <# Open PRs newest-first, plus the default branch, as selectable targets. #>
+    param([string]$RepoName)
+
+    $prs = Invoke-Gh @('api',
+        "repos/$RepoName/pulls?state=open&sort=updated&direction=desc&per_page=30",
+        '--jq', '[.[] | {number, title, draft, branch: .head.ref, author: .user.login, updated: .updated_at}]')
+
+    $state = Get-InstallState
+    $localBranch = Get-LocalBranch
+
+    $items = foreach ($pr in @($prs)) {
+        $meta = @($pr.author, (Get-RelativeAge ([datetime]$pr.updated)))
+        if ($pr.draft) { $meta = @($pr.author, 'draft', (Get-RelativeAge ([datetime]$pr.updated))) }
+
+        [pscustomobject]@{
+            Spec   = [string]$pr.number
+            Name   = "#$($pr.number)"
+            Title  = $pr.title
+            Meta   = ($meta -join ' - ')
+            Marker = if ($state -and $state.Branch -eq $pr.branch) { '*' }
+                     elseif ($localBranch -eq $pr.branch) { '.' }
+                     else { ' ' }
+        }
+    }
+
+    $defaultBranch = Invoke-Gh @('api', "repos/$RepoName", '--jq', '.default_branch') -Raw
+    $items = @($items) + [pscustomobject]@{
+        Spec   = $defaultBranch
+        Name   = $defaultBranch
+        Title  = 'latest build from the default branch'
+        Meta   = ''
+        Marker = if ($state -and $state.Branch -eq $defaultBranch) { '*' } else { ' ' }
+    }
+
+    return @($items)
+}
+
+function Get-ConsoleWidth {
+    try { return [Math]::Max(60, [Console]::WindowWidth - 1) } catch { return 100 }
+}
+
+function Format-MenuLines {
+    <# Pure renderer so the layout can be verified without a live console. #>
+    param([object[]]$Items, [int]$SelectedIndex, [int]$Width)
+
+    $nameWidth = ($Items | ForEach-Object { $_.Name.Length } | Measure-Object -Maximum).Maximum
+    $metaWidth = ($Items | ForEach-Object { $_.Meta.Length } | Measure-Object -Maximum).Maximum
+
+    $lines = for ($i = 0; $i -lt $Items.Count; $i++) {
+        $item = $Items[$i]
+        $cursor = if ($i -eq $SelectedIndex) { '>' } else { ' ' }
+        $prefix = "$cursor$($item.Marker) $($item.Name.PadRight($nameWidth))  "
+        $suffix = if ($item.Meta) { "  $($item.Meta.PadLeft($metaWidth))" } else { '' }
+
+        $room = $Width - $prefix.Length - $suffix.Length
+        $title = $item.Title
+        if ($room -lt 10) { $room = 10 }
+        if ($title.Length -gt $room) { $title = $title.Substring(0, $room - 3) + '...' }
+
+        "$prefix$($title.PadRight($room))$suffix"
+    }
+    return @($lines)
+}
+
+function Show-InteractiveMenu {
+    param([object[]]$Items)
+
+    $width = Get-ConsoleWidth
+    $selected = 0
+    # Start on the entry for the current branch, if there is one.
+    for ($i = 0; $i -lt $Items.Count; $i++) {
+        if ($Items[$i].Marker -eq '.') { $selected = $i; break }
+    }
+
+    $lineCount = $Items.Count
+    $top = [Console]::CursorTop
+
+    [Console]::CursorVisible = $false
+    try {
+        while ($true) {
+            [Console]::SetCursorPosition(0, $top)
+            $lines = Format-MenuLines -Items $Items -SelectedIndex $selected -Width $width
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+                $color = if ($i -eq $selected) { 'Cyan' } else { 'Gray' }
+                Write-Host $lines[$i].PadRight($width) -ForegroundColor $color
+            }
+            # Recomputed each pass so the menu stays anchored if the buffer scrolled.
+            $top = [Console]::CursorTop - $lineCount
+
+            $key = [Console]::ReadKey($true)
+            switch ($key.Key) {
+                'UpArrow'   { $selected = ($selected - 1 + $Items.Count) % $Items.Count }
+                'DownArrow' { $selected = ($selected + 1) % $Items.Count }
+                'Home'      { $selected = 0 }
+                'End'       { $selected = $Items.Count - 1 }
+                'Enter'     { return $Items[$selected] }
+                'Escape'    { return $null }
+                'Q'         { return $null }
+            }
+        }
+    }
+    finally {
+        [Console]::CursorVisible = $true
+    }
+}
+
+function Show-NumberedMenu {
+    <# Used when the console can't do raw key input (redirected stdin, CI, some hosts). #>
+    param([object[]]$Items)
+
+    $width = Get-ConsoleWidth
+    $lines = Format-MenuLines -Items $Items -SelectedIndex -1 -Width $width
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        Write-Host ("{0,3}. {1}" -f ($i + 1), $lines[$i].Substring(1))
+    }
+
+    $answer = try {
+        Read-Host "`nSelect a build to install (1-$($Items.Count), blank to cancel)"
+    }
+    catch {
+        Fail "Console input is not available here. Pass a target instead, e.g. winapp-pr 690"
+    }
+    if (-not $answer) { return $null }
+
+    $index = 0
+    if (-not [int]::TryParse($answer, [ref]$index) -or $index -lt 1 -or $index -gt $Items.Count) {
+        Fail "'$answer' is not a valid selection."
+    }
+    return $Items[$index - 1]
+}
+
+function Select-InstallTarget {
+    param([string]$RepoName)
+
+    Write-Step "Open pull requests in $RepoName"
+    $items = Get-MenuItems -RepoName $RepoName
+    if (-not $items) { Fail "No open pull requests or branches found in $RepoName." }
+
+    Write-Host "   * installed   . current branch   (Up/Down, Enter to install, Esc to cancel)`n" -ForegroundColor DarkGray
+
+    $canDrawMenu = -not ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected)
+    $choice = if ($canDrawMenu) {
+        # Cursor control is unavailable in some hosts; fall back rather than fail.
+        try { Show-InteractiveMenu -Items $items }
+        catch { Show-NumberedMenu -Items $items }
+    }
+    else {
+        Show-NumberedMenu -Items $items
+    }
+
+    if (-not $choice) {
+        Write-Host "`nCancelled." -ForegroundColor Yellow
+        exit 0
+    }
+    Write-Host ''
+    return $choice.Spec
 }
 
 function Get-BranchRuns {
@@ -509,15 +694,23 @@ if ($PruneCerts) {
     exit 0
 }
 
-Write-Step "Resolving build from $repoName"
-
 if ($Run) {
+    Write-Step "Resolving build from $repoName"
     $runDetail = Invoke-Gh @('api', "repos/$repoName/actions/runs/$Run")
     $runs = @($runDetail)
     Write-Detail "Run $Run  ($($runDetail.head_branch))"
 }
 else {
-    $spec = if ($Target) { $Target } else { Resolve-CurrentBranch -RepoName $repoName }
+    $spec = $Target
+    if (-not $spec) {
+        $spec = if ($NonInteractive -or $List) {
+            Resolve-CurrentBranch -RepoName $repoName
+        }
+        else {
+            Select-InstallTarget -RepoName $repoName
+        }
+    }
+    Write-Step "Resolving build from $repoName"
     $runs = Get-CandidateRuns -RepoName $repoName -TargetSpec $spec
     if (-not $runs) {
         Fail "No '$WorkflowName' runs found for '$spec' in $repoName."
