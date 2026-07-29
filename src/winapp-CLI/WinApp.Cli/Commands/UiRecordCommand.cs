@@ -261,7 +261,6 @@ internal class UiRecordCommand : Command, IShortDescription
                     MaxEdge = maxEdge,
                     CaptureScreen = captureScreen,
                     FramesDirectory = framesDirectory,
-                    Selector = selector,
                 };
 
                 var result = await uiAutomation.RecordAsync(session, selector, options, linkedCts.Token, OnRecordingStarted);

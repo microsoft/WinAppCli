@@ -24,9 +24,6 @@ internal sealed class RecordOptions
     /// <summary>Absolute final directory for agent-readable frame artifacts, or null when disabled.</summary>
     public string? FramesDirectory { get; init; }
 
-    /// <summary>Original selector supplied by the caller, for artifact provenance.</summary>
-    public string? Selector { get; init; }
-
 }
 
 /// <summary>Result of an MP4 recording.</summary>

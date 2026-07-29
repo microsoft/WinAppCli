@@ -191,6 +191,29 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
+    public async Task Record_FrameOutputFailed_EmitsStableRecoveryEnvelope()
+    {
+        _fakeUia.RecordException = new RecordFrameOutputException(
+            "No recording artifact could be preserved.",
+            "Check disk space and retry with a new --output path.",
+            new IOException("simulated frame failure"));
+        var command = GetRequiredService<UiRecordCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command,
+            ["-a", "TestApp", "--frames", "--output", Path.Join(_tempDirectory.FullName, "failed.mp4"), "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        var stderr = ConsoleStdErr.ToString();
+        var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(stderr));
+        using var document = JsonDocument.ParseValue(ref reader);
+        var error = document.RootElement.GetProperty("error");
+        Assert.AreEqual("frame_output_failed", error.GetProperty("code").GetString());
+        StringAssert.Contains(error.GetProperty("recoveryHint").GetString(), "new --output path");
+        Assert.IsFalse(stderr.Contains("   at ", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task RecordFrameArtifactCoordinator_InitializationFailureLogsSanitizedReason()
     {
         using var stdout = new StringWriter();

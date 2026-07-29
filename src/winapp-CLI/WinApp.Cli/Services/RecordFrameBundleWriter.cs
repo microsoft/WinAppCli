@@ -14,10 +14,6 @@ namespace WinApp.Cli.Services;
 
 internal interface IRecordFrameSink : IAsyncDisposable
 {
-    int SampleCount { get; }
-    int ImageCount { get; }
-    bool IsTruncated { get; }
-
     ValueTask WriteAsync(ReadOnlyMemory<byte> bgra, RecordFrameSample sample, CancellationToken cancellationToken);
     Task<RecordFrameArtifactResult> CompleteAsync(RecordFrameCompletion completion);
     Task AbortAsync();
@@ -47,6 +43,7 @@ internal sealed class RecordFrameCompletion
     public required string VideoStatus { get; init; }
     public required int VideoFrameCount { get; init; }
     public long? VideoFileSize { get; init; }
+    public string? PublicationDirectory { get; init; }
 }
 
 internal sealed class RecordFrameBundleWriter : IRecordFrameSink
@@ -268,9 +265,10 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
                 _lifetimeCts.Token).ConfigureAwait(false);
         }
 
-        if (Path.Exists(_configuration.FinalDirectory))
+        var publicationDirectory = completion.PublicationDirectory ?? _configuration.FinalDirectory;
+        if (Path.Exists(publicationDirectory))
         {
-            throw new IOException($"Frame artifact directory appeared before publication: {_configuration.FinalDirectory}");
+            throw new IOException($"Frame artifact directory appeared before publication: {publicationDirectory}");
         }
 
         var totalBytes = Directory.EnumerateFiles(
@@ -280,9 +278,9 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
 
         var result = new RecordFrameArtifactResult
         {
-            Directory = _configuration.FinalDirectory,
-            Manifest = Path.Join(_configuration.FinalDirectory, "manifest.json"),
-            Index = Path.Join(_configuration.FinalDirectory, "frames.ndjson"),
+            Directory = publicationDirectory,
+            Manifest = Path.Join(publicationDirectory, "manifest.json"),
+            Index = Path.Join(publicationDirectory, "frames.ndjson"),
             Samples = SampleCount,
             Images = ImageCount,
             RepeatedSamples = SampleCount - ImageCount,
@@ -291,7 +289,7 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
             ByteLimit = _maximumBundleBytes,
         };
 
-        Directory.Move(_stagingDirectory, _configuration.FinalDirectory);
+        Directory.Move(_stagingDirectory, publicationDirectory);
         _published = true;
         return result;
     }

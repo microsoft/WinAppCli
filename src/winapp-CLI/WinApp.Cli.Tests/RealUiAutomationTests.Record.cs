@@ -226,12 +226,15 @@ public partial class RealUiAutomationTests
                 MaxEdge = 64,
             }, CancellationToken.None));
 
-        Assert.AreEqual(framesDirectory, exception.FramesDirectory);
+        Assert.IsNotNull(exception.FramesDirectory);
+        StringAssert.StartsWith(exception.FramesDirectory, framesDirectory + ".partial-");
+        var partialDirectory = exception.FramesDirectory;
         var manifest = JsonSerializer.Deserialize<JsonElement>(
-            await File.ReadAllTextAsync(Path.Join(framesDirectory, "manifest.json")));
+            await File.ReadAllTextAsync(Path.Join(partialDirectory, "manifest.json")));
         Assert.AreEqual("partial", manifest.GetProperty("status").GetString());
         Assert.AreEqual(1, manifest.GetProperty("timing").GetProperty("sampleCount").GetInt32());
         Assert.AreEqual(0, manifest.GetProperty("video").GetProperty("frameCount").GetInt32());
+        Assert.IsFalse(Directory.Exists(framesDirectory));
     }
 
     [TestMethod]
@@ -256,7 +259,7 @@ public partial class RealUiAutomationTests
             };
         await File.WriteAllTextAsync(output, "winning recording");
 
-        await Assert.ThrowsExactlyAsync<IOException>(
+        var exception = await Assert.ThrowsExactlyAsync<RecordPartialOutputException>(
             () => svc.RecordAsync(session, null, new RecordOptions
             {
                 OutputPath = output,
@@ -268,6 +271,46 @@ public partial class RealUiAutomationTests
 
         Assert.AreEqual("winning recording", await File.ReadAllTextAsync(output));
         Assert.IsFalse(Directory.Exists(framesDirectory));
+        Assert.IsNotNull(exception.FramesDirectory);
+        StringAssert.StartsWith(exception.FramesDirectory, framesDirectory + ".partial-");
+        Assert.IsTrue(Directory.Exists(exception.FramesDirectory));
+    }
+
+    [TestMethod]
+    public async Task RecordAsync_FrameAndMp4FailurePreservesNeitherArtifact()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var session = SessionFor(fx);
+        await ResolveAsync(svc, session, "btnInvoke");
+
+        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        WgcCapture.s_isSupported = () => true;
+        WgcCapture.s_startGrabber = (_, _, _) =>
+            new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
+            new FakeVideoEncoder(path, width, height)
+            {
+                WriteFrameException = new IOException("simulated MP4 failure"),
+            };
+        RecordFrameBundleWriter.s_create = _ => new FakeFrameSink
+        {
+            WriteException = new IOException("simulated frame failure"),
+        };
+
+        var exception = await Assert.ThrowsExactlyAsync<RecordFrameOutputException>(
+            () => svc.RecordAsync(session, null, new RecordOptions
+            {
+                OutputPath = Path.Join(root, "failed.mp4"),
+                FramesDirectory = Path.Join(root, "failed.frames"),
+                DurationSec = 1,
+                Fps = 1,
+                MaxEdge = 64,
+            }, CancellationToken.None));
+
+        StringAssert.Contains(exception.InnerException!.Message, "frame failure");
+        Assert.IsFalse(Directory.EnumerateFileSystemEntries(root).Any());
     }
 
     [TestMethod]

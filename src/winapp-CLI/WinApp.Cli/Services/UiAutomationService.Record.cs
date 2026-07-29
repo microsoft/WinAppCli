@@ -460,26 +460,19 @@ internal sealed partial class UiAutomationService
             {
                 if (frameOutput is not null)
                 {
-                    if (File.Exists(options.OutputPath))
-                    {
-                        // Another recording may have won the no-clobber MP4 publication race.
-                        // Never publish this run's frames beside an MP4 it did not produce.
-                        await frameOutput.AbortAsync().ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        frameArtifacts = await frameOutput.CompleteAfterVideoFailureAsync(
-                            new RecordFrameCompletion
-                            {
-                                Status = "partial",
-                                StopReason = stopReason,
-                                ElapsedMs = elapsedMs,
-                                AchievedFps = frameAchievedFps,
-                                CadenceRatio = frameCadenceRatio,
-                                VideoStatus = "failed",
-                                VideoFrameCount = frameIndex,
-                            }).ConfigureAwait(false);
-                    }
+                    frameArtifacts = await frameOutput.CompleteAfterVideoFailureAsync(
+                        new RecordFrameCompletion
+                        {
+                            Status = "partial",
+                            StopReason = stopReason,
+                            ElapsedMs = elapsedMs,
+                            AchievedFps = frameAchievedFps,
+                            CadenceRatio = frameCadenceRatio,
+                            VideoStatus = "failed",
+                            VideoFrameCount = frameIndex,
+                            // Keep canonical <stem>.frames reserved for a successful MP4 pair.
+                            PublicationDirectory = $"{options.FramesDirectory}.partial-{Guid.NewGuid():N}",
+                        }).ConfigureAwait(false);
                 }
 
                 if (frameArtifacts is not null)

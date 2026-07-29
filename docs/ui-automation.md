@@ -291,7 +291,7 @@ The manifest `timing` object describes the indexed frame timeline. For a truncat
 
 `manifest.json` records the request, indexed timing/counts, MP4 status, image dimensions, and truncation state. `status` is `complete`, `partial` when the MP4 failed, or `truncated` when the 1 GiB cap retained only a prefix. Frame output is local, unencrypted screen content; retain and share it with the same care as screenshots or the MP4.
 
-The frame bundle is written to a randomized sibling staging directory and published by directory rename only after its manifest is complete. In frame mode, neither the final MP4 path nor frame directory may already exist. A valid MP4 is preserved if frame output fails; a valid partial frame bundle is preserved if MP4 finalization fails.
+The frame bundle is written to a randomized sibling staging directory and published by directory rename only after its manifest is complete. In frame mode, neither the final MP4 path nor frame directory may already exist. A valid MP4 is preserved if frame output fails; if MP4 finalization fails, a valid frame bundle is preserved under a unique `<output-name>.frames.partial-*` directory so it cannot be mistaken for the successful MP4's matching bundle.
 
 **Stop mechanisms:**
 - Interactive: **Ctrl+C** (any platform).
