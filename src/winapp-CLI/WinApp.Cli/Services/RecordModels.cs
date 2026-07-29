@@ -69,6 +69,8 @@ internal sealed class RecordFrameArtifactResult
     public int Images { get; init; }
     public int RepeatedSamples { get; init; }
     public long TotalBytes { get; init; }
+    public bool Truncated { get; init; }
+    public long ByteLimit { get; init; }
 }
 
 internal sealed class RecordFrameSample
@@ -151,6 +153,8 @@ internal sealed class RecordFrameImagesManifest
     public RecordFrameRectManifest ContentRect { get; init; } = new();
     public string HashAlgorithm { get; init; } = "sha256";
     public long TotalBytes { get; init; }
+    public bool Truncated { get; init; }
+    public long ByteLimit { get; init; }
 }
 
 internal sealed class RecordFrameSourceManifest

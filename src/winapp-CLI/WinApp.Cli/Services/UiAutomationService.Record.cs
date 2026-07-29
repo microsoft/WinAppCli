@@ -609,9 +609,19 @@ internal sealed partial class UiAutomationService
                     frameOutput.Failure);
             }
 
-            var warnings = cadenceRatio < 0.90
-                ? new[] { $"Capture cadence was {cadenceRatio:P0} of the requested {options.Fps} fps." }
-                : null;
+            List<string>? warnings = null;
+            if (cadenceRatio < 0.90)
+            {
+                warnings = [$"Capture cadence was {cadenceRatio:P0} of the requested {options.Fps} fps."];
+            }
+            if (frameArtifacts?.Truncated == true)
+            {
+                warnings ??= [];
+                warnings.Add(
+                    $"Frame artifacts reached the {frameArtifacts.ByteLimit / 1024 / 1024} MiB bundle limit; " +
+                    "the MP4 is complete, but only the indexed frame prefix was retained. " +
+                    "Retry with a shorter duration, lower fps, or lower max-edge for complete frame evidence.");
+            }
             return new RecordCaptureResult
             {
                 Frames = frameIndex,
@@ -624,7 +634,7 @@ internal sealed partial class UiAutomationService
                 CadenceRatio = cadenceRatio,
                 StopReason = stopReason,
                 FrameArtifacts = frameArtifacts,
-                Warnings = warnings,
+                Warnings = warnings?.ToArray(),
             };
         }
         finally

@@ -273,7 +273,7 @@ winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups
 - `--max-edge N` — Downscale so the longest edge is at most N pixels (0 = no downscale).
 - `--capture-screen` — Capture from the screen DC (includes overlays/popups; foregrounds the window).
 - `--output <path>` — Output MP4 path. Defaults to `recording-<timestamp>-<guid>.mp4` in the current directory.
-- `--frames-dir <path>` — Also write timestamped JPEG evidence to a new directory. Requires `--duration-sec > 0`, `--fps 1..30`, and at most 18,000 requested samples. Frame mode defaults `--max-edge` to 1280; when specified, it must be 64-4096 (`0` is not supported in frame mode). Very large, near-square outputs that exceed the 256 MiB frame-pipeline budget are rejected with guidance to lower `--max-edge`. The MP4 is still required.
+- `--frames-dir <path>` — Also write timestamped JPEG evidence to a new directory. Requires `--duration-sec > 0`, `--fps 1..30`, and at most 18,000 requested samples. Frame mode defaults `--max-edge` to 1280; when specified, it must be 64-4096 (`0` is not supported in frame mode). Very large, near-square outputs that exceed the 256 MiB frame-pipeline memory budget are rejected with guidance to lower `--max-edge`. Frame data is capped at a 1 GiB bundle; if the cap is reached, the valid indexed prefix is published with `status: "truncated"`, `frames.truncated: true`, and a warning while the MP4 continues to completion. The MP4 is still required.
 
 **Agent-readable frame artifacts:**
 
@@ -288,7 +288,7 @@ demo.frames/
 
 Each actual recording sample has one compact JSON line in `frames.ndjson`. `elapsedMs` is the monotonic capture timestamp to use when bounding transitions; `mediaTimeMs` correlates the sample to the MP4 timeline. `contentRect` records that sample's non-letterboxed region, including after a live window resize. Exact consecutive processed-pixel duplicates reference the preceding JPEG (`changed: false`) instead of writing duplicate images. JPEGs use quality 85 and the same cropped, scaled, and letterboxed BGRA pixels sent to the H.264 encoder.
 
-`manifest.json` describes the request, achieved cadence, capture mode/source window, crop and content rectangles, MP4 status, image dimensions, counts, and SHA-256 integrity metadata. Frame output is local, unencrypted screen content; retain and share the directory with the same care as screenshots or the MP4.
+`manifest.json` describes the request, achieved cadence, capture mode/source window, crop and content rectangles, MP4 status, image dimensions, counts, and SHA-256 integrity metadata. `status` is `complete`, `partial` when the MP4 failed, or `truncated` when the 1 GiB frame-data cap retained only a prefix. `frames.truncated` and `frames.byteLimit` make that condition explicit. Frame output is local, unencrypted screen content; retain and share the directory with the same care as screenshots or the MP4.
 
 The frame bundle is written to a randomized sibling staging directory and published by directory rename only after its manifest is complete. In frame mode, neither the final MP4 path nor frame directory may already exist. A valid MP4 is preserved if frame output fails; a valid partial frame bundle is preserved if MP4 finalization fails.
 
@@ -302,7 +302,7 @@ The frame bundle is written to a randomized sibling staging directory and publis
 - `screen` — Screen DC via `--capture-screen` (includes overlays/popups; brings the window to the foreground).
 
 **JSON output (`--json`):**
-- **stdout** (final result): existing fields plus `elapsedMs`, `achievedFps`, `cadenceRatio`, `stopReason`, optional `frameArtifacts`, and optional `warnings`.
+- **stdout** (final result): existing fields plus `elapsedMs`, `achievedFps`, `cadenceRatio`, `stopReason`, optional `frameArtifacts`, and optional `warnings`. `frameArtifacts` includes `truncated` and `byteLimit`; when truncated, `warnings` explains how to retain a complete frame timeline on retry.
 - **stderr** (liveness event): `{ "event": "recording-started", "path", "fps", "durationSec", "framesDirectory"?, "framesManifest"?, "framesIndex"? }`
 - **stderr** (frame mode, at most every five seconds): `{ "event": "recording-progress", "elapsedMs", "samples", "images", "achievedFps" }`
 

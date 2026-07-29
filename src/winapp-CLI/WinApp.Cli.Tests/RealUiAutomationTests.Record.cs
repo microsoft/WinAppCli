@@ -477,6 +477,82 @@ public partial class RealUiAutomationTests
         Assert.IsTrue(encoder.Completed);
     }
 
+    [TestMethod]
+    public async Task RecordAsync_JpegWorkerFailurePreservesMp4AndRemovesFrameStaging()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var session = SessionFor(fx);
+        await ResolveAsync(svc, session, "btnInvoke");
+
+        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var output = Path.Join(root, "jpeg-failure.mp4");
+        var framesDirectory = Path.Join(root, "jpeg-failure.frames");
+        WgcCapture.s_isSupported = () => true;
+        WgcCapture.s_startGrabber = (_, _, _) =>
+            new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
+            new FakeVideoEncoder(path, width, height);
+        RecordFrameBundleWriter.s_encodeJpeg = (_, _, _) =>
+            throw new IOException("simulated JPEG worker failure");
+
+        var exception = await Assert.ThrowsExactlyAsync<RecordPartialOutputException>(
+            () => svc.RecordAsync(session, null, new RecordOptions
+            {
+                OutputPath = output,
+                FramesDirectory = framesDirectory,
+                DurationSec = 1,
+                Fps = 1,
+                MaxEdge = 64,
+            }, CancellationToken.None));
+
+        Assert.AreEqual(output, exception.VideoPath);
+        Assert.IsTrue(File.Exists(output));
+        Assert.IsFalse(Directory.Exists(framesDirectory));
+        Assert.IsFalse(Directory.EnumerateDirectories(
+            root,
+            ".*.staging",
+            SearchOption.TopDirectoryOnly).Any());
+    }
+
+    [TestMethod]
+    public async Task RecordAsync_TruncatedFrameBundleReturnsActionableWarning()
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var session = SessionFor(fx);
+        await ResolveAsync(svc, session, "btnInvoke");
+
+        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        WgcCapture.s_isSupported = () => true;
+        WgcCapture.s_startGrabber = (_, _, _) =>
+            new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
+            new FakeVideoEncoder(path, width, height);
+        RecordFrameBundleWriter.s_create = _ => new FakeFrameSink
+        {
+            IsTruncated = true,
+            ByteLimit = RecordFrameBundleConfiguration.DefaultMaximumBundleBytes,
+        };
+
+        var result = await svc.RecordAsync(session, null, new RecordOptions
+        {
+            OutputPath = Path.Join(root, "truncated.mp4"),
+            FramesDirectory = Path.Join(root, "truncated.frames"),
+            DurationSec = 1,
+            Fps = 1,
+            MaxEdge = 64,
+        }, CancellationToken.None);
+
+        Assert.IsNotNull(result.FrameArtifacts);
+        Assert.IsTrue(result.FrameArtifacts.Truncated);
+        Assert.IsNotNull(result.Warnings);
+        Assert.IsTrue(result.Warnings.Any(
+            warning => warning.Contains("only the indexed frame prefix was retained", StringComparison.Ordinal)));
+    }
+
     private sealed class FakeFrameGrabber(byte[] pixels, int width, int height) : WgcCapture.IFrameGrabber
     {
         private long _version;
@@ -549,6 +625,9 @@ public partial class RealUiAutomationTests
         public int SampleCount { get; private set; }
 
         public int ImageCount => SampleCount;
+        public bool IsTruncated { get; init; }
+
+        public long ByteLimit { get; init; }
 
         public bool Aborted { get; private set; }
 
@@ -580,6 +659,8 @@ public partial class RealUiAutomationTests
                 Index = "frames/frames.ndjson",
                 Samples = SampleCount,
                 Images = ImageCount,
+                Truncated = IsTruncated,
+                ByteLimit = ByteLimit,
             });
 
         public Task AbortAsync()

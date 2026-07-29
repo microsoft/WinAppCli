@@ -26,6 +26,7 @@ internal sealed class RecordFrameArtifactCoordinator : IAsyncDisposable
     public int SamplesAccepted { get; private set; }
 
     public int ImageCount => _sink?.ImageCount ?? 0;
+    public bool IsTruncated => _sink?.IsTruncated ?? false;
 
     public static RecordFrameArtifactCoordinator Create(RecordFrameBundleConfiguration configuration)
     {

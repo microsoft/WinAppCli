@@ -145,4 +145,38 @@ public partial class UiCommandTests
         Assert.IsTrue(File.Exists(finalPath), "pre-existing final file must be untouched");
         Assert.AreEqual("pre-existing-sentinel", File.ReadAllText(finalPath), "pre-existing file content must be unchanged");
     }
+
+    [TestMethod]
+    public void Mp4SinkWriterEncoder_NoClobberRacePreservesLateDestinationAndCleansTemp()
+    {
+        var finalPath = Path.Join(_tempDirectory.FullName, "late-destination.mp4");
+        Mp4SinkWriterEncoder? encoder = null;
+        try
+        {
+            encoder = new Mp4SinkWriterEncoder(
+                finalPath,
+                64,
+                64,
+                1,
+                1_000_000,
+                overwriteExisting: false);
+            encoder.WriteFrame(MakeSolidFrame(64, 64, b: 0, g: 0, r: 0), 0, 10_000_000);
+            File.WriteAllText(finalPath, "late-sentinel");
+
+            Assert.ThrowsExactly<IOException>(() => encoder.Complete());
+        }
+        catch (Mp4EncoderInitializationException ex)
+        {
+            Assert.Inconclusive($"Media Foundation H.264 encoder unavailable: {ex.Message}");
+        }
+        finally
+        {
+            encoder?.Dispose();
+        }
+
+        Assert.AreEqual("late-sentinel", File.ReadAllText(finalPath));
+        CollectionAssert.AreEquivalent(
+            new[] { finalPath },
+            Directory.GetFiles(_tempDirectory.FullName, "*.mp4"));
+    }
 }

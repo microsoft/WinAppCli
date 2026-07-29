@@ -2,9 +2,12 @@
 // Licensed under the MIT License.
 
 using System.Text.Json;
+using System.Text;
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging.Abstractions;
 using SkiaSharp;
+using Spectre.Console;
+using Spectre.Console.Testing;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Services;
 
@@ -84,6 +87,47 @@ public partial class UiCommandTests
             ]);
         Assert.AreEqual(1, rejectedExitCode);
         StringAssert.Contains(ConsoleStdErr.ToString(), "up to 4096");
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task Record_FramesDirectory_TextMode_LogsTruncationWarning()
+    {
+        const string warning = "Frame artifacts reached the 1 GiB byte limit; the valid indexed prefix was published.";
+        _fakeUia.RecordResult = new RecordCaptureResult
+        {
+            Frames = 3,
+            Width = 640,
+            Height = 480,
+            Mode = "wgc",
+            Warnings = [warning],
+        };
+
+        var command = GetRequiredService<UiRecordCommand>();
+        var previousAmbient = AnsiConsole.Console;
+        var ambient = new TestConsole();
+        AnsiConsole.Console = ambient;
+        int exitCode;
+        try
+        {
+            exitCode = await ParseAndInvokeWithCaptureAsync(
+                command,
+                [
+                    "-a", "TestApp",
+                    "--duration-sec", "1",
+                    "--output", Path.Join(_tempDirectory.FullName, "truncated.mp4"),
+                    "--frames-dir", Path.Join(_tempDirectory.FullName, "truncated.frames"),
+                ]);
+        }
+        finally
+        {
+            AnsiConsole.Console = previousAmbient;
+        }
+
+        Assert.AreEqual(0, exitCode);
+        StringAssert.Contains(ambient.Output, "Frame artifacts reached the 1 GiB byte limit");
+        StringAssert.Contains(ambient.Output, "valid indexed prefix was");
+        Assert.IsFalse(ConsoleStdErr.ToString().Contains(warning, StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -260,9 +304,14 @@ public partial class UiCommandTests
 
         Assert.AreEqual(1, exitCode);
         var stderr = ConsoleStdErr.ToString();
-        StringAssert.Contains(stderr, "\"partial_output\"");
-        StringAssert.Contains(stderr, "\"recoveryHint\"");
-        StringAssert.Contains(stderr, videoPath.Replace("\\", "\\\\"));
+        var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(stderr));
+        using var document = JsonDocument.ParseValue(ref reader);
+        var error = document.RootElement.GetProperty("error");
+        Assert.AreEqual("partial_output", error.GetProperty("code").GetString());
+        Assert.AreEqual("Retry with a new frame path.", error.GetProperty("recoveryHint").GetString());
+        var partialOutput = error.GetProperty("partialOutput");
+        Assert.AreEqual(videoPath, partialOutput.GetProperty("videoPath").GetString());
+        Assert.IsFalse(partialOutput.TryGetProperty("framesDirectory", out _));
     }
 
     [TestMethod]
@@ -360,6 +409,18 @@ public partial class UiCommandTests
         var firstEntry = JsonSerializer.Deserialize<JsonElement>(lines[0]);
         var repeatedEntry = JsonSerializer.Deserialize<JsonElement>(lines[1]);
         var changedEntry = JsonSerializer.Deserialize<JsonElement>(lines[2]);
+        Assert.AreEqual(0, firstEntry.GetProperty("sampleIndex").GetInt32());
+        Assert.AreEqual(12, firstEntry.GetProperty("elapsedMs").GetInt64());
+        Assert.AreEqual(0, firstEntry.GetProperty("mediaTimeMs").GetDouble());
+        Assert.AreEqual(0, firstEntry.GetProperty("imageIndex").GetInt32());
+        Assert.AreEqual(1, repeatedEntry.GetProperty("sampleIndex").GetInt32());
+        Assert.AreEqual(108, repeatedEntry.GetProperty("elapsedMs").GetInt64());
+        Assert.AreEqual(100, repeatedEntry.GetProperty("mediaTimeMs").GetDouble());
+        Assert.AreEqual(0, repeatedEntry.GetProperty("imageIndex").GetInt32());
+        Assert.AreEqual(2, changedEntry.GetProperty("sampleIndex").GetInt32());
+        Assert.AreEqual(211, changedEntry.GetProperty("elapsedMs").GetInt64());
+        Assert.AreEqual(200, changedEntry.GetProperty("mediaTimeMs").GetDouble());
+        Assert.AreEqual(1, changedEntry.GetProperty("imageIndex").GetInt32());
         Assert.IsTrue(firstEntry.GetProperty("changed").GetBoolean());
         Assert.IsFalse(repeatedEntry.GetProperty("changed").GetBoolean());
         Assert.AreEqual(
@@ -394,6 +455,93 @@ public partial class UiCommandTests
         Assert.AreEqual(
             Path.Join(_tempDirectory.FullName, "video.mp4"),
             manifest.GetProperty("video").GetProperty("path").GetString());
+    }
+
+    [TestMethod]
+    public async Task RecordFrameBundleWriter_ByteLimitPublishesIndexedPrefixAndDrains()
+    {
+        var originalEncodeJpeg = RecordFrameBundleWriter.s_encodeJpeg;
+        RecordFrameBundleWriter? writer = null;
+        try
+        {
+            RecordFrameBundleWriter.s_encodeJpeg = (_, _, _) => new byte[800];
+            var finalDirectory = Path.Join(_tempDirectory.FullName, "limited.frames");
+            writer = new RecordFrameBundleWriter(CreateFrameConfiguration(
+                finalDirectory,
+                maximumBundleBytes: 1024 * 1024 + 1_500));
+
+            for (var index = 0; index < 20; index++)
+            {
+                var pixels = Enumerable.Repeat((byte)index, 64 * 64 * 4).ToArray();
+                await writer.WriteAsync(
+                    pixels,
+                    Sample(index, index * 100L, index * 100d),
+                    CancellationToken.None);
+            }
+
+            var result = await writer.CompleteAsync(Completion());
+            Assert.IsTrue(result.Truncated);
+            Assert.AreEqual(1024 * 1024 + 1_500, result.ByteLimit);
+            Assert.IsGreaterThan(0, result.Samples);
+            Assert.IsLessThan(20, result.Samples);
+            Assert.IsTrue(result.TotalBytes <= result.ByteLimit);
+
+            var manifest = JsonSerializer.Deserialize<JsonElement>(
+                await File.ReadAllTextAsync(Path.Join(finalDirectory, "manifest.json")));
+            Assert.AreEqual("truncated", manifest.GetProperty("status").GetString());
+            Assert.IsTrue(manifest.GetProperty("frames").GetProperty("truncated").GetBoolean());
+            Assert.AreEqual(
+                result.ByteLimit,
+                manifest.GetProperty("frames").GetProperty("byteLimit").GetInt64());
+            Assert.AreEqual(
+                result.Samples,
+                (await File.ReadAllLinesAsync(Path.Join(finalDirectory, "frames.ndjson"))).Length);
+        }
+        finally
+        {
+            if (writer is not null)
+            {
+                await writer.DisposeAsync();
+            }
+            RecordFrameBundleWriter.s_encodeJpeg = originalEncodeJpeg;
+        }
+    }
+
+    [TestMethod]
+    public async Task RecordFrameBundleWriter_JpegFailureRemovesStagingAndFinalOutput()
+    {
+        var originalEncodeJpeg = RecordFrameBundleWriter.s_encodeJpeg;
+        RecordFrameBundleWriter? writer = null;
+        var finalDirectory = Path.Join(_tempDirectory.FullName, "jpeg-failure.frames");
+        try
+        {
+            RecordFrameBundleWriter.s_encodeJpeg = (_, _, _) =>
+                throw new IOException("simulated JPEG failure");
+            writer = new RecordFrameBundleWriter(CreateFrameConfiguration(finalDirectory));
+            await writer.WriteAsync(
+                new byte[64 * 64 * 4],
+                Sample(0, 1, 0),
+                CancellationToken.None);
+
+            var exception = await Assert.ThrowsExactlyAsync<IOException>(
+                () => writer.CompleteAsync(Completion()));
+            StringAssert.Contains(exception.Message, "simulated JPEG failure");
+            await Assert.ThrowsExactlyAsync<IOException>(() => writer.AbortAsync());
+
+            Assert.IsFalse(Directory.Exists(finalDirectory));
+            Assert.IsFalse(Directory.EnumerateDirectories(
+                _tempDirectory.FullName,
+                ".*.staging",
+                SearchOption.TopDirectoryOnly).Any());
+        }
+        finally
+        {
+            if (writer is not null)
+            {
+                await writer.DisposeAsync();
+            }
+            RecordFrameBundleWriter.s_encodeJpeg = originalEncodeJpeg;
+        }
     }
 
     [TestMethod]
@@ -495,7 +643,8 @@ public partial class UiCommandTests
     private RecordFrameBundleConfiguration CreateFrameConfiguration(
         string finalDirectory,
         int width = 64,
-        int height = 64)
+        int height = 64,
+        long maximumBundleBytes = RecordFrameBundleConfiguration.DefaultMaximumBundleBytes)
         => new()
         {
             FinalDirectory = finalDirectory,
@@ -504,6 +653,7 @@ public partial class UiCommandTests
             StartedUtc = DateTimeOffset.Parse("2026-01-01T00:00:00Z"),
             Width = width,
             Height = height,
+            MaximumBundleBytes = maximumBundleBytes,
             ContentRect = new RecordFrameRectManifest { Width = width, Height = height },
             Requested = new RecordFrameRequestManifest
             {

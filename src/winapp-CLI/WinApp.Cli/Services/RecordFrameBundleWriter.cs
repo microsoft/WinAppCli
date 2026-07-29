@@ -17,6 +17,7 @@ internal interface IRecordFrameSink : IAsyncDisposable
 {
     int SampleCount { get; }
     int ImageCount { get; }
+    bool IsTruncated { get; }
 
     ValueTask WriteAsync(ReadOnlyMemory<byte> bgra, RecordFrameSample sample, CancellationToken cancellationToken);
     Task<RecordFrameArtifactResult> CompleteAsync(RecordFrameCompletion completion);
@@ -25,6 +26,8 @@ internal interface IRecordFrameSink : IAsyncDisposable
 
 internal sealed class RecordFrameBundleConfiguration
 {
+    public const long DefaultMaximumBundleBytes = 1024L * 1024 * 1024;
+
     public required string FinalDirectory { get; init; }
     public required string VideoPath { get; init; }
     public required string RecordingId { get; init; }
@@ -36,6 +39,7 @@ internal sealed class RecordFrameBundleConfiguration
     public required RecordFrameSourceManifest Source { get; init; }
     public required RecordFrameCropManifest Crop { get; init; }
     public required ILogger Logger { get; init; }
+    public long MaximumBundleBytes { get; init; } = DefaultMaximumBundleBytes;
 }
 
 internal sealed class RecordFrameCompletion
@@ -54,12 +58,19 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
 {
     internal const int JpegQuality = 85;
     internal const long FramePipelineMemoryBudgetBytes = 256L * 1024 * 1024;
+    private const long ManifestByteReserve = 1024L * 1024;
     private const int ReservedFrameBufferCount = 6;
     private const int MaximumQueuedFrames = 4;
 
     internal static Func<RecordFrameBundleConfiguration, IRecordFrameSink> s_create =
         configuration => new RecordFrameBundleWriter(configuration);
     internal static Func<byte[], int, int, byte[]> s_encodeJpeg = EncodeJpeg;
+
+    internal static void ResetTestSeams()
+    {
+        s_create = configuration => new RecordFrameBundleWriter(configuration);
+        s_encodeJpeg = EncodeJpeg;
+    }
 
     private readonly RecordFrameBundleConfiguration _configuration;
     private readonly string _stagingDirectory;
@@ -68,20 +79,33 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
     private readonly Channel<QueuedFrame> _channel;
     private readonly StreamWriter _indexWriter;
     private readonly Task _worker;
+    private readonly long _maximumBundleBytes;
+    private readonly long _dataByteLimit;
     private readonly CancellationTokenSource _lifetimeCts = new();
     private int _sampleCount;
     private int _imageCount;
     private long _imageBytes;
+    private long _indexBytes;
+    private int _truncated;
     private bool _indexDisposed;
     private bool _published;
     private bool _aborted;
 
     public int SampleCount => Volatile.Read(ref _sampleCount);
     public int ImageCount => Volatile.Read(ref _imageCount);
+    public bool IsTruncated => Volatile.Read(ref _truncated) != 0;
 
     internal RecordFrameBundleWriter(RecordFrameBundleConfiguration configuration)
     {
         _configuration = configuration;
+        if (configuration.MaximumBundleBytes <= ManifestByteReserve)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(configuration),
+                $"Frame artifact byte limit must exceed the {ManifestByteReserve / 1024 / 1024} MiB manifest reserve.");
+        }
+        _maximumBundleBytes = configuration.MaximumBundleBytes;
+        _dataByteLimit = configuration.MaximumBundleBytes - ManifestByteReserve;
         var capacity = ComputeQueueCapacity(configuration.Width, configuration.Height);
 
         if (Path.Exists(configuration.FinalDirectory))
@@ -112,6 +136,7 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
             _indexWriter = new StreamWriter(
                 new FileStream(_indexPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read),
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            _indexWriter.NewLine = "\n";
 
             _channel = Channel.CreateBounded<QueuedFrame>(new BoundedChannelOptions(capacity)
             {
@@ -156,6 +181,10 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
                 $"Frame buffer is {bgra.Length} bytes; expected {expectedBytes}.",
                 nameof(bgra));
         }
+        if (IsTruncated)
+        {
+            return;
+        }
 
         try
         {
@@ -198,7 +227,9 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
         var indexBytes = new FileInfo(_indexPath).Length;
         var manifest = new RecordFrameBundleManifest
         {
-            Status = completion.Status,
+            Status = completion.Status == "complete" && IsTruncated
+                ? "truncated"
+                : completion.Status,
             RecordingId = _configuration.RecordingId,
             StartedUtc = _configuration.StartedUtc,
             CompletedUtc = DateTimeOffset.UtcNow,
@@ -226,6 +257,8 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
                 Height = _configuration.Height,
                 ContentRect = _configuration.ContentRect,
                 TotalBytes = _imageBytes + indexBytes,
+                Truncated = IsTruncated,
+                ByteLimit = _maximumBundleBytes,
             },
             Source = _configuration.Source,
             Crop = _configuration.Crop,
@@ -236,6 +269,11 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
             manifest,
             UiJsonContext.Default.RecordFrameBundleManifest);
         var manifestBytes = Encoding.UTF8.GetBytes(manifestJson);
+        if (_imageBytes + indexBytes + manifestBytes.Length > _maximumBundleBytes)
+        {
+            throw new InvalidOperationException(
+                "Frame artifact manifest exceeded its reserved space within the bundle byte limit.");
+        }
         await using (var manifestStream = new FileStream(
             manifestPath,
             FileMode.CreateNew,
@@ -268,6 +306,8 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
             Images = ImageCount,
             RepeatedSamples = SampleCount - ImageCount,
             TotalBytes = totalBytes,
+            Truncated = IsTruncated,
+            ByteLimit = _maximumBundleBytes,
         };
 
         Directory.Move(_stagingDirectory, _configuration.FinalDirectory);
@@ -351,13 +391,52 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
         {
             await foreach (var queued in _channel.Reader.ReadAllAsync(_lifetimeCts.Token).ConfigureAwait(false))
             {
+                if (IsTruncated)
+                {
+                    continue;
+                }
+
                 var changed = previousPixels is null || !queued.Pixels.AsSpan().SequenceEqual(previousPixels);
+                byte[]? jpeg = null;
+                var nextImageIndex = currentImageIndex;
+                var nextFile = currentFile;
+                var nextHash = currentHash;
                 if (changed)
                 {
-                    currentImageIndex++;
-                    var fileName = $"frame-{currentImageIndex:D6}-t{queued.Sample.ElapsedMs:D12}.jpg";
-                    var absolutePath = Path.Join(_framesDirectory, fileName);
-                    var jpeg = s_encodeJpeg(queued.Pixels, _configuration.Width, _configuration.Height);
+                    nextImageIndex++;
+                    var fileName = $"frame-{nextImageIndex:D6}-t{queued.Sample.ElapsedMs:D12}.jpg";
+                    nextFile = $"frames/{fileName}";
+                    jpeg = s_encodeJpeg(queued.Pixels, _configuration.Width, _configuration.Height);
+                    nextHash = Convert.ToHexString(SHA256.HashData(jpeg)).ToLowerInvariant();
+                }
+
+                var entry = new RecordFrameIndexEntry
+                {
+                    SampleIndex = queued.Sample.SampleIndex,
+                    ElapsedMs = queued.Sample.ElapsedMs,
+                    MediaTimeMs = queued.Sample.MediaTimeMs,
+                    ImageIndex = nextImageIndex,
+                    File = nextFile,
+                    Changed = changed,
+                    Sha256 = nextHash,
+                    SourceVersion = queued.Sample.SourceVersion,
+                    SourceWidth = queued.Sample.SourceWidth,
+                    SourceHeight = queued.Sample.SourceHeight,
+                    ContentRect = queued.Sample.ContentRect,
+                };
+                var line = JsonSerializer.Serialize(
+                    entry,
+                    RecordFrameIndexJsonContext.Default.RecordFrameIndexEntry);
+                var lineBytes = Encoding.UTF8.GetByteCount(line) + 1;
+                if (_imageBytes + _indexBytes + (jpeg?.Length ?? 0) + lineBytes > _dataByteLimit)
+                {
+                    Interlocked.Exchange(ref _truncated, 1);
+                    continue;
+                }
+
+                if (jpeg is not null)
+                {
+                    var absolutePath = Path.Join(_stagingDirectory, nextFile.Replace('/', Path.DirectorySeparatorChar));
                     await using (var imageStream = new FileStream(
                         absolutePath,
                         FileMode.CreateNew,
@@ -371,33 +450,18 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
                             _lifetimeCts.Token).ConfigureAwait(false);
                     }
 
-                    currentFile = $"frames/{fileName}";
-                    currentHash = Convert.ToHexString(SHA256.HashData(jpeg)).ToLowerInvariant();
+                    currentImageIndex = nextImageIndex;
+                    currentFile = nextFile;
+                    currentHash = nextHash;
                     Interlocked.Add(ref _imageBytes, jpeg.Length);
                     Interlocked.Increment(ref _imageCount);
                     previousPixels = queued.Pixels;
                 }
 
-                var entry = new RecordFrameIndexEntry
-                {
-                    SampleIndex = queued.Sample.SampleIndex,
-                    ElapsedMs = queued.Sample.ElapsedMs,
-                    MediaTimeMs = queued.Sample.MediaTimeMs,
-                    ImageIndex = currentImageIndex,
-                    File = currentFile,
-                    Changed = changed,
-                    Sha256 = currentHash,
-                    SourceVersion = queued.Sample.SourceVersion,
-                    SourceWidth = queued.Sample.SourceWidth,
-                    SourceHeight = queued.Sample.SourceHeight,
-                    ContentRect = queued.Sample.ContentRect,
-                };
-                var line = JsonSerializer.Serialize(
-                    entry,
-                    RecordFrameIndexJsonContext.Default.RecordFrameIndexEntry);
                 await _indexWriter.WriteLineAsync(
                     line.AsMemory(),
                     _lifetimeCts.Token).ConfigureAwait(false);
+                _indexBytes += lineBytes;
                 Interlocked.Increment(ref _sampleCount);
             }
 

@@ -57,7 +57,7 @@ public partial class RealUiAutomationTests
         Mp4SinkWriterEncoder.s_create = (path, width, height, fps, bitrate) => new Mp4SinkWriterEncoder(path, width, height, fps, bitrate);
         Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, fps, bitrate) =>
             new Mp4SinkWriterEncoder(path, width, height, fps, bitrate, overwriteExisting: false);
-        RecordFrameBundleWriter.s_create = configuration => new RecordFrameBundleWriter(configuration);
+        RecordFrameBundleWriter.ResetTestSeams();
     }
 
     private static UiAutomationService NewService()

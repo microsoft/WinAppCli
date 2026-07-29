@@ -1173,12 +1173,13 @@ winapp ui record -a Calculator --duration-sec 5 --fps 10 -o demo.mp4 --frames-di
 - `--max-edge <px>` - Downscale so the longest edge is at most this many pixels (`0` = no downscale).
 - `--capture-screen` - Capture from the screen so overlays/popups are included (may capture occluding windows).
 - `-o, --output <path>` - Output `.mp4` path (defaults to `recording-<timestamp>-<guid>.mp4`).
-- `--frames-dir <path>` - Also write timestamped JPEGs, `frames.ndjson`, and `manifest.json` to a new directory. Requires a timed recording, 1-30 fps, no more than 18,000 requested samples, and `--max-edge` from 64 through 4096 when specified (`0` is not supported; the frame-mode default is 1280). Very large, near-square outputs that exceed the 256 MiB frame-pipeline budget are rejected with guidance to lower `--max-edge`.
+- `--frames-dir <path>` - Also write timestamped JPEGs, `frames.ndjson`, and `manifest.json` to a new directory. Requires a timed recording, 1-30 fps, no more than 18,000 requested samples, and `--max-edge` from 64 through 4096 when specified (`0` is not supported; the frame-mode default is 1280). Very large, near-square outputs that exceed the 256 MiB frame-pipeline memory budget are rejected with guidance to lower `--max-edge`. Frame data is capped at a 1 GiB bundle; reaching it publishes the valid indexed prefix as `truncated` and lets the MP4 finish.
 
 With `--json`, emits a `UiRecordResult` envelope including the output `path`, `frames`, `width`,
 `height`, `fileSize`, `codec` (`"h264"`), `mode` (the capture path actually used), `elapsedMs`,
-`achievedFps`, `cadenceRatio`, and `stopReason`. Frame mode also includes `frameArtifacts`;
-cadence shortfalls are reported in `warnings`. Capture modes are `wgc`, `printwindow`, and `screen`.
+`achievedFps`, `cadenceRatio`, and `stopReason`. Frame mode also includes `frameArtifacts`,
+including `truncated` and `byteLimit`; cadence shortfalls and frame-bundle truncation are reported
+in `warnings`. Capture modes are `wgc`, `printwindow`, and `screen`.
 
 > **Known limitation:** recording a *specific element* inside a popup that renders in its own
 > top-level window (WinUI/XAML flyout, teaching tip, tooltip) may capture the underlying main

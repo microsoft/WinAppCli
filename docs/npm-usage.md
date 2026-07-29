@@ -945,6 +945,8 @@ Record a window or element region to an H.264 MP4.
 **`durationSec` is required and must be > 0.** Unbounded recording (durationSec == 0) is only
 supported via the CLI with Ctrl+C or piped stdin. The npm wrapper has no mechanism to stop
 an unbounded spawn, so passing durationSec == 0 or omitting it will throw a clear error.
+With `framesDir`, the CLI also writes timestamped JPEG evidence, `frames.ndjson`, and
+`manifest.json` without replacing the MP4. See `UiRecordOptions.framesDir` for limits.
 
 ```typescript
 function uiRecord(options: UiRecordOptions): Promise<WinappResult>

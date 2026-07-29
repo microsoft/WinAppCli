@@ -18,7 +18,7 @@ internal class UiRecordCommand : Command, IShortDescription
 
     internal static readonly Option<string?> FramesDirectoryOption = new("--frames-dir")
     {
-        Description = "Also write agent-readable JPEG frames, frames.ndjson, and manifest.json to this new directory. Requires a timed recording, fps 1-30, at most 18,000 requested samples, and max-edge 64-4096 when specified (default 1280; 0 is not supported).",
+        Description = "Also write agent-readable JPEG frames, frames.ndjson, and manifest.json to this new directory. Requires a timed recording, fps 1-30, at most 18,000 requested samples, and max-edge 64-4096 when specified (default 1280; 0 is not supported). Frame data is capped at a 1 GiB bundle; a complete indexed prefix is retained if the cap is reached.",
     };
 
     public string ShortDescription => "Record a window or element region to an MP4 (H.264) video";
@@ -354,6 +354,10 @@ internal class UiRecordCommand : Command, IShortDescription
                 logger.LogInformation(
                     "Recorded {Frames} frames ({Width}x{Height}, h264) to {Path} ({Size}KB)",
                     result.Frames, result.Width, result.Height, filePath, result.FileSize / 1024);
+                foreach (var warning in result.Warnings ?? [])
+                {
+                    logger.LogWarning("{Symbol} {Warning}", UiSymbols.Warning, warning);
+                }
                 return 0;
             }
             catch (RecordPartialOutputException partialEx)
