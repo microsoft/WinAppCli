@@ -423,7 +423,7 @@ internal partial class MsixService
     /// list (or falls back to a cwd glob) and installs the Windows App Runtime framework packages for
     /// the given architecture. Callers gate on <c>WindowsAppSDKSelfContained</c> before calling.
     /// </summary>
-    public async Task EnsureWindowsAppRuntimeInstalledAsync(FileInfo? projectFile, string? architecture, string? framework, bool noRestore, TaskContext taskContext, CancellationToken cancellationToken = default)
+    public async Task<bool> EnsureWindowsAppRuntimeInstalledAsync(FileInfo? projectFile, string? architecture, string? framework, bool noRestore, TaskContext taskContext, CancellationToken cancellationToken = default)
     {
         var packageList = await ResolveDotNetPackageListAsync(projectFile, framework, noRestore, cancellationToken);
 
@@ -432,12 +432,23 @@ internal partial class MsixService
         // runtime for it is wasted work and prints a noisy "could not determine runtime" warning. Skip
         // only when we can positively confirm no reference; an unresolved list falls through to prep so
         // a real WinUI app is never left without its runtime.
+        //
+        // Documented tradeoff (Copilot review): the package list comes from `dotnet list package`, which
+        // evaluates the DEFAULT Configuration/RuntimeIdentifier (it rejects -c/-r/-p, so this run's -c /
+        // --arch can't be forwarded). A Windows App SDK <PackageReference> gated on a non-default
+        // Configuration or RID (e.g. Condition="'$(Configuration)'=='Release'") would therefore be absent
+        // from the list under the default evaluation, and this skip would wrongly bypass runtime prep.
+        // Resolving it precisely needs a full MSBuild evaluation of the package graph under the effective
+        // inputs, which is disproportionate to the risk: config-conditional Windows App SDK references are
+        // effectively unseen in practice, and the skip only ever fires on a POSITIVE no-reference result
+        // (an unresolved/failed list fails open into prep above). Accepted as-is; revisit if a real app
+        // hits it.
         var referencesWindowsAppSdk = packageList is not null && ReferencesWindowsAppSdk(packageList);
         if (packageList is not null && !referencesWindowsAppSdk)
         {
             taskContext.AddDebugMessage(
                 $"{UiSymbols.Note} No Windows App SDK reference found; skipping Windows App Runtime preparation.");
-            return;
+            return false;
         }
 
         // requireExactVersion:true — this unpackaged path must resolve the runtime the app was actually
@@ -488,6 +499,8 @@ internal partial class MsixService
                 "so the app would fail to start. Restore the project so the matching Windows App SDK runtime is available for that " +
                 "architecture, install it manually, or build a self-contained app (WindowsAppSDKSelfContained=true).");
         }
+
+        return true;
     }
 
     /// <summary>

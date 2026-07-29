@@ -69,7 +69,9 @@ internal class FakeMsixService : IMsixService
         return Task.FromResult(FakeIdentityResult);
     }
 
-    public Task EnsureWindowsAppRuntimeInstalledAsync(
+    public bool EnsureRuntimeInstalledResult { get; set; } = true;
+
+    public Task<bool> EnsureWindowsAppRuntimeInstalledAsync(
         FileInfo? projectFile,
         string? architecture,
         string? framework,
@@ -82,7 +84,7 @@ internal class FakeMsixService : IMsixService
         {
             throw EnsureRuntimeInstalledException;
         }
-        return Task.CompletedTask;
+        return Task.FromResult(EnsureRuntimeInstalledResult);
     }
 
     public Task<MsixIdentityResult> AddSparseIdentityAsync(
