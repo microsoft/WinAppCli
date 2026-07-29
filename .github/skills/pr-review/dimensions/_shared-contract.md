@@ -88,33 +88,46 @@ Specifically, **drop**:
 - Coverage gaps with concrete impact.
 - Doc/sample/packaging drift caused by this change.
 
-## The Complexity Budget Test (mandatory, applies to your recommendation)
+## The gut check (mandatory, applies to every finding you emit)
 
-The Team Lead Test governs whether a *finding* is worth reporting. This test
-governs the *fix you propose*. A review that only ever says "add X" turns every
-round into net growth; over several rounds that is how a focused feature becomes
-an over-engineered one. Your recommendation is part of the design, so it carries
-the same burden the diff does.
+The Team Lead Test asks whether a finding is *noise*. This one asks the harder
+question: **is it necessary, or merely true?**
 
-Before writing `Recommendation`, do all three:
+You are a specialist, and a specialist told to find problems will find some.
+Everything you are about to report is defensible. That is the trap — the author
+reads nine defensible findings as nine required changes, and the PR grows to
+satisfy the list. Real reviewers discard most of what they notice.
 
-1. **Propose the smallest fix that actually resolves the finding.** Not the most
-   thorough, not the most general, not the one that also handles the adjacent
-   case you imagined. The smallest one.
-2. **Try the subtractive fix first.** Many findings are better resolved by
-   removing than by adding — delete the unused branch, drop the option nobody
-   asked for, collapse the second code path, reject the input instead of
-   handling it, or document the limitation in `docs/usage.md` and move on. If a
-   subtractive fix exists, lead with it, even if an additive fix is "better."
-3. **Justify any `large` fix cost explicitly.** If your recommendation adds a
-   new command / flag / option / service / interface / abstraction, the
-   `Recommendation` must say in one clause why a `subtractive` or `small` fix
-   does not work. A `large` recommendation with no such justification fails this
-   test — downgrade it to the smaller fix or drop the finding.
+For each finding, ask:
 
-Never recommend speculative generality: no "make this pluggable," no "extract an
-interface for future providers," no config knob without a user who asked for it.
-"YAGNI" is a valid and complete recommendation.
+> Would a busy maintainer, looking at a PR that is otherwise ready to ship,
+> genuinely want this changed — or is this just a true statement about the code?
+
+**Drop it** if:
+
+- The code works and you are describing a tidier alternative.
+- The fix adds more complexity than the problem costs users. Say YAGNI instead.
+- It guards against something that cannot happen here — input the CLI controls,
+  a state the caller guarantees, a config the repo does not support.
+- It is a "for completeness" / "for consistency" item with no user-visible
+  consequence: the symmetric flag nobody asked for, the parallel test for a case
+  that cannot regress, the doc section restating the help text.
+- You cannot finish the sentence *"a user doing X will hit Y."*
+
+**Never drop** a security issue, data loss, a crash, wrong output, or a broken
+install — this gate removes polish and speculation, not real defects.
+
+Then, for the findings that survive, write the **smallest** recommendation that
+resolves each one — not the most thorough or most general. Try the subtractive
+fix first: delete the unused branch, drop the option, collapse the second code
+path, reject the input instead of handling it, or document the limitation. If
+your recommendation adds a new command / flag / option / service / interface /
+abstraction (`Fix cost: large`), say in one clause why a smaller fix will not
+work; if you cannot, propose the smaller fix instead. Never recommend
+speculative generality — no "make it pluggable," no interface for a second
+implementation that does not exist.
+
+Two precise findings beat eight thorough ones.
 
 ## No quotas — a clean result is a valid result
 
@@ -124,20 +137,17 @@ inflate, or lower the bar on a finding just to avoid an empty report** — a
 manufactured finding fails the Team Lead Test by definition. When you have
 nothing to flag, say so and record what you checked in `## What I checked`.
 
-## Re-review rounds (round 2 and later)
+## Re-review rounds
 
-The orchestrator will tell you when the branch has already been through one or
-more review rounds, and may give you the previous round's findings. On a
-re-review:
+If the orchestrator tells you the branch has already been reviewed once:
 
 - **Raise the bar.** Emit only `critical` and `high` findings. Medium and low
   observations belong in `## What I checked` as a one-line note, not as findings
   the author feels obliged to fix.
-- **Code added in response to a previous review is fair game.** It is *not*
-  settled design. If a prior round's recommendation produced a new option,
-  abstraction, or code path that is not earning its keep, say so — a
-  `subtractive` finding recommending its removal is one of the most valuable
-  things you can return.
+- **Code added in response to an earlier review is fair game.** It is *not*
+  settled design. If a previous recommendation produced an option, abstraction,
+  or code path that is not earning its keep, say so — a `subtractive` finding
+  recommending its removal is one of the most valuable things you can return.
 - **Do not restate findings the author already addressed.** Confirm the fix and
   move on.
 
