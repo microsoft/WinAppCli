@@ -251,7 +251,7 @@ Record the target window (or an element's region) to an H.264 MP4 video. Frames 
 winapp ui record -a myapp --duration-sec 10 --fps 15 --output demo.mp4
 
 # Agent evidence: keep the MP4 and add timestamped JPEG frames plus an index
-winapp ui record -a myapp --frames --fps 10 --output demo.mp4 --json
+winapp ui record -a myapp --frames --duration-sec 10 --fps 10 --output demo.mp4 --json
 
 # Unbounded (default): record until Ctrl+C, downscaled to max 1280px longest edge
 winapp ui record -a myapp --max-edge 1280 --output capture.mp4

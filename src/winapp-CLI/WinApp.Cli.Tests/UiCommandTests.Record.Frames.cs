@@ -272,14 +272,27 @@ public partial class UiCommandTests
 
         var lines = await File.ReadAllLinesAsync(Path.Join(finalDirectory, "frames.ndjson"));
         Assert.AreEqual(3, lines.Length);
-        var firstEntry = JsonSerializer.Deserialize<JsonElement>(lines[0]);
-        var repeatedEntry = JsonSerializer.Deserialize<JsonElement>(lines[1]);
+        var entries = lines
+            .Select(line => JsonSerializer.Deserialize<JsonElement>(line))
+            .ToArray();
+        var firstEntry = entries[0];
+        var repeatedEntry = entries[1];
+        var changedEntry = entries[2];
         Assert.AreEqual(12, firstEntry.GetProperty("elapsedMs").GetInt64());
         Assert.IsTrue(firstEntry.GetProperty("changed").GetBoolean());
         Assert.IsFalse(repeatedEntry.GetProperty("changed").GetBoolean());
         Assert.AreEqual(firstEntry.GetProperty("file").GetString(), repeatedEntry.GetProperty("file").GetString());
+        Assert.IsTrue(changedEntry.GetProperty("changed").GetBoolean());
+        Assert.AreNotEqual(firstEntry.GetProperty("file").GetString(), changedEntry.GetProperty("file").GetString());
         Assert.IsFalse(firstEntry.TryGetProperty("sha256", out _));
         Assert.IsFalse(firstEntry.TryGetProperty("contentRect", out _));
+        foreach (var file in entries.Select(entry => entry.GetProperty("file").GetString()).Distinct())
+        {
+            using var indexedImage = SKBitmap.Decode(Path.Join(finalDirectory, file!.Replace('/', Path.DirectorySeparatorChar)));
+            Assert.IsNotNull(indexedImage);
+            Assert.AreEqual(64, indexedImage.Width);
+            Assert.AreEqual(64, indexedImage.Height);
+        }
 
         var manifest = JsonSerializer.Deserialize<JsonElement>(
             await File.ReadAllTextAsync(Path.Join(finalDirectory, "manifest.json")));
@@ -307,7 +320,7 @@ public partial class UiCommandTests
                 await writer.WriteAsync(pixels, Sample(index, index * 100L, index * 100d), CancellationToken.None);
             }
 
-            var result = await writer.CompleteAsync(Completion());
+            var result = await writer.CompleteAsync(Completion(videoFrameCount: 20));
             Assert.IsTrue(result.Truncated);
             Assert.IsGreaterThan(0, result.Samples);
             Assert.IsLessThan(20, result.Samples);
@@ -322,6 +335,19 @@ public partial class UiCommandTests
                 .Select(path => $"frames/{Path.GetFileName(path)}")
                 .ToHashSet(StringComparer.Ordinal);
             CollectionAssert.AreEquivalent(indexedFiles.ToArray(), publishedFiles.ToArray());
+
+            var manifest = JsonSerializer.Deserialize<JsonElement>(
+                await File.ReadAllTextAsync(Path.Join(finalDirectory, "manifest.json")));
+            Assert.AreEqual("truncated", manifest.GetProperty("status").GetString());
+            Assert.IsTrue(manifest.GetProperty("frames").GetProperty("truncated").GetBoolean());
+            Assert.AreEqual(result.Samples, manifest.GetProperty("timing").GetProperty("sampleCount").GetInt32());
+            Assert.AreEqual(result.Images, manifest.GetProperty("timing").GetProperty("imageCount").GetInt32());
+            var expectedElapsedMs = (result.Samples - 1) * 100L;
+            var expectedAchievedFps = result.Samples * 1000.0 / expectedElapsedMs;
+            Assert.AreEqual(expectedElapsedMs, manifest.GetProperty("timing").GetProperty("elapsedMs").GetInt64());
+            Assert.AreEqual(expectedAchievedFps, manifest.GetProperty("timing").GetProperty("achievedFps").GetDouble(), 0.001);
+            Assert.AreEqual(expectedAchievedFps / 10, manifest.GetProperty("timing").GetProperty("cadenceRatio").GetDouble(), 0.001);
+            Assert.AreEqual(20, manifest.GetProperty("video").GetProperty("frameCount").GetInt32());
         }
         finally
         {
@@ -417,7 +443,7 @@ public partial class UiCommandTests
             MediaTimeMs = mediaTimeMs,
         };
 
-    private static RecordFrameCompletion Completion()
+    private static RecordFrameCompletion Completion(int videoFrameCount = 3)
         => new()
         {
             Status = "complete",
@@ -426,7 +452,7 @@ public partial class UiCommandTests
             AchievedFps = 10,
             CadenceRatio = 1,
             VideoStatus = "complete",
-            VideoFrameCount = 3,
+            VideoFrameCount = videoFrameCount,
             VideoFileSize = 1_024,
         };
 }

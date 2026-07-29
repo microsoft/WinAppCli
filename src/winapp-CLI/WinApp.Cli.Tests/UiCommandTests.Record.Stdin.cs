@@ -267,6 +267,45 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
+    public async Task Record_Frames_RedirectedStdinStopsAndPublishesBundle()
+    {
+        var outputPath = Path.Combine(_tempDirectory.FullName, "frames-redirect.mp4");
+        var command = GetRequiredService<UiRecordCommand>();
+
+        UiRecordCommand.Handler.s_isInputRedirectedOverride = () => true;
+        UiRecordCommand.Handler.s_stdinOverride = new StringReader("stop");
+        try
+        {
+            _fakeUia.RecordResult = new RecordCaptureResult
+            {
+                Frames = 1,
+                Width = 64,
+                Height = 64,
+                Mode = "wgc",
+                StopReason = "cancelled",
+            };
+            _fakeUia.RecordShouldWaitForCancellation = true;
+
+            var exitCode = await ParseAndInvokeWithCaptureAsync(
+                command,
+                ["-a", "TestApp", "--frames", "--duration-sec", "0", "-o", outputPath, "--json"]);
+
+            Assert.AreEqual(0, exitCode);
+            var framesDirectory = Path.Combine(_tempDirectory.FullName, "frames-redirect.frames");
+            Assert.IsTrue(File.Exists(outputPath));
+            Assert.IsTrue(File.Exists(Path.Combine(framesDirectory, "manifest.json")));
+            Assert.IsTrue(File.Exists(Path.Combine(framesDirectory, "frames.ndjson")));
+            StringAssert.Contains(TestAnsiConsole.Output, "\"stopReason\": \"cancelled\"");
+        }
+        finally
+        {
+            UiRecordCommand.Handler.s_isInputRedirectedOverride = null;
+            UiRecordCommand.Handler.s_stdinOverride = null;
+            _fakeUia.RecordShouldWaitForCancellation = false;
+        }
+    }
+
+    [TestMethod]
     public async Task Record_NonZeroDuration_WithRedirectedStdin_NeverReadsStdinAndExitsZero()
     {
         // H1 regression guard (r12): with --duration-sec N (> 0) AND a redirected stdin that

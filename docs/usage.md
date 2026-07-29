@@ -1164,7 +1164,7 @@ winapp ui record -a "My App" --duration-sec 0 --max-edge 1280 -o capture.mp4
 winapp ui record -a "My App" btn-save-1234 -o button.mp4
 
 # Keep an agent-readable timeline alongside the MP4
-winapp ui record -a Calculator --frames --fps 10 -o demo.mp4
+winapp ui record -a Calculator --frames --duration-sec 10 --fps 10 -o demo.mp4
 ```
 
 **Record options:**

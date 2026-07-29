@@ -255,9 +255,12 @@ public partial class RealUiAutomationTests
         Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
             new FakeVideoEncoder(path, width, height)
             {
-                WriteFrameException = new IOException("simulated publication race"),
+                OnComplete = () =>
+                {
+                    File.WriteAllText(output, "winning recording");
+                    throw new IOException("simulated publication race");
+                },
             };
-        await File.WriteAllTextAsync(output, "winning recording");
 
         var exception = await Assert.ThrowsExactlyAsync<RecordPartialOutputException>(
             () => svc.RecordAsync(session, null, new RecordOptions
@@ -464,6 +467,8 @@ public partial class RealUiAutomationTests
 
         public Exception? WriteFrameException { get; init; }
 
+        public Action? OnComplete { get; init; }
+
         public void WriteFrame(ReadOnlySpan<byte> bgra, long sampleTimeHns, long sampleDurationHns)
         {
             if (WriteFrameException is not null)
@@ -479,6 +484,7 @@ public partial class RealUiAutomationTests
         public void Complete()
         {
             Completed = true;
+            OnComplete?.Invoke();
             File.WriteAllBytes(path, [1, 2, 3, 4, 5]);
         }
 

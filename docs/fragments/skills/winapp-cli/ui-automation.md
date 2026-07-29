@@ -108,7 +108,7 @@ captures never buffer in memory. By default records until stopped; use `--durati
 winapp ui record -a myapp --duration-sec 10 --fps 15 --output demo.mp4
 
 # Recommended agent evidence: MP4 plus timestamped JPEGs and an NDJSON index
-winapp ui record -a myapp --frames --fps 10 --output demo.mp4 --json
+winapp ui record -a myapp --frames --duration-sec 10 --fps 10 --output demo.mp4 --json
 
 # Record until Ctrl+C (default — duration 0), downscaled so the longest edge is 1280px
 winapp ui record -a myapp --max-edge 1280 --output capture.mp4
