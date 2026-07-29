@@ -1,494 +1,154 @@
 ---
 name: pr-review
-description: Multi-dimensional review of a PR or feature branch in the microsoft/winappcli repo. Activate when a contributor asks to "review my PR", "review my changes", "vet my branch before pushing", "do a full review", "PR review", "review this feature", or similar. Fans out parallel sub-agents covering security, correctness/edge cases, CLI UX, alternative-solution check, necessity & simplicity, test coverage, docs & samples sync, packaging/release impact, and an independent multi-model cross-check, then validates high/critical findings by building and running the CLI the way a user would. Applies a mandatory gut check that drops findings which are true-but-not-necessary, so the review does not drive scope creep or over-engineering. Reports a short, consolidated finding list to stdout. Does NOT apply fixes unless explicitly asked.
+description: Multi-dimensional review of a PR or feature branch in the microsoft/winappcli repo. Activate when a contributor asks to "review my PR", "review my changes", "vet my branch before pushing", "do a full review", "PR review", "review this feature", or similar. Fans out parallel sub-agents covering security, correctness and tests, CLI UX, alternative solutions, necessity and simplicity, shipping surfaces (docs/samples/packaging), and an independent different-model cross-check, then validates critical/high findings by building and running the CLI the way a user would. Applies a mandatory gut check that drops findings which are true-but-not-necessary, so the review does not drive scope creep. Reports a short finding list to stdout. Does NOT apply fixes unless explicitly asked.
 infer: true
 ---
 
-You are the **PR Review orchestrator** for the `microsoft/winappcli` repo.
-Your job is to give a contributor a thorough, high-signal review of their
-in-progress branch before they push, by fanning out parallel sub-agents,
-validating the high-risk findings against a real build, and consolidating the
-results.
+You are the **PR review orchestrator** for `microsoft/winappcli`. Fan out
+parallel reviewers, run the branch for real, and hand back a short list of things
+that actually matter.
 
-## When to activate
+Do **not** activate for "review this function" or "is this line correct" — those
+are direct questions, not PR scope.
 
-Trigger phrases include:
+## 1. Get the diff
 
-- "review my PR" / "review my changes" / "review my branch"
-- "review my uncommitted changes" / "review my work in progress" /
-  "review before I commit"
-- "review what I've staged" / "review what I'm about to commit"
-- "review my branch including uncommitted" / "review everything"
-- "vet my changes before pushing"
-- "do a full review of this feature"
-- "PR review" / "feature review"
-- "is this ready to merge?"
+Default to the branch: `git --no-pager diff origin/main...HEAD`. If the working
+tree is dirty and the branch has no new commits, review the working tree
+(`git --no-pager diff HEAD`) instead, and include untracked files via
+`git ls-files --others --exclude-standard` — new files in a feature usually live
+there. If both have substance, ask which the user wants. Honor an explicitly
+named scope or base ref over any of this.
 
-Do **not** activate for narrow questions like "review this function" or
-"is this line correct" — those are direct review questions, not PR-scope.
+Fall back through `origin/main` → `main` → `origin/HEAD` for the base; if none
+resolve, stop and ask.
 
-## Workflow
+Capture the file list (`--stat`) and the full unified diff. **0 files** → say so
+and stop. **>50 files** → warn and ask before proceeding.
 
-### 1. Determine the diff scope
+Note whether this is a **re-review**: the user says so ("I addressed the
+findings", "another pass"), or an earlier report is in this conversation.
 
-The skill supports four scopes. Pick one based on the user's phrasing and
-what the working tree looks like.
+## 2. Fan out
 
-| Scope | When to use | What it covers | Diff command |
-|-------|-------------|----------------|--------------|
-| `branch` (default) | "review my PR / branch / feature" | Committed work on this branch vs the merge base with `origin/main` | `git --no-pager diff origin/main...HEAD` |
-| `working` | "review my uncommitted changes", "before I commit", "review what I'm working on" | Working tree + staged changes vs `HEAD` | `git --no-pager diff HEAD` |
-| `staged` | "review what I've staged", "review what I'm about to commit" | Staged-only vs `HEAD` | `git --no-pager diff --cached` |
-| `all` | "review everything", "review my branch including uncommitted" | Committed + working tree + staged vs merge base | `git --no-pager diff origin/main...HEAD` **plus** `git --no-pager diff HEAD` (concatenate, see step 1c) |
+Launch these in **one response** with the `task` tool, mode `sync`. Each prompt
+must be self-contained: role line, the diff, which changed files fall in that
+reviewer's area, then the full text of `dimensions/_shared-contract.md` and
+`dimensions/<name>.md`. On a re-review, add: *"already reviewed once — emit
+critical/high only, and treat code added in response to earlier review comments
+as re-openable, not settled design."*
 
-#### 1a. Pick the scope
+| Reviewer | File |
+|---|---|
+| security | `dimensions/security.md` |
+| correctness & tests | `dimensions/correctness-and-tests.md` |
+| cli-ux | `dimensions/cli-ux.md` |
+| alternative-solution | `dimensions/alternative-solution.md` |
+| ship-surfaces | `dimensions/ship-surfaces.md` |
+| necessity & simplicity — *conditional* | `dimensions/necessity-and-simplicity.md` |
 
-1. **If the user named one explicitly** (e.g., "review my uncommitted changes",
-   "review what I've staged", "review my branch + uncommitted", "review vs
-   `release/2.0`"), use that. An explicit base ref overrides the default
-   `origin/main` for `branch` / `all`.
-2. **Otherwise** infer:
-   - `git status --porcelain` → if **non-empty AND no new commits exist on the
-     branch** (i.e., `git rev-list --count origin/main..HEAD` = 0), use
-     `working`.
-   - `git rev-list --count origin/main..HEAD` > 0 AND working tree clean → use
-     `branch`.
-   - Both have content → **ask the user** with `ask_user`:
-     "You have N committed change(s) on this branch and M uncommitted file(s).
-     Review which? `branch` / `working` / `all`."
+**Necessity is conditional**: run it when the diff adds user-facing surface, adds
+new internal structure (service / interface / abstraction / config knob), **or**
+this is a re-review. Skip it for small fixes, refactors, perf, docs, tests, and
+CI on a first review, and mark it `n/a` in Coverage.
 
-#### 1b. Resolve the base ref (for `branch` / `all`)
+Then, after those return, launch **multi-model** (`dimensions/multi-model.md`)
+with a `model` override selecting the latest model from a different family than
+yourself (GPT / Opus / Gemini). Pass it the **diff and the real changed files**,
+not the consolidated findings — those anchor it into agreement. The specialists'
+critical/high list is optional input it reads only after its own pass.
 
-Try in order, use the first that exists:
+Tell every sub-agent: if a tool call is blocked, keep going with what you have
+and still return findings. If one returns nothing or dies, re-run that one
+hardened; mark it `✗ skipped + reason` only if the retry also fails.
 
-1. User-provided base.
-2. `origin/main`.
-3. `main`.
-4. `origin/HEAD` (remote default branch fallback).
+## 3. Consolidate
 
-If none resolve, abort with a clear message asking the user to specify a base.
+Dedupe (same file, overlapping lines, same root cause — keep the higher severity,
+append the other domain). Assign IDs: `C1`, `H1`, `M1`, `L1`. Sort by severity,
+then path. Merge overlapping additive fixes: if several reviewers each want a new
+guard or helper in the same area, that is one recommendation, not three. You are
+the only one who sees the total.
 
-#### 1c. Capture the diff
+On a re-review, drop medium and low; report their count as one `Deferred polish`
+line.
 
-For all scopes, capture:
-- Scope name (`branch` / `working` / `staged` / `all`).
-- Base ref (for `branch` / `all`) and head ref (`HEAD`, or `WORKTREE` for
-  `working` / `staged`).
-- Commit count: `git --no-pager log --oneline <base>..HEAD` (0 for `working`
-  and `staged`).
-- File list with per-file stats: `git --no-pager diff --stat <range>`.
-- The full unified diff: `git --no-pager diff <range>` (where `<range>` is the
-  scope's diff command from the table above).
-- For `working`, also capture **untracked files** via
-  `git ls-files --others --exclude-standard` and include their full contents
-  as if they were "all-added" diffs — `git diff` does not include untracked
-  files by default, but new files in a feature usually live there.
-- For `all`, run both diff commands and concatenate the outputs with a clear
-  separator banner so sub-agents can tell committed from uncommitted parts.
+## 4. The gut check
 
-### 2. Diff-size guardrail
+**The most important step.** Every reviewer returned things that are
+*defensible* — that is the trap. A list of nine defensible findings reads to the
+author as nine required changes, and the PR grows to satisfy it.
 
-Before fanning out:
+Go through every surviving finding and ask:
 
-- **0 files changed** → Tell the user there is nothing to review and stop.
-  For `working` / `staged`, suggest the other scope as a likely fix
-  ("nothing staged — did you mean `working`?").
-- **>50 files changed** → Print a one-line warning and ask the user whether
-  to proceed, scope down to a subdirectory, or pick specific files. Use
-  `ask_user`. Do not silently proceed.
-
-### 2b. Note whether this is a re-review
-
-Cheap check, no bookkeeping: this is a **re-review** if the user says so ("review
-again", "I addressed the findings", "another pass", "check my fixes") or if an
-earlier pr-review report is visible in this conversation. Otherwise treat it as a
-first review.
-
-If it is a re-review, tell every sub-agent two things: **clamp to critical and
-high**, and **code added in response to earlier review comments is not settled
-design — reopen it freely.** That is the whole mechanism. Do not persist state
-files or compute deltas.
-
-The gut check in step 5b is the primary defense and runs on **every** review,
-because reviews are often one-shot and a "round 2 only" rule would never fire.
-
-### 3. Map likely-impacted areas
-
-Skim file paths and classify which sub-agents are most relevant. Every dimension
-still runs (parallelism is cheap and coverage matters), but include the
-classification in each sub-agent prompt so they know where to focus. Common
-buckets in this repo:
-
-| Path prefix | Likely owner |
-|-------------|--------------|
-| `src/winapp-CLI/WinApp.Cli/Commands/` | CLI UX, correctness, security, necessity-and-simplicity |
-| `src/winapp-CLI/WinApp.Cli/Services/` | correctness, alternative-solution, security, necessity-and-simplicity |
-| `src/winapp-CLI/WinApp.Cli.Tests/` | test-coverage |
-| `src/winapp-npm/` | packaging, CLI UX (npm wrapper) |
-| `src/winapp-NuGet/` | packaging |
-| `docs/`, `README.md`, `samples/` | docs-and-samples |
-| `docs/fragments/skills/`, `.github/plugin/` | docs-and-samples (shipped Copilot plugin) |
-| `scripts/` | packaging |
-| `version.json`, `*.csproj`, `Directory.Build.*` | packaging |
-
-### 4. Fan out parallel sub-agents
-
-Launch the specialist dimension sub-agents (#1–#8) in **the same response**
-using the `task` tool, mode `"sync"`, agent type `general-purpose` (or `explore`
-for read-only dimensions — see per-dimension files). Each prompt must be
-self-contained: include the diff, the base/head refs, the file classification,
-and the contents of the corresponding `dimensions/<name>.md` file as
-instructions.
-
-**#5 (necessity & simplicity) is conditional.** Launch it when **any** of these
-holds: the diff adds new user-facing surface (a new command / verb / subcommand,
-a new public flag / option / API, or a materially new capability); the diff adds
-new internal structure (a new service, interface, abstraction, or config knob,
-even with no user-facing surface); **or this is a re-review** — on a re-review it
-is **always** launched, because auditing complexity that earlier review comments
-caused is its job and nothing else does it. Skip it only for small bug fixes,
-mechanical refactors, perf, docs, tests, and dependency / CI / packaging changes
-on a first review, and mark it `n/a (no new surface)` in the Coverage block.
-
-The 9 dimensions and their fragment files — **8 always-on + 1 conditional**
-(necessity & simplicity):
-
-| # | Dimension | Fragment | Default agent |
-|---|-----------|----------|---------------|
-| 1 | security | `dimensions/security.md` | general-purpose |
-| 2 | correctness & edge cases (incl. regression) | `dimensions/correctness.md` | general-purpose |
-| 3 | CLI UX & usability | `dimensions/cli-ux.md` | general-purpose |
-| 4 | alternative-solution check | `dimensions/alternative-solution.md` | general-purpose |
-| 5 | necessity & simplicity — *conditional; always on re-reviews* | `dimensions/necessity-and-simplicity.md` | general-purpose |
-| 6 | test coverage | `dimensions/test-coverage.md` | general-purpose |
-| 7 | docs & samples sync | `dimensions/docs-and-samples.md` | explore |
-| 8 | packaging & release impact | `dimensions/packaging.md` | general-purpose |
-| 9 | multi-model cross-check | `dimensions/multi-model.md` | general-purpose, with `model` override |
-
-For #9 (multi-model), wait until #1–#8 finish first. Pass it the **raw diff plus
-the actual changed code files** — **not** the consolidated findings, which anchor
-it into a rubber-stamp — and require an **independent pass** first; the
-specialists' critical/high list is optional reconciliation input it reads only
-afterward. Require it to (a) use the **latest model from a different family**
-than the orchestrator, chosen among the three co-equal families — GPT, Opus, and
-Gemini (if you are Opus, use the latest GPT or Gemini; if GPT, use the latest
-Opus or Gemini; if Gemini, use the latest Opus or GPT) — and (b) record which
-model family actually ran. For high-risk PRs, run it across all three families
-(latest Opus, GPT, and Gemini), each independent.
-
-**Sub-agent fault-tolerance.** Tell every sub-agent that if a tool call is
-blocked by a policy hook or otherwise denied, it must **continue with the tools
-it has and still return findings**, never abort silently. After the fan-out, if
-a sub-agent returned nothing, errored, or died (e.g. a "Policy hook failed"
-abort), **detect it and re-run that one dimension once, hardened** (drop the
-blocked tool, keep the analysis). Mark a dimension `✗ skipped + reason` only if
-the retry also fails.
-
-### 5. Consolidate
-
-Collect all findings. Then:
-
-1. **Dedupe.** Two findings are duplicates if they reference the same file,
-   overlapping line range, and substantially the same root cause. Keep the
-   higher-severity / higher-confidence copy and append the other domain to its
-   `Domain:` field (comma-separated).
-2. **Assign IDs.** `C1, C2, ...` for critical, `H1, H2, ...` for high,
-   `M1, ...` for medium, `L1, ...` for low.
-3. **Sort.** critical → high → medium → low; within severity, sort by file path.
-4. **Reconcile the multi-model pass.** For each critical/high finding, compare
-   it against the independent multi-model output and mark it `confirmed`,
-   `disputed`, `downgrade`, `upgrade`, or `not reviewed`. Record which model
-   family ran.
-5. **Seed validation status.** Every finding enters this step as
-   `static-only (needs runtime confirmation)`. The Validate phase (next) is what
-   promotes critical/high findings to `validated` or drops them.
-6. **Merge overlapping additive fixes.** If several findings each want a new
-   guard, helper, or option in the same area, collapse them into one
-   recommendation. Nine sub-agents each proposing one reasonable addition is how
-   a PR gets over-engineered — individually rational, collectively maximalist.
-   You are the only one who sees the total.
-7. **Clamp on re-review.** If step 2b said this is a re-review, drop `medium` and
-   `low` findings from the Findings and Details sections and report their count
-   on one `Deferred polish` line. Do not enumerate them.
-
-### 5b. The gut check (mandatory, every review)
-
-**This is the most important step in the skill.** Run it on every review — first
-review or re-review, one-shot or looping.
-
-Sub-agents are specialists, and a specialist asked to find problems will always
-find some. Every finding they return is *defensible*. That is exactly the
-problem: a list of nine defensible findings reads to the author as a list of
-nine required changes, and the PR grows to satisfy it. Real reviewers do not do
-this. They mentally discard most of what they notice and comment on a handful of
-things that actually matter.
-
-So before the report, go through **every surviving finding** and ask the one
-question no sub-agent asked:
-
-> **Would a busy maintainer, looking at a PR that is otherwise ready to ship,
+> Would a busy maintainer, looking at a PR that is otherwise ready to ship,
 > genuinely want this changed — or is this merely a true statement about the
-> code?**
+> code?
 
-Delete the finding if any of these is true:
+Delete it if the code works and it describes a tidier alternative; if the fix
+costs more complexity than the problem costs users; if it guards against
+something that cannot happen here; if it is a "for completeness" item with no
+user-visible effect; or if you cannot finish the sentence *"a user doing X will
+hit Y."*
 
-- **It is "possible" rather than "necessary."** The code works; the finding
-  describes a tidier alternative. Not a finding.
-- **The fix costs more complexity than the problem costs users.** A new option,
-  abstraction, or code path to handle a case no one has hit is a net loss. Say
-  YAGNI and move on.
-- **It defends against something that cannot happen here.** Input the CLI
-  controls, a state the caller already guarantees, a config the repo does not
-  support.
-- **It is a "for completeness" or "for consistency" item** with no user-visible
-  consequence — the symmetric flag nobody asked for, the parallel test for a
-  case that cannot regress, the extra doc section restating the help text.
-- **You cannot name who is hurt if it ships unfixed.** If you cannot finish the
-  sentence "a user doing X will hit Y," it is not a finding.
+**Never cut** security, data loss, crashes, wrong output, or broken installs —
+this removes polish and speculation, not defects.
 
-**Never cut these, regardless of the above:** security findings, data loss or
-corruption, crashes, wrong output, and broken installs or packaging. The gut
-check removes *polish and speculation*, not real defects. If in doubt about a
-genuine bug, keep it — the Validate phase (next) will confirm or drop it with
-runtime evidence, and severity does the rest.
+**If more than about 6 findings survive on a normal PR, go again.** Cutting a
+real-but-minor finding is cheap; padding the list is expensive, because that is
+how simple things get complicated. Report the count you kept.
 
-Then apply the ceiling: **if more than about 6 findings survive on a normal PR,
-you have not been strict enough.** Go again and keep the ones that would make a
-maintainer say "good catch." Cutting a real-but-minor finding is a cheap mistake;
-padding the list is an expensive one, because it is how simple things get
-complicated.
+## 5. Validate for real
 
-Record the count you dropped in `Coverage notes` as one line, e.g.
-`gut check: dropped 11 of 17 findings as not-worth-the-complexity` — that keeps
-the pass honest and visible without reintroducing the list.
+Static review misses what only shows up at runtime. Confirm or drop every
+critical/high finding with real evidence, and record what you could not do.
 
-A short report is a good report. Zero findings is a great one.
+1. **Build** (`scripts/build-cli.ps1` or a targeted `dotnet build`). A build
+   failure is itself critical.
+2. **Run it as a user would, not dev mode.** Default: `dotnet publish` the CLI
+   and invoke the binary directly. `dotnet run` from a Debug worktree hides
+   cold-cache and first-run bugs. Escalate only when the change needs it — npm
+   wrapper changes validate via `npm pack` + global install; MSIX / identity
+   changes validate the built MSIX. Prefer a cold cache.
+3. **Exercise the changed commands** against a throwaway app in a temp dir. For
+   UI-automation changes, drive a real window — test fakes mask real behavior.
+4. **Try the security red-team attempt** the security reviewer described.
+5. Mark each finding `validated` (reproduced — add the runtime evidence),
+   **drop** it (refuted — say why in Coverage notes), or leave it `static-only`
+   and state exactly what you'd need (cert, hardware, admin, sample app).
 
-### 6. Validate findings for real
+Never mark something `validated` without real evidence.
 
-Static review misses what only shows up at runtime (empty output files,
-physical- vs logical-pixel bugs, dead gates that never fired, cold-cache version
-drift). Before reporting, **try to confirm or drop every critical/high finding
-with runtime evidence.** This phase deliberately replaces the old "no build/test
-execution" rule.
+## 6. Report
 
-Do as much of this as the environment allows, and **record what you could not
-do** rather than silently skipping it:
-
-1. **Build the branch** (`scripts/build-cli.ps1`, or a targeted `dotnet build`).
-   A build failure is itself a critical finding.
-2. **Run the CLI as a *user* would — not dev mode.** Do **not** validate via
-   `dotnet run` or a Debug worktree; that hides cold-cache and first-run bugs
-   real users hit. **Default:** build the **published single-file binary**
-   (`dotnet publish` the CLI) and invoke it directly on a clean PATH — that is
-   enough for most changes. **Escalate only when the change/scenario requires
-   it:** if the diff touches the **npm wrapper** (`src/winapp-npm`), validate via
-   `npm pack` + `npm i -g` the tarball; if it touches **MSIX packaging / install
-   / identity**, validate the built **MSIX** or installed global tool. Prefer a
-   **fresh / cold cache** so first-run download and version-drift bugs surface.
-3. **Scaffold a throwaway app** in a temp dir to exercise the changed commands
-   against something real (`winapp init`, package, sign, run). For WinUI /
-   desktop apps you may delegate the scaffold + build to the `winui-dev` agent.
-4. **Exercise each changed command** end-to-end. For UI-automation changes,
-   actually drive a window and read back real events/values — do not trust test
-   fakes or slug-format selectors, which mask real behavior.
-5. **Red-team the top security finding** using the concrete attempt the security
-   sub-agent proposed (input-injection / process-invocation / signing).
-6. **Resolve each critical/high finding:**
-   - **validated** — you reproduced the problem (or confirmed a fix): set
-     `Validation: validated` and add the runtime evidence to its Evidence.
-   - **dropped** — the runtime check refutes it: remove it and say why in
-     `Coverage notes`.
-   - **static-only** — you could not run it (missing creds, hardware, admin,
-     sample app): keep `Validation: static-only (needs runtime confirmation)`
-     and state exactly what was needed. This feeds the opt-in test-setup handoff.
-
-Never mark a finding `validated` without real evidence — false confidence is
-worse than an honest "static-only, needs runtime confirmation."
-
-### 7. Report to stdout
-
-Print exactly the format below. **Do not** save to a file or post a PR comment
-unless the user explicitly asks (see Opt-in follow-through). **Do not** apply
-fixes by default — reporting is where the default run ends.
-
-The header line varies by scope:
-
-- `branch` → `PR Review — <head> vs <base>  (<N> commits, <M> files, +<add>/-<del> lines)`
-- `working` → `PR Review — uncommitted changes vs HEAD  (<M> files, +<add>/-<del> lines)`
-- `staged` → `PR Review — staged changes vs HEAD  (<M> files, +<add>/-<del> lines)`
-- `all` → `PR Review — <head> + uncommitted vs <base>  (<N> commits + <M_uncommitted> uncommitted files, <M_total> files total, +<add>/-<del> lines)`
+Print this to stdout. No file output, no PR comment, and **no fixes** unless
+explicitly asked.
 
 ```
-<header>
+PR Review — <head> vs <base>  (<N> commits, <M> files, +<add>/-<del>)
 
 Summary
-  Critical: <n>   High: <n>   Medium: <n>   Low: <n>
-  Gut check: kept <n> of <n> findings
+  Critical: 0   High: 2   Medium: 1   Low: 0
+  Gut check: kept 3 of 17
 
 Coverage
-  security              <✓ clean | ⚠ N findings | ✗ skipped + reason>
-  correctness           ...
-  cli-ux                ...
-  alternative-solution  ...
-  necessity-simplicity  <n/a (no new surface) | ✓ clean | ⚠ N findings>
-  test-coverage         ...
-  docs-and-samples      ...
-  packaging             ...
-  multi-model           <✓ X/Y critical+high confirmed  ·  models: opus,gpt>
-  regression            <✓ no change to existing flows | ⚠ N regressions>
-  validation            <✓ K/L critical+high validated at runtime | ⚠ static-only: ...>
-
-Recommended action
-  Must fix before merge  <C*/H* ids, or "none — this PR is mergeable as-is">
-  Safe to decline        <M*/L* ids the author can close as won't-fix, with why>
-
-Findings
-  C1  <file>:<lines>   <domain>      <one-line>
-  C2  ...
-  H1  ...
-  ...
-
-Details
-## C1  <file>:<lines>
-- Severity: critical
-- Confidence: high
-- Validation: validated | static-only (needs runtime confirmation)
-- Domain: security
-- Multi-model: confirmed
-- Fix cost: small
-- Finding: <one-line>
-- Evidence: <code refs and quoted lines; runtime evidence if validated>
-- Recommendation: <smallest concrete next step>
-
-## C2 ...
-```
-
-**The `Recommended action` block is mandatory and is the most important part of
-the report.** It is the stop signal. Rules for it:
-
-- `Must fix before merge` lists critical and high only. If there are none, print
-  `none — this PR is mergeable as-is` and mean it.
-- `Safe to decline` must be **non-empty whenever medium/low findings exist**.
-  Naming which findings the author may reasonably close is what stops a review
-  list from being read as a to-do list. Give a one-clause reason each.
-- On a re-review, add a `Deferred polish  <n> items` line instead of listing
-  medium/low findings.
-
-If a sub-agent returned zero findings, list its dimension as `✓ clean` in the
-Coverage block and include its short "what I checked" note in a final
-`Coverage notes` section so the user can see scope, not just verdict.
-
-## Rules the orchestrator must enforce
-
-- **Parallelism in one turn.** Fan out the specialists (#1–#8, skipping #5 on
-  non-feature PRs) in a single response; run #9 (multi-model) after they return.
-- **Validate high/critical for real.** Build and run the branch to confirm or
-  drop critical/high findings (see the Validate phase). This **replaces** the
-  old "no build/test execution" rule. Still flag staleness you can see
-  statically (e.g. `cli-schema.json` not regenerated, npm `winapp-commands.ts`
-  out of sync). Mark anything you could not run
-  `static-only (needs runtime confirmation)` — never fake a runtime result.
-- **No fixes by default.** Do not edit code unless the user explicitly asks for
-  follow-through (see Opt-in follow-through). Reporting is the default endpoint.
-- **Stdout by default.** No file output and no posted PR comment unless the user
-  explicitly asks.
-- **Fault-tolerant fan-out.** A sub-agent whose tool call is blocked must keep
-  going and still return findings; the orchestrator must detect a dead or
-  aborted sub-agent and re-run that one dimension once, hardened.
-- **Signal-to-noise.** Reject sub-agent findings that are pure style nits,
-  formatting, or things the compiler / analyzers / linter already catch. The
-  Team Lead Test (see any dimension file) is mandatory.
-- **Prefer subtractive fixes.** Every recommendation you keep must be the
-  smallest fix that resolves the finding; a recommendation that adds a new
-  command / flag / option / service / abstraction must justify why a smaller one
-  won't do. Rewrite or drop ones that fail. A review whose net effect is "add
-  nine things" is a failed review even if all nine are individually reasonable.
-- **Run the gut check on every review.** Step 5b is mandatory and unconditional.
-  A short report with 3 real findings is better than a thorough one with 12.
-  Recommending *no changes* is a valid, useful outcome.
-- **Cite evidence.** Every kept finding must reference a specific file and line
-  range visible in the diff (plus runtime evidence once validated).
-
-## Sub-agent prompt template
-
-When invoking each dimension sub-agent via the `task` tool, build the prompt
-from these blocks (in order):
-
-1. **Role line.** "You are the `<dimension>` sub-agent for the winappcli PR
-   review skill."
-2. **Diff context.** Base ref, head ref, file list with line counts, and the
-   full unified diff.
-3. **Area classification.** Which files in the diff fall under this
-   dimension's primary focus.
-4. **Shared contract.** Inline the contents of
-   `.github/skills/pr-review/dimensions/_shared-contract.md`.
-5. **Re-review note** (only if step 2b said so). "This branch has already been
-   reviewed — emit critical/high only, and treat code added in response to
-   earlier review comments as re-openable, not settled design."
-6. **Dimension instructions.** Inline the contents of
-   `.github/skills/pr-review/dimensions/<name>.md`.
-7. **Closing instruction.** "Return only the markdown specified by the shared
-   contract. No preamble, no apologies, no narration."
-
-For the multi-model sub-agent, pass the **raw diff and the actual changed code
-files** (not the consolidated findings) so it does a genuinely independent pass,
-set the `model` parameter on the `task` call to a different model family than
-yourself, and require it to record which family ran. You may pass the
-specialists' critical/high findings as *optional* reconciliation input it reads
-only after its own pass.
-
-## Example invocation pattern
-
-```
-1. git diff --stat origin/main...HEAD          → 12 files, +340/-87
-2. git diff origin/main...HEAD                 → captured for sub-agents
-3. Re-review? (user phrasing / prior report in conversation)
-4. Map files to areas                          → mostly Services + Commands + 1 doc
-5. Fan out 7–8 task() calls in parallel        → #5 necessity always on re-reviews; retry any that died
-6. Fan out task() #9 (diff+code, model override) → wait, record model family
-7. Dedupe, sort, ID, reconcile multi-model, seed validation, merge overlapping fixes
-8. GUT CHECK (5b)                              → drop everything that is true-but-not-necessary; aim ≤6
-9. Validate: build + run the published single-file binary (npm/MSIX only if the change needs it) + run changed cmds → confirm/drop crit+high
-10. Print stdout report incl. Recommended action
-```
-
-## Example consolidated stdout (feature PR)
-
-```
-PR Review — feat/sparse-trustedlaunch vs origin/main  (4 commits, 9 files, +312/-58)
-
-Summary
-  Critical: 0   High: 2   Medium: 4   Low: 1
-  Gut check: kept 7 of 19 findings
-
-Coverage
-  security              ⚠ 1 finding
+  security              ✓ clean
   correctness           ⚠ 1 finding
-  cli-ux                ⚠ 1 finding
+  cli-ux                ✓ clean
   alternative-solution  ✓ clean
-  necessity-simplicity  ⚠ 1 finding
-  test-coverage         ⚠ 1 finding
-  docs-and-samples      ⚠ 2 findings
-  packaging             ✓ clean
-  multi-model           ✓ 2/2 high confirmed  ·  models: gpt
-  regression            ✓ no change to existing flows
-  validation            ⚠ 1/2 high validated at runtime; H2 static-only (no signing cert)
+  ship-surfaces         ⚠ 1 finding
+  necessity-simplicity  n/a (no new surface)
+  multi-model           ✓ 2/2 high confirmed  ·  gemini
+  validation            ⚠ 1/2 high validated; H2 static-only (no signing cert)
 
 Recommended action
   Must fix before merge  H1, H2
-  Safe to decline        M2 (a required flag is fine for a v1); M3 (the separate
-                         verb is defensible if you keep the flag set small);
-                         L1 (cosmetic ordering)
+  Safe to decline        M1 — a required flag is fine for a v1
 
 Findings
-  H1  src/winapp-CLI/.../SparsePackageService.cs:142-160   security        Process.Start with manifest-derived path
-  H2  src/winapp-CLI/.../Commands/CreateExternalCatalogCommand.cs:34-49  test-coverage   New command has no unit tests
-  M1  src/winapp-CLI/.../SparsePackageService.cs:88-95     correctness     Manifest auto-detect skips Package.appxmanifest
-  M2  src/winapp-CLI/.../Commands/CreateExternalCatalogCommand.cs:18-25  cli-ux          --catalog-name has no default; breaks scripted use
-  M3  src/winapp-CLI/.../Commands/CreateExternalCatalogCommand.cs:1-60   necessity-simplicity  New top-level verb overlaps `package`; could be a `--external-catalog` flag
-  M4  docs/usage.md (missing)                               docs-and-samples  New command not documented
-  L1  .github/plugin/agents/winapp.agent.md:189            docs-and-samples  Command list out of order
+  H1  src/.../SparsePackageService.cs:142-160   security   Process.Start with manifest-derived path
+  H2  src/.../CreateExternalCatalogCommand.cs:34-49  correctness  New command has no tests
+  M1  src/.../CreateExternalCatalogCommand.cs:18-25  cli-ux  --catalog-name has no default
 
 Details
 ## H1  src/winapp-CLI/WinApp.Cli/Services/SparsePackageService.cs:142-160
@@ -497,153 +157,40 @@ Details
 - Validation: validated
 - Domain: security
 - Multi-model: confirmed
-- Fix cost: small
-- Finding: Process.Start invokes makeappx.exe with a path read from the input manifest without validation.
-- Evidence: Line 148 builds args via $"makeappx.exe pack /d {manifestPath} ..." where manifestPath comes from XElement.Attribute("Source").Value at line 131. Validate-phase red-team on the npm-installed CLI (cold cache): a manifest with Source='a b" /p x' made the extra /p flag reach makeappx.
-- Recommendation: Validate manifestPath is a rooted, existing file path under the project root, and pass it via ProcessStartInfo.ArgumentList rather than concatenating into Arguments.
-
-## H2  src/winapp-CLI/WinApp.Cli/Commands/CreateExternalCatalogCommand.cs:34-49
-- Severity: high
-- Confidence: high
-- Validation: static-only (needs runtime confirmation)
-- Domain: test-coverage
-- Multi-model: confirmed
-- Fix cost: medium
-- Finding: New create-external-catalog command has no unit tests.
-- Evidence: Command added at lines 34-49; no matching test in WinApp.Cli.Tests. Could not exercise end-to-end — needs a signing cert to run against a scaffolded package (see Test-setup handoff).
-- Recommendation: Add a happy-path + error-path unit test; supply a dev cert to enable a runtime smoke test.
+- Finding: makeappx.exe is invoked with a path read from the input manifest without validation.
+- Evidence: Line 148 builds args via string interpolation from XElement.Attribute("Source").Value (line 131). Red-teamed on the published binary: a manifest with Source='a b" /p x' made the extra /p flag reach makeappx.
+- Recommendation: Pass arguments via ProcessStartInfo.ArgumentList instead of concatenating.
 
 Coverage notes
-  gut check: dropped 12 of 19 findings as true-but-not-necessary (mostly
-    defensive guards for inputs the CLI controls, and "for consistency" tests).
-  alternative-solution: Inspected new sparse-package code paths against
-    AppxManifestDocument and ManifestHelper — uses both correctly.
-  packaging: Inspected version.json, npm wrapper, NuGet targets — no impact.
+  gut check: dropped 14 of 17 as true-but-not-necessary — mostly defensive
+    guards for input the CLI controls.
+  ship-surfaces: checked version.json, npm wrapper, NuGet targets — no impact.
 ```
 
-## Example consolidated stdout (non-feature PR — bug fix)
+`Recommended action` is the stop signal and is mandatory. `Must fix before merge`
+is critical/high only — if empty, print `none — mergeable as-is` and mean it.
+`Safe to decline` must be non-empty whenever medium/low findings exist; naming
+what the author may reasonably close is what stops the list being read as a
+to-do list.
 
-A bug fix / refactor adds no new command, flag, or capability, so the
-orchestrator **skips** necessity & simplicity and marks it `n/a`:
+Zero findings is a great result. Recommending no changes is a valid outcome.
 
-```
-PR Review — fix/stream-empty-file vs origin/main  (2 commits, 3 files, +41/-12)
+## If asked to fix
 
-Summary
-  Critical: 1   High: 0   Medium: 1   Low: 0
-  Gut check: kept 2 of 6 findings
+Fix **critical and high only**, then stop and ask before touching medium/low —
+mechanically applying every finding is exactly how a review loop over-engineers a
+PR. Apply the smallest version of each fix; if a finding offered a subtractive
+option, take it. Never push fixes onto the branch under review — use a new branch
+and a separate PR.
 
-Coverage
-  security              ✓ clean
-  correctness           ⚠ 1 finding
-  cli-ux                ✓ clean
-  alternative-solution  ✓ clean
-  necessity-simplicity  n/a (no new surface)
-  test-coverage         ⚠ 1 finding
-  docs-and-samples      ✓ clean
-  packaging             ✓ clean
-  multi-model           ✓ 1/1 critical confirmed  ·  models: gemini
-  regression            ✓ fixes a regression; no new behavior change
-  validation            ✓ 1/1 critical validated at runtime
+If asked to post the review as a PR comment, open with
+`> 🤖 AI-generated review (winappcli pr-review skill) — verify before acting.`
+Never post silently, never drop the banner.
 
-Recommended action
-  Must fix before merge  C1 (already fixed in the diff — keep it)
-  Safe to decline        M1 if you'd rather not grow the test file; the fix is
-                         self-evident from the diff
+## Maintaining this skill
 
-Findings
-  C1  src/winapp-CLI/.../StreamService.cs:77-84   correctness    Watch writes an empty file when the source never flushes
-  M1  src/winapp-CLI/.../StreamService.cs:77-84   test-coverage  No regression test pins the non-empty-output fix
-
-Details
-## C1  src/winapp-CLI/WinApp.Cli/Services/StreamService.cs:77-84
-- Severity: critical
-- Confidence: high
-- Validation: validated
-- Domain: correctness
-- Multi-model: confirmed
-- Fix cost: small
-- Finding: On a cold cache the streaming watch still closes the output file before the first flush, producing a 0-byte file.
-- Evidence: Reproduced on the npm-installed CLI (cold cache): `winapp ... --watch` left out.log empty until the fix at line 80 moved the flush ahead of Dispose.
-- Recommendation: Keep the fix; add the regression test from M1 so the empty-file case can't silently return.
-```
-
-## Example consolidated stdout (re-review)
-
-This is the shape that guards against review-driven over-engineering: the gut
-check cut most of what the sub-agents returned, medium/low collapsed to one
-`Deferred polish` line, and the single surviving finding proposes *removing*
-code that earlier review comments caused.
-
-```
-PR Review — feat/ui-recording vs origin/main  (11 commits, 18 files, +1,240/-96)
-
-Summary
-  Critical: 0   High: 1   Medium: — (deferred)   Low: — (deferred)
-  Gut check: kept 1 of 14 findings
-
-Coverage
-  security              ✓ clean
-  correctness           ✓ clean
-  cli-ux                ✓ clean
-  alternative-solution  ✓ clean
-  necessity-simplicity  ⚠ 1 finding
-  test-coverage         ✓ clean
-  docs-and-samples      ✓ clean
-  packaging             ✓ clean
-  multi-model           ✓ 1/1 high confirmed  ·  models: gemini
-  regression            ✓ no change to existing flows
-  validation            ✓ 1/1 high validated at runtime
-  deferred polish       5 items
-
-Recommended action
-  Must fix before merge  none — H1 is a proposal to remove code, not a blocker
-  Safe to decline        all 5 deferred items; they are polish, not defects.
-                         This PR is done — ship it after deciding on H1.
-
-Findings
-  H1  src/winapp-CLI/.../Services/RecordingExportService.cs:1-120  necessity-simplicity  Export-format indirection added by an earlier review has one caller; cut it and 3 of the 5 flags
-
-Details
-## H1  src/winapp-CLI/WinApp.Cli/Services/RecordingExportService.cs:1-120
-- Severity: high
-- Confidence: high
-- Validation: validated
-- Domain: necessity-and-simplicity
-- Multi-model: confirmed
-- Fix cost: subtractive
-- Finding: The IRecordingExporter abstraction and --format/--compress/--split flags were added in response to earlier review comments, not to a user request; only the JSONL path is ever used.
-- Evidence: IRecordingExporter (lines 1-40) has a single implementation, JsonlExporter, resolved unconditionally at line 88. Runtime check: `winapp ui record --format=csv` produces a file no other winapp command can read. No sample or doc uses a non-default --format.
-- Recommendation: Delete IRecordingExporter and inline the JSONL writer; drop --format, --compress, and --split. Removes ~180 lines and 3 flags you would otherwise support forever. Re-add a format switch when a second consumer actually exists.
-```
-
-## Opt-in follow-through
-
-Default behavior is unchanged: **stdout only, no fixes, no posting.** Only when
-the user explicitly asks, offer these follow-ups:
-
-- **Post an AI-labelled PR review comment.** On request, post the consolidated
-  findings as a PR comment that **opens with a clear banner**, e.g.
-  `> 🤖 AI-generated review (winappcli pr-review skill) — verify before acting.`
-  Never post silently and never drop the banner.
-- **Emit a test-setup / prerequisites handoff.** Turn every `static-only`
-  finding into a checklist of what a human needs to validate it for real —
-  signing certs, cloud / Azure credentials, specific hardware, a sample app,
-  admin rights. This is the honest handoff for anything the Validate phase could
-  not reach ("here's what I'd need to test it for real").
-- **Open a follow-up fix PR — only on explicit request.** If (and only if) the
-  user asks you to fix the findings, make the changes on a **new** branch and
-  open a separate PR; never push fixes onto the branch under review.
-
-**When the user asks you to "fix the findings", fix critical and high only.**
-Then stop and ask before touching medium/low. Mechanically applying every
-finding is precisely how a review loop over-engineers a PR — the severity
-ladder exists so that not everything gets fixed. When you do apply a fix, apply
-the smallest version of it; if the finding offered a subtractive option, take it.
-
-## Output discipline
-
-The final stdout report is the primary user-visible output — and, unless the
-user opted into follow-through, the *only* one. Do not narrate the process, do
-not summarize what each sub-agent did, do not apologize for noise. The Coverage
-table already conveys what ran.
+A dimension file contains **only what a competent reviewer would not already know
+about this repo.** If a line would be true of any C# CLI repo, delete it —
+generic advice dilutes the repo-specific knowledge that makes this skill worth
+running. Say each thing once: the shared contract owns the bar and the severity
+scale, so dimension files must not restate them.
