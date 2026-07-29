@@ -188,6 +188,8 @@ internal class FakeUiAutomationService : IUiAutomationService
 
     public Exception? RecordException { get; set; }
 
+    public Exception? RecordExceptionAfterStarted { get; set; }
+
     public bool RecordShouldWaitForCancellation { get; set; }
 
     public bool? RecordingStartedFrameArtifactsActiveOverride { get; set; }
@@ -226,6 +228,10 @@ internal class FakeUiAutomationService : IUiAutomationService
         onRecordingStarted?.Invoke(
             RecordingStartedFrameArtifactsActiveOverride
             ?? (options.FramesDirectory is not null));
+        if (RecordExceptionAfterStarted is not null)
+        {
+            throw RecordExceptionAfterStarted;
+        }
         if (RecordShouldWaitForCancellation)
         {
             try

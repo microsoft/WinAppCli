@@ -191,6 +191,34 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
+    public async Task Record_PartialOutputAfterStarted_EmitsJsonLines()
+    {
+        var videoPath = Path.Join(_tempDirectory.FullName, "preserved-after-start.mp4");
+        _fakeUia.RecordExceptionAfterStarted = new RecordPartialOutputException(
+            "Frame output failed.",
+            videoPath,
+            framesDirectory: null,
+            "Retry with --frames and a new output path.",
+            new IOException("disk full"));
+        var command = GetRequiredService<UiRecordCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command,
+            ["-a", "TestApp", "--duration-sec", "1", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        var lines = ConsoleStdErr.ToString()
+            .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Where(line => line.StartsWith('{'))
+            .ToArray();
+        Assert.HasCount(2, lines);
+        var started = JsonSerializer.Deserialize<JsonElement>(lines[0]);
+        var error = JsonSerializer.Deserialize<JsonElement>(lines[1]);
+        Assert.AreEqual("recording-started", started.GetProperty("event").GetString());
+        Assert.AreEqual("partial_output", error.GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [TestMethod]
     public async Task Record_FrameOutputFailed_EmitsStableRecoveryEnvelope()
     {
         _fakeUia.RecordException = new RecordFrameOutputException(

@@ -281,7 +281,7 @@ demo.frames/
 
 `manifest.json` records the request, timing, MP4 status, image dimensions, and status (`complete`, `partial`, or `truncated`). Truncated timing covers the retained prefix, while `video` describes the complete MP4.
 
-Existing output paths are never replaced. If MP4 finalization fails, preserved frames are published under `<output-name>.frames.partial-*`. Frame artifacts contain unencrypted screen content; handle them like screenshots or video.
+With `--frames`, existing MP4 and frame paths are not replaced. If MP4 finalization fails, preserved frames are published under `<output-name>.frames.partial-*`. Frame artifacts contain unencrypted screen content; handle them like screenshots or video.
 
 **Capture modes** (reported in the JSON `mode` field):
 - `wgc` — Windows Graphics Capture (default; works while the window is occluded).
@@ -290,13 +290,13 @@ Existing output paths are never replaced. If MP4 finalization fails, preserved f
 
 **JSON output (`--json`):**
 - **stdout:** Final recording result, including cadence, stop reason, optional `frameArtifacts`, and warnings.
-- **stderr:** A `recording-started` event after the first frame. Frame paths are included only when frame output is active.
+- **stderr:** One JSON object per line: a `recording-started` event after the first frame, followed by an error if recording later fails. Frame paths are included only when frame output is active.
 
 **Error codes:**
 - `element_not_found` — The selector did not match.
 - `ambiguous_selector` — The selector matched multiple elements; use a suggested slug.
 - `invalid_arguments` — An option value is invalid.
-- `output_exists` — The MP4 or frame directory already exists.
+- `output_exists` — With `--frames`, the MP4 or frame directory already exists.
 - `frame_output_failed` — Neither artifact could be preserved after frame output failed.
 - `partial_output` — Only one artifact completed; inspect `partialOutput` and `recoveryHint`.
 

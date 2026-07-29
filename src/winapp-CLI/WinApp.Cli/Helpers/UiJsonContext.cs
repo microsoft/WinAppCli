@@ -58,6 +58,14 @@ namespace WinApp.Cli.Helpers;
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 internal partial class UiJsonContext : JsonSerializerContext;
 
+[JsonSerializable(typeof(UiRecordStartedEvent))]
+[JsonSerializable(typeof(UiErrorResult))]
+[JsonSourceGenerationOptions(
+    WriteIndented = false,
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+internal partial class UiJsonLineContext : JsonSerializerContext;
+
 // JSON output models for --json mode
 
 internal sealed class UiStatusResult

@@ -217,7 +217,7 @@ internal class UiRecordCommand : Command, IShortDescription
                             FramesIndex = frameArtifactsActive ? Path.Join(framesDirectory!, "frames.ndjson") : null,
                         };
                         parseResult.InvocationConfiguration.Error.WriteLine(
-                            JsonSerializer.Serialize(startedEvent, UiJsonContext.Default.UiRecordStartedEvent));
+                            JsonSerializer.Serialize(startedEvent, UiJsonLineContext.Default.UiRecordStartedEvent));
                     }
                 }
 

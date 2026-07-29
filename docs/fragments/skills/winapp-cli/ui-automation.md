@@ -116,10 +116,10 @@ winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups
 ```
 - Default `--duration-sec 0` records until Ctrl+C, a newline, or EOF on redirected stdin.
 - `--frames` writes `<output-name>.frames` with a manifest, NDJSON index, and changed JPEGs. It supports 1-30 fps and `--max-edge` 64-4096 (default 1280), with a 1 GiB cap. Use `elapsedMs` to bound transitions.
-- Output paths are never replaced. On partial failure, use the reported preserved path and `recoveryHint`.
+- With `--frames`, existing MP4 and frame paths are not replaced. On partial failure, use the reported preserved path and `recoveryHint`.
 - `--capture-screen` captures from the screen DC so overlays and popups are included; the window is brought to the foreground first. When WGC is unavailable and `--capture-screen` is not passed, the CLI returns an error — re-run with `--capture-screen` to consent to screen-DC capture.
 - Providing a selector that doesn't match any element fails immediately with `element_not_found` (rather than silently recording the whole window).
-- `--json` writes the final result to stdout and a `recording-started` event to stderr after the first frame.
+- `--json` writes the final result to stdout and one JSON event per line to stderr.
 
 ### Hover (for tooltips, flyouts, hover states)
 `--dwell-time <ms>` sets how long to wait after hovering (default: 800, range: 0–10000).

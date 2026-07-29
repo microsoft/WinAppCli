@@ -56,7 +56,7 @@ internal static class UiJsonError
                 PartialOutput = partialOutput,
             },
         };
-        var payload = JsonSerializer.Serialize(result, UiJsonContext.Default.UiErrorResult);
+        var payload = JsonSerializer.Serialize(result, UiJsonLineContext.Default.UiErrorResult);
         // Errors go to stderr so consumers can separate them from successful stdout payloads.
         (errorOut ?? Console.Error).WriteLine(payload);
     }
