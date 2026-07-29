@@ -305,10 +305,11 @@ The binaries and packages will be placed in the `artifacts` folder
 Developer-facing AI skills live under [`.github/skills/`](./.github/skills/).
 Before pushing a PR, you can ask Copilot CLI (or any agent that reads skill
 files) to "review my PR" — the [`pr-review`](./.github/skills/pr-review/SKILL.md)
-skill fans out parallel sub-agents covering security, correctness, CLI UX,
-alternative-solution check, test coverage, docs/samples sync, packaging
-impact, and a multi-model cross-check, then prints a consolidated finding
-list to stdout.
+skill fans out parallel sub-agents covering security, correctness and tests,
+CLI UX, alternative solutions, necessity and simplicity, shipping surfaces
+(docs/samples/packaging), and a different-model cross-check. It then builds and
+runs the CLI to validate the critical findings, and prints a short list to
+stdout.
 
 ## Trademarks
 
