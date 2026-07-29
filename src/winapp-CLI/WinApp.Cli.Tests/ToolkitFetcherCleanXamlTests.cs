@@ -123,6 +123,8 @@ public class ToolkitFetcherCleanXamlTests
             "an unnamed empty Border placeholder is still cleaned away");
     }
 
+    // --- Split/no-code-behind scenarios must not reference missing handlers --------
+
     [TestMethod]
     public void CleanXaml_StripsUnreferencedNames_ButKeepsReferencedOnes()
     {
@@ -138,5 +140,37 @@ public class ToolkitFetcherCleanXamlTests
         Assert.IsFalse(cleaned.Contains("NoiseName", StringComparison.Ordinal),
             "an unreferenced x:Name is still stripped as demo noise");
         StringAssert.Contains(cleaned, "x:Name=\"Keep\"", "a referenced x:Name is preserved");
+    }
+
+    [TestMethod]
+    public void StripDanglingEventHandlers_RemovesBareMethodHandlers()
+    {
+        var xaml = "<controls:SettingsCard Header=\"A\" Click=\"OnCardClicked\" IsClickEnabled=\"True\" />";
+        var stripped = ToolkitFetcher.StripDanglingEventHandlers(xaml);
+
+        Assert.IsFalse(stripped.Contains("Click=\"OnCardClicked\"", StringComparison.Ordinal),
+            "a bare-method Click handler with no code-behind must be stripped");
+        StringAssert.Contains(stripped, "Header=\"A\"", "non-event attributes are preserved");
+        StringAssert.Contains(stripped, "IsClickEnabled=\"True\"", "non-event attributes are preserved");
+    }
+
+    [TestMethod]
+    public void StripDanglingEventHandlers_KeepsCommandBindings()
+    {
+        var xaml = "<Button Click=\"{x:Bind SaveCommand}\" Content=\"Save\" />";
+        var stripped = ToolkitFetcher.StripDanglingEventHandlers(xaml);
+
+        StringAssert.Contains(stripped, "Click=\"{x:Bind SaveCommand}\"",
+            "a command binding is not a dangling handler and must be kept");
+    }
+
+    [TestMethod]
+    public void StripDanglingEventHandlers_DoesNotTouchLookalikeAttributes()
+    {
+        // Attributes that aren't events must survive even with identifier-like values.
+        var xaml = "<AppBarButton Icon=\"Add\" Label=\"Add\" Symbol=\"Edit\" />";
+        var stripped = ToolkitFetcher.StripDanglingEventHandlers(xaml);
+
+        Assert.AreEqual(xaml, stripped, "non-event attributes with identifier values must be untouched");
     }
 }

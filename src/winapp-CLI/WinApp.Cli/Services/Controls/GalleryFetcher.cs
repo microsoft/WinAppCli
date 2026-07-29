@@ -779,7 +779,14 @@ internal static partial class GalleryFetcher
                         </CommandBar.SecondaryCommands>
                     </CommandBar>
                     """,
-                CSharp = null
+                // Minimal code-behind so the wired Click handlers above resolve — the
+                // snippet must compile as pasted. Fill in each body with real logic.
+                CSharp = """
+                    private void AddButton_Click(object sender, RoutedEventArgs e) { }
+                    private void EditButton_Click(object sender, RoutedEventArgs e) { }
+                    private void DeleteButton_Click(object sender, RoutedEventArgs e) { }
+                    private void RefreshButton_Click(object sender, RoutedEventArgs e) { }
+                    """
             });
         }
 
@@ -814,7 +821,7 @@ internal static partial class GalleryFetcher
                   and the layout fills available width with as many columns as fit.
                 -->
                 <ScrollView>
-                    <ItemsRepeater ItemsSource="{x:Bind ViewModel.Items, Mode=OneWay}">
+                    <ItemsRepeater ItemsSource="{x:Bind Items, Mode=OneWay}">
                         <ItemsRepeater.Layout>
                             <UniformGridLayout MinItemWidth="200"
                                                MinItemHeight="200"
@@ -839,7 +846,8 @@ internal static partial class GalleryFetcher
                     public string Thumbnail { get; set; } = "";
                 }
 
-                // ItemsSource:
+                // Expose this collection on your page — the XAML binds to it directly
+                // as {x:Bind Items}:
                 // public ObservableCollection<PhotoItem> Items { get; } = new();
                 """,
             Source = "gallery"
