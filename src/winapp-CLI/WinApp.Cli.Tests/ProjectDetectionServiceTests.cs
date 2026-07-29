@@ -801,6 +801,82 @@ public class ProjectDetectionServiceTests
 
         Assert.AreEqual(ProjectRunnability.App, ProjectDetectionService.ClassifyRunnableStatic(csproj));
     }
+
+    // --- TryGetDeclaredOutputType (F1 pre-build gate) ---
+
+    [TestMethod]
+    public void TryGetDeclaredOutputType_Exe_ReturnsExe()
+    {
+        CreateFile("App.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Exe</OutputType>
+          </PropertyGroup>
+        </Project>
+        """);
+        var csproj = new FileInfo(Path.Combine(_tempDir, "App.csproj"));
+
+        Assert.AreEqual("Exe", ProjectDetectionService.TryGetDeclaredOutputType(csproj));
+    }
+
+    [TestMethod]
+    public void TryGetDeclaredOutputType_Library_ReturnsLibrary()
+    {
+        CreateFile("Lib.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Library</OutputType>
+          </PropertyGroup>
+        </Project>
+        """);
+        var csproj = new FileInfo(Path.Combine(_tempDir, "Lib.csproj"));
+
+        Assert.AreEqual("Library", ProjectDetectionService.TryGetDeclaredOutputType(csproj));
+    }
+
+    [TestMethod]
+    public void TryGetDeclaredOutputType_Absent_ReturnsNull()
+    {
+        // No OutputType declared: must return null (an SDK default only an evaluation can resolve),
+        // NOT collapse to "not runnable" the way ClassifyRunnableStatic does.
+        CreateFile("Lib.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net8.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+        var csproj = new FileInfo(Path.Combine(_tempDir, "Lib.csproj"));
+
+        Assert.IsNull(ProjectDetectionService.TryGetDeclaredOutputType(csproj));
+    }
+
+    [TestMethod]
+    public void TryGetDeclaredOutputType_LastWinsAcrossPropertyGroups()
+    {
+        CreateFile("App.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Library</OutputType>
+          </PropertyGroup>
+          <PropertyGroup>
+            <OutputType>WinExe</OutputType>
+          </PropertyGroup>
+        </Project>
+        """);
+        var csproj = new FileInfo(Path.Combine(_tempDir, "App.csproj"));
+
+        Assert.AreEqual("WinExe", ProjectDetectionService.TryGetDeclaredOutputType(csproj));
+    }
+
+    [TestMethod]
+    public void TryGetDeclaredOutputType_MalformedXml_ReturnsNull()
+    {
+        CreateFile("Broken.csproj", "<Project><PropertyGroup><OutputType>Exe");
+        var csproj = new FileInfo(Path.Combine(_tempDir, "Broken.csproj"));
+
+        Assert.IsNull(ProjectDetectionService.TryGetDeclaredOutputType(csproj));
+    }
 }
 
 /// <summary>

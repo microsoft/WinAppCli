@@ -18,7 +18,7 @@ namespace WinApp.Cli.Commands;
 
 internal partial class RunCommand : Command, IShortDescription
 {
-    public string ShortDescription => "Build and run a Windows app from a .csproj, .sln, or build-output folder.";
+    public string ShortDescription => "Run a Windows app: build and launch from a .csproj/.sln, or launch an existing build-output folder.";
 
     public static Argument<FileSystemInfo> InputArgument { get; }
     public static Option<FileInfo> ManifestOption { get; }
@@ -413,6 +413,15 @@ internal partial class RunCommand : Command, IShortDescription
                 }
                 else
                 {
+                    // No live spinner here (--verbose/--json/--quiet/agent/CI/redirected). Resolution can
+                    // still spawn many silent MSBuild classification evaluates for a large solution, so
+                    // announce it up front on the plain path — otherwise a redirected/CI run looks hung
+                    // with nothing on screen. Suppressed for --json (pure stdout) and --quiet (Info off).
+                    if (!isJson && logger.IsEnabled(LogLevel.Information))
+                    {
+                        logger.LogInformation("{UISymbol} Resolving project...", UiSymbols.Search);
+                    }
+
                     inputResolution = await projectRunService.ResolveInputAsync(inputFsi, cancellationToken, projectSelector, classificationInputs);
                 }
             }
@@ -430,6 +439,18 @@ internal partial class RunCommand : Command, IShortDescription
             // directory. Delegate to the shared pipeline with no project-mode runtime hints, so
             // behavior is identical to before project mode existed.
             var inputFolder = inputResolution.ProjectDirectory;
+
+            // Breadcrumb: we reached folder mode because no top-level .csproj/.sln/.slnx with a runnable
+            // app was found, so the path is treated as a pre-built layout (nothing is built). Without
+            // this, a user who pointed at a source directory expecting a build only sees a later
+            // "manifest not found" and can't tell why nothing built. Only meaningful when the input was a
+            // directory; suppressed for --json (pure stdout) and --quiet (Info off).
+            if (!isJson && inputFsi is DirectoryInfo && logger.IsEnabled(LogLevel.Information))
+            {
+                ansiConsole.MarkupLineInterpolated(
+                    $"{UiSymbols.Search} No .csproj/.sln/.slnx with a runnable app found in '{inputFolder.FullName}' — running it as a build-output folder.");
+            }
+
             return await ExecuteRunPipelineAsync(
                 inputFolder, manifest, outputAppXDirectory, appArgs,
                 noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, isJson,

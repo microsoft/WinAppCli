@@ -304,6 +304,36 @@ internal sealed class ProjectDetectionService(
         }
     }
 
+    /// <summary>
+    /// Reads the <em>explicitly declared</em> <c>OutputType</c> from the project XML (last-wins across
+    /// PropertyGroups, namespace-agnostic), or <see langword="null"/> when none is declared (the value is
+    /// then an SDK default that only an evaluation can resolve). Unlike <see cref="ClassifyRunnableStatic"/>
+    /// this does NOT collapse an absent value to "not runnable" — the caller distinguishes the two so a
+    /// project relying on an imported/SDK-default OutputType is never statically misjudged.
+    /// </summary>
+    internal static string? TryGetDeclaredOutputType(FileInfo csprojFile)
+    {
+        try
+        {
+            var doc = XDocument.Load(csprojFile.FullName);
+            string? outputType = null;
+            foreach (var pg in doc.Descendants().Where(e => e.Name.LocalName == "PropertyGroup"))
+            {
+                var outputTypeEl = pg.Elements().FirstOrDefault(e => e.Name.LocalName == "OutputType");
+                if (outputTypeEl != null)
+                {
+                    outputType = outputTypeEl.Value.Trim();
+                }
+            }
+
+            return string.IsNullOrEmpty(outputType) ? null : outputType;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <inheritdoc />
     public async Task<ProjectRunnability> ClassifyRunnableAsync(
         FileInfo csproj,

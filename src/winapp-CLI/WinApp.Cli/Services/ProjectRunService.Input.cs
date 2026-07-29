@@ -54,7 +54,7 @@ internal sealed partial class ProjectRunService
 
         // A solution in the directory wins over loose .csproj files: it carries the config→platform map
         // and defines $(SolutionDir), which some projects need to build at all. Matches what VS opens.
-        var solutions = SafeEnumerateFiles(dir, "*.sln", "*.slnx");
+        var solutions = CollapseSolutionMigrationPairs(SafeEnumerateFiles(dir, "*.sln", "*.slnx"));
 
         if (solutions.Count == 1)
         {
@@ -124,7 +124,11 @@ internal sealed partial class ProjectRunService
             var selected = MatchProjectSelector(csprojs, projectSelector, dir);
             if (selected is null)
             {
-                var available = string.Join(", ", csprojs.Select(c => c.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+                // List only the projects the user can actually run (not every library) so the hint guides
+                // them to a valid choice instead of a wall of non-runnable names.
+                var available = await BuildRunnableAvailableHintAsync(
+                    csprojs, dir, BuildClassificationPropertyTokens(classificationInputs, solution: null),
+                    classificationInputs, solution: null, cancellationToken);
                 throw new ProjectRunException(
                     $"--project '{projectSelector}' did not match a single .csproj in '{dir.FullName}'. Available: {available}.");
             }
@@ -157,10 +161,52 @@ internal sealed partial class ProjectRunService
             $"Multiple .csproj files found in '{dir.FullName}' ({names}). Specify which project to run, e.g. 'winapp run {csprojs[0].Name}' or --project <name>.");
     }
 
+    /// <summary>
+    /// Builds the "Available: …" hint for a failed <c>--project</c> match. Prefers the projects the user
+    /// can actually run (apps first, then test projects) so a mismatch in a large solution doesn't dump a
+    /// wall of library/build-only project names; falls back to every project name when classification
+    /// surfaces nothing runnable, so the hint is never empty and still helps correct a typo. Runs only on
+    /// the (already-failed) error path, so it adds no cost to a successful run.
+    /// </summary>
+    private async Task<string> BuildRunnableAvailableHintAsync(
+        List<FileInfo> projects,
+        DirectoryInfo workingDirectory,
+        IReadOnlyList<string>? props,
+        ProjectClassificationInputs? classificationInputs,
+        FileInfo? solution,
+        CancellationToken cancellationToken)
+    {
+        var (apps, tests) = await ClassifyRunnablesAsync(projects, workingDirectory, props, classificationInputs, solution, cancellationToken);
+        var runnable = apps.Concat(tests).Select(p => p.Name).ToList();
+        var names = runnable.Count > 0 ? runnable : projects.Select(p => p.Name);
+        return string.Join(", ", names.OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+    }
+
     /// <summary>True when the file is a solution (<c>.sln</c> or the newer XML <c>.slnx</c>).</summary>
     private static bool IsSolutionFile(FileInfo file) =>
         string.Equals(file.Extension, ".sln", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(file.Extension, ".slnx", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Collapses same-basename <c>.sln</c>/<c>.slnx</c> pairs — Visual Studio leaves BOTH side by side
+    /// during .slnx migration — into a single entry, preferring the newer <c>.slnx</c>. Solutions with
+    /// distinct base names are left untouched, so a genuinely multi-solution folder still requires an
+    /// explicit choice. Without this, a folder mid-migration is wrongly rejected as "multiple solutions".
+    /// </summary>
+    private static List<FileInfo> CollapseSolutionMigrationPairs(List<FileInfo> solutions)
+    {
+        if (solutions.Count <= 1)
+        {
+            return solutions;
+        }
+
+        return solutions
+            .GroupBy(s => Path.GetFileNameWithoutExtension(s.Name), StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+                group.FirstOrDefault(s => string.Equals(s.Extension, ".slnx", StringComparison.OrdinalIgnoreCase))
+                ?? group.First())
+            .ToList();
+    }
 
     /// <summary>Matches any project entry in a classic <c>.sln</c>, capturing the (relative) project path (any type).</summary>
     [GeneratedRegex(
@@ -413,7 +459,11 @@ internal sealed partial class ProjectRunService
             var selected = MatchProjectSelector(projects, projectSelector, solutionDir);
             if (selected is null)
             {
-                var available = string.Join(", ", projects.Select(p => p.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+                // List only the runnable projects (not every project in the solution) so a large solution
+                // doesn't dump 100+ names, most of which the user can't run.
+                var available = await BuildRunnableAvailableHintAsync(
+                    projects, solutionDir, BuildClassificationPropertyTokens(classificationInputs, solution),
+                    classificationInputs, solution, cancellationToken);
                 throw new ProjectRunException(
                     $"--project '{projectSelector}' did not match a single project in '{solution.Name}'. Available: {available}.");
             }
@@ -459,11 +509,11 @@ internal sealed partial class ProjectRunService
         }
         else
         {
-            reason = $"No runnable app project was found in '{solution.Name}'";
+            reason = $"No runnable app project was found in '{solution.Name}' ({candidateList})";
         }
 
         throw new ProjectRunException(
-            $"{reason}. Specify which project to run with --project <name>. Projects: {candidateList}.");
+            $"{reason}. Specify which project to run with --project <name>.");
     }
 
     /// <summary>
@@ -473,27 +523,50 @@ internal sealed partial class ProjectRunService
     /// a real app but still fall back to a lone test project.
     /// </summary>
     private async Task<(List<FileInfo> Apps, List<FileInfo> Tests)> ClassifyRunnablesAsync(
-        IReadOnlyList<FileInfo> projects,
+        List<FileInfo> projects,
         DirectoryInfo workingDirectory,
         IReadOnlyList<string>? extraMsbuildProperties,
         ProjectClassificationInputs? classificationInputs,
         FileInfo? solution,
         CancellationToken cancellationToken)
     {
+        // Each project's classification spawns up to two `dotnet` evaluations, so a large solution (100+
+        // projects) ran for minutes when done sequentially. Classify with bounded parallelism instead —
+        // the per-project work is independent — while capping concurrency so we don't spawn a dotnet
+        // process storm. Results are reassembled in the original project order so the candidate lists and
+        // auto-selection stay deterministic regardless of completion order.
+        var degree = Math.Max(1, Math.Min(Environment.ProcessorCount, projects.Count));
+        using var throttle = new SemaphoreSlim(degree);
+        var kinds = new ProjectRunnability[projects.Count];
+
+        var classifyTasks = projects.Select(async (project, index) =>
+        {
+            await throttle.WaitAsync(cancellationToken);
+            try
+            {
+                var projectProps = await AddEffectiveFrameworkForClassificationAsync(
+                    project, workingDirectory, extraMsbuildProperties, classificationInputs, solution, cancellationToken);
+                kinds[index] = await projectDetectionService.ClassifyRunnableAsync(project, workingDirectory, projectProps, cancellationToken);
+            }
+            finally
+            {
+                throttle.Release();
+            }
+        });
+
+        await Task.WhenAll(classifyTasks);
+
         var apps = new List<FileInfo>();
         var tests = new List<FileInfo>();
-        foreach (var project in projects)
+        for (var i = 0; i < projects.Count; i++)
         {
-            var projectProps = await AddEffectiveFrameworkForClassificationAsync(
-                project, workingDirectory, extraMsbuildProperties, classificationInputs, solution, cancellationToken);
-            var kind = await projectDetectionService.ClassifyRunnableAsync(project, workingDirectory, projectProps, cancellationToken);
-            switch (kind)
+            switch (kinds[i])
             {
                 case ProjectRunnability.App:
-                    apps.Add(project);
+                    apps.Add(projects[i]);
                     break;
                 case ProjectRunnability.Test:
-                    tests.Add(project);
+                    tests.Add(projects[i]);
                     break;
             }
         }
