@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 
 namespace WinApp.Cli.Services;
@@ -86,9 +85,7 @@ internal sealed class RecordFrameArtifactCoordinator : IAsyncDisposable
             await DisposeSinkAsync().ConfigureAwait(false);
             return result;
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException
-            and not StackOverflowException
-            and not AccessViolationException)
+        catch (Exception ex) when (IsRecoverableFrameOutputFailure(ex))
         {
             Failure ??= ex;
             LogExpectedFailure(_logger, ex, "Could not preserve partial frame artifacts after MP4 failure");
@@ -174,10 +171,7 @@ internal sealed class RecordFrameArtifactCoordinator : IAsyncDisposable
     }
 
     private static bool IsRecoverableFrameOutputFailure(Exception exception)
-        => exception is IOException
-            or UnauthorizedAccessException
-            or ArgumentException
-            or InvalidOperationException
-            or ExternalException
-            or OperationCanceledException;
+        => exception is not OutOfMemoryException
+            and not StackOverflowException
+            and not AccessViolationException;
 }

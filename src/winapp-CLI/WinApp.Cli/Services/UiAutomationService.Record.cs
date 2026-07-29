@@ -76,7 +76,6 @@ internal sealed partial class UiAutomationService
         WgcCapture.IFrameGrabber? grabber = null;
         RecordFrameArtifactCoordinator? frameOutput = null;
         var mode = useScreen ? "screen" : (useWgc ? "wgc" : "printwindow");
-        var captureHwnd = (long)(nint)hwnd;
 
         try
         {
@@ -106,11 +105,7 @@ internal sealed partial class UiAutomationService
                     _logger.LogDebug(ex, "WGC recorder init failed; throwing (no silent screen fallback without --capture-screen)");
                     grabber?.Dispose();
                     grabber = null;
-                    // H1 privacy guard: do not silently fall back to screen capture unless the user
-                    // explicitly consented by passing --capture-screen. Screen-DC capture includes any
-                    // window overlapping the target on screen, which can leak unrelated content.
-                    // EnsureWgcFallbackConsented always throws here because WGC only runs when
-                    // --capture-screen is NOT set, so captureScreenRequested is always false.
+                    // Screen capture requires explicit consent because it can include overlapping windows.
                     EnsureWgcFallbackConsented(ex, options.CaptureScreen, _logger);
                     useScreen = true;
                     useWgc = false;
@@ -128,8 +123,7 @@ internal sealed partial class UiAutomationService
                 captureOriginTop = rect.top;
             }
 
-            // H2: For whole-window WGC capture, derive crop dims from EACH frame (not just the first).
-            // Element-crop captures use the fixed cropW/cropH computed from the element bounds below.
+            // Whole-window WGC dimensions can change while recording.
             var isWholeWindowWgc = useWgc && string.IsNullOrEmpty(elementId);
 
             // Determine the crop rectangle (in capture-space) for an element selector.
@@ -152,23 +146,13 @@ internal sealed partial class UiAutomationService
                     throw new UiElementNotFoundException(elementId);
                 }
 
-                // H1 fix: When the selector resolves to a popup or owned window whose HWND differs
-                // from the session's main window, retarget the capture surface to that window.
-                // Using the main window's rect to clamp an element in a different window produces a
-                // truncated sliver or wrong pixels; the fix switches both the capture origin and
-                // (for WGC/PrintWindow) the capture HWND to the element's actual top-level window.
+                // Capture against the element's top-level window, including popups and dialogs.
                 var captureTargetHwnd = ResolvePopupCaptureHwnd(
                     selectorElement.WindowHandle, (nint)hwnd,
                     ref captureOriginLeft, ref captureOriginTop,
                     ref srcWidth, ref srcHeight);
 
-                // H2 fix (r12): the UIA main-tree resolution path stamps WindowHandle =
-                // session.WindowHandle on every resolved element, so a windowed popup/dialog
-                // reachable via the main tree has WindowHandle == sessionHwnd and bypasses the
-                // stamped-handle retarget above. Derive the element's TRUE top-level window from
-                // its UIA native-window ancestor (authoritative — it follows the real UIA parent
-                // chain, unlike z-order hit testing which can pick an unrelated same-process
-                // window that merely overlaps the element's center) and retarget to it.
+                // Main-tree elements inherit the session HWND, so confirm it from the UIA ancestor chain.
                 if (captureTargetHwnd == (nint)hwnd)
                 {
                     var derivedHwnd = DeriveElementCaptureHwnd(
@@ -187,7 +171,6 @@ internal sealed partial class UiAutomationService
 
                 if (captureTargetHwnd != (nint)hwnd)
                 {
-                    captureHwnd = (long)captureTargetHwnd;
                     var popupHwnd = new Windows.Win32.Foundation.HWND(captureTargetHwnd);
                     _logger.LogDebug(
                         "Selector '{Sel}' resolved to popup window HWND 0x{Hwnd:X}; retargeting capture",
@@ -237,10 +220,7 @@ internal sealed partial class UiAutomationService
                     // For useScreen: captureOriginLeft/Top/srcWidth/srcHeight already updated; no further action.
                 }
 
-                // Guard: reject elements with no positive-area intersection with the capture surface.
-                // A zero/negative intersection would be clamped to a 1-pixel edge sliver, then
-                // inflated by encoder-min padding → garbage pixels recorded at exit 0 (M1 fix).
-                // Legitimately small elements that DO intersect fall through to the clamp + padding below.
+                // Reject elements outside the capture surface instead of recording a clamped edge.
                 if (IsElementOffscreen(selectorElement.X, selectorElement.Y,
                     selectorElement.Width, selectorElement.Height,
                     captureOriginLeft, captureOriginTop, srcWidth, srcHeight))

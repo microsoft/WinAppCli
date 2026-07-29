@@ -90,9 +90,11 @@ public static class GlobalTestSetup
                 Directory.Delete(scratchPath, recursive: true);
             }
         }
-        catch
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or System.Security.SecurityException)
         {
-            // Test cleanup is best effort.
+            Console.Error.WriteLine($"Could not clean coverage scratch: {ex.Message}");
         }
     }
 }

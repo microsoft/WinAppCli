@@ -35,8 +35,9 @@ public partial class UiCommandTests
     public void StdinStopMonitor_Newline_StopsRecording()
     {
         var stopped = false;
+        using var reader = new StringReader("\n");
         StdinStopMonitor.MonitorCore(
-            new StringReader("\n"),
+            reader,
             Task.CompletedTask,
             () => stopped = true);
         Assert.IsTrue(stopped, "a newline should trigger stop");
@@ -46,8 +47,9 @@ public partial class UiCommandTests
     public void StdinStopMonitor_EmptyLine_StopsRecording()
     {
         var stopped = false;
+        using var reader = new StringReader("\n");
         StdinStopMonitor.MonitorCore(
-            new StringReader("\n"),
+            reader,
             Task.CompletedTask,
             () => stopped = true);
         Assert.IsTrue(stopped, "an empty line (immediate enter) should trigger stop");
@@ -68,8 +70,9 @@ public partial class UiCommandTests
     public void StdinStopMonitor_LineOfText_Stops()
     {
         var stopped = false;
+        using var reader = new StringReader("stop");
         StdinStopMonitor.MonitorCore(
-            new StringReader("stop"),
+            reader,
             Task.CompletedTask,
             () => stopped = true);
         Assert.IsTrue(stopped, "any line of text should trigger stop");
@@ -90,8 +93,9 @@ public partial class UiCommandTests
     public void StdinStopMonitor_Start_RunsOnBackgroundThreadAndFiresStop()
     {
         using var stopped = new ManualResetEventSlim(false);
+        using var reader = new StringReader("\n");
         StdinStopMonitor.Start(
-            new StringReader("\n"),
+            reader,
             Task.CompletedTask,
             () => stopped.Set());
 
@@ -220,8 +224,9 @@ public partial class UiCommandTests
         var outputPath = Path.Combine(_tempDirectory.FullName, "l1-redirect.mp4");
         var command = GetRequiredService<UiRecordCommand>();
 
+        using var stdin = new StringReader("stop");
         UiRecordCommand.Handler.s_isInputRedirectedOverride = () => true;
-        UiRecordCommand.Handler.s_stdinOverride = new StringReader("stop");
+        UiRecordCommand.Handler.s_stdinOverride = stdin;
         try
         {
             _fakeUia.RecordResult = new RecordCaptureResult { Frames = 1, Width = 64, Height = 64, Mode = "wgc" };
@@ -248,8 +253,9 @@ public partial class UiCommandTests
         var outputPath = Path.Combine(_tempDirectory.FullName, "frames-redirect.mp4");
         var command = GetRequiredService<UiRecordCommand>();
 
+        using var stdin = new StringReader("stop");
         UiRecordCommand.Handler.s_isInputRedirectedOverride = () => true;
-        UiRecordCommand.Handler.s_stdinOverride = new StringReader("stop");
+        UiRecordCommand.Handler.s_stdinOverride = stdin;
         try
         {
             _fakeUia.RecordResult = new RecordCaptureResult

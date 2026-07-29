@@ -150,10 +150,9 @@ public partial class UiCommandTests
     public void Mp4SinkWriterEncoder_NoClobberRacePreservesLateDestinationAndCleansTemp()
     {
         var finalPath = Path.Join(_tempDirectory.FullName, "late-destination.mp4");
-        Mp4SinkWriterEncoder? encoder = null;
         try
         {
-            encoder = new Mp4SinkWriterEncoder(
+            using var encoder = new Mp4SinkWriterEncoder(
                 finalPath,
                 64,
                 64,
@@ -168,10 +167,6 @@ public partial class UiCommandTests
         catch (Mp4EncoderInitializationException ex)
         {
             Assert.Inconclusive($"Media Foundation H.264 encoder unavailable: {ex.Message}");
-        }
-        finally
-        {
-            encoder?.Dispose();
         }
 
         Assert.AreEqual("late-sentinel", File.ReadAllText(finalPath));

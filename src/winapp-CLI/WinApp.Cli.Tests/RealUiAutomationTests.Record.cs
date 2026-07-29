@@ -401,6 +401,50 @@ public partial class RealUiAutomationTests
     }
 
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task RecordAsync_NonIoFrameFailurePreservesMp4(bool failOnComplete)
+    {
+        using var fx = new UiaTestFixture();
+        var svc = NewService();
+        var session = SessionFor(fx);
+        await ResolveAsync(svc, session, "btnInvoke");
+
+        var root = Path.Join(AppContext.BaseDirectory, "coverage-scratch", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var output = Path.Join(root, "non-io-frame-failure.mp4");
+        var framesDirectory = Path.Join(root, "non-io-frame-failure.frames");
+        var frameFailure = new TypeInitializationException(
+            "SkiaSharp",
+            new DllNotFoundException("simulated native dependency failure"));
+
+        WgcCapture.s_isSupported = () => true;
+        WgcCapture.s_startGrabber = (_, _, _) =>
+            new FakeFrameGrabber(new byte[64 * 64 * 4], 64, 64);
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, _, _) =>
+            new FakeVideoEncoder(path, width, height);
+        RecordFrameBundleWriter.s_create = _ => new FakeFrameSink
+        {
+            WriteException = failOnComplete ? null : frameFailure,
+            CompleteException = failOnComplete ? frameFailure : null,
+        };
+
+        var exception = await Assert.ThrowsExactlyAsync<RecordPartialOutputException>(
+            () => svc.RecordAsync(session, null, new RecordOptions
+            {
+                OutputPath = output,
+                FramesDirectory = framesDirectory,
+                DurationSec = 1,
+                Fps = 1,
+                MaxEdge = 64,
+            }, CancellationToken.None));
+
+        Assert.AreEqual(output, exception.VideoPath);
+        Assert.IsTrue(File.Exists(output));
+        Assert.IsFalse(Directory.Exists(framesDirectory));
+    }
+
+    [TestMethod]
     public async Task RecordAsync_TruncatedFrameBundleReturnsActionableWarning()
     {
         using var fx = new UiaTestFixture();
@@ -509,6 +553,8 @@ public partial class RealUiAutomationTests
 
         public Exception? WriteException { get; init; }
 
+        public Exception? CompleteException { get; init; }
+
         public Exception? AbortException { get; init; }
 
         public ValueTask WriteAsync(
@@ -526,7 +572,13 @@ public partial class RealUiAutomationTests
         }
 
         public Task<RecordFrameArtifactResult> CompleteAsync(RecordFrameCompletion completion)
-            => Task.FromResult(new RecordFrameArtifactResult
+        {
+            if (CompleteException is not null)
+            {
+                throw CompleteException;
+            }
+
+            return Task.FromResult(new RecordFrameArtifactResult
             {
                 Directory = "frames",
                 Manifest = "frames/manifest.json",
@@ -536,6 +588,7 @@ public partial class RealUiAutomationTests
                 Truncated = IsTruncated,
                 ByteLimit = ByteLimit,
             });
+        }
 
         public Task AbortAsync()
         {

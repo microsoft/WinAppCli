@@ -228,7 +228,14 @@ internal class FakeUiAutomationService : IUiAutomationService
             ?? (options.FramesDirectory is not null));
         if (RecordShouldWaitForCancellation)
         {
-            try { await Task.Delay(Timeout.Infinite, ct); } catch (OperationCanceledException) { }
+            try
+            {
+                await Task.Delay(Timeout.Infinite, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Cancellation is the expected stop signal.
+            }
         }
         var size = new FileInfo(options.OutputPath).Length;
         return new RecordCaptureResult
