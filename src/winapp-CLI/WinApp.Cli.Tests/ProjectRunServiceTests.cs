@@ -483,6 +483,23 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public void BuildEvaluateArguments_IncludeRuntimeIdentifierFalse_OmitsRid()
+    {
+        // F10: under --no-build the RID-qualified output may not exist (a prior plain VS/dotnet build
+        // produced non-RID output), so the fallback re-evaluates WITHOUT the RID to find that TargetDir.
+        var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));
+        var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: true, NoRestore: false, Properties: []);
+
+        var args = ProjectRunService.BuildEvaluateArguments(csproj, options, includeRuntimeIdentifier: false);
+
+        Assert.IsFalse(args.Contains("-p:RuntimeIdentifier=", StringComparison.Ordinal),
+            "no-RID fallback must not pin a RuntimeIdentifier");
+        // Configuration and the getProperty queries are still present so TargetDir still resolves.
+        StringAssert.Contains(args, "-p:Configuration=Debug");
+        StringAssert.Contains(args, "--getProperty:TargetDir");
+    }
+
+    [TestMethod]
     public void BuildEvaluateArguments_Framework_ForwardedAsProperty()
     {
         var csproj = new FileInfo(Path.Combine(_tempDir.FullName, "App.csproj"));

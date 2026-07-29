@@ -223,6 +223,29 @@ internal sealed partial class ProjectRunService(
                 csproj, options, workingDir, setStatus: null, cancellationToken);
         }
 
+        // F1: A non-runnable project (e.g. a class library) is otherwise only rejected by the POST-build
+        // evaluate below — after the user has already paid for a full build. Reject it up front instead.
+        // Scope: only a directly-specified single project (a solution-resolved target was already
+        // classified as runnable while resolving the solution, so re-checking it would just add cost) and
+        // only when we're actually going to build. A project that explicitly declares an executable
+        // OutputType is the common app hot path — trust it and skip the probe (zero added cost). Only when
+        // the declared OutputType is absent (an SDK default) or non-executable do we run the side-effect-free
+        // evaluate to resolve the effective value, and we fast-fail ONLY on a CONFIDENT evaluated
+        // non-executable result, so a real app whose evaluate is inconclusive is never wrongly rejected.
+        if (!options.NoBuild && options.Solution is null)
+        {
+            var declaredOutputType = ProjectDetectionService.TryGetDeclaredOutputType(csproj);
+            if (string.IsNullOrEmpty(declaredOutputType) || !ProjectDetectionService.IsExecutableOutputType(declaredOutputType))
+            {
+                var evaluatedOutputType = await TryEvaluateOutputTypeAsync(csproj, options, workingDir, csWinRTMetadata, cancellationToken);
+                if (!string.IsNullOrEmpty(evaluatedOutputType) && !ProjectDetectionService.IsExecutableOutputType(evaluatedOutputType))
+                {
+                    throw new ProjectRunException(
+                        $"'{csproj.Name}' is not a runnable project (OutputType='{evaluatedOutputType}'). 'winapp run' requires an executable project (OutputType Exe or WinExe).");
+                }
+            }
+        }
+
         // Two passes (Change #1): (1) BUILD — a plain `dotnet build` whose console log
         // STREAMS live so the user sees progress (skipped under --no-build); then (2) EVALUATE — a
         // fast `dotnet msbuild --getProperty` that returns the resolved output paths as JSON. The
@@ -271,6 +294,34 @@ internal sealed partial class ProjectRunService(
 
         var props = MsBuildPropertyReader.Parse(stdout, RequestedProperties);
 
+        // F10: Under --no-build the evaluate pass injected -r win-<arch>, so TargetDir/RunCommand point at
+        // bin\<cfg>\<tfm>\win-<arch>\. An app previously built by Visual Studio or a plain `dotnet build`
+        // (neither injects a RID) has its output at the NON-RID path bin\<cfg>\<tfm>\, so the RID-qualified
+        // directory doesn't exist and the launch would fail with a confusing "executable not found". When
+        // that happens, re-evaluate WITHOUT the RID and prefer that output when it's the one actually on
+        // disk — making `winapp run --no-build` usable after a normal IDE/CLI build. Only the --no-build
+        // path is affected; a winapp build always writes the RID path, so its evaluate matches as before.
+        if (options.NoBuild)
+        {
+            var ridTargetDir = GetProp(props, "TargetDir");
+            if (!string.IsNullOrEmpty(ridTargetDir) && !Directory.Exists(ridTargetDir))
+            {
+                var noRidArgs = BuildEvaluateArguments(csproj, options, csWinRTMetadata, includeRuntimeIdentifier: false);
+                logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(noRidArgs));
+                var (noRidExit, noRidStdout, _) = await dotNetService.RunDotnetCommandAsync(workingDir, noRidArgs, cancellationToken);
+                if (noRidExit == 0)
+                {
+                    var noRidProps = MsBuildPropertyReader.Parse(noRidStdout, RequestedProperties);
+                    var noRidTargetDir = GetProp(noRidProps, "TargetDir");
+                    if (!string.IsNullOrEmpty(noRidTargetDir) && Directory.Exists(noRidTargetDir))
+                    {
+                        logger.LogDebug("{UISymbol} --no-build: RID output '{RidDir}' not found; using non-RID output '{NoRidDir}'.", UiSymbols.Note, ridTargetDir, noRidTargetDir);
+                        props = noRidProps;
+                    }
+                }
+            }
+        }
+
         var outputType = GetProp(props, "OutputType");
         if (!string.IsNullOrEmpty(outputType) &&
             !string.Equals(outputType, "Exe", StringComparison.OrdinalIgnoreCase) &&
@@ -297,7 +348,7 @@ internal sealed partial class ProjectRunService(
             if (string.IsNullOrEmpty(runCommand) || !RunCommandIsLaunchable(runCommand))
             {
                 var reason = options.NoBuild
-                    ? "The runnable executable was not found. Remove --no-build so the project is built first, or build it manually."
+                    ? $"The runnable executable was not found under '{targetDir}'. Remove --no-build so the project is built first, or build it manually."
                     : "The build did not produce a runnable executable (RunCommand).";
                 throw new ProjectRunException(
                     $"'{csproj.Name}' resolves to an unpackaged app but no launchable executable is available. {reason}");
@@ -701,6 +752,47 @@ internal sealed partial class ProjectRunService(
 
     private static string GetProp(IReadOnlyDictionary<string, string> props, string name)
         => props.TryGetValue(name, out var value) ? value.Trim() : string.Empty;
+
+    /// <summary>
+    /// F1 pre-build probe: runs the side-effect-free evaluate (no <c>-t:Build</c>, no restore) purely to
+    /// read the resolved <c>OutputType</c>, so a non-runnable project can be rejected BEFORE the user pays
+    /// for a full build. Reuses the exact evaluate args the post-build pass uses (same RID/Config/TFM/-p)
+    /// so OutputType resolves identically; the other requested properties (TargetDir/RunCommand) are
+    /// meaningless pre-build and ignored. Returns the evaluated OutputType, or <see langword="null"/> when
+    /// the evaluate failed or produced nothing — the caller then proceeds to the normal build+evaluate
+    /// path rather than reject on an inconclusive probe.
+    /// </summary>
+    private async Task<string?> TryEvaluateOutputTypeAsync(
+        FileInfo csproj,
+        ProjectRunOptions options,
+        DirectoryInfo workingDir,
+        string? csWinRTMetadata,
+        CancellationToken cancellationToken)
+    {
+        var evaluateArgs = BuildEvaluateArguments(csproj, options, csWinRTMetadata);
+        try
+        {
+            var (exitCode, stdout, _) = await dotNetService.RunDotnetCommandAsync(workingDir, evaluateArgs, cancellationToken);
+            if (exitCode != 0)
+            {
+                return null;
+            }
+
+            var props = MsBuildPropertyReader.Parse(stdout, RequestedProperties);
+            var outputType = GetProp(props, "OutputType");
+            return string.IsNullOrEmpty(outputType) ? null : outputType;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Honor Ctrl+C during the probe rather than masking it as an inconclusive result.
+            throw;
+        }
+        catch (Exception)
+        {
+            // dotnet unavailable / evaluate failed → inconclusive; let the normal path classify.
+            return null;
+        }
+    }
 
     /// <summary>
     /// Parses the leading <c>major.minor.patch</c> of a <c>dotnet --version</c> string

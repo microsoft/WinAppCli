@@ -131,9 +131,12 @@ internal sealed partial class ProjectRunService
     /// the build pass (including a resolved <c>-p:Platform</c>, when any) so its <c>TargetDir</c>/
     /// <c>RunCommand</c> match what was built. <c>dotnet msbuild</c> rejects <c>-c</c>/<c>-r</c> (MSB1001),
     /// so Configuration/RID/TFM/Platform go as <c>-p:</c> emitted LAST (MSBuild last-wins beats a
-    /// conflicting user <c>-p</c>).
+    /// conflicting user <c>-p</c>). <paramref name="includeRuntimeIdentifier"/> is <see langword="false"/>
+    /// only for the <c>--no-build</c> no-RID fallback (see <c>BuildAndResolveAsync</c>): an app previously
+    /// built by Visual Studio or a plain <c>dotnet build</c> has its output at the NON-RID
+    /// <c>bin\&lt;cfg&gt;\&lt;tfm&gt;\</c> path, which only resolves when the RID is omitted.
     /// </summary>
-    internal static string BuildEvaluateArguments(FileInfo csproj, ProjectRunOptions options, string? csWinRTMetadataFolder = null)
+    internal static string BuildEvaluateArguments(FileInfo csproj, ProjectRunOptions options, string? csWinRTMetadataFolder = null, bool includeRuntimeIdentifier = true)
     {
         var rid = RunArchHelper.ToRuntimeIdentifier(options.Architecture);
 
@@ -153,7 +156,10 @@ internal sealed partial class ProjectRunService
         AppendSolutionProperties(tokens, options);
 
         tokens.Add($"-p:Configuration={options.Configuration}");
-        tokens.Add($"-p:RuntimeIdentifier={rid}");
+        if (includeRuntimeIdentifier)
+        {
+            tokens.Add($"-p:RuntimeIdentifier={rid}");
+        }
         if (!string.IsNullOrWhiteSpace(options.Framework))
         {
             tokens.Add($"-p:TargetFramework={options.Framework}");
