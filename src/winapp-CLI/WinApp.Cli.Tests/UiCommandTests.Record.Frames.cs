@@ -4,11 +4,13 @@
 using System.Text.Json;
 using System.Text;
 using System.Security.Cryptography;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SkiaSharp;
 using Spectre.Console;
 using Spectre.Console.Testing;
 using WinApp.Cli.Commands;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -73,10 +75,24 @@ public partial class UiCommandTests
                 "--json",
             ]);
         Assert.AreEqual(1, unboundedExitCode);
-        StringAssert.Contains(ConsoleStdErr.ToString(), "does not support --max-edge 0");
+        StringAssert.Contains(ConsoleStdErr.ToString(), "64 through 4096");
 
         ConsoleStdErr.GetStringBuilder().Clear();
-        var rejectedExitCode = await ParseAndInvokeWithCaptureAsync(
+        var tooSmallExitCode = await ParseAndInvokeWithCaptureAsync(
+            command,
+            [
+                "-a", "TestApp",
+                "--duration-sec", "1",
+                "--max-edge", "32",
+                "--frames-dir", Path.Join(_tempDirectory.FullName, "too-small.frames"),
+                "--json",
+            ]);
+        Assert.AreEqual(1, tooSmallExitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "64 through 4096");
+        Assert.IsFalse(ConsoleStdErr.ToString().Contains("0 (unbounded)", StringComparison.Ordinal));
+
+        ConsoleStdErr.GetStringBuilder().Clear();
+        var tooLargeExitCode = await ParseAndInvokeWithCaptureAsync(
             command,
             [
                 "-a", "TestApp",
@@ -85,8 +101,8 @@ public partial class UiCommandTests
                 "--frames-dir", Path.Join(_tempDirectory.FullName, "too-large.frames"),
                 "--json",
             ]);
-        Assert.AreEqual(1, rejectedExitCode);
-        StringAssert.Contains(ConsoleStdErr.ToString(), "up to 4096");
+        Assert.AreEqual(1, tooLargeExitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "64 through 4096");
     }
 
     [TestMethod]
@@ -177,6 +193,30 @@ public partial class UiCommandTests
         Assert.AreEqual(1, exitCode);
         Assert.IsFalse(File.Exists(outputPath));
         Assert.AreEqual("frame sentinel", await File.ReadAllTextAsync(sentinelPath));
+        StringAssert.Contains(ConsoleStdErr.ToString(), "output_exists");
+    }
+
+    [TestMethod]
+    public async Task Record_FramesDirectory_RejectsPathThatIsAnExistingFile()
+    {
+        var command = GetRequiredService<UiRecordCommand>();
+        var outputPath = Path.Join(_tempDirectory.FullName, "available.mp4");
+        var framesPath = Path.Join(_tempDirectory.FullName, "frames-file");
+        await File.WriteAllTextAsync(framesPath, "sentinel");
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command,
+            [
+                "-a", "TestApp",
+                "--duration-sec", "1",
+                "--output", outputPath,
+                "--frames-dir", framesPath,
+                "--json",
+            ]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.IsFalse(File.Exists(outputPath));
+        Assert.AreEqual("sentinel", await File.ReadAllTextAsync(framesPath));
         StringAssert.Contains(ConsoleStdErr.ToString(), "output_exists");
     }
 
@@ -377,6 +417,8 @@ public partial class UiCommandTests
         StringAssert.Contains(stderr, "\"frame_output_failed\"");
         StringAssert.Contains(stderr, "\"recoveryHint\"");
         StringAssert.Contains(stderr, "\"IOException\"");
+        Assert.IsFalse(stderr.Contains("RecordFrameOutputException", StringComparison.Ordinal));
+        Assert.IsFalse(stderr.Contains("   at ", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -424,6 +466,39 @@ public partial class UiCommandTests
         Assert.IsFalse(startedEvent.TryGetProperty("framesDirectory", out _));
         Assert.IsFalse(startedEvent.TryGetProperty("framesManifest", out _));
         Assert.IsFalse(startedEvent.TryGetProperty("framesIndex", out _));
+    }
+
+    [TestMethod]
+    public async Task RecordFrameArtifactCoordinator_InitializationFailureLogsSanitizedReason()
+    {
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        using var provider = new TextWriterLoggerProvider(stdout, stderr);
+        using var loggerFactory = LoggerFactory.Create(builder =>
+            builder.SetMinimumLevel(LogLevel.Information).AddProvider(provider));
+        RecordFrameBundleWriter.s_create = _ =>
+            throw new UnauthorizedAccessException("Access to the frame parent was denied.");
+        try
+        {
+            var coordinator = RecordFrameArtifactCoordinator.Create(
+                CreateFrameConfiguration(
+                    Path.Join(_tempDirectory.FullName, "unwritable-parent", "recording.frames"),
+                    logger: loggerFactory.CreateLogger("recording-test")));
+
+            await coordinator.DisposeAsync();
+
+            Assert.IsNotNull(coordinator.Failure);
+            var error = stderr.ToString();
+            StringAssert.Contains(error, "Could not initialize frame artifact output");
+            StringAssert.Contains(error, "Access to the frame parent was denied.");
+            Assert.IsFalse(error.Contains("UnauthorizedAccessException", StringComparison.Ordinal));
+            Assert.IsFalse(error.Contains("   at ", StringComparison.Ordinal));
+            Assert.IsFalse(error.Contains(".cs:line", StringComparison.Ordinal));
+        }
+        finally
+        {
+            RecordFrameBundleWriter.ResetTestSeams();
+        }
     }
 
     [TestMethod]
@@ -541,12 +616,23 @@ public partial class UiCommandTests
             Assert.AreEqual(
                 result.ByteLimit,
                 manifest.GetProperty("frames").GetProperty("byteLimit").GetInt64());
+            var indexLines = await File.ReadAllLinesAsync(Path.Join(finalDirectory, "frames.ndjson"));
+            Assert.AreEqual(result.Samples, indexLines.Length);
+            var lastEntry = JsonSerializer.Deserialize<JsonElement>(indexLines[^1]);
+            var timing = manifest.GetProperty("timing");
+            var prefixElapsedMs = Math.Max(1, lastEntry.GetProperty("elapsedMs").GetInt64());
+            Assert.AreEqual(prefixElapsedMs, timing.GetProperty("elapsedMs").GetInt64());
             Assert.AreEqual(
-                result.Samples,
-                (await File.ReadAllLinesAsync(Path.Join(finalDirectory, "frames.ndjson"))).Length);
+                result.Samples * 1000.0 / prefixElapsedMs,
+                timing.GetProperty("achievedFps").GetDouble(),
+                0.0001);
+            Assert.AreEqual(
+                timing.GetProperty("achievedFps").GetDouble() / 10,
+                timing.GetProperty("cadenceRatio").GetDouble(),
+                0.0001);
 
             var indexedFiles = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var line in await File.ReadAllLinesAsync(Path.Join(finalDirectory, "frames.ndjson")))
+            foreach (var line in indexLines)
             {
                 var entry = JsonSerializer.Deserialize<JsonElement>(line);
                 var relativePath = entry.GetProperty("file").GetString()!;
@@ -749,7 +835,8 @@ public partial class UiCommandTests
         int? sourceWidth = null,
         int? sourceHeight = null,
         int sourceBufferCount = 0,
-        long maximumBundleBytes = RecordFrameBundleConfiguration.DefaultMaximumBundleBytes)
+        long maximumBundleBytes = RecordFrameBundleConfiguration.DefaultMaximumBundleBytes,
+        ILogger? logger = null)
         => new()
         {
             FinalDirectory = finalDirectory,
@@ -783,7 +870,7 @@ public partial class UiCommandTests
                 Kind = "window",
                 Rect = new RecordFrameRectManifest { Width = 64, Height = 64 },
             },
-            Logger = NullLogger.Instance,
+            Logger = logger ?? NullLogger.Instance,
         };
 
     private static RecordFrameSample Sample(int index, long elapsedMs, double mediaTimeMs)

@@ -275,73 +275,27 @@ internal sealed partial class UiAutomationService
 
             if (options.FramesDirectory is not null)
             {
-                var initialCropW = isWholeWindowWgc ? srcWidth : cropW;
-                var initialCropH = isWholeWindowWgc ? srcHeight : cropH;
-                var requiresTransform = RequiresFrameTransform(
-                    srcWidth,
-                    srcHeight,
-                    cropX,
-                    cropY,
-                    initialCropW,
-                    initialCropH,
-                    encoderW,
-                    encoderH,
-                    displayW,
-                    displayH);
-                var sourceBufferCount = useScreen || !requiresTransform
-                    ? 0
-                    // WGC may retain a published latest frame and allocate the following
-                    // copy while the recorder and Skia each retain the current source.
-                    : useWgc ? 4 : 2;
-                var (contentX, contentY, contentW, contentH) = ComputeFittedContentRect(
-                    cropW, cropH, encoderW, encoderH, displayW, displayH);
-                frameOutput = RecordFrameArtifactCoordinator.Create(new RecordFrameBundleConfiguration
+                frameOutput = CreateRecordFrameArtifactCoordinator(new RecordFrameArtifactSetup
                 {
-                    FinalDirectory = options.FramesDirectory,
-                    VideoPath = options.OutputPath,
-                    RecordingId = Guid.NewGuid().ToString("N"),
+                    Options = options,
+                    Session = session,
                     StartedUtc = startedUtc,
-                    Width = encoderW,
-                    Height = encoderH,
                     SourceWidth = srcWidth,
                     SourceHeight = srcHeight,
-                    SourceBufferCount = sourceBufferCount,
-                    ContentRect = new RecordFrameRectManifest
-                    {
-                        X = contentX,
-                        Y = contentY,
-                        Width = contentW,
-                        Height = contentH,
-                    },
-                    Requested = new RecordFrameRequestManifest
-                    {
-                        DurationSec = options.DurationSec,
-                        Fps = options.Fps,
-                        MaxEdge = options.MaxEdge,
-                        Selector = options.Selector,
-                        CaptureScreen = options.CaptureScreen,
-                    },
-                    Source = new RecordFrameSourceManifest
-                    {
-                        ProcessId = session.ProcessId,
-                        ProcessName = session.ProcessName,
-                        WindowTitle = session.WindowTitle,
-                        SessionHwnd = session.WindowHandle,
-                        CaptureHwnd = captureHwnd,
-                        CaptureMode = mode,
-                    },
-                    Crop = new RecordFrameCropManifest
-                    {
-                        Kind = string.IsNullOrEmpty(elementId) ? "window" : "element",
-                        Rect = new RecordFrameRectManifest
-                        {
-                            X = cropX,
-                            Y = cropY,
-                            Width = cropW,
-                            Height = cropH,
-                        },
-                    },
-                    Logger = _logger,
+                    CropX = cropX,
+                    CropY = cropY,
+                    CropWidth = cropW,
+                    CropHeight = cropH,
+                    EncoderWidth = encoderW,
+                    EncoderHeight = encoderH,
+                    DisplayWidth = displayW,
+                    DisplayHeight = displayH,
+                    CaptureHwnd = captureHwnd,
+                    CaptureMode = mode,
+                    ElementId = elementId,
+                    IsWholeWindowWgc = isWholeWindowWgc,
+                    UseScreen = useScreen,
+                    UseWgc = useWgc,
                 });
             }
 
@@ -799,242 +753,5 @@ internal sealed partial class UiAutomationService
     }
 
     internal static bool ShouldEncodeClosedDrainFrame(long cachedVersion, long lastEncodedVersion) => cachedVersion != lastEncodedVersion;
-
-    /// <summary>
-    /// When the resolved UI element lives in a popup or owned window (a top-level HWND different
-    /// from the session's main window), retargets the capture surface to that window so that the
-    /// recording captures the correct pixels rather than a clamped sliver of the main frame.
-    /// </summary>
-    /// <param name="elementWindowHandle">
-    /// The <see cref="Models.UiElement.WindowHandle"/> from the resolved element (nullable).
-    /// Set to the HWND of the window that was searched when the element was found.
-    /// </param>
-    /// <param name="sessionHwnd">The session's main window HWND (as <see cref="nint"/>).</param>
-    /// <param name="captureOriginLeft">In/out: updated to the popup window's screen-left when retargeting.</param>
-    /// <param name="captureOriginTop">In/out: updated to the popup window's screen-top when retargeting.</param>
-    /// <param name="srcWidth">In/out: updated to the popup window's pixel width when retargeting.</param>
-    /// <param name="srcHeight">In/out: updated to the popup window's pixel height when retargeting.</param>
-    /// <param name="getAncestorRoot">
-    /// Optional injectable for <c>GetAncestor(hwnd, GA_ROOT)</c> — used for unit testing without Win32.
-    /// Receives and returns an HWND as <see cref="nint"/> (0 = null/not found).
-    /// When <see langword="null"/>, the real <c>Windows.Win32.PInvoke.GetAncestor</c> is called.
-    /// </param>
-    /// <param name="getWindowRect">
-    /// Optional injectable for <c>GetWindowRect</c> — used for unit testing without Win32.
-    /// Returns <c>(left, top, right, bottom)</c> screen coordinates of the window.
-    /// When <see langword="null"/>, the real <c>Windows.Win32.PInvoke.GetWindowRect</c> is called.
-    /// </param>
-    /// <returns>
-    /// The HWND (as <see cref="nint"/>) to use as the capture surface: the element's top-level
-    /// window when a retarget was needed, or <paramref name="sessionHwnd"/> when unchanged.
-    /// </returns>
-    /// <remarks>
-    /// Coverage ceiling (issue #630): unit tests cover the retargeting decisions through injected
-    /// ancestor/rect delegates. The only remaining uncovered lines call the real GetAncestor/
-    /// GetWindowRect Win32 APIs for live popup HWNDs, which require desktop window topology that is
-    /// not deterministic on the shared test host.
-    /// </remarks>
-    internal static nint ResolvePopupCaptureHwnd(
-        long? elementWindowHandle,
-        nint sessionHwnd,
-        ref int captureOriginLeft, ref int captureOriginTop,
-        ref int srcWidth, ref int srcHeight,
-        Func<nint, nint>? getAncestorRoot = null,
-        Func<nint, (int left, int top, int right, int bottom)>? getWindowRect = null)
-    {
-        if (!elementWindowHandle.HasValue || elementWindowHandle.Value == sessionHwnd)
-        {
-            return sessionHwnd;
-        }
-
-        var rawElementHwnd = (nint)elementWindowHandle.Value;
-
-        // Walk up to the true top-level window (GA_ROOT) so that child HWNDs (e.g. hosted
-        // control islands) resolve to the containing top-level window for WGC/capture.
-        nint elementOwnerHwnd;
-        if (getAncestorRoot is not null)
-        {
-            var root = getAncestorRoot(rawElementHwnd);
-            elementOwnerHwnd = root != 0 ? root : rawElementHwnd;
-        }
-        else
-        {
-            var rootHwnd = Windows.Win32.PInvoke.GetAncestor(
-                new Windows.Win32.Foundation.HWND(rawElementHwnd),
-                Windows.Win32.UI.WindowsAndMessaging.GET_ANCESTOR_FLAGS.GA_ROOT);
-            elementOwnerHwnd = rootHwnd.IsNull ? rawElementHwnd : (nint)rootHwnd;
-        }
-
-        // If GA_ROOT turned out to be the session window (element is a child HWND inside
-        // the main window), no retarget is needed.
-        if (elementOwnerHwnd == sessionHwnd)
-        {
-            return sessionHwnd;
-        }
-
-        // Update capture origin and dimensions to the element's owning top-level window.
-        if (getWindowRect is not null)
-        {
-            var (l, t, r, b) = getWindowRect(elementOwnerHwnd);
-            captureOriginLeft = l;
-            captureOriginTop = t;
-            srcWidth = Math.Max(1, r - l);
-            srcHeight = Math.Max(1, b - t);
-        }
-        else
-        {
-            Windows.Win32.PInvoke.GetWindowRect(
-                new Windows.Win32.Foundation.HWND(elementOwnerHwnd), out var popupRect);
-            captureOriginLeft = popupRect.left;
-            captureOriginTop = popupRect.top;
-            srcWidth = Math.Max(1, popupRect.right - popupRect.left);
-            srcHeight = Math.Max(1, popupRect.bottom - popupRect.top);
-        }
-
-        return elementOwnerHwnd;
-    }
-
-    /// <summary>
-    /// Returns <see langword="true"/> when an element rect has no positive-area intersection with
-    /// the capture surface. Used to reject entirely-offscreen elements before crop clamping so
-    /// callers get an actionable error instead of a garbage 1-pixel-sliver recording.
-    /// A legitimately small element that does intersect returns <see langword="false"/> and is
-    /// allowed to fall through to the existing encoder-min padding (intended behaviour).
-    /// </summary>
-    internal static bool IsElementOffscreen(
-        double elemX, double elemY, double elemWidth, double elemHeight,
-        int captureOriginLeft, int captureOriginTop, int srcWidth, int srcHeight)
-    {
-        if (elemWidth <= 0 || elemHeight <= 0)
-        {
-            return true;
-        }
-
-        var interLeft   = Math.Max((int)elemX,                       captureOriginLeft);
-        var interTop    = Math.Max((int)elemY,                       captureOriginTop);
-        var interRight  = Math.Min((int)elemX + (int)elemWidth,      captureOriginLeft + srcWidth);
-        var interBottom = Math.Min((int)elemY + (int)elemHeight,     captureOriginTop  + srcHeight);
-
-        return interRight <= interLeft || interBottom <= interTop;
-    }
-
-    /// <summary>
-    /// Resolves the element's TRUE top-level native window by re-resolving the live UIA element
-    /// (<see cref="ResolveComElement"/>) and walking up the control view to the nearest ancestor
-    /// that owns a native window handle, then to that handle's <c>GA_ROOT</c> top-level window.
-    ///
-    /// This is authoritative because it follows the actual UIA parent chain, so it is immune to
-    /// the z-order pitfall of hit testing (<c>WindowFromPoint</c>), which can return an unrelated
-    /// window that merely overlaps the element's on-screen center — even one in the same process.
-    /// Returns 0 when the element cannot be re-resolved or has no native-window ancestor, in which
-    /// case the caller leaves capture on the session window (no retarget).
-    /// </summary>
-    /// <remarks>
-    /// Coverage ceiling (issue #630): this walks live UIA COM parents and Win32 ancestors. The safe
-    /// static decision helper is unit-tested; the remaining lines require a real popup/owned HWND
-    /// ancestor chain or a COM provider fault during parent walking.
-    /// </remarks>
-    private nint ResolveElementTopLevelHwnd(UiSessionInfo session, UiElement selectorElement)
-    {
-        try
-        {
-            var comElement = ResolveComElement(session, selectorElement);
-            if (comElement is null)
-            {
-                return 0;
-            }
-
-            // Walk up the control view to the nearest element that owns a native HWND, then
-            // resolve that handle's top-level (GA_ROOT) window. Bounded to avoid pathological loops.
-            var walker = _automation.get_ControlViewWalker();
-            var current = comElement;
-            var maxWalk = 40;
-            while (current is not null && maxWalk-- > 0)
-            {
-                var native = current.get_CurrentNativeWindowHandle();
-                if (!native.IsNull)
-                {
-                    var root = Windows.Win32.PInvoke.GetAncestor(
-                        native, Windows.Win32.UI.WindowsAndMessaging.GET_ANCESTOR_FLAGS.GA_ROOT);
-                    return root.IsNull ? (nint)native : (nint)root;
-                }
-                current = walker.GetParentElement(current);
-            }
-
-            return 0;
-        }
-        catch (System.Runtime.InteropServices.COMException ex)
-        {
-            _logger.LogDebug(ex, "Deriving element top-level HWND failed; leaving capture on the session window");
-            return 0;
-        }
-    }
-
-    /// <summary>
-    /// Decides whether to retarget the capture surface to the element's derived top-level window
-    /// and, when so, updates the capture origin/size to that window's rect. The authoritative HWND
-    /// is supplied by <paramref name="getElementTopLevelHwnd"/> (production: the UIA native-window
-    /// ancestor of the resolved element via <see cref="ResolveElementTopLevelHwnd"/>; tests: an
-    /// injected value). Retargets only when the derived window is non-zero and differs from the
-    /// session window; otherwise returns <paramref name="sessionHwnd"/> and leaves the rect intact.
-    /// </summary>
-    /// <param name="sessionHwnd">The session's main window HWND.</param>
-    /// <param name="captureOriginLeft">In/out: updated to the derived window's screen-left when retargeting.</param>
-    /// <param name="captureOriginTop">In/out: updated to the derived window's screen-top when retargeting.</param>
-    /// <param name="srcWidth">In/out: updated to the derived window's pixel width when retargeting.</param>
-    /// <param name="srcHeight">In/out: updated to the derived window's pixel height when retargeting.</param>
-    /// <param name="getElementTopLevelHwnd">
-    /// Supplies the element's authoritative top-level HWND (0 when it cannot be derived).
-    /// </param>
-    /// <param name="getWindowRect">
-    /// Optional injectable for <c>GetWindowRect</c>. Returns <c>(left, top, right, bottom)</c>.
-    /// When <see langword="null"/>, the real <c>Windows.Win32.PInvoke.GetWindowRect</c> is called.
-    /// </param>
-    /// <returns>
-    /// The derived top-level HWND when a retarget is warranted, otherwise <paramref name="sessionHwnd"/>.
-    /// </returns>
-    /// <remarks>
-    /// Coverage ceiling (issue #630): unit tests cover the decision logic through the injectable rect
-    /// delegate. The uncovered branch is the real GetWindowRect call for a live derived HWND, which is
-    /// native desktop state and not deterministic in headless/shared coverage runs.
-    /// </remarks>
-    internal static nint DeriveElementCaptureHwnd(
-        nint sessionHwnd,
-        ref int captureOriginLeft, ref int captureOriginTop,
-        ref int srcWidth, ref int srcHeight,
-        Func<nint> getElementTopLevelHwnd,
-        Func<nint, (int left, int top, int right, int bottom)>? getWindowRect = null)
-    {
-        var derived = getElementTopLevelHwnd();
-
-        // No retarget when the element has no derivable top-level window, or it is the session
-        // window itself (genuine in-window element). The overlap case that broke the previous
-        // geometry approach cannot occur here: an overlapping window is never a UIA ancestor.
-        if (derived == 0 || derived == sessionHwnd)
-        {
-            return sessionHwnd;
-        }
-
-        // Update capture origin and dimensions to the derived top-level window.
-        if (getWindowRect is not null)
-        {
-            var (l, t, r, b) = getWindowRect(derived);
-            captureOriginLeft = l;
-            captureOriginTop = t;
-            srcWidth = Math.Max(1, r - l);
-            srcHeight = Math.Max(1, b - t);
-        }
-        else
-        {
-            Windows.Win32.PInvoke.GetWindowRect(
-                new Windows.Win32.Foundation.HWND(derived), out var derivedRect);
-            captureOriginLeft = derivedRect.left;
-            captureOriginTop = derivedRect.top;
-            srcWidth = Math.Max(1, derivedRect.right - derivedRect.left);
-            srcHeight = Math.Max(1, derivedRect.bottom - derivedRect.top);
-        }
-
-        return derived;
-    }
 
 }

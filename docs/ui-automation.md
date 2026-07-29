@@ -288,6 +288,8 @@ demo.frames/
 
 Each actual recording sample has one compact JSON line in `frames.ndjson`. `elapsedMs` is the monotonic capture timestamp to use when bounding transitions; `mediaTimeMs` correlates the sample to the MP4 timeline. `contentRect` records that sample's non-letterboxed region, including after a live window resize. Exact consecutive processed-pixel duplicates reference the preceding JPEG (`changed: false`) instead of writing duplicate images. JPEGs use quality 85 and the same cropped, scaled, and letterboxed BGRA pixels sent to the H.264 encoder.
 
+The manifest `timing` object describes the indexed frame timeline. For a truncated bundle, its `elapsedMs`, `sampleCount`, `achievedFps`, and `cadenceRatio` describe only the retained prefix; the `video` object separately describes the complete MP4.
+
 `manifest.json` describes the request, achieved cadence, capture mode/source window, crop and content rectangles, MP4 status, image dimensions, counts, and SHA-256 integrity metadata. `status` is `complete`, `partial` when the MP4 failed, or `truncated` when the 1 GiB frame-data cap retained only a prefix. `frames.truncated` and `frames.byteLimit` make that condition explicit. Frame output is local, unencrypted screen content; retain and share the directory with the same care as screenshots or the MP4.
 
 The frame bundle is written to a randomized sibling staging directory and published by directory rename only after its manifest is complete. In frame mode, neither the final MP4 path nor frame directory may already exist. A valid MP4 is preserved if frame output fails; a valid partial frame bundle is preserved if MP4 finalization fails.

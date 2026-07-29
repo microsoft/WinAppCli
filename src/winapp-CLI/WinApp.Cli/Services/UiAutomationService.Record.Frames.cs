@@ -3,6 +3,7 @@
 
 using System.Runtime.InteropServices;
 using SkiaSharp;
+using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
 
@@ -14,6 +15,108 @@ internal sealed partial class UiAutomationService
     // centered on a black letterbox canvas padded to the minimum, preserving aspect ratio.
     private const int MfH264MinWidth = 64;
     private const int MfH264MinHeight = 64;
+
+    private sealed class RecordFrameArtifactSetup
+    {
+        public required RecordOptions Options { get; init; }
+        public required UiSessionInfo Session { get; init; }
+        public required DateTimeOffset StartedUtc { get; init; }
+        public required int SourceWidth { get; init; }
+        public required int SourceHeight { get; init; }
+        public required int CropX { get; init; }
+        public required int CropY { get; init; }
+        public required int CropWidth { get; init; }
+        public required int CropHeight { get; init; }
+        public required int EncoderWidth { get; init; }
+        public required int EncoderHeight { get; init; }
+        public required int DisplayWidth { get; init; }
+        public required int DisplayHeight { get; init; }
+        public required long CaptureHwnd { get; init; }
+        public required string CaptureMode { get; init; }
+        public string? ElementId { get; init; }
+        public required bool IsWholeWindowWgc { get; init; }
+        public required bool UseScreen { get; init; }
+        public required bool UseWgc { get; init; }
+    }
+
+    private RecordFrameArtifactCoordinator CreateRecordFrameArtifactCoordinator(
+        RecordFrameArtifactSetup setup)
+    {
+        var initialCropWidth = setup.IsWholeWindowWgc ? setup.SourceWidth : setup.CropWidth;
+        var initialCropHeight = setup.IsWholeWindowWgc ? setup.SourceHeight : setup.CropHeight;
+        var requiresTransform = RequiresFrameTransform(
+            setup.SourceWidth,
+            setup.SourceHeight,
+            setup.CropX,
+            setup.CropY,
+            initialCropWidth,
+            initialCropHeight,
+            setup.EncoderWidth,
+            setup.EncoderHeight,
+            setup.DisplayWidth,
+            setup.DisplayHeight);
+        var sourceBufferCount = setup.UseScreen || !requiresTransform
+            ? 0
+            // WGC may retain a published latest frame and allocate the following
+            // copy while the recorder and Skia each retain the current source.
+            : setup.UseWgc ? 4 : 2;
+        var (contentX, contentY, contentWidth, contentHeight) = ComputeFittedContentRect(
+            setup.CropWidth,
+            setup.CropHeight,
+            setup.EncoderWidth,
+            setup.EncoderHeight,
+            setup.DisplayWidth,
+            setup.DisplayHeight);
+
+        return RecordFrameArtifactCoordinator.Create(new RecordFrameBundleConfiguration
+        {
+            FinalDirectory = setup.Options.FramesDirectory!,
+            VideoPath = setup.Options.OutputPath,
+            RecordingId = Guid.NewGuid().ToString("N"),
+            StartedUtc = setup.StartedUtc,
+            Width = setup.EncoderWidth,
+            Height = setup.EncoderHeight,
+            SourceWidth = setup.SourceWidth,
+            SourceHeight = setup.SourceHeight,
+            SourceBufferCount = sourceBufferCount,
+            ContentRect = new RecordFrameRectManifest
+            {
+                X = contentX,
+                Y = contentY,
+                Width = contentWidth,
+                Height = contentHeight,
+            },
+            Requested = new RecordFrameRequestManifest
+            {
+                DurationSec = setup.Options.DurationSec,
+                Fps = setup.Options.Fps,
+                MaxEdge = setup.Options.MaxEdge,
+                Selector = setup.Options.Selector,
+                CaptureScreen = setup.Options.CaptureScreen,
+            },
+            Source = new RecordFrameSourceManifest
+            {
+                ProcessId = setup.Session.ProcessId,
+                ProcessName = setup.Session.ProcessName,
+                WindowTitle = setup.Session.WindowTitle,
+                SessionHwnd = setup.Session.WindowHandle,
+                CaptureHwnd = setup.CaptureHwnd,
+                CaptureMode = setup.CaptureMode,
+            },
+            Crop = new RecordFrameCropManifest
+            {
+                Kind = string.IsNullOrEmpty(setup.ElementId) ? "window" : "element",
+                Rect = new RecordFrameRectManifest
+                {
+                    X = setup.CropX,
+                    Y = setup.CropY,
+                    Width = setup.CropWidth,
+                    Height = setup.CropHeight,
+                },
+            },
+            Logger = _logger,
+        });
+    }
 
     /// <summary>
     /// Computes the encoder output size and display (content) size for the given crop dimensions.

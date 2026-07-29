@@ -40,7 +40,7 @@ internal sealed class RecordFrameArtifactCoordinator : IAsyncDisposable
         }
         catch (Exception ex) when (IsRecoverableFrameOutputFailure(ex))
         {
-            configuration.Logger.LogError(ex, "Could not initialize frame artifact output");
+            LogExpectedFailure(configuration.Logger, ex, "Could not initialize frame artifact output");
             return new RecordFrameArtifactCoordinator(configuration.Logger, sink: null, ex);
         }
     }
@@ -62,7 +62,10 @@ internal sealed class RecordFrameArtifactCoordinator : IAsyncDisposable
         catch (Exception ex) when (IsRecoverableFrameOutputFailure(ex))
         {
             Failure ??= ex;
-            _logger.LogError(ex, "Frame artifact source dimensions exceed the memory budget; continuing MP4 recording");
+            LogExpectedFailure(
+                _logger,
+                ex,
+                "Frame artifact source dimensions exceed the memory budget; continuing MP4 recording");
             await AbortAndDisposeAsync("Frame artifact cleanup also failed").ConfigureAwait(false);
         }
     }
@@ -87,7 +90,7 @@ internal sealed class RecordFrameArtifactCoordinator : IAsyncDisposable
         catch (Exception ex) when (IsRecoverableFrameOutputFailure(ex))
         {
             Failure ??= ex;
-            _logger.LogError(ex, "Frame artifact output failed; continuing MP4 recording");
+            LogExpectedFailure(_logger, ex, "Frame artifact output failed; continuing MP4 recording");
             await AbortAndDisposeAsync("Frame artifact cleanup also failed").ConfigureAwait(false);
         }
     }
@@ -117,7 +120,7 @@ internal sealed class RecordFrameArtifactCoordinator : IAsyncDisposable
             and not AccessViolationException)
         {
             Failure ??= ex;
-            _logger.LogError(ex, "Could not preserve partial frame artifacts after MP4 failure");
+            LogExpectedFailure(_logger, ex, "Could not preserve partial frame artifacts after MP4 failure");
             await AbortAndDisposeAsync("Partial frame artifact cleanup also failed").ConfigureAwait(false);
             return null;
         }
@@ -140,7 +143,7 @@ internal sealed class RecordFrameArtifactCoordinator : IAsyncDisposable
         catch (Exception ex) when (IsRecoverableFrameOutputFailure(ex))
         {
             Failure ??= ex;
-            _logger.LogError(ex, "Could not finalize frame artifact output");
+            LogExpectedFailure(_logger, ex, "Could not finalize frame artifact output");
             await AbortAndDisposeAsync("Frame artifact cleanup also failed").ConfigureAwait(false);
             return null;
         }
@@ -187,6 +190,16 @@ internal sealed class RecordFrameArtifactCoordinator : IAsyncDisposable
 
         _sink = null;
         await sink.DisposeAsync().ConfigureAwait(false);
+    }
+
+    private static void LogExpectedFailure(ILogger logger, Exception exception, string message)
+    {
+        logger.LogError("{Message}: {Reason}", message, exception.Message);
+        logger.LogDebug(
+            "{Message} ({ExceptionType}): {Reason}",
+            message,
+            exception.GetType().Name,
+            exception.Message);
     }
 
     private static bool IsRecoverableFrameOutputFailure(Exception exception)

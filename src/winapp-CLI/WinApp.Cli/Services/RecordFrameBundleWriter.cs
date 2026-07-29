@@ -94,6 +94,7 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
     private int _imageCount;
     private long _imageBytes;
     private long _indexBytes;
+    private long _lastIndexedElapsedMs;
     private int _truncated;
     private bool _indexDisposed;
     private bool _published;
@@ -275,6 +276,15 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
         await DisposeIndexWriterAsync().ConfigureAwait(false);
 
         var indexBytes = new FileInfo(_indexPath).Length;
+        var timingElapsedMs = IsTruncated
+            ? Math.Max(1, Volatile.Read(ref _lastIndexedElapsedMs))
+            : completion.ElapsedMs;
+        var timingAchievedFps = IsTruncated
+            ? SampleCount * 1000.0 / timingElapsedMs
+            : completion.AchievedFps;
+        var timingCadenceRatio = IsTruncated
+            ? timingAchievedFps / _configuration.Requested.Fps
+            : completion.CadenceRatio;
         var manifest = new RecordFrameBundleManifest
         {
             Status = completion.Status == "complete" && IsTruncated
@@ -287,12 +297,12 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
             Requested = _configuration.Requested,
             Timing = new RecordFrameTimingManifest
             {
-                ElapsedMs = completion.ElapsedMs,
+                ElapsedMs = timingElapsedMs,
                 SampleCount = SampleCount,
                 ImageCount = ImageCount,
                 RepeatedSampleCount = SampleCount - ImageCount,
-                AchievedFps = completion.AchievedFps,
-                CadenceRatio = completion.CadenceRatio,
+                AchievedFps = timingAchievedFps,
+                CadenceRatio = timingCadenceRatio,
             },
             Video = new RecordFrameVideoManifest
             {
@@ -512,6 +522,7 @@ internal sealed class RecordFrameBundleWriter : IRecordFrameSink
                     line.AsMemory(),
                     _lifetimeCts.Token).ConfigureAwait(false);
                 _indexBytes += lineBytes;
+                Interlocked.Exchange(ref _lastIndexedElapsedMs, queued.Sample.ElapsedMs);
                 Interlocked.Increment(ref _sampleCount);
             }
 

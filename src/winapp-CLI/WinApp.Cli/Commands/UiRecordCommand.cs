@@ -93,7 +93,7 @@ internal class UiRecordCommand : Command, IShortDescription
                 logger.LogError("{Symbol} --fps must be at least 1.", UiSymbols.Error);
                 return 1;
             }
-            if (maxEdge != 0 && maxEdge < 64)
+            if (framesDirectoryOption is null && maxEdge != 0 && maxEdge < 64)
             {
                 UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--max-edge must be 0 (unbounded) or >= 64 (encoder minimum).");
                 logger.LogError("{Symbol} --max-edge must be 0 (unbounded) or >= 64 (encoder minimum).", UiSymbols.Error);
@@ -125,15 +125,9 @@ internal class UiRecordCommand : Command, IShortDescription
                     logger.LogError("{Symbol} --frames-dir is limited to 18,000 requested samples.", UiSymbols.Error);
                     return 1;
                 }
-                if (maxEdge > MaximumFrameArtifactMaxEdge)
+                if (maxEdgeExplicit && (maxEdge < 64 || maxEdge > MaximumFrameArtifactMaxEdge))
                 {
-                    UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, "--frames-dir supports --max-edge values up to 4096.");
-                    logger.LogError("{Symbol} --frames-dir supports --max-edge values up to 4096.", UiSymbols.Error);
-                    return 1;
-                }
-                if (maxEdgeExplicit && maxEdge == 0)
-                {
-                    const string message = "--frames-dir does not support --max-edge 0; specify 64 through 4096, or omit --max-edge to use 1280.";
+                    const string message = "--frames-dir supports --max-edge values from 64 through 4096; omit --max-edge to use 1280.";
                     UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, message);
                     logger.LogError("{Symbol} {Message}", UiSymbols.Error, message);
                     return 1;
