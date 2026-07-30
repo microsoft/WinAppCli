@@ -145,15 +145,44 @@ jobs:
 
     # --- Run the sample's self-contained Pester test ---
 
+    # Hosted Windows images ship Pester 5.x, so this normally short-circuits.
+    # When it does need to install, PSGallery registration/download is a known
+    # flake ("Missing option value for: '-source'"), so retry before failing.
     - name: Install Pester
       if: steps.check.outputs.skip != 'true'
       shell: pwsh
       run: |
-        if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
-          Register-PSRepository -Default
+        function Get-Pester5 {
+          Get-Module -Name Pester -ListAvailable |
+            Where-Object { $_.Version.Major -ge 5 } |
+            Sort-Object Version -Descending |
+            Select-Object -First 1
         }
-        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-        Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser -MinimumVersion 5.0 -Repository PSGallery
+
+        $pester = Get-Pester5
+        if (-not $pester) {
+          foreach ($attempt in 1..3) {
+            try {
+              if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
+                Register-PSRepository -Default -ErrorAction Stop
+              }
+              Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction Stop
+              Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser -MinimumVersion 5.0 -Repository PSGallery -ErrorAction Stop
+            } catch {
+              Write-Host "::warning::Pester install attempt $attempt failed: $($_.Exception.Message)"
+            }
+
+            $pester = Get-Pester5
+            if ($pester) { break }
+            if ($attempt -lt 3) { Start-Sleep -Seconds (10 * $attempt) }
+          }
+        }
+
+        if (-not $pester) {
+          Write-Error "Pester 5.x is not available after 3 install attempts"
+          exit 1
+        }
+        Write-Host "Using Pester $($pester.Version)"
 
     - name: Run ${{ matrix.sample }} test
       if: steps.check.outputs.skip != 'true'
