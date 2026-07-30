@@ -16,8 +16,14 @@ internal class UiCommand : Command, IShortDescription
         UiGetPropertyCommand getPropertyCommand,
         UiGetValueCommand getValueCommand,
         UiScreenshotCommand screenshotCommand,
+        UiRecordCommand recordCommand,
         UiInvokeCommand invokeCommand,
         UiClickCommand clickCommand,
+        UiDragCommand dragCommand,
+        UiTouchCommand touchCommand,
+        UiPenCommand penCommand,
+        UiHoverCommand hoverCommand,
+        UiSendKeysCommand sendKeysCommand,
         UiSetValueCommand setValueCommand,
         UiFocusCommand focusCommand,
         UiScrollIntoViewCommand scrollIntoViewCommand,
@@ -26,7 +32,6 @@ internal class UiCommand : Command, IShortDescription
         UiListWindowsCommand listWindowsCommand,
         UiGetFocusedCommand getFocusedCommand)
         : base("ui", "Inspect and interact with any running Windows app using UI Automation (UIA). " +
-               "Auto-detects DevTools mode for WinUI 3 apps with the WinApp NuGet. " +
                "Works with WPF, WinForms, Win32, Electron, and WinUI 3 apps.")
     {
         Subcommands.Add(statusCommand);
@@ -35,8 +40,14 @@ internal class UiCommand : Command, IShortDescription
         Subcommands.Add(getPropertyCommand);
         Subcommands.Add(getValueCommand);
         Subcommands.Add(screenshotCommand);
+        Subcommands.Add(recordCommand);
         Subcommands.Add(invokeCommand);
         Subcommands.Add(clickCommand);
+        Subcommands.Add(dragCommand);
+        Subcommands.Add(touchCommand);
+        Subcommands.Add(penCommand);
+        Subcommands.Add(hoverCommand);
+        Subcommands.Add(sendKeysCommand);
         Subcommands.Add(setValueCommand);
         Subcommands.Add(focusCommand);
         Subcommands.Add(scrollIntoViewCommand);

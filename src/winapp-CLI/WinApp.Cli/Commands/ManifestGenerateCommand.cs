@@ -39,7 +39,7 @@ internal class ManifestGenerateCommand : Command, IShortDescription
 
         PublisherNameOption = new Option<string>("--publisher-name")
         {
-            Description = "Publisher CN (default: CN=<current user>)"
+            Description = "Publisher distinguished name (DN) (default: CN=<current user>). Accepts any valid X.500 DN; bare names are auto-wrapped as CN=<name>."
         };
 
         VersionOption = new Option<string>("--version")

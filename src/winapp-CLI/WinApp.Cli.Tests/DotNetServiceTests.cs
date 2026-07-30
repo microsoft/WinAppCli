@@ -1012,7 +1012,678 @@ public class DotNetServiceTests : BaseCommandTests
             new FileInfo("dummy.csproj"), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
 
         // Assert
-        Assert.IsFalse(result, "Should return false when package is only a transitive dependency");
+        Assert.IsFalse(result, "Should return false when package is only a transitive dependency");    }
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_FastPath_DetectsInlinePackageReference_WithoutDotnetRestore()
+    {
+        // Arrange — write an SDK-style csproj with an inline PackageReference. Use a non-existent
+        // SDK so a `dotnet list package` fallback would fail; success here proves the XML fast path
+        // returned true without invoking dotnet (#463).
+        var csprojPath = Path.Combine(_testTempDirectory, "Inline.csproj");
+        await File.WriteAllTextAsync(csprojPath, """
+<Project Sdk="DefinitelyNotARealSdk/0.0.0">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.0" />
+  </ItemGroup>
+</Project>
+""", TestContext.CancellationToken);
+
+        // Act
+        var result = await _dotNetService.HasPackageReferenceAsync(
+            new FileInfo(csprojPath), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "XML fast path should detect inline <PackageReference Include=\"Microsoft.WindowsAppSDK\"/>.");
+    }
+
+    [TestMethod]
+    public async Task HasPackageReferenceAsync_FastPath_CaseInsensitiveOnIncludeAttribute()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Cased.csproj");
+        await File.WriteAllTextAsync(csprojPath, """
+<Project Sdk="DefinitelyNotARealSdk/0.0.0">
+  <ItemGroup>
+    <PackageReference Include="microsoft.windowsappsdk" Version="1.6.0" />
+  </ItemGroup>
+</Project>
+""", TestContext.CancellationToken);
+
+        // Act
+        var result = await _dotNetService.HasPackageReferenceAsync(
+            new FileInfo(csprojPath), "Microsoft.WindowsAppSDK", TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "XML fast path should be case-insensitive on the Include attribute.");
+    }
+
+    #endregion
+
+    #region EnsureAssetContentItemsAsync
+
+    [TestMethod]
+    public async Task EnsureAssetContentItems_AddsMissingAssetsGlob()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Test.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+</Project>
+");
+
+        // Act
+        var result = await _dotNetService.EnsureAssetContentItemsAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Should modify csproj when no asset Content items exist");
+        var content = File.ReadAllText(csprojPath);
+        Assert.IsTrue(content.Contains(@"<Content Include=""Assets\**\*"" />"),
+            "Should add Assets glob Content item");
+        Assert.IsTrue(content.Contains("</Project>"),
+            "Should preserve </Project> closing tag");
+    }
+
+    [TestMethod]
+    public async Task EnsureAssetContentItems_SkipsWhenAlreadyPresent()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Test.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include=""Assets\**\*"" />
+  </ItemGroup>
+</Project>
+");
+
+        // Act
+        var result = await _dotNetService.EnsureAssetContentItemsAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should not modify csproj when asset Content items already exist");
+    }
+
+    [TestMethod]
+    public async Task EnsureAssetContentItems_SkipsWhenIndividualAssetPresent()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Test.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <ItemGroup>
+    <Content Include=""Assets\StoreLogo.png"" />
+  </ItemGroup>
+</Project>
+");
+
+        // Act
+        var result = await _dotNetService.EnsureAssetContentItemsAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should not modify csproj when individual asset Content items exist");
+    }
+
+    [TestMethod]
+    public async Task EnsureAssetContentItems_ReturnsFalseForMissingFile()
+    {
+        // Act
+        var result = await _dotNetService.EnsureAssetContentItemsAsync(
+            new FileInfo(Path.Combine(_testTempDirectory, "NonExistent.csproj")),
+            TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result);
+    }
+
+    #endregion
+
+    #region UpdatePublishProfileAsync Tests
+
+    [TestMethod]
+    public async Task UpdatePublishProfile_WithPlatformProfile_AddsExistsCondition()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Pub.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <PublishProfile>win-$(Platform).pubxml</PublishProfile>
+  </PropertyGroup>
+</Project>");
+
+        // Act
+        var result = await _dotNetService.UpdatePublishProfileAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Should return true when the PublishProfile was rewritten");
+        var content = File.ReadAllText(csprojPath);
+        StringAssert.Contains(content,
+            @"<PublishProfile Condition=""Exists('Properties\PublishProfiles\win-$(Platform).pubxml')"">win-$(Platform).pubxml</PublishProfile>");
+    }
+
+    [TestMethod]
+    public async Task UpdatePublishProfile_WithoutPlatformToken_DoesNotModify()
+    {
+        // Arrange — a PublishProfile that does not reference $(Platform) should be ignored
+        var csprojPath = Path.Combine(_testTempDirectory, "Pub.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <PublishProfile>Release.pubxml</PublishProfile>
+  </PropertyGroup>
+</Project>");
+
+        // Act
+        var result = await _dotNetService.UpdatePublishProfileAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false when there is no $(Platform) PublishProfile");
+        var content = File.ReadAllText(csprojPath);
+        Assert.IsFalse(content.Contains("Condition="), "Content should be untouched");
+    }
+
+    [TestMethod]
+    public async Task UpdatePublishProfile_MissingFile_ReturnsFalse()
+    {
+        // Act
+        var result = await _dotNetService.UpdatePublishProfileAsync(
+            new FileInfo(Path.Combine(_testTempDirectory, "Missing.csproj")),
+            TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result);
+    }
+
+    #endregion
+
+    #region EnsureEnableMsixToolingAsync Tests
+
+    [TestMethod]
+    public async Task EnsureEnableMsixTooling_AlreadyTrue_DoesNotModify()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Msix.csproj");
+        var original = @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <EnableMsixTooling>true</EnableMsixTooling>
+  </PropertyGroup>
+</Project>";
+        File.WriteAllText(csprojPath, original);
+
+        // Act
+        var result = await _dotNetService.EnsureEnableMsixToolingAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false when EnableMsixTooling is already true");
+        Assert.AreEqual(original, File.ReadAllText(csprojPath), "Content should be unchanged");
+    }
+
+    [TestMethod]
+    public async Task EnsureEnableMsixTooling_FalseWithoutComment_SetsTrueAndAddsComment()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Msix.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <EnableMsixTooling>false</EnableMsixTooling>
+  </PropertyGroup>
+</Project>");
+
+        // Act
+        var result = await _dotNetService.EnsureEnableMsixToolingAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Should return true when flipping false to true");
+        var content = File.ReadAllText(csprojPath);
+        StringAssert.Contains(content, "<EnableMsixTooling>true</EnableMsixTooling>");
+        StringAssert.Contains(content, "Enables targets that generate package layout");
+        Assert.IsFalse(content.Contains("<EnableMsixTooling>false"), "Old false value should be gone");
+    }
+
+    [TestMethod]
+    public async Task EnsureEnableMsixTooling_FalseWithExistingComment_SetsTrueWithoutDuplicateComment()
+    {
+        // Arrange — an XML comment already sits directly above the element
+        var csprojPath = Path.Combine(_testTempDirectory, "Msix.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <!-- existing note -->
+    <EnableMsixTooling>false</EnableMsixTooling>
+  </PropertyGroup>
+</Project>");
+
+        // Act
+        var result = await _dotNetService.EnsureEnableMsixToolingAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Should return true when flipping false to true");
+        var content = File.ReadAllText(csprojPath);
+        StringAssert.Contains(content, "<EnableMsixTooling>true</EnableMsixTooling>");
+        StringAssert.Contains(content, "<!-- existing note -->");
+        Assert.IsFalse(content.Contains("Enables targets that generate package layout"),
+            "Should not inject a second comment when one already exists");
+    }
+
+    [TestMethod]
+    public async Task EnsureEnableMsixTooling_UnexpectedValue_DoesNotModify()
+    {
+        // Arrange — a non true/false value is left untouched
+        var csprojPath = Path.Combine(_testTempDirectory, "Msix.csproj");
+        var original = @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <EnableMsixTooling>maybe</EnableMsixTooling>
+  </PropertyGroup>
+</Project>";
+        File.WriteAllText(csprojPath, original);
+
+        // Act
+        var result = await _dotNetService.EnsureEnableMsixToolingAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false for an unexpected existing value");
+        Assert.AreEqual(original, File.ReadAllText(csprojPath));
+    }
+
+    [TestMethod]
+    public async Task EnsureEnableMsixTooling_InsertsAfterRuntimeIdentifier()
+    {
+        // Arrange — no EnableMsixTooling, but a RuntimeIdentifier is present
+        var csprojPath = Path.Combine(_testTempDirectory, "Msix.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+</Project>");
+
+        // Act
+        var result = await _dotNetService.EnsureEnableMsixToolingAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result);
+        var content = File.ReadAllText(csprojPath);
+        StringAssert.Contains(content, "<EnableMsixTooling>true</EnableMsixTooling>");
+        // Should be inserted after the RuntimeIdentifier element
+        var ridIdx = content.IndexOf("</RuntimeIdentifier>", StringComparison.Ordinal);
+        var msixIdx = content.IndexOf("<EnableMsixTooling>true", StringComparison.Ordinal);
+        Assert.IsTrue(ridIdx >= 0 && msixIdx > ridIdx, "EnableMsixTooling should follow RuntimeIdentifier");
+    }
+
+    [TestMethod]
+    public async Task EnsureEnableMsixTooling_InsertsAfterTargetFramework_WhenNoRuntimeIdentifier()
+    {
+        // Arrange — no EnableMsixTooling and no RuntimeIdentifier, but a TargetFramework is present
+        var csprojPath = Path.Combine(_testTempDirectory, "Msix.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+  </PropertyGroup>
+</Project>");
+
+        // Act
+        var result = await _dotNetService.EnsureEnableMsixToolingAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result);
+        var content = File.ReadAllText(csprojPath);
+        StringAssert.Contains(content, "<EnableMsixTooling>true</EnableMsixTooling>");
+        var tfmIdx = content.IndexOf("</TargetFramework>", StringComparison.Ordinal);
+        var msixIdx = content.IndexOf("<EnableMsixTooling>true", StringComparison.Ordinal);
+        Assert.IsTrue(tfmIdx >= 0 && msixIdx > tfmIdx, "EnableMsixTooling should follow TargetFramework");
+    }
+
+    [TestMethod]
+    public async Task EnsureEnableMsixTooling_InsertsAfterPropertyGroup_WhenNoRidOrTfm()
+    {
+        // Arrange — no EnableMsixTooling, no RuntimeIdentifier, no TargetFramework
+        var csprojPath = Path.Combine(_testTempDirectory, "Msix.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+</Project>");
+
+        // Act
+        var result = await _dotNetService.EnsureEnableMsixToolingAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result);
+        var content = File.ReadAllText(csprojPath);
+        StringAssert.Contains(content, "<EnableMsixTooling>true</EnableMsixTooling>");
+        var pgIdx = content.IndexOf("<PropertyGroup>", StringComparison.Ordinal);
+        var msixIdx = content.IndexOf("<EnableMsixTooling>true", StringComparison.Ordinal);
+        Assert.IsTrue(pgIdx >= 0 && msixIdx > pgIdx, "EnableMsixTooling should be inserted inside the PropertyGroup");
+    }
+
+    [TestMethod]
+    public async Task EnsureEnableMsixTooling_NoPropertyGroup_DoesNotModify()
+    {
+        // Arrange — nothing to anchor the insertion to
+        var csprojPath = Path.Combine(_testTempDirectory, "Msix.csproj");
+        var original = @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <ItemGroup>
+    <PackageReference Include=""Some.Package"" Version=""1.0.0"" />
+  </ItemGroup>
+</Project>";
+        File.WriteAllText(csprojPath, original);
+
+        // Act
+        var result = await _dotNetService.EnsureEnableMsixToolingAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false when there is no anchor to insert after");
+        Assert.AreEqual(original, File.ReadAllText(csprojPath));
+    }
+
+    [TestMethod]
+    public async Task EnsureEnableMsixTooling_MissingFile_ReturnsFalse()
+    {
+        // Act
+        var result = await _dotNetService.EnsureEnableMsixToolingAsync(
+            new FileInfo(Path.Combine(_testTempDirectory, "Missing.csproj")),
+            TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result);
+    }
+
+    #endregion
+
+    #region RemoveWindowsPackageTypeNoneAsync Tests
+
+    [TestMethod]
+    public async Task RemoveWindowsPackageTypeNone_WhenPresent_RemovesElement()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Wpt.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <WindowsPackageType>None</WindowsPackageType>
+  </PropertyGroup>
+</Project>");
+
+        // Act
+        var result = await _dotNetService.RemoveWindowsPackageTypeNoneAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Should return true when the element was removed");
+        var content = File.ReadAllText(csprojPath);
+        Assert.IsFalse(content.Contains("WindowsPackageType"), "WindowsPackageType element should be gone");
+        StringAssert.Contains(content, "<TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>");
+    }
+
+    [TestMethod]
+    public async Task RemoveWindowsPackageTypeNone_WhenAbsent_ReturnsFalse()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Wpt.csproj");
+        var original = @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+</Project>";
+        File.WriteAllText(csprojPath, original);
+
+        // Act
+        var result = await _dotNetService.RemoveWindowsPackageTypeNoneAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false when there is no WindowsPackageType element");
+        Assert.AreEqual(original, File.ReadAllText(csprojPath));
+    }
+
+    [TestMethod]
+    public async Task RemoveWindowsPackageTypeNone_MissingFile_ReturnsFalse()
+    {
+        // Act
+        var result = await _dotNetService.RemoveWindowsPackageTypeNoneAsync(
+            new FileInfo(Path.Combine(_testTempDirectory, "Missing.csproj")),
+            TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result);
+    }
+
+    #endregion
+
+    #region AnnotatePackageReferencesAsync Tests
+
+    [TestMethod]
+    public async Task AnnotatePackageReferences_AddsCommentAbovePackage()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Ann.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <ItemGroup>
+    <PackageReference Include=""Microsoft.WindowsAppSDK"" Version=""1.0.0"" />
+  </ItemGroup>
+</Project>");
+        var comments = new Dictionary<string, string>
+        {
+            ["Microsoft.WindowsAppSDK"] = "Windows App SDK runtime",
+        };
+
+        // Act
+        var result = await _dotNetService.AnnotatePackageReferencesAsync(
+            new FileInfo(csprojPath), comments, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Should return true when a comment was inserted");
+        var content = File.ReadAllText(csprojPath);
+        StringAssert.Contains(content, "<!-- Windows App SDK runtime -->");
+        var commentIdx = content.IndexOf("<!-- Windows App SDK runtime -->", StringComparison.Ordinal);
+        var pkgIdx = content.IndexOf("<PackageReference Include=\"Microsoft.WindowsAppSDK\"", StringComparison.Ordinal);
+        Assert.IsTrue(commentIdx >= 0 && commentIdx < pkgIdx, "Comment should appear above the PackageReference");
+    }
+
+    [TestMethod]
+    public async Task AnnotatePackageReferences_SkipsWhenCommentAlreadyPresent()
+    {
+        // Arrange — a comment already sits directly above the package reference
+        var csprojPath = Path.Combine(_testTempDirectory, "Ann.csproj");
+        var original = @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <ItemGroup>
+    <!-- Windows App SDK runtime -->
+    <PackageReference Include=""Microsoft.WindowsAppSDK"" Version=""1.0.0"" />
+  </ItemGroup>
+</Project>";
+        File.WriteAllText(csprojPath, original);
+        var comments = new Dictionary<string, string>
+        {
+            ["Microsoft.WindowsAppSDK"] = "Windows App SDK runtime",
+        };
+
+        // Act
+        var result = await _dotNetService.AnnotatePackageReferencesAsync(
+            new FileInfo(csprojPath), comments, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false when the package already has a comment");
+        Assert.AreEqual(original, File.ReadAllText(csprojPath));
+    }
+
+    [TestMethod]
+    public async Task AnnotatePackageReferences_SkipsWhenPackageNotFound()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Ann.csproj");
+        var original = @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <ItemGroup>
+    <PackageReference Include=""Some.Other.Package"" Version=""1.0.0"" />
+  </ItemGroup>
+</Project>";
+        File.WriteAllText(csprojPath, original);
+        var comments = new Dictionary<string, string>
+        {
+            ["Microsoft.WindowsAppSDK"] = "Windows App SDK runtime",
+        };
+
+        // Act
+        var result = await _dotNetService.AnnotatePackageReferencesAsync(
+            new FileInfo(csprojPath), comments, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false when the target package is not referenced");
+        Assert.AreEqual(original, File.ReadAllText(csprojPath));
+    }
+
+    [TestMethod]
+    public async Task AnnotatePackageReferences_AnnotatesMultiplePackages()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Ann.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <ItemGroup>
+    <PackageReference Include=""Microsoft.WindowsAppSDK"" Version=""1.0.0"" />
+    <PackageReference Include=""Microsoft.Windows.SDK.BuildTools"" Version=""1.0.0"" />
+  </ItemGroup>
+</Project>");
+        var comments = new Dictionary<string, string>
+        {
+            ["Microsoft.WindowsAppSDK"] = "SDK runtime",
+            ["Microsoft.Windows.SDK.BuildTools"] = "Build tools",
+        };
+
+        // Act
+        var result = await _dotNetService.AnnotatePackageReferencesAsync(
+            new FileInfo(csprojPath), comments, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result);
+        var content = File.ReadAllText(csprojPath);
+        StringAssert.Contains(content, "<!-- SDK runtime -->");
+        StringAssert.Contains(content, "<!-- Build tools -->");
+    }
+
+    [TestMethod]
+    public async Task AnnotatePackageReferences_EmptyDictionary_ReturnsFalse()
+    {
+        // Arrange
+        var csprojPath = Path.Combine(_testTempDirectory, "Ann.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <ItemGroup>
+    <PackageReference Include=""Microsoft.WindowsAppSDK"" Version=""1.0.0"" />
+  </ItemGroup>
+</Project>");
+
+        // Act
+        var result = await _dotNetService.AnnotatePackageReferencesAsync(
+            new FileInfo(csprojPath), new Dictionary<string, string>(), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false for an empty comment set");
+    }
+
+    [TestMethod]
+    public async Task AnnotatePackageReferences_MissingFile_ReturnsFalse()
+    {
+        // Arrange
+        var comments = new Dictionary<string, string> { ["X"] = "Y" };
+
+        // Act
+        var result = await _dotNetService.AnnotatePackageReferencesAsync(
+            new FileInfo(Path.Combine(_testTempDirectory, "Missing.csproj")),
+            comments, TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result);
+    }
+
+    #endregion
+
+    #region Additional branch coverage
+
+    [TestMethod]
+    public void IsTargetFrameworkSupported_WindowsVersionUnparseable_ReturnsFalse()
+    {
+        // A windows TFM whose SDK version has too many components is not a valid Version
+        var result = _dotNetService.IsTargetFrameworkSupported("net8.0-windows1.2.3.4.5");
+
+        Assert.IsFalse(result, "An unparseable Windows SDK version should be unsupported");
+    }
+
+    [TestMethod]
+    public void GetRecommendedTargetFramework_PlainWindowsTfmWithUnsupportedNet_ReturnsRecommended()
+    {
+        // net5.0-windows matches the plain-windows TFM shape but 5.0 < 6.0, so it falls through
+        var result = _dotNetService.GetRecommendedTargetFramework("net5.0-windows");
+
+        Assert.AreEqual("net10.0-windows10.0.26100.0", result);
+    }
+
+    [TestMethod]
+    public void GetRecommendedTargetFramework_PlainNetTfmWithUnsupportedNet_ReturnsRecommended()
+    {
+        // net5.0 matches the plain .NET TFM shape but 5.0 < 6.0, so it falls through
+        var result = _dotNetService.GetRecommendedTargetFramework("net5.0");
+
+        Assert.AreEqual("net10.0-windows10.0.26100.0", result);
+    }
+
+    [TestMethod]
+    public async Task EnsureRuntimeIdentifier_NoTfmOrRids_InsertsAtStartOfPropertyGroup()
+    {
+        // Arrange — a PropertyGroup with neither TargetFramework nor RuntimeIdentifiers
+        var csprojPath = Path.Combine(_testTempDirectory, "NoTfm.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+</Project>");
+
+        // Act
+        var result = await _dotNetService.EnsureRuntimeIdentifierAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsTrue(result, "Should insert a RuntimeIdentifier at the start of the PropertyGroup");
+        var content = File.ReadAllText(csprojPath);
+        StringAssert.Contains(content, "<RuntimeIdentifier Condition=");
+        var pgIdx = content.IndexOf("<PropertyGroup>", StringComparison.Ordinal);
+        var ridIdx = content.IndexOf("<RuntimeIdentifier Condition=", StringComparison.Ordinal);
+        var outputIdx = content.IndexOf("<OutputType>", StringComparison.Ordinal);
+        Assert.IsTrue(ridIdx > pgIdx && ridIdx < outputIdx,
+            "RuntimeIdentifier should be inserted at the start of the PropertyGroup, before existing children");
+    }
+
+    [TestMethod]
+    public async Task EnsureAssetContentItems_NoProjectClosingTag_ReturnsFalse()
+    {
+        // Arrange — malformed csproj with no </Project> to anchor the insertion
+        var csprojPath = Path.Combine(_testTempDirectory, "NoClose.csproj");
+        File.WriteAllText(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>");
+
+        // Act
+        var result = await _dotNetService.EnsureAssetContentItemsAsync(
+            new FileInfo(csprojPath), TestContext.CancellationToken);
+
+        // Assert
+        Assert.IsFalse(result, "Should return false when there is no </Project> to insert before");
     }
 
     #endregion

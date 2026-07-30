@@ -1,3 +1,5 @@
+<!-- mslearn: true -->
+<!-- description: Register temporary package identity for an unpackaged app so you can debug identity-dependent Windows features directly from your build output. -->
 # Debugging with Package Identity
 
 Many Windows APIs (push notifications, background tasks, share target, startup tasks, Windows AI APIs) require your app to have **package identity**. During development, you don't want to build a full MSIX installer every time you test — winapp provides two commands to give your app identity on the fly.
@@ -86,7 +88,7 @@ winapp run .\build\Debug --no-launch
 
 **Step 2:** Configure your IDE to launch via the AUMID or the **execution alias** (not the exe directly). 
 * Launching with AUMID: Use the command `start shell:AppsFolder\<AUMID>`. `winapp run` outputs the AUMID when the app is registered.
-* Launching with the alias: The alias must be defined in the appxmanifest.xml (or Package.appxmanifest).
+* Launching with the alias: The alias must be defined in your manifest (`Package.appxmanifest` preferred, `appxmanifest.xml` also supported).
 
 > **Important:** Simply launching the exe in the build folder will **not** give it identity. The app must be started via AUMID activation or its execution alias. This is how loose layout packages work - identity is tied to the activation path, not the exe file.
 
@@ -122,11 +124,128 @@ winapp run .\build\Debug --debug-output --symbols
 
 > **Important:** This attaches winapp as the debugger. Windows only allows one debugger per process, so you **cannot** also attach Visual Studio, VS Code, or WinDbg.
 
+#### WinUI stowed-exception triage
+
+Most WinUI crashes start inside a XAML event handler and surface as a **stowed exception** (`0xC000027B`) that is re-raised later from the dispatcher, so the normal stack no longer points at the real cause. When the crashed app loaded `Microsoft.UI.Xaml.dll`, winapp automatically runs an extra triage pass that decodes the stowed exception and the native XAML dispatch chain (`Microsoft.UI.Xaml` → `CXcpDispatcher` → `CoreMessagingXP` → CLR host). The result is appended to the debug log. No flag is needed — it is enabled automatically for WinUI dumps. Add `--symbols` for fully resolved function names in the dispatch chain.
+
+To make this work, winapp captures the crash dump with the terminating stowed exception's record (and its parameters, which point at the stowed-exception array) while keeping the first-chance thread context, so the standard managed analysis still recovers your original user frame *and* the triage pass can locate the stowed exception.
+
+This pass hosts DbgEng with the WinUI team's WinDbg JavaScript extension. The native debugging engine (`dbgeng.dll` and friends) comes from NuGet, and `JsProvider.dll` — the JavaScript scripting host, which is **not** on NuGet — is fetched on first use directly from the official WinDbg download (only the few hundred kilobytes needed are read, not the full package). Because `JsProvider.dll` must be the same build as the engine — loading a mismatched provider crashes the debugger on startup — it is pinned to the specific WinDbg bundle whose build matches the NuGet engine (not the rolling "current" release), and after acquisition the two builds are compared: a mismatch is rejected and triage is skipped with a clear reason rather than crashing silently. The debugger packages are version-pinned and, before any of their native DLLs are extracted and loaded, verified against a compiled-in SHA-512 content hash (and the extension against a pinned hash); `JsProvider.dll` is additionally required to carry a valid Microsoft Authenticode signature, checked with full certificate-chain revocation (falling back to a signature-only check when revocation data can't be reached offline, but always rejecting a revoked certificate). Downloads are staged to a temporary file, verified, then atomically published into the cache, so a concurrent run never observes a partially-written or unverified DLL. On every run the cached binaries are re-checked (the `JsProvider.dll` signature and its engine-build match, and the engine DLLs for a valid PE image), so a truncated or drifted cache self-heals by re-acquiring instead of failing every run. Together this means a mirrored or compromised feed cannot substitute altered binaries — any failure skips triage rather than loading unverified code. Everything is cached under the winapp global directory, so subsequent runs are offline. If your environment blocks those downloads, install **Debugging Tools for Windows** (via the Windows SDK) or set the `WINAPP_DBGTOOLS_DIR` environment variable to a debugger directory that already contains `dbgeng.dll` and `JsProvider.dll`. When `WINAPP_DBGTOOLS_DIR` is set it is authoritative — only that directory is consulted — so if it's incomplete the log names the specific missing component (`dbgeng.dll` and/or `JsProvider.dll`) rather than suggesting you set a variable that's already set. When triage succeeds, the console surfaces a one-line verdict (the stowed exception's error code/message); when the binaries can't be obtained, the triage pass is skipped (the standard managed/native analysis still runs), the console says so, and the log explains why.
+
+The triage pass runs in a short-lived child process. This is required: winapp's main process loads the system `dbghelp.dll` while capturing and analyzing the dump, and the modern engine `dbgeng.dll` cannot bind to that older, already-resident copy — a fresh process gives the engine a clean loader state. Decoding the stowed-exception structures also needs operating-system symbols (`combase.dll`), which `--symbols` downloads from the Microsoft public symbol server; on builds whose symbols aren't published there, the triage pass still identifies the stowed exception but cannot fully expand it.
+
 ## IDE setup
 
 ### VS Code
 
-**Attach to running process** — add to `.vscode/launch.json`:
+The **[WinApp VS Code extension](https://marketplace.visualstudio.com/items?itemName=Microsoft-WinAppCLI.winapp)** provides a custom **`winapp` debug type** that launches your app with package identity and attaches the debugger — all from a single **F5** press. Install it from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=Microsoft-WinAppCLI.winapp); its source and issue tracker live in the [microsoft/WinAppVSCE](https://github.com/microsoft/WinAppVSCE) repository.
+
+#### One-press F5 debugging with identity
+
+Add a `winapp` launch configuration to `.vscode/launch.json`:
+
+```jsonc
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "winapp",
+            "request": "launch",
+            "name": "WinApp: Launch and Attach"
+        }
+    ]
+}
+```
+
+When you press **F5**:
+
+1. The extension scans your workspace for build output directories containing `.exe` files.
+2. You select the build folder to run (or set `inputFolder` to skip the prompt).
+3. It launches your app via `winapp run` to give it package identity.
+4. A child debug session attaches to the running process using the debugger you specified.
+
+Once the debugger attaches, you get the full VS Code debugging experience — set breakpoints by clicking the gutter, step through code line-by-line (`F10`), step into functions (`F11`), inspect variables in the **Variables** pane, and evaluate expressions in the **Debug Console**. The app runs with package identity throughout, so identity-dependent APIs behave exactly as they would in production.
+
+> **Important:** The `winapp` debug type does **not** build your project automatically. After making code changes, rebuild before pressing F5.
+
+#### Automate builds with `preLaunchTask`
+
+To avoid forgetting to rebuild, add a `preLaunchTask` that builds your project before every debug session:
+
+1. Define a build task in `.vscode/tasks.json` (example for .NET):
+    ```jsonc
+    {
+        "version": "2.0.0",
+        "tasks": [
+            {
+                "label": "build",
+                "command": "dotnet",
+                "type": "process",
+                "args": ["build", "${workspaceFolder}"],
+                "problemMatcher": "$msCompile"
+            }
+        ]
+    }
+    ```
+2. Reference it in your `launch.json`:
+    ```jsonc
+    {
+        "type": "winapp",
+        "request": "launch",
+        "name": "WinApp: Launch and Attach",
+        "preLaunchTask": "build"
+    }
+    ```
+
+#### Configuration properties
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `inputFolder` | string | | Path to the build output folder containing your app binaries (e.g., `${workspaceFolder}/bin/Debug/net8.0-windows10.0.22621`). If not set, you will be prompted to select a folder. |
+| `manifest` | string | | Path to an AppX manifest file (e.g., `AppxManifest.xml`, `Package.appxmanifest`, or `appxmanifest.xml`). If not set, the CLI auto-detects from the input folder or current directory. |
+| `debuggerType` | string | `coreclr` | Underlying debugger to use (`coreclr`, `cppvsdbg`, or `node`). |
+| `workingDirectory` | string | workspace folder | Working directory for the application. |
+| `args` | string | | Command-line arguments to pass to the application. |
+| `outputAppxDirectory` | string | | Output directory for the loose-layout package. Defaults to an `AppX` folder inside the input folder. |
+| `port` | number | `9229` | (`node` only) The port used for the Node.js `--inspect` listener and the attach connection. Override when the default port is already in use. |
+
+#### Supported debuggers
+
+| `debuggerType` | Language | Required Extension |
+|----------------|----------|--------------------|
+| `coreclr` (default) | C# / .NET | [C# Dev Kit](https://marketplace.visualstudio.com/items?itemName=ms-dotnettools.csharp) |
+| `cppvsdbg` | C / C++ | [C/C++](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cpptools) |
+| `node` | Node.js / Electron | Built-in |
+
+Example for a C++ project:
+
+```jsonc
+{
+    "type": "winapp",
+    "request": "launch",
+    "name": "WinApp: Launch C++ App",
+    "debuggerType": "cppvsdbg"
+}
+```
+
+#### Startup debugging with Create Debug Identity
+
+If you need to debug startup code from the very first instruction, the F5 attach approach may miss early code. Instead, use the **WinApp: Create Debug Identity** command from the Command Palette (`Ctrl+Shift+P`) to register a sparse package for your executable, then launch it with your standard debugger:
+
+```jsonc
+{
+    "name": "Launch (with identity)",
+    "type": "coreclr",
+    "request": "launch",
+    "program": "${workspaceFolder}/bin/Debug/net8.0-windows10.0.22621/myapp.exe"
+}
+```
+
+Since `create-debug-identity` registers identity on the exe itself, the app has identity no matter how it's launched — including from a standard VS Code launch configuration.
+
+#### Attach to a running process
+
+If you prefer to launch with `winapp run` from the terminal and then attach, use a standard attach configuration:
 
 ```json
 {
@@ -147,3 +266,7 @@ For C++/Rust, use `"type": "cppvsdbg"` (MSVC) or `"type": "lldb"` (LLDB):
     "processId": "${command:pickProcess}"
 }
 ```
+
+#### Cleaning up
+
+When you're done testing, run **WinApp: Unregister Package** from the Command Palette to remove sideloaded development packages without leaving VS Code.

@@ -1,0 +1,286 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+import { test } from 'node:test';
+import * as assert from 'node:assert/strict';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
+import {
+  buildAddExactCommand,
+  detectPackageManager,
+  resolvePackageManagerPath,
+} from '../src/jsbindings/package-manager-detector';
+
+test('buildAddExactCommand pins exact versions per package manager', () => {
+  assert.deepEqual(buildAddExactCommand('npm', 'pkg@1.2.3'), {
+    exe: 'npm',
+    args: ['install', 'pkg@1.2.3', '--save-exact'],
+  });
+  assert.deepEqual(buildAddExactCommand('pnpm', 'pkg@1.2.3'), {
+    exe: 'pnpm',
+    args: ['add', 'pkg@1.2.3', '--save-exact'],
+  });
+  assert.deepEqual(buildAddExactCommand('yarn', 'pkg@1.2.3'), {
+    exe: 'yarn',
+    args: ['add', 'pkg@1.2.3', '--exact'],
+  });
+  assert.deepEqual(buildAddExactCommand('bun', 'pkg@1.2.3'), {
+    exe: 'bun',
+    args: ['add', 'pkg@1.2.3', '--exact'],
+  });
+});
+
+test('buildAddExactCommand adds dev-install flag when target is devDependencies', () => {
+  assert.deepEqual(buildAddExactCommand('npm', 'pkg@1.2.3', 'devDependencies'), {
+    exe: 'npm',
+    args: ['install', 'pkg@1.2.3', '--save-exact', '--save-dev'],
+  });
+  assert.deepEqual(buildAddExactCommand('pnpm', 'pkg@1.2.3', 'devDependencies'), {
+    exe: 'pnpm',
+    args: ['add', 'pkg@1.2.3', '--save-exact', '-D'],
+  });
+  assert.deepEqual(buildAddExactCommand('yarn', 'pkg@1.2.3', 'devDependencies'), {
+    exe: 'yarn',
+    args: ['add', 'pkg@1.2.3', '--exact', '--dev'],
+  });
+  assert.deepEqual(buildAddExactCommand('bun', 'pkg@1.2.3', 'devDependencies'), {
+    exe: 'bun',
+    args: ['add', 'pkg@1.2.3', '--exact', '--dev'],
+  });
+});
+
+test('buildAddExactCommand accepts a version-less spec (registry resolves the latest tag)', () => {
+  assert.deepEqual(buildAddExactCommand('npm', 'pkg', 'devDependencies'), {
+    exe: 'npm',
+    args: ['install', 'pkg', '--save-exact', '--save-dev'],
+  });
+});
+
+function withTempWorkspace(files: Record<string, string>, fn: (dir: string) => void): void {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-pm-'));
+  try {
+    for (const [name, contents] of Object.entries(files)) {
+      fs.writeFileSync(path.join(dir, name), contents);
+    }
+    fn(dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('detectPackageManager prefers the corepack packageManager field', () => {
+  withTempWorkspace(
+    {
+      'package.json': JSON.stringify({ packageManager: 'pnpm@9.1.0+sha512.abc' }),
+      // A conflicting lockfile must lose to the explicit corepack declaration.
+      'yarn.lock': '',
+    },
+    (dir) => {
+      assert.equal(detectPackageManager(dir).name, 'pnpm');
+    }
+  );
+});
+
+test('detectPackageManager sniffs lockfiles when no corepack field is present', () => {
+  withTempWorkspace({ 'pnpm-lock.yaml': '' }, (dir) => assert.equal(detectPackageManager(dir).name, 'pnpm'));
+  withTempWorkspace({ 'yarn.lock': '' }, (dir) => assert.equal(detectPackageManager(dir).name, 'yarn'));
+  withTempWorkspace({ 'bun.lockb': '' }, (dir) => assert.equal(detectPackageManager(dir).name, 'bun'));
+  withTempWorkspace({ 'package-lock.json': '' }, (dir) => assert.equal(detectPackageManager(dir).name, 'npm'));
+});
+
+test('detectPackageManager falls back to npm for an empty workspace', () => {
+  withTempWorkspace({}, (dir) => {
+    const detected = detectPackageManager(dir);
+    assert.equal(detected.name, 'npm');
+    assert.equal(detected.installCommand, 'npm install');
+  });
+});
+
+test('detectPackageManager ignores an unparsable package.json and uses lockfiles', () => {
+  withTempWorkspace({ 'package.json': '{ not valid json', 'yarn.lock': '' }, (dir) => {
+    assert.equal(detectPackageManager(dir).name, 'yarn');
+  });
+});
+
+const isWin = process.platform === 'win32';
+// On Windows the launcher is a PATHEXT-extension file (npm.cmd); elsewhere it's bare.
+const launcherExt = isWin ? '.cmd' : '';
+
+function withEnv(overrides: Record<string, string | undefined>, fn: () => void): void {
+  const saved: Record<string, string | undefined> = {};
+  for (const k of Object.keys(overrides)) {
+    saved[k] = process.env[k];
+    if (overrides[k] === undefined) {
+      delete process.env[k];
+    } else {
+      process.env[k] = overrides[k];
+    }
+  }
+  try {
+    fn();
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) {
+        delete process.env[k];
+      } else {
+        process.env[k] = v;
+      }
+    }
+  }
+}
+
+test('resolvePackageManagerPath returns the absolute path of a launcher found on PATH', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-which-'));
+  try {
+    const launcher = path.join(dir, `npm${launcherExt}`);
+    fs.writeFileSync(launcher, '');
+    withEnv({ PATH: dir, PATHEXT: '.COM;.EXE;.BAT;.CMD' }, () => {
+      const resolved = resolvePackageManagerPath('npm');
+      // resolvePackageManagerPath calls fs.realpathSync.native to collapse 8.3 short
+      // names and symlinks; CI runners ship TEMP as a short path (RUNNER~1) so the
+      // expected value must go through the same canonicalisation.
+      const expected = fs.realpathSync.native(launcher);
+      assert.equal(resolved?.toLowerCase(), expected.toLowerCase());
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('resolvePackageManagerPath returns null when PATH is unset', () => {
+  withEnv({ PATH: undefined, Path: undefined }, () => {
+    assert.equal(resolvePackageManagerPath('npm'), null);
+  });
+});
+
+test('resolvePackageManagerPath returns null when the launcher is not on PATH', () => {
+  const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-which-empty-'));
+  try {
+    withEnv({ PATH: emptyDir, PATHEXT: '.COM;.EXE;.BAT;.CMD' }, () => {
+      assert.equal(resolvePackageManagerPath('pnpm'), null);
+    });
+  } finally {
+    fs.rmSync(emptyDir, { recursive: true, force: true });
+  }
+});
+
+test('resolvePackageManagerPath ignores a launcher in the current directory (shim-hijack defense)', () => {
+  // A malicious `npm.cmd` dropped in the workspace/cwd must NOT be resolved:
+  // only PATH is scanned, never process.cwd().
+  const cwdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-which-cwd-'));
+  const emptyPathDir = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-which-pathonly-'));
+  const savedCwd = process.cwd();
+  try {
+    fs.writeFileSync(path.join(cwdDir, `npm${launcherExt}`), '');
+    process.chdir(cwdDir);
+    withEnv({ PATH: emptyPathDir, PATHEXT: '.COM;.EXE;.BAT;.CMD' }, () => {
+      // PATH has no npm launcher; the one in cwd must be ignored.
+      assert.equal(resolvePackageManagerPath('npm'), null);
+    });
+  } finally {
+    process.chdir(savedCwd);
+    fs.rmSync(cwdDir, { recursive: true, force: true });
+    fs.rmSync(emptyPathDir, { recursive: true, force: true });
+  }
+});
+
+test('resolvePackageManagerPath skips relative PATH entries (workspace-shim defense)', () => {
+  // Relative PATH entries could resolve to workspace-controlled shims.
+  const cwdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-which-rel-'));
+  const savedCwd = process.cwd();
+  try {
+    fs.writeFileSync(path.join(cwdDir, `npm${launcherExt}`), '');
+    process.chdir(cwdDir);
+    withEnv({ PATH: '.', PATHEXT: '.COM;.EXE;.BAT;.CMD' }, () => {
+      assert.equal(resolvePackageManagerPath('npm'), null);
+    });
+  } finally {
+    process.chdir(savedCwd);
+    fs.rmSync(cwdDir, { recursive: true, force: true });
+  }
+});
+
+test('resolvePackageManagerPath skips launchers under the workspace', () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-which-workspace-'));
+  try {
+    const launcher = path.join(workspace, `npm${launcherExt}`);
+    fs.writeFileSync(launcher, '');
+    withEnv({ PATH: workspace, PATHEXT: '.COM;.EXE;.BAT;.CMD' }, () => {
+      assert.equal(resolvePackageManagerPath('npm', workspace), null);
+    });
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('resolvePackageManagerPath skips UNC PATH entries', () => {
+  if (!isWin) {
+    return;
+  }
+  withEnv({ PATH: '\\\\server\\share', PATHEXT: '.COM;.EXE;.BAT;.CMD' }, () => {
+    assert.equal(resolvePackageManagerPath('npm'), null);
+  });
+});
+
+test('resolvePackageManagerPath accepts a PATH entry that is under cwd but outside the workspace', () => {
+  // Regression: an overly broad "under cwd" rejection masked legitimate global
+  // PM shims when winapp was launched from the user profile (e.g. cwd =
+  // %USERPROFILE%, PATH includes %USERPROFILE%\AppData\Roaming\npm).
+  // Workspace-controlled shims are still rejected by the workspace check.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-which-home-'));
+  const shimDir = path.join(home, 'sub', 'npm-bin');
+  fs.mkdirSync(shimDir, { recursive: true });
+  fs.writeFileSync(path.join(shimDir, `npm${launcherExt}`), '');
+  const savedCwd = process.cwd();
+  try {
+    process.chdir(home);
+    withEnv({ PATH: shimDir, PATHEXT: '.COM;.EXE;.BAT;.CMD' }, () => {
+      const resolved = resolvePackageManagerPath('npm');
+      // Same realpath canonicalisation as the happy-path test (TEMP may be 8.3).
+      const expected = fs.realpathSync.native(path.join(shimDir, `npm${launcherExt}`));
+      assert.equal(resolved?.toLowerCase(), expected.toLowerCase());
+    });
+  } finally {
+    process.chdir(savedCwd);
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('resolvePackageManagerPath rejects a PATH entry that equals cwd itself', () => {
+  // Defense-in-depth: a PATH entry literally equal to cwd is unsafe (a dropper
+  // in cwd's top level would hijack `npm`). This must still be rejected even
+  // though descendants of cwd are allowed (see above test).
+  const cwdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-which-cwdpath-'));
+  fs.writeFileSync(path.join(cwdDir, `npm${launcherExt}`), '');
+  const savedCwd = process.cwd();
+  try {
+    process.chdir(cwdDir);
+    withEnv({ PATH: cwdDir, PATHEXT: '.COM;.EXE;.BAT;.CMD' }, () => {
+      assert.equal(resolvePackageManagerPath('npm'), null);
+    });
+  } finally {
+    process.chdir(savedCwd);
+    fs.rmSync(cwdDir, { recursive: true, force: true });
+  }
+});
+
+test('resolvePackageManagerPath still rejects launchers under workspace even when not under cwd', () => {
+  // Workspace check is independent of cwd — a launcher inside the project
+  // workspace is rejected regardless of where the user ran winapp from.
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-which-ws-only-'));
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'winapp-which-elsewhere-'));
+  const savedCwd = process.cwd();
+  try {
+    fs.writeFileSync(path.join(workspace, `npm${launcherExt}`), '');
+    process.chdir(elsewhere);
+    withEnv({ PATH: workspace, PATHEXT: '.COM;.EXE;.BAT;.CMD' }, () => {
+      assert.equal(resolvePackageManagerPath('npm', workspace), null);
+    });
+  } finally {
+    process.chdir(savedCwd);
+    fs.rmSync(workspace, { recursive: true, force: true });
+    fs.rmSync(elsewhere, { recursive: true, force: true });
+  }
+});

@@ -15,7 +15,14 @@ namespace WinApp.Cli.Services;
 
 internal partial class MsixService
 {
-    [GeneratedRegex(@"^Microsoft\.WindowsAppRuntime\.\d+\.\d+.*\.msix$", RegexOptions.IgnoreCase, "en-US")]
+    // Matches the framework MSIX filename across all naming conventions WinAppSDK has shipped:
+    //   * 1.x stable / per-minor SxS:        Microsoft.WindowsAppRuntime.1.8.msix
+    //   * 2.x stable / major-only (2.0.1+):  Microsoft.WindowsAppRuntime.2.msix
+    //   * 2.x experimental:                  Microsoft.WindowsAppRuntime.2-experimentalN.msix
+    // The minor-version segment is optional so a future 2.0.2 / 2.1.0 / 3.0 still match.
+    // DDLM/Singleton/Main/Framework variants are excluded by their own .Contains() filters
+    // at the call site, not by this regex.
+    [GeneratedRegex(@"^Microsoft\.WindowsAppRuntime\.\d+(\.\d+)?.*\.msix$", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex WindowsAppRuntimeMsixRegex();
     [GeneratedRegex(@"<assemblyIdentity[^>]*name\s*=\s*[""']([^""']*)[""']", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex AssemblyIdentityNameRegex();
@@ -839,9 +846,9 @@ internal partial class MsixService
     /// <param name="inputFolder">The folder where runtime files should be copied</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>The path to the self-contained deployment directory</returns>
-    private async Task<DirectoryInfo> PrepareRuntimeForPackagingAsync(DirectoryInfo inputFolder, DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
+    private async Task<DirectoryInfo> PrepareRuntimeForPackagingAsync(DirectoryInfo inputFolder, DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken, string? overrideArch = null)
     {
-        var arch = WorkspaceSetupService.GetSystemArchitecture();
+        var arch = overrideArch ?? WorkspaceSetupService.GetSystemArchitecture();
 
         var winappDir = winappDirectoryService.GetLocalWinappDirectory();
 
@@ -851,33 +858,52 @@ internal partial class MsixService
         // Copy runtime files from .winapp/self-contained to input folder
         var runtimeSourceDir = new DirectoryInfo(Path.Combine(winappDir.FullName, "self-contained", arch, "deployment"));
 
-        if (runtimeSourceDir.Exists)
-        {
-            // Copy files recursively to maintain directory structure
-            foreach (var file in runtimeSourceDir.GetFiles("*", SearchOption.AllDirectories))
-            {
-                var relativePath = Path.GetRelativePath(runtimeSourceDir.FullName, file.FullName);
-                var destFile = Path.Combine(inputFolder.FullName, relativePath);
+        MergeRuntimeFilesIntoStaging(runtimeSourceDir, inputFolder, taskContext);
 
-                // Create destination directory if needed
-                var destDir = Path.GetDirectoryName(destFile);
-                if (!string.IsNullOrEmpty(destDir))
-                {
-                    Directory.CreateDirectory(destDir);
-                }
+        return runtimeSourceDir;
+    }
 
-                file.CopyTo(destFile, overwrite: true);
-
-                taskContext.AddDebugMessage($"{UiSymbols.Folder} Bundled runtime: {relativePath}");
-            }
-
-            taskContext.AddDebugMessage($"{UiSymbols.Check} Windows App SDK runtime bundled into package");
-        }
-        else
+    /// <summary>
+    /// Copies runtime files from <paramref name="runtimeSourceDir"/> into <paramref name="stagingDir"/>,
+    /// skipping any file that already exists in the staging directory. This ensures the app's own
+    /// assets (resources.pri, Assets\StoreLogo.png, etc.) are never overwritten by their runtime equivalents.
+    /// </summary>
+    internal static void MergeRuntimeFilesIntoStaging(DirectoryInfo runtimeSourceDir, DirectoryInfo stagingDir, TaskContext? taskContext = null)
+    {
+        if (!runtimeSourceDir.Exists)
         {
             throw new DirectoryNotFoundException($"Runtime files not found at {runtimeSourceDir}");
         }
 
-        return runtimeSourceDir;
+        foreach (var file in runtimeSourceDir.GetFiles("*", SearchOption.AllDirectories))
+        {
+            var relativePath = Path.GetRelativePath(runtimeSourceDir.FullName, file.FullName);
+            var destFile = Path.Combine(stagingDir.FullName, relativePath);
+
+            // Create destination directory if needed
+            var destDir = Path.GetDirectoryName(destFile);
+            if (!string.IsNullOrEmpty(destDir))
+            {
+                Directory.CreateDirectory(destDir);
+            }
+
+            // Never overwrite existing app files with runtime equivalents. The staging
+            // directory already contains the app's own assets, PRI, and resources — these
+            // must take precedence. In particular, overwriting resources.pri would destroy
+            // the app's MRT mappings (e.g. SplashScreen.png → SplashScreen.scale-200.png)
+            // and cause deployment failure (0x80070002). Similarly, the runtime's placeholder
+            // Assets\StoreLogo.png must not replace the app's branded icons.
+            if (File.Exists(destFile))
+            {
+                taskContext?.AddDebugMessage($"{UiSymbols.Note} Skipping (app file exists): {relativePath}");
+                continue;
+            }
+
+            file.CopyTo(destFile, overwrite: false);
+
+            taskContext?.AddDebugMessage($"{UiSymbols.Folder} Bundled runtime: {relativePath}");
+        }
+
+        taskContext?.AddDebugMessage($"{UiSymbols.Check} Windows App SDK runtime bundled into package");
     }
 }

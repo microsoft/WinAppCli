@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 using Microsoft.Extensions.Logging;
 using Windows.Win32.UI.Accessibility;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
@@ -13,11 +14,49 @@ namespace WinApp.Cli.Services;
 /// UIA backend using Windows UI Automation COM APIs via CsWin32.
 /// Provides cross-process element tree inspection and pattern-based interaction.
 /// </summary>
+/// <remarks>
+/// Coverage ceiling (issue #630): the deterministic real-UIA suite drives a live in-process WinForms
+/// target to cover the ordinary success and error paths across this partial class. The lines that
+/// remain uncovered are defensive UI Automation COM provider fault arms (catch/break/continue/log)
+/// and native HWND-enumeration branches that cannot be triggered safely without unsafe native
+/// provider fault injection on the shared desktop.
+/// </remarks>
 internal sealed partial class UiAutomationService : IUiAutomationService
 {
     private readonly ILogger<UiAutomationService> _logger;
     private readonly IUIAutomation _automation;
     private readonly ISelectorService _selectorService;
+
+    internal static Func<UiAutomationService, UiSessionInfo, IUIAutomationElement?> s_getRootElement = (service, session) => service.GetRootElementCore(session);
+    internal static Func<UiAutomationService, nint, IUIAutomationElement?> s_getRootElementForHwnd = (service, hwnd) => service.GetRootElementForHwndCore(hwnd);
+    internal static Func<UiAutomationService, UiSessionInfo, List<(nint Hwnd, int Pid, string Title)>> s_getAllAppWindows = (service, session) => service.GetAllAppWindowsCore(session);
+    internal static Func<UiAutomationService, UiSessionInfo, SelectorExpression, UiElement?> s_findElementOnOtherWindows = (service, session, selector) => service.FindElementOnOtherWindowsCore(session, selector);
+    internal static Func<UiAutomationService, IUIAutomationElement, string, int, List<IUIAutomationElement>> s_manualTreeSearch = (service, root, query, maxResults) => service.ManualTreeSearchCore(root, query, maxResults);
+    internal static Func<UiAutomationService, IUIAutomationElement, IUIAutomationElement, IUIAutomationElement?> s_findInvokableAncestor = (service, element, root) => service.FindInvokableAncestorCore(element, root);
+    internal static Func<UiAutomationService, IUIAutomationElement?> s_getFocusedElement = service => service._automation.GetFocusedElement();
+    internal static Func<IUIAutomationElement, int> s_getElementProcessId = element => element.get_CurrentProcessId();
+    internal static Func<UiAutomationService, IUIAutomationElement?> s_getDesktopRootElement = service => service._automation.GetRootElement();
+    internal static Func<UiAutomationService, nint, IUIAutomationElement?> s_elementFromHandle = (service, hwnd) => service._automation.ElementFromHandle(new Windows.Win32.Foundation.HWND(hwnd));
+    internal static Func<int, nint> s_getMainWindowHandleForProcessId = pid => System.Diagnostics.Process.GetProcessById(pid).MainWindowHandle;
+
+    internal static void ResetNativeSeams()
+    {
+        s_getRootElement = (service, session) => service.GetRootElementCore(session);
+        s_getRootElementForHwnd = (service, hwnd) => service.GetRootElementForHwndCore(hwnd);
+        s_getAllAppWindows = (service, session) => service.GetAllAppWindowsCore(session);
+        s_findElementOnOtherWindows = (service, session, selector) => service.FindElementOnOtherWindowsCore(session, selector);
+        s_manualTreeSearch = (service, root, query, maxResults) => service.ManualTreeSearchCore(root, query, maxResults);
+        s_findInvokableAncestor = (service, element, root) => service.FindInvokableAncestorCore(element, root);
+        s_getFocusedElement = service => service._automation.GetFocusedElement();
+        s_getElementProcessId = element => element.get_CurrentProcessId();
+        s_getDesktopRootElement = service => service._automation.GetRootElement();
+        s_elementFromHandle = (service, hwnd) => service._automation.ElementFromHandle(new Windows.Win32.Foundation.HWND(hwnd));
+        s_getMainWindowHandleForProcessId = pid => System.Diagnostics.Process.GetProcessById(pid).MainWindowHandle;
+        s_captureFromWindow = CaptureFromWindow;
+        s_captureFromScreenScaled = CaptureFromScreenScaled;
+        s_foregroundWindowForBlankRetry = ForegroundWindowForBlankRetry;
+        s_sleepForBlankRetry = Thread.Sleep;
+    }
 
     public UiAutomationService(ILogger<UiAutomationService> logger, ISelectorService selectorService)
     {
@@ -29,12 +68,54 @@ internal sealed partial class UiAutomationService : IUiAutomationService
     public List<(nint Hwnd, int Pid, string Title)> FindWindowsByTitle(string titleQuery)
     {
         return EnumerateWindows((pid, title) =>
-            title.Length > 0 && title.Contains(titleQuery, StringComparison.OrdinalIgnoreCase));
+            string.IsNullOrEmpty(titleQuery) || (title.Length > 0 && title.Contains(titleQuery, StringComparison.OrdinalIgnoreCase)));
     }
 
     public List<(nint Hwnd, int Pid, string Title)> FindWindowsByPid(int targetPid)
     {
         return EnumerateWindows((pid, title) => pid == targetPid);
+    }
+
+    /// <remarks>
+    /// Coverage ceiling (issue #630): tests cover zero-HWND and successful live HWND bounds. Remaining
+    /// lines are Win32 GetWindowRect failure/catch arms that require native handle invalidation races.
+    /// </remarks>
+    public bool TryGetWindowRect(long hwnd, out PointerRect rect)
+    {
+        rect = default;
+        if (hwnd == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            var target = new Windows.Win32.Foundation.HWND((nint)hwnd);
+            // Touch/pen bounds checks may pass a child/control HWND from UIA; use its top-level
+            // root so the safety gate matches the foreground guard and the documented contract.
+            var root = Windows.Win32.PInvoke.GetAncestor(
+                target, Windows.Win32.UI.WindowsAndMessaging.GET_ANCESTOR_FLAGS.GA_ROOT);
+            var rectHwnd = root.IsNull ? target : root;
+
+            Windows.Win32.Foundation.RECT r;
+            bool ok;
+            unsafe
+            {
+                ok = Windows.Win32.PInvoke.GetWindowRect(rectHwnd, &r);
+            }
+
+            if (!ok)
+            {
+                return false;
+            }
+
+            rect = new PointerRect(r.left, r.top, r.right, r.bottom);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static List<(nint Hwnd, int Pid, string Title)> EnumerateWindows(Func<int, string, bool> filter)
@@ -132,8 +213,9 @@ internal sealed partial class UiAutomationService : IUiAutomationService
             el.WindowHandle = session.WindowHandle;
         }
 
-        // Also walk popup/owned windows (when inspecting full tree, not scoped to element)
-        if (string.IsNullOrEmpty(elementId))
+        // Also walk popup/owned windows (when inspecting full tree, not scoped to element,
+        // and the user did not explicitly target a single HWND — see issue #472).
+        if (string.IsNullOrEmpty(elementId) && !session.IsExplicitWindow)
         {
             var mainHwnd = (nint)session.WindowHandle;
             var allWindows = GetAllAppWindows(session);
@@ -388,8 +470,9 @@ internal sealed partial class UiAutomationService : IUiAutomationService
             }
         }
 
-        // If no results on main window, search popup/owned windows
-        if (mainResults.Count == 0)
+        // If no results on main window, search popup/owned windows — unless the user
+        // explicitly scoped the session to a single HWND via --window (issue #472).
+        if (mainResults.Count == 0 && !session.IsExplicitWindow)
         {
             var allWindows = GetAllAppWindows(session);
             var mainHwnd = (nint)session.WindowHandle;
@@ -467,11 +550,14 @@ internal sealed partial class UiAutomationService : IUiAutomationService
                 slugResult.WindowHandle = session.WindowHandle;
                 return Task.FromResult<UiElement?>(slugResult);
             }
-            // Not found on main window — search other windows
-            var otherResult = FindElementOnOtherWindows(session, selector);
-            if (otherResult is not null)
+            // Not found on main window — search other windows (unless --window scoped us to one)
+            if (!session.IsExplicitWindow)
             {
-                return Task.FromResult<UiElement?>(otherResult);
+                var otherResult = FindElementOnOtherWindows(session, selector);
+                if (otherResult is not null)
+                {
+                    return Task.FromResult<UiElement?>(otherResult);
+                }
             }
             return Task.FromResult<UiElement?>(null);
         }
@@ -525,10 +611,14 @@ return Task.FromResult<UiElement?>(null);
             }
 
             // Element not found on main window — search popup/owned windows
-            var otherResult = FindElementOnOtherWindows(session, selector);
-            if (otherResult is not null)
+            // (unless --window scoped us to a single HWND).
+            if (!session.IsExplicitWindow)
             {
-                return Task.FromResult<UiElement?>(otherResult);
+                var otherResult = FindElementOnOtherWindows(session, selector);
+                if (otherResult is not null)
+                {
+                    return Task.FromResult<UiElement?>(otherResult);
+                }
             }
             return Task.FromResult<UiElement?>(null);
         }
@@ -588,7 +678,7 @@ return Task.FromResult<UiElement?>(null);
                 listing.AppendLine($"  ... and {matchCount - 5} more");
             }
             listing.Append("Use a slug from 'inspect' to target a specific element.");
-            throw new InvalidOperationException(listing.ToString());
+            throw new UiAmbiguousSelectorException(listing.ToString());
         }
 
         var element = found.GetElement(0);
@@ -779,41 +869,11 @@ return Task.FromResult<UiElement?>(null);
             throw new InvalidOperationException($"Element {element.Id} is stale. Re-run 'inspect' or 'search'.");
         }
 
-        try
-        {
-            var pattern = (IUIAutomationValuePattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_ValuePatternId);
-            unsafe
-            {
-                var bstrPtr = Marshal.StringToBSTR(text);
-                try
-                {
-                    pattern.SetValue(new Windows.Win32.Foundation.BSTR((char*)bstrPtr));
-                }
-                finally
-                {
-                    Marshal.FreeBSTR(bstrPtr);
-                }
-            }
-            return Task.CompletedTask;
-        }
-        catch
-        {
-            // ValuePattern not supported — try RangeValuePattern for sliders/progress bars
-            if (double.TryParse(text, out var numericValue))
-            {
-                try
-                {
-                    var rangePattern = (IUIAutomationRangeValuePattern)comElement.GetCurrentPattern(UIA_PATTERN_ID.UIA_RangeValuePatternId);
-                    rangePattern.SetValue(numericValue);
-                    return Task.CompletedTask;
-                }
-                catch { }
-            }
-
-            throw new InvalidOperationException(
-                $"Element {element.Id} ({element.Type}) does not support ValuePattern or RangeValuePattern. " +
-                "Only editable controls (TextBox, ComboBox, Slider, etc.) support set-value.");
-        }
+        // The fallback ordering (ValuePattern → RangeValuePattern → LegacyIAccessible/put_accValue,
+        // then a send-keys hint) lives in the pure, unit-tested ValueSetter; ComValueSetStrategy
+        // supplies the live UIA COM mechanics.
+        ValueSetter.Apply(new ComValueSetStrategy(comElement, _logger), element, text);
+        return Task.CompletedTask;
     }
 
     public Task FocusAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
@@ -1101,7 +1161,7 @@ return Task.FromResult<UiElement?>(null);
         IUIAutomationElement? focused;
         try
         {
-            focused = _automation.GetFocusedElement();
+            focused = s_getFocusedElement(this);
         }
         catch
         {
@@ -1116,7 +1176,7 @@ return Task.FromResult<UiElement?>(null);
         // Verify the focused element belongs to the target process
         try
         {
-            var pid = focused.get_CurrentProcessId();
+            var pid = s_getElementProcessId(focused);
             if (pid != session.ProcessId)
             {
                 return Task.FromResult<UiElement?>(null);
@@ -1269,10 +1329,10 @@ return Task.FromResult<UiElement?>(null);
     {
         // Use the element's source HWND if it came from a different window (popup/dialog)
         IUIAutomationElement? root;
-        if (element.WindowHandle != 0 && element.WindowHandle != session.WindowHandle)
+        if (element.WindowHandle is { } elHwnd && elHwnd != 0 && elHwnd != session.WindowHandle)
         {
-            root = GetRootElementForHwnd((nint)element.WindowHandle);
-            _logger.LogDebug("Resolving element on source HWND {Hwnd}", element.WindowHandle);
+            root = GetRootElementForHwnd((nint)elHwnd);
+            _logger.LogDebug("Resolving element on source HWND {Hwnd}", elHwnd);
         }
         else
         {
@@ -1344,6 +1404,11 @@ return Task.FromResult<UiElement?>(null);
     /// </summary>
     private List<(nint Hwnd, int Pid, string Title)> GetAllAppWindows(UiSessionInfo session)
     {
+        return s_getAllAppWindows(this, session);
+    }
+
+    private List<(nint Hwnd, int Pid, string Title)> GetAllAppWindowsCore(UiSessionInfo session)
+    {
         var windows = FindWindowsByPid(session.ProcessId);
 
         // Remove internal system windows from same-PID results
@@ -1400,9 +1465,14 @@ return Task.FromResult<UiElement?>(null);
     /// <summary>Get UIA root element for a specific HWND.</summary>
     private IUIAutomationElement? GetRootElementForHwnd(nint hwnd)
     {
+        return s_getRootElementForHwnd(this, hwnd);
+    }
+
+    private IUIAutomationElement? GetRootElementForHwndCore(nint hwnd)
+    {
         try
         {
-            return _automation.ElementFromHandle(new Windows.Win32.Foundation.HWND(hwnd));
+            return s_elementFromHandle(this, hwnd);
         }
         catch
         {
@@ -1415,6 +1485,11 @@ return Task.FromResult<UiElement?>(null);
     /// Called when FindSingleElementAsync fails to find the element on the main window.
     /// </summary>
     private UiElement? FindElementOnOtherWindows(UiSessionInfo session, SelectorExpression selector)
+    {
+        return s_findElementOnOtherWindows(this, session, selector);
+    }
+
+    private UiElement? FindElementOnOtherWindowsCore(UiSessionInfo session, SelectorExpression selector)
     {
         var allWindows = GetAllAppWindows(session);
         var mainHwnd = (nint)session.WindowHandle;
@@ -1498,13 +1573,17 @@ return Task.FromResult<UiElement?>(null);
 
     private IUIAutomationElement? GetRootElement(UiSessionInfo session)
     {
+        return s_getRootElement(this, session);
+    }
+
+    private IUIAutomationElement? GetRootElementCore(UiSessionInfo session)
+    {
         // If we have a specific window handle, use it directly
         if (session.WindowHandle != 0)
         {
             try
             {
-                var hwnd = new Windows.Win32.Foundation.HWND((nint)session.WindowHandle);
-                var element = _automation.ElementFromHandle(hwnd);
+                var element = s_elementFromHandle(this, (nint)session.WindowHandle);
                 if (element is not null)
                 {
                     var name = SafeGetBstr(() => element.get_CurrentName());
@@ -1518,7 +1597,7 @@ return Task.FromResult<UiElement?>(null);
             }
         }
 
-        var root = _automation.GetRootElement();
+        var root = s_getDesktopRootElement(this);
         if (root is null)
 
         {
@@ -1584,11 +1663,10 @@ return Task.FromResult<UiElement?>(null);
         _logger.LogDebug("PID search returned 0 elements, trying ElementFromHandle fallback");
         try
         {
-            var proc = System.Diagnostics.Process.GetProcessById(session.ProcessId);
-            if (proc.MainWindowHandle != 0)
+            var mainWindowHandle = s_getMainWindowHandleForProcessId(session.ProcessId);
+            if (mainWindowHandle != 0)
             {
-                var hwnd = new Windows.Win32.Foundation.HWND(proc.MainWindowHandle);
-                var element = _automation.ElementFromHandle(hwnd);
+                var element = s_elementFromHandle(this, mainWindowHandle);
                 if (element is not null)
                 {
                     var name = SafeGetBstr(() => element.get_CurrentName());
@@ -1611,6 +1689,11 @@ return Task.FromResult<UiElement?>(null);
     /// and cause sibling elements after the WebView to be skipped.
     /// </summary>
     private List<IUIAutomationElement> ManualTreeSearch(IUIAutomationElement root, string query, int maxResults, int maxDepth = 25)
+    {
+        return s_manualTreeSearch(this, root, query, maxResults);
+    }
+
+    private List<IUIAutomationElement> ManualTreeSearchCore(IUIAutomationElement root, string query, int maxResults, int maxDepth = 25)
     {
         var walker = _automation.get_ControlViewWalker();
         var results = new List<IUIAutomationElement>();
@@ -1707,6 +1790,11 @@ return Task.FromResult<UiElement?>(null);
     /// </summary>
     private IUIAutomationElement? FindInvokableAncestor(IUIAutomationElement element, IUIAutomationElement root)
     {
+        return s_findInvokableAncestor(this, element, root);
+    }
+
+    private IUIAutomationElement? FindInvokableAncestorCore(IUIAutomationElement element, IUIAutomationElement root)
+    {
         var walker = _automation.get_ControlViewWalker();
         var current = walker.GetParentElement(element);
         var maxDepth = 10; // prevent runaway walks
@@ -1744,31 +1832,46 @@ return Task.FromResult<UiElement?>(null);
         return null;
     }
 
-    private void WalkTree(IUIAutomationElement element, int maxDepth, int currentDepth, string path, List<UiElement> results, ref int nextElementId)
+    private void WalkTree(IUIAutomationElement element, int maxDepth, int currentDepth, string path, List<UiElement> results, ref int nextElementId,
+                          string? parentSelector = null, List<string>? ancestorTypes = null)
     {
         var uiElement = ToUiElement(element, path, ref nextElementId);
         uiElement.Depth = currentDepth;
+        uiElement.ParentSelector = parentSelector;
+        if (ancestorTypes is { Count: > 0 })
+        {
+            uiElement.AncestorPath = ancestorTypes.ToArray();
+        }
         results.Add(uiElement);
 
         if (currentDepth >= maxDepth)
-
-
         {
-
-
+            // Peek for children so we can hint that the tree was truncated.
+            try
+            {
+                var peekWalker = _automation.get_ControlViewWalker();
+                if (peekWalker.GetFirstChildElement(element) is not null)
+                {
+                    uiElement.HasMoreChildren = true;
+                }
+            }
+            catch { /* COM errors here are non-fatal — leave HasMoreChildren null */ }
             return;
-
-
         }
 
         var walker = _automation.get_ControlViewWalker();
         var child = walker.GetFirstChildElement(element);
         var childIndex = 0;
 
+        // Build ancestor list for children: parent's ancestors + this element's type.
+        var childAncestors = ancestorTypes is null ? new List<string>(currentDepth + 1) : new List<string>(ancestorTypes);
+        childAncestors.Add(uiElement.Type);
+        var childParentSelector = uiElement.Selector ?? uiElement.Id;
+
         while (child is not null)
         {
             var childPath = string.IsNullOrEmpty(path) ? $"/{childIndex}" : $"{path}/{childIndex}";
-            WalkTree(child, maxDepth, currentDepth + 1, childPath, results, ref nextElementId);
+            WalkTree(child, maxDepth, currentDepth + 1, childPath, results, ref nextElementId, childParentSelector, childAncestors);
 
             IUIAutomationElement? next;
             try
@@ -1779,10 +1882,10 @@ return Task.FromResult<UiElement?>(null);
             {
                 next = null;
             }
-child = next;
+            child = next;
             childIndex++;
         }
-}
+    }
 
     private static UiElement ToUiElement(IUIAutomationElement element, string path, ref int nextElementId)
     {
@@ -1864,6 +1967,14 @@ child = next;
         }
         catch { }
 
+        // Detect any actionable UIA pattern; used by inspect --interactive to surface
+        // truly clickable elements (including framework-Custom controls) instead of relying
+        // on a hard-coded ControlType allowlist.
+        var isInvokable = toggleState is not null
+                       || expandState is not null
+                       || HasPattern(element, UIA_PATTERN_ID.UIA_InvokePatternId)
+                       || HasPattern(element, UIA_PATTERN_ID.UIA_SelectionItemPatternId);
+
         return new UiElement
         {
             Id = id,
@@ -1882,7 +1993,20 @@ child = next;
             ExpandState = expandState,
             ScrollDir = scrollDir,
             Selector = selector,
+            IsInvokable = isInvokable,
         };
+    }
+
+    private static bool HasPattern(IUIAutomationElement element, UIA_PATTERN_ID patternId)
+    {
+        try
+        {
+            return element.GetCurrentPattern(patternId) is not null;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -1966,7 +2090,7 @@ child = next;
         }
     }
 
-    private static string GetControlTypeName(UIA_CONTROLTYPE_ID controlType) => controlType switch
+    internal static string GetControlTypeName(UIA_CONTROLTYPE_ID controlType) => controlType switch
     {
         UIA_CONTROLTYPE_ID.UIA_ButtonControlTypeId => "Button",
         UIA_CONTROLTYPE_ID.UIA_CalendarControlTypeId => "Calendar",
@@ -2011,7 +2135,7 @@ child = next;
         _ => $"Unknown({(int)controlType})"
     };
 
-    private static int MapControlType(string typeName) => typeName switch
+    internal static int MapControlType(string typeName) => typeName switch
     {
         "Button" => (int)UIA_CONTROLTYPE_ID.UIA_ButtonControlTypeId,
         "CheckBox" => (int)UIA_CONTROLTYPE_ID.UIA_CheckBoxControlTypeId,

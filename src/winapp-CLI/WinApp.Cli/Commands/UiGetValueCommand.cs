@@ -37,20 +37,20 @@ internal class UiGetValueCommand : Command, IShortDescription
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
+            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var selectorStr = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
-                UiErrors.MissingApp(logger);
+                UiErrors.MissingApp(logger, json);
                 return 1;
             }
-            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             if (string.IsNullOrWhiteSpace(selectorStr))
             {
-                UiErrors.MissingSelector(logger, "get-value");
+                UiErrors.MissingSelector(logger, "get-value", json);
                 return 1;
             }
 
@@ -62,7 +62,7 @@ internal class UiGetValueCommand : Command, IShortDescription
 
                 if (element is null)
                 {
-                    UiErrors.ElementNotFound(logger, selectorStr);
+                    UiErrors.ElementNotFound(logger, selectorStr, json);
                     return 1;
                 }
 
@@ -72,7 +72,7 @@ internal class UiGetValueCommand : Command, IShortDescription
                 {
                     var result = new UiGetValueResult
                     {
-                        ElementId = element.Selector ?? element.Id,
+                        ElementId = (element.Selector ?? element.Id ?? ""),
                         Text = text
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
@@ -82,7 +82,7 @@ internal class UiGetValueCommand : Command, IShortDescription
 
                 if (text is null)
                 {
-                    logger.LogInformation("No value found on {ElementId}", element.Selector ?? element.Id);
+                    logger.LogInformation("No value found on {ElementId}", (element.Selector ?? element.Id ?? ""));
                 }
                 else
                 {
@@ -95,12 +95,12 @@ internal class UiGetValueCommand : Command, IShortDescription
             catch (System.Runtime.InteropServices.COMException comEx)
             {
                 logger.LogDebug("COM error: {HResult} {StackTrace}", comEx.HResult, comEx.StackTrace);
-                UiErrors.StaleElement(logger);
+                UiErrors.StaleElement(logger, json);
                 return 1;
             }
             catch (Exception ex)
             {
-                UiErrors.GenericError(logger, ex);
+                UiErrors.GenericError(logger, ex, json);
                 return 1;
             }
         }

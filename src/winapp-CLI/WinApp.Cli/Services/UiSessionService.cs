@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using WinApp.Cli.Models;
 
@@ -9,8 +8,15 @@ namespace WinApp.Cli.Services;
 
 internal sealed class UiSessionService(
     IUiAutomationService uiAutomation,
+    ISystemUiQuery systemQuery,
     ILogger<UiSessionService> logger) : IUiSessionService
 {
+    // The window-metadata reads live on ISystemUiQuery so the resolver's selection logic is unit-
+    // testable. GetWindowInfo/GetWindowClassName must stay static (they're called statically by
+    // UiListWindowsCommand, UiScreenshotCommand, and UiAutomationService), so those shims route
+    // through this shared real implementation while instance callers use the injected seam. Both
+    // point at the same OS boundary; tests inject a fake for the instance path.
+    private static readonly SystemUiQuery s_sharedQuery = new();
 
     public Task<UiSessionInfo> ResolveSessionAsync(string? app, long? hwnd, CancellationToken ct)
     {
@@ -34,7 +40,7 @@ internal sealed class UiSessionService(
             var windows = uiAutomation.FindWindowsByTitle(app);
             if (windows.Count == 0)
             {
-                throw new InvalidOperationException($"No running app found matching '{app}'.");
+                throw new AppNotFoundException($"No running app found matching '{app}'.");
             }
             if (windows.Count > 1)
             {
@@ -45,8 +51,10 @@ internal sealed class UiSessionService(
             return Task.FromResult(CreateSession(match.Pid, match.Hwnd, match.Title));
         }
 
+        var resolved = process.Value;
+
         // Process found — check for multiple windows
-        var processWindows = uiAutomation.FindWindowsByPid(process.Id);
+        var processWindows = uiAutomation.FindWindowsByPid(resolved.Id);
         if (processWindows.Count > 1)
         {
             return Task.FromResult(AutoSelectWindow(processWindows, app));
@@ -54,14 +62,14 @@ internal sealed class UiSessionService(
 
         if (processWindows.Count == 1)
         {
-            return Task.FromResult(CreateSession(process.Id, processWindows[0].Hwnd, processWindows[0].Title));
+            return Task.FromResult(CreateSession(resolved.Id, processWindows[0].Hwnd, processWindows[0].Title));
         }
 
         return Task.FromResult(new UiSessionInfo
         {
-            ProcessId = process.Id,
-            ProcessName = process.ProcessName,
-            WindowTitle = GetMainWindowTitle(process)
+            ProcessId = resolved.Id,
+            ProcessName = resolved.ProcessName,
+            WindowTitle = GetMainWindowTitle(resolved)
         });
     }
 
@@ -71,26 +79,26 @@ internal sealed class UiSessionService(
     /// </summary>
     private UiSessionInfo AutoSelectWindow(List<(nint Hwnd, int Pid, string Title)> windows, string app)
     {
-        var foregroundHwnd = Windows.Win32.PInvoke.GetForegroundWindow();
-        var foreground = windows.FirstOrDefault(w => w.Hwnd == (nint)foregroundHwnd);
+        var foregroundHwnd = systemQuery.GetForegroundWindow();
+        var foreground = windows.FirstOrDefault(w => w.Hwnd == foregroundHwnd);
         var selected = foreground != default ? foreground : PickLargestWindow(windows);
 
         var reason = foreground != default ? "foreground" : "largest";
-        logger.LogDebug("Auto-selected HWND {Hwnd} ({Reason}) from {Count} windows for '{App}'", selected.Hwnd, reason, windows.Count, app);
+        logger.LogInformation("Auto-selected HWND {Hwnd} ({Reason}) from {Count} windows for '{App}' — pass -w {ExplicitHwnd} to target this window explicitly.", selected.Hwnd, reason, windows.Count, app, selected.Hwnd);
 
         return CreateSession(selected.Pid, selected.Hwnd, selected.Title);
     }
 
-    /// <summary>Pick the window with the largest area.</summary>
-    private static (nint Hwnd, int Pid, string Title) PickLargestWindow(List<(nint Hwnd, int Pid, string Title)> windows)
+    /// <summary>Pick the window with the largest area (queried through the OS-boundary seam).</summary>
+    private (nint Hwnd, int Pid, string Title) PickLargestWindow(List<(nint Hwnd, int Pid, string Title)> windows)
     {
         var best = windows[0];
         long bestArea = 0;
 
         foreach (var w in windows)
         {
-            var info = GetWindowInfo(w.Hwnd);
-            var area = (long)info.Width * info.Height;
+            var (width, height) = systemQuery.GetWindowSize((long)w.Hwnd);
+            var area = (long)width * height;
             if (area > bestArea)
             {
                 bestArea = area;
@@ -106,8 +114,8 @@ internal sealed class UiSessionService(
     {
         var className = GetWindowClassName(hwnd);
         var label = ClassifyWindow(className);
-        var (width, height) = GetWindowSize(hwnd);
-        var ownerHwnd = GetWindowOwner(hwnd);
+        var (width, height) = s_sharedQuery.GetWindowSize((long)hwnd);
+        var ownerHwnd = s_sharedQuery.GetWindowOwner((long)hwnd);
 
         return new WindowMetadata
         {
@@ -119,58 +127,14 @@ internal sealed class UiSessionService(
         };
     }
 
-    internal static string? GetWindowClassName(nint hwnd)
-    {
-        try
-        {
-            var buffer = new char[256];
-            int len;
-            unsafe
-            {
-                fixed (char* pClass = buffer)
-                {
-                    len = Windows.Win32.PInvoke.GetClassName(
-                        new Windows.Win32.Foundation.HWND(hwnd), pClass, 256);
-                }
-            }
-            return len > 0 ? new string(buffer, 0, len) : null;
-        }
-        catch { return null; }
-    }
+    internal static string? GetWindowClassName(nint hwnd) => s_sharedQuery.GetWindowClassName((long)hwnd);
 
-    private static string ClassifyWindow(string? className)
+    internal static string ClassifyWindow(string? className)
     {
         if (className is null) { return "window"; }
         if (className.Contains("Popup", StringComparison.OrdinalIgnoreCase)) { return "popup"; }
         if (className == "#32770") { return "dialog"; }
         return "window";
-    }
-
-    private static (int Width, int Height) GetWindowSize(nint hwnd)
-    {
-        try
-        {
-            Windows.Win32.Foundation.RECT rect;
-            unsafe
-            {
-                Windows.Win32.PInvoke.GetWindowRect(
-                    new Windows.Win32.Foundation.HWND(hwnd), &rect);
-            }
-            return (rect.right - rect.left, rect.bottom - rect.top);
-        }
-        catch { return (0, 0); }
-    }
-
-    private static nint GetWindowOwner(nint hwnd)
-    {
-        try
-        {
-            var owner = Windows.Win32.PInvoke.GetWindow(
-                new Windows.Win32.Foundation.HWND(hwnd),
-                Windows.Win32.UI.WindowsAndMessaging.GET_WINDOW_CMD.GW_OWNER);
-            return (nint)owner;
-        }
-        catch { return 0; }
     }
 
     internal record WindowMetadata
@@ -182,24 +146,24 @@ internal sealed class UiSessionService(
         public nint OwnerHwnd { get; init; }
     }
 
-    private static UiSessionInfo ResolveByHwnd(long hwnd)
+    private UiSessionInfo ResolveByHwnd(long hwnd)
     {
-        var pid = GetPidFromHwnd(hwnd);
+        var pid = systemQuery.GetProcessIdForWindow(hwnd);
         if (pid == 0)
         {
-            throw new InvalidOperationException($"Window HWND {hwnd} not found or not accessible.");
+            throw new AppNotFoundException($"Window HWND {hwnd} not found or not accessible.");
         }
 
         var session = CreateSession((int)pid, (nint)hwnd, null);
+        session.IsExplicitWindow = true;
         RefreshWindowTitle(session);
         return session;
     }
 
-    private static UiSessionInfo CreateSession(int pid, nint hwnd, string? title)
+    private UiSessionInfo CreateSession(int pid, nint hwnd, string? title)
     {
-        string processName;
-        try { processName = Process.GetProcessById(pid).ProcessName; }
-        catch { processName = "Unknown"; }
+        var processName = systemQuery.GetProcessById(pid)?.ProcessName;
+        if (string.IsNullOrEmpty(processName)) { processName = "Unknown"; }
 
         return new UiSessionInfo
         {
@@ -210,178 +174,97 @@ internal sealed class UiSessionService(
         };
     }
 
-    private static string GetProcessNameSafe(int pid)
-    {
-        try { return Process.GetProcessById(pid).ProcessName; }
-        catch { return "Unknown"; }
-    }
-
     /// <summary>
-    /// Refresh the window title. When a specific HWND is set, reads from that HWND.
+    /// Refresh the window title from the session's explicit HWND. Only ever called after
+    /// <see cref="ResolveByHwnd"/>, which always sets a non-zero <see cref="UiSessionInfo.WindowHandle"/>.
     /// </summary>
-    private static void RefreshWindowTitle(UiSessionInfo session)
+    private void RefreshWindowTitle(UiSessionInfo session)
     {
-        if (session.WindowHandle != 0)
+        var title = systemQuery.GetWindowText(session.WindowHandle);
+        if (!string.IsNullOrEmpty(title))
         {
-            try
-            {
-                var hwnd = new Windows.Win32.Foundation.HWND((nint)session.WindowHandle);
-                var title = new char[256];
-                int len;
-                unsafe
-                {
-                    fixed (char* pTitle = title)
-                    {
-                        len = Windows.Win32.PInvoke.GetWindowText(hwnd, pTitle, title.Length);
-                    }
-                }
-                if (len > 0)
-                {
-                    session.WindowTitle = new string(title, 0, len);
-                }
-            }
-            catch { }
-            return;
+            session.WindowTitle = title;
         }
-
-        try
-        {
-            var proc = Process.GetProcessById(session.ProcessId);
-            var title = proc.MainWindowTitle;
-            if (!string.IsNullOrEmpty(title))
-            {
-                session.WindowTitle = title;
-            }
-        }
-        catch { }
     }
 
-    private static Process? TryResolveProcess(string app)
+    private UiProcessInfo? TryResolveProcess(string app)
     {
         // Try as PID
         if (int.TryParse(app, out var pid))
         {
-            try
+            var byPid = systemQuery.GetProcessById(pid);
+            if (byPid is null)
             {
-                return Process.GetProcessById(pid);
+                throw new AppNotFoundException($"No process found with PID {pid}.");
             }
-            catch (ArgumentException)
-            {
-                throw new InvalidOperationException($"No process found with PID {pid}.");
-            }
+            return byPid;
         }
 
         // Try exact process name
-        var byName = Process.GetProcessesByName(app);
-        try
+        var exact = SelectProcess(systemQuery.GetProcessesByName(app), app, partial: false);
+        if (exact is not null)
         {
-            if (byName.Length == 1)
-            {
-                var result = byName[0];
-                byName = []; // prevent disposal of the returned process
-                return result;
-            }
-
-            if (byName.Length > 1)
-            {
-                var withWindow = byName
-                    .Where(p =>
-                    {
-                        try { return p.MainWindowHandle != 0 && !string.IsNullOrEmpty(p.MainWindowTitle); }
-                        catch { return false; }
-                    })
-                    .ToArray();
-
-                if (withWindow.Length == 1)
-                {
-                    var result = withWindow[0];
-                    byName = byName.Where(p => p != result).ToArray(); // dispose all except the returned one
-                    return result;
-                }
-
-                if (withWindow.Length > 1)
-                {
-                    var listing = string.Join("\n  ",
-                        withWindow.Select(p =>
-                        {
-                            try { return $"PID {p.Id}: \"{p.MainWindowTitle}\""; }
-                            catch { return $"PID {p.Id}"; }
-                        }));
-                    throw new InvalidOperationException(
-                        $"Multiple '{app}' windows found:\n  {listing}\n" +
-                        "Use --app with a PID or a more specific window title.");
-                }
-            }
-        }
-        finally
-        {
-            foreach (var p in byName) { p.Dispose(); }
+            return exact;
         }
 
         // Try partial process name match (e.g., "imageresizer" matches "PowerToys.ImageResizer")
-        var partialMatches = Process.GetProcesses()
-            .Where(p =>
-            {
-                try { return p.ProcessName.Contains(app, StringComparison.OrdinalIgnoreCase); }
-                catch { return false; }
-            })
-            .ToArray();
+        return SelectProcess(systemQuery.GetProcessesMatching(app), app, partial: true);
+    }
 
-        try
+    /// <summary>
+    /// Choose a single process from the candidate snapshots. Returns the match (logging a note for
+    /// partial matches), <c>null</c> when there is no usable match, or throws with a disambiguation
+    /// listing when multiple windowed processes qualify.
+    /// </summary>
+    private UiProcessInfo? SelectProcess(IReadOnlyList<UiProcessInfo> candidates, string app, bool partial)
+    {
+        if (candidates.Count == 1)
         {
-            if (partialMatches.Length == 1)
-            {
-                var result = partialMatches[0];
-                partialMatches = []; // prevent disposal
-                return result;
-            }
-
-            if (partialMatches.Length > 1)
-            {
-                var withWindow = partialMatches
-                    .Where(p =>
-                    {
-                        try { return p.MainWindowHandle != 0 && !string.IsNullOrEmpty(p.MainWindowTitle); }
-                        catch { return false; }
-                    })
-                    .ToArray();
-
-                if (withWindow.Length == 1)
-                {
-                    var result = withWindow[0];
-                    partialMatches = partialMatches.Where(p => p != result).ToArray();
-                    return result;
-                }
-            }
+            var only = candidates[0];
+            if (partial) { LogPartialMatch(app, only); }
+            return only;
         }
-        finally
+
+        if (candidates.Count > 1)
         {
-            foreach (var p in partialMatches) { p.Dispose(); }
+            var withWindow = candidates
+                .Where(p => p.MainWindowHandle != 0 && !string.IsNullOrEmpty(p.MainWindowTitle))
+                .ToList();
+
+            if (withWindow.Count == 1)
+            {
+                var single = withWindow[0];
+                if (partial) { LogPartialMatch(app, single); }
+                return single;
+            }
+
+            if (withWindow.Count > 1)
+            {
+                var listing = string.Join("\n  ",
+                    withWindow.Select(p => partial
+                        ? $"PID {p.Id} ({p.ProcessName}): \"{p.MainWindowTitle}\""
+                        : $"PID {p.Id}: \"{p.MainWindowTitle}\""));
+                var header = partial
+                    ? $"Multiple processes matching '{app}' found:"
+                    : $"Multiple '{app}' windows found:";
+                throw new InvalidOperationException(
+                    $"{header}\n  {listing}\n" +
+                    "Use --app with a PID or a more specific window title.");
+            }
         }
 
         return null;
     }
 
-    private static uint GetPidFromHwnd(long hwnd)
+    private void LogPartialMatch(string input, UiProcessInfo matched)
     {
-        uint pid = 0;
-        unsafe
-        {
-            Windows.Win32.PInvoke.GetWindowThreadProcessId(
-                new Windows.Win32.Foundation.HWND((nint)hwnd), &pid);
-        }
-        return pid;
+        // Surface partial-name matches so users notice when a short/typoed --app value
+        // resolved to an unrelated process (issue #467).
+        logger.LogInformation(
+            "Partial process-name match: '{Input}' resolved to '{ProcessName}' (PID {Pid}). Pass the full process name or PID to disambiguate.",
+            input, matched.ProcessName, matched.Id);
     }
 
-    private static string? GetMainWindowTitle(Process process)
-    {
-        try
-        {
-            return string.IsNullOrEmpty(process.MainWindowTitle) ? null : process.MainWindowTitle;
-        }
-        catch
-        {
-            return null;
-        }
-    }
+    private static string? GetMainWindowTitle(UiProcessInfo process)
+        => string.IsNullOrEmpty(process.MainWindowTitle) ? null : process.MainWindowTitle;
 }

@@ -74,6 +74,8 @@ const typeExports = [];   // interfaces & type aliases
 for (const sym of allExports) {
   const name = sym.getName();
   if (name === 'default') continue;
+  // Skip internal helpers — underscore-prefixed names are not part of the public API.
+  if (name.startsWith('_')) continue;
 
   const resolved = resolveSymbol(sym);
   const src = getSourcePath(resolved);
@@ -325,6 +327,9 @@ function generate() {
   const lines = [];
   const L = (s = '') => lines.push(s);
 
+  L('---');
+  L('ms.custom: mslearn');
+  L('---');
   L('<!-- AUTO-GENERATED — DO NOT EDIT -->');
   L('<!-- Regenerate with: cd src/winapp-npm && npm run generate-docs -->');
   L();

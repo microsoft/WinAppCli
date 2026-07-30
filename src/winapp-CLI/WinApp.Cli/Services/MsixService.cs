@@ -27,6 +27,8 @@ internal partial class MsixService(
     IWinmdService winmdService,
     IPriService priService,
     IPackageRegistrationService packageRegistrationService,
+    IBundleService bundleService,
+    IBundleValidationService bundleValidationService,
     ILogger<MsixService> logger,
     ICurrentDirectoryProvider currentDirectoryProvider) : IMsixService
 {
@@ -147,7 +149,7 @@ internal partial class MsixService(
                 // Try to auto-infer by finding .exe files in the input folder root
                 var exeFiles = inputFolder.Exists
                     ? inputFolder.GetFiles("*.exe", SearchOption.TopDirectoryOnly)
-                        .Where(f => !string.Equals(f.Name, "createdump.exe", StringComparison.OrdinalIgnoreCase))
+                        .Where(f => !IsRuntimeToolExecutable(f.Name))
                         .ToArray()
                     : [];
 
@@ -175,7 +177,7 @@ internal partial class MsixService(
         // Apply all placeholder replacements
         manifestContent = PlaceholderHelper.ReplacePlaceholders(manifestContent, replacements);
 
-        // Sanity check: ensure no unresolved placeholders remain
+        // Validation check: ensure no unresolved placeholders remain
         PlaceholderHelper.ThrowIfUnresolvedPlaceholders(manifestContent);
 
         return manifestContent;
@@ -286,20 +288,14 @@ internal partial class MsixService(
             }
         }
 
-        // Check for an AppX subdirectory, which is a build artifact that should not be
-        // included in the package. Exclude it from staging and warn the user.
-        var excludedDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var appxDir = new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
-        if (appxDir.Exists)
-        {
-            excludedDirectories.Add("AppX");
-            taskContext.AddStatusMessage($"{UiSymbols.Warning} Found 'AppX' directory in input folder. It will be excluded from the package.");
-        }
+        // Check for build-artifact subdirectories (e.g. 'AppX') that must not be included in the
+        // package. Any found are excluded from staging and the user is warned.
+        var excludedDirectories = BuildStagingExclusions(inputFolder, taskContext);
 
         // Determine manifest path based on priority:
         // 1. Use provided manifestPath parameter
-        // 2. Check for appxmanifest.xml or package.appxmanifest in input folder
-        // 3. Check for appxmanifest.xml or package.appxmanifest in current directory
+        // 2. Check for Package.appxmanifest or appxmanifest.xml in input folder
+        // 3. Check for Package.appxmanifest or appxmanifest.xml in current directory
         FileInfo resolvedManifestPath;
         if (manifestPath != null)
         {
@@ -318,7 +314,7 @@ internal partial class MsixService(
             }
             else
             {
-                throw new FileNotFoundException($"Manifest file not found. Searched for appxmanifest.xml and package.appxmanifest in: input folder ({inputFolder.FullName}), current directory ({currentDirectoryProvider.GetCurrentDirectory()})");
+                throw new FileNotFoundException($"Manifest file not found. Searched for Package.appxmanifest, then appxmanifest.xml in: input folder ({inputFolder.FullName}), current directory ({currentDirectoryProvider.GetCurrentDirectory()})");
             }
         }
 
@@ -385,13 +381,7 @@ internal partial class MsixService(
         // Clean the resolved package name to ensure it meets MSIX schema requirements
         finalPackageName = ManifestService.CleanPackageName(finalPackageName);
 
-        var defaultMsixFileName = (packageArch, extractedVersion) switch
-        {
-            (not null, not null) when !string.IsNullOrWhiteSpace(extractedVersion) => $"{finalPackageName}_{extractedVersion}_{packageArch}.msix",
-            (null, not null) when !string.IsNullOrWhiteSpace(extractedVersion) => $"{finalPackageName}_{extractedVersion}.msix",
-            (not null, _) => $"{finalPackageName}_{packageArch}.msix",
-            _ => $"{finalPackageName}.msix"
-        };
+        var defaultMsixFileName = BuildDefaultMsixFileName(finalPackageName, packageArch, extractedVersion);
 
         FileInfo outputMsixPath;
         DirectoryInfo outputFolder;
@@ -453,7 +443,7 @@ internal partial class MsixService(
             else
             {
                 // No recipe available — copy the entire input folder to staging
-                CopyDirectoryRecursive(inputFolder, stagingDir);
+                CopyDirectoryRecursive(inputFolder, stagingDir, excludedDirectories);
                 taskContext.AddDebugMessage($"{UiSymbols.Files} Copied input folder to staging directory");
             }
 
@@ -469,12 +459,21 @@ internal partial class MsixService(
             var manifestIsOutsideInputFolder = !inputFolder.FullName.TrimEnd(Path.DirectorySeparatorChar)
                 .Equals(resolvedManifestPath.Directory!.FullName.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
 
+            // Pre-extract all file references from the manifest once (used by both
+            // MrtAssetHelper for images and CopyManifestReferencedFiles for non-image files)
+            var allManifestReferences = ManifestFileReferenceHelper.ExtractAllFileReferencesFromManifest(manifestContent);
+
             // If manifest is outside input folder, copy its referenced assets into the staging directory
             if (manifestIsOutsideInputFolder)
             {
                 var externalAssets = MrtAssetHelper.GetExpandedManifestReferencedFiles(resolvedManifestPath, taskContext);
                 MrtAssetHelper.CopyAllAssets(externalAssets, stagingDir, taskContext);
             }
+
+            // Copy any non-image files referenced in the manifest that are missing from
+            // staging. This handles files like manifest.json or other extension-referenced
+            // resources that aren't discovered by the image-asset extractor.
+            CopyManifestReferencedFiles(allManifestReferences, resolvedManifestPath.Directory!, inputFolder, stagingDir, taskContext, cancellationToken);
 
             taskContext.AddDebugMessage($"Creating MSIX package from staging: {stagingDir.FullName}");
             taskContext.AddDebugMessage($"Output: {outputMsixPath.FullName}");
@@ -635,6 +634,20 @@ internal partial class MsixService(
         await buildToolsService.RunBuildToolAsync(new MakeAppxTool(), makeappxArguments, taskContext, cancellationToken: cancellationToken);
     }
 
+    /// <summary>
+    /// Builds the default MSIX output file name from the resolved package name, optional processor
+    /// architecture, and optional package version. Extracted as a pure function so the naming
+    /// convention (name[_version][_arch].msix) can be verified directly by unit tests, including the
+    /// architecture-only and versionless combinations that a real makeappx-backed flow cannot exercise.
+    /// </summary>
+    internal static string BuildDefaultMsixFileName(string finalPackageName, string? packageArch, string? extractedVersion) => (packageArch, extractedVersion) switch
+    {
+        (not null, not null) when !string.IsNullOrWhiteSpace(extractedVersion) => $"{finalPackageName}_{extractedVersion}_{packageArch}.msix",
+        (null, not null) when !string.IsNullOrWhiteSpace(extractedVersion) => $"{finalPackageName}_{extractedVersion}.msix",
+        (not null, _) => $"{finalPackageName}_{packageArch}.msix",
+        _ => $"{finalPackageName}.msix"
+    };
+
     private static void TryDeleteFile(FileInfo path)
     {
         try
@@ -649,6 +662,26 @@ internal partial class MsixService(
         {
             // Ignore cleanup failures
         }
+    }
+
+    /// <summary>
+    /// Builds the set of top-level build-artifact directory names that must be excluded from the
+    /// staged package (currently the MSBuild-generated 'AppX' output folder). When such a directory
+    /// is found the user is warned. Shared by the single-package (<see cref="CreateMsixPackageAsync"/>)
+    /// and per-slice bundle (<c>PackSingleFolderToMsixAsync</c>) staging paths so both exclude
+    /// build artifacts consistently.
+    /// </summary>
+    private static HashSet<string> BuildStagingExclusions(DirectoryInfo inputFolder, TaskContext taskContext)
+    {
+        var excludedDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var appxDir = new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
+        if (appxDir.Exists)
+        {
+            excludedDirectories.Add("AppX");
+            taskContext.AddStatusMessage($"{UiSymbols.Warning} Found 'AppX' directory in input folder. It will be excluded from the package.");
+        }
+
+        return excludedDirectories;
     }
 
     /// <summary>
@@ -677,10 +710,106 @@ internal partial class MsixService(
     }
 
     /// <summary>
-    /// Searches for appxmanifest.xml in the project by looking for .winapp directory in parent directories
+    /// Copies files referenced in the manifest that are missing from the staging directory.
+    /// Resolves file paths relative to the manifest directory first, then the input folder.
+    /// This ensures non-image referenced files (e.g., manifest.json) are included in the package.
+    /// </summary>
+    private static void CopyManifestReferencedFiles(
+        HashSet<string> referencedFiles,
+        DirectoryInfo manifestDir,
+        DirectoryInfo inputFolder,
+        DirectoryInfo stagingDir,
+        TaskContext taskContext,
+        CancellationToken cancellationToken)
+    {
+        if (referencedFiles.Count == 0)
+        {
+            return;
+        }
+
+        int copied = 0;
+
+        foreach (var relativePath in referencedFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var stagingPath = Path.GetFullPath(Path.Combine(stagingDir.FullName, relativePath));
+            var stagingRoot = Path.GetFullPath(stagingDir.FullName).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+            // Verify the destination stays within the staging directory
+            if (!stagingPath.StartsWith(stagingRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} Skipped manifest-referenced file with path escape: {relativePath}");
+                continue;
+            }
+
+            if (File.Exists(stagingPath))
+            {
+                continue;
+            }
+
+            // Try manifest directory first, then input folder
+            FileInfo? sourceFile = null;
+            var manifestRelative = new FileInfo(Path.Combine(manifestDir.FullName, relativePath));
+            var inputRelative = new FileInfo(Path.Combine(inputFolder.FullName, relativePath));
+
+            if (manifestRelative.Exists)
+            {
+                sourceFile = manifestRelative;
+            }
+            else if (inputRelative.Exists)
+            {
+                sourceFile = inputRelative;
+            }
+
+            if (sourceFile == null)
+            {
+                continue;
+            }
+
+            // Security: verify the resolved source path stays within the allowed roots.
+            // This prevents symlinks/junctions from escaping the project directory.
+            var resolvedSourcePath = Path.GetFullPath(sourceFile.FullName);
+            var manifestRoot = Path.GetFullPath(manifestDir.FullName).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var inputRoot = Path.GetFullPath(inputFolder.FullName).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+            if (!resolvedSourcePath.StartsWith(manifestRoot, StringComparison.OrdinalIgnoreCase) &&
+                !resolvedSourcePath.StartsWith(inputRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} Skipped manifest-referenced file outside project root: {relativePath}");
+                continue;
+            }
+
+            // Reject reparse points (symlinks/junctions) that could redirect to arbitrary locations
+            var sourceAttributes = File.GetAttributes(sourceFile.FullName);
+            if (sourceAttributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} Skipped manifest-referenced symlink/junction: {relativePath}");
+                continue;
+            }
+
+            var destDir = Path.GetDirectoryName(stagingPath);
+            if (destDir != null)
+            {
+                Directory.CreateDirectory(destDir);
+            }
+
+            sourceFile.CopyTo(stagingPath, overwrite: true);
+            copied++;
+            taskContext.AddDebugMessage($"{UiSymbols.Files} Copied manifest-referenced file: {relativePath}");
+        }
+
+        if (copied > 0)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Note} Manifest-referenced files: {copied} copied to staging");
+        }
+    }
+
+    /// <summary>
+    /// Searches for a manifest file in the start directory and walks up parent directories until one is found.
     /// </summary>
     /// <param name="startDirectory">The directory to start searching from. If null, uses current directory.</param>
-    /// <returns>Path to the project's appxmanifest.xml file, or null if not found</returns>
+    /// <returns>Path to the first manifest found (preferring Package.appxmanifest over appxmanifest.xml), or null if not found.</returns>
     public static FileInfo? FindProjectManifest(ICurrentDirectoryProvider currentDirectoryProvider, DirectoryInfo? startDirectory = null)
     {
         var directory = startDirectory ?? currentDirectoryProvider.GetCurrentDirectoryInfo();
@@ -697,6 +826,16 @@ internal partial class MsixService(
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Returns true if the given file name belongs to a .NET runtime tool that should be
+    /// excluded when auto-detecting the application executable.
+    /// </summary>
+    internal static bool IsRuntimeToolExecutable(string fileName)
+    {
+        return string.Equals(fileName, "createdump.exe", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(fileName, "apphost.exe", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

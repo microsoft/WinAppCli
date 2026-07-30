@@ -1,6 +1,8 @@
+<!-- mslearn: true -->
+<!-- description: Use the winapp CLI with a Tauri Windows app to restore Windows App SDK headers, add package identity, and package the desktop app as MSIX. -->
 # Using winapp CLI with Tauri
 
-This guide demonstrates how to use `winappcli` with a Tauri application to debug with package identity and package your application as an MSIX.
+This guide demonstrates how to use the `winapp` CLI with a Tauri application to debug with package identity and package your application as an MSIX.
 
 Package identity is a core concept in the Windows app model. It allows your application to access specific Windows APIs (like Notifications, Security, AI APIs, etc), have a clean install/uninstall experience, and more.
 
@@ -10,7 +12,11 @@ For a complete working example, check out the [Tauri sample](../../samples/tauri
 
 1. **Windows 11** 
 1. **Node.js** - `winget install OpenJS.NodeJS --source winget`
+1. **Rust Toolchain** - Install Rust using [rustup](https://rustup.rs/) or `winget install Rustlang.Rustup --source winget`
 1. **winapp CLI** - `winget install microsoft.winappcli --source winget`
+
+> [!TIP]
+> If you already have these installed, run the `winget install` commands anyway to check for updates.
 
 ## 1. Create a New Tauri App
 
@@ -19,7 +25,12 @@ Start by creating a new Tauri application using the official scaffolding tool:
 ```powershell
 npm create tauri-app@latest
 ```
-Follow the prompts (e.g., Project name: `tauri-app`, Frontend language: `JavaScript`, Package manager: `npm`).
+Follow the prompts:
+- **Project name**: `tauri-app` (or your preferred name)
+- **Frontend language**: `JavaScript`
+- **Package manager**: `npm`
+- **UI template**: `Vanilla`
+- **UI flavor**: `JavaScript`
 
 Navigate to your project directory and install dependencies:
 
@@ -40,14 +51,14 @@ We'll update the app to check if it's running with package identity. We'll use t
 
 ### Backend Changes (Rust)
 
-1.  **Add Dependency**: Open `src-tauri/Cargo.toml` and add the `windows` dependency for the Windows target:
+1.  **Add Dependency**: Open `src-tauri/Cargo.toml` and add the following lines at the end of the file. This adds the Windows API bindings so we can check for package identity:
 
     ```toml
     [target.'cfg(windows)'.dependencies]
     windows = { version = "0.58", features = ["ApplicationModel"] }
     ```
 
-2.  **Add Command**: Open `src-tauri/src/lib.rs` and add the `get_package_family_name` command. This function attempts to retrieve the current package identity.
+2.  **Add Command**: Open `src-tauri/src/lib.rs` and add the `get_package_family_name` function. Place it before the `pub fn run()` function:
 
     ```rust
     #[tauri::command]
@@ -130,7 +141,7 @@ We'll update the app to check if it's running with package identity. We'll use t
 
 ## 3. Initialize Project with winapp CLI
 
-The `winapp init` command sets up everything you need in one go: app manifest and assets.
+The `winapp init` command sets up everything you need in one go: app manifest and assets. The manifest defines your app's identity (name, publisher, version) which Windows uses to grant API access.
 
 Run the following command and follow the prompts:
 
@@ -143,16 +154,20 @@ When prompted:
 - **Publisher name**: Press Enter to accept the default or enter your name
 - **Version**: Press Enter to accept 1.0.0.0
 - **Entry point**: Press Enter to accept the default (tauri-app.exe)
-- **Setup SDKs**: Select "Do not setup SDKs"
+- **Setup SDKs**: Select "Do not setup SDKs" (Tauri uses Rust's `windows` crate, not the C++ SDK headers)
 
 This command will:
-- Create `appxmanifest.xml` and `Assets` folder for your app identity
+- Create `Package.appxmanifest` — the manifest that defines your app's identity
+- Create `Assets` folder — icons required for MSIX packaging and Store submission
 
-You can open `appxmanifest.xml` to further customize properties like the display name, publisher, and capabilities.
+> [!NOTE]
+> Because no SDK packages are being managed, no `winapp.yaml` is created — Tauri uses Rust's `windows` crate via Cargo, so there's nothing for `winapp restore`/`update` to track.
+
+You can open `Package.appxmanifest` to further customize properties like the display name, publisher, and capabilities.
 
 ## 4. Debug with Identity
 
-To debug with identity, we need to build the Rust backend and run it with `winapp run`. Since `npm run tauri dev` manages the process lifecycle, it's harder to inject the identity there. Instead, we'll create a custom script.
+To debug with identity, we need to build the Rust backend and run it with `winapp run`. Since `npm run tauri dev` manages the process lifecycle, it's harder to inject the identity there. Instead, we'll create a custom script. No certificate or signing is needed for debugging.
 
 1.  **Add Script**: Open `package.json` and add a new script `tauri:dev:withidentity`:
 
@@ -174,9 +189,16 @@ To debug with identity, we need to build the Rust backend and run it with `winap
     npm run tauri:dev:withidentity
     ```
 
-You should now see the app open and display a "Package family name", confirming it is running with identity! You can now start using and debugging APIs that require package identity, such as Notifications or the new AI APIs like Phi Silica. 
+> [!TIP]
+> You may see a terminal/console window appear behind the app window — this is normal for Tauri debug builds (it's the Rust process's console).
 
-> **Tip:** For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
+You should now see the app open and display a "Package family name", confirming it is running with identity! You can now start using and debugging APIs that require package identity, such as Notifications or the new AI APIs like Phi Silica.
+
+> [!TIP]
+> `winapp run` also registers the package on your system. This is why the MSIX may appear as "already installed" when you try to install it later in step 5. Use `winapp unregister` to clean up development packages when done.
+
+> [!TIP]
+> For advanced debugging workflows (attaching debuggers, IDE setup, startup debugging), see the [Debugging Guide](../debugging.md).
 
 ## 5. Package with MSIX
 
@@ -199,11 +221,14 @@ First, add a `pack:msix` script to your `package.json`:
 
 ### Generate a Development Certificate
 
-Before packaging, you need a development certificate for signing. Generate one if you haven't already:
+MSIX packages must be signed. For local testing, generate a self-signed development certificate:
 
 ```powershell
 winapp cert generate --if-exists skip
 ```
+
+> [!TIP]
+> The certificate's publisher must match the `Publisher` in your `Package.appxmanifest`. The `cert generate` command reads this automatically from your manifest.
 
 ### Build, Stage, and Pack
 
@@ -211,18 +236,42 @@ winapp cert generate --if-exists skip
 npm run pack:msix
 ```
 
-> Note: The `pack` command automatically uses the appxmanifest.xml from your current directory and copies it to the target folder before packaging. The generated .msix file will be in the current directory.
+> [!TIP]
+> The `pack` command automatically uses the Package.appxmanifest from your current directory and copies it to the target folder before packaging. The generated .msix file will be in the current directory.
 
 ### Install the Certificate
 
-Before you can install the MSIX package, you need to install the development certificate. Run this command as administrator:
+Before you can install the MSIX package, you need to trust the development certificate on your machine. Run this command as administrator (you only need to do this once per certificate):
 
 ```powershell
 winapp cert install .\devcert.pfx
 ```
 
 ### Install and Run
-Install the package by double-clicking the generated `.msix` file. Once installed, you can launch your app from the start menu.
 
+> [!TIP]
+> If you used `winapp run` in step 4, the package may already be registered on your system. Use `winapp unregister` first to remove the development registration, then install the release package.
 
-You should see the app running with identity.
+Install the package by double-clicking the generated `.msix` file, or using PowerShell:
+
+```powershell
+Add-AppxPackage .\tauri-app.msix
+```
+
+> [!TIP]
+> The MSIX filename includes the version and architecture (e.g., `tauri-app_1.0.0.0_x64.msix`). Check your directory for the exact filename. If you need to repackage after code changes, increment the `Version` in your `Package.appxmanifest` — Windows requires a higher version number to update an installed package.
+
+Once installed, you can launch your app from the Start menu. You should see the app running with identity.
+
+## Tips
+
+1. Once you are ready for distribution, you can sign your MSIX with a code signing certificate from a Certificate Authority so your users don't have to install a self-signed certificate.
+2. The Microsoft Store will sign the MSIX for you, no need to sign before submission.
+3. You might need to create multiple MSIX packages, one for each architecture you support (x64, Arm64).
+
+## Next Steps
+
+- **Distribute via winget**: Submit your MSIX to the [Windows Package Manager Community Repository](https://github.com/microsoft/winget-pkgs)
+- **Publish to the Microsoft Store**: Use `winapp store` to submit your package
+- **Set up CI/CD**: Use the [`setup-WinAppCli`](https://github.com/microsoft/setup-WinAppCli) GitHub Action to automate packaging in your pipeline
+- **Explore Windows APIs**: With package identity, you can now use [Notifications](https://learn.microsoft.com/windows/apps/develop/notifications/app-notifications/app-notifications-quickstart), [on-device AI](https://learn.microsoft.com/windows/ai/apis/), and other [identity-dependent APIs](https://learn.microsoft.com/windows/apps/desktop/modernize/desktop-to-uwp-extensions)

@@ -17,6 +17,9 @@
   <a href="https://www.npmjs.com/package/@microsoft/winappcli">
     <img src="https://img.shields.io/npm/v/%40microsoft%2Fwinappcli?style=for-the-badge&logo=npm" alt="NPM">
   </a>
+  <a href="https://www.nuget.org/packages/Microsoft.Windows.SDK.BuildTools.WinApp">
+    <img src="https://img.shields.io/nuget/v/Microsoft.Windows.SDK.BuildTools.WinApp?style=for-the-badge&logo=nuget&label=NuGet&color=004880" alt="NuGet">
+  </a>
   <a href="https://github.com/microsoft/WinAppCli/releases/latest">
     <img src="https://img.shields.io/github/v/release/microsoft/WinAppCli?style=for-the-badge&logo=github&label=Latest%20Release&color=8ab4f8" alt="Latest Release">
   </a>
@@ -65,7 +68,7 @@ Perfect for:
 
 ## 🤔 Why?
 
-Many powerful Windows APIs require your app to have package identity, enabling you to leverage some of the OS components Windows offers, that you wouldn't otherwise have access to. With identity, your app gains access to user-first features like notifications, OS integration, and on-device AI.
+Many Windows APIs require your app to have package identity, enabling you to leverage some of the OS components Windows offers, that you wouldn't otherwise have access to. With identity, your app gains access to user-first features like notifications, OS integration, and on-device AI.
 
 Our goal is to support developers wherever they are, with the tools and frameworks they already use. Based on feedback from developers shipping cross-platform apps on Windows, we built this CLI to streamline integrating with the Windows developer platform - handling SDK setup, header generation, manifests, certificates, and packaging in just a few commands:
 
@@ -107,7 +110,7 @@ Checkout our getting started guides for step by step instructions of how to setu
     <img src="https://img.shields.io/badge/C++-Get%20Started-00599C?style=for-the-badge&logo=cplusplus&logoColor=white" alt="Get Started with C++">
   </a>
     <br />
-  <a href="/docs/electron-get-started.md">
+  <a href="/docs/guides/electron/index.md">
     <img src="https://img.shields.io/badge/Electron-Get%20Started-47848F?style=for-the-badge&logo=electron&logoColor=white" alt="Get Started with Electron">
   </a>
     <br />
@@ -126,6 +129,11 @@ Checkout our getting started guides for step by step instructions of how to setu
 
 Additional guides:
 - [Packaging an EXE/CLI](/docs/guides/packaging-cli.md): step by step guide of packaging an existing exe/cli as MSIX
+- **Electron JS/TypeScript bindings** *(npm only)*: opt into auto-generated WinRT bindings via `winapp init --add-js-bindings`. See task-focused guides:
+  - [File picker](/docs/guides/electron/js-file-picker.md) — open native Windows file/folder pickers from the renderer
+  - [Toast notifications](/docs/guides/electron/js-notification.md) — show Windows toasts with actions
+  - [Phi Silica (on-device LLM)](/docs/guides/electron/js-phi-silica.md) — local text generation via Windows AI
+  - [WinML inference](/docs/guides/electron/js-winml.md) — run ONNX models with the Windows ML runtime
 
 ## 📦 Installation
 
@@ -134,6 +142,10 @@ Additional guides:
 The easiest way to use the CLI is via WinGet (Windows Package Manager). In Terminal, simply run:
 
 `winget install Microsoft.winappcli --source winget`
+
+Or, if you prefer a PowerShell terminal, you can use the WinGet PowerShell cmdlet (from the `Microsoft.WinGet.Client` module):
+
+`Install-WinGetPackage Microsoft.winappcli`
 
 ### NPM <a href="https://www.npmjs.com/package/@microsoft/winappcli"> <img src="https://img.shields.io/npm/v/%40microsoft%2Fwinappcli?style=for-the-badge&logo=npm" alt="NPM" height="24"></a>
 
@@ -212,6 +224,7 @@ See also: [Debugging Guide](./docs/debugging.md) — choosing between `winapp ru
 
 - [`cert`](./docs/usage.md#cert) - Generate and install development certificates
 - [`sign`](./docs/usage.md#sign) - Sign MSIX packages and executables
+- [`az-sign`](./docs/usage.md#az-sign) - Sign with Azure Trusted Signing (cloud-managed identity, no local PFX)
 - [`create-external-catalog`](./docs/usage.md#create-external-catalog) - Generate CodeIntegrityExternal.cat for TrustedLaunch sparse packages
 
 **Development Tools:**
@@ -244,6 +257,12 @@ This repository includes samples demonstrating how to use the CLI with various f
 | [Tauri App](/samples/tauri-app/README.md) | Tauri cross-platform app with Rust backend |
 | [Flutter App](/samples/flutter-app/README.md) | Flutter desktop app with package identity and Windows App SDK |
 
+## 🧩 VS Code Extension
+
+The **[WinApp VS Code Extension](https://marketplace.visualstudio.com/items?itemName=Microsoft-WinAppCLI.winapp)** brings WinApp CLI into Visual Studio Code. It can initialize projects, debug with package identity, package, sign, and more without leaving the editor. Press **F5** to launch your app with identity and automatically attach a debugger.
+
+Install it from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=Microsoft-WinAppCLI.winapp). Checkout the repo for the WinApp VS Code Extension at [microsoft/WinAppVSCE](https://github.com/microsoft/WinAppVSCE).
+
 ## 🤖 Using with AI Coding Agents
 
 AI coding agents (GitHub Copilot, Claude Code, etc.) auto-discover skill files in your project.
@@ -252,6 +271,8 @@ AI coding agents (GitHub Copilot, Claude Code, etc.) auto-discover skill files i
 ```bash
 copilot plugin install microsoft/WinAppCli
 ```
+
+**Claude Code** — Claude Code auto-discovers skills and agents from the in-repo [`.claude/`](./.claude/) directory shipped in this repository. No install step required; just open the repo in Claude Code.
 
 This gives agents full understanding of winapp commands, workflows, and troubleshooting.
 
@@ -273,11 +294,22 @@ For more information see the [Code of Conduct FAQ](https://opensource.microsoft.
 
 To build the CLI:
 ```
-# Build the CLI and package for npm, and NuGet, from the repo root
+# Build the CLI and package for npm, NuGet, and MSIX from the repo root
 .\scripts\build-cli.ps1
 ```
 
 The binaries and packages will be placed in the `artifacts` folder
+
+### Reviewing your changes before pushing
+
+Developer-facing AI skills live under [`.github/skills/`](./.github/skills/).
+Before pushing a PR, you can ask Copilot CLI (or any agent that reads skill
+files) to "review my PR" — the [`pr-review`](./.github/skills/pr-review/SKILL.md)
+skill fans out parallel sub-agents covering security, correctness and tests,
+CLI UX, alternative solutions, necessity and simplicity, shipping surfaces
+(docs/samples/packaging), and a different-model cross-check. It then builds and
+runs the CLI to validate the critical findings, and prints a short list to
+stdout.
 
 ## Trademarks
 

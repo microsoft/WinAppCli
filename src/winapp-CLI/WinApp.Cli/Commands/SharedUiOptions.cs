@@ -20,9 +20,13 @@ internal static class SharedUiOptions
     public static Option<string?> PropertyOption { get; }
     public static Argument<string?> ValueArgument { get; }
     public static Option<bool> CaptureScreenOption { get; }
+    public static Option<bool> FocusOption { get; }
     public static Option<bool> InteractiveOption { get; }
     public static Option<bool> HideDisabledOption { get; }
     public static Option<bool> HideOffscreenOption { get; }
+    public static Option<int> DurationSecOption { get; }
+    public static Option<int> FpsOption { get; }
+    public static Option<int> MaxEdgeOption { get; }
 
     static SharedUiOptions()
     {
@@ -56,7 +60,7 @@ internal static class SharedUiOptions
 
         OutputOption = new Option<string?>("--output", "-o")
         {
-            Description = "Save output to file path (e.g., screenshot)"
+            Description = "Save output to this file path."
         };
 
         TimeoutOption = new Option<int>("--timeout", "-t")
@@ -78,7 +82,12 @@ internal static class SharedUiOptions
 
         CaptureScreenOption = new Option<bool>("--capture-screen")
         {
-            Description = "Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first."
+            Description = "Capture from screen DC via BitBlt (includes popups/overlays not owned by the target)."
+        };
+
+        FocusOption = new Option<bool>("--focus")
+        {
+            Description = "Bring the target window to the foreground before capture. Already implied by --capture-screen."
         };
 
         InteractiveOption = new Option<bool>("--interactive", "-i")
@@ -94,6 +103,24 @@ internal static class SharedUiOptions
         HideOffscreenOption = new Option<bool>("--hide-offscreen")
         {
             Description = "Hide offscreen elements from output"
+        };
+
+        DurationSecOption = new Option<int>("--duration-sec")
+        {
+            Description = "Recording duration in seconds. Default 0 records until stopped — Ctrl+C, or (for programmatic callers) a newline or EOF on stdin. A valid MP4 is always finalized on graceful stop.",
+            DefaultValueFactory = _ => 0
+        };
+
+        FpsOption = new Option<int>("--fps")
+        {
+            Description = "Frames per second to capture",
+            DefaultValueFactory = _ => 15
+        };
+
+        MaxEdgeOption = new Option<int>("--max-edge")
+        {
+            Description = "Downscale so the longest edge is at most this many pixels (0 = no downscale)",
+            DefaultValueFactory = _ => 0
         };
     }
 }

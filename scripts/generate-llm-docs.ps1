@@ -5,6 +5,8 @@
 .DESCRIPTION
     This script generates docs/cli-schema.json and SKILL.md files
     from the CLI's --cli-schema output. Run after building the CLI to keep documentation in sync.
+    Also mirrors the regenerated .github/plugin/ tree to .claude/ for Claude Code compatibility
+    via scripts/sync-claude-plugin.ps1.
 .PARAMETER CliPath
     Path to the winapp.exe CLI binary (default: artifacts/cli/win-x64/winapp.exe)
 .PARAMETER DocsPath
@@ -98,11 +100,11 @@ $SkillCommandMap = @{
     "setup"        = @("init", "restore", "update", "run")
     "package"      = @("package", "create-external-catalog")
     "identity"     = @("create-debug-identity")
-    "signing"      = @("cert generate", "cert install", "cert info", "sign")
+    "signing"      = @("cert generate", "cert install", "cert info", "sign", "az-sign")
     "manifest"     = @("manifest generate", "manifest update-assets", "manifest add-alias")
     "troubleshoot"    = @("get-winapp-path", "tool", "store")
     "frameworks"      = @()       # No auto-generated command sections — links to guides
-    "ui-automation"   = @("ui status", "ui inspect", "ui search", "ui get-property", "ui get-value", "ui screenshot", "ui invoke", "ui click", "ui set-value", "ui focus", "ui scroll-into-view", "ui scroll", "ui wait-for", "ui list-windows", "ui get-focused")
+    "ui-automation"   = @("ui status", "ui inspect", "ui search", "ui get-property", "ui get-value", "ui screenshot", "ui record", "ui invoke", "ui click", "ui drag", "ui touch", "ui pen", "ui hover", "ui send-keys", "ui set-value", "ui focus", "ui scroll-into-view", "ui scroll", "ui wait-for", "ui list-windows", "ui get-focused")
 }
 
 # Validate that all CLI commands are covered by at least one skill
@@ -245,10 +247,10 @@ $SkillDescriptions = @{
     "package"      = "Package a Windows app as an MSIX installer for distribution or testing. Use when creating a Windows installer, packaging an Electron/Flutter/.NET/Rust/C++/Tauri app for Windows, building an MSIX, distributing a desktop app, packaging a console app or CLI tool, or adding MSIX packaging to a build script or CI/CD pipeline."
     "identity"     = "Enable Windows package identity for desktop apps to access Windows APIs like push notifications, background tasks, share target, and startup tasks. Use when adding Windows notifications, background tasks, or other identity-requiring Windows features to a desktop app."
     "signing"      = "Create and manage code signing certificates for Windows apps and MSIX packages. Use when generating a certificate, signing a Windows app or installer, or fixing certificate trust issues."
-    "manifest"     = "Create and edit Windows app manifest files (appxmanifest.xml) that define app identity, capabilities, and visual assets, or generate new assets from existing images. Use when creating a Windows app manifest for any app type (GUI, console, CLI tool, service), adding Windows capabilities, generating new app icons and assets, or adding execution aliases, file associations, protocol handlers, or other app extensions."
+    "manifest"     = "Create and edit Windows app manifest files (Package.appxmanifest or appxmanifest.xml) that define app identity, capabilities, and visual assets, or generate new assets from existing images. Use when creating a Windows app manifest for any app type (GUI, console, CLI tool, service), adding Windows capabilities, generating new app icons and assets, or adding execution aliases, file associations, protocol handlers, or other app extensions."
     "troubleshoot" = "Diagnose and fix common Windows app packaging, signing, identity, and SDK errors. Use when encountering errors with MSIX packaging, certificate signing, Windows SDK setup, or app installation."
     "frameworks"      = "Framework-specific Windows development guidance for Electron, .NET (WPF, WinForms), C++, Rust, Flutter, and Tauri. Use when packaging or adding Windows features to an Electron app, .NET desktop app, Flutter app, Tauri app, Rust app, or C++ app."
-    "ui-automation"   = "Inspect and interact with running Windows app UIs from the command line using UI Automation (UIA). Use when an AI agent or developer needs to inspect a UI element tree, find controls, take screenshots, click buttons, read or set text, or verify UI state in a running Windows app. Works with any framework: WinUI 3, WPF, WinForms, Win32, Electron."
+    "ui-automation"   = "Inspect and interact with running Windows app UIs from the command line using UI Automation (UIA). Use when an AI agent or developer needs to inspect a UI element tree, find controls, take screenshots, click buttons, read or set text, or verify UI state in a running Windows app. Works with any framework WinUI 3, WPF, WinForms, Win32, Electron."
 }
 
 foreach ($skillName in $SkillNames) {
@@ -298,8 +300,26 @@ version: $CliVersion
     Write-Host "[SKILLS]   $skillName - generated" -ForegroundColor Gray
 }
 
-# Update plugin.json version to match CLI version (only when outputting to the default skills path)
+# Mirror the regenerated Copilot plugin to .claude/ so Claude Code consumers
+# (and the cc-community plugin marketplace) stay in sync. Source of truth
+# remains .github/plugin/; .claude/ is a generated output of this script.
+# Only sync when writing to the default plugin path — custom -SkillsDir runs
+# should not mutate the canonical .claude/ tree.
 $DefaultSkillsPath = Join-Path $ProjectRoot ".github\plugin\skills\winapp-cli"
+$syncScript = Join-Path $PSScriptRoot 'sync-claude-plugin.ps1'
+if ($SkillsDir -eq $DefaultSkillsPath -and (Test-Path $syncScript)) {
+    Write-Host "`n[CLAUDE]   syncing .claude/ from .github/plugin/" -ForegroundColor Gray
+    try {
+        & $syncScript
+    }
+    catch {
+        Write-Error "sync-claude-plugin.ps1 failed: $_"
+        exit 1
+    }
+}
+
+
+# Update plugin.json version to match CLI version (only when outputting to the default skills path)
 if ($SkillsDir -eq $DefaultSkillsPath) {
     $PluginJsonPath = Join-Path $ProjectRoot ".github\plugin\plugin.json"
     if (Test-Path $PluginJsonPath) {

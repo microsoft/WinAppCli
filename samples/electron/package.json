@@ -21,7 +21,20 @@
   "keywords": [],
   "author": "Sample Author",
   "license": "MIT",
+  "imports": {
+    "#winapp/bindings": {
+      "types": "./.winapp/bindings/index.d.ts",
+      "import": "./.winapp/bindings/index.mjs",
+      "require": "./.winapp/bindings/index.js",
+      "default": "./.winapp/bindings/index.js"
+    },
+    "#winapp/bindings/*": {
+      "types": "./.winapp/bindings/*.d.ts",
+      "default": "./.winapp/bindings/*.js"
+    }
+  },
   "dependencies": {
+    "@microsoft/dynwinrt": "0.1.0-preview.8",
     "electron-squirrel-startup": "^1.0.1",
     "node-api-dotnet": "^0.9.18"
   },
@@ -34,10 +47,17 @@
     "@electron-forge/plugin-auto-unpack-natives": "^7.10.2",
     "@electron-forge/plugin-fuses": "^7.10.2",
     "@electron/fuses": "^1.8.0",
-    "@microsoft/winappcli": "^0.2.0",
+    "@microsoft/dynwinrt-codegen": "0.1.0-preview.8",
+    "@microsoft/winappcli": "0.4.0",
     "electron": "39.8.5",
     "nan": "^2.24.0",
     "node-addon-api": "^8.5.0",
     "node-gyp": "^12.1.0"
+  },
+  "winapp": {
+    "jsBindings": {
+      "additionalWinmds": [],
+      "additionalRefs": []
+    }
   }
 }

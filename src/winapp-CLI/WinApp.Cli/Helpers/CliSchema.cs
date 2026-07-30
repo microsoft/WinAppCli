@@ -22,6 +22,7 @@ namespace WinApp.Cli.Helpers;
 [JsonSerializable(typeof(Dictionary<string, CliSchema.CommandDetails>))]
 [JsonSerializable(typeof(IfExists))]
 [JsonSerializable(typeof(ManifestTemplates))]
+[JsonSerializable(typeof(float))]
 [JsonSourceGenerationOptions(
     WriteIndented = true,
     NewLine = "\n",
@@ -157,11 +158,11 @@ internal static class CliSchema
             return null;
         }
         var dict = new Dictionary<string, CommandDetails>();
-        foreach (var subcommand in subcommands.OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase))
+        foreach (var subcommand in subcommands.Where(c => !c.Hidden).OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase))
         {
             dict[subcommand.Name] = CreateCommandDetails(subcommand);
         }
-        return dict;
+        return dict.Count > 0 ? dict : null;
     }
 
     private static string[]? DetermineAliases(ICollection<string> aliases)

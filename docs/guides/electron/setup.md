@@ -1,3 +1,5 @@
+<!-- mslearn: true -->
+<!-- description: Set up your development environment for adding Windows APIs to an Electron app with the winapp CLI, including SDK install and project init. -->
 # Setting Up the Development Environment
 
 This guide walks you through setting up your Electron development environment for Windows API development. You'll install the necessary tools, initialize your project, and configure Windows SDKs.
@@ -20,6 +22,12 @@ npm create electron-app@latest my-windows-app
 cd my-windows-app
 ```
 
+When prompted by Electron Forge:
+- **Bundler**: Select **None** (recommended — native addons work without extra configuration)
+- **Language**: Select **JavaScript** (this guide uses JS; TypeScript works too)
+- **Electron version**: Select **latest**
+- **Initialize git**: Your preference
+
 Verify the app runs:
 
 ```bash
@@ -29,6 +37,8 @@ npm start
 You should see the default Electron Forge window. Close it and let's add Windows capabilities!
 
 ## Step 2: Install winapp CLI
+
+The Electron workflow requires the **npm package** (`@microsoft/winappcli`) rather than the standalone CLI installed from winget. The npm package includes Node.js-specific helpers (like `add-electron-debug-identity` and `create-addon`) that are not available in the native CLI. If you already have winapp installed from winget, that's fine — the npm package adds Node.js-specific tools as a project dependency and won't conflict with your system installation.
 
 ```bash
 npm install --save-dev @microsoft/winappcli
@@ -41,7 +51,7 @@ The `winapp init` command sets up everything you need in one go: app manifest, a
 Run the following command and follow the prompts:
 
 ```bash
-npx winapp init
+npx winapp init .
 ```
 
 When prompted:
@@ -50,6 +60,10 @@ When prompted:
 - **Version**: Press Enter to accept 1.0.0.0
 - **Entry point**: Press Enter to accept the default (my-windows-app.exe)
 - **Setup SDKs**: Select "Stable SDKs"
+- **Add JS/TypeScript bindings**: Press Enter to accept the default (**Yes**) to generate JS bindings for Windows App SDK APIs
+
+> [!NOTE]
+> `--use-defaults` and non-interactive init skip JS bindings unless you pass `--add-js-bindings`. Run interactive `npx winapp init .` to opt in at the prompt, or use `npx winapp init . --use-defaults --add-js-bindings` for automation.
 
 ### What Does `winapp init` Do?
 
@@ -60,22 +74,29 @@ This command sets up everything you need for Windows development:
    - Headers and libraries from the **Windows App SDK**
    - NuGet packages with the required binaries
 
-2. **Generates `appxmanifest.xml`** - The app manifest required for app identity and MSIX packaging
+2. **Generates `Package.appxmanifest`** - The app manifest required for app identity and MSIX packaging
 
 3. **Creates `Assets/` folder** - Contains app icons and visual assets for your app
 
 4. **Creates `winapp.yaml`** - Tracks SDK versions and project configuration
 
-6. **Installs Windows App SDK runtime** - Required runtime components for modern APIs
+5. **Installs Windows App SDK runtime** - Required runtime components for modern APIs
 
-7. **Enables Developer Mode in Windows** - Required for debugging our application
+6. **Enables Developer Mode in Windows** - Required for debugging our application
+
+7. **Generates JS bindings** - When you opt in, it:
+   - Writes the `winapp.jsBindings` block to `package.json`
+   - Adds `@microsoft/dynwinrt-codegen` to `devDependencies` — the build-time tool that produces the bindings (pinned to the registry's `latest` version on first run, then left alone)
+   - Adds `@microsoft/dynwinrt` to `dependencies` — the runtime that the generated bindings import at execution time (version is chosen by the installed codegen to guarantee ABI compatibility)
+   - Generates JS bindings for Windows App SDK APIs into `.winapp/bindings/`
 
 > [!NOTE]
 > The `.winapp/` folder is automatically added to `.gitignore` and should not be checked in to source.
 
-You can open `appxmanifest.xml` to further customize properties like the display name, publisher, and capabilities.
+You can open `Package.appxmanifest` to further customize properties like the display name, publisher, and capabilities.
 
-> **💡 About the Windows SDKs:**
+> [!TIP]
+> **About the Windows SDKs:**
 >
 > - **[Windows SDK](https://developer.microsoft.com/windows/downloads/windows-sdk/)** - A development platform that lets you build Win32/desktop apps. It's designed around Windows APIs that are coupled to particular versions of the OS. Use this to access core Win32 APIs like file system, networking, and system services.
 > 
@@ -100,7 +121,27 @@ This script automatically runs after `npm install` and does two things:
 1. **`winapp restore`** - Downloads and restores all Windows SDK packages to the `.winapp/` folder
 2. **`winapp node add-electron-debug-identity`** - Registers your Electron app with debug identity (more on this in the next steps)
 
-Now whenever someone runs `npm install`, the Windows environment is automatically configured!
+> [!IMPORTANT]
+> **Electron 42 and newer**: As of Electron 42, the binary is no longer downloaded automatically during `npm install` ([release notes](https://github.com/electron/electron/releases/tag/v42.0.0)). You must download it explicitly before `add-electron-debug-identity` runs:
+>
+> ```json
+> {
+>   "scripts": {
+>     "postinstall": "npx --no-install install-electron && winapp restore && winapp node add-electron-debug-identity"
+>   }
+> }
+> ```
+>
+> The `--no-install` flag ensures `npx` only runs the `install-electron` bin shipped by your installed Electron package and never silently downloads anything from the registry. If you pin to Electron < 42, omit this step — the binary is already in place after `npm install`.
+
+Now run `npm install` to trigger the postinstall script and configure the Windows environment:
+
+```bash
+npm install
+```
+
+> [!NOTE]
+> The `postinstall` script runs automatically after every `npm install`. This means the Windows environment will be configured automatically whenever someone clones your project and runs `npm install`.
 
 <details>
 <summary><b>💡 Cross-Platform Development (click to expand)</b></summary>
@@ -111,10 +152,28 @@ Create `scripts/postinstall.js`:
 ```javascript
 if (process.platform === 'win32') {
   const { execSync } = require('child_process');
+  const fs = require('fs');
+  const path = require('path');
+
+  // Electron 42+ ships an `install-electron` bin and skips the postinstall download.
+  // Run it only when present, and use `--no-install` so npx never silently fetches
+  // anything from the registry.
+  const installElectronBin = path.join(
+    'node_modules', '.bin',
+    process.platform === 'win32' ? 'install-electron.cmd' : 'install-electron'
+  );
+  const steps = [];
+  if (fs.existsSync(installElectronBin)) {
+    steps.push('npx --no-install install-electron');
+  }
+  steps.push(
+    'npx winapp restore',
+    'npx winapp cert generate --if-exists skip',
+    'npx winapp node add-electron-debug-identity'
+  );
+
   try {
-    execSync('npx winapp restore && npx winapp cert generate --if-exists skip && npx winapp node add-electron-debug-identity', {
-      stdio: 'inherit'
-    });
+    execSync(steps.join(' && '), { stdio: 'inherit' });
   } catch (error) {
     console.warn('Warning: Windows-specific setup failed. If you are not developing Windows features, you can ignore this.');
   }
@@ -138,20 +197,20 @@ This ensures Windows-specific setup only runs on Windows machines, allowing deve
 
 ## Step 5: Understanding Debug Identity
 
-The `postinstall` script in Step 4 includes the `winapp node add-electron-debug-identity` command, which enables you to test Windows APIs that require app identity during development.
+The `npm install` you ran in Step 4 triggered the `postinstall` script, which ran `winapp node add-electron-debug-identity`. This gives your app a temporary debug identity so you can test Windows APIs that require app identity during development.
 
 ### What Does Debug Identity Do?
 
 This command:
-1. Reads your `appxmanifest.xml` to get app details and capabilities
+1. Reads your `Package.appxmanifest` to get app details and capabilities
 2. Registers `electron.exe` in your `node_modules` with a temporary identity
 3. Enables you to test identity-required APIs without creating a full MSIX package
 
-The debug identity is automatically applied when you run `npm install` thanks to the `postinstall` script.
+The debug identity was applied automatically when you ran `npm install` in Step 4. Going forward, it will be reapplied whenever anyone runs `npm install`.
 
 ### When to Manually Update Debug Identity
 
-You need to run this command manually whenever you modify `appxmanifest.xml` (change capabilities, identity, or properties) or any of the linked assets (icons, mcp.json, etc)
+You need to run this command manually whenever you modify `Package.appxmanifest` (change capabilities, identity, or properties) or any of the linked assets (icons, mcp.json, etc)
 
 ```bash
 npx winapp node add-electron-debug-identity
@@ -164,6 +223,8 @@ You can now test your Electron app with the debug identity applied:
 ```bash
 npm start
 ```
+
+You should see a **desktop application window** open (not a browser tab) — this is how Electron apps run.
 
 <details>
 <summary><b>⚠️ Known Issue: App Crashes or Blank Window (click to expand)</b></summary>
@@ -200,10 +261,14 @@ This restores the original Electron executable without the debug identity.
 
 ## Next Steps
 
-Now that your development environment is set up, you're ready to create native addons and call Windows APIs:
+Now that your development environment is set up, you're ready to call Windows APIs from JavaScript or create native addons when you need native code:
 
+- **[Calling Windows APIs from JavaScript](js-file-picker.md)** - Use JS bindings to call Windows App SDK APIs, and extend them with Windows SDK APIs via `winapp.jsBindings`
+- **[Showing a Notification from JavaScript](js-notification.md)** - Use JS bindings to show a Windows App SDK notification without a native addon
+- **[Calling Phi Silica from JavaScript](js-phi-silica.md)** - Use JS bindings to summarize text with the local language model
+- **[Running WinML from JavaScript](js-winml.md)** - Use JS bindings with `onnxruntime-node` for ONNX inference
 - **[Creating a Phi Silica Addon](phi-silica-addon.md)** - Learn how to create a C# addon that calls the Phi Silica AI API
 - **[Creating a WinML Addon](winml-addon.md)** - Learn how to create a C# addon that uses Windows Machine Learning
 - **[Packaging for Distribution](packaging.md)** - Create an MSIX package for distribution
 
-Or return to the **[Getting Started Overview](../../electron-get-started.md)**.
+Or return to the **[Getting Started Overview](index.md)**.

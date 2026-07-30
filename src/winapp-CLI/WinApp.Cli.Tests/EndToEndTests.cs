@@ -249,12 +249,26 @@ public class EndToEndTests : BaseCommandTests
             Path.Combine(extractDir, "AppxManifest.xml"), TestContext.CancellationToken);
 
         var versionParts = winAppSdkVersion.Split('.');
-        var expectedRuntimeName = $"Microsoft.WindowsAppRuntime.{versionParts[0]}.{versionParts[1]}";
+
+        // Assert only on what's invariant across SDK naming-convention churn:
+        //   * The PackageDependency name MUST start with "Microsoft.WindowsAppRuntime.{major}".
+        //     Whether the framework is "Microsoft.WindowsAppRuntime.2" (2.0.1+ stable, major-only),
+        //     "Microsoft.WindowsAppRuntime.1.8" (per-minor SxS in 1.x), or
+        //     "Microsoft.WindowsAppRuntime.2-experimentalN" (2.x experimental) is the SDK's call,
+        //     not ours — the CLI faithfully propagates whatever name appears in MSIX.inventory.
+        //   * MinVersion's first three components must match the SDK version
+        //     (the inventory ships a Major.Minor.Patch.Revision quad; the leading triple is the SDK version).
+        var expectedNamePrefix = $"Name=\"Microsoft.WindowsAppRuntime.{versionParts[0]}";
+        var expectedMinVersionPrefix = versionParts.Length >= 3
+            ? $"MinVersion=\"{versionParts[0]}.{versionParts[1]}.{versionParts[2].Split('-')[0]}."
+            : $"MinVersion=\"{versionParts[0]}.";
 
         Assert.Contains("<PackageDependency", finalManifest,
             "Manifest should contain a PackageDependency element");
-        Assert.Contains(expectedRuntimeName, finalManifest,
-            $"PackageDependency should reference {expectedRuntimeName}");
+        Assert.Contains(expectedNamePrefix, finalManifest,
+            $"PackageDependency Name should start with Microsoft.WindowsAppRuntime.{versionParts[0]}");
+        Assert.Contains(expectedMinVersionPrefix, finalManifest,
+            $"PackageDependency MinVersion should be derived from SDK version {winAppSdkVersion}");
     }
 
     [TestMethod]
@@ -545,7 +559,7 @@ public class EndToEndTests : BaseCommandTests
         Assert.AreNotEqual(0, result.ExitCode, "Command should fail for non-existent package input folder.");
         var combinedOutput = $"{result.Output}\n{result.Error}";
         Assert.IsTrue(
-            combinedOutput.Contains("Input folder not found", StringComparison.OrdinalIgnoreCase)
+            combinedOutput.Contains("Input folder(s) not found:", StringComparison.OrdinalIgnoreCase)
                 || combinedOutput.Contains("Directory does not exist", StringComparison.OrdinalIgnoreCase),
             $"Expected package missing-folder error to be surfaced. Output: {combinedOutput}");
     }
@@ -567,8 +581,12 @@ public class EndToEndTests : BaseCommandTests
         // Assert
         Assert.AreNotEqual(0, result.ExitCode, "Command should fail when electron.exe does not exist.");
         var combinedOutput = $"{result.Output}\n{result.Error}";
+        // Either branch of the new error messaging is acceptable: "Electron is not installed"
+        // (no node_modules/electron) or "binary was not found" (node_modules/electron present
+        // but exe missing, e.g. Electron 42+ before `install-electron` runs).
         Assert.IsTrue(
-            combinedOutput.Contains("Electron executable not found at:", StringComparison.OrdinalIgnoreCase),
+            combinedOutput.Contains("Electron is not installed", StringComparison.OrdinalIgnoreCase)
+                || combinedOutput.Contains("binary was not found", StringComparison.OrdinalIgnoreCase),
             $"Expected Node-layer electron missing error to be surfaced. Output: {combinedOutput}");
     }
 

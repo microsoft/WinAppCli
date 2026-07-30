@@ -2,6 +2,9 @@
   branches:
     include:
       - rel/v*
+  tags:
+    exclude:
+      - '*'
 pr: none
 
 resources:
@@ -35,6 +38,10 @@ extends:
   template: v1/1ES.Official.PipelineTemplate.yml@1esPipelines
   parameters:
     sdl:
+      policheck:
+        enabled: true
+        break: true
+        severity: 'Warning'
       sourceAnalysisPool:
         name: Azure-Pipelines-1ESPT-ExDShared
         image: windows-latest
@@ -158,6 +165,27 @@ extends:
             inputs:
               path: '$(Build.ArtifactStagingDirectory)/release-notes'
               artifactName: release-notes
+          - task: PowerShell@2
+            displayName: "Stage MS Learn doc source"
+            inputs:
+              pwsh: true
+              targetType: 'inline'
+              script: |
+                # Publish the files the MS Learn port step needs as an artifact
+                # (1ES release jobs can't checkout the repo). Layout mirrors the
+                # repo so the script's $ProjectRoot resolves docs/ and version.json.
+                $staging = "$(Build.ArtifactStagingDirectory)/mslearn-source"
+                New-Item -ItemType Directory -Path "$staging/scripts" -Force | Out-Null
+                Copy-Item "$(System.DefaultWorkingDirectory)/scripts/port-mslearn-docs.ps1" "$staging/scripts/" -Force
+                Copy-Item "$(System.DefaultWorkingDirectory)/scripts/validate-mslearn-docs.ps1" "$staging/scripts/" -Force
+                Copy-Item "$(System.DefaultWorkingDirectory)/scripts/mslearn-doc-lib.ps1" "$staging/scripts/" -Force
+                Copy-Item "$(System.DefaultWorkingDirectory)/docs" "$staging/docs" -Recurse -Force
+                Copy-Item "$(System.DefaultWorkingDirectory)/version.json" "$staging/" -Force
+          - task: 1ES.PublishPipelineArtifact@1
+            displayName: Upload Artifact - MS Learn Source
+            inputs:
+              path: '$(Build.ArtifactStagingDirectory)/mslearn-source'
+              artifactName: mslearn-source
 
     - stage: Release_GitHub
       displayName: Create GitHub Release
@@ -385,16 +413,192 @@ extends:
                 Write-Host "Fork synced successfully."
                 
                 # Get the installer URLs from the GitHub release
+                # Order must match the winget manifest: x64 MSIX, arm64 MSIX, x64 portable zip, arm64 portable zip
                 $x64MsixUrl = "https://github.com/microsoft/winappcli/releases/download/v$(version)/winappcli_x64.msix"
                 $arm64MsixUrl = "https://github.com/microsoft/winappcli/releases/download/v$(version)/winappcli_arm64.msix"
+                $x64ZipUrl = "https://github.com/microsoft/winappcli/releases/download/v$(version)/winappcli-x64.zip"
+                $arm64ZipUrl = "https://github.com/microsoft/winappcli/releases/download/v$(version)/winappcli-arm64.zip"
                 
                 Write-Host "Submitting to WinGet..."
                 Write-Host "Version: $(version)"
                 Write-Host "x64 MSIX: $x64MsixUrl"
                 Write-Host "ARM64 MSIX: $arm64MsixUrl"
+                Write-Host "x64 Portable: $x64ZipUrl"
+                Write-Host "ARM64 Portable: $arm64ZipUrl"
                 
                 # Submit to WinGet repository
                 wingetcreate update Microsoft.WinAppCli `
                   --version $(version) `
-                  --urls $x64MsixUrl $arm64MsixUrl `
+                  --urls $x64MsixUrl $arm64MsixUrl $x64ZipUrl $arm64ZipUrl `
                   --submit
+
+    - stage: Release_MSLearn
+      displayName: Update MS Learn Docs
+      dependsOn: [Build, Release_GitHub]
+      variables:
+        version: $[ stageDependencies.Build.Build.outputs['SetMeta.version'] ]
+      jobs:
+      - job: update_mslearn_docs
+        pool:
+          name: Azure-Pipelines-1ESPT-ExDShared
+          image: windows-latest
+          os: windows
+          hostArchitecture: amd64
+        displayName: MS Learn Docs PR
+        templateContext:
+          type: releaseJob
+          isProduction: true
+          inputs:
+          - input: pipelineArtifact
+            artifactName: mslearn-source
+            targetPath: $(Pipeline.Workspace)/mslearn-source
+        steps:
+          - task: PowerShell@2
+            displayName: "Create MS Learn Docs PR"
+            env:
+              GH_TOKEN: $(GITHUB_TOKEN_2)
+              MSLEARN_DOCS_FORK: $(MSLearnDocsFork)
+            inputs:
+              targetType: 'inline'
+              pwsh: true
+              errorActionPreference: 'stop'
+              script: |
+                $version = "$(version)"
+                $docsRepoBase = "hub/apps/dev-tools/winapp-cli"
+                $docsUpstream = "MicrosoftDocs/windows-dev-docs-pr"
+                $branch = "winapp-cli/v$version"
+
+                # Validate docs fork from env var (not ADO macro expansion)
+                $docsFork = $env:MSLEARN_DOCS_FORK
+                if (-not $docsFork -or $docsFork -notmatch '^[\w-]+/[\w.-]+$') {
+                  Write-Error "Invalid or missing MSLearnDocsFork value: '$docsFork'. Expected format: 'owner/repo'."
+                  exit 1
+                }
+                $docsForkOwner = $docsFork.Split('/')[0]
+
+                # Install gh with integrity verification
+                Write-Host "Installing gh..."
+                $tempDir = "$(Agent.TempDirectory)"
+                $ghZipUrl = "https://github.com/cli/cli/releases/download/v2.83.1/gh_2.83.1_windows_amd64.zip"
+                $ghZipPath = "$tempDir\gh.zip"
+                $ghExpectedHash = "1324871424CB8CB3793914565026A8DA53B1A633FA05760597ABEF54B57FF12E"
+                Invoke-WebRequest -Uri $ghZipUrl -OutFile $ghZipPath
+                $actualHash = (Get-FileHash $ghZipPath -Algorithm SHA256).Hash
+                if ($actualHash -ne $ghExpectedHash) {
+                  Write-Error "SHA-256 mismatch for gh.zip! Expected: $ghExpectedHash, Got: $actualHash"
+                  exit 1
+                }
+                Expand-Archive $ghZipPath -DestinationPath "$tempDir\gh"
+                $ghExe = "$tempDir\gh\bin\gh.exe"
+
+                # Configure git to authenticate as gh (uses GH_TOKEN) so raw `git push`
+                # against the HTTPS remote doesn't prompt for credentials.
+                Write-Host "Configuring git credential helper via gh..."
+                & $ghExe auth setup-git
+                if ($LASTEXITCODE -ne 0) {
+                  Write-Error "Failed to configure git auth via gh. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+
+                # Sync the fork with upstream
+                Write-Host "Syncing docs repo fork..."
+                & $ghExe repo sync $docsFork -b main
+                if ($LASTEXITCODE -ne 0) {
+                  Write-Error "Failed to sync docs repo fork. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+                Write-Host "Fork synced successfully."
+
+                # Clone the fork
+                Write-Host "Cloning docs repo fork..."
+                $docsDir = "$tempDir\windows-dev-docs-pr"
+                & $ghExe repo clone $docsFork $docsDir -- --depth 1
+                if ($LASTEXITCODE -ne 0) {
+                  Write-Error "Failed to clone docs repo. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+
+                # Run the port script to generate MS Learn-ready docs
+                Write-Host "Running port script..."
+                $portOutput = "$tempDir\mslearn-docs"
+                & "$(Pipeline.Workspace)\mslearn-source\scripts\port-mslearn-docs.ps1" `
+                  -OutputPath $portOutput `
+                  -Version $version
+                if ($LASTEXITCODE -ne 0) {
+                  Write-Error "Port script failed. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+
+                # Clean target dir to remove stale files, then copy ported docs
+                Write-Host "Copying ported docs to docs repo..."
+                $targetDir = Join-Path $docsDir $docsRepoBase
+                if (Test-Path $targetDir) {
+                  Remove-Item "$targetDir\*" -Recurse -Force
+                } else {
+                  New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+                }
+                Copy-Item "$portOutput\*" $targetDir -Recurse -Force
+
+                # Create branch and commit
+                Write-Host "Creating branch and committing..."
+                Push-Location $docsDir
+                git config user.name "winapp-cli-bot"
+                git config user.email "winapp-cli-bot@users.noreply.github.com"
+                git checkout -B $branch
+                git add -A
+                git diff --cached --quiet
+                if ($LASTEXITCODE -eq 0) {
+                  Write-Host "No changes detected. Docs are already up to date."
+                  Pop-Location
+                  exit 0
+                }
+                git commit -m "Update winapp CLI docs to v$version"
+                if ($LASTEXITCODE -ne 0) {
+                  Pop-Location
+                  Write-Error "Failed to commit. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+                git push --force-with-lease origin $branch
+                if ($LASTEXITCODE -ne 0) {
+                  Pop-Location
+                  Write-Error "Failed to push branch. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+                Pop-Location
+
+                # Create PR (or update if one already exists for this branch)
+                Write-Host "Creating PR..."
+                $prTitle = "Update winapp CLI docs to v$version"
+                $prBody = @"
+                Automated update of winapp CLI documentation for v$version.
+
+                Changes generated by the winapp CLI release pipeline using ``port-mslearn-docs.ps1``.
+
+                Source: [microsoft/winappCli v$version](https://github.com/microsoft/WinAppCli/releases/tag/v$version)
+
+                Please review the changes and merge when ready.
+                "@
+
+                # Check if a PR already exists for this branch
+                $existingPr = & $ghExe pr list --repo $docsUpstream --head "${docsForkOwner}:${branch}" --json number --jq '.[0].number' 2>$null
+                if ($existingPr) {
+                  Write-Host "PR #$existingPr already exists. Updating..."
+                  & $ghExe pr edit $existingPr `
+                    --repo $docsUpstream `
+                    --title $prTitle `
+                    --body $prBody
+                } else {
+                  & $ghExe pr create `
+                    --repo $docsUpstream `
+                    --head "${docsForkOwner}:${branch}" `
+                    --base main `
+                    --title $prTitle `
+                    --body $prBody
+                }
+
+                if ($LASTEXITCODE -ne 0) {
+                  Write-Error "Failed to create/update PR. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+
+                Write-Host "PR created/updated successfully."

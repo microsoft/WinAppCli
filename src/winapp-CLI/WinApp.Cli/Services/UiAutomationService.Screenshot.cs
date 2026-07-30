@@ -12,9 +12,27 @@ namespace WinApp.Cli.Services;
 /// </summary>
 internal sealed partial class UiAutomationService
 {
-    public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, CancellationToken ct)
+    internal static Func<Windows.Win32.Foundation.HWND, int, int, byte[]> s_captureFromWindow = CaptureFromWindow;
+    internal static Func<int, int, int, int, int, int, byte[]> s_captureFromScreenScaled = CaptureFromScreenScaled;
+    internal static Action<Windows.Win32.Foundation.HWND> s_foregroundWindowForBlankRetry = ForegroundWindowForBlankRetry;
+    internal static Action<int> s_sleepForBlankRetry = Thread.Sleep;
+
+    /// <remarks>
+    /// Coverage ceiling (issue #630): this is a direct Win32 foreground request used only after a
+    /// native PrintWindow blank frame. Tests cover callers through the injectable seam.
+    /// </remarks>
+    private static void ForegroundWindowForBlankRetry(Windows.Win32.Foundation.HWND hwnd)
+        => Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
+
+    /// <remarks>
+    /// Coverage ceiling (issue #630): tests cover real WGC/screen/PrintWindow attempts and deterministic
+    /// blank-retry/composition seams. Remaining lines require minimized/zero-size native HWND state,
+    /// foreground policy transitions, WGC cancellation timing, or UIA elements without native handles
+    /// that cannot be forced safely on the shared desktop.
+    /// </remarks>
+    public async Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, CancellationToken ct)
     {
-        _logger.LogDebug("Taking screenshot of process {Pid} (captureScreen={CaptureScreen})", session.ProcessId, captureScreen);
+        _logger.LogDebug("Taking screenshot of process {Pid} (captureScreen={CaptureScreen}, focus={Focus})", session.ProcessId, captureScreen, focus);
 
         var root = GetRootElement(session);
         if (root is null)
@@ -60,45 +78,95 @@ internal sealed partial class UiAutomationService
         }
 
         byte[] pixelData;
+        var cropOriginLeft = rect.left;
+        var cropOriginTop = rect.top;
+
+        // Bring window to foreground when explicitly requested or implied by --capture-screen.
+        // Done exactly once here, regardless of capture path.
+        if (focus || captureScreen)
+        {
+            Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
+            await Task.Delay(focus ? 150 : 100, ct).ConfigureAwait(false);
+        }
 
         if (captureScreen)
         {
-            // Screen capture mode: BitBlt from screen DC — captures popups and overlays
-            // Bring window to foreground first to avoid capturing other windows
-            Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
-            Thread.Sleep(100);
-
+            // Screen capture mode: BitBlt from screen DC — captures popups and overlays.
             pixelData = CaptureFromScreen(rect.left, rect.top, width, height);
+        }
+        else if (WgcCapture.IsSupported())
+        {
+            try
+            {
+                var visibleRect = GetVisibleWindowRect(hwnd, rect);
+                var result = await WgcCapture.CaptureAsync(hwnd, _logger, ct).ConfigureAwait(false);
+                pixelData = result.Pixels;
+                width = result.Width;
+                height = result.Height;
+                cropOriginLeft = visibleRect.left;
+                cropOriginTop = visibleRect.top;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "WGC capture failed; falling back to PrintWindow");
+                pixelData = CaptureFromWindowWithBlankRetry(hwnd, width, height);
+            }
         }
         else
         {
-            // Window render mode: PrintWindow — works even when occluded
-            pixelData = CaptureFromWindow(hwnd, width, height);
-
-            // If capture is blank (all zeros), the window may not have rendered yet.
-            // Activate it and retry — common with Electron on first launch.
-            if (IsBlankCapture(pixelData))
-            {
-                _logger.LogDebug("PrintWindow returned blank frame; foregrounding and retrying");
-                Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
-                Thread.Sleep(200);
-                pixelData = CaptureFromWindow(hwnd, width, height);
-            }
+            pixelData = CaptureFromWindowWithBlankRetry(hwnd, width, height);
         }
 
         // If a selector was provided, crop to the element's bounding rectangle
         if (!string.IsNullOrEmpty(elementId))
         {
-            var cropped = CropToElement(pixelData, width, height, elementId, session, root, rect.left, rect.top);
+            var cropped = CropToElement(pixelData, width, height, elementId, session, root, cropOriginLeft, cropOriginTop);
             if (cropped is not null)
             {
-                return Task.FromResult(cropped.Value);
+                return cropped.Value;
             }
         }
 
-        return Task.FromResult((pixelData, width, height));
+        return (pixelData, width, height);
     }
 
+
+    private static unsafe Windows.Win32.Foundation.RECT GetVisibleWindowRect(
+        Windows.Win32.Foundation.HWND hwnd,
+        Windows.Win32.Foundation.RECT fallbackRect)
+    {
+        var visibleRect = fallbackRect;
+        var hr = Windows.Win32.PInvoke.DwmGetWindowAttribute(
+            hwnd,
+            Windows.Win32.Graphics.Dwm.DWMWINDOWATTRIBUTE.DWMWA_EXTENDED_FRAME_BOUNDS,
+            &visibleRect,
+            (uint)sizeof(Windows.Win32.Foundation.RECT));
+
+        return hr.Succeeded ? visibleRect : fallbackRect;
+    }
+
+    internal byte[] CaptureFromWindowWithBlankRetry(Windows.Win32.Foundation.HWND hwnd, int width, int height)
+    {
+        var pixels = s_captureFromWindow(hwnd, width, height);
+        if (IsBlankCapture(pixels))
+        {
+            _logger.LogDebug("PrintWindow returned blank frame; foregrounding and retrying");
+            s_foregroundWindowForBlankRetry(hwnd);
+            s_sleepForBlankRetry(200);
+            pixels = s_captureFromWindow(hwnd, width, height);
+        }
+        return pixels;
+    }
+
+    /// <remarks>
+    /// Coverage ceiling (issue #630): this is the innermost GDI/PrintWindow capture boundary. Tests
+    /// cover the blank-retry and caller orchestration through seams; the native DC/bitmap handles are
+    /// only safe to exercise against a real visible window.
+    /// </remarks>
     private static unsafe byte[] CaptureFromWindow(Windows.Win32.Foundation.HWND hwnd, int width, int height)
     {
         var hdcWindow = Windows.Win32.PInvoke.GetDC(hwnd);
@@ -135,6 +203,10 @@ internal sealed partial class UiAutomationService
         }
     }
 
+    /// <remarks>
+    /// Coverage ceiling (issue #630): this is the innermost screen-DC BitBlt boundary. It reads the
+    /// shared desktop and is intentionally covered only by gated real capture tests.
+    /// </remarks>
     private static unsafe byte[] CaptureFromScreen(int x, int y, int width, int height)
     {
         var hdcScreen = Windows.Win32.PInvoke.GetDC(Windows.Win32.Foundation.HWND.Null);
@@ -172,6 +244,87 @@ internal sealed partial class UiAutomationService
         }
     }
 
+    internal static byte[] CaptureScreenFrame(
+        int x, int y, int cropWidth, int cropHeight,
+        int encoderWidth, int encoderHeight,
+        int displayWidth, int displayHeight)
+    {
+        var (offsetX, offsetY, fitW, fitH) = ComputeFittedContentRect(
+            cropWidth, cropHeight, encoderWidth, encoderHeight, displayWidth, displayHeight);
+        var content = s_captureFromScreenScaled(x, y, cropWidth, cropHeight, fitW, fitH);
+        if (offsetX == 0 && offsetY == 0 && fitW == encoderWidth && fitH == encoderHeight)
+        {
+            return content;
+        }
+
+        var frame = new byte[encoderWidth * encoderHeight * 4];
+        var sourceStride = fitW * 4;
+        var destinationStride = encoderWidth * 4;
+        for (var row = 0; row < fitH; row++)
+        {
+            Buffer.BlockCopy(
+                content,
+                row * sourceStride,
+                frame,
+                ((offsetY + row) * destinationStride) + (offsetX * 4),
+                sourceStride);
+        }
+        return frame;
+    }
+
+    /// <remarks>
+    /// Coverage ceiling (issue #630): this is the innermost scaled screen-DC StretchBlt boundary.
+    /// Deterministic tests cover letterbox composition through a seam; native readback is gated to
+    /// interactive capture hosts.
+    /// </remarks>
+    private static unsafe byte[] CaptureFromScreenScaled(int x, int y, int sourceWidth, int sourceHeight, int targetWidth, int targetHeight)
+    {
+        var hdcScreen = Windows.Win32.PInvoke.GetDC(Windows.Win32.Foundation.HWND.Null);
+        try
+        {
+            var hdcMem = Windows.Win32.PInvoke.CreateCompatibleDC(hdcScreen);
+            try
+            {
+                var hBitmap = Windows.Win32.PInvoke.CreateCompatibleBitmap(hdcScreen, targetWidth, targetHeight);
+                try
+                {
+                    var hOld = Windows.Win32.PInvoke.SelectObject(hdcMem, *(Windows.Win32.Graphics.Gdi.HGDIOBJ*)&hBitmap);
+                    try
+                    {
+                        _ = Windows.Win32.PInvoke.SetStretchBltMode(hdcMem, Windows.Win32.Graphics.Gdi.STRETCH_BLT_MODE.HALFTONE);
+                        Windows.Win32.PInvoke.StretchBlt(
+                            hdcMem, 0, 0, targetWidth, targetHeight,
+                            hdcScreen, x, y, sourceWidth, sourceHeight,
+                            Windows.Win32.Graphics.Gdi.ROP_CODE.SRCCOPY);
+                    }
+                    finally
+                    {
+                        Windows.Win32.PInvoke.SelectObject(hdcMem, hOld);
+                    }
+
+                    return ExtractPixels(hdcScreen, hBitmap, targetWidth, targetHeight);
+                }
+                finally
+                {
+                    Windows.Win32.PInvoke.DeleteObject(*(Windows.Win32.Graphics.Gdi.HGDIOBJ*)&hBitmap);
+                }
+            }
+            finally
+            {
+                Windows.Win32.PInvoke.DeleteDC(hdcMem);
+            }
+        }
+        finally
+        {
+            Windows.Win32.PInvoke.ReleaseDC(Windows.Win32.Foundation.HWND.Null, hdcScreen);
+        }
+    }
+
+    /// <remarks>
+    /// Coverage ceiling (issue #630): this is the innermost GetDIBits extraction from a native HBITMAP.
+    /// It is covered indirectly by real screenshot attempts and cannot be executed with managed-only
+    /// fakes without fabricating native GDI handles.
+    /// </remarks>
     private static unsafe byte[] ExtractPixels(Windows.Win32.Graphics.Gdi.HDC hdc, Windows.Win32.Graphics.Gdi.HBITMAP hBitmap, int width, int height)
     {
         var bmi = new Windows.Win32.Graphics.Gdi.BITMAPINFO
@@ -197,7 +350,7 @@ internal sealed partial class UiAutomationService
         return pixelData;
     }
 
-    private static bool IsBlankCapture(byte[] pixels)
+    internal static bool IsBlankCapture(byte[] pixels)
     {
         // Check if all pixels are zero (black/unrendered frame).
         // Use int-sized chunks for speed on large buffers.
@@ -220,6 +373,11 @@ internal sealed partial class UiAutomationService
         return true;
     }
 
+    /// <remarks>
+    /// Coverage ceiling (issue #630): real screenshot tests cover element cropping for normal controls.
+    /// Remaining branches require stale/missing UIA selector resolution or off-surface native bounding
+    /// rectangles, which would need unsafe COM/provider fault injection or desktop mutation.
+    /// </remarks>
     private (byte[] Pixels, int Width, int Height)? CropToElement(
         byte[] fullPixels, int fullWidth, int fullHeight,
         string selector, UiSessionInfo session, IUIAutomationElement root,

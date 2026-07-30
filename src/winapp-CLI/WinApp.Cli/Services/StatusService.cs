@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using Spectre.Console.Rendering;
 using WinApp.Cli.ConsoleTasks;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 
 namespace WinApp.Cli.Services;
@@ -15,18 +16,49 @@ namespace WinApp.Cli.Services;
 /// </summary>
 internal class StatusService(IAnsiConsole ansiConsole, ILogger<StatusService> logger) : IStatusService
 {
+    /// <summary>
+    /// Decides whether the animated live spinner is used vs. plain streaming output.
+    /// Overridable in tests so both rendering branches are reachable regardless of the
+    /// host terminal (test hosts always report redirected/ non-interactive output).
+    /// </summary>
+    internal Func<IAnsiConsole, ILogger, bool> ShouldUseLiveSpinnerProvider { get; set; } = ProgressDisplay.ShouldUseLiveSpinner;
+
+    /// <summary>
+    /// Factory for the root task. Overridable in tests to inject a task whose execution
+    /// faults, exercising the otherwise-defensive cancellation/error handling below
+    /// (the production <see cref="GroupableTask{T}"/> swallows task-body exceptions).
+    /// </summary>
+    internal virtual GroupableTask<(int ReturnCode, T CompletedMessage)> CreateRootTask<T>(
+        string inProgressMessage,
+        Func<TaskContext, CancellationToken, Task<(int ReturnCode, T CompletedMessage)>> taskFunc,
+        Lock renderLock)
+        => new(inProgressMessage, null, taskFunc, ansiConsole, logger, renderLock);
+
     public async Task<int> ExecuteWithStatusAsync<T>(string inProgressMessage, Func<TaskContext, CancellationToken, Task<(int ReturnCode, T CompletedMessage)>> taskFunc, CancellationToken cancellationToken)
     {
         var renderLock = new Lock();
-        GroupableTask<(int ReturnCode, T CompletedMessage)> task = new(inProgressMessage, null, taskFunc, ansiConsole, logger, renderLock);
+        GroupableTask<(int ReturnCode, T CompletedMessage)> task = CreateRootTask(inProgressMessage, taskFunc, renderLock);
 
-        // Start the task execution
-        var taskExecution = task.ExecuteAsync(null, cancellationToken);
+        var useLiveSpinner = ShouldUseLiveSpinnerProvider(ansiConsole, logger);
+        var infoEnabled = logger.IsEnabled(LogLevel.Information);
+
+        // In plain mode, hook a renderer that prints each task start/finish and status
+        // message as it occurs. In live mode the spinner loop handles rendering.
+        // When info-level output is suppressed (--quiet/--json), no callback is needed.
+        PlainProgressRenderer? plainRenderer = null;
+        Action? onUpdate = null;
+        if (!useLiveSpinner && infoEnabled)
+        {
+            plainRenderer = new PlainProgressRenderer(ansiConsole, renderLock, task);
+            onUpdate = plainRenderer.OnUpdate;
+        }
+
+        var taskExecution = task.ExecuteAsync(onUpdate, cancellationToken);
 
         IRenderable rendered;
 
         (int ReturnCode, T CompletedMessage)? result = null;
-        if (Environment.UserInteractive && !Console.IsOutputRedirected && logger.IsEnabled(LogLevel.Information))
+        if (useLiveSpinner)
         {
             rendered = task.Render();
             // Run the Live display until task completes
@@ -52,7 +84,8 @@ internal class StatusService(IAnsiConsole ansiConsole, ILogger<StatusService> lo
         }
         else
         {
-            // if output is redirected, just wait for the task to complete without live rendering
+            // Plain (or silent) mode: the PlainProgressRenderer hooked to onUpdate (when
+            // info logging is enabled) streams each line as it happens. Just await here.
             try
             {
                 result = await taskExecution;
@@ -66,15 +99,22 @@ internal class StatusService(IAnsiConsole ansiConsole, ILogger<StatusService> lo
             }
         }
 
-        if (logger.IsEnabled(LogLevel.Information))
+        if (infoEnabled && useLiveSpinner)
         {
-            // Final render to show completed state
+            // Final render to show completed state for the live-spinner path. The plain
+            // renderer already streamed completion lines as they arrived.
             lock (renderLock)
             {
                 rendered = task.Render(true);
             }
 
             ansiConsole.Write(rendered);
+        }
+        else if (infoEnabled && plainRenderer != null)
+        {
+            // Flush any straggler updates that arrived between the last onUpdate and
+            // task completion (e.g., the root task's own success/failure state).
+            plainRenderer.OnUpdate();
         }
 
         // Get the result
@@ -100,7 +140,12 @@ internal class StatusService(IAnsiConsole ansiConsole, ILogger<StatusService> lo
                 // StatusService only handles unhandled exceptions (caught above).
                 if (logger.IsEnabled(LogLevel.Error))
                 {
-                    logger.LogError("{CompletedMessage}", result.Value.CompletedMessage);
+                    var completedMessageText = result.Value.CompletedMessage?.ToString();
+                    if (string.IsNullOrWhiteSpace(completedMessageText))
+                    {
+                        completedMessageText = "Operation failed without an error message.";
+                    }
+                    logger.LogError("{CompletedMessage}", completedMessageText);
                     if (!logger.IsEnabled(LogLevel.Debug))
                     {
                         logger.LogInformation("Run with --verbose for more details.");

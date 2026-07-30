@@ -108,7 +108,7 @@ function deriveUnionName(valueType) {
 function tsType(valueType, helpName) {
   if (!valueType) return 'string';
   if (valueType.includes('Boolean')) return 'boolean';
-  if (valueType.includes('Int32') || valueType.includes('Int64') || valueType.includes('Double')) return 'number';
+  if (valueType.includes('Int32') || valueType.includes('Int64') || valueType.includes('Double') || valueType.includes('Single')) return 'number';
 
   // If helpName has pipe-separated values, it's an enum — derive a named union type
   if (helpName && helpName.includes('|')) {
@@ -126,6 +126,17 @@ function tsType(valueType, helpName) {
 /** Whether a boolean option is a flag (arity max 0 or 1 with default false). */
 function isBoolFlag(opt) {
   return tsType(opt.valueType, opt.helpName) === 'boolean';
+}
+
+/** Whether a positional argument is variadic (accepts multiple values). */
+function isVariadicArg(argDef) {
+  // Array types (e.g., DirectoryInfo[], String[])
+  if (argDef.valueType && argDef.valueType.endsWith('[]')) return true;
+  // Arity with no maximum or maximum > 1
+  const arity = argDef.arity;
+  if (arity && arity.maximum === undefined) return true;
+  if (arity && arity.maximum > 1) return true;
+  return false;
 }
 
 /**
@@ -285,8 +296,10 @@ function generate(schema) {
     // positional args first
     for (const arg of positionalArgs) {
       const required = arg.def.arity?.minimum >= 1;
+      const variadic = isVariadicArg(arg.def);
+      const type = variadic ? 'string | string[]' : tsType(arg.def.valueType);
       L(`  /** ${cleanDesc(arg.def.description)} */`);
-      L(`  ${arg.propName}${required ? '' : '?'}: ${tsType(arg.def.valueType)};`);
+      L(`  ${arg.propName}${required ? '' : '?'}: ${type};`);
     }
     // then named options
     for (const opt of opts) {
@@ -304,6 +317,16 @@ function generate(schema) {
     L();
 
     // --- Wrapper function ---
+    // Internal functions (underscore-prefixed) only need the Options interface exported
+    // for type-import by hand-maintained guard wrappers (e.g. ui-record-guard.ts).
+    // The function body is intentionally skipped — guards call the CLI directly so there
+    // is no unused private function to generate or suppress.
+    if (fnName.startsWith('_')) {
+      L(`// ${fnName}: options interface exported above; function body omitted — use the`);
+      L(`//   public guarded wrapper (e.g. uiRecord from ui-record-guard.ts) instead.`);
+      continue;
+    }
+
     const defaultArg = hasRequiredArgs ? '' : ' = {}';
     L('/**');
     L(` * ${cleanDesc(cmd.description)}`);
@@ -316,7 +339,18 @@ function generate(schema) {
     // Positional args
     for (const arg of positionalArgs) {
       const required = arg.def.arity?.minimum >= 1;
-      if (required) {
+      const variadic = isVariadicArg(arg.def);
+      if (variadic) {
+        if (required) {
+          L(`  const ${arg.propName}Arr = Array.isArray(options.${arg.propName}) ? options.${arg.propName} : [options.${arg.propName}];`);
+          L(`  args.push(...${arg.propName}Arr);`);
+        } else {
+          L(`  if (options.${arg.propName}) {`);
+          L(`    const ${arg.propName}Arr = Array.isArray(options.${arg.propName}) ? options.${arg.propName} : [options.${arg.propName}];`);
+          L(`    args.push(...${arg.propName}Arr);`);
+          L('  }');
+        }
+      } else if (required) {
         L(`  args.push(options.${arg.propName});`);
       } else {
         L(`  if (options.${arg.propName}) args.push(options.${arg.propName});`);
@@ -359,6 +393,7 @@ function generate(schema) {
 // ---------------------------------------------------------------------------
 const FN_NAME_OVERRIDES = {
   'package': 'packageApp', // `package` is a TS reserved-ish word
+  'ui record': '_uiRecordGenerated', // the public uiRecord is the guarded wrapper in ui-record-guard.ts
 };
 
 function getFunctionName(cmdPath) {

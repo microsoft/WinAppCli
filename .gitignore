@@ -85,6 +85,9 @@ out
 .nuxt
 dist
 
+# Compiled TypeScript unit tests (src/winapp-npm)
+dist-test
+
 # Gatsby files
 .cache/
 # Comment in the public line in if your project uses Gatsby and not Next.js
@@ -125,8 +128,9 @@ dist
 # TernJS port file
 .tern-port
 
-# Stores VSCode versions used for testing VSCode extensions
-.vscode-test
+# Playwright test artifacts
+test-results/
+playwright-report/
 
 # yarn v3
 .pnp.*

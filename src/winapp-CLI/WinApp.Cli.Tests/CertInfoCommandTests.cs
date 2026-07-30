@@ -159,4 +159,48 @@ public class CertInfoCommandTests : BaseCommandTests
         Assert.IsTrue(root.TryGetProperty("error", out var errorProp), "JSON error output should contain 'error' property");
         Assert.IsFalse(string.IsNullOrEmpty(errorProp.GetString()), "error message should not be empty");
     }
+
+    // ── Invocation tests: file removed between parse and invocation (TOCTOU) ──
+
+    [TestMethod]
+    public async Task Invoke_FileRemovedAfterParse_ReturnsError()
+    {
+        // CertPathArgument.AcceptExistingOnly() rejects a missing file at parse time, so the
+        // handler's defensive re-check (certPath.Refresh(); !Exists) is only reachable when the
+        // file exists at parse time but disappears before the handler reads it.
+        var tempCert = new FileInfo(Path.Combine(_tempDirectory.FullName, "toctou.pfx"));
+        File.WriteAllText(tempCert.FullName, "placeholder");
+        var command = GetRequiredService<CertInfoCommand>();
+        var parseResult = command.Parse([tempCert.FullName]);
+        Assert.IsEmpty(parseResult.Errors, "The file exists at parse time");
+        tempCert.Delete();
+
+        parseResult.InvocationConfiguration.Output = TestAnsiConsole.Profile.Out.Writer;
+        parseResult.InvocationConfiguration.Error = ConsoleStdErr;
+        var exitCode = await parseResult.InvokeAsync(parseResult.InvocationConfiguration, TestContext.CancellationToken);
+
+        Assert.AreEqual(1, exitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "Certificate file not found");
+    }
+
+    [TestMethod]
+    public async Task Invoke_JsonFileRemovedAfterParse_OutputsJsonError()
+    {
+        // Same TOCTOU as above, but the --json branch emits a structured error instead of logging.
+        var tempCert = new FileInfo(Path.Combine(_tempDirectory.FullName, "toctou-json.pfx"));
+        File.WriteAllText(tempCert.FullName, "placeholder");
+        var command = GetRequiredService<CertInfoCommand>();
+        var parseResult = command.Parse([tempCert.FullName, "--json"]);
+        Assert.IsEmpty(parseResult.Errors, "The file exists at parse time");
+        tempCert.Delete();
+
+        parseResult.InvocationConfiguration.Output = TestAnsiConsole.Profile.Out.Writer;
+        parseResult.InvocationConfiguration.Error = ConsoleStdErr;
+        var exitCode = await parseResult.InvokeAsync(parseResult.InvocationConfiguration, TestContext.CancellationToken);
+
+        Assert.AreEqual(1, exitCode);
+        var root = JsonDocument.Parse(TestAnsiConsole.Output.Trim()).RootElement;
+        Assert.IsTrue(root.TryGetProperty("error", out var errorProp), "JSON error output should contain 'error' property");
+        StringAssert.Contains(errorProp.GetString(), "Certificate file not found");
+    }
 }

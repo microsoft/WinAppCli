@@ -60,18 +60,20 @@ internal class UiWaitForCommand : Command, IShortDescription
         IUiSessionService sessionService,
         IUiAutomationService uiAutomation,
         ISelectorService selectorService,
+        IPollDelay pollDelay,
         IAnsiConsole ansiConsole,
         ILogger<UiWaitForCommand> logger) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
+            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var selectorStr = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
-                UiErrors.MissingApp(logger);
+                UiErrors.MissingApp(logger, json);
                 return 1;
             }
             var timeout = parseResult.GetRequiredValue(SharedUiOptions.TimeoutOption);
@@ -79,11 +81,10 @@ internal class UiWaitForCommand : Command, IShortDescription
             var property = parseResult.GetValue(SharedUiOptions.PropertyOption);
             var value = parseResult.GetValue(ValueOption);
             var contains = parseResult.GetValue(ContainsOption);
-            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
 
             if (string.IsNullOrWhiteSpace(selectorStr))
             {
-                UiErrors.MissingSelector(logger, "wait-for");
+                UiErrors.MissingSelector(logger, "wait-for", json);
                 return 1;
             }
 
@@ -160,6 +161,7 @@ internal class UiWaitForCommand : Command, IShortDescription
                             {
                                 if (json)
                                 {
+                                    UiElementScrubber.Scrub(element);
                                     var result = new UiWaitForResult
                                     {
                                         Found = true,
@@ -182,6 +184,7 @@ internal class UiWaitForCommand : Command, IShortDescription
                         {
                             if (json)
                             {
+                                UiElementScrubber.Scrub(element);
                                 var result = new UiWaitForResult
                                 {
                                     Found = true,
@@ -199,26 +202,42 @@ internal class UiWaitForCommand : Command, IShortDescription
                         }
                     }
 
-                    await Task.Delay(100, cancellationToken);
+                    await pollDelay.DelayAsync(100, cancellationToken);
                 }
 
-                logger.LogError("'{Selector}' not found after {Timeout}ms", selectorStr, timeout);
+                // Timeout exhausted without satisfying the condition.
+                if (json)
+                {
+                    var result = new UiWaitForResult
+                    {
+                        Found = false,
+                        TimedOut = true,
+                        WaitedMs = (int)sw.ElapsedMilliseconds,
+                    };
+                    ansiConsole.Profile.Out.Writer.WriteLine(
+                        JsonSerializer.Serialize(result, UiJsonContext.Default.UiWaitForResult));
+                }
+                else
+                {
+                    logger.LogError("'{Selector}' not found after {Timeout}ms", selectorStr, timeout);
+                }
                 return 1;
             }
             catch (OperationCanceledException)
             {
                 logger.LogError("Wait cancelled");
+                UiJsonError.Emit(json, UiJsonError.CodeInternalError, "Wait cancelled");
                 return 1;
             }
             catch (System.Runtime.InteropServices.COMException comEx)
             {
                 logger.LogDebug("COM error: {HResult} {StackTrace}", comEx.HResult, comEx.StackTrace);
-                UiErrors.StaleElement(logger);
+                UiErrors.StaleElement(logger, json);
                 return 1;
             }
             catch (Exception ex)
             {
-                UiErrors.GenericError(logger, ex);
+                UiErrors.GenericError(logger, ex, json);
                 return 1;
             }
         }

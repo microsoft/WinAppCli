@@ -1,3 +1,5 @@
+<!-- mslearn: true -->
+<!-- description: Build a native C++ Node addon for your Electron app that sends Windows toast notifications through the Windows App SDK from JavaScript. -->
 # Creating a C++ Native Addon with Notifications
 
 This guide shows you how to create a C++ native addon that calls the Windows App SDK notification APIs in your Electron app. This is a great starting point for understanding native addons before diving into more complex scenarios.
@@ -16,7 +18,7 @@ npx winapp node create-addon
 ```
 
 > [!NOTE]
-> This command might prompt your to install Python or required Visual Studio tools if you don't already have them installed.
+> This command might prompt you to install Python or required Visual Studio tools if you don't already have them installed.
 
 This creates a `nativeWindowsAddon/` folder with:
 - `nativeWindowsAddon.cc` - Your C++ code that will call Windows APIs
@@ -72,7 +74,7 @@ npx winapp node add-electron-debug-identity
 ```
 
 > [!NOTE]
-> This command is already part of the `postinstall` script we added in the setup guide, so it runs automatically after `npm install`. However, you need to run it manually whenever you modify `appxmanifest.xml`, update app assets, or reinstall dependencies.
+> This command is already part of the `postinstall` script we added in the setup guide, so it runs automatically after `npm install`. However, you need to run it manually whenever you modify `Package.appxmanifest`, update app assets, or reinstall dependencies.
 
 Now run your app:
 
@@ -190,7 +192,7 @@ Now you're ready to:
 Or explore other guides:
 - **[Creating a Phi Silica Addon](phi-silica-addon.md)** - Learn how to use Windows AI APIs in a C# addon
 - **[Creating a WinML Addon](winml-addon.md)** - Learn how to use Windows Machine Learning in a C# addon
-- **[Getting Started Overview](../../electron-get-started.md)** - Return to the main guide
+- **[Getting Started Overview](index.md)** - Return to the main guide
 
 ### Additional Resources
 

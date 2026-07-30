@@ -4,11 +4,12 @@
 namespace WinApp.Cli.Models;
 
 /// <summary>
-/// Represents a UI element discovered via UIA or DevTools inspection.
+/// Represents a UI element discovered via UIA inspection.
 /// </summary>
 internal sealed class UiElement
 {
-    public string Id { get; set; } = "";
+    /// <summary>Synthetic walk-order id (e0, e1, ...). Useful in flat result lists; null on nested inspect output where elements are addressed via tree position + selector.</summary>
+    public string? Id { get; set; }
     public string Type { get; set; } = "";
     public string? Name { get; set; }
     public string? AutomationId { get; set; }
@@ -36,12 +37,29 @@ internal sealed class UiElement
     /// <summary>Scroll capability: "v" (vertical), "h" (horizontal), "vh" (both). Null if not scrollable.</summary>
     public string? ScrollDir { get; set; }
 
-    /// <summary>Depth in the tree (0 = root). Used for display indentation.</summary>
-    [System.Text.Json.Serialization.JsonIgnore]
-    public int Depth { get; set; }
+    /// <summary>Depth in the tree (0 = root). Set on flat result lists from inspect (so the
+    /// command can rebuild a nested tree via the depth-stack); not populated by search /
+    /// wait-for / get-focused, and null on already-nested inspect output.</summary>
+    public int? Depth { get; set; }
 
-    /// <summary>HWND of the window this element belongs to. Used for cross-window element resolution.</summary>
-    public long WindowHandle { get; set; }
+    /// <summary>Selector of the parent element. Set during the inspect tree walk; not populated
+    /// by search / wait-for / get-focused, and null on already-nested inspect output.</summary>
+    public string? ParentSelector { get; set; }
+
+    /// <summary>Ancestor element types from root to direct parent (e.g. ["Window","Pane","MenuBar"]).
+    /// Set on <c>inspect --interactive --json</c> output to surface the collapsed non-interactive
+    /// chain above each surviving element; not populated by search / wait-for / get-focused.</summary>
+    public string[]? AncestorPath { get; set; }
+
+    /// <summary>True when this element supports a directly invokable UIA pattern (Invoke/Toggle/SelectionItem/ExpandCollapse). Used by --interactive filtering.</summary>
+    public bool IsInvokable { get; set; }
+
+    /// <summary>True when the element has additional descendants that were not included
+    /// because the inspect depth limit was reached. Hint to re-run with a deeper --depth.</summary>
+    public bool? HasMoreChildren { get; set; }
+
+    /// <summary>HWND of the window this element belongs to. Set on flat result lists; null on nested output (window context is the parent in the tree).</summary>
+    public long? WindowHandle { get; set; }
 
     /// <summary>
     /// Nearest ancestor that supports an invoke pattern (InvokePattern, TogglePattern, etc.).

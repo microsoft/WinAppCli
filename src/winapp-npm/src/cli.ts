@@ -3,23 +3,30 @@
 import { generateCppAddonFiles } from './cpp-addon-utils';
 import { generateCsAddonFiles } from './cs-addon-utils';
 import { addElectronDebugIdentity, clearElectronDebugIdentity } from './msix-utils';
-import { getWinappCliPath, callWinappCli, WINAPP_CLI_CALLER_VALUE } from './winapp-cli-utils';
+import { getWinappCliPath, callWinappCli, callWinappCliCapture, WINAPP_CLI_CALLER_VALUE } from './winapp-cli-utils';
+import { parseSetupSdksArg } from './jsbindings/init-prompt';
+import { stripWrapperOnlyFlags, hasUseDefaults } from './cli-args';
+import { CLI_NAME, parseArgs, logErrorAndExit } from './cli-shared';
+import {
+  handleInit,
+  handleRestore,
+  handleGenerateBindings,
+  printInitWrapperOnlyHelp,
+  wrapHelpLine,
+} from './jsbindings/cli-hooks';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
-
-// CLI name - change this to rebrand the tool
-const CLI_NAME = 'winapp';
 
 // Commands that should be handled by Node.js (everything else goes to winapp-cli)
 const NODE_ONLY_COMMANDS = new Set(['node']);
 
-interface ParsedArgs {
-  help?: boolean;
-  name?: string;
-  template?: string;
-  verbose?: boolean;
-  [key: string]: string | boolean | undefined;
-}
+// Commands the npm wrapper intercepts to add pre-/post-native hooks
+// (currently: JS bindings prompt + orchestration).
+const INTERCEPTED_COMMANDS = new Set(['init', 'restore']);
+
+// argv flags that mean "skip every interactive wrapper hook" (help / completions
+// / version are routed straight to the native CLI without prompting).
+const HELP_FLAGS = new Set(['--help', '-h', '-?', '/?']);
 
 interface PackageJson {
   name: string;
@@ -53,10 +60,73 @@ export async function main(): Promise<void> {
       return;
     }
 
+    // Handle completion requests — augment native CLI completions with wrapper-only commands
+    if (command === 'complete') {
+      await handleComplete(commandArgs);
+      return;
+    }
+
     // Route Node.js-only commands to local handlers
     if (NODE_ONLY_COMMANDS.has(command)) {
       await handleNodeCommand(command, commandArgs);
       return;
+    }
+
+    // `init --help` — let native write directly to terminal (preserves wrap/indent),
+    // then append wrapper option. Eat the trailing blank line only when on a real TTY.
+    if (command === 'init' && commandArgs.some((a) => HELP_FLAGS.has(a))) {
+      await callWinappCli(stripWrapperOnlyFlags(args), { exitOnError: true });
+      printInitWrapperOnlyHelp();
+      return;
+    }
+
+    // JS-binding hooks wrap init/restore; help/completion and SDK-less init pass through.
+    if (INTERCEPTED_COMMANDS.has(command) && !commandArgs.some((a) => HELP_FLAGS.has(a))) {
+      if (command === 'init') {
+        // `--add-js-bindings` is a non-interactive opt-in: it only makes sense
+        // when the entire init flow can run without prompts. Accept any signal
+        // native init treats as non-interactive (Spectre.Console's interactive
+        // capability check at InitCommand.cs:91-96): explicit --use-defaults /
+        // --no-prompt, piped stdin, or CI=true. (We do NOT accept --json here:
+        // native init has no --json flag, so the end-to-end command would fail
+        // downstream anyway.)
+        if (commandArgs.includes('--add-js-bindings')) {
+          const isNonInteractive = hasUseDefaults(commandArgs) || !process.stdin.isTTY || !!process.env.CI;
+          if (!isNonInteractive) {
+            console.error(
+              '❌ --add-js-bindings requires a non-interactive setup. ' +
+                'Add --use-defaults (or --no-prompt), or run from piped input / CI.'
+            );
+            process.exit(1);
+          }
+        }
+        if (parseSetupSdksArg(commandArgs) === 'none') {
+          // JS bindings need SDK winmds; SDK-less init can't generate them.
+          if (commandArgs.includes('--add-js-bindings')) {
+            console.error(
+              '❌ --add-js-bindings is incompatible with --setup-sdks none ' + '(JS bindings need SDK winmds).'
+            );
+            process.exit(1);
+          }
+          await callWinappCli(['init', ...stripWrapperOnlyFlags(commandArgs)], { exitOnError: true });
+          return;
+        }
+        await handleInit(commandArgs);
+        return;
+      }
+      if (command === 'restore') {
+        // `--add-js-bindings` is init-only opt-in; restore reads the persisted
+        // `winapp.jsBindings`. Reject loudly instead of silently stripping.
+        if (commandArgs.includes('--add-js-bindings')) {
+          console.error(
+            '❌ --add-js-bindings is only valid on `winapp init`. ' +
+              'restore uses the existing `winapp.jsBindings` configuration in package.json.'
+          );
+          process.exit(1);
+        }
+        await handleRestore(commandArgs);
+        return;
+      }
     }
 
     // Route everything else to winapp-cli
@@ -75,6 +145,92 @@ async function handleNodeCommand(command: string, args: string[]): Promise<void>
     default:
       console.error(`Unknown Node.js command: ${command}`);
       process.exit(1);
+  }
+}
+
+// Node.js wrapper-only commands that should appear in completions
+const NODE_WRAPPER_COMMANDS = ['node'];
+const NODE_SUBCOMMANDS = [
+  'create-addon',
+  'add-electron-debug-identity',
+  'clear-electron-debug-identity',
+  'generate-bindings',
+];
+
+/**
+ * Handle completion requests by forwarding to the native CLI and augmenting
+ * with wrapper-only commands (node, node subcommands).
+ */
+async function handleComplete(args: string[]): Promise<void> {
+  // If --setup is requested, forward directly to native CLI
+  const setupIdx = args.indexOf('--setup');
+  if (setupIdx !== -1) {
+    await callWinappCli(['complete', ...args], { exitOnError: true });
+    return;
+  }
+
+  // Parse --commandline and --position from args (supports both --key value and --key=value syntax)
+  let commandLine = '';
+  let position = 0;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i].startsWith('--commandline=')) {
+      commandLine = args[i].slice('--commandline='.length);
+    } else if (args[i] === '--commandline' && i + 1 < args.length) {
+      commandLine = args[++i];
+    } else if (args[i].startsWith('--position=')) {
+      position = parseInt(args[i].slice('--position='.length), 10) || 0;
+    } else if (args[i] === '--position' && i + 1 < args.length) {
+      position = parseInt(args[++i], 10) || 0;
+    }
+  }
+
+  // Get completions from native CLI
+  let nativeCompletions: string[] = [];
+  try {
+    const result = await callWinappCliCapture(['complete', ...args]);
+    nativeCompletions = result.stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+  } catch {
+    // Native CLI may not be available; continue with wrapper-only completions
+  }
+
+  // Determine context from the command line to decide whether to add wrapper commands
+  const textBeforeCursor = commandLine.slice(0, position);
+  const hasTrailingSpace = textBeforeCursor.endsWith(' ');
+  const tokens = textBeforeCursor.trim().split(/\s+/);
+  // tokens[0] is "winapp", tokens[1] is the first subcommand if present, etc.
+  // tokenCount accounts for trailing space meaning the user is starting a new token
+  const tokenCount = hasTrailingSpace ? tokens.length + 1 : tokens.length;
+
+  if (tokenCount <= 2) {
+    // User is completing a top-level command — add wrapper-only commands
+    const partial = tokenCount === 2 && !hasTrailingSpace ? tokens[1] : '';
+    for (const cmd of NODE_WRAPPER_COMMANDS) {
+      if (cmd.startsWith(partial) && !nativeCompletions.includes(cmd)) {
+        nativeCompletions.push(cmd);
+      }
+    }
+  } else if (tokenCount <= 3 && tokens[1] === 'node') {
+    // User is completing a node subcommand
+    const partial = tokenCount === 3 && !hasTrailingSpace ? tokens[2] : '';
+    for (const sub of NODE_SUBCOMMANDS) {
+      if (sub.startsWith(partial)) {
+        nativeCompletions.push(sub);
+      }
+    }
+  } else if (tokens[1] === 'init') {
+    // Surface wrapper-only --add-js-bindings alongside native init flags.
+    const partial = !hasTrailingSpace ? tokens[tokens.length - 1] : '';
+    if ('--add-js-bindings'.startsWith(partial) && !nativeCompletions.includes('--add-js-bindings')) {
+      nativeCompletions.push('--add-js-bindings');
+    }
+  }
+
+  // Output all completions
+  for (const completion of nativeCompletions) {
+    console.log(completion);
   }
 }
 
@@ -125,12 +281,19 @@ async function showCombinedHelp(): Promise<void> {
   console.log('  node create-addon         Generate native addon files for Electron');
   console.log('  node add-electron-debug-identity  Add package identity to Electron debug process');
   console.log('  node clear-electron-debug-identity  Remove package identity from Electron debug process');
+  console.log(
+    wrapHelpLine(
+      '  node generate-bindings    ',
+      'Regenerate JS bindings after updating only winapp.jsBindings config (if winapp.yaml changed, use restore instead)'
+    )
+  );
   console.log('');
   console.log('Examples:');
   console.log(`  ${CLI_NAME} node create-addon --name myAddon`);
   console.log(`  ${CLI_NAME} node create-addon --template cs --name myAddon`);
   console.log(`  ${CLI_NAME} node add-electron-debug-identity`);
   console.log(`  ${CLI_NAME} node clear-electron-debug-identity`);
+  console.log(`  ${CLI_NAME} node generate-bindings`);
 }
 
 async function showVersion(): Promise<void> {
@@ -186,9 +349,15 @@ async function handleNode(args: string[]): Promise<void> {
     console.log('Node.js-specific commands');
     console.log('');
     console.log('Subcommands:');
-    console.log('  create-addon                  Generate native addon files for Electron');
-    console.log('  add-electron-debug-identity   Add package identity to Electron debug process');
-    console.log('  clear-electron-debug-identity Remove package identity from Electron debug process');
+    console.log('  create-addon                   Generate native addon files for Electron');
+    console.log('  add-electron-debug-identity    Add package identity to Electron debug process');
+    console.log('  clear-electron-debug-identity  Remove package identity from Electron debug process');
+    console.log(
+      wrapHelpLine(
+        '  generate-bindings              ',
+        'Regenerate JS bindings after updating only winapp.jsBindings config (if winapp.yaml changed, use restore instead)'
+      )
+    );
     console.log('');
     console.log('Examples:');
     console.log(`  ${CLI_NAME} node create-addon --help`);
@@ -196,6 +365,7 @@ async function handleNode(args: string[]): Promise<void> {
     console.log(`  ${CLI_NAME} node create-addon --name myCsAddon --template cs`);
     console.log(`  ${CLI_NAME} node add-electron-debug-identity`);
     console.log(`  ${CLI_NAME} node clear-electron-debug-identity`);
+    console.log(`  ${CLI_NAME} node generate-bindings`);
     console.log('');
     console.log(`Use "${CLI_NAME} node <subcommand> --help" for detailed help on each subcommand.`);
     return;
@@ -215,6 +385,10 @@ async function handleNode(args: string[]): Promise<void> {
 
     case 'clear-electron-debug-identity':
       await handleClearElectronDebugIdentity(subcommandArgs);
+      break;
+
+    case 'generate-bindings':
+      await handleGenerateBindings(subcommandArgs);
       break;
 
     default:
@@ -359,7 +533,7 @@ async function handleAddonElectronDebugIdentity(args: string[]): Promise<void> {
     console.log('');
     console.log('Options:');
     console.log(
-      '  --manifest <path>     Path to custom appxmanifest.xml (default: appxmanifest.xml in current directory)'
+      '  --manifest <path>     Path to custom Package.appxmanifest or appxmanifest.xml (default: auto-detected in current directory)'
     );
     console.log('  --no-install          Do not install the package after creation (will require manual registration)');
     console.log('  --keep-identity       Keep the manifest identity as-is, without appending .debug suffix');
@@ -421,46 +595,6 @@ async function handleClearElectronDebugIdentity(args: string[]): Promise<void> {
   } catch (error) {
     logErrorAndExit(error);
   }
-}
-
-function logErrorAndExit(error: unknown): never {
-  if (error instanceof Error && error.message.includes('winapp-cli exited with code')) {
-    process.exit(1);
-  }
-
-  if (error instanceof Error && error.message) {
-    console.error(error.message);
-  } else {
-    console.error(error);
-  }
-
-  process.exit(1);
-}
-
-function parseArgs(args: string[], defaults: ParsedArgs = {}): ParsedArgs {
-  const result: ParsedArgs = { ...defaults };
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-
-    if (arg === '--help' || arg === '-h') {
-      result.help = true;
-    } else if (arg.startsWith('--')) {
-      const key = arg.slice(2);
-      const nextArg = args[i + 1];
-
-      if (nextArg && !nextArg.startsWith('--')) {
-        // Value argument
-        result[key] = nextArg;
-        i++; // Skip next arg
-      } else {
-        // Boolean flag
-        result[key] = true;
-      }
-    }
-  }
-
-  return result;
 }
 
 // Run if called directly

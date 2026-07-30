@@ -25,6 +25,23 @@ internal interface IMsixService
         string? executable = null,
         CancellationToken cancellationToken = default);
 
+    public Task<CreateMsixBundleResult> CreateMsixBundleAsync(
+        DirectoryInfo[] inputFolders,
+        FileSystemInfo? outputPath,
+        TaskContext taskContext,
+        string? packageName = null,
+        bool skipPri = false,
+        bool autoSign = false,
+        FileInfo? certificatePath = null,
+        string certificatePassword = "password",
+        bool generateDevCert = false,
+        bool installDevCert = false,
+        string? publisher = null,
+        FileInfo? manifestPath = null,
+        bool selfContained = false,
+        string? executable = null,
+        CancellationToken cancellationToken = default);
+
     public Task<MsixIdentityResult> AddSparseIdentityAsync(
         string? entryPointPath,
         FileInfo appxManifestPath,
@@ -39,5 +56,6 @@ internal interface IMsixService
         DirectoryInfo outputAppXDirectory,
         TaskContext taskContext,
         bool clean = false,
+        string? executable = null,
         CancellationToken cancellationToken = default);
 }

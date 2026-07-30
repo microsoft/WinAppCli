@@ -20,6 +20,14 @@ internal partial class ManifestService(
     IImageAssetService imageAssetService,
     IAnsiConsole ansiConsole) : IManifestService
 {
+    /// <summary>
+    /// Seam for extracting an icon from an executable. Defaults to the real shell-based
+    /// extractor. Tests override it so the extracted-icon -> app.ico path is exercised
+    /// deterministically, independent of whether the headless CI session has a populated
+    /// shell image list (<see cref="ShellIcon.GetJumboIcon"/> can return null there).
+    /// </summary>
+    internal Func<string, Icon?> ExecutableIconExtractor { get; set; } = ShellIcon.GetJumboIcon;
+
     public async Task<ManifestGenerationInfo> PromptForManifestInfoAsync(
         DirectoryInfo directory,
         string? packageName,
@@ -123,7 +131,7 @@ internal partial class ManifestService(
             Icon? extractedIcon = null;
             try
             {
-                extractedIcon = ShellIcon.GetJumboIcon(executableAbsolute);
+                extractedIcon = ExecutableIconExtractor(executableAbsolute);
                 // save temporary
                 if (extractedIcon != null)
                 {
@@ -491,6 +499,7 @@ internal partial class ManifestService(
     [GeneratedRegex(@"(\d+)x(\d+)", RegexOptions.IgnoreCase)]
     private static partial Regex DimensionRegex();
 
+
     [GeneratedRegex(@"^(\s*)<([\w:.-]+)((?:\s+[\w:.-]+\s*=\s*""[^""]*"")+)\s*(\/?>)\s*$")]
     private static partial Regex TagPattern();
 
@@ -539,14 +548,28 @@ internal partial class ManifestService(
             targetApp = applications[0];
         }
 
-        // Infer alias name from Executable attribute if not specified
+        // Infer alias name from Executable attribute if not specified.
+        // The MSIX manifest's Application/@Executable is a package-relative path
+        // (e.g. "app\my-app.exe" — see the Electron guide), so extract the leaf
+        // filename before using it as an alias. Still reject path-traversal
+        // segments defensively so a hostile manifest can't smuggle "..\evil.exe"
+        // through inference.
         var aliasName = options.AliasName;
         if (string.IsNullOrEmpty(aliasName))
         {
             var executable = targetApp.Attribute("Executable")?.Value;
             if (!string.IsNullOrEmpty(executable))
             {
-                aliasName = executable;
+                if (executable.Split('\\', '/').Any(seg => seg == ".."))
+                {
+                    return new AddExecutionAliasResult(AddExecutionAliasStatus.InvalidAliasName, AliasName: executable);
+                }
+
+                aliasName = Path.GetFileName(executable);
+                if (string.IsNullOrEmpty(aliasName))
+                {
+                    return new AddExecutionAliasResult(AddExecutionAliasStatus.CouldNotInferAlias);
+                }
             }
             else
             {
@@ -558,6 +581,15 @@ internal partial class ManifestService(
         if (!aliasName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
         {
             aliasName += ".exe";
+        }
+
+        // Validate the alias is a safe bare filename before writing it into
+        // the manifest. The same validator is used on the read side
+        // (RunCommand --with-alias) — see ExecutionAliasResolver for the
+        // RCE class this defends against.
+        if (!Helpers.ExecutionAliasResolver.IsSafeAliasName(aliasName))
+        {
+            return new AddExecutionAliasResult(AddExecutionAliasStatus.InvalidAliasName, AliasName: aliasName);
         }
 
         // Check if the target Application already has any execution alias
@@ -604,9 +636,8 @@ internal partial class ManifestService(
         }
 
         // Build the ExecutionAlias element
-        var aliasElement = new XElement(AppxManifestDocument.Uap5Ns + "ExecutionAlias",
-            new XAttribute("Alias", aliasName));
-
+        var aliasElement = new XElement(AppxManifestDocument.Uap5Ns + "ExecutionAlias", new XAttribute("Alias", aliasName));
+        
         // Find or create the Extensions > uap5:Extension > uap5:AppExecutionAlias hierarchy
         var extensions = targetApp.Element(AppxManifestDocument.DefaultNs + "Extensions");
         if (extensions == null)

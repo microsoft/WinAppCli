@@ -133,6 +133,31 @@ function Assert-WinappOutputContains {
     return $result
 }
 
+# Asserts the command fails (non-zero exit) AND its combined stdout+stderr contains an expected
+# substring. Used for graceful-failure paths whose message is written to stderr (which Invoke-Winapp
+# discards), e.g. set-value on a control that supports no settable UIA pattern.
+function Assert-WinappFailureContains {
+    param([string]$TestName, [string[]]$WinappArgs, [string]$Expected)
+    $env:WINAPP_CLI_TELEMETRY_OPTOUT = "1"
+    $stderrFile = New-TemporaryFile
+    try {
+        $stdout = & $WinAppPath @WinappArgs 2>$stderrFile
+        $exitCode = $LASTEXITCODE
+        $stderr = Get-Content $stderrFile -Raw -ErrorAction SilentlyContinue
+    } finally {
+        Remove-Item $stderrFile -ErrorAction SilentlyContinue
+    }
+    $combined = (@($stdout) -join "`n") + "`n" + [string]$stderr
+    if ($exitCode -ne 0 -and $combined -match [regex]::Escape($Expected)) {
+        Write-TestPass $TestName "exit $exitCode, matched '$Expected'"
+    } elseif ($exitCode -eq 0) {
+        Write-TestFail $TestName "Expected non-zero exit but got 0"
+    } else {
+        Write-TestFail $TestName "Exit $exitCode but '$Expected' not found in: $($combined.Substring(0, [Math]::Min(300, $combined.Length)))"
+    }
+    return @{ ExitCode = $exitCode; Output = $combined }
+}
+
 function Assert-WinappJsonField {
     param([string]$TestName, [string[]]$WinappArgs, [string]$Field, [string]$Expected)
     $result = Invoke-Winapp $WinappArgs
@@ -285,7 +310,7 @@ Assert-WinappJsonField "list-windows" -WinappArgs @("ui", "list-windows", "-a", 
 Assert-WinappJsonField "status" -WinappArgs @("ui", "status", "-a", "$appPid", "--json") -Field "processName" -Expected "winui-app"
 
 # --- inspect (JSON) ---
-Assert-WinappJsonField "inspect --json" -WinappArgs @("ui", "inspect", "-a", "$appPid", "--json", "-d", "8") -Field "elements.0.type" -Expected "Window"
+Assert-WinappJsonField "inspect --json" -WinappArgs @("ui", "inspect", "-a", "$appPid", "--json", "-d", "8") -Field "windows.0.elements.0.type" -Expected "Window"
 
 # --- inspect interactive (exit code) ---
 Assert-WinappSuccess "inspect --interactive" -WinappArgs @("ui", "inspect", "-a", "$appPid", "-i")
@@ -322,6 +347,19 @@ Assert-WinappSuccess "set-value Text Input" -WinappArgs @("ui", "set-value", "Te
 # --- wait-for text value ---
 Assert-WinappSuccess "wait-for: text value set" -WinappArgs @("ui", "wait-for", "Text Input", "-a", "$appPid", "--property", "Value", "--value", "Hello from e2e test!", "-t", "5000")
 
+# --- RichEditBox (TextPattern-only, no ValuePattern): read works, set falls back to
+#     LegacyIAccessible. WinUI 3 RichEditBox returns E_NOTIMPL for put_accValue, so set-value
+#     must fail *gracefully* (non-zero exit) with an actionable message that points at send-keys,
+#     rather than crash or hang. This guards the fallback chain + error path for issue #620.
+#     Coverage boundary: the *successful* put_accValue path can't be exercised from this WinUI 3
+#     sample — no WinUI 3 control implements put_accValue without also exposing ValuePattern (which
+#     set-value tries first). The fallback *ordering*, including the successful LegacyIAccessible
+#     (put_accValue) branch, is now unit-tested in WinApp.Cli.Tests/ValueSetterTests.cs via the
+#     IValueSetStrategy seam (issue #623); the live COM call against a real put_accValue-only control
+#     is still validated manually (Win32 rich-edit, Electron/WebView2 compose boxes). ---
+Assert-WinappOutputContains "get-value RichEditBox (TextPattern read path)" -WinappArgs @("ui", "get-value", "Rich Text Editor", "-a", "$appPid") -Expected "Rich text read path OK"
+Assert-WinappFailureContains "set-value RichEditBox fails gracefully with send-keys hint" -WinappArgs @("ui", "set-value", "Rich Text Editor", "hello richedit", "-a", "$appPid") -Expected "send-keys"
+
 # --- invoke checkbox toggle (exit code) ---
 Assert-WinappSuccess "invoke FeatureToggle" -WinappArgs @("ui", "invoke", "Feature Toggle", "-a", "$appPid")
 
@@ -351,9 +389,29 @@ Assert-WinappSuccess "click Counter Button" -WinappArgs @("ui", "click", "Counte
 # --- wait-for counter = Count: 4 (click may use different coordinates on different screens) ---
 Assert-WinappSuccess "wait-for: counter after click" -WinappArgs @("ui", "wait-for", "CounterDisplay", "-a", "$appPid", "-t", "3000")
 
+# --- hover (exercises mouse hover + dwell) ---
+Assert-WinappSuccess "hover Counter Button" -WinappArgs @("ui", "hover", "Counter Button", "-a", "$appPid", "--json", "--dwell-time", "200")
+
+# --- hover + screenshot --capture-screen (tooltip workflow from docs) ---
+$ssHover = Join-Path $ScreenshotDir "05-hover-screen.png"
+Assert-WinappSuccess "screenshot after hover" -WinappArgs @("ui", "screenshot", "-a", "$appPid", "-o", $ssHover, "--capture-screen")
+
 # --- screenshot --capture-screen ---
-$ssScreen = Join-Path $ScreenshotDir "05-capture-screen.png"
+$ssScreen = Join-Path $ScreenshotDir "06-capture-screen.png"
 Assert-WinappSuccess "screenshot --capture-screen" -WinappArgs @("ui", "screenshot", "-a", "$appPid", "-o", $ssScreen, "--capture-screen")
+
+# --- screenshot --focus (exercises new WGC + foreground path) ---
+$ssFocus = Join-Path $ScreenshotDir "07-focus.png"
+Assert-WinappSuccess "screenshot --focus" -WinappArgs @("ui", "screenshot", "-a", "$appPid", "-o", $ssFocus, "--focus")
+
+# --- send-keys: synthetic keyboard input into the focused Text Input (#562) ---
+# Literal text with spaces exercises the whitespace-preserving parser path.
+Assert-WinappSuccess "focus Text Input (for send-keys)" -WinappArgs @("ui", "focus", "Text Input", "-a", "$appPid")
+Assert-WinappSuccess "send-keys: literal text" -WinappArgs @("ui", "send-keys", "Typed via send-keys", "-a", "$appPid", "--target", "Text Input", "--json")
+Assert-WinappSuccess "send-keys: named key" -WinappArgs @("ui", "send-keys", "end", "-a", "$appPid", "--target", "Text Input")
+
+# --- scroll --wheel against the main ScrollViewer (exercises mouse wheel path) ---
+Assert-WinappSuccess "scroll --wheel MainScroller" -WinappArgs @("ui", "scroll", "MainScroller", "-a", "$appPid", "--wheel", "-1", "--json")
 
 # --- wait-for: element exists ---
 Assert-WinappSuccess "wait-for: element exists" -WinappArgs @("ui", "wait-for", "Submit Button", "-a", "$appPid", "-t", "3000")
@@ -363,10 +421,12 @@ $jsonResult = Invoke-Winapp @("ui", "inspect", "-a", "$appPid", "--json", "-d", 
 if ($jsonResult.ExitCode -eq 0) {
     try {
         $parsed = $jsonResult.Output | ConvertFrom-Json
-        if ($parsed.elements.Count -gt 0) {
-            Write-TestPass "inspect --json structure" "$($parsed.elements.Count) elements"
+        $totalElements = 0
+        foreach ($w in $parsed.windows) { $totalElements += $w.elementCount }
+        if ($parsed.windows.Count -gt 0 -and $totalElements -gt 0) {
+            Write-TestPass "inspect --json structure" "$($parsed.windows.Count) window(s), $totalElements element(s)"
         } else {
-            Write-TestFail "inspect --json structure" "No elements in JSON"
+            Write-TestFail "inspect --json structure" "No windows/elements in JSON"
         }
     } catch {
         Write-TestFail "inspect --json structure" "Invalid JSON: $_"
@@ -387,7 +447,9 @@ Assert-ScreenshotValid "screenshot: 01-initial.png" $ssInitial
 Assert-ScreenshotValid "screenshot: 02-after-counter.png" $ssCounter
 Assert-ScreenshotValid "screenshot: 03-after-input.png" $ssInput
 Assert-ScreenshotValid "screenshot: 04-after-submit.png" $ssSubmit
-Assert-ScreenshotValid "screenshot: 05-capture-screen.png" $ssScreen
+Assert-ScreenshotValid "screenshot: 05-hover-screen.png" $ssHover
+Assert-ScreenshotValid "screenshot: 06-capture-screen.png" $ssScreen
+Assert-ScreenshotValid "screenshot: 07-focus.png" $ssFocus
 
 # ============================================================================
 # Summary

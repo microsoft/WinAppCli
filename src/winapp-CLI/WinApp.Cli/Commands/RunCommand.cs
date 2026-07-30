@@ -29,6 +29,14 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<bool> DetachOption { get; }
     public static Option<bool> CleanOption { get; }
     public static Option<bool> SymbolsOption { get; }
+    public static Option<string?> ExecutableOption { get; }
+
+    /// <summary>
+    /// Captures zero or more arguments after the <c>--</c> separator and forwards them to the
+    /// launched application. System.CommandLine routes all post-<c>--</c> tokens here as
+    /// positional arguments; anything typed before <c>--</c> is validated normally.
+    /// </summary>
+    public static Argument<string[]> PassthroughArgument { get; }
 
     static RunCommand()
     {
@@ -38,6 +46,17 @@ internal partial class RunCommand : Command, IShortDescription
             Arity = ArgumentArity.ExactlyOne
         };
         InputFolderArgument.AcceptExistingOnly();
+
+        PassthroughArgument = new Argument<string[]>("app-args")
+        {
+            Description = "Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value).",
+            Arity = ArgumentArity.ZeroOrMore,
+            // Hidden from help/schema: this argument exists only to absorb tokens after '--'
+            // so System.CommandLine doesn't reject them. Exposing it would mislead users and
+            // schema consumers into thinking `winapp run <input-folder> [<app-args>...]` is
+            // a valid direct invocation; in reality, app args MUST be preceded by '--'.
+            Hidden = true,
+        };
 
         ManifestOption = new Option<FileInfo>("--manifest")
         {
@@ -52,7 +71,7 @@ internal partial class RunCommand : Command, IShortDescription
 
         ArgsOption = new Option<string>("--args")
         {
-            Description = "Command-line arguments to pass to the application"
+            Description = "Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value)."
         };
 
         NoLaunchOption = new Option<bool>("--no-launch")
@@ -67,7 +86,7 @@ internal partial class RunCommand : Command, IShortDescription
 
         DebugOutputOption = new Option<bool>("--debug-output")
         {
-            Description = "Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json."
+            Description = "Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. For WinUI apps, a crash also triggers a stowed-exception triage pass; the first run downloads debugger components (cached under the winapp global directory) and can be pointed at an existing debugger install via the WINAPP_DBGTOOLS_DIR environment variable. Cannot be combined with --no-launch or --json."
         };
 
         UnregisterOnExitOption = new Option<bool>("--unregister-on-exit")
@@ -87,13 +106,20 @@ internal partial class RunCommand : Command, IShortDescription
 
         SymbolsOption = new Option<bool>("--symbols")
         {
-            Description = "Download symbols from Microsoft Symbol Server for richer native crash analysis. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache."
+            Description = "Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache."
         };
+
+        ExecutableOption = new Option<string?>("--executable")
+        {
+            Description = "Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder."
+        };
+        ExecutableOption.Aliases.Add("--exe");
     }
 
     public RunCommand() : base("run", "Creates packaged layout, registers the Application, and launches the packaged application.")
     {
         Arguments.Add(InputFolderArgument);
+        Arguments.Add(PassthroughArgument);
         Options.Add(ManifestOption);
         Options.Add(OutputAppXDirectoryOption);
         Options.Add(ArgsOption);
@@ -104,6 +130,7 @@ internal partial class RunCommand : Command, IShortDescription
         Options.Add(DetachOption);
         Options.Add(CleanOption);
         Options.Add(SymbolsOption);
+        Options.Add(ExecutableOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -117,6 +144,15 @@ internal partial class RunCommand : Command, IShortDescription
         IStatusService statusService,
         ILogger<RunCommand> logger) : AsynchronousCommandLineAction
     {
+        // Test seams for the execution-alias launch path. They isolate the two operating-system
+        // boundaries — resolving the Windows App Execution Alias proxy location and starting the
+        // resolved process — so tests can exercise all of the surrounding validation, debug,
+        // cancellation and error-handling logic without registering a real alias proxy under
+        // %LOCALAPPDATA%\Microsoft\WindowsApps or spawning the resolved binary. Both default to
+        // the production behavior, so runtime behavior is unchanged.
+        internal Func<string, FileInfo?> ResolveAliasProxy { get; set; } = alias => ExecutionAliasResolver.ResolveAliasPath(alias);
+        internal Func<ProcessStartInfo, Process?> ProcessStarter { get; set; } = Process.Start;
+
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var inputFolder = parseResult.GetRequiredValue(InputFolderArgument);
@@ -130,7 +166,45 @@ internal partial class RunCommand : Command, IShortDescription
             var detach = parseResult.GetValue(DetachOption);
             var clean = parseResult.GetValue(CleanOption);
             var useSymbols = parseResult.GetValue(SymbolsOption);
+            var executable = parseResult.GetValue(ExecutableOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
+
+            // Collect passthrough args from the token stream.
+            // With a ZeroOrMore positional argument, System.CommandLine absorbs ALL extra
+            // Argument-typed tokens — including unrecognised option-like tokens before '--'.
+            // SplitPassthroughTokens uses a count-based diff between the post-'--' token walk
+            // and what ZeroOrMore actually absorbed to detect pre-dash invalids without needing
+            // to categorise each token by type (which would confuse option values with positionals).
+            var allAbsorbed = parseResult.GetValue(PassthroughArgument) ?? [];
+            var (passthroughArgs, invalidPreDashTokens) = WindowsCommandLine.SplitPassthroughTokens(
+                parseResult.Tokens, allAbsorbed);
+            if (invalidPreDashTokens.Count > 0)
+            {
+                foreach (var bad in invalidPreDashTokens)
+                {
+                    logger.LogError("{UISymbol} Unrecognized argument: '{Arg}'. To pass arguments to the app, use -- (e.g., winapp run . -- --flag value).", UiSymbols.Error, bad);
+                }
+
+                // In --json mode the logger above is suppressed (LogLevel.None), so users would
+                // otherwise see only an empty stdout and exit code 1. Emit a structured error so
+                // machine-readable callers can surface a useful message.
+                if (isJson)
+                {
+                    var firstBad = invalidPreDashTokens[0];
+                    var jsonError = invalidPreDashTokens.Count == 1
+                        ? $"Unrecognized argument: '{firstBad}'. To pass arguments to the app, use -- (e.g., winapp run . -- --flag value)."
+                        : $"Unrecognized arguments: {string.Join(", ", invalidPreDashTokens.Select(t => $"'{t}'"))}. To pass arguments to the app, use -- (e.g., winapp run . -- --flag value).";
+                    PrintJson(aumid: null, processId: null, errorMessage: jsonError);
+                }
+                return 1;
+            }
+
+            // Merge '--args' value with any tokens collected after '--'.
+            var passthroughStr = WindowsCommandLine.JoinArguments(passthroughArgs);
+            if (passthroughStr != null)
+            {
+                appArgs = string.IsNullOrEmpty(appArgs) ? passthroughStr : $"{appArgs} {passthroughStr}";
+            }
 
             // Validate mutually exclusive options
             if (withAlias && noLaunch)
@@ -147,7 +221,13 @@ internal partial class RunCommand : Command, IShortDescription
 
             if (isJson && debugOutput)
             {
-                logger.LogError("{UISymbol} --json and --debug-output cannot be used together.", UiSymbols.Error);
+                const string msg = "--json and --debug-output cannot be used together.";
+                logger.LogError("{UISymbol} {Message}", UiSymbols.Error, msg);
+
+                // In --json mode the logger above is suppressed (LogLevel.None), so users would
+                // otherwise see only an empty stdout and exit code 1. Emit a structured error so
+                // machine-readable callers can surface a useful message.
+                PrintJson(aumid: null, processId: null, errorMessage: msg);
                 return 1;
             }
 
@@ -185,6 +265,13 @@ internal partial class RunCommand : Command, IShortDescription
             {
                 logger.LogError("{UISymbol} --detach and --unregister-on-exit cannot be used together.", UiSymbols.Error);
                 return 1;
+            }
+
+            // --symbols only affects the stowed-exception triage that runs under --debug-output.
+            // Warn (non-fatal) when it is supplied on its own so the flag isn't silently ignored.
+            if (useSymbols && !debugOutput)
+            {
+                logger.LogWarning("{UISymbol} --symbols has no effect without --debug-output; ignoring.", UiSymbols.Warning);
             }
 
             // Validate the input folder path early so the command fails fast with a clear
@@ -259,6 +346,7 @@ internal partial class RunCommand : Command, IShortDescription
                         outputAppXDirectory,
                         taskContext,
                         clean,
+                        executable,
                         cancellationToken);
 
                     packageFamilyName = appLauncherService.ComputePackageFamilyName(
@@ -361,6 +449,7 @@ internal partial class RunCommand : Command, IShortDescription
                 return exitCode;
             }
 
+
             // Wait for the launched process to exit before returning.
             // The process may have already exited by the time we get here (common for
             // fast-starting apps), in which case GetProcessById throws ArgumentException.
@@ -441,6 +530,31 @@ internal partial class RunCommand : Command, IShortDescription
         }
 
         /// <summary>
+        /// Builds the <see cref="ProcessStartInfo"/> used to launch an app via its execution
+        /// alias. Extracted so tests can verify that passthrough args (from <c>--args</c> /
+        /// <c>--</c>) are forwarded into <see cref="ProcessStartInfo.Arguments"/> without
+        /// having to spawn a real process.
+        /// </summary>
+        internal static ProcessStartInfo BuildAliasProcessStartInfo(string alias, string? appArgs)
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = alias,
+                UseShellExecute = false,
+                RedirectStandardInput = false,
+                RedirectStandardOutput = false,
+                RedirectStandardError = false,
+            };
+
+            if (!string.IsNullOrEmpty(appArgs))
+            {
+                psi.Arguments = appArgs;
+            }
+
+            return psi;
+        }
+
+        /// <summary>
         /// Launches the app using its execution alias (from the processed manifest in the AppX directory).
         /// The alias process inherits stdin/stdout/stderr so console apps run inline.
         /// </summary>
@@ -470,29 +584,47 @@ internal partial class RunCommand : Command, IShortDescription
                 return 1;
             }
 
+            // The alias value is attacker-controlled (it comes verbatim from the manifest,
+            // which may originate from an untrusted repo). Reject any alias that is not a
+            // bare filename before touching the filesystem.
             var alias = aliases[0]; // Use the first alias
-
-            // Launch the execution alias process with inherited stdio
-            var psi = new ProcessStartInfo
+            if (!ExecutionAliasResolver.IsSafeAliasName(alias))
             {
-                FileName = alias,
-                UseShellExecute = false,
-                RedirectStandardInput = false,
-                RedirectStandardOutput = false,
-                RedirectStandardError = false,
-            };
-
-            if (!string.IsNullOrEmpty(appArgs))
-            {
-                psi.Arguments = appArgs;
+                logger.LogError(
+                    "{UISymbol} Execution alias '{Alias}' is not a valid bare .exe filename. Aliases must be a single .exe filename with no path separators, drive letters, '..' segments, trailing dots/spaces, or reserved device names (CON, NUL, COM1-9, LPT1-9). Fix the <uap5:ExecutionAlias> entry in the manifest.",
+                    UiSymbols.Error,
+                    alias);
+                return 1;
             }
+
+            // Resolve the alias to the canonical Windows App Execution Alias proxy under
+            // %LOCALAPPDATA%\Microsoft\WindowsApps\. Using an absolute path here is the
+            // mitigation for the bare-filename CWD/PATH lookup that CreateProcess would
+            // otherwise perform — passing just "a.exe" would let an attacker-supplied
+            // a.exe in the project folder hijack the launch.
+            var aliasFile = ResolveAliasProxy(alias);
+            if (aliasFile is null || !aliasFile.Exists)
+            {
+                logger.LogError(
+                    "{UISymbol} Execution alias proxy for '{Alias}' was not found at the expected location ('{ExpectedPath}'). Windows may not have registered the alias yet, or it has been removed. Try re-running 'winapp run' without --with-alias to launch via AUMID instead.",
+                    UiSymbols.Error,
+                    alias,
+                    aliasFile?.FullName ?? ExecutionAliasResolver.GetDefaultWindowsAppsDirectory());
+                return 1;
+            }
+
+            // Build the ProcessStartInfo via a static helper so the argument-forwarding
+            // contract is unit-testable without spawning a real process. The FileName is
+            // the fully-qualified WindowsApps path so CreateProcess does not consult CWD
+            // or PATH when launching.
+            var psi = BuildAliasProcessStartInfo(aliasFile.FullName, appArgs);
 
             try
             {
-                using var process = Process.Start(psi);
+                using var process = ProcessStarter(psi);
                 if (process == null)
                 {
-                    logger.LogError("{UISymbol} Failed to start process via execution alias '{Alias}'.", UiSymbols.Error, alias);
+                    logger.LogError("{UISymbol} Failed to start process via execution alias '{Alias}' ({Path}).", UiSymbols.Error, alias, aliasFile.FullName);
                     return 1;
                 }
 
@@ -521,7 +653,7 @@ internal partial class RunCommand : Command, IShortDescription
             }
             catch (Exception ex)
             {
-                logger.LogError("{UISymbol} Failed to launch via execution alias '{Alias}': {Error}", UiSymbols.Error, alias, ex.Message);
+                logger.LogError("{UISymbol} Failed to launch via execution alias '{Alias}' ({Path}): {Error}", UiSymbols.Error, alias, aliasFile.FullName, ex.Message);
                 return 1;
             }
         }

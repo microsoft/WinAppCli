@@ -129,77 +129,9 @@ jobs:
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  # Mark existing metrics comment as stale immediately on PR push
-  # This job has no dependencies so it starts instantly, before the build finishes
-  mark-metrics-stale:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-    steps:
-    - name: Mark metrics comment as stale
-      uses: actions/github-script@v7
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          const { data: comments } = await github.rest.issues.listComments({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            issue_number: context.issue.number,
-          });
-
-          const existing = comments.find(c => c.body &&
-            (c.body.includes('<!-- build-metrics-report -->') || c.body.includes('<!-- binary-size-report -->')));
-
-          if (!existing) {
-            core.info('No existing metrics comment found, nothing to mark stale.');
-            return;
-          }
-
-          // Skip if already marked stale
-          if (existing.body.includes('<!-- build-metrics-stale -->')) {
-            core.info('Comment is already marked stale.');
-            return;
-          }
-
-          const staleBanner = '> :hourglass_flowing_sand: **Build in progress** — metrics below are from a previous commit and will update when the current build finishes.\n>\n<!-- build-metrics-stale -->\n\n';
-          const updatedBody = staleBanner + existing.body;
-
-          await github.rest.issues.updateComment({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            comment_id: existing.id,
-            body: updatedBody,
-          });
-          core.info(`Marked comment ${existing.id} as stale.`);
-
-  # E2E test for Electron workflow - runs after build completes
-  e2e-test:
-    runs-on: windows-latest
-    needs: build-and-package
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v5
-
-    - name: Enable Windows Developer Mode
-      run: |
-        # Registry key to enable Developer Mode
-        reg add "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /v "AllowDevelopmentWithoutDevLicense" /d 1 /f
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v5
-      with:
-        node-version: '24'
-
-    - name: Download npm package artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: npm-package
-        path: artifacts/npm
-
-    - name: Run E2E Electron test
-      run: |
-        .\scripts\test-e2e-electron.ps1 -ArtifactsPath "artifacts/npm" -Verbose
+  # NOTE: The "mark metrics comment as stale" job that used to live here
+  # has moved to .github/workflows/mark-metrics-stale.yml so it can run on
+  # `pull_request_target` and obtain write permissions for fork PRs.
 
   # E2E test for winapp ui commands against WinUI 3 sample app
   e2e-test-ui:

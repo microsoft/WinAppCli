@@ -13,13 +13,16 @@
 
   <Identity
     Name="{PackageName}"
-    Publisher="CN={PublisherName}"
+    Publisher="{PublisherDN}"
     Version="1.0.0.0" />
 
   <Properties>
     <DisplayName>{PackageName}</DisplayName>
     <PublisherDisplayName>{PublisherName}</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
+    <uap10:PackageIntegrity>
+      <uap10:Content Enforcement="on"/>
+    </uap10:PackageIntegrity>
   </Properties>
 
   <Dependencies>
@@ -33,9 +36,7 @@
   <Applications>
     <Application Id="{ApplicationId}"
       Executable="$targetnametoken$.exe"
-      EntryPoint="Windows.FullTrustApplication"
-      uap10:TrustLevel="mediumIL"
-      uap10:RuntimeBehavior="packagedClassicApp">
+      EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         DisplayName="{PackageName}"
         Description="{Description}"

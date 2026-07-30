@@ -5,6 +5,8 @@ using System.IO.Compression;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.RegularExpressions;
 using WinApp.Cli.ConsoleTasks;
+using WinApp.Cli.Helpers;
+using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -71,7 +73,19 @@ public class PackageCommandTests : BaseCommandTests
             "CN=TestCertificatePublisher",
             "CN=PasswordTestPublisher",
             "CN=CommonValidationPublisher",
-            "CN=CertificatePublisher"
+            "CN=CertificatePublisher",
+            "CN=SimplePublisher",
+            "CN=SimpleName",
+            "CN=Trimmed",
+            "CN=CA0D5344-F590-41F9-BE2C-16BE6FCEE1DF",
+            "CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN",
+            "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+            "CN=Publisher, O=MyOrg",
+            "CN=Publisher, C=US",
+            "CN=Publisher With Spaces, O=My Organization, L=New York, S=New York, C=US",
+            "OU=Finance, DC=corp, DC=com",
+            "O=Contoso Ltd, C=US",
+            "DC=example, DC=com",
         };
 
         foreach (var publisher in testCertificatePublishers)
@@ -190,7 +204,7 @@ public class PackageCommandTests : BaseCommandTests
     /// Removes test certificates from the CurrentUser\My certificate store
     /// This ensures test certificates don't accumulate and interfere with other tests
     /// </summary>
-    /// <param name="subjectName">Certificate subject name to clean up (e.g., "CN=TestPublisher")</param>
+    /// <param name="subjectName">Certificate subject DN to clean up (e.g., "CN=TestPublisher" or "OU=Finance, DC=corp, DC=com")</param>
     private static void CleanupInvalidTestCertificatesFromStore(string subjectName)
     {
         try
@@ -198,7 +212,7 @@ public class PackageCommandTests : BaseCommandTests
             using var store = new X509Store(StoreName.My, StoreLocation.CurrentUser);
             store.Open(OpenFlags.ReadWrite);
 
-            var certificates = store.Certificates.Find(X509FindType.FindBySubjectName, subjectName.Replace("CN=", ""), false);
+            var certificates = store.Certificates.Find(X509FindType.FindBySubjectDistinguishedName, subjectName, false);
 
             foreach (X509Certificate2 cert in certificates)
             {
@@ -679,8 +693,8 @@ public class PackageCommandTests : BaseCommandTests
         // Arrange
         var certPath = new FileInfo(Path.Combine(_tempDirectory.FullName, "publisher_test_cert.pfx"));
         const string testPassword = "testpassword123";
-        const string expectedPublisher = "TestCertificatePublisher";
-        const string testPublisherCN = $"CN={expectedPublisher}";
+        const string expectedPublisher = "CN=TestCertificatePublisher";
+        const string testPublisherCN = $"CN=TestCertificatePublisher";
 
         // Create a test certificate using the existing certificate service
         _certificateService.GenerateDevCertificateAsync(
@@ -689,8 +703,137 @@ public class PackageCommandTests : BaseCommandTests
         // Act
         var extractedPublisher = CertificateService.ExtractPublisherFromCertificate(certPath, testPassword);
 
-        // Assert
-        Assert.AreEqual(expectedPublisher, extractedPublisher, "Extracted publisher should match the expected publisher");
+        // Assert - compare as X.500 distinguished names (matches production comparison semantics)
+        AssertDNEquals(expectedPublisher, extractedPublisher, "Extracted publisher should match the full subject DN");
+    }
+
+    [TestMethod]
+    [DataRow("CN=SimplePublisher", DisplayName = "Simple CN only")]
+    [DataRow("CN=CA0D5344-F590-41F9-BE2C-16BE6FCEE1DF", DisplayName = "GUID-style CN")]
+    [DataRow("CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN", DisplayName = "CN with locale fields")]
+    [DataRow("CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US", DisplayName = "Full corporate DN")]
+    [DataRow("CN=Publisher, O=MyOrg", DisplayName = "CN with organization only")]
+    [DataRow("CN=Publisher, C=US", DisplayName = "CN with country only")]
+    [DataRow("CN=Publisher With Spaces, O=My Organization, L=New York, S=New York, C=US", DisplayName = "DN with spaces in values")]
+    [DataRow("OU=Finance, DC=corp, DC=com", DisplayName = "Non-CN DN (OU-based)")]
+    [DataRow("O=Contoso Ltd, C=US", DisplayName = "Non-CN DN (O-based)")]
+    [DataRow("DC=example, DC=com", DisplayName = "Non-CN DN (DC-based)")]
+    public void CertificateService_ExtractPublisherFromCertificate_WithVariousDNFormats_ShouldReturnFullSubject(string publisherDN)
+    {
+        // Arrange
+        var certPath = new FileInfo(Path.Combine(_tempDirectory.FullName, $"dn_test_{publisherDN.GetHashCode():x}.pfx"));
+        const string testPassword = "testpassword123";
+
+        _certificateService.GenerateDevCertificateAsync(
+            publisherDN, certPath, TestTaskContext, testPassword, cancellationToken: TestContext.CancellationToken).GetAwaiter().GetResult();
+
+        // Act
+        var extractedPublisher = CertificateService.ExtractPublisherFromCertificate(certPath, testPassword);
+
+        // Assert - compare as X.500 distinguished names (matches production comparison semantics)
+        AssertDNEquals(publisherDN, extractedPublisher);
+    }
+
+    [TestMethod]
+    [DataRow("CN=SimplePublisher", DisplayName = "Simple CN only")]
+    [DataRow("CN=CA0D5344-F590-41F9-BE2C-16BE6FCEE1DF", DisplayName = "GUID-style CN")]
+    [DataRow("CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN", DisplayName = "CN with locale fields")]
+    [DataRow("CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US", DisplayName = "Full corporate DN")]
+    [DataRow("CN=Publisher, O=MyOrg", DisplayName = "CN with organization only")]
+    [DataRow("CN=Publisher, C=US", DisplayName = "CN with country only")]
+    [DataRow("OU=Finance, DC=corp, DC=com", DisplayName = "Non-CN DN (OU-based)")]
+    [DataRow("O=Contoso Ltd, C=US", DisplayName = "Non-CN DN (O-based)")]
+    public async Task CertificateService_ValidatePublisherMatch_WithVariousDNFormats_ShouldSucceed(string publisherDN)
+    {
+        // Arrange - same DN in both cert and manifest
+        var certPath = new FileInfo(Path.Combine(_tempDirectory.FullName, $"validate_dn_{publisherDN.GetHashCode():x}.pfx"));
+        var manifestPath = new FileInfo(Path.Combine(_tempDirectory.FullName, $"validate_dn_{publisherDN.GetHashCode():x}_manifest.xml"));
+        const string testPassword = "testpassword123";
+
+        await _certificateService.GenerateDevCertificateAsync(
+            publisherDN, certPath, TestTaskContext, testPassword, cancellationToken: TestContext.CancellationToken);
+
+        var manifestContent = StandardTestManifestContent.Replace(
+            "CN=TestPublisher", publisherDN);
+        await File.WriteAllTextAsync(manifestPath.FullName, manifestContent, TestContext.CancellationToken);
+
+        // Act & Assert - Should not throw
+        await CertificateService.ValidatePublisherMatchAsync(certPath, testPassword, manifestPath, TestContext.CancellationToken);
+    }
+
+    [TestMethod]
+    [DataRow("SimpleName", "CN=SimpleName", DisplayName = "Name without CN= prefix")]
+    [DataRow("  CN=Trimmed  ", "CN=Trimmed", DisplayName = "Publisher with surrounding whitespace")]
+    public void CertificateService_GenerateDevCertificate_NormalizesPublisherInput(string input, string expectedSubject)
+    {
+        // Arrange
+        var certPath = new FileInfo(Path.Combine(_tempDirectory.FullName, $"normalize_test_{input.GetHashCode():x}.pfx"));
+        const string testPassword = "testpassword123";
+
+        _certificateService.GenerateDevCertificateAsync(
+            input, certPath, TestTaskContext, testPassword, cancellationToken: TestContext.CancellationToken).GetAwaiter().GetResult();
+
+        // Act
+        var extractedPublisher = CertificateService.ExtractPublisherFromCertificate(certPath, testPassword);
+
+        // Assert - compare as X.500 distinguished names (matches production comparison semantics)
+        AssertDNEquals(expectedSubject, extractedPublisher);
+    }
+
+    [TestMethod]
+    public void CertificateService_ExtractPublisherFromCertificate_WithMultiComponentDN_ShouldReturnFullSubject()
+    {
+        // Arrange - multi-component DN like the bug report: CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN
+        var certPath = new FileInfo(Path.Combine(_tempDirectory.FullName, "multi_dn_cert.pfx"));
+        const string testPassword = "testpassword123";
+        const string fullDN = "CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN";
+
+        _certificateService.GenerateDevCertificateAsync(
+            fullDN, certPath, TestTaskContext, testPassword, cancellationToken: TestContext.CancellationToken).GetAwaiter().GetResult();
+
+        // Act
+        var extractedPublisher = CertificateService.ExtractPublisherFromCertificate(certPath, testPassword);
+
+        // Assert - compare as X.500 distinguished names (matches production comparison semantics)
+        AssertDNEquals(fullDN, extractedPublisher);
+    }
+
+    [TestMethod]
+    public async Task CertificateService_ValidatePublisherMatch_WithMultiComponentDN_ShouldSucceed()
+    {
+        // Arrange - same multi-component DN in both cert and manifest
+        var certPath = new FileInfo(Path.Combine(_tempDirectory.FullName, "multi_dn_validation_cert.pfx"));
+        var manifestPath = new FileInfo(Path.Combine(_tempDirectory.FullName, "multi_dn_validation_manifest.xml"));
+        const string testPassword = "testpassword123";
+        const string fullDN = "CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN";
+
+        await _certificateService.GenerateDevCertificateAsync(
+            fullDN, certPath, TestTaskContext, testPassword, cancellationToken: TestContext.CancellationToken);
+
+        var manifestContent = StandardTestManifestContent.Replace(
+            "CN=TestPublisher", fullDN);
+        await File.WriteAllTextAsync(manifestPath.FullName, manifestContent, TestContext.CancellationToken);
+
+        // Act & Assert - Should not throw
+        await CertificateService.ValidatePublisherMatchAsync(certPath, testPassword, manifestPath, TestContext.CancellationToken);
+    }
+
+    [TestMethod]
+    [DataRow("CN=SimplePublisher", "SimplePublisher", DisplayName = "Simple CN → bare name")]
+    [DataRow("CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN", "CN=Taozuhong, L=Shenzhen, S=Guangdong, C=CN", DisplayName = "Multi-component → full DN")]
+    [DataRow("OU=Finance, DC=corp, DC=com", "OU=Finance, DC=corp, DC=com", DisplayName = "Non-CN → full DN")]
+    public async Task CertificateService_GenerateDevCertificate_PublisherDisplayField_MatchesExpected(string publisherDN, string expectedDisplay)
+    {
+        // Arrange
+        var certPath = new FileInfo(Path.Combine(_tempDirectory.FullName, $"display_test_{publisherDN.GetHashCode():x}.pfx"));
+        const string testPassword = "testpassword123";
+
+        // Act
+        var result = await _certificateService.GenerateDevCertificateAsync(
+            publisherDN, certPath, TestTaskContext, testPassword, cancellationToken: TestContext.CancellationToken);
+
+        // Assert - Publisher field is the display name
+        Assert.AreEqual(expectedDisplay, result.Publisher);
     }
 
     [TestMethod]
@@ -770,6 +913,29 @@ public class PackageCommandTests : BaseCommandTests
         // Verify error message format matches requirement
         Assert.Contains($"Publisher in {manifestPath} (CN=ManifestPublisher)", ex.Message);
         Assert.Contains($"does not match the publisher in the certificate {certPath} (CN=CertificatePublisher)", ex.Message);
+    }
+
+    [TestMethod]
+    public async Task CertificateService_ValidatePublisherMatch_WithMalformedManifestPublisher_ShouldThrowWrappedError()
+    {
+        // Arrange - Create a valid cert but a manifest with an unparsable publisher DN
+        var certPath = new FileInfo(Path.Combine(_tempDirectory.FullName, "malformed_manifest_cert.pfx"));
+        var manifestPath = new FileInfo(Path.Combine(_tempDirectory.FullName, "malformed_manifest.xml"));
+        const string testPassword = "testpassword123";
+
+        await _certificateService.GenerateDevCertificateAsync(
+            "CN=TestPublisher", certPath, TestTaskContext, testPassword, cancellationToken: TestContext.CancellationToken);
+
+        // Create manifest with an invalid publisher string that X500DistinguishedName cannot parse
+        var manifestContent = StandardTestManifestContent.Replace(
+            "CN=TestPublisher", "=InvalidDN=");
+        await File.WriteAllTextAsync(manifestPath.FullName, manifestContent, TestContext.CancellationToken);
+
+        // Act & Assert - Should throw a wrapped InvalidOperationException
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            async () => await CertificateService.ValidatePublisherMatchAsync(certPath, testPassword, manifestPath, TestContext.CancellationToken));
+
+        Assert.Contains("Failed to validate publisher match", ex.Message);
     }
 
     [TestMethod]
@@ -1126,6 +1292,85 @@ public class PackageCommandTests : BaseCommandTests
 
         Assert.Contains("--executable", ex.Message, "Error message should mention --executable option");
         Assert.Contains("no", ex.Message, "Error message should mention no exe files found");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_PlaceholderWithAppExeAndCreatedump_InfersAppExe()
+    {
+        // Arrange - .NET self-contained build outputs include createdump.exe alongside the app exe.
+        // Auto-inference must skip createdump.exe and pick the app exe.
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "PlaceholderCreatedumpTest"));
+        CreatePlaceholderTestPackageStructure(packageDir, "MyApp.exe", "createdump.exe");
+
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "TestPackage",
+            skipPri: true,
+            autoSign: false,
+            cancellationToken: TestContext.CancellationToken
+        );
+
+        // Assert
+        var manifestContent = await ExtractManifestContentFromPackageAsync(result.MsixPath, "PlaceholderCreatedumpExtracted");
+        Assert.Contains(@"Executable=""MyApp.exe""", manifestContent, "createdump.exe should be filtered out, MyApp.exe should be picked");
+        Assert.DoesNotContain("createdump", manifestContent, "createdump should not appear in resolved manifest");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_PlaceholderWithAppExeAndApphost_InfersAppExe()
+    {
+        // Arrange - apphost.exe is a .NET runtime artifact that should also be filtered
+        // during executable auto-inference.
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "PlaceholderApphostTest"));
+        CreatePlaceholderTestPackageStructure(packageDir, "MyApp.exe", "apphost.exe");
+
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "TestPackage",
+            skipPri: true,
+            autoSign: false,
+            cancellationToken: TestContext.CancellationToken
+        );
+
+        // Assert
+        var manifestContent = await ExtractManifestContentFromPackageAsync(result.MsixPath, "PlaceholderApphostExtracted");
+        Assert.Contains(@"Executable=""MyApp.exe""", manifestContent, "apphost.exe should be filtered out, MyApp.exe should be picked");
+        Assert.DoesNotContain("apphost", manifestContent, "apphost should not appear in resolved manifest");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_PlaceholderWithOnlyRuntimeTools_Throws()
+    {
+        // Arrange - only runtime-tool exes present; auto-inference should fail with the
+        // same multi-/no-exe guidance rather than silently picking createdump.exe.
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "PlaceholderOnlyRuntimeToolsTest"));
+        CreatePlaceholderTestPackageStructure(packageDir, "createdump.exe", "apphost.exe");
+
+        // Act & Assert
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
+        {
+            await _msixService.CreateMsixPackageAsync(
+                inputFolder: packageDir,
+                outputPath: _tempDirectory,
+                TestTaskContext,
+                packageName: "TestPackage",
+                skipPri: true,
+                autoSign: false,
+                cancellationToken: TestContext.CancellationToken
+            );
+        });
+
+        Assert.Contains("--executable", ex.Message, "Error message should mention --executable option");
     }
 
     #endregion
@@ -1582,6 +1827,83 @@ public class PackageCommandTests : BaseCommandTests
             $"Warning should mention the relative path to the PFX file. Messages:\n{string.Join("\n", statusMessages)}");
     }
 
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_AppXDirectory_ExcludedWithWarningAndNameFromManifest()
+    {
+        // Arrange - valid package structure plus a build-artifact 'AppX' directory
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "PackageWithAppX"));
+        CreateTestPackageStructure(packageDir);
+        var appxDir = Path.Combine(packageDir.FullName, "AppX");
+        Directory.CreateDirectory(appxDir);
+        await File.WriteAllTextAsync(Path.Combine(appxDir, "leftover.txt"), "build artifact", TestContext.CancellationToken);
+
+        // Act - no packageName provided, so the name is derived from the manifest Identity.
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: null,
+            skipPri: true,
+            autoSign: false,
+            cancellationToken: TestContext.CancellationToken
+        );
+
+        // Assert - package built, named from manifest identity, AppX exclusion warned.
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package should be created");
+        StringAssert.Contains(result.MsixPath.Name, "TestPackage", "Filename should use the manifest identity name");
+
+        var statusMessages = TestTask.SubTasks
+            .OfType<StatusMessageTask>()
+            .Select(t => t.CompletedMessage ?? string.Empty)
+            .ToList();
+        Assert.IsTrue(
+            statusMessages.Any(m => m.Contains("AppX", StringComparison.Ordinal) && m.Contains("excluded", StringComparison.OrdinalIgnoreCase)),
+            $"Should warn that the AppX directory is excluded. Messages:\n{string.Join("\n", statusMessages)}");
+
+        // Prove the warning is real: the build-artifact AppX directory (and its leftover.txt)
+        // must be genuinely absent from the produced package, not merely warned about.
+        using var archive = ZipFile.OpenRead(result.MsixPath.FullName);
+        var appxEntries = archive.Entries
+            .Where(e => e.FullName.Replace('\\', '/').StartsWith("AppX/", StringComparison.OrdinalIgnoreCase))
+            .Select(e => e.FullName)
+            .ToList();
+        Assert.AreEqual(
+            0,
+            appxEntries.Count,
+            $"The build-artifact 'AppX' directory must be excluded from the package. Present entries:\n{string.Join("\n", appxEntries)}");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_ExistingResourcesPri_SkipsPriGenerationAndPackagesItAsIs()
+    {
+        // Arrange - valid package with a pre-existing resources.pri (as a prior build would leave).
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "PackageWithExistingPri"));
+        CreateTestPackageStructure(packageDir);
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "resources.pri"), "prebuilt-pri-marker", TestContext.CancellationToken);
+
+        // Act - skipPri is false, but the existing resources.pri short-circuits PRI generation.
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "TestPackage",
+            skipPri: false,
+            autoSign: false,
+            cancellationToken: TestContext.CancellationToken
+        );
+
+        // Assert - the pre-existing PRI is packaged verbatim (generation was skipped, not overwritten).
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package should be created");
+        var extractDir = Path.Combine(_tempDirectory.FullName, "extract-existing-pri");
+        Directory.CreateDirectory(extractDir);
+        ZipFile.ExtractToDirectory(result.MsixPath.FullName, extractDir);
+        var extractedPri = Path.Combine(extractDir, "resources.pri");
+        Assert.IsTrue(File.Exists(extractedPri), "resources.pri should be present in the package");
+        Assert.AreEqual("prebuilt-pri-marker",
+            await File.ReadAllTextAsync(extractedPri, TestContext.CancellationToken),
+            "Existing resources.pri should be packaged as-is (PRI generation skipped)");
+    }
+
     #endregion
 
     /// <summary>
@@ -1888,5 +2210,512 @@ public class PackageCommandTests : BaseCommandTests
             "MSIX should include TestApp.exe");
     }
 
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_ExternalManifestWithNonImageFile_IncludesReferencedFileInMsix()
+    {
+        // Arrange — external manifest references a manifest.json file alongside image assets
+        var packageDir = Path.Combine(_tempDirectory.FullName, "InputPackage_WithExternalNonImageFile");
+        Directory.CreateDirectory(packageDir);
+        await File.WriteAllTextAsync(Path.Combine(packageDir, "TestApp.exe"), "fake exe content", TestContext.CancellationToken);
+
+        var externalManifestDir = Path.Combine(_tempDirectory.FullName, "ExternalManifest_WithNonImageFile");
+        Directory.CreateDirectory(externalManifestDir);
+
+        var externalAssetsDir = Path.Combine(externalManifestDir, "Assets");
+        Directory.CreateDirectory(externalAssetsDir);
+        await File.WriteAllTextAsync(Path.Combine(externalAssetsDir, "Logo.png"), "external logo content", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(externalAssetsDir, "StoreLogo.png"), "external store logo content", TestContext.CancellationToken);
+
+        // Create manifest.json alongside the manifest — simulates an MCP server config
+        await File.WriteAllTextAsync(Path.Combine(externalManifestDir, "manifest.json"), """{"name":"test-mcp-server"}""", TestContext.CancellationToken);
+
+        // Manifest that references manifest.json via an extension element
+        var manifestContent = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+         xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10""
+         xmlns:uap3=""http://schemas.microsoft.com/appx/manifest/uap/windows10/3""
+         xmlns:rescap=""http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities""
+         IgnorableNamespaces=""uap uap3 rescap"">
+  <Identity Name=""ExternalTestPackage""
+            Publisher=""CN=ExternalTestPublisher""
+            Version=""1.0.0.0"" />
+  <Properties>
+    <DisplayName>External Test Package</DisplayName>
+    <PublisherDisplayName>External Test Publisher</PublisherDisplayName>
+    <Description>Test package with manifest.json reference</Description>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name=""Windows.Universal"" MinVersion=""10.0.18362.0"" MaxVersionTested=""10.0.26100.0"" />
+  </Dependencies>
+  <Applications>
+    <Application Id=""ExternalTestApp"" Executable=""TestApp.exe"" EntryPoint=""ExternalTestApp.App"">
+      <uap:VisualElements DisplayName=""External Test App"" Description=""Test application""
+                          BackgroundColor=""#333333"" Square150x150Logo=""Assets\Logo.png"" Square44x44Logo=""Assets\Logo.png"" />
+      <Extensions>
+        <uap3:Extension Category=""windows.appExtension"">
+          <uap3:AppExtension Name=""com.test.mcp"" Id=""mcp"" DisplayName=""Test MCP"" PublicFolder=""public"">
+            <uap3:Properties>
+              <ManifestFile>manifest.json</ManifestFile>
+            </uap3:Properties>
+          </uap3:AppExtension>
+        </uap3:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name=""runFullTrust"" />
+  </Capabilities>
+</Package>";
+
+        var externalManifestPath = Path.Combine(externalManifestDir, "AppxManifest.xml");
+        await File.WriteAllTextAsync(externalManifestPath, manifestContent, TestContext.CancellationToken);
+
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: new DirectoryInfo(packageDir),
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "ExternalNonImageFilePackage",
+            skipPri: true,
+            autoSign: false,
+            manifestPath: new FileInfo(externalManifestPath),
+            cancellationToken: CancellationToken.None
+        );
+
+        // Assert
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package should exist");
+
+        using var archive = ZipFile.OpenRead(result.MsixPath.FullName);
+        var entryNames = archive.Entries.Select(e => e.FullName).ToList();
+
+        Assert.IsTrue(
+            entryNames.Any(e => e.Equals("manifest.json", StringComparison.OrdinalIgnoreCase)),
+            $"MSIX should include manifest.json referenced in the manifest. Entries: {string.Join(", ", entryNames)}");
+        Assert.IsTrue(
+            entryNames.Any(e => e.Equals("Assets/Logo.png", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include Assets/Logo.png");
+        Assert.IsTrue(
+            entryNames.Any(e => e.Equals("Assets/StoreLogo.png", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include Assets/StoreLogo.png");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_WithAppxRecipe_IncludesManifestReferencedFileMissingFromRecipe()
+    {
+        // Arrange — recipe-based packaging where a manifest-referenced file is not in the recipe
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "RecipeManifestRefPackage"));
+        packageDir.Create();
+
+        // Manifest content that references config.json via a custom properties element
+        var manifestWithRef = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+         xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10""
+         xmlns:uap3=""http://schemas.microsoft.com/appx/manifest/uap/windows10/3""
+         xmlns:rescap=""http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities""
+         xmlns:build=""http://schemas.microsoft.com/developer/appx/2015/build""
+         IgnorableNamespaces=""uap uap3 rescap build"">
+  <Identity Name=""RecipeRefPackage""
+            Publisher=""CN=TestPublisher""
+            Version=""1.0.0.0"" />
+  <Properties>
+    <DisplayName>Recipe Ref Package</DisplayName>
+    <PublisherDisplayName>Test Publisher</PublisherDisplayName>
+    <Description>Test package with manifest-referenced file not in recipe</Description>
+    <Logo>Assets\Logo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name=""Windows.Universal"" MinVersion=""10.0.18362.0"" MaxVersionTested=""10.0.26100.0"" />
+  </Dependencies>
+  <Applications>
+    <Application Id=""TestApp"" Executable=""TestApp.exe"" EntryPoint=""TestApp.App"">
+      <uap:VisualElements DisplayName=""Test App"" Description=""Test application""
+                          BackgroundColor=""#777777"" Square150x150Logo=""Assets\Logo.png"" Square44x44Logo=""Assets\Logo.png"" />
+      <Extensions>
+        <uap3:Extension Category=""windows.appExtension"">
+          <uap3:AppExtension Name=""com.test.server"" Id=""srv"" DisplayName=""Test Server"">
+            <uap3:Properties>
+              <ServerConfig>config.json</ServerConfig>
+            </uap3:Properties>
+          </uap3:AppExtension>
+        </uap3:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name=""runFullTrust"" />
+  </Capabilities>
+  <build:Metadata>
+    <build:Item Name=""makepri.exe"" Version=""10.0.22621.3233"" />
+  </build:Metadata>
+</Package>";
+
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "AppxManifest.xml"), manifestWithRef, TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "TestApp.exe"), "fake exe content", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "TestApp.dll"), "fake dll content", TestContext.CancellationToken);
+
+        // config.json is NOT listed in the recipe but IS referenced in the manifest
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "config.json"), """{"server":"test"}""", TestContext.CancellationToken);
+
+        var assetsDir = Path.Combine(packageDir.FullName, "Assets");
+        Directory.CreateDirectory(assetsDir);
+        await File.WriteAllTextAsync(Path.Combine(assetsDir, "Logo.png"), "fake logo content", TestContext.CancellationToken);
+
+        // Recipe only lists exe, dll, and logo — NOT config.json
+        var recipeContent = CreateAppxRecipeContent(packageDir.FullName,
+        [
+            ("TestApp.exe", "TestApp.exe"),
+            ("TestApp.dll", "TestApp.dll"),
+            (@"Assets\Logo.png", @"Assets\Logo.png"),
+        ]);
+        await File.WriteAllTextAsync(Path.Combine(packageDir.FullName, "TestApp.build.appxrecipe"), recipeContent, TestContext.CancellationToken);
+
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "RecipeManifestRefPackage",
+            skipPri: true,
+            autoSign: false,
+            cancellationToken: CancellationToken.None
+        );
+
+        // Assert
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package should exist");
+
+        using var archive = ZipFile.OpenRead(result.MsixPath.FullName);
+        var entryNames = archive.Entries.Select(e => e.FullName).ToList();
+
+        // config.json should be included because it's referenced in the manifest
+        Assert.IsTrue(
+            entryNames.Any(e => e.Equals("config.json", StringComparison.OrdinalIgnoreCase)),
+            $"MSIX should include config.json referenced in manifest. Entries: {string.Join(", ", entryNames)}");
+
+        // Recipe files should still be present
+        Assert.IsTrue(entryNames.Any(e => e.Equals("TestApp.exe", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include TestApp.exe from recipe");
+        Assert.IsTrue(entryNames.Any(e => e.Equals("TestApp.dll", StringComparison.OrdinalIgnoreCase)),
+            "MSIX should include TestApp.dll from recipe");
+    }
+
+    [TestMethod]
+    public void ExtractAllFileReferencesFromManifest_ExtractsReferencedFiles()
+    {
+        var manifestContent = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10""
+         xmlns:uap=""http://schemas.microsoft.com/appx/manifest/uap/windows10"">
+  <Identity Name=""TestPackage"" Publisher=""CN=Test"" Version=""1.0.0.0"" />
+  <Properties>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name=""Windows.Universal"" MinVersion=""10.0.18362.0"" MaxVersionTested=""10.0.26100.0"" />
+  </Dependencies>
+  <Applications>
+    <Application Id=""App"" Executable=""app.exe"" EntryPoint=""App.Main"">
+      <uap:VisualElements DisplayName=""App"" Description=""Test""
+                          BackgroundColor=""#333333"" Square150x150Logo=""Assets\Logo.png"" Square44x44Logo=""Assets\SmallLogo.png"" />
+      <Extensions>
+        <uap:Extension Category=""windows.appExtension"">
+          <uap:AppExtension Name=""com.test"" Id=""ext"" DisplayName=""Extension"">
+            <uap:Properties>
+              <Config>settings.json</Config>
+              <Data>data\config.yaml</Data>
+            </uap:Properties>
+          </uap:AppExtension>
+        </uap:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>";
+
+        var references = ManifestFileReferenceHelper.ExtractAllFileReferencesFromManifest(manifestContent);
+
+        // Should include image assets
+        Assert.IsTrue(references.Contains(@"Assets\StoreLogo.png"), "Should find StoreLogo.png");
+        Assert.IsTrue(references.Contains(@"Assets\Logo.png"), "Should find Logo.png");
+        Assert.IsTrue(references.Contains(@"Assets\SmallLogo.png"), "Should find SmallLogo.png");
+
+        // Should include the executable
+        Assert.IsTrue(references.Contains("app.exe"), "Should find app.exe");
+
+        // Should include non-image referenced files
+        Assert.IsTrue(references.Contains("settings.json"), "Should find settings.json");
+        Assert.IsTrue(references.Contains(@"data\config.yaml"), "Should find data\\config.yaml");
+
+        // Should NOT include non-file values
+        Assert.IsFalse(references.Any(r => r.Contains("1.0.0.0")), "Should not include version strings");
+        Assert.IsFalse(references.Any(r => r.Contains("10.0.18362.0")), "Should not include version strings");
+        Assert.IsFalse(references.Any(r => r.Contains("10.0.26100.0")), "Should not include version strings");
+        Assert.IsFalse(references.Any(r => r.Contains("http")), "Should not include URIs");
+
+        // Should NOT include dotted identifiers (class names, namespaces, extension names)
+        Assert.IsFalse(references.Any(r => r.Contains("Windows.Universal")), "Should not include dotted namespace identifiers");
+        Assert.IsFalse(references.Any(r => r.Contains("App.Main")), "Should not include dotted class identifiers");
+        Assert.IsFalse(references.Any(r => r.Contains("com.test")), "Should not include dotted extension names");
+    }
+
+    [TestMethod]
+    public void ExtractAllFileReferencesFromManifest_RejectsPathTraversal()
+    {
+        var manifestContent = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<Package xmlns=""http://schemas.microsoft.com/appx/manifest/foundation/windows10"">
+  <Identity Name=""TestPackage"" Publisher=""CN=Test"" Version=""1.0.0.0"" />
+  <Applications>
+    <Application Id=""App"" Executable=""app.exe"">
+      <Extensions>
+        <Extension>
+          <Properties>
+            <File>..\secret.json</File>
+          </Properties>
+        </Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>";
+
+        var references = ManifestFileReferenceHelper.ExtractAllFileReferencesFromManifest(manifestContent);
+
+        Assert.IsFalse(references.Any(r => r.Contains("secret.json")),
+            "Should reject path traversal references");
+        Assert.IsTrue(references.Contains("app.exe"),
+            "Should still include valid references");
+    }
+
+    [TestMethod]
+    [DataRow("https://schemas.microsoft.com/appx/manifest.xml", DisplayName = "https URI")]
+    [DataRow("http://example.com/file.dll", DisplayName = "http URI")]
+    [DataRow("ms-appx:///Assets/logo.png", DisplayName = "ms-appx URI")]
+    [DataRow("ms-resource:Resources/AppName.txt", DisplayName = "ms-resource URI")]
+    [DataRow(@"C:\Windows\foo.txt", DisplayName = "Rooted absolute path")]
+    [DataRow(@"\rooted\path.json", DisplayName = "Rooted relative path")]
+    [DataRow(@"\\server\share\x.txt", DisplayName = "UNC path")]
+    [DataRow("6ba7b810-9dad-11d1-80b4-00c04fd430c8", DisplayName = "GUID-like string")]
+    [DataRow("{6ba7b810-9dad-11d1-80b4-00c04fd430c8}", DisplayName = "Braced GUID")]
+    [DataRow("file\0name.dll", DisplayName = "Invalid path characters")]
+    [DataRow("1.0.0.0", DisplayName = "Version string")]
+    [DataRow("10.0.18362.0", DisplayName = "Windows version string")]
+    [DataRow("MyApp.App", DisplayName = "Dotted class identifier")]
+    [DataRow("Windows.Universal", DisplayName = "Dotted namespace identifier")]
+    [DataRow("", DisplayName = "Empty string")]
+    [DataRow("   ", DisplayName = "Whitespace only")]
+    [DataRow("noextension", DisplayName = "No file extension")]
+    public void IsLikelyFilePath_RejectsNonPathValues(string value)
+    {
+        Assert.IsFalse(ManifestFileReferenceHelper.IsLikelyFilePath(value),
+            $"IsLikelyFilePath should reject: \"{value}\"");
+    }
+
+    [TestMethod]
+    [DataRow("app.exe", DisplayName = "Simple executable")]
+    [DataRow("Assets/logo.png", DisplayName = "Relative path with directory")]
+    [DataRow("config.json", DisplayName = "JSON file")]
+    [DataRow("resources/strings.resw", DisplayName = "Resource file")]
+    [DataRow("lib/native.dll", DisplayName = "DLL in subdirectory")]
+    public void IsLikelyFilePath_AcceptsValidPaths(string value)
+    {
+        Assert.IsTrue(ManifestFileReferenceHelper.IsLikelyFilePath(value),
+            $"IsLikelyFilePath should accept: \"{value}\"");
+    }
+
+    [TestMethod]
+    public void ExtractAllFileReferencesFromManifest_ReturnsEmptyForMalformedXml()
+    {
+        var references = ManifestFileReferenceHelper.ExtractAllFileReferencesFromManifest("<not valid xml><><>");
+        Assert.AreEqual(0, references.Count, "Should return empty set for malformed XML");
+    }
+
+    [TestMethod]
+    [DataRow("", DisplayName = "Empty string")]
+    [DataRow("   ", DisplayName = "Whitespace only")]
+    public void ExtractAllFileReferencesFromManifest_ReturnsEmptyForEmptyInput(string input)
+    {
+        var references = ManifestFileReferenceHelper.ExtractAllFileReferencesFromManifest(input);
+        Assert.AreEqual(0, references.Count, "Should return empty set for empty/whitespace input");
+    }
+
     #endregion
+
+    /// <summary>
+    /// Compares two DN strings via X500DistinguishedName.RawData to match production semantics.
+    /// </summary>
+    [TestMethod]
+    [DataRow("CN=Contoso, O=Contoso Ltd, C=US", DisplayName = "Multi-component CN+O+C publisher")]
+    [DataRow("Last, First", DisplayName = "Bare name with comma (escaped)")]
+    [DataRow("CN=A&B Corp", DisplayName = "Publisher with ampersand")]
+    public async Task CertificateService_GeneratedManifestAndCert_PublisherRoundTrips(string publisherInput)
+    {
+        // Arrange — generate a manifest using the template service, then a cert from the same input.
+        // The manifest Identity/Publisher must semantically equal the cert subject.
+        var manifestTemplateService = GetRequiredService<IManifestTemplateService>();
+        var outputDir = _tempDirectory.CreateSubdirectory($"roundtrip_{publisherInput.GetHashCode():x}");
+        var certPath = new FileInfo(Path.Combine(outputDir.FullName, "test.pfx"));
+        const string testPassword = "testpassword123";
+
+        // Generate manifest
+        await manifestTemplateService.GenerateCompleteManifestAsync(
+            outputDir,
+            "RoundTripTestPackage",
+            publisherInput,
+            "1.0.0.0",
+            ManifestTemplates.Packaged,
+            "Test",
+            TestTaskContext,
+            TestContext.CancellationToken);
+
+        // Generate cert from same publisher input
+        await _certificateService.GenerateDevCertificateAsync(
+            publisherInput, certPath, TestTaskContext, testPassword, cancellationToken: TestContext.CancellationToken);
+
+        // Act & Assert — ValidatePublisherMatchAsync should not throw
+        var manifestPath = new FileInfo(Path.Combine(outputDir.FullName, "Package.appxmanifest"));
+        await CertificateService.ValidatePublisherMatchAsync(certPath, testPassword, manifestPath, TestContext.CancellationToken);
+    }
+
+    private static void AssertDNEquals(string expectedDN, string actualDN, string? message = null)
+    {
+        var expected = new X500DistinguishedName(expectedDN);
+        var actual = new X500DistinguishedName(actualDN);
+        Assert.IsTrue(
+            expected.RawData.AsSpan().SequenceEqual(actual.RawData.AsSpan()),
+            message ?? $"DN mismatch.\nExpected: {expectedDN}\nActual:   {actualDN}");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_AutoSignWithGenerateDevCert_GeneratesAndSignsWithDevCertificate()
+    {
+        // Arrange - use a UNIQUE publisher subject for this test. The autoSign + generateDevCert
+        // flow generates a dev certificate that is installed into the shared CurrentUser\My store.
+        // This class runs in parallel and many other tests generate and blanket-remove the shared
+        // "CN=TestPublisher" subject, so reusing it here would race concurrent store add/remove of
+        // the same entry (the flagged flaky failure). A dedicated subject, cleaned up only by this
+        // test, isolates the store interaction and keeps the class fully parallel-safe.
+        const string uniquePublisher = "CN=AutoSignGenDevCertPublisher";
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "GenDevCertPackage"));
+        CreateTestPackageStructure(packageDir);
+        await File.WriteAllTextAsync(
+            Path.Combine(packageDir.FullName, "AppxManifest.xml"),
+            StandardTestManifestContent.Replace("CN=TestPublisher", uniquePublisher, StringComparison.Ordinal),
+            TestContext.CancellationToken);
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        try
+        {
+            // Act - autoSign + generateDevCert with NO external certificate path forces the service to
+            // generate a dev certificate for the manifest publisher, validate the publisher match, and
+            // sign the package with it.
+            var result = await _msixService.CreateMsixPackageAsync(
+                inputFolder: packageDir,
+                outputPath: _tempDirectory,
+                TestTaskContext,
+                packageName: "GenDevCertPackage",
+                skipPri: true,
+                autoSign: true,
+                certificatePassword: "testpassword123",
+                generateDevCert: true,
+                cancellationToken: CancellationToken.None);
+
+            // Assert
+            Assert.IsNotNull(result, "Result should not be null");
+            Assert.IsTrue(result.Signed, "Package should be signed with the generated dev certificate");
+            Assert.IsTrue(result.MsixPath.Exists, "MSIX package file should exist");
+            var generatedCert = new FileInfo(Path.Combine(_tempDirectory.FullName, "GenDevCertPackage_cert.pfx"));
+            Assert.IsTrue(generatedCert.Exists, "The generated dev certificate PFX should be written next to the package");
+        }
+        finally
+        {
+            // Clean up only this test's own unique subject (matches the SignCommandTests self-cleanup pattern).
+            CleanupInvalidTestCertificatesFromStore(uniquePublisher);
+        }
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_NativeExecutable_IncludesDetectedArchitectureInPackageName()
+    {
+        // Arrange - real native x64 PE so ProcessorArchitecture is auto-detected from the executable.
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "ArchPackage"));
+        CreateTestPackageStructure(packageDir);
+        File.WriteAllBytes(Path.Combine(packageDir.FullName, "TestApp.exe"), BuildMinimalNativePe(0x8664));
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        // Act
+        var result = await _msixService.CreateMsixPackageAsync(
+            inputFolder: packageDir,
+            outputPath: _tempDirectory,
+            TestTaskContext,
+            packageName: "TestPackage",
+            skipPri: true,
+            autoSign: false,
+            cancellationToken: CancellationToken.None);
+
+        // Assert - default file name is "{name}_{version}_{arch}.msix" when both are known.
+        Assert.IsNotNull(result, "Result should not be null");
+        Assert.IsTrue(result.MsixPath.Exists, "MSIX package file should exist");
+        StringAssert.Contains(result.MsixPath.Name, "1.0.0.0", "Package name should include the manifest version");
+        StringAssert.Contains(result.MsixPath.Name, "x64", "Package name should include the detected x64 architecture");
+    }
+
+    [TestMethod]
+    public async Task CreateMsixPackageAsync_SelfContainedWithoutSdkRuntime_ThrowsWithRuntimeNotFound()
+    {
+        // Arrange - a self-contained package request with no Windows App SDK version resolvable
+        // (empty winapp.yaml, no .csproj). The runtime preparation step must fail clearly rather
+        // than silently producing a package without the bundled runtime.
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "SelfContainedPackage"));
+        CreateTestPackageStructure(packageDir);
+        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
+
+        // Act & Assert
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
+            await _msixService.CreateMsixPackageAsync(
+                inputFolder: packageDir,
+                outputPath: _tempDirectory,
+                TestTaskContext,
+                packageName: "SelfContainedPackage",
+                skipPri: true,
+                autoSign: false,
+                selfContained: true,
+                cancellationToken: CancellationToken.None));
+
+        StringAssert.Contains(
+            ex.Message,
+            "Failed to create MSIX package",
+            "The self-contained packaging failure should surface through the standard MSIX creation error wrapper");
+        StringAssert.Contains(
+            ex.Message,
+            "Runtime",
+            "The failure should explain that the Windows App SDK runtime could not be located for self-contained packaging");
+    }
+
+    /// <summary>
+    /// Builds a minimal but structurally valid native PE image with the given COFF machine type,
+    /// sufficient for architecture auto-detection.
+    /// </summary>
+    private static byte[] BuildMinimalNativePe(ushort machineType)
+    {
+        bool is64Bit = machineType is 0x8664 or 0xAA64;
+        ushort optionalHeaderSize = is64Bit ? (ushort)0xF0 : (ushort)0xE0;
+        int coffHeaderOffset = 0x84;
+        var peBytes = new byte[coffHeaderOffset + 20 + optionalHeaderSize + 64];
+
+        peBytes[0] = 0x4D; // 'M'
+        peBytes[1] = 0x5A; // 'Z'
+        BitConverter.GetBytes(0x80).CopyTo(peBytes, 0x3C);
+        peBytes[0x80] = 0x50; // 'P'
+        peBytes[0x81] = 0x45; // 'E'
+
+        BitConverter.GetBytes(machineType).CopyTo(peBytes, coffHeaderOffset);
+        BitConverter.GetBytes(optionalHeaderSize).CopyTo(peBytes, coffHeaderOffset + 16);
+        peBytes[coffHeaderOffset + 18] = 0x02;
+
+        ushort optionalHeaderMagic = is64Bit ? (ushort)0x20B : (ushort)0x10B;
+        BitConverter.GetBytes(optionalHeaderMagic).CopyTo(peBytes, coffHeaderOffset + 20);
+
+        return peBytes;
+    }
 }

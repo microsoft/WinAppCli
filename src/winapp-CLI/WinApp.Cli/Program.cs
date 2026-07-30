@@ -15,59 +15,41 @@ namespace WinApp.Cli;
 
 internal static class Program
 {
-    static async Task<int> Main(string[] args)
+    internal static async Task<int> Main(string[] args)
     {
+        // Hidden internal verb: the WinUI DbgEng triage pass runs in this isolated child process so
+        // its modern dbgeng.dll is not poisoned by the system32 dbghelp.dll the parent already loaded.
+        // Intercept before any host/service setup to keep the loader state clean and output noise-free.
+        if (args.Length > 0 && args[0] == Services.XamlTriageRunner.InternalVerb)
+        {
+            return Services.XamlTriageRunner.Run(args);
+        }
+
         // Ensure UTF-8 I/O for emoji-capable terminals; fall back silently if not supported
-        try
+        ConfigureConsoleEncoding(static () =>
         {
             Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
             Console.InputEncoding = Encoding.UTF8;
-        }
-        catch
-        {
-            // ignore
-        }
+        });
 
-        var minimumLogLevel = LogLevel.Information;
-        bool quiet = false;
-        bool verbose = false;
-        bool json = false;
-
-        if (args.Contains(WinAppRootCommand.VerboseOption.Name) || args.Any(WinAppRootCommand.VerboseOption.Aliases.Contains))
+        var loggingMode = ResolveLoggingMode(args);
+        if (loggingMode.ConflictError is not null)
         {
-            minimumLogLevel = LogLevel.Debug;
-            verbose = true;
-        }
-        if (args.Contains(WinAppRootCommand.QuietOption.Name) || args.Any(WinAppRootCommand.QuietOption.Aliases.Contains))
-        {
-            minimumLogLevel = LogLevel.Warning;
-            quiet = true;
-        }
-        if (args.Contains(WinAppRootCommand.JsonOption.Name) || args.Any(WinAppRootCommand.JsonOption.Aliases.Contains))
-        {
-            minimumLogLevel = LogLevel.None;
-            json = true;
-        }
-
-        if (quiet && verbose)
-        {
-            Console.Error.WriteLine($"Cannot specify both --quiet and --verbose options together.");
+            Console.Error.WriteLine(loggingMode.ConflictError);
             return 1;
         }
-        else if (quiet && json)
-        {
-            Console.Error.WriteLine($"Cannot specify both --quiet and --json options together.");
-            return 1;
-        }
-        else if (verbose && json)
-        {
-            Console.Error.WriteLine($"Cannot specify both --verbose and --json options together.");
-            return 1;
-        }
+
+        var minimumLogLevel = loggingMode.MinimumLevel;
+        bool quiet = loggingMode.Quiet;
+        bool json = loggingMode.Json;
 
         // Check if --cli-schema is specified - this outputs machine-readable JSON
         // and should not display any interactive messages like first-run notices
-        bool isCliSchemaMode = args.Contains(WinAppRootCommand.CliSchemaOption.Name);
+        bool isCliSchemaMode = GlobalOptionPreScan.IsFlagPresent(
+            args, WinAppRootCommand.CliSchemaOption.Name, []);
+
+        // Check if this is a completion request - completions must be fast and silent
+        bool isCompleteMode = args.Length > 0 && args[0] == "complete";
 
         var services = new ServiceCollection()
             .ConfigureServices()
@@ -81,15 +63,60 @@ internal static class Program
 
         using var serviceProvider = services.BuildServiceProvider();
 
-        // Skip first-run notice for machine-readable output modes
+        var rootCommand = serviceProvider.GetRequiredService<WinAppRootCommand>();
+        System.CommandLine.ParseResult? parseResult = null;
+
+        if (args.Length > 0)
+        {
+            parseResult = rootCommand.Parse(args, WinAppParserConfiguration.Default);
+
+            // Set WINAPP_CLI_CALLER env var from --caller option so telemetry and update checks can use it
+            var caller = parseResult.GetValue(WinAppRootCommand.CallerOption);
+            if (!string.IsNullOrWhiteSpace(caller))
+            {
+                Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", caller);
+            }
+
+            // Reject an invalid '='-attached value on ANY boolean option reachable by the selected
+            // command — a global flag like --json=bogus or a command flag like --eraser=bogus.
+            // System.CommandLine silently coerces such a value to TRUE with no parse error, which
+            // would (a) silently enable a flag the user never set (e.g. the pen eraser) and (b) for
+            // --json leave logging un-suppressed, so the human ❌ line and the JSON envelope BOTH hit
+            // stderr and corrupt machine-readable output. Fail fast HERE — before the first-run /
+            // update notice can print anything (M1) — with a single clean invalid_arguments error,
+            // mirroring how the parser already rejects other malformed values (e.g. --pressure nope).
+            if (TryFindInvalidBooleanOption(parseResult, args, out var invalidBoolOption, out var invalidBoolValue))
+            {
+                var message =
+                    $"Cannot parse argument '{invalidBoolValue}' for option '{invalidBoolOption}' as expected type 'System.Boolean'.";
+                if (ResolveEffectiveJson(parseResult) && IsUiDescendant(parseResult))
+                {
+                    UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments, message);
+                }
+                else
+                {
+                    Console.Error.WriteLine(message);
+                }
+
+                return 1;
+            }
+        }
+
+        // Skip first-run notice for machine-readable output modes and completions
         var didShowFirstRunNotice = false;
-        if (!isCliSchemaMode && !json)
+        if (!isCliSchemaMode && !isCompleteMode && !json)
         {
             var firstRunService = serviceProvider.GetRequiredService<IFirstRunService>();
             didShowFirstRunNotice = firstRunService.CheckAndDisplayFirstRunNotice();
-        }
 
-        var rootCommand = serviceProvider.GetRequiredService<WinAppRootCommand>();
+            // Check for CLI updates — shows cached notice instantly (no network),
+            // and starts a background refresh if the cache is stale (fire-and-forget).
+            if (!quiet)
+            {
+                var updateNotificationService = serviceProvider.GetRequiredService<IUpdateNotificationService>();
+                updateNotificationService.CheckAndNotify();
+            }
+        }
 
         // If no arguments provided, display banner and show help
         if (args.Length == 0)
@@ -100,34 +127,279 @@ internal static class Program
             }
 
             // Show help by invoking with --help
-            await rootCommand.Parse(["--help"]).InvokeAsync();
+            await rootCommand.Parse(["--help"], WinAppParserConfiguration.Default).InvokeAsync();
             return 0;
         }
 
-        var parseResult = rootCommand.Parse(args);
+        var parsedArgs = parseResult!;
 
-        // Set WINAPP_CLI_CALLER env var from --caller option so telemetry picks it up
-        var caller = parseResult.GetValue(WinAppRootCommand.CallerOption);
-        if (!string.IsNullOrWhiteSpace(caller))
+        // Derive the effective JSON mode from the SELECTED command's PARSED --json value (M1).
+        // The pre-scan (json) is value-aware but still a heuristic; the parsed value is the truth.
+        // Reading the parsed bool works even when a different option (e.g. --pressure) failed parse.
+        bool effectiveJson = ResolveEffectiveJson(parsedArgs);
+
+        // Catch single-dash typos like "-app" before invocation so the user gets a clear
+        // "Did you mean --app?" message instead of System.CommandLine's confusing
+        // "Unrecognized command or argument" pointing at the wrong token (issue #467).
+        // Only run when parsing already failed — otherwise a command that legitimately
+        // accepts a "-foo"-shaped positional value would get a false-positive typo error.
+        if (parsedArgs.Errors.Count > 0)
         {
-            Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", caller);
+            var typo = OptionTypoValidator.FindLikelyLongOptionTypo(args, parsedArgs);
+            if (typo is not null)
+            {
+                var suggested = "-" + typo;
+                if (effectiveJson && IsUiDescendant(parsedArgs))
+                {
+                    // Gate on IsUiDescendant so that non-ui commands (e.g. cert info) fall through
+                    // to default error handling instead of receiving the nested UI schema (M2).
+                    if (!isCompleteMode)
+                    {
+                        CommandInvokedEvent.Log(parsedArgs.CommandResult);
+                    }
+                    UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments,
+                        $"Unknown option '{typo}'. Did you mean '{suggested}'?");
+                    if (!isCompleteMode)
+                    {
+                        CommandCompletedEvent.Log(parsedArgs.CommandResult, 1);
+                    }
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Unknown option '{typo}'. Did you mean '{suggested}'?");
+                    Console.Error.WriteLine(
+                        "(Single-dash flags are reserved for short aliases like '-a'. Long options use a double dash.)");
+                }
+                return 1;
+            }
         }
 
+        return await RunWithTelemetryAsync(parsedArgs, isCompleteMode, () => parsedArgs.InvokeAsync());
+    }
+
+    /// <summary>
+    /// Applies the given console-encoding mutation, swallowing the platform exception that occurs
+    /// when the standard stream encoding cannot be changed (e.g. redirected or unsupported handles).
+    /// UTF-8 I/O is a best-effort nicety, so a failure here must never abort startup.
+    /// </summary>
+    internal static void ConfigureConsoleEncoding(Action apply)
+    {
         try
         {
-            CommandInvokedEvent.Log(parseResult.CommandResult);
+            apply();
+        }
+        catch
+        {
+            // ignore
+        }
+    }
 
-            var returnCode = await parseResult.InvokeAsync();
+    /// <summary>
+    /// Runs the parsed command via <paramref name="invoke"/>, emitting command-invoked/-completed
+    /// telemetry (unless in completion mode) and converting any unhandled exception into a logged
+    /// error plus exit code 1. The <paramref name="invoke"/> seam lets tests exercise both the
+    /// success and top-level-failure paths without needing a real, throwing command.
+    /// </summary>
+    internal static Task<int> RunWithTelemetryAsync(
+        System.CommandLine.ParseResult parsedArgs, bool isCompleteMode, Func<Task<int>> invoke) =>
+        RunWithTelemetryAsync(parsedArgs, isCompleteMode, invoke, CommandInvokedEvent.Log, CommandCompletedEvent.Log);
 
-            CommandCompletedEvent.Log(parseResult.CommandResult, returnCode);
+    /// <summary>
+    /// Core of <see cref="RunWithTelemetryAsync(System.CommandLine.ParseResult, bool, Func{Task{int}})"/>
+    /// with the telemetry sinks injected. <paramref name="logCommandInvoked"/> and
+    /// <paramref name="logCommandCompleted"/> default (via the public overload) to the production
+    /// <see cref="CommandInvokedEvent.Log"/>/<see cref="CommandCompletedEvent.Log"/> events; the seam
+    /// lets tests assert that the invoked/completed events fire around the invocation — in order, with
+    /// the parsed command result and real exit code, and only when not in completion mode.
+    /// </summary>
+    internal static async Task<int> RunWithTelemetryAsync(
+        System.CommandLine.ParseResult parsedArgs, bool isCompleteMode, Func<Task<int>> invoke,
+        Action<System.CommandLine.Parsing.CommandResult> logCommandInvoked,
+        Action<System.CommandLine.Parsing.CommandResult, int> logCommandCompleted)
+    {
+        try
+        {
+            if (!isCompleteMode)
+            {
+                logCommandInvoked(parsedArgs.CommandResult);
+            }
+
+            bool effectiveJson = ResolveEffectiveJson(parsedArgs);
+
+            // Parse-error → JSON bridge: activated only when the SELECTED command exposes --json,
+            // its parsed value is true (effectiveJson), AND the command is a ui descendant (M3).
+            // Non-ui commands (e.g. cert info) use a flat {"error":"..."} schema — do not impose
+            // the UI nested contract on them; let SCL's default parse-error handling run instead.
+            // M3: emit CommandCompletedEvent before the early return to keep telemetry paired.
+            if (effectiveJson && parsedArgs.Errors.Count > 0 && IsUiDescendant(parsedArgs))
+            {
+                var errorMsg = string.Join("; ", parsedArgs.Errors.Select(e => e.Message));
+                UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments, errorMsg);
+                if (!isCompleteMode)
+                {
+                    logCommandCompleted(parsedArgs.CommandResult, 1);
+                }
+                return 1;
+            }
+
+            var returnCode = await invoke();
+
+            if (!isCompleteMode)
+            {
+                logCommandCompleted(parsedArgs.CommandResult, returnCode);
+            }
 
             return returnCode;
         }
         catch (Exception ex)
         {
-            TelemetryFactory.Get<ITelemetry>().LogException(parseResult.CommandResult.Command.Name, ex);
+            TelemetryFactory.Get<ITelemetry>().LogException(parsedArgs.CommandResult.Command.Name, ex);
             Console.Error.WriteLine($"An unexpected error occurred: {ex.Message}");
             return 1;
         }
+    }
+
+    /// <summary>
+    /// Derives the effective JSON mode from the selected command's PARSED <c>--json</c> option.
+    /// Reading the parsed value is reliable even when a different option caused a parse error,
+    /// because System.CommandLine parses each option independently (M1).
+    /// </summary>
+    private static bool ResolveEffectiveJson(System.CommandLine.ParseResult parsedArgs)
+    {
+        // Only engage when the selected (innermost) command actually owns --json.
+        var selectedCmd = parsedArgs.CommandResult.Command;
+        if (!selectedCmd.Options.Contains(WinAppRootCommand.JsonOption))
+        {
+            return false;
+        }
+        try
+        {
+            return parsedArgs.GetValue(WinAppRootCommand.JsonOption);
+        }
+        catch
+        {
+            // If reading the parsed value fails for any reason, do not fire the bridge.
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when the selected command is the <c>ui</c> command
+    /// or any of its descendants. Used to scope the parse-error JSON bridge to ui commands
+    /// only, leaving non-ui commands (e.g. <c>cert info</c>) with their own flat error schema (M3).
+    /// </summary>
+    private static bool IsUiDescendant(System.CommandLine.ParseResult parseResult)
+    {
+        var cmd = parseResult.CommandResult.Command;
+        while (cmd is not null)
+        {
+            if (cmd.Name == "ui")
+            {
+                return true;
+            }
+            cmd = cmd.Parents.OfType<System.CommandLine.Command>().FirstOrDefault();
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Scans argv for an invalid <c>=</c>-attached value on any boolean option reachable by the
+    /// selected command — the command's own <see cref="System.CommandLine.Option{T}"/> boolean
+    /// options plus inherited/global ones on ancestor commands (e.g. <c>--json</c>/<c>--verbose</c>/
+    /// <c>--quiet</c> on the root, or <c>--eraser</c> on <c>ui pen</c>). System.CommandLine silently
+    /// coerces a non-boolean attached value (e.g. <c>--eraser=bogus</c>) to <see langword="true"/>;
+    /// the caller uses this to reject it with a clean error instead (#600 H1/M1/M2).
+    /// </summary>
+    private static bool TryFindInvalidBooleanOption(
+        System.CommandLine.ParseResult parseResult,
+        string[] args,
+        out string optionName,
+        out string invalidValue)
+    {
+        optionName = string.Empty;
+        invalidValue = string.Empty;
+
+        // Walk the selected command up through its ancestors so both command-level bool options
+        // and inherited/global ones are covered. Dedupe by name in case an option appears twice.
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var cmd = parseResult.CommandResult.Command;
+        while (cmd is not null)
+        {
+            foreach (var option in cmd.Options)
+            {
+                if (option is not System.CommandLine.Option<bool>)
+                {
+                    continue;
+                }
+                if (!seen.Add(option.Name))
+                {
+                    continue;
+                }
+                if (GlobalOptionPreScan.TryFindInvalidBooleanValue(args, option.Name, option.Aliases, out var badValue))
+                {
+                    optionName = option.Name;
+                    invalidValue = badValue;
+                    return true;
+                }
+            }
+
+            cmd = cmd.Parents.OfType<System.CommandLine.Command>().FirstOrDefault();
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The global logging mode resolved from argv: the minimum log level plus the individual
+    /// <c>--quiet</c>/<c>--verbose</c>/<c>--json</c> flags, and a non-null <see cref="ConflictError"/>
+    /// message when a mutually-exclusive combination was requested.
+    /// </summary>
+    internal readonly record struct LoggingMode(LogLevel MinimumLevel, bool Quiet, bool Verbose, bool Json, string? ConflictError);
+
+    /// <summary>
+    /// Pre-scans argv for the global logging-mode flags and resolves the effective
+    /// <see cref="LoggingMode"/>. The scan (via <see cref="GlobalOptionPreScan"/>) stops at the first
+    /// standalone <c>--</c> separator so passthrough payload (e.g. <c>winapp run . -- --json</c>) is
+    /// not misread as a winapp global flag. Extracted from <see cref="Main"/> so the flag precedence
+    /// and mutual-exclusion rules are unit testable without invoking the full entrypoint.
+    /// </summary>
+    internal static LoggingMode ResolveLoggingMode(string[] args)
+    {
+        var minimumLogLevel = LogLevel.Information;
+        bool quiet = false;
+        bool verbose = false;
+        bool json = false;
+
+        verbose = GlobalOptionPreScan.GetBooleanFlagValue(args, WinAppRootCommand.VerboseOption.Name, WinAppRootCommand.VerboseOption.Aliases);
+        if (verbose)
+        {
+            minimumLogLevel = LogLevel.Debug;
+        }
+        quiet = GlobalOptionPreScan.GetBooleanFlagValue(args, WinAppRootCommand.QuietOption.Name, WinAppRootCommand.QuietOption.Aliases);
+        if (quiet)
+        {
+            minimumLogLevel = LogLevel.Warning;
+        }
+        json = GlobalOptionPreScan.GetBooleanFlagValue(args, WinAppRootCommand.JsonOption.Name, WinAppRootCommand.JsonOption.Aliases);
+        if (json)
+        {
+            minimumLogLevel = LogLevel.None;
+        }
+
+        string? conflictError = null;
+        if (quiet && verbose)
+        {
+            conflictError = "Cannot specify both --quiet and --verbose options together.";
+        }
+        else if (quiet && json)
+        {
+            conflictError = "Cannot specify both --quiet and --json options together.";
+        }
+        else if (verbose && json)
+        {
+            conflictError = "Cannot specify both --verbose and --json options together.";
+        }
+
+        return new LoggingMode(minimumLogLevel, quiet, verbose, json, conflictError);
     }
 }

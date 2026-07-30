@@ -30,28 +30,32 @@ internal class UiScreenshotCommand : Command, IShortDescription
         Options.Add(WinAppRootCommand.JsonOption);
         Options.Add(SharedUiOptions.OutputOption);
         Options.Add(SharedUiOptions.CaptureScreenOption);
+        Options.Add(SharedUiOptions.FocusOption);
     }
 
     public class Handler(
         IUiSessionService sessionService,
         IUiAutomationService uiAutomation,
+        IOwnedWindowFinder ownedWindowFinder,
+        ISystemUiQuery systemQuery,
         IAnsiConsole ansiConsole,
         ILogger<UiScreenshotCommand> logger) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
+            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var selector = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
-                UiErrors.MissingApp(logger);
+                UiErrors.MissingApp(logger, json);
                 return 1;
             }
             var output = parseResult.GetValue(SharedUiOptions.OutputOption);
-            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var captureScreen = parseResult.GetValue(SharedUiOptions.CaptureScreenOption);
+            var focus = parseResult.GetValue(SharedUiOptions.FocusOption);
 
             try
             {
@@ -68,7 +72,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
                             return (long)info.Width * info.Height;
                         }).First();
                         var session = await sessionService.ResolveSessionAsync(null, main.Hwnd, cancellationToken);
-                        return await CaptureMultipleWindows(allWindows, session, output, json, captureScreen, cancellationToken);
+                        return await CaptureMultipleWindows(allWindows, session, output, json, captureScreen, focus, cancellationToken);
                     }
                 }
 
@@ -79,7 +83,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
                 if (selector is null)
                 {
                     var sessionHwnd = (nint)singleSession.WindowHandle;
-                    var ownedWindows = FindOwnedWindows([(sessionHwnd, singleSession.ProcessId, singleSession.WindowTitle ?? "")]);
+                    var ownedWindows = ownedWindowFinder.FindOwnedWindows([(sessionHwnd, singleSession.ProcessId, singleSession.WindowTitle ?? "")]);
                     if (ownedWindows.Count > 0)
                     {
                         var allWindows = new List<(nint Hwnd, int Pid, string Title)>
@@ -87,14 +91,19 @@ internal class UiScreenshotCommand : Command, IShortDescription
                             (sessionHwnd, singleSession.ProcessId, singleSession.WindowTitle ?? "")
                         };
                         allWindows.AddRange(ownedWindows);
-                        return await CaptureMultipleWindows(allWindows, singleSession, output, json, captureScreen, cancellationToken);
+                        return await CaptureMultipleWindows(allWindows, singleSession, output, json, captureScreen, focus, cancellationToken);
                     }
                 }
 
-                var (pixels, w, h) = await uiAutomation.ScreenshotAsync(singleSession, selector, captureScreen, cancellationToken);
+                var (pixels, w, h) = await uiAutomation.ScreenshotAsync(singleSession, selector, captureScreen, focus, cancellationToken);
                 var pngBytes = EncodePng(pixels, w, h);
 
                 var filePath = output ?? "screenshot.png";
+                var dir = Path.GetDirectoryName(Path.GetFullPath(filePath));
+                if (dir is not null)
+                {
+                    Directory.CreateDirectory(dir);
+                }
                 await File.WriteAllBytesAsync(filePath, pngBytes, cancellationToken);
                 var absolutePath = Path.GetFullPath(filePath);
 
@@ -121,12 +130,12 @@ internal class UiScreenshotCommand : Command, IShortDescription
             catch (System.Runtime.InteropServices.COMException comEx)
             {
                 logger.LogDebug("COM error: {HResult} {StackTrace}", comEx.HResult, comEx.StackTrace);
-                UiErrors.StaleElement(logger);
+                UiErrors.StaleElement(logger, json);
                 return 1;
             }
             catch (Exception ex)
             {
-                UiErrors.GenericError(logger, ex);
+                UiErrors.GenericError(logger, ex, json);
                 return 1;
             }
         }
@@ -137,6 +146,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
             string? output,
             bool json,
             bool captureScreen,
+            bool focus,
             CancellationToken ct)
         {
             var filePath = output ?? "screenshot.png";
@@ -155,6 +165,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
 
             // Capture each window
             var captures = new List<(byte[] Pixels, int Width, int Height, nint Hwnd, string Title, string Label)>();
+            var windowDetails = new List<UiScreenshotWindowInfo>();
             foreach (var w in sorted)
             {
                 var info = UiSessionService.GetWindowInfo(w.Hwnd);
@@ -168,8 +179,17 @@ internal class UiScreenshotCommand : Command, IShortDescription
                         WindowTitle = title,
                         WindowHandle = w.Hwnd
                     };
-                    var (pixels, width, height) = await uiAutomation.ScreenshotAsync(windowSession, null, captureScreen, ct);
+                    var (pixels, width, height) = await uiAutomation.ScreenshotAsync(windowSession, null, captureScreen, focus, ct);
                     captures.Add((pixels, width, height, w.Hwnd, title, info.Label));
+                    windowDetails.Add(new UiScreenshotWindowInfo
+                    {
+                        Hwnd = w.Hwnd,
+                        Title = string.IsNullOrEmpty(w.Title) ? null : w.Title,
+                        Label = info.Label,
+                        Width = width,
+                        Height = height,
+                        Captured = true,
+                    });
 
                     if (!json)
                     {
@@ -180,6 +200,14 @@ internal class UiScreenshotCommand : Command, IShortDescription
                 catch (Exception ex)
                 {
                     logger.LogDebug("Failed to capture HWND {Hwnd}: {Error}", w.Hwnd, ex.Message);
+                    windowDetails.Add(new UiScreenshotWindowInfo
+                    {
+                        Hwnd = w.Hwnd,
+                        Title = string.IsNullOrEmpty(w.Title) ? null : w.Title,
+                        Label = info.Label,
+                        Captured = false,
+                        Error = ex.Message,
+                    });
                     if (!json)
                     {
                         ansiConsole.MarkupLine($"  [red]✗[/] HWND {w.Hwnd}: \"{Markup.Escape(title)}\" — {Markup.Escape(ex.Message)}");
@@ -190,11 +218,17 @@ internal class UiScreenshotCommand : Command, IShortDescription
             if (captures.Count == 0)
             {
                 logger.LogError("No windows could be captured.");
+                UiJsonError.Emit(json, UiJsonError.CodeInternalError, "No windows could be captured.");
                 return 1;
             }
 
             // Compose all captures side-by-side into single image
             var pngBytes = ComposeSideBySide(captures);
+            var dir = Path.GetDirectoryName(Path.GetFullPath(filePath));
+            if (dir is not null)
+            {
+                Directory.CreateDirectory(dir);
+            }
             await File.WriteAllBytesAsync(filePath, pngBytes, ct);
             var absolutePath = Path.GetFullPath(filePath);
 
@@ -216,7 +250,8 @@ internal class UiScreenshotCommand : Command, IShortDescription
                     Height = compositeHeight,
                     ProcessId = session.ProcessId,
                     WindowTitle = session.WindowTitle,
-                    Hwnd = session.WindowHandle
+                    Hwnd = session.WindowHandle,
+                    Windows = windowDetails.ToArray(),
                 };
                 ansiConsole.Profile.Out.Writer.WriteLine(
                     JsonSerializer.Serialize(result, UiJsonContext.Default.UiScreenshotResult));
@@ -287,29 +322,14 @@ internal class UiScreenshotCommand : Command, IShortDescription
 
             if (window is not null and > 0)
             {
-                // Direct HWND — only find windows owned by THIS window (not all process windows)
+                // Direct HWND — only find windows owned by THIS window (not all process windows).
+                // The PID/title reads route through ISystemUiQuery so a valid live handle can be
+                // supplied by a fake (real handles resolve identically through the seam).
                 var hwndVal = (nint)window.Value;
-                uint pid = 0;
-                unsafe
-                {
-                    Windows.Win32.PInvoke.GetWindowThreadProcessId(
-                        new Windows.Win32.Foundation.HWND(hwndVal), &pid);
-                }
+                uint pid = systemQuery.GetProcessIdForWindow(window.Value);
                 if (pid == 0) { return null; }
 
-                // Get title for this window
-                var titleChars = new char[512];
-                string title;
-                unsafe
-                {
-                    fixed (char* buffer = titleChars)
-                    {
-                        var len = Windows.Win32.PInvoke.GetWindowText(
-                            new Windows.Win32.Foundation.HWND(hwndVal), buffer, 512);
-                        title = len > 0 ? new string(buffer, 0, len) : "";
-                    }
-                }
-
+                var title = systemQuery.GetWindowText(window.Value) ?? "";
                 appWindows = [(hwndVal, (int)pid, title)];
             }
             else if (!string.IsNullOrWhiteSpace(app))
@@ -342,50 +362,10 @@ internal class UiScreenshotCommand : Command, IShortDescription
             }
 
             // Also find cross-process owned windows
-            var ownedWindows = FindOwnedWindows(appWindows);
+            var ownedWindows = ownedWindowFinder.FindOwnedWindows(appWindows);
             appWindows.AddRange(ownedWindows);
 
             return appWindows.Count > 1 ? appWindows : null;
-        }
-
-        private static List<(nint Hwnd, int Pid, string Title)> FindOwnedWindows(List<(nint Hwnd, int Pid, string Title)> appWindows)
-        {
-            var appHwnds = new HashSet<nint>(appWindows.Select(w => w.Hwnd));
-            var owned = new List<(nint Hwnd, int Pid, string Title)>();
-
-            // Enumerate all visible windows and check ownership
-            var hwnd = Windows.Win32.Foundation.HWND.Null;
-            while (true)
-            {
-                hwnd = Windows.Win32.PInvoke.FindWindowEx(
-                    Windows.Win32.Foundation.HWND.Null, hwnd, null, (string?)null);
-                if (hwnd.IsNull) { break; }
-                if (!Windows.Win32.PInvoke.IsWindowVisible(hwnd)) { continue; }
-
-                // Skip windows already in the list
-                if (appHwnds.Contains((nint)hwnd)) { continue; }
-
-                // Check if this window is owned by one of our app windows
-                var owner = Windows.Win32.PInvoke.GetWindow(hwnd,
-                    Windows.Win32.UI.WindowsAndMessaging.GET_WINDOW_CMD.GW_OWNER);
-                if (!owner.IsNull && appHwnds.Contains((nint)owner))
-                {
-                    unsafe
-                    {
-                        uint pid = 0;
-                        Windows.Win32.PInvoke.GetWindowThreadProcessId(hwnd, &pid);
-                        var titleChars = new char[512];
-                        fixed (char* buffer = titleChars)
-                        {
-                            var len = Windows.Win32.PInvoke.GetWindowText(hwnd, buffer, 512);
-                            var title = len > 0 ? new string(buffer, 0, len) : "";
-                            owned.Add(((nint)hwnd, (int)pid, title));
-                        }
-                    }
-                }
-            }
-
-            return owned;
         }
 
         private static byte[] EncodePng(byte[] bgraPixels, int width, int height)

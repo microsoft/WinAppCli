@@ -23,7 +23,7 @@ You need an **existing app project** — `winapp init` does **not** create new p
 
 ## Key concepts
 
-**`appxmanifest.xml`** is the most important file winapp creates — it declares your app's identity, capabilities, and visual assets. Most winapp commands require it (`package`, `run`, `cert generate --manifest`).
+**`Package.appxmanifest`** is the most important file winapp creates — it declares your app's identity, capabilities, and visual assets. Most winapp commands require it (`package`, `run`, `cert generate --manifest`).
 
 **`winapp.yaml`** is only needed for SDK version management via `restore`/`update`. Projects that already reference Windows SDK packages (e.g., via NuGet in a `.csproj`) can use winapp commands without it.
 
@@ -35,24 +35,32 @@ You need an **existing app project** — `winapp init` does **not** create new p
 
 ```powershell
 # Interactive — prompts for app name, publisher, SDK channel, etc.
-winapp init .
+# Automatically searches for compatible projects (Tauri, Electron, .NET, Rust, C++, Flutter)
+winapp init
 
 # Non-interactive — accepts all defaults (stable SDKs, current folder name as app name)
-winapp init --use-defaults
+winapp init . --use-defaults
+
+# Non-interactive with JS bindings enabled
+winapp init . --use-defaults --add-js-bindings
 
 # Skip SDK installation (just manifest + config)
-winapp init --use-defaults --setup-sdks none
+winapp init . --use-defaults --setup-sdks none
 
 # Install preview SDKs instead of stable
-winapp init --use-defaults --setup-sdks preview
+winapp init . --use-defaults --setup-sdks preview
 ```
 
 After `init`, your project will contain:
-- `appxmanifest.xml` — package identity and capabilities
+- `Package.appxmanifest` — package identity and capabilities
 - `Assets/` — default app icons (Square44x44Logo, Square150x150Logo, etc.)
 - `winapp.yaml` — SDK version pinning for `restore`/`update`
 - `.winapp/` — downloaded SDK packages and generated projections
 - `.gitignore` update — excludes `.winapp/` and `devcert.pfx`
+
+When JS bindings are enabled (via `--add-js-bindings` or by answering yes in interactive init), npm/Electron projects also get:
+- `.winapp/bindings/` — generated JS bindings for Windows App SDK APIs (npm-only, Node / Electron)
+- `package.json` update — adds the `winapp.jsBindings` namespace and `@microsoft/dynwinrt` dependency (npm-only)
 
 ### Restore after cloning
 
@@ -85,7 +93,10 @@ This updates `winapp.yaml` with the latest versions and reinstalls packages.
 winapp run ./bin/Debug
 
 # Launch with custom manifest and pass arguments to the app
-winapp run ./dist --manifest ./out/AppxManifest.xml --args "--my-flag value"
+winapp run ./dist --manifest ./out/Package.appxmanifest --args "--my-flag value"
+
+# Pass arguments after -- to avoid escaping (equivalent to --args)
+winapp run ./bin/Debug -- --my-flag value
 
 # Register identity without launching (useful for attaching a debugger manually)
 winapp run ./bin/Debug --no-launch
@@ -96,6 +107,7 @@ winapp run ./bin/Debug --debug-output
 ```
 
 Use `winapp run` during iterative development — it creates a loose layout package, registers a debug identity, and launches the app in one step. For identity-only registration without loose layout, use `winapp create-debug-identity` instead.
+
 
 #### Choosing between `run` and `create-debug-identity`
 
@@ -111,27 +123,27 @@ Use `winapp run` during iterative development — it creates a loose layout pack
 
 For console apps, add `--with-alias` to preserve stdin/stdout in the current terminal.
 
-> **`--debug-output` caveat:** Captures `OutputDebugString` and crash diagnostics (minidump + automatic analysis for both managed and native crashes) but attaches winapp as the debugger — you cannot also attach VS Code or WinDbg. Use `--no-launch` if you need your own debugger. Add `--symbols` to download PDB symbols for richer native crash analysis.
+> **`--debug-output` caveat:** Captures `OutputDebugString` and crash diagnostics (minidump + automatic analysis for both managed and native crashes) but attaches winapp as the debugger — you cannot also attach VS Code or WinDbg. Use `--no-launch` if you need your own debugger. Add `--symbols` to download PDB symbols for richer native crash analysis. For WinUI 3 apps, a stowed-exception triage pass runs automatically (surfacing the originating HRESULT and native XAML dispatch stack); the debugger components it needs are downloaded on first use, or set `WINAPP_DBGTOOLS_DIR` to a directory containing `dbgeng.dll` and `JsProvider.dll` for offline/locked-down environments.
 
 For full debugging scenarios and IDE setup, see the [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md).
 
 ## Recommended workflow
 
-1. **Initialize** — `winapp init --use-defaults` in your existing project
-2. **Configure** — edit `appxmanifest.xml` to add capabilities your app needs (e.g., `runFullTrust`, `internetClient`)
+1. **Initialize** — `winapp init . --use-defaults` in your existing project
+2. **Configure** — edit `Package.appxmanifest` to add capabilities your app needs (e.g., `runFullTrust`, `internetClient`)
 3. **Build** — build your app as usual (dotnet build, cmake, npm run build, etc.)
 4. **Run with identity** — `winapp run ./bin/Debug` to register identity and launch for debugging
 5. **Package** — `winapp package ./bin/Release --cert ./devcert.pfx` to create MSIX
 
 ## Tips
 
-- Use `--use-defaults` (alias: `--no-prompt`) in CI/CD pipelines and scripts to avoid interactive prompts
-- If you only need `appxmanifest.xml` without SDK setup, use `winapp manifest generate` instead of `init`
+- Use `--use-defaults` (alias: `--no-prompt`) in CI/CD pipelines and scripts to avoid interactive prompts. Non-interactive environments (piped stdin, CI runners) are auto-detected and will use defaults automatically with a warning.
+- If you only need `Package.appxmanifest` without SDK setup, use `winapp manifest generate` instead of `init`
 - `winapp init` is idempotent for the config file — re-running it won't overwrite an existing `winapp.yaml` unless you use `--config-only`
 - For Electron projects, prefer `npm install --save-dev @microsoft/winappcli` and use `npx winapp init` instead of the standalone CLI
 
 ## Related skills
-- After setup, see `winapp-manifest` to customize your `appxmanifest.xml`
+- After setup, see `winapp-manifest` to customize your `Package.appxmanifest`
 - Ready to package? See `winapp-package` to create an MSIX installer
 - Need a certificate? See `winapp-signing` for certificate generation
 - Not sure which command to use? See `winapp-troubleshoot` for a command selection flowchart
@@ -142,4 +154,4 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 | "winapp.yaml not found" | Running `restore`/`update` without config | Run `winapp init` first, or ensure you're in the right directory |
 | "Directory not found" | Target directory doesn't exist | Create the directory first or check the path |
 | SDK download fails | Network issue or firewall | Ensure internet access; check proxy settings |
-| `init` prompts unexpectedly in CI | Missing `--use-defaults` flag | Add `--use-defaults` to skip all prompts |
+| `init` prompts unexpectedly in CI | Missing `--use-defaults` flag | Add `--use-defaults` to skip all prompts (note: non-interactive shells are now auto-detected) |

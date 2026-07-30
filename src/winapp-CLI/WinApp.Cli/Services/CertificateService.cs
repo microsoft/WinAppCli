@@ -18,6 +18,21 @@ internal partial class CertificateService(
 {
     public const string DefaultCertFileName = "devcert.pfx";
 
+    // Test seams for OS/certificate-store boundaries. Each defaults to the real
+    // production implementation; tests inject fakes to exercise success/error paths
+    // that require administrator privileges or a matching machine-store certificate.
+    internal Func<X509Certificate2, bool> IsCertificateInstalledImpl { get; set; } = DefaultIsCertificateInstalled;
+    internal Action<X509Certificate2> AddCertificateToStoreImpl { get; set; } = DefaultAddCertificateToStore;
+    internal Func<int, CancellationToken, Task<string?>> ReadAppxPackagingSignErrorAsync { get; set; } = DefaultReadAppxPackagingSignErrorAsync;
+
+    // Key-storage flags used when loading the PFX for the machine-store install. Defaults to the
+    // real production combination: MachineKeySet|PersistKeySet persists the private key in the
+    // machine key container so the installed certificate stays usable after the process exits.
+    // Seamed so unit tests load with EphemeralKeySet (in-memory only) and never leave a persisted
+    // key container behind on the host; production always uses the persisting default.
+    internal X509KeyStorageFlags InstallKeyStorageFlags { get; set; } =
+        X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.PersistKeySet;
+
     public record CertificateResult(
         FileInfo CertificatePath,
         string Password,
@@ -39,12 +54,8 @@ internal partial class CertificateService(
         // Ensure output directory exists
         outputPath.Directory?.Create();
 
-        // Clean up the publisher name to ensure proper CN format
-        // Remove any existing CN= prefix and clean up quotes
-        var cleanPublisher = publisher.Replace("CN=", "").Replace("\"", "").Replace("'", "");
-
-        // Ensure we have a proper CN format
-        var subjectName = $"CN={cleanPublisher}";
+        // Normalize the publisher to a valid X.500 distinguished name.
+        var subjectName = PublisherDnHelper.Normalize(publisher);
 
         try
         {
@@ -99,10 +110,12 @@ internal partial class CertificateService(
 
             outputPath.Refresh();
 
+            var publisherDisplay = PublisherDnHelper.GetDisplayName(subjectName);
+
             return new CertificateResult(
                 CertificatePath: outputPath,
                 Password: password,
-                Publisher: cleanPublisher,
+                Publisher: publisherDisplay,
                 SubjectName: subjectName,
                 UpdatedGitignore: false,
                 PublicCertificatePath: publicCertPath
@@ -138,15 +151,7 @@ internal partial class CertificateService(
                         X509KeyStorageFlags.Exportable);
 
                     // Check if this certificate is already in the TrustedPeople store
-                    using var store = new X509Store(StoreName.TrustedPeople, StoreLocation.LocalMachine);
-                    store.Open(OpenFlags.ReadOnly);
-
-                    var existingCerts = store.Certificates.Find(
-                        X509FindType.FindByThumbprint,
-                        certToCheck.Thumbprint,
-                        validOnly: false);
-
-                    if (existingCerts.Count > 0)
+                    if (IsCertificateInstalledImpl(certToCheck))
                     {
                         taskContext.AddDebugMessage("Certificate appears to already be installed");
                         return false;
@@ -160,18 +165,18 @@ internal partial class CertificateService(
             }
 
             // Install to TrustedPeople store (required for MSIX sideloading)
-            // Load the certificate from the PFX file
+            // Load the certificate from the PFX file. The key-storage flags are seamed so unit
+            // tests load with EphemeralKeySet (no persisted key container); production uses the
+            // default MachineKeySet|PersistKeySet so the installed certificate stays usable.
             using var cert = X509CertificateLoader.LoadPkcs12FromFile(
                 certPath.FullName,
                 password,
-                X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.PersistKeySet);
+                InstallKeyStorageFlags);
 
             // Install to LocalMachine\TrustedPeople store (requires elevation)
             try
             {
-                using var store = new X509Store(StoreName.TrustedPeople, StoreLocation.LocalMachine);
-                store.Open(OpenFlags.ReadWrite);
-                store.Add(cert);
+                AddCertificateToStoreImpl(cert);
             }
             catch (CryptographicException ex) when (ex.Message.Contains("Access is denied"))
             {
@@ -233,35 +238,17 @@ internal partial class CertificateService(
         catch (BuildToolsService.InvalidBuildToolException ex)
             when (ex.Stdout.Contains("0x800"))
         {
-            var query = new EventLogQuery(
-                "Microsoft-Windows-AppxPackaging/Operational",
-                PathType.LogName,
-                $"*[System[Level=2 and Execution[@ProcessID={ex.ProcessId}]]]");
+            var description = await ReadAppxPackagingSignErrorAsync(ex.ProcessId, cancellationToken);
 
-            EventRecord? record = null;
-            var timeout = TimeSpan.FromSeconds(5);
-            var pollingInterval = TimeSpan.FromMilliseconds(500);
-            var startTime = DateTime.UtcNow;
-
-            while (record == null && (DateTime.UtcNow - startTime) < timeout && !cancellationToken.IsCancellationRequested)
+            if (description != null)
             {
-                using var reader = new EventLogReader(query);
-                record = reader.ReadEvent();
-
-                if (record != null)
+                // Keep raw error code in verbose mode; simplify for non-verbose output.
+                if (!taskContext.IsVerboseEnabled)
                 {
-                    var description = record.FormatDescription() ?? string.Empty;
-
-                    // Keep raw error code in verbose mode; simplify for non-verbose output.
-                    if (!taskContext.IsVerboseEnabled)
-                    {
-                        description = EventLogHexErrorRegex().Replace(description, "");
-                    }
-
-                    throw new InvalidOperationException($"Failed to sign file: {description}", ex);
+                    description = EventLogHexErrorRegex().Replace(description, "");
                 }
 
-                await Task.Delay(pollingInterval, cancellationToken);
+                throw new InvalidOperationException($"Failed to sign file: {description}", ex);
             }
 
             throw;
@@ -412,19 +399,8 @@ internal partial class CertificateService(
                 throw new InvalidOperationException("Certificate has no subject information");
             }
 
-            // Extract CN from the subject (format: "CN=Publisher, O=Organization, ...")
-            var cnMatch = CnFieldRegex().Match(subject);
-            if (!cnMatch.Success)
-            {
-                throw new InvalidOperationException($"Certificate subject does not contain CN field: {subject}");
-            }
-
-            var publisher = cnMatch.Groups[1].Value.Trim();
-
-            // Remove any quotes that might be present
-            publisher = publisher.Trim('"', '\'');
-
-            return publisher;
+            // Return the full subject DN (e.g., "CN=Publisher, L=City, S=State, C=Country")
+            return subject;
         }
         catch (Exception ex) when (!(ex is FileNotFoundException || ex is InvalidOperationException))
         {
@@ -444,22 +420,23 @@ internal partial class CertificateService(
     {
         try
         {
-            // Extract publisher from certificate
+            // Extract full subject DN from certificate
             var certPublisher = ExtractPublisherFromCertificate(certificatePath, password);
 
             // Extract publisher from manifest
             var manifestIdentity = await MsixService.ParseAppxManifestFromPathAsync(manifestPath, cancellationToken);
             var manifestPublisher = manifestIdentity.Publisher;
 
-            // Normalize both publishers for comparison (remove CN= prefix and quotes)
-            var normalizedCertPublisher = ManifestTemplateService.StripCnPrefix(certPublisher);
-            var normalizedManifestPublisher = ManifestTemplateService.StripCnPrefix(manifestPublisher);
+            // Compare as X.500 distinguished names for semantic equality
+            // This handles differences in spacing, ordering normalization, etc.
+            var certDn = new X500DistinguishedName(certPublisher);
+            var manifestDn = new X500DistinguishedName(manifestPublisher);
 
-            // Compare publishers (case-insensitive)
-            if (!string.Equals(normalizedCertPublisher, normalizedManifestPublisher, StringComparison.OrdinalIgnoreCase))
+            if (!certDn.RawData.AsSpan().SequenceEqual(manifestDn.RawData.AsSpan()))
             {
                 throw new InvalidOperationException(
-                    $"Publisher in {manifestPath} (CN={normalizedManifestPublisher}) does not match the publisher in the certificate {certificatePath} (CN={normalizedCertPublisher}).");
+                    $"Publisher in {manifestPath} ({manifestPublisher}) does not match the publisher in the certificate {certificatePath} ({certPublisher}). " +
+                    $"Regenerate the certificate with 'winapp cert generate --manifest \"{manifestPath.FullName}\"' or update the manifest Identity Publisher to match the certificate subject.");
             }
         }
         catch (Exception ex) when (ex is not InvalidOperationException)
@@ -472,7 +449,7 @@ internal partial class CertificateService(
     /// Infers the publisher name using the specified hierarchy:
     /// 1. If explicit publisher is provided, use that
     /// 2. If manifest path is provided, extract publisher from that manifest
-    /// 3. If appxmanifest.xml is found in project (.winapp directory), use that
+    /// 3. If a project manifest is found by searching the current directory and parent directories (preferring Package.appxmanifest, then appxmanifest.xml), use that
     /// 4. Use the system default publisher (from SystemDefaultsService.GetDefaultPublisherCN())
     /// </summary>
     private async Task<string> InferPublisherAsync(
@@ -504,7 +481,7 @@ internal partial class CertificateService(
             }
         }
 
-        // 3. If appxmanifest.xml is found in the current project, use that
+        // 3. If Package.appxmanifest is found in the current project, use that
         var projectManifestPath = MsixService.FindProjectManifest(currentDirectoryProvider);
         if (projectManifestPath != null)
         {
@@ -526,8 +503,65 @@ internal partial class CertificateService(
         return defaultPublisher;
     }
 
-    [GeneratedRegex(@"CN=([^,]+)", RegexOptions.IgnoreCase, "en-US")]
-    private static partial Regex CnFieldRegex();
+    /// <summary>
+    /// Default production implementation of the "is this certificate already installed" check.
+    /// Opens the LocalMachine TrustedPeople store read-only and looks for a matching thumbprint.
+    /// </summary>
+    private static bool DefaultIsCertificateInstalled(X509Certificate2 certToCheck)
+    {
+        using var store = new X509Store(StoreName.TrustedPeople, StoreLocation.LocalMachine);
+        store.Open(OpenFlags.ReadOnly);
+
+        var existingCerts = store.Certificates.Find(
+            X509FindType.FindByThumbprint,
+            certToCheck.Thumbprint,
+            validOnly: false);
+
+        return existingCerts.Count > 0;
+    }
+
+    /// <summary>
+    /// Default production implementation that installs a certificate into the LocalMachine
+    /// TrustedPeople store. Requires administrator privileges.
+    /// </summary>
+    private static void DefaultAddCertificateToStore(X509Certificate2 cert)
+    {
+        using var store = new X509Store(StoreName.TrustedPeople, StoreLocation.LocalMachine);
+        store.Open(OpenFlags.ReadWrite);
+        store.Add(cert);
+    }
+
+    /// <summary>
+    /// Default production implementation that polls the AppxPackaging operational event log for a
+    /// signing error emitted by the given signtool process, returning its formatted description
+    /// (or null if none is found within the timeout).
+    /// </summary>
+    private static async Task<string?> DefaultReadAppxPackagingSignErrorAsync(int processId, CancellationToken cancellationToken)
+    {
+        var query = new EventLogQuery(
+            "Microsoft-Windows-AppxPackaging/Operational",
+            PathType.LogName,
+            $"*[System[Level=2 and Execution[@ProcessID={processId}]]]");
+
+        var timeout = TimeSpan.FromSeconds(5);
+        var pollingInterval = TimeSpan.FromMilliseconds(500);
+        var startTime = DateTime.UtcNow;
+
+        while ((DateTime.UtcNow - startTime) < timeout && !cancellationToken.IsCancellationRequested)
+        {
+            using var reader = new EventLogReader(query);
+            var record = reader.ReadEvent();
+
+            if (record != null)
+            {
+                return record.FormatDescription() ?? string.Empty;
+            }
+
+            await Task.Delay(pollingInterval, cancellationToken);
+        }
+
+        return null;
+    }
 
     [GeneratedRegex(@"^error\s+0x[0-9A-Fa-f]+:\s*", RegexOptions.IgnoreCase, "en-US")]
     private static partial Regex EventLogHexErrorRegex();

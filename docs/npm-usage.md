@@ -1,3 +1,6 @@
+---
+ms.custom: mslearn
+---
 <!-- AUTO-GENERATED — DO NOT EDIT -->
 <!-- Regenerate with: cd src/winapp-npm && npm run generate-docs -->
 
@@ -56,6 +59,29 @@ Result returned by every command wrapper.
 
 These functions wrap native `winapp` CLI commands. All accept [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).
 
+### `azSign()`
+
+Code-sign a file using Azure Trusted Signing. Signs executables, MSIX packages, or MSIX bundles using a cloud-managed signing identity. Example: winapp az-sign ./app.msix
+
+```typescript
+function azSign(options: AzSignOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `filePath` | `string` | Yes | Path to the file to sign (exe, msix, or msixbundle) |
+| `account` | `string \| undefined` | No | Signing account name. Must be used with --resource-group |
+| `metadataFile` | `string \| undefined` | No | Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. A non-interactive Azure credential should already be available; the CLI can otherwise fall back to an interactive tenant prompt or 'az login', but the npm programmatic API is always non-interactive and fails instead of prompting. |
+| `profile` | `string \| undefined` | No | Certificate profile name. Must be used with --account |
+| `resourceGroup` | `string \| undefined` | No | Resource group to narrow down signing accounts |
+| `subscription` | `string \| undefined` | No | Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `certGenerate()`
 
 Create a self-signed certificate for local testing only. Publisher must match the manifest (auto-inferred if --manifest provided or Package.appxmanifest is in working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.
@@ -75,7 +101,7 @@ function certGenerate(options?: CertGenerateOptions): Promise<WinappResult>
 | `manifest` | `string \| undefined` | No | Path to Package.appxmanifest or appxmanifest.xml file to extract publisher information from |
 | `output` | `string \| undefined` | No | Output path for the generated PFX file |
 | `password` | `string \| undefined` | No | Password for the generated PFX file |
-| `publisher` | `string \| undefined` | No | Publisher name for the generated certificate. If not specified, will be inferred from manifest. |
+| `publisher` | `string \| undefined` | No | Publisher distinguished name (DN) for the generated certificate (e.g., CN=MyCompany or OU=Team, O=Corp, C=US). If not specified, will be inferred from manifest. Bare names are auto-wrapped as CN=<name>. |
 | `validDays` | `number \| undefined` | No | Number of days the certificate is valid |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -124,7 +150,7 @@ function certInstall(options: CertInstallOptions): Promise<WinappResult>
 
 ### `createDebugIdentity()`
 
-Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires Package.appxmanifest in current directory or passed via --manifest. Re-run after changing the manifest or Assets/.
+Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires Package.appxmanifest or appxmanifest.xml in current directory or passed via --manifest. Re-run after changing the manifest or Assets/.
 
 ```typescript
 function createDebugIdentity(options?: CreateDebugIdentityOptions): Promise<WinappResult>
@@ -186,7 +212,7 @@ function getWinappPath(options?: GetWinappPathOptions): Promise<WinappResult>
 
 ### `init()`
 
-Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, creates winapp.yaml for version management, and downloads Windows SDK and Windows App SDK packages and generates projections. Interactive by default (use --use-defaults to skip prompts). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
+Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. Interactive by default; automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
 
 ```typescript
 function init(options?: InitOptions): Promise<WinappResult>
@@ -197,12 +223,12 @@ function init(options?: InitOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace, for consumption or installation. |
-| `configDir` | `string \| undefined` | No | Directory to read/store configuration (default: current directory) |
+| `configDir` | `string \| undefined` | No | Directory to read/store configuration (default: the selected project directory, or current directory if no project is detected) |
 | `configOnly` | `boolean \| undefined` | No | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. |
 | `ignoreConfig` | `boolean \| undefined` | No | Don't use configuration file for version management |
 | `noGitignore` | `boolean \| undefined` | No | Don't update .gitignore file |
 | `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
-| `useDefaults` | `boolean \| undefined` | No | Do not prompt, and use default of all prompts |
+| `useDefaults` | `boolean \| undefined` | No | Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults) |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -246,7 +272,7 @@ function manifestGenerate(options?: ManifestGenerateOptions): Promise<WinappResu
 | `ifExists` | `IfExists \| undefined` | No | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) |
 | `logoPath` | `string \| undefined` | No | Path to logo image file |
 | `packageName` | `string \| undefined` | No | Package name (default: folder name) |
-| `publisherName` | `string \| undefined` | No | Publisher CN (default: CN=<current user>) |
+| `publisherName` | `string \| undefined` | No | Publisher distinguished name (DN) (default: CN=<current user>). Accepts any valid X.500 DN; bare names are auto-wrapped as CN=<name>. |
 | `template` | `ManifestTemplates \| undefined` | No | Manifest template type: 'packaged' (full MSIX app, default) or 'sparse' (desktop app with package identity for Windows APIs) |
 | `version` | `string \| undefined` | No | App version in Major.Minor.Build.Revision format (e.g., 1.0.0.0). |
 
@@ -325,7 +351,7 @@ function packageApp(options: PackageOptions): Promise<WinappResult>
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `inputFolder` | `string` | Yes | Input folder with package layout |
+| `inputFolder` | `string \| string[]` | Yes | One or more input folders with package layout. Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64). |
 | `cert` | `string \| undefined` | No | Path to signing certificate (will auto-sign if provided) |
 | `certPassword` | `string \| undefined` | No | Certificate password (default: password) |
 | `executable` | `string \| undefined` | No | Path to the executable relative to the input folder. |
@@ -333,8 +359,8 @@ function packageApp(options: PackageOptions): Promise<WinappResult>
 | `installCert` | `boolean \| undefined` | No | Install certificate to machine |
 | `manifest` | `string \| undefined` | No | Path to AppX manifest file (default: auto-detect from input folder or current directory) |
 | `name` | `string \| undefined` | No | Package name (default: from manifest) |
-| `output` | `string \| undefined` | No | Output msix file name for the generated package (defaults to <name>.msix) |
-| `publisher` | `string \| undefined` | No | Publisher name for certificate generation |
+| `output` | `string \| undefined` | No | Output file name for the generated package (.msix) or bundle (.msixbundle). Defaults to <name>_<version>_<arch>.msix for single packages, or <name>_<version>_<arch1>_<arch2>.msixbundle for bundles. |
+| `publisher` | `string \| undefined` | No | Publisher distinguished name (DN) for certificate generation (e.g., CN=MyCompany). Bare names are auto-wrapped as CN=<name>. |
 | `selfContained` | `boolean \| undefined` | No | Bundle Windows App SDK runtime for self-contained deployment |
 | `skipPri` | `boolean \| undefined` | No | Skip PRI file generation |
 
@@ -374,15 +400,17 @@ function run(options: RunOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `inputFolder` | `string` | Yes | Input folder containing the app to run |
-| `args` | `string \| undefined` | No | Command-line arguments to pass to the application |
+| `appArgs` | `string \| string[] \| undefined` | No | Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). |
+| `args` | `string \| undefined` | No | Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). |
 | `clean` | `boolean \| undefined` | No | Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. |
-| `debugOutput` | `boolean \| undefined` | No | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. |
+| `debugOutput` | `boolean \| undefined` | No | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. For WinUI apps, a crash also triggers a stowed-exception triage pass; the first run downloads debugger components (cached under the winapp global directory) and can be pointed at an existing debugger install via the WINAPP_DBGTOOLS_DIR environment variable. Cannot be combined with --no-launch or --json. |
 | `detach` | `boolean \| undefined` | No | Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). |
+| `executable` | `string \| undefined` | No | Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) |
 | `noLaunch` | `boolean \| undefined` | No | Only create the debug identity and register the package without launching the application |
 | `outputAppxDirectory` | `string \| undefined` | No | Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used. |
-| `symbols` | `boolean \| undefined` | No | Download symbols from Microsoft Symbol Server for richer native crash analysis. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. |
+| `symbols` | `boolean \| undefined` | No | Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. |
 | `unregisterOnExit` | `boolean \| undefined` | No | Unregister the development package after the application exits. Only removes packages registered in development mode. |
 | `withAlias` | `boolean \| undefined` | No | Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. |
 
@@ -464,6 +492,31 @@ function uiClick(options?: UiClickOptions): Promise<WinappResult>
 | `double` | `boolean \| undefined` | No | Perform a double-click instead of a single click |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `right` | `boolean \| undefined` | No | Perform a right-click instead of a left click |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `uiDrag()`
+
+Press the mouse button at one point, move to another, then release. 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or screen x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.
+
+```typescript
+function uiDrag(options?: UiDragOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `from` | `string \| undefined` | No | Start point — an element selector (drags from its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200). |
+| `to` | `string \| undefined` | No | End point — an element selector (drops at its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400). |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `dwellMs` | `number \| undefined` | No | Milliseconds to dwell at the destination after moving, before releasing (default: 0). Lets drop targets / merge overlays that arm from a sustained hover latch before release. |
+| `holdMs` | `number \| undefined` | No | Milliseconds to hold the button down at the start before moving (default: 0). With <from> == <to> (no movement) this performs a press-and-hold / long-press gesture. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `right` | `boolean \| undefined` | No | Drag with the right mouse button instead of the left button |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -554,6 +607,28 @@ function uiGetValue(options?: UiGetValueOptions): Promise<WinappResult>
 
 ---
 
+### `uiHover()`
+
+Move the mouse to an element's center to trigger hover effects (tooltips, flyouts, visual states). Uses SendInput for realistic mouse movement and waits for a configurable dwell time.
+
+```typescript
+function uiHover(options?: UiHoverOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `dwellTime` | `number \| undefined` | No | Time in milliseconds to wait after hovering for hover effects to appear (default: 800) |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `uiInspect()`
 
 View the UI element tree with semantic slugs, element types, names, and bounds.
@@ -615,6 +690,35 @@ function uiListWindows(options?: UiListWindowsOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
+| `showHidden` | `boolean \| undefined` | No | Include untitled zero-size windows that are hidden by default |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `uiPen()`
+
+Inject synthetic pen/stylus input using the Windows synthetic-pointer API. Taps or draws ink strokes with configurable pressure, tilt and eraser mode, at an element's center or explicit screen x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable (Windows 10 1809+).
+
+```typescript
+function uiPen(options?: UiPenOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `at` | `string \| undefined` | No | Pen contact point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. Ignored when --path is given. |
+| `durationMs` | `number \| undefined` | No | Total glide time in milliseconds distributed across the stroke path segments (default: ~10 ms per segment). |
+| `eraser` | `boolean \| undefined` | No | Use the eraser end of the pen instead of the tip. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `path` | `string \| undefined` | No | Ink stroke path as a whitespace-separated list of x,y pairs, e.g. "10,10 20,30 40,50". |
+| `pressure` | `number \| undefined` | No | Pen pressure from 0.0 to 1.0 (default: 0.5). |
+| `tiltX` | `number \| undefined` | No | Pen tilt along the x-axis in degrees (-90 to 90, default: 0). |
+| `tiltY` | `number \| undefined` | No | Pen tilt along the y-axis in degrees (-90 to 90, default: 0). |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -634,9 +738,10 @@ function uiScreenshot(options?: UiScreenshotOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
-| `captureScreen` | `boolean \| undefined` | No | Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first. |
+| `captureScreen` | `boolean \| undefined` | No | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). |
+| `focus` | `boolean \| undefined` | No | Bring the target window to the foreground before capture. Already implied by --capture-screen. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `output` | `string \| undefined` | No | Save output to file path (e.g., screenshot) |
+| `output` | `string \| undefined` | No | Save output to this file path. |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -645,7 +750,7 @@ function uiScreenshot(options?: UiScreenshotOptions): Promise<WinappResult>
 
 ### `uiScroll()`
 
-Scroll a container element using ScrollPattern. Use --direction to scroll incrementally, or --to to jump to top/bottom.
+Scroll a container element using ScrollPattern. Use --direction to scroll incrementally, --to to jump to top/bottom, or --wheel to synthesize mouse-wheel input.
 
 ```typescript
 function uiScroll(options?: UiScrollOptions): Promise<WinappResult>
@@ -660,6 +765,7 @@ function uiScroll(options?: UiScrollOptions): Promise<WinappResult>
 | `direction` | `string \| undefined` | No | Scroll direction: up, down, left, right |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `to` | `string \| undefined` | No | Scroll to position: top, bottom |
+| `wheel` | `number \| undefined` | No | Rotate the mouse wheel over the element by this many notches (1 = one notch up, -1 = one notch down). Synthesizes real wheel input instead of using ScrollPattern. |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -709,9 +815,34 @@ function uiSearch(options?: UiSearchOptions): Promise<WinappResult>
 
 ---
 
+### `uiSendKeys()`
+
+Send synthetic keyboard input to a window. Supports named keys (down, enter, tab), modifier combos (ctrl+shift+t), raw virtual keys (vk=0xNN), and literal text. Use --verbatim to type the whole argument literally, or --target to focus an element first. Two transports via --via: post-message (default, HWND-targeted, bypasses UIPI) or send-input (OS-wide). For per-keystroke KeyDown on typed text (e.g. a WinUI 3/WPF TextBox), use --via send-input.
+
+```typescript
+function uiSendKeys(options?: UiSendKeysOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `keys` | `string \| undefined` | No | Keys to send. Whitespace-separated tokens: named keys (down, enter, tab, esc, f5), modifier combos (ctrl+shift+t, alt+f4), raw virtual keys (vk=0x42), or literal text (hello). Use text=<literal> to type a single value verbatim when it would otherwise be read as a key name or combo (text=enter types "enter"; text=ctrl+a types "ctrl+a"); backslash escapes \s \t \n \r \\ are supported (text=a\s\sb types "a b"). To type the whole argument literally without escaping each token, pass --verbatim instead. Quote multi-token strings, e.g. "ctrl+a delete". |
+| `allowSystemKeys` | `boolean \| undefined` | No | Allow synthesizing system-/shell-reserved combos (win+<key>, alt+f4, alt+tab, ctrl+esc, …) via --via send-input, which are refused by default because they act on the OS/shell beyond the target app. Opt in to drive global hotkeys (e.g. PowerToys' win+shift+v, win+r). No effect on --via post-message (already window-scoped; a warning is emitted if set without send-input). Note: win+l and ctrl+alt+del stay blocked even with this flag — win+l locks the workstation (LockWorkStation() via the shell hook), which is unrecoverable from automation, and ctrl+alt+del is a Secure Attention Sequence (SAS) that Windows drops from injected input regardless of this flag, so it can never take effect. |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `target` | `string \| undefined` | No | Optional selector (slug or text) to focus before sending keys. |
+| `verbatim` | `boolean \| undefined` | No | Type the entire keys argument as literal text — no named-key, combo, or vk= interpretation, and exact whitespace preserved. The whole-argument form of the per-token text= escape: --verbatim "down down enter" types the words instead of pressing Down, Down, Enter. |
+| `via` | `string \| undefined` | No | Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character KeyDown + TextChanged). Named keys and combos raise KeyDown on both, but keyboard accelerators/shortcuts (KeyboardAccelerator, e.g. ctrl+t) only fire via send-input. post-message targets the focused child control and works for classic Win32/WinForms controls, but WinUI 3 / UWP / XAML controls are windowless and ignore posted messages — use send-input for those (a warning is emitted when the target looks like a XAML app). |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `uiSetValue()`
 
-Set a value on an element using UIA ValuePattern. Works for TextBox, ComboBox, Slider, and other editable controls. Usage: winapp ui set-value <selector> <value> -a <app>
+Set a value on an element programmatically. Works for TextBox, ComboBox, Slider, and other editable controls via UIA ValuePattern/RangeValuePattern, with a LegacyIAccessible (put_accValue) fallback for TextPattern-only edit controls — no app foreground required. Some rich text controls (e.g. WinUI 3 RichEditBox and WPF RichTextBox) don't support setting their value programmatically — use the 'send-keys' command with '--via send-input' to type into them instead. Usage: winapp ui set-value <selector> <value> -a <app>
 
 ```typescript
 function uiSetValue(options?: UiSetValueOptions): Promise<WinappResult>
@@ -733,7 +864,7 @@ function uiSetValue(options?: UiSetValueOptions): Promise<WinappResult>
 
 ### `uiStatus()`
 
-Connect to a target app, auto-detect mode (UIA or DevTools), and display connection info.
+Connect to a target app and display connection info.
 
 ```typescript
 function uiStatus(options?: UiStatusOptions): Promise<WinappResult>
@@ -745,6 +876,35 @@ function uiStatus(options?: UiStatusOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `uiTouch()`
+
+Inject synthetic touch input using the Windows touch-injection API. Supports tap, double-tap, long-press, swipe, pinch and stretch gestures at an element's center or explicit screen x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable.
+
+```typescript
+function uiTouch(options?: UiTouchOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `at` | `string \| undefined` | No | Explicit start point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. |
+| `direction` | `string \| undefined` | No | Swipe direction: right (default), left, up, or down. Combined with --distance to compute the end point when --to-point is not given. |
+| `distance` | `number \| undefined` | No | Distance in pixels for pinch/stretch (finger spread) or swipe. |
+| `durationMs` | `number \| undefined` | No | Glide time in milliseconds for moving gestures (swipe/pinch/stretch). |
+| `fingers` | `number \| undefined` | No | Number of touch contacts (default: 1). Pinch/stretch always use 2. |
+| `gesture` | `string \| undefined` | No | Gesture to perform: tap, double-tap, long-press, swipe, pinch, stretch (default: tap). |
+| `holdMs` | `number \| undefined` | No | Milliseconds to hold contacts down before lifting (long-press hold time). Defaults to 500 ms when --gesture long-press is used and this option is not set. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `toPoint` | `string \| undefined` | No | End point x,y for a swipe (screen coordinates). Takes precedence over --direction. |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -817,6 +977,26 @@ function update(options?: UpdateOptions): Promise<WinappResult>
 
 ## Utility functions
 
+### `uiRecord()`
+
+Record a window or element region to an H.264 MP4.
+
+**`durationSec` is required and must be > 0.** Unbounded recording (durationSec == 0) is only
+supported via the CLI with Ctrl+C or piped stdin. The npm wrapper has no mechanism to stop
+an unbounded spawn, so passing durationSec == 0 or omitting it will throw a clear error.
+
+```typescript
+function uiRecord(options: UiRecordOptions): Promise<WinappResult>
+```
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `options` | `UiRecordOptions` | Yes |  |
+
+---
+
 ### `execWithBuildTools()`
 
 Execute a command with BuildTools bin path added to PATH environment
@@ -838,7 +1018,7 @@ function execWithBuildTools(command: string, options?: ExecSyncOptions): string 
 
 ### `addMsixIdentityToExe()`
 
-Adds package identity information from an appxmanifest.xml file to an executable's embedded manifest
+Adds package identity information from a Package.appxmanifest or appxmanifest.xml file to an executable's embedded manifest
 
 ```typescript
 function addMsixIdentityToExe(exePath: string, appxManifestPath?: string | undefined, options?: MsixIdentityOptions): Promise<MsixIdentityResult>
@@ -849,7 +1029,7 @@ function addMsixIdentityToExe(exePath: string, appxManifestPath?: string | undef
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `exePath` | `string` | Yes | Path to the executable file |
-| `appxManifestPath` | `string \| undefined` | No | Path to the appxmanifest.xml file containing package identity data |
+| `appxManifestPath` | `string \| undefined` | No | Path to the Package.appxmanifest or appxmanifest.xml file containing package identity data |
 | `options` | `MsixIdentityOptions` | No | Optional configuration |
 
 ---
@@ -944,7 +1124,7 @@ npx winapp node create-addon --template cs --name MyCsAddon
 
 ### `node add-electron-debug-identity`
 
-Add package identity to the Electron debug process using sparse packaging.  Creates a backup of `electron.exe`, generates a sparse MSIX manifest, adds identity to the executable, and registers the sparse package.  Requires an `appxmanifest.xml` (create one with `winapp init` or `winapp manifest generate`).
+Add package identity to the Electron debug process using sparse packaging.  Creates a backup of `electron.exe`, generates a sparse MSIX manifest, adds identity to the executable, and registers the sparse package.  Requires a `Package.appxmanifest` (create one with `winapp init` or `winapp manifest generate`).
 
 ```bash
 npx winapp node add-electron-debug-identity [options]
@@ -954,7 +1134,7 @@ npx winapp node add-electron-debug-identity [options]
 
 | Flag | Description |
 |------|-------------|
-| `--manifest <path>` | Path to custom `appxmanifest.xml` (default: `appxmanifest.xml` in current directory) |
+| `--manifest <path>` | Path to custom `Package.appxmanifest` (default: `Package.appxmanifest` in current directory) |
 | `--no-install` | Do not install the package after creation |
 | `--keep-identity` | Keep the manifest identity as-is, without appending `.debug` suffix |
 | `--verbose` | Enable verbose output |
@@ -965,7 +1145,7 @@ npx winapp node add-electron-debug-identity [options]
 
 ```bash
 npx winapp node add-electron-debug-identity
-npx winapp node add-electron-debug-identity --manifest ./custom/appxmanifest.xml
+npx winapp node add-electron-debug-identity --manifest ./custom/Package.appxmanifest
 ```
 
 ---
@@ -1095,6 +1275,16 @@ Re-exported from Node.js for convenience. See [Node.js docs](https://nodejs.org/
 | `needsTerminalRestart` | `boolean` | Yes |  |
 | `files` | `string[]` | Yes |  |
 
+### `UiRecordOptions`
+
+Stricter version of `UiRecordOptions` where `durationSec` is **required** (not optional).
+This type is the public surface of `uiRecord`; the generated type has it optional.
+Survives regeneration because it is defined here in the hand-written guard module.
+
+```typescript
+type UiRecordOptions = Omit<GeneratedUiRecordOptions, "durationSec"> & { durationSec: number; }
+```
+
 ### `IfExists`
 
 IfExists values.
@@ -1119,6 +1309,20 @@ ManifestTemplates values.
 type ManifestTemplates = "packaged" | "sparse"
 ```
 
+### `AzSignOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `filePath` | `string` | Yes | Path to the file to sign (exe, msix, or msixbundle) |
+| `account` | `string \| undefined` | No | Signing account name. Must be used with --resource-group |
+| `metadataFile` | `string \| undefined` | No | Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. A non-interactive Azure credential should already be available; the CLI can otherwise fall back to an interactive tenant prompt or 'az login', but the npm programmatic API is always non-interactive and fails instead of prompting. |
+| `profile` | `string \| undefined` | No | Certificate profile name. Must be used with --account |
+| `resourceGroup` | `string \| undefined` | No | Resource group to narrow down signing accounts |
+| `subscription` | `string \| undefined` | No | Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
 ### `CertGenerateOptions`
 
 | Property | Type | Required | Description |
@@ -1130,7 +1334,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `manifest` | `string \| undefined` | No | Path to Package.appxmanifest or appxmanifest.xml file to extract publisher information from |
 | `output` | `string \| undefined` | No | Output path for the generated PFX file |
 | `password` | `string \| undefined` | No | Password for the generated PFX file |
-| `publisher` | `string \| undefined` | No | Publisher name for the generated certificate. If not specified, will be inferred from manifest. |
+| `publisher` | `string \| undefined` | No | Publisher distinguished name (DN) for the generated certificate (e.g., CN=MyCompany or OU=Team, O=Corp, C=US). If not specified, will be inferred from manifest. Bare names are auto-wrapped as CN=<name>. |
 | `validDays` | `number \| undefined` | No | Number of days the certificate is valid |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
@@ -1198,12 +1402,12 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace, for consumption or installation. |
-| `configDir` | `string \| undefined` | No | Directory to read/store configuration (default: current directory) |
+| `configDir` | `string \| undefined` | No | Directory to read/store configuration (default: the selected project directory, or current directory if no project is detected) |
 | `configOnly` | `boolean \| undefined` | No | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. |
 | `ignoreConfig` | `boolean \| undefined` | No | Don't use configuration file for version management |
 | `noGitignore` | `boolean \| undefined` | No | Don't update .gitignore file |
 | `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
-| `useDefaults` | `boolean \| undefined` | No | Do not prompt, and use default of all prompts |
+| `useDefaults` | `boolean \| undefined` | No | Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults) |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
@@ -1229,7 +1433,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `ifExists` | `IfExists \| undefined` | No | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) |
 | `logoPath` | `string \| undefined` | No | Path to logo image file |
 | `packageName` | `string \| undefined` | No | Package name (default: folder name) |
-| `publisherName` | `string \| undefined` | No | Publisher CN (default: CN=<current user>) |
+| `publisherName` | `string \| undefined` | No | Publisher distinguished name (DN) (default: CN=<current user>). Accepts any valid X.500 DN; bare names are auto-wrapped as CN=<name>. |
 | `template` | `ManifestTemplates \| undefined` | No | Manifest template type: 'packaged' (full MSIX app, default) or 'sparse' (desktop app with package identity for Windows APIs) |
 | `version` | `string \| undefined` | No | App version in Major.Minor.Build.Revision format (e.g., 1.0.0.0). |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
@@ -1272,7 +1476,7 @@ type ManifestTemplates = "packaged" | "sparse"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `inputFolder` | `string` | Yes | Input folder with package layout |
+| `inputFolder` | `string \| string[]` | Yes | One or more input folders with package layout. Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64). |
 | `cert` | `string \| undefined` | No | Path to signing certificate (will auto-sign if provided) |
 | `certPassword` | `string \| undefined` | No | Certificate password (default: password) |
 | `executable` | `string \| undefined` | No | Path to the executable relative to the input folder. |
@@ -1280,8 +1484,8 @@ type ManifestTemplates = "packaged" | "sparse"
 | `installCert` | `boolean \| undefined` | No | Install certificate to machine |
 | `manifest` | `string \| undefined` | No | Path to AppX manifest file (default: auto-detect from input folder or current directory) |
 | `name` | `string \| undefined` | No | Package name (default: from manifest) |
-| `output` | `string \| undefined` | No | Output msix file name for the generated package (defaults to <name>.msix) |
-| `publisher` | `string \| undefined` | No | Publisher name for certificate generation |
+| `output` | `string \| undefined` | No | Output file name for the generated package (.msix) or bundle (.msixbundle). Defaults to <name>_<version>_<arch>.msix for single packages, or <name>_<version>_<arch1>_<arch2>.msixbundle for bundles. |
+| `publisher` | `string \| undefined` | No | Publisher distinguished name (DN) for certificate generation (e.g., CN=MyCompany). Bare names are auto-wrapped as CN=<name>. |
 | `selfContained` | `boolean \| undefined` | No | Bundle Windows App SDK runtime for self-contained deployment |
 | `skipPri` | `boolean \| undefined` | No | Skip PRI file generation |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
@@ -1303,15 +1507,17 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `inputFolder` | `string` | Yes | Input folder containing the app to run |
-| `args` | `string \| undefined` | No | Command-line arguments to pass to the application |
+| `appArgs` | `string \| string[] \| undefined` | No | Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). |
+| `args` | `string \| undefined` | No | Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). |
 | `clean` | `boolean \| undefined` | No | Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. |
-| `debugOutput` | `boolean \| undefined` | No | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. Cannot be combined with --no-launch or --json. |
+| `debugOutput` | `boolean \| undefined` | No | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. For WinUI apps, a crash also triggers a stowed-exception triage pass; the first run downloads debugger components (cached under the winapp global directory) and can be pointed at an existing debugger install via the WINAPP_DBGTOOLS_DIR environment variable. Cannot be combined with --no-launch or --json. |
 | `detach` | `boolean \| undefined` | No | Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). |
+| `executable` | `string \| undefined` | No | Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) |
 | `noLaunch` | `boolean \| undefined` | No | Only create the debug identity and register the package without launching the application |
 | `outputAppxDirectory` | `string \| undefined` | No | Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used. |
-| `symbols` | `boolean \| undefined` | No | Download symbols from Microsoft Symbol Server for richer native crash analysis. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. |
+| `symbols` | `boolean \| undefined` | No | Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. |
 | `unregisterOnExit` | `boolean \| undefined` | No | Unregister the development package after the application exits. Only removes packages registered in development mode. |
 | `withAlias` | `boolean \| undefined` | No | Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
@@ -1357,6 +1563,22 @@ type ManifestTemplates = "packaged" | "sparse"
 | `double` | `boolean \| undefined` | No | Perform a double-click instead of a single click |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `right` | `boolean \| undefined` | No | Perform a right-click instead of a left click |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `UiDragOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `from` | `string \| undefined` | No | Start point — an element selector (drags from its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200). |
+| `to` | `string \| undefined` | No | End point — an element selector (drops at its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400). |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `dwellMs` | `number \| undefined` | No | Milliseconds to dwell at the destination after moving, before releasing (default: 0). Lets drop targets / merge overlays that arm from a sustained hover latch before release. |
+| `holdMs` | `number \| undefined` | No | Milliseconds to hold the button down at the start before moving (default: 0). With <from> == <to> (no movement) this performs a press-and-hold / long-press gesture. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `right` | `boolean \| undefined` | No | Drag with the right mouse button instead of the left button |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
@@ -1410,6 +1632,19 @@ type ManifestTemplates = "packaged" | "sparse"
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
 
+### `UiHoverOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `dwellTime` | `number \| undefined` | No | Time in milliseconds to wait after hovering for hover effects to appear (default: 800) |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
 ### `UiInspectOptions`
 
 | Property | Type | Required | Description |
@@ -1445,6 +1680,26 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
+| `showHidden` | `boolean \| undefined` | No | Include untitled zero-size windows that are hidden by default |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `UiPenOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `at` | `string \| undefined` | No | Pen contact point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. Ignored when --path is given. |
+| `durationMs` | `number \| undefined` | No | Total glide time in milliseconds distributed across the stroke path segments (default: ~10 ms per segment). |
+| `eraser` | `boolean \| undefined` | No | Use the eraser end of the pen instead of the tip. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `path` | `string \| undefined` | No | Ink stroke path as a whitespace-separated list of x,y pairs, e.g. "10,10 20,30 40,50". |
+| `pressure` | `number \| undefined` | No | Pen pressure from 0.0 to 1.0 (default: 0.5). |
+| `tiltX` | `number \| undefined` | No | Pen tilt along the x-axis in degrees (-90 to 90, default: 0). |
+| `tiltY` | `number \| undefined` | No | Pen tilt along the y-axis in degrees (-90 to 90, default: 0). |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
@@ -1455,9 +1710,10 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
-| `captureScreen` | `boolean \| undefined` | No | Capture from screen (includes popups/overlays) instead of window rendering. Brings window to foreground first. |
+| `captureScreen` | `boolean \| undefined` | No | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). |
+| `focus` | `boolean \| undefined` | No | Bring the target window to the foreground before capture. Already implied by --capture-screen. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `output` | `string \| undefined` | No | Save output to file path (e.g., screenshot) |
+| `output` | `string \| undefined` | No | Save output to this file path. |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
@@ -1472,6 +1728,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `direction` | `string \| undefined` | No | Scroll direction: up, down, left, right |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `to` | `string \| undefined` | No | Scroll to position: top, bottom |
+| `wheel` | `number \| undefined` | No | Rotate the mouse wheel over the element by this many notches (1 = one notch up, -1 = one notch down). Synthesizes real wheel input instead of using ScrollPattern. |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
@@ -1502,6 +1759,22 @@ type ManifestTemplates = "packaged" | "sparse"
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
 
+### `UiSendKeysOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `keys` | `string \| undefined` | No | Keys to send. Whitespace-separated tokens: named keys (down, enter, tab, esc, f5), modifier combos (ctrl+shift+t, alt+f4), raw virtual keys (vk=0x42), or literal text (hello). Use text=<literal> to type a single value verbatim when it would otherwise be read as a key name or combo (text=enter types "enter"; text=ctrl+a types "ctrl+a"); backslash escapes \s \t \n \r \\ are supported (text=a\s\sb types "a b"). To type the whole argument literally without escaping each token, pass --verbatim instead. Quote multi-token strings, e.g. "ctrl+a delete". |
+| `allowSystemKeys` | `boolean \| undefined` | No | Allow synthesizing system-/shell-reserved combos (win+<key>, alt+f4, alt+tab, ctrl+esc, …) via --via send-input, which are refused by default because they act on the OS/shell beyond the target app. Opt in to drive global hotkeys (e.g. PowerToys' win+shift+v, win+r). No effect on --via post-message (already window-scoped; a warning is emitted if set without send-input). Note: win+l and ctrl+alt+del stay blocked even with this flag — win+l locks the workstation (LockWorkStation() via the shell hook), which is unrecoverable from automation, and ctrl+alt+del is a Secure Attention Sequence (SAS) that Windows drops from injected input regardless of this flag, so it can never take effect. |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `target` | `string \| undefined` | No | Optional selector (slug or text) to focus before sending keys. |
+| `verbatim` | `boolean \| undefined` | No | Type the entire keys argument as literal text — no named-key, combo, or vk= interpretation, and exact whitespace preserved. The whole-argument form of the per-token text= escape: --verbatim "down down enter" types the words instead of pressing Down, Down, Enter. |
+| `via` | `string \| undefined` | No | Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character KeyDown + TextChanged). Named keys and combos raise KeyDown on both, but keyboard accelerators/shortcuts (KeyboardAccelerator, e.g. ctrl+t) only fire via send-input. post-message targets the focused child control and works for classic Win32/WinForms controls, but WinUI 3 / UWP / XAML controls are windowless and ignore posted messages — use send-input for those (a warning is emitted when the target looks like a XAML app). |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
 ### `UiSetValueOptions`
 
 | Property | Type | Required | Description |
@@ -1521,6 +1794,26 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
+| `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `UiTouchOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
+| `at` | `string \| undefined` | No | Explicit start point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. |
+| `direction` | `string \| undefined` | No | Swipe direction: right (default), left, up, or down. Combined with --distance to compute the end point when --to-point is not given. |
+| `distance` | `number \| undefined` | No | Distance in pixels for pinch/stretch (finger spread) or swipe. |
+| `durationMs` | `number \| undefined` | No | Glide time in milliseconds for moving gestures (swipe/pinch/stretch). |
+| `fingers` | `number \| undefined` | No | Number of touch contacts (default: 1). Pinch/stretch always use 2. |
+| `gesture` | `string \| undefined` | No | Gesture to perform: tap, double-tap, long-press, swipe, pinch, stretch (default: tap). |
+| `holdMs` | `number \| undefined` | No | Milliseconds to hold contacts down before lifting (long-press hold time). Defaults to 500 ms when --gesture long-press is used and this option is not set. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `toPoint` | `string \| undefined` | No | End point x,y for a swipe (screen coordinates). Takes precedence over --direction. |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |

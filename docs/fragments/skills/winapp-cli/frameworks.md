@@ -21,20 +21,31 @@ Each framework has a detailed guide — refer to the links below rather than try
 ## Key differences by framework
 
 ### Electron (npm package)
-Use the **npm package** (`@Microsoft/WinAppCli`), **not** the standalone CLI. The npm package includes:
+Use the **npm package** (`@microsoft/winappcli`), **not** the standalone CLI. The npm package includes:
 - The native winapp CLI binary bundled inside `node_modules`
 - A Node.js SDK with helpers for creating native C#/C++ addons
 - Electron-specific commands under `npx winapp node`
+- Generated JS bindings (`.winapp/bindings/`) for direct JavaScript access to Windows App SDK APIs
 
 Quick start:
 ```powershell
 npm install --save-dev @microsoft/winappcli
-npx winapp init --use-defaults
+npx winapp init . --use-defaults --add-js-bindings
 npx winapp node create-addon --template cs   # create a C# native addon
 npx winapp node add-electron-debug-identity  # register identity for debugging
 ```
 
+Windows integration guidance:
+
+- Use **JS bindings** to call Windows App SDK APIs directly from JavaScript without native addons (for example AI APIs, notifications, and file pickers). Custom WinRT components with .winmd metadata can also be added via `winapp.jsBindings.additionalWinmds` in package.json.
+- Use **native addons** when you need Win32/COM APIs, third-party C++ libraries, or .NET assemblies: `--template cpp` for C++ (node-gyp), or `--template cs` for C#.
+- Mixing JS bindings and native addons in one Electron app is fine.
+
 Additional Electron guides:
+- [Notification JS bindings guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/js-notification.md)
+- [Windows APIs JS bindings guide (file picker + imaging)](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/js-file-picker.md)
+- [Phi Silica JS bindings guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/js-phi-silica.md)
+- [WinML JS bindings guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/js-winml.md)
 - [Packaging guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/packaging.md)
 - [C++ notification addon guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/cpp-notification-addon.md)
 - [WinML addon guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/winml-addon.md)
@@ -43,8 +54,9 @@ Additional Electron guides:
 ### .NET (WPF, WinForms, Console)
 .NET projects have direct access to Windows APIs. Key differences:
 - Projects with NuGet references to `Microsoft.Windows.SDK.BuildTools` or `Microsoft.WindowsAppSDK` **don't need `winapp.yaml`** — winapp auto-detects SDK versions from the `.csproj`
-- The key prerequisite is `appxmanifest.xml`, not `winapp.yaml`
+- The key prerequisite is `Package.appxmanifest`, not `winapp.yaml`
 - No native addon step needed — unlike Electron, .NET can call Windows APIs directly
+- `winapp init` automatically adds the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, enabling `dotnet run` with automatic identity registration
 
 **If you already have a `Package.appxmanifest`** (e.g., WinUI 3 apps or projects with an existing packaging setup), you likely **don't need `winapp init`** — your project is already configured for packaged builds. Just make sure:
 - Your `.csproj` references the `Microsoft.WindowsAppSDK` NuGet package (WinUI 3 apps already have this)
@@ -53,7 +65,7 @@ Additional Electron guides:
 
 Quick start:
 ```powershell
-winapp init --use-defaults
+winapp init . --use-defaults
 dotnet build <path-to-project.csproj> -c Debug -p:Platform=x64
 winapp run bin\x64\Debug\<tfm>\win-x64\
 ```
@@ -95,7 +107,7 @@ C++ projects use winapp primarily for SDK projections (CppWinRT headers) and pac
 
 **Key rules:**
 - **GUI apps** (Flutter, Tauri, WPF): use `winapp run <build-output>` — launches via AUMID activation
-- **Console apps** (C++, Rust, .NET console): use `winapp run <build-output> --with-alias` — launches via execution alias to preserve stdin/stdout. Requires `uap5:ExecutionAlias` in `appxmanifest.xml`
+- **Console apps** (C++, Rust, .NET console): use `winapp run <build-output> --with-alias` — launches via execution alias to preserve stdin/stdout. Requires `uap5:ExecutionAlias` in `Package.appxmanifest`
 - **Electron**: different mechanism — uses `npx winapp node add-electron-debug-identity` because `electron.exe` is in `node_modules/`, not your build output
 - **Startup debugging (any framework)**: use `winapp create-debug-identity <exe>` so your IDE can F5-launch the exe with identity from the first instruction
 
@@ -103,7 +115,7 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 
 ## Related skills
 - **Setup**: `winapp-setup` — initial project setup with `winapp init`
-- **Manifest**: `winapp-manifest` — creating and customizing `appxmanifest.xml`
+- **Manifest**: `winapp-manifest` — creating and customizing `Package.appxmanifest`
 - **Signing**: `winapp-signing` — certificate generation and management
 - **Packaging**: `winapp-package` — creating MSIX installers from build output
 - **Identity**: `winapp-identity` — enabling package identity for Windows APIs during development

@@ -1,4 +1,19 @@
+<!-- mslearn: true -->
+<!-- ms.topic: reference -->
+<!-- description: Complete command reference for the winapp CLI covering setup, packaging, identity, certificates, signing, and other utility commands. -->
 # CLI Documentation and Usage
+
+## Shell Completion
+
+Enable tab completion for commands, options, and values. See the [Shell Completion guide](guides/shell-completion.md) for setup instructions.
+
+```powershell
+# Quick setup for PowerShell (permanent — add to profile)
+winapp complete --setup powershell >> $PROFILE
+
+# Or try it in the current session only
+winapp complete --setup powershell | Out-String | Invoke-Expression
+```
 
 ### init
 
@@ -20,24 +35,48 @@ winapp init [base-directory] [options]
 - `--no-gitignore` - Don't update .gitignore file
 - `--use-defaults`, `--no-prompt` - Do not prompt, and use default of all prompts
 - `--config-only` - Only handle configuration file operations, skip package installation
+- `--add-js-bindings` *(npm only)* - Add `winapp.jsBindings` to package.json and generate JS/TypeScript bindings, without prompting (incompatible with `--setup-sdks none`)
 
 **What it does:**
 
-- Creates `winapp.yaml` configuration file
+- Creates `winapp.yaml` configuration file (only when SDK packages are managed; skipped with `--setup-sdks none`)
 - Downloads Windows SDK and Windows App SDK packages
 - Generates C++/WinRT headers and binaries
-- Creates AppxManifest.xml
+- Creates Package.appxmanifest
 - Sets up build tools and enables developer mode
 - Updates .gitignore to exclude generated files
-- Stores sharable files in the global cache directory
+- Stores shareable files in the global cache directory
+- Generates JS bindings for Windows App SDK APIs when enabled (npm only)
 
-**Automatic .NET project detection:**
+**Automatic project detection:**
+
+When `init` is run without a directory argument, it performs a breadth-first search of the current directory tree to find compatible projects (up to 10). Supported project types:
+
+- **Tauri** — `tauri.conf.json` found one level below the directory
+- **Electron** — `package.json` with `electron` in dependencies or devDependencies
+- **Flutter** — `pubspec.yaml` at project root
+- **.NET** — `.csproj` at project root
+- **Rust** — `Cargo.toml` at project root
+- **C++** — `CMakeLists.txt` at project root
+
+The search skips commonly ignored directories (node_modules, bin, obj, .git, etc.). When a compatible project is found, subdirectories below it are not searched.
+
+- If a directory argument is provided (e.g., `winapp init .` or `winapp init path/to/project`), the search is skipped and `init` checks only that directory for a compatible project
+- If `--use-defaults` (or `--no-prompt`) is set without a directory argument, `init` skips the search and initializes the current directory non-interactively, warning first if no known project type is detected there (e.g., `winapp init --use-defaults`)
+- In non-interactive environments (piped stdin, CI, redirected input), `init` automatically uses `--use-defaults` behavior and emits a warning: `Non-interactive environment detected. Using default values.`
+- If the current directory is a compatible project, `init` proceeds immediately
+- If exactly one project is found elsewhere, you're prompted to confirm
+- If multiple projects are found, you can select which one to initialize — the current directory is always available as a fallback option
+- If no projects are found, you're warned and asked whether to proceed anyway
+- If the search reaches the 10-project limit, a warning suggests providing a directory argument
+
+**Automatic .NET project flow:**
 
 When a `.csproj` file is found in the target directory, `init` uses a streamlined .NET-specific flow:
 
 - Validates and updates the `TargetFramework` to a Windows-compatible TFM (e.g., `net10.0-windows10.0.26100.0`)
 - Adds `Microsoft.WindowsAppSDK` and `Microsoft.Windows.SDK.BuildTools` as NuGet `PackageReference` entries directly in the `.csproj`
-- Generates `appxmanifest.xml`, assets, and a development certificate
+- Generates `Package.appxmanifest`, assets, and a development certificate
 - Does **not** create a `winapp.yaml` or download C++ projections (use `dotnet restore` for NuGet packages)
 
 **Examples:**
@@ -63,7 +102,7 @@ If you ran `init` with `--setup-sdks none` (or skipped SDK installation) and lat
 
 ```bash
 # Re-run init to install SDKs - preserves existing files (manifest, etc.)
-winapp init --use-defaults --setup-sdks stable
+winapp init . --use-defaults --setup-sdks stable
 ```
 
 Use `--setup-sdks preview` or `--setup-sdks experimental` for preview/experimental SDK versions.
@@ -87,9 +126,10 @@ winapp restore [options]
 - Reads existing `winapp.yaml` configuration
 - Downloads/updates SDK packages to specified versions
 - Regenerates C++/WinRT headers and binaries
-- Stores sharable files in the global cache directory
+- Stores shareable files in the global cache directory
 
-> **Note:** For .NET projects initialized with `winapp init`, there is no `winapp.yaml`. Use `dotnet restore` to restore NuGet packages instead.
+> [!NOTE]
+> For .NET projects initialized with `winapp init`, there is no `winapp.yaml`. Use `dotnet restore` to restore NuGet packages instead.
 
 **Examples:**
 
@@ -110,12 +150,11 @@ winapp update [options]
 
 **Options:**
 
-- `--config-dir <path>` - Directory containing winapp.yaml (default: current directory)
-- `----setup-sdks` - SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation)
+- `--setup-sdks <stable|preview|experimental|none>` - SDK installation mode: `stable` (default), `preview`, `experimental`, or `none` (skip SDK installation)
 
 **What it does:**
 
-- Reads existing `winapp.yaml` configuration
+- Reads existing `winapp.yaml` configuration in the current directory
 - Updates all packages to their latest available versions
 - Updates the `winapp.yaml` file with new version numbers
 - Regenerates C++/WinRT headers and binaries
@@ -134,45 +173,48 @@ winapp update --setup-sdks experimental
 
 ### pack
 
-Create MSIX packages from prepared application directories. Requires appxmanifest.xml file to be present in the target directory, in the current directory, or passed with the `--manifest` option. (run `init` or `manifest generate` to create a manifest)
+Create MSIX packages from prepared application directories. Requires a manifest file (`Package.appxmanifest` preferred, `appxmanifest.xml` also supported) to be present in the target directory, in the current directory, or passed with the `--manifest` option. (run `init` or `manifest generate` to create a manifest)
+
+Pass multiple input folders to create an `.msixbundle` for multi-architecture distribution (see [Multi-architecture bundles](#multi-architecture-bundles) below).
 
 ```bash
-winapp pack <input-folder> [options]
+winapp pack <input-folder> [input-folder...] [options]
 ```
 
 **Arguments:**
 
-- `input-folder` - Directory containing the application files to package
+- `input-folder` - One or more directories containing the application files to package. Pass multiple folders (e.g., `./publish/x64 ./publish/arm64`) to create an MSIX bundle.
 
 **Options:**
 
-- `--output <filename>` - Output MSIX file name (default: `<name>_<version>.msix`)
+- `--output <filename>` - Output file name. For single packages: `<name>_<version>_<arch>.msix` (falling back to `<name>_<version>.msix`, `<name>_<arch>.msix`, or `<name>.msix`). For bundles: `<name>_<version>_<arch1>_<arch2>.msixbundle`.
 - `--name <name>` - Package name (default: from manifest)
-- `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect)
+- `--manifest <path>` - Path to manifest file (`Package.appxmanifest` preferred, `appxmanifest.xml` also supported; default: auto-detect)
 - `--cert <path>` - Path to signing certificate (enables auto-signing)
 - `--cert-password <password>` - Certificate password (default: "password")
 - `--generate-cert` - Generate a new development certificate
 - `--install-cert` - Install certificate to machine
-- `--publisher <name>` - Publisher name for certificate generation
+- `--publisher <name>` - Publisher for certificate generation. Accepts a full X.500 distinguished name or a bare name (automatically wrapped as `CN=<name>`)
 - `--self-contained` - Bundle Windows App SDK runtime
 - `--skip-pri` - Skip PRI file generation
 - `--executable <path>` - Path to the executable relative to the input folder (also `--exe`). Used to resolve `$targetnametoken$` placeholders in the manifest.
 
 **What it does:**
 
-- Validates and processes AppxManifest.xml files
+- Validates and processes Package.appxmanifest files
 - Resolves `$placeholder$` tokens in the manifest (see [Manifest placeholders](#manifest-placeholders) below)
 - Ensures proper framework dependencies
 - Updates side-by-side manifests with registrations
+- Automatically discovers and bundles any non-image files referenced in the manifest (e.g., AppExtension `manifest.json`, config files) from the manifest directory or input folder if they are missing from staging
 - Automatically discovers third-party WinRT components and registers their activatable classes (see [WinRT component discovery](#winrt-component-discovery) below)
 - Handles self-contained WinAppSDK deployment
 - Signs package if certificate provided
 
-**WinRT component discovery:**
+#### WinRT component discovery
 
 When packaging, `winapp pack` automatically scans NuGet packages defined in the `winapp.yaml` or `*.csproj` for third-party WinRT components (e.g., Win2D). It parses `.winmd` files to extract activatable class names and locates their implementation DLLs. The discovered entries are registered as follows:
 
-- **Framework-dependent** (default): Activatable classes are added as `<InProcessServer>` entries in the `AppxManifest.xml`
+- **Framework-dependent** (default): Activatable classes are added as `<InProcessServer>` entries in the `Package.appxmanifest`
 - **Self-contained** (`--self-contained`): Activatable classes are embedded in side-by-side (SxS) manifests within the executable
 
 **Placeholder resolution during packaging:**
@@ -198,6 +240,49 @@ winapp pack ./dist --generate-cert --install-cert --self-contained
 winapp pack ./dist --executable MyApp.exe
 ```
 
+#### Multi-architecture bundles
+
+When multiple input folders are passed, `winapp pack` creates an `.msixbundle` containing one `.msix` per architecture:
+
+```bash
+# Create unsigned bundle for Microsoft Store submission
+winapp pack ./publish/x64 ./publish/arm64
+
+# Create signed bundle for sideloading
+winapp pack ./publish/x64 ./publish/arm64 --cert ./devcert.pfx
+
+# Self-contained bundle
+winapp pack ./publish/x64 ./publish/arm64 --self-contained --generate-cert
+```
+
+The command auto-detects each folder's architecture from the primary executable's PE header, validates consistency across slices (Identity, Capabilities, Dependencies), and produces a `<Name>_<Version>_<arch1>_<arch2>.msixbundle`.
+
+**Manifest resolution for bundles:**
+
+Each slice in the bundle needs a manifest. The command resolves manifests in this order:
+
+1. **`--manifest <path>`** — If specified, this single manifest is used for all slices. The `ProcessorArchitecture` is automatically updated per-slice to match the detected architecture.
+
+2. **Per-folder manifest** — If each input folder contains a `Package.appxmanifest` (or `appxmanifest.xml`), that folder's manifest is used for its slice.
+
+3. **Current directory fallback** — If a folder has no manifest, the command looks for `Package.appxmanifest` in the current working directory and uses it (with architecture auto-stamped).
+
+In all cases, the manifest is automatically updated: placeholders are resolved, dependencies are injected, and the `ProcessorArchitecture` is force-set to the detected architecture. After resolution, a cross-slice validation ensures that Identity (Name, Version, Publisher), Capabilities, and Dependencies are consistent across all slices — only `ProcessorArchitecture` may differ.
+The package version defined in the slices is atributed to the MSIX bundle version, except if it's `0.0.0.0`, in which case a timestamp-based version is automatically generated.
+
+```bash
+# Option 1: Single shared manifest (simplest for most projects)
+# Place Package.appxmanifest in your project root and run from there
+winapp pack ./publish/x64 ./publish/arm64
+
+# Option 2: Explicit manifest path
+winapp pack ./publish/x64 ./publish/arm64 --manifest ./src/Package.appxmanifest
+
+# Option 3: Per-folder manifests (useful if slices have different app extensions)
+# Each folder already contains its own Package.appxmanifest
+winapp pack ./publish/x64 ./publish/arm64
+```
+
 ---
 
 ### create-debug-identity
@@ -216,7 +301,7 @@ winapp create-debug-identity [entrypoint] [options]
 
 **Options:**
 
-- `--manifest <path>` - Path to AppxManifest.xml (default: `./appxmanifest.xml`)
+- `--manifest <path>` - Path to the app manifest file, either `Package.appxmanifest` or `appxmanifest.xml` (default: auto-detect `Package.appxmanifest` or `appxmanifest.xml` in the current directory)
 - `--no-install` - Don't install the package after creation
 - `--keep-identity` - Keep the manifest identity as-is, without appending `.debug` to the package name and application ID
 
@@ -243,11 +328,11 @@ winapp create-debug-identity app.py
 
 ### manifest
 
-Generate and manage AppxManifest.xml files.
+Generate and manage Package.appxmanifest files.
 
 #### manifest generate
 
-Generate AppxManifest.xml from templates.
+Generate Package.appxmanifest from templates.
 
 ```bash
 winapp manifest generate [directory] [options]
@@ -260,20 +345,20 @@ winapp manifest generate [directory] [options]
 **Options:**
 
 - `--package-name <name>` - Package name (default: folder name)
-- `--publisher-name <name>` - Publisher CN (default: CN=\<current user\>)
+- `--publisher-name <name>` - Publisher distinguished name (default: CN=\<current user\>). Accepts any valid X.500 DN; bare names are auto-wrapped as CN=\<name\>.
 - `--version <version>` - Version (default: "1.0.0.0")
 - `--description <text>` - Description (default: "My Application")
 - `--entrypoint <path>` - Entry point executable or script
 - `--template <type>` - Template type: `packaged` (default) or `sparse`
 - `--logo-path <path>` - Path to logo image file
-- `--if-exists <Error|Overwrite|Skip>` - Set behavior if the certificate file already exists (default: Error)
+- `--if-exists <Error|Overwrite|Skip>` - Behavior when the manifest file already exists at the target path (default: `Error`)
 
 **Templates:**
 
 - `packaged` - Standard packaged app manifest
 - `sparse` - App manifest using [sparse/external location packaging](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/grant-identity-to-nonpackaged-apps)
 
-**Manifest placeholders:**
+#### Manifest placeholders
 
 Generated manifests use `$placeholder$` tokens (dollar-sign delimited) that are resolved automatically at packaging time:
 
@@ -302,12 +387,106 @@ winapp manifest generate
 winapp manifest generate ./src --package-name MyApp --publisher-name "CN=My Company" --if-exists overwrite
 ```
 
+#### manifest add-alias
+
+Add an execution alias (`uap5:AppExecutionAlias`) to a Package.appxmanifest. This allows launching the packaged app from the command line by typing the alias name.
+
+```bash
+winapp manifest add-alias [options]
+```
+
+**Options:**
+
+- `--name <alias>` - Alias name (e.g. `myapp.exe`). Default: inferred from the `Executable` attribute in the manifest.
+- `--manifest <path>` - Path to Package.appxmanifest (default: search current directory)
+- `--app-id <id>` - Application Id to add the alias to (default: first Application element)
+
+**What it does:**
+
+- Reads the manifest and infers the alias from the `Executable` attribute (preserving placeholders like `$targetnametoken$.exe`)
+- Adds the `uap5` namespace declaration if not already present
+- Adds an `<Extensions>` block with `<uap5:AppExecutionAlias>` inside the target Application element
+- If the alias already exists, reports it and exits successfully
+
+**Examples:**
+
+```bash
+# Add alias inferred from Executable attribute (e.g. $targetnametoken$.exe)
+winapp manifest add-alias
+
+# Add alias with explicit name
+winapp manifest add-alias --name myapp.exe
+
+# Add alias to specific manifest
+winapp manifest add-alias --manifest ./dist/Package.appxmanifest
+```
+
+#### manifest update-assets
+
+Generate all required MSIX image assets from a single source image.
+
+```bash
+winapp manifest update-assets <image-path> [options]
+```
+
+**Arguments:**
+
+- `image-path` - Path to source image file (PNG, JPG, SVG, ICO, GIF, BMP, etc.)
+
+**Options:**
+
+- `--manifest <path>` - Path to Package.appxmanifest file (default: search current directory)
+- `--light-image <path>` - Path to a separate source image for light theme variants
+
+**Description:**
+
+Takes a single source image and generates a comprehensive set of MSIX image assets based on the manifest's asset references:
+
+For each asset referenced in the manifest:
+- **5 scale variants** — base (no suffix), `.scale-125`, `.scale-150`, `.scale-200`, `.scale-400`
+
+For the app icon (Square44x44Logo / AppList, 44×44 base):
+- **14 plated targetsize variants** — `.targetsize-{16,20,24,30,32,36,40,48,60,64,72,80,96,256}`
+- **14 unplated targetsize variants** — `.targetsize-{size}_altform-unplated`
+
+Additionally:
+- **app.ico** — Multi-resolution ICO file (16, 24, 32, 48, 256) for shell integration. If an existing `.ico` file is found in the assets directory (e.g. `AppIcon.ico` from a project template), it is replaced in-place rather than creating a duplicate
+
+With `--light-image`:
+- **Light theme targetsize variants** — `.targetsize-{size}_altform-lightunplated` (app icon)
+- **Light theme scale variants** — `.scale-{factor}_altform-colorful_theme-light` (tiles, store logo)
+
+**SVG support:** SVG files are fully supported as source images. They are rendered as vectors directly at each target size, producing pixel-perfect results at all resolutions.
+
+The command scales images proportionally while maintaining aspect ratio, centering them with transparent backgrounds when needed. Assets are saved to the `Assets` directory relative to the manifest location.
+
+**Examples:**
+
+```bash
+# Generate assets with auto-detected manifest
+winapp manifest update-assets mylogo.png
+
+# Use an SVG source for best quality at all sizes
+winapp manifest update-assets mylogo.svg
+
+# Specify manifest location explicitly
+winapp manifest update-assets mylogo.png --manifest ./dist/Package.appxmanifest
+
+# Generate light theme variants from a separate image
+winapp manifest update-assets mylogo.png --light-image mylogo-light.png
+
+# Use the same image for both (generates all MRT light theme qualifiers)
+winapp manifest update-assets mylogo.png --light-image mylogo.png
+
+# With verbose output
+winapp manifest update-assets mylogo.png --verbose
+```
 
 ---
 
 ### run
 
-Create a loose layout package from a build output folder, register it with Windows, and launch the application — simulating a full MSIX install for debugging. Returns the process ID for debugger attachment.
+Create a loose layout package from a build output folder, register it with Windows using the `Windows.Management.Deployment.PackageManager` API, and launch the application — simulating a full MSIX install for debugging. Returns the process ID for debugger attachment.
 
 > **This is the preferred command for debugging with package identity** for most frameworks (.NET, C++, Rust, Flutter, Tauri). Unlike [`create-debug-identity`](#create-debug-identity) which registers a sparse package for a single exe, `winapp run` registers the entire folder as a loose layout package, just like a real MSIX install. See the [Debugging Guide](debugging.md) for common debugging workflows.
 
@@ -321,16 +500,17 @@ winapp run <input-folder> [options]
 
 **Options:**
 
-- `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect from input folder or current directory)
+- `--manifest <path>` - Path to Package.appxmanifest (default: auto-detect from input folder or current directory)
 - `--output-appx-directory <path>` - Output directory for the loose layout package (default: `AppX` inside the input folder directory)
-- `--args <string>` - Command-line arguments to pass to the application
+- `--args <string>` - Command-line arguments to pass to the application. Alternatively, use `--` followed by arguments to avoid escaping (e.g., `winapp run . -- --flag value`).
 - `--no-launch` - Only create the debug identity and register the package without launching the application
 - `--with-alias` - Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a `uap5:ExecutionAlias` in the manifest (use `winapp manifest add-alias` to add one). Cannot be combined with `--no-launch`. Cannot be combined with `--json`.
-- `--debug-output` - Capture `OutputDebugString` messages and first-chance exceptions from the launched application. Framework noise (WinUI, COM, DirectX) is filtered from console output; the full log file captures everything. If the app crashes, automatically captures a minidump and analyzes it to show the exception type, message, and stack trace with source file:line numbers (resolved from PDBs in the build output folder). Managed (.NET) crashes are analyzed instantly with no external tools. Native (C++/WinRT) crashes show module names and offsets. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use `--no-launch` instead if you need to attach a different debugger. Cannot be combined with `--no-launch`. Cannot be combined with `--json`.
-- `--symbols` - Download PDB symbols from Microsoft Symbol Server for richer native crash analysis with resolved function names. Only used with `--debug-output`. If omitted and a native crash occurs, the output will suggest adding this flag. First run downloads symbols and caches them locally; subsequent runs use the cache.
+- `--debug-output` - Capture `OutputDebugString` messages and first-chance exceptions from the launched application. Framework noise (WinUI, COM, DirectX) is filtered from console output; the full log file captures everything. If the app crashes, automatically captures a minidump and analyzes it to show the exception type, message, and stack trace with source file:line numbers (resolved from PDBs in the build output folder). Managed (.NET) crashes are analyzed instantly with no external tools. Native (C++/WinRT) crashes show module names and offsets. When the crashed app is a WinUI 3 app (`Microsoft.UI.Xaml.dll` is loaded), an extra stowed-exception triage pass runs automatically to surface the originating HRESULT, its ErrorContext chain, and the full native XAML dispatch stack; the required debugger components are downloaded on first use (see [Debugging](debugging.md#winui-stowed-exception-triage), overridable via the `WINAPP_DBGTOOLS_DIR` environment variable). Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use `--no-launch` instead if you need to attach a different debugger. Cannot be combined with `--no-launch`. Cannot be combined with `--json`.
+- `--symbols` - Download PDB symbols from Microsoft Symbol Server for richer native crash analysis with resolved function names. Only used with `--debug-output`. If omitted and a native crash occurs, the output will suggest adding this flag. This flag also improves the WinUI stowed-exception triage stack for WinUI 3 apps. First run downloads symbols and caches them locally; subsequent runs use the cache.
 - `--unregister-on-exit` - Unregister the development package after the application exits. Only removes packages registered in development mode. Cannot be combined with `--no-launch`.
 - `--detach` - Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with `--json`). Cannot be combined with `--no-launch`, `--debug-output`, `--with-alias`, or `--unregister-on-exit`.
 - `--clean` - Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments.
+- `--json` - Format output as JSON for programmatic consumption (e.g. CI/automation). Useful with `--detach` to capture the PID. Cannot be combined with `--with-alias` or `--debug-output`.
 
 **Application data persistence:**
 
@@ -340,7 +520,7 @@ Use `--clean` when you need a fresh start (e.g., to reset corrupted state or tes
 
 **What it does:**
 
-- Locates or generates the AppxManifest.xml
+- Locates or generates the Package.appxmanifest
 - Creates and registers a debug identity using a loose layout package
 - Computes the Application User Model ID (AUMID)
 - Launches the application using the registered identity (unless `--no-launch` is specified)
@@ -353,7 +533,10 @@ Use `--clean` when you need a fresh start (e.g., to reset corrupted state or tes
 winapp run ./bin/Debug
 
 # Launch with custom manifest and arguments
-winapp run ./dist --manifest ./out/AppxManifest.xml --args "--my-flag value"
+winapp run ./dist --manifest ./out/Package.appxmanifest --args "--my-flag value"
+
+# Pass arguments after -- to avoid escaping (equivalent to --args)
+winapp run ./bin/Debug -- --my-flag value
 
 # Specify output directory for loose layout package
 winapp run ./bin/Release --output-appx-directory ./AppXDebug
@@ -417,7 +600,7 @@ winapp unregister [options]
 
 **Options:**
 
-- `--manifest <path>` - Path to AppxManifest.xml (default: auto-detect from current directory)
+- `--manifest <path>` - Path to Package.appxmanifest (default: auto-detect from current directory)
 - `--force` - Skip the install-location directory check and unregister even if the package was registered from a different project tree
 - `--json` - Format output as JSON
 
@@ -436,108 +619,13 @@ winapp unregister [options]
 winapp unregister
 
 # Unregister with explicit manifest
-winapp unregister --manifest ./appxmanifest.xml
+winapp unregister --manifest ./Package.appxmanifest
 
 # Force unregister even if registered from a different project tree
 winapp unregister --force
 
 # JSON output for scripting
 winapp unregister --json
-```
-
----
-
-#### manifest add-alias
-
-Add an execution alias (`uap5:AppExecutionAlias`) to an appxmanifest.xml. This allows launching the packaged app from the command line by typing the alias name.
-
-```bash
-winapp manifest add-alias [options]
-```
-
-**Options:**
-
-- `--name <alias>` - Alias name (e.g. `myapp.exe`). Default: inferred from the `Executable` attribute in the manifest.
-- `--manifest <path>` - Path to AppxManifest.xml (default: search current directory)
-- `--app-id <id>` - Application Id to add the alias to (default: first Application element)
-
-**What it does:**
-
-- Reads the manifest and infers the alias from the `Executable` attribute (preserving placeholders like `$targetnametoken$.exe`)
-- Adds the `uap5` namespace declaration if not already present
-- Adds an `<Extensions>` block with `<uap5:AppExecutionAlias>` inside the target Application element
-- If the alias already exists, reports it and exits successfully
-
-**Examples:**
-
-```bash
-# Add alias inferred from Executable attribute (e.g. $targetnametoken$.exe)
-winapp manifest add-alias
-
-# Add alias with explicit name
-winapp manifest add-alias --name myapp.exe
-
-# Add alias to specific manifest
-winapp manifest add-alias --manifest ./dist/appxmanifest.xml
-```
-
-Generate all required MSIX image assets from a single source image.
-
-```bash
-winapp manifest update-assets <image-path> [options]
-```
-
-**Arguments:**
-
-- `image-path` - Path to source image file (PNG, JPG, SVG, ICO, GIF, BMP, etc.)
-
-**Options:**
-
-- `--manifest <path>` - Path to AppxManifest.xml file (default: search current directory)
-- `--light-image <path>` - Path to a separate source image for light theme variants
-
-**Description:**
-
-Takes a single source image and generates a comprehensive set of MSIX image assets based on the manifest's asset references:
-
-For each asset referenced in the manifest:
-- **5 scale variants** — base (no suffix), `.scale-125`, `.scale-150`, `.scale-200`, `.scale-400`
-
-For the app icon (Square44x44Logo / AppList, 44×44 base):
-- **14 plated targetsize variants** — `.targetsize-{16,20,24,30,32,36,40,48,60,64,72,80,96,256}`
-- **14 unplated targetsize variants** — `.targetsize-{size}_altform-unplated`
-
-Additionally:
-- **app.ico** — Multi-resolution ICO file (16, 24, 32, 48, 256) for shell integration. If an existing `.ico` file is found in the assets directory (e.g. `AppIcon.ico` from a project template), it is replaced in-place rather than creating a duplicate
-
-With `--light-image`:
-- **Light theme targetsize variants** — `.targetsize-{size}_altform-lightunplated` (app icon)
-- **Light theme scale variants** — `.scale-{factor}_altform-colorful_theme-light` (tiles, store logo)
-
-**SVG support:** SVG files are fully supported as source images. They are rendered as vectors directly at each target size, producing pixel-perfect results at all resolutions.
-
-The command scales images proportionally while maintaining aspect ratio, centering them with transparent backgrounds when needed. Assets are saved to the `Assets` directory relative to the manifest location.
-
-**Examples:**
-
-```bash
-# Generate assets with auto-detected manifest
-winapp manifest update-assets mylogo.png
-
-# Use an SVG source for best quality at all sizes
-winapp manifest update-assets mylogo.svg
-
-# Specify manifest location explicitly
-winapp manifest update-assets mylogo.png --manifest ./dist/appxmanifest.xml
-
-# Generate light theme variants from a separate image
-winapp manifest update-assets mylogo.png --light-image mylogo-light.png
-
-# Use the same image for both (generates all MRT light theme qualifiers)
-winapp manifest update-assets mylogo.png --light-image mylogo.png
-
-# With verbose output
-winapp manifest update-assets mylogo.png --verbose
 ```
 
 ---
@@ -556,8 +644,8 @@ winapp cert generate [options]
 
 **Options:**
 
-- `--manifest <appxmanifest.xml>` - Extract publisher information from appxmanifest.xml 
-- `--publisher <name>` - Publisher name for certificate
+- `--manifest <Package.appxmanifest>` - Extract publisher information from Package.appxmanifest 
+- `--publisher <name>` - Publisher for the certificate. Accepts a full X.500 distinguished name (e.g., `CN=Contoso, O=Contoso Ltd, C=US`) or a bare name which is automatically wrapped as `CN=<name>`
 - `--output <path>` - Output certificate file path (supports absolute and relative paths)
 - `--password <password>` - Certificate password (default: "password")
 - `--valid-days <valid-days>` - Number of days the certificate is valid (default: 365)
@@ -644,6 +732,53 @@ winapp sign MyApp.msix --cert ./mycert.pfx
 
 # Sign executable
 winapp sign ./bin/MyApp.exe --cert ./mycert.pfx --cert-password mypassword
+```
+
+---
+
+### az-sign
+
+Code-sign a file (exe, MSIX, or MSIX bundle) using [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/) — a cloud-managed signing identity, so no private key (PFX) ever lives on the local machine.
+
+```bash
+winapp az-sign <file-path> [options]
+```
+
+**Arguments:**
+
+- `file-path` - Path to the file to sign (exe, msix, or msixbundle)
+
+**Options:**
+
+- `--subscription`, `-s` - Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted
+- `--resource-group`, `-r` - Resource group to narrow down signing accounts
+- `--account` - Signing account name. Must be used with `--resource-group`
+- `--profile`, `-p` - Certificate profile name. Must be used with `--account`
+- `--metadata-file`, `-m` - Path to an existing `metadata.json`. Skips resource discovery and account/profile selection prompts and signs directly. A non-interactive Azure credential should already be available; the CLI can otherwise fall back to an interactive tenant prompt or `az login`, but the npm programmatic API is always non-interactive and fails instead of prompting
+
+**Authentication:**
+
+`az-sign` uses Azure's standard credential chain (`DefaultAzureCredential`). For CI/CD, set `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET` (or use GitHub Actions OIDC / managed identity). An existing Azure CLI session (`az login`, including the `azure/login` GitHub Action) is also honored in any environment. Only when no credentials are found *and* the session is interactive will `az-sign` launch `az login` for you.
+
+**Prerequisites:**
+
+- An Azure Code Signing account and a certificate profile (created in the Azure portal after identity validation), plus the **Code Signing Certificate Profile Signer** role assigned to your identity. For more guidance, visit [Azure Artifact Signing quickstart docs.](https://learn.microsoft.com/azure/artifact-signing/quickstart)
+- A machine-wide **x64 .NET 8 (or later) runtime** installed. The Azure signing client library is a managed assembly that `signtool.exe` loads in a separate process; winapp's own self-contained runtime does not satisfy it. Install it from https://dotnet.microsoft.com/download if signing fails with a runtime-load error.
+- The **Microsoft Visual C++ Redistributable (x64)**. The Azure signing client library depends on the VC++ runtime, and because winapp downloads the raw NuGet package rather than the official client-tools installer, this dependency is **not** installed automatically. A clean machine can load-fail even with .NET and SignTool present. Install the latest x64 redistributable from https://aka.ms/vs/17/release/vc_redist.x64.exe if signing fails with a `0xc000007b`, "The application was unable to start correctly", or missing-DLL error from the dlib.
+
+> **Least-privilege CI:** Auto-discovery (listing subscriptions, resource groups, accounts, and profiles) needs read access at a parent scope. To avoid *every* collection-listing call, pass all four of `--subscription`, `--resource-group`, `--account`, and `--profile`: `az-sign` then validates the account and profile with direct resource reads (a GET on each named resource) instead of enumerating the parent collection, so a principal scoped to just that account and profile is sufficient. Omitting any one of them re-introduces a listing call — for example, leaving out `--subscription` makes `az-sign` list the subscriptions your identity can access — which a narrowly-scoped principal may not be permitted to do. A principal scoped only to a single certificate profile can skip validation entirely by passing a pre-generated `--metadata-file` (which specifies the account endpoint and profile directly).
+
+**Examples:**
+
+```bash
+# Interactive — discover/select subscription, account, and profile
+winapp az-sign ./app.msix
+
+# Fully specified — no prompting (ideal for CI/CD)
+winapp az-sign ./app.msix --subscription <sub-id> --resource-group <rg> --account <account> --profile <profile>
+
+# Reuse an existing metadata.json (skips resource discovery and selection; authentication may still prompt)
+winapp az-sign ./app.msix --metadata-file ./metadata.json
 ```
 
 ---
@@ -741,7 +876,7 @@ winapp tool signtool verify /pa MyApp.msix
 
 ### store
 
-Run a Microsoft Store Developer CLI command. This command will download the Microsoft Store Developer CLI if not already downloaded. Learn more about the Microsoft Store Developer CLI here: ([https://aka.ms/msstoredevcli](https://aka.ms/msstoredevcli)).
+Run a Microsoft Store Developer CLI command. This command will download the Microsoft Store Developer CLI if not already downloaded. Learn more about the [Microsoft Store Developer CLI](https://aka.ms/msstoredevcli).
 
 ```bash
 winapp store [args...]
@@ -785,6 +920,42 @@ winapp get-winapp-path [options]
 
 ---
 
+### node generate-bindings
+
+*(Available in NPM package only)* Generate JS bindings for Windows App SDK APIs. The bindings are declared by a `"winapp": { "jsBindings": {...} }` namespace in **`package.json`** and written to `.winapp/bindings/`.
+
+```bash
+npx winapp node generate-bindings [options]
+```
+
+**Options:**
+
+- `--verbose`, `-v` - Enable verbose per-file codegen output
+- `--quiet`, `-q` - Suppress progress and informational output
+
+**What it does:**
+
+- Reads the `winapp.jsBindings` block from `package.json` and the `winmds.lock.json` written by the last `winapp restore`, then emits typed `.js` + `.d.ts` bindings into `.winapp/bindings/`
+- Does **not** modify `package.json` — it is a passive regenerator. Adding the `winapp.jsBindings` block and the `@microsoft/dynwinrt` runtime dependency happens during [`winapp init`](#init) when JS bindings are enabled; this command fails fast if the block is absent
+- Warns (but does not write) if `@microsoft/dynwinrt` is missing from your dependencies — run `npm install` after `init` has added it
+
+> [!NOTE]
+> Bindings are **npm-only** — they require invocation via `npx winapp` (the `@microsoft/winappcli` npm package); the standalone winget CLI does not surface them. Run [`winapp init`](#init) interactively and opt in, or use `winapp init . --use-defaults --add-js-bindings`, before using this command to regenerate bindings. If you edit `winapp.yaml`, run `npx winapp restore` to refresh Windows dependencies before regenerating.
+
+**Examples:**
+
+```bash
+# Regenerate JS bindings in the current project
+npx winapp node generate-bindings
+
+# Regenerate after editing winapp.jsBindings, with verbose output
+npx winapp node generate-bindings --verbose
+```
+
+> See the [JS bindings guide](guides/electron/js-file-picker.md) for the end-to-end workflow and the `winapp.jsBindings` configuration options.
+
+---
+
 ### node create-addon
 
 *(Available in NPM package only)* Generate native C++ or C# addon templates with Windows SDK and Windows App SDK integration.
@@ -820,7 +991,7 @@ npx winapp node create-addon --name myWindowsAddon
 
 ### node add-electron-debug-identity
 
-*(Available in NPM package only)* Add app identity to Electron development process by using sparse packaging. Requires an appxmanifest.xml (create one with `winapp init` or `winapp manifest generate` if you don't have one).
+*(Available in NPM package only)* Add app identity to Electron development process by using sparse packaging. Requires a Package.appxmanifest (create one with `winapp init` or `winapp manifest generate` if you don't have one).
 
 > [!IMPORTANT]  
 > There is a known issue with sparse packaging Electron applications which causes the app to crash on start or not render the web content. The issue has been fixed in Windows but it has not propagated to external Windows devices yet. If you are seeing this issue after calling `add-electron-debug-identity`, you can [disable sandboxing in your Electron app](https://www.electronjs.org/docs/latest/tutorial/sandbox#disabling-chromiums-sandbox-testing-only) for debug purposes with the `--no-sandbox` flag. This issue does not affect full MSIX packaging.
@@ -835,7 +1006,7 @@ npx winapp node add-electron-debug-identity [options]
 
 | Option | Description |
 |--------|-------------|
-| `--manifest <path>` | Path to custom appxmanifest.xml (default: appxmanifest.xml in current directory) |
+| `--manifest <path>` | Path to custom Package.appxmanifest (default: Package.appxmanifest in current directory) |
 | `--no-install` | Do not install or modify dependencies; only configure the Electron debug identity |
 | `--keep-identity` | Keep the manifest identity as-is, without appending `.debug` to the package name and application ID |
 | `--verbose` | Enable verbose output |
@@ -844,7 +1015,7 @@ npx winapp node add-electron-debug-identity [options]
 
 - Registers debug identity for electron.exe process
 - Enables testing identity-requiring APIs in Electron development
-- Uses existing AppxManifest.xml for identity configuration
+- Uses existing Package.appxmanifest for identity configuration
 
 **Examples:**
 
@@ -853,7 +1024,7 @@ npx winapp node add-electron-debug-identity [options]
 npx winapp node add-electron-debug-identity
 
 # Use a custom manifest file
-npx winapp node add-electron-debug-identity --manifest ./custom/appxmanifest.xml
+npx winapp node add-electron-debug-identity --manifest ./custom/Package.appxmanifest
 ```
 
 ---
@@ -911,13 +1082,37 @@ REM Set a custom location for winapp's global cache
 set WINAPP_CLI_CACHE_DIRECTORY=d:\temp\.winapp
 ```
 
-In **Powershell** and **pwsh**:
+In **PowerShell** and **pwsh**:
 ```pwsh
 # Set a custom location for winapp's global cache
 $env:WINAPP_CLI_CACHE_DIRECTORY=d:\temp\.winapp
 ```
 
 Winapp will create this directory automatically when you run commands like `init` or `restore`.
+
+### Update Checks
+
+The winapp CLI periodically checks for new versions and displays a one-line notice when an update is available. This check runs in the background and adds no latency to commands.
+
+Update checks are automatically disabled in CI environments (GitHub Actions, Azure Pipelines, etc.).
+
+To manually disable update checks, set the `WINAPP_CLI_UPDATE_CHECK` environment variable to `0`.
+
+In **cmd**:
+```cmd
+set WINAPP_CLI_UPDATE_CHECK=0
+```
+
+In **PowerShell** and **pwsh**:
+```pwsh
+$env:WINAPP_CLI_UPDATE_CHECK = "0"
+```
+
+To make this permanent:
+```powershell
+[System.Environment]::SetEnvironmentVariable('WINAPP_CLI_UPDATE_CHECK', '0', 'User')
+```
+
 ### ui
 
 Inspect and interact with running Windows app UIs using UI Automation (UIA).
@@ -933,9 +1128,15 @@ winapp ui [command] [options]
 - `get-property` - Read element properties
 - `get-text` / `get-value` - Read value/text from element (TextPattern, ValuePattern, or Name)
 - `screenshot` - Capture window/element as PNG (auto-captures dialogs separately)
+- `record` - Record a window/element region to an H.264 MP4 video (Windows Graphics Capture + Media Foundation)
 - `invoke` - Activate element (click, toggle, expand)
 - `click` - Click element via mouse simulation (for controls that don't support invoke)
-- `set-value` - Set value on editable element (text, number)
+- `hover` - Move mouse to element to trigger tooltips, flyouts, and hover states (default dwell: 800ms)
+- `drag` - Drag the mouse from one point to another, by element selector or screen `x,y` coordinates (reorder, resize, sliders, drag-and-drop)
+- `touch` - Inject synthetic touch gestures (tap, double-tap, long-press, swipe, pinch, stretch) at an element center or screen `x,y` coordinates
+- `pen` - Inject synthetic pen/stylus input — taps and ink strokes with configurable pressure, tilt, and eraser mode
+- `send-keys` - Send synthetic keyboard input (named keys, combos, raw vk=0xNN, or literal text) to a window
+- `set-value` - Set value on editable element (text, number); falls back to LegacyIAccessible `put_accValue` for TextPattern-only rich-edit controls
 - `focus` - Move keyboard focus
 - `scroll-into-view` - Scroll element visible
 - `wait-for` - Wait for element state
@@ -945,5 +1146,38 @@ winapp ui [command] [options]
 **Options:**
 - `-a, --app <app>` - Target app (name, title, or PID)
 - `-w, --window <hwnd>` - Target window by HWND (stable)
+
+#### ui record
+
+Record the target window — or a single element's region — to an H.264 MP4 video. Frames are
+captured via Windows Graphics Capture (with a PrintWindow fallback) and encoded incrementally with
+Media Foundation, so long recordings never buffer in memory.
+
+```bash
+# Record a window for 10 seconds at 15 fps
+winapp ui record -a Calculator --duration-sec 10 --fps 15 -o demo.mp4
+
+# Record until Ctrl+C, downscaled so the longest edge is 1280px
+winapp ui record -a "My App" --duration-sec 0 --max-edge 1280 -o capture.mp4
+
+# Record just one element's region
+winapp ui record -a "My App" btn-save-1234 -o button.mp4
+```
+
+**Record options:**
+- `--duration-sec <n>` - Recording length in seconds. `0` records until Ctrl+C (default `0`).
+- `--fps <n>` - Frames per second to capture (default `15`).
+- `--max-edge <px>` - Downscale so the longest edge is at most this many pixels (`0` = no downscale).
+- `--capture-screen` - Capture from the screen so overlays/popups are included (may capture occluding windows).
+- `-o, --output <path>` - Output `.mp4` path (defaults to `recording-<timestamp>-<guid>.mp4`).
+
+With `--json`, emits a `UiRecordResult` envelope including the output `path`, `frames`, `width`,
+`height`, `fileSize`, `codec` (`"h264"`), and `mode` — the capture path actually used
+(`wgc`, `printwindow`, or `screen`).
+
+> **Known limitation:** recording a *specific element* inside a popup that renders in its own
+> top-level window (WinUI/XAML flyout, teaching tip, tooltip) may capture the underlying main
+> window instead. Record the whole window, or use `ui screenshot --capture-screen` for popup
+> stills. Tracked in [#646](https://github.com/microsoft/winappCli/issues/646).
 
 For full documentation, see [docs/ui-automation.md](ui-automation.md).

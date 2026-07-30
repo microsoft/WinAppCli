@@ -26,6 +26,23 @@ internal class FakeDotNetService : IDotNetService
     /// </summary>
     public DotNetPackageListJson? PackageListResult { get; set; }
 
+    /// <summary>
+    /// When true, <see cref="GetPackageListAsync"/> throws, simulating a failure of
+    /// <c>dotnet list package --format json</c> (e.g. a project that fails to restore).
+    /// </summary>
+    public bool ThrowOnGetPackageList { get; set; }
+
+    /// <summary>
+    /// Number of times <see cref="GetPackageListAsync"/> has been invoked.
+    /// </summary>
+    public int GetPackageListCallCount { get; private set; }
+
+    /// <summary>
+    /// Packages listed here will cause <see cref="AddOrUpdatePackageReferenceAsync"/> to throw,
+    /// simulating failures from <c>dotnet add package</c>.
+    /// </summary>
+    public HashSet<string> PackagesToThrowOnAdd { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     // Delegate file-based operations to real implementation
     public IReadOnlyList<FileInfo> FindCsproj(DirectoryInfo directory) => _real.FindCsproj(directory);
     public string? GetTargetFramework(FileInfo csprojPath) => _real.GetTargetFramework(csprojPath);
@@ -53,6 +70,11 @@ internal class FakeDotNetService : IDotNetService
     // Fake CLI-based operations
     public Task<string> AddOrUpdatePackageReferenceAsync(FileInfo csprojPath, string packageName, string? version, CancellationToken cancellationToken = default)
     {
+        if (PackagesToThrowOnAdd.Contains(packageName))
+        {
+            throw new InvalidOperationException($"Simulated dotnet add package failure for {packageName}");
+        }
+
         AddedPackages.Add((csprojPath.FullName, packageName, version));
         return Task.FromResult(version ?? "1.0.0");
     }
@@ -64,6 +86,13 @@ internal class FakeDotNetService : IDotNetService
 
     public Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, CancellationToken cancellationToken = default)
     {
+        GetPackageListCallCount++;
+
+        if (ThrowOnGetPackageList)
+        {
+            throw new InvalidOperationException("Simulated dotnet list package failure.");
+        }
+
         return Task.FromResult(PackageListResult);
     }
 
@@ -76,4 +105,7 @@ internal class FakeDotNetService : IDotNetService
 
     public Task<bool> AnnotatePackageReferencesAsync(FileInfo csprojPath, IReadOnlyDictionary<string, string> packageComments, CancellationToken cancellationToken = default)
         => _real.AnnotatePackageReferencesAsync(csprojPath, packageComments, cancellationToken);
+
+    public Task<bool> EnsureAssetContentItemsAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)
+        => _real.EnsureAssetContentItemsAsync(csprojPath, cancellationToken);
 }
