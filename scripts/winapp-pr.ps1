@@ -124,6 +124,9 @@ $SourceUrl    = 'https://raw.githubusercontent.com/microsoft/winappCli/main/scri
 $FailSentinel   = 'winapp-pr:failed'
 $CancelSentinel = 'winapp-pr:cancelled'
 
+# Resolved by Assert-GhReady; may be a full path when gh was just installed and is not yet on PATH.
+$GhExe = 'gh'
+
 $ToolHome     = Join-Path $env:LOCALAPPDATA 'winapp-dev'
 $CacheRoot    = Join-Path $ToolHome 'cache'
 $StateFile    = Join-Path $ToolHome 'current.json'
@@ -148,9 +151,122 @@ function Get-HostArch {
     }
 }
 
+function Confirm-Action {
+    param([string]$Question)
+
+    if ([Console]::IsInputRedirected) { return $false }
+    try { $answer = Read-Host "$Question [Y/n]" } catch { return $false }
+    return ($answer -eq '' -or $answer -match '^[Yy]')
+}
+
+function Update-PathFromRegistry {
+    <# winget installs gh machine-wide; this process won't see it without a refresh. #>
+    $parts = @(
+        [Environment]::GetEnvironmentVariable('Path', 'Machine'),
+        [Environment]::GetEnvironmentVariable('Path', 'User')
+    ) | Where-Object { $_ }
+    $env:Path = $parts -join ';'
+}
+
+function Find-Gh {
+    $command = Get-Command gh -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+
+    $candidates = @(
+        (Join-Path $env:ProgramFiles 'GitHub CLI\gh.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'GitHub CLI\gh.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\GitHub CLI\gh.exe')
+    )
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path $candidate)) { return $candidate }
+    }
+    return $null
+}
+
+function Install-GhCli {
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Fail @'
+The GitHub CLI is required to download build artifacts, and winget is not
+available to install it automatically.
+
+Install it from https://cli.github.com, then run:
+  gh auth login
+'@
+    }
+
+    Write-Detail 'Running: winget install --id GitHub.cli -e'
+    & winget install --id GitHub.cli -e --accept-package-agreements --accept-source-agreements
+    if ($LASTEXITCODE -ne 0) {
+        Fail "winget exited with code $LASTEXITCODE. Install the GitHub CLI from https://cli.github.com and re-run."
+    }
+
+    Update-PathFromRegistry
+    $ghPath = Find-Gh
+    if (-not $ghPath) {
+        Fail 'The GitHub CLI was installed but could not be located. Open a new terminal and re-run.'
+    }
+    Write-Ok "GitHub CLI installed: $ghPath"
+    return $ghPath
+}
+
+function Assert-GhReady {
+    <#
+        A token is unavoidable: GitHub serves run and artifact metadata anonymously but returns
+        401 for the artifact zip itself, so there is no tokenless path to a build.
+    #>
+    $ghPath = Find-Gh
+    if (-not $ghPath) {
+        Write-Warn 'The GitHub CLI (gh) is required to download build artifacts, and is not installed.'
+        if (-not (Confirm-Action '   Install it now with winget?')) {
+            Fail @'
+Install the GitHub CLI, then re-run:
+  winget install --id GitHub.cli -e
+  gh auth login
+'@
+        }
+        $ghPath = Install-GhCli
+    }
+    $script:GhExe = $ghPath
+
+    # Scoped to the active github.com account: a bare `gh auth status` fails when ANY configured
+    # account on any host is stale, which would send people with a second account into sign-in.
+    & $script:GhExe auth status --active --hostname github.com *> $null
+    if ($LASTEXITCODE -eq 0) { return }
+
+    # gh refuses to store credentials while an env token is set, so offering login would dead-end.
+    $envTokenName = @('GH_TOKEN', 'GITHUB_TOKEN') |
+        Where-Object { [Environment]::GetEnvironmentVariable($_) } |
+        Select-Object -First 1
+    if ($envTokenName) {
+        Fail @"
+GitHub rejected the token in `$env:$envTokenName.
+
+Update it, or clear it and sign in interactively:
+  Remove-Item Env:\$envTokenName
+  gh auth login
+"@
+    }
+
+    Write-Warn 'The GitHub CLI is installed but not signed in.'
+    if (-not (Confirm-Action '   Sign in now?')) {
+        Fail @'
+Sign in, then re-run:
+  gh auth login
+'@
+    }
+
+    # gh drives its own prompts here, so let it own the console.
+    & $script:GhExe auth login
+    & $script:GhExe auth status --active --hostname github.com *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Fail 'Still not signed in. Run gh auth login manually, then re-run.'
+    }
+    Write-Ok 'Signed in to GitHub'
+}
+
 function Get-GhAccounts {
     <# Logins gh has configured, so a permissions error can suggest a real alternative. #>
-    $status = & gh auth status 2>&1 | Out-String
+    $status = & $script:GhExe auth status 2>&1 | Out-String
     $logins = [regex]::Matches($status, 'account (\S+)') | ForEach-Object { $_.Groups[1].Value }
     return @($logins | Select-Object -Unique)
 }
@@ -160,7 +276,7 @@ function Get-AccessHint {
 
     $repo = if ($Url -match 'repos/([^/?]+/[^/?]+)') { $Matches[1] } else { 'that repository' }
 
-    $active = & gh api user --jq '.login' 2>$null
+    $active = & $script:GhExe api user --jq '.login' 2>$null
     $active = if ($LASTEXITCODE -eq 0 -and $active) { $active.Trim() } else { 'unknown' }
 
     $others = @(Get-GhAccounts | Where-Object { $_ -ne $active })
@@ -183,11 +299,14 @@ function Invoke-Gh {
 
     $errFile = [System.IO.Path]::GetTempFileName()
     try {
-        $output = & gh @Arguments 2>$errFile
+        $output = & $script:GhExe @Arguments 2>$errFile
         if ($LASTEXITCODE -ne 0) {
             $stderr = (Get-Content $errFile -Raw -ErrorAction SilentlyContinue)
             if ($stderr -match 'HTTP 404') {
                 Fail (Get-AccessHint -Url ($Arguments -join ' '))
+            }
+            if ($stderr -match 'HTTP 401') {
+                Fail "GitHub rejected the stored credentials. Run: gh auth login"
             }
             Fail "gh $($Arguments -join ' ') failed:`n$stderr"
         }
@@ -557,7 +676,7 @@ function Get-CachedMsixPackage {
     New-Item -ItemType Directory -Path $runCache -Force | Out-Null
     Write-Detail "Downloading $ArtifactName from run $($Run.id) (~33 MB)..."
 
-    & gh run download $Run.id -R $RepoName -n $ArtifactName -D $runCache 2>&1 | Out-Null
+    & $script:GhExe run download $Run.id -R $RepoName -n $ArtifactName -D $runCache 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Remove-Item $runCache -Recurse -Force -ErrorAction SilentlyContinue
         Fail "Failed to download artifact from run $($Run.id)."
@@ -756,9 +875,8 @@ function Invoke-Main {
         return
     }
 
-    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
-        Fail 'The GitHub CLI (gh) is required. Install it from https://cli.github.com and run: gh auth login'
-    }
+    Assert-GhReady
+
 
     $repoName = Resolve-Repo
     if ($repoName -notmatch '^[^/]+/[^/]+$') {
