@@ -77,6 +77,7 @@ $GhExe = 'gh'
 $ToolHome     = Join-Path $env:LOCALAPPDATA 'winapp-dev'
 $CacheRoot    = Join-Path $ToolHome 'cache'
 $StateFile    = Join-Path $ToolHome 'current.json'
+$TrustedFile  = Join-Path $ToolHome 'trusted-certs.json'
 $InstallDir   = Join-Path $env:LOCALAPPDATA 'Programs\winapp-dev'
 
 function Write-Step   { param([string]$m) Write-Host "`n>> $m" -ForegroundColor Cyan }
@@ -689,6 +690,22 @@ function Read-P7xCertificate {
     }
 }
 
+function Get-TrackedCerts {
+    <#
+        Thumbprints this tool has trusted. TrustedPeople is a shared store holding unrelated
+        anchors, so cleanup is driven by what we added rather than by matching on subject.
+    #>
+    if (-not (Test-Path $TrustedFile)) { return @() }
+    try { return @(Get-Content $TrustedFile -Raw | ConvertFrom-Json) } catch { return @() }
+}
+
+function Set-TrackedCerts {
+    param([string[]]$Thumbprints)
+
+    New-Item -ItemType Directory -Path $ToolHome -Force | Out-Null
+    ,@($Thumbprints) | ConvertTo-Json | Set-Content -Path $TrustedFile -Encoding UTF8
+}
+
 function Get-PackageCertificate {
     param([string]$PackagePath)
 
@@ -717,10 +734,15 @@ function Grant-CertificateTrust {
     <# Imports the cert into LocalMachine\TrustedPeople, elevating only for that step. #>
     param([System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate)
 
+    $tracked = Get-TrackedCerts
+
     $already = Get-ChildItem Cert:\LocalMachine\TrustedPeople |
         Where-Object { $_.Thumbprint -eq $Certificate.Thumbprint }
     if ($already) {
         Write-Ok "Certificate already trusted ($($Certificate.Thumbprint.Substring(0,12))...)"
+        if ($tracked -notcontains $Certificate.Thumbprint) {
+            Set-TrackedCerts -Thumbprints (@($tracked) + $Certificate.Thumbprint)
+        }
         return
     }
 
@@ -730,8 +752,20 @@ function Grant-CertificateTrust {
     Write-Detail "Trusting $($Certificate.Subject) ($($Certificate.Thumbprint.Substring(0,12))...)"
     Write-Detail 'Approve the elevation prompt to add it to LocalMachine\TrustedPeople.'
 
-    $command = "Import-Certificate -FilePath '$cerPath' -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null"
-    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+    # Retire the certs we trusted for earlier builds in the same elevated step, so cleanup
+    # never costs an extra prompt. Removing one does not affect an already-installed package.
+    $retire = @($tracked | Where-Object { $_ -and $_ -ne $Certificate.Thumbprint })
+    if ($retire) {
+        Write-Detail "Also retiring $($retire.Count) certificate(s) from earlier installs."
+    }
+
+    $statements = @(
+        "Import-Certificate -FilePath '$cerPath' -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null"
+    ) + @($retire | ForEach-Object {
+        "Remove-Item 'Cert:\LocalMachine\TrustedPeople\$_' -Force -ErrorAction SilentlyContinue"
+    })
+
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($statements -join '; '))
     $shell = if (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell' }
 
     try {
@@ -754,6 +788,7 @@ function Grant-CertificateTrust {
     if (-not $verify) {
         Fail 'Certificate import reported success but the certificate is not in the store.'
     }
+    Set-TrackedCerts -Thumbprints @($Certificate.Thumbprint)
     Write-Ok 'Certificate trusted'
 }
 
@@ -779,6 +814,7 @@ function Remove-StaleCertificates {
         foreach ($cert in $stale) {
             Remove-Item "Cert:\LocalMachine\TrustedPeople\$($cert.Thumbprint)" -Force
         }
+        Set-TrackedCerts -Thumbprints @(Get-TrackedCerts | Where-Object { $_ -eq $KeepThumbprint })
         Write-Ok "Removed $($stale.Count) certificate(s)"
         return
     }
@@ -794,6 +830,7 @@ function Remove-StaleCertificates {
     if ($proc.ExitCode -ne 0) {
         Fail "Certificate cleanup failed with exit code $($proc.ExitCode)."
     }
+    Set-TrackedCerts -Thumbprints @(Get-TrackedCerts | Where-Object { $_ -eq $KeepThumbprint })
     Write-Ok "Removed $($stale.Count) certificate(s)"
 }
 
@@ -834,6 +871,7 @@ COMMANDS
   -Status                   show the installed build and where it came from
   -List                     list recent builds for the target
   -PruneCerts               remove trusted CI certificates from past installs
+                            (installs retire their own automatically)
   -AddToPath                install winapp-pr itself onto your PATH
   -UpdateTool               update winapp-pr itself
   -Help                     show this
@@ -1083,7 +1121,7 @@ Name what you want instead, for example:
         Write-Warn "'winapp --version' failed; open a new terminal and try again."
     }
 
-    Write-Host "`nDone. Run 'winapp-pr -PruneCerts' occasionally to clear old CI certificates.`n" -ForegroundColor Green
+    Write-Host "`nDone.`n" -ForegroundColor Green
 }
 
 $exitCode = 0
