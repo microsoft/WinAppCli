@@ -9,11 +9,10 @@ internal class MigrateCommand : Command, IShortDescription
 {
     public string ShortDescription => "Migrate apps to WinUI 3 / Windows App SDK";
 
-    public MigrateCommand(MigrateScaffoldCommand migrateScaffoldCommand, MigrateAnalyzeCommand migrateAnalyzeCommand, MigrateValidateCommand migrateValidateCommand)
-        : base("migrate", "Migrate apps to WinUI 3 / Windows App SDK. Use 'migrate scaffold --from-uwp' to copy UWP source into a WinUI 3 project and apply mechanical transforms, 'migrate analyze --from-uwp' to produce a source-only migration plan (JSON), and 'migrate validate --from-uwp' to gate a completed migration on residue / single-project / manifest checks.")
+    public MigrateCommand(MigrateScaffoldCommand migrateScaffoldCommand, MigrateValidateCommand migrateValidateCommand)
+        : base("migrate", "Migrate apps to WinUI 3 / Windows App SDK. Use 'migrate scaffold --from-uwp' to copy UWP source into a WinUI 3 project and apply mechanical transforms, and 'migrate validate --from-uwp' to gate a completed migration on residue / single-project / manifest checks.")
     {
         Subcommands.Add(migrateScaffoldCommand);
-        Subcommands.Add(migrateAnalyzeCommand);
         Subcommands.Add(migrateValidateCommand);
     }
 }

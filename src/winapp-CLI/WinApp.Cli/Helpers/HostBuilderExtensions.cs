@@ -48,8 +48,7 @@ internal static class StoreHostBuilderExtensions
             // UI Automation services
             .AddSingleton<ISelectorService, SelectorService>()
             .AddSingleton<IUiSessionService, UiSessionService>()
-            .AddSingleton<IUiAutomationService, UiAutomationService>()
-            .AddSingleton<IMigrateAnalyzerDriver, MigrateAnalyzerDriver>();
+            .AddSingleton<IUiAutomationService, UiAutomationService>();
     }
 
     public static IServiceCollection ConfigureCommands(this IServiceCollection serviceCollection)
@@ -69,7 +68,6 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<UnregisterCommand, UnregisterCommand.Handler>()
                 .ConfigureCommand<MigrateCommand>()
                 .UseCommandHandler<MigrateScaffoldCommand, MigrateScaffoldCommand.Handler>()
-                .UseCommandHandler<MigrateAnalyzeCommand, MigrateAnalyzeCommand.Handler>()
                 .UseCommandHandler<MigrateValidateCommand, MigrateValidateCommand.Handler>()
                 .UseCommandHandler<GetWinappPathCommand, GetWinappPathCommand.Handler>()
                 .ConfigureCommand<CertCommand>()

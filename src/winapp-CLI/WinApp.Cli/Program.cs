@@ -69,12 +69,6 @@ internal static class Program
         // and should not display any interactive messages like first-run notices
         bool isCliSchemaMode = args.Contains(WinAppRootCommand.CliSchemaOption.Name);
 
-        // 'migrate analyze' emits a machine-readable JSON migration plan on stdout and must not
-        // be polluted by the first-run notice, even though it has no --json flag.
-        var positionalArgs = args.Where(a => !a.StartsWith('-')).ToArray();
-        bool isMigrateAnalyzeMode = positionalArgs.Length >= 2
-            && positionalArgs[0] == "migrate" && positionalArgs[1] == "analyze";
-
         var services = new ServiceCollection()
             .ConfigureServices()
             .ConfigureCommands()
@@ -89,7 +83,7 @@ internal static class Program
 
         // Skip first-run notice for machine-readable output modes
         var didShowFirstRunNotice = false;
-        if (!isCliSchemaMode && !json && !isMigrateAnalyzeMode)
+        if (!isCliSchemaMode && !json)
         {
             var firstRunService = serviceProvider.GetRequiredService<IFirstRunService>();
             didShowFirstRunNotice = firstRunService.CheckAndDisplayFirstRunNotice();

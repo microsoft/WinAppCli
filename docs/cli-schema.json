@@ -1071,87 +1071,11 @@
       }
     },
     "migrate": {
-      "description": "Migrate apps to WinUI 3 / Windows App SDK. Use 'migrate scaffold --from-uwp' to copy UWP source into a WinUI 3 project and apply mechanical transforms, 'migrate analyze --from-uwp' to produce a source-only migration plan (JSON), and 'migrate validate --from-uwp' to gate a completed migration on residue / single-project / manifest checks.",
+      "description": "Migrate apps to WinUI 3 / Windows App SDK. Use 'migrate scaffold --from-uwp' to copy UWP source into a WinUI 3 project and apply mechanical transforms, and 'migrate validate --from-uwp' to gate a completed migration on residue / single-project / manifest checks.",
       "hidden": false,
       "subcommands": {
-        "analyze": {
-          "description": "Analyze UWP source (C#/XAML/manifest) pre-build, source-only (no restore or build), and emit a stable JSON migration plan to stdout: per-file disposition + per-line findings + severity + fix refs + feature area. The analysis runs out-of-process via the bundled analyzer driver.",
-          "hidden": false,
-          "arguments": {
-            "directory": {
-              "description": "UWP project directory to analyze (default: current directory)",
-              "order": 0,
-              "hidden": false,
-              "valueType": "System.IO.DirectoryInfo",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              }
-            }
-          },
-          "options": {
-            "--from-uwp": {
-              "description": "Analyze UWP source (currently the only supported migration source).",
-              "hidden": false,
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--project": {
-              "description": "Target a specific .csproj (default: scan the whole directory).",
-              "hidden": false,
-              "valueType": "System.IO.FileInfo",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--quiet": {
-              "description": "Suppress progress messages",
-              "hidden": false,
-              "aliases": [
-                "-q"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--verbose": {
-              "description": "Enable verbose output",
-              "hidden": false,
-              "aliases": [
-                "-v"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            }
-          }
-        },
         "scaffold": {
-          "description": "Copy UWP source (C#/XAML/assets) into an existing WinUI 3 scaffold and apply the mechanical, deterministic transforms a migration always needs: merge SDK-sample shared/ + SharedContent/ assets, preserve the original .csproj/.appxmanifest under .uwp-source/, patch the csproj RuntimeIdentifier for x86/x64/ARM64 F5, rewrite Windows.UI.Xaml -> Microsoft.UI.Xaml, neutralize content-filter-prone helper classes, and wire the MainWindow RootFrame + initial Navigate. Triage / per-line findings are produced separately by 'migrate analyze'.",
+          "description": "Copy UWP source (C#/XAML/assets) into an existing WinUI 3 scaffold and apply the mechanical, deterministic transforms a migration always needs: merge SDK-sample shared/ + SharedContent/ assets, preserve the original .csproj/.appxmanifest under .uwp-source/, patch the csproj RuntimeIdentifier for x86/x64/ARM64 F5, rewrite Windows.UI.Xaml -> Microsoft.UI.Xaml, neutralize content-filter-prone helper classes, and wire the MainWindow RootFrame + initial Navigate. Triage / per-line findings are produced separately by the migration skill's analysis step.",
           "hidden": false,
           "arguments": {
             "source": {
@@ -1227,7 +1151,7 @@
           }
         },
         "validate": {
-          "description": "Validate a migrated WinUI 3 project before declaring the migration done. Runs source-only static gates: UWP API/namespace residue (backed by the analyzer), single-project layout, MainWindow shell wiring, and Package.appxmanifest packaging requirements. Emits sanitized [PASS]/[FAIL]/[WARN] lines to stdout with full diagnostics in .validator-diagnostics.txt, and returns non-zero when any [FAIL] remains. Build/run health is covered separately by 'winapp build' / 'winapp run'.",
+          "description": "Validate a migrated WinUI 3 project before declaring the migration done. Runs source-only static gates: UWP namespace/csproj residue markers, single-project layout, MainWindow shell wiring, and Package.appxmanifest packaging requirements. Emits sanitized [PASS]/[FAIL]/[WARN] lines to stdout with full diagnostics in .validator-diagnostics.txt, and returns non-zero when any [FAIL] remains. Build/run health is covered separately by 'winapp build' / 'winapp run'.",
           "hidden": false,
           "arguments": {
             "directory": {
@@ -1251,18 +1175,6 @@
               "defaultValue": false,
               "arity": {
                 "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--project": {
-              "description": "Target a specific .csproj (default: scan the whole directory).",
-              "hidden": false,
-              "valueType": "System.IO.FileInfo",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
                 "maximum": 1
               },
               "required": false,

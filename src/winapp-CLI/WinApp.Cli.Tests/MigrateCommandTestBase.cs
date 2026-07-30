@@ -1,15 +1,13 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
-using Microsoft.Extensions.DependencyInjection;
 using System.CommandLine;
-using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
 
 /// <summary>
-/// Shared base for the <c>winapp migrate</c> command tests. Injects a
-/// <see cref="FakeMigrateAnalyzerDriver"/> and provides a helper to capture the commands' output.
+/// Shared base for the <c>winapp migrate</c> command tests. Provides a helper to capture the
+/// commands' output.
 /// </summary>
 /// <remarks>
 /// The migrate commands write to <see cref="System.Console.Out"/> directly (winapp ships as
@@ -22,11 +20,6 @@ namespace WinApp.Cli.Tests;
 public abstract class MigrateCommandTestBase : BaseCommandTests
 {
     private static readonly SemaphoreSlim ConsoleGate = new(1, 1);
-
-    private protected FakeMigrateAnalyzerDriver FakeDriver { get; } = new();
-
-    protected override IServiceCollection ConfigureServices(IServiceCollection services)
-        => services.AddSingleton<IMigrateAnalyzerDriver>(FakeDriver);
 
     private protected async Task<(int ExitCode, string Output)> InvokeCapturingConsoleAsync(Command command, params string[] args)
     {
