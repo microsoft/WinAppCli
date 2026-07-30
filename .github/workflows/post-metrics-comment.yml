@@ -333,6 +333,30 @@ jobs:
               body += '\n';
             }
 
+            // --- Try this build ---
+            // Only prNumber (resolved from the trusted head_sha and verified above) and
+            // context.repo are interpolated here; nothing from the artifact reaches this text.
+            if (artifactLinks['msix-x64'] || artifactLinks['msix-arm64']) {
+              const bootstrapUrl = `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/main/scripts/winapp-pr.ps1`;
+              const pr = Number(prNumber);
+              body += '\n### Try This Build\n\n';
+              body += 'Installs the MSIX for your architecture, replacing any previously installed build. Needs the [GitHub CLI](https://cli.github.com) — the command offers to install it and sign you in if it is missing.\n\n';
+              body += '```powershell\n';
+              body += `& ([scriptblock]::Create((irm ${bootstrapUrl}))) ${pr}\n`;
+              body += '```\n\n';
+              body += '<details><summary>Switching between builds often?</summary>\n\n';
+              body += 'Put the tool on your PATH once:\n\n';
+              body += '```powershell\n';
+              body += `& ([scriptblock]::Create((irm ${bootstrapUrl}))) -AddToPath\n`;
+              body += '```\n\n';
+              body += 'Then this build is just:\n\n';
+              body += '```powershell\n';
+              body += `winapp-pr ${pr}\n`;
+              body += '```\n\n';
+              body += 'Run `winapp-pr` with no arguments to pick from a list of open PRs.\n';
+              body += '</details>\n';
+            }
+
             // --- Footer (uses TRUSTED head_sha + source run id) ---
             const timestamp = new Date().toISOString().replace('T', ' ').replace(/\.[0-9]+Z$/, ' UTC');
             const shortSha = trustedHeadSha.substring(0, 7);
