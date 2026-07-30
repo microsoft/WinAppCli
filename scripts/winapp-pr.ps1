@@ -676,18 +676,40 @@ function Get-CachedMsixPackage {
 
 # ── Certificate trust ────────────────────────────────────────────────────────
 
+function Test-Thumbprint {
+    <# Thumbprints get interpolated into an elevated command, so treat them as untrusted input. #>
+    param([string]$Value)
+    return ($Value -match '^[0-9A-Fa-f]{40}$')
+}
+
 function Read-P7xCertificate {
     param([string]$Path)
 
     if (-not (Test-Path $Path)) { return $null }
     try {
+        $bytes = [System.IO.File]::ReadAllBytes($Path)
+        # AppxSignature.p7x is a PKCS#7 blob behind a 4-byte 'PKCX' magic; SignedCms rejects it.
+        if ($bytes.Length -gt 4 -and
+            $bytes[0] -eq 0x50 -and $bytes[1] -eq 0x4B -and $bytes[2] -eq 0x43 -and $bytes[3] -eq 0x58) {
+            $bytes = $bytes[4..($bytes.Length - 1)]
+        }
         $cms = New-Object System.Security.Cryptography.Pkcs.SignedCms
-        $cms.Decode([System.IO.File]::ReadAllBytes($Path))
+        $cms.Decode($bytes)
         return $cms.Certificates[0]
     }
     catch {
         return $null
     }
+}
+
+function Get-InstalledCertThumbprint {
+    <# The signing certificate of the installed package. CI mints one per run, so it is unique. #>
+    param([object]$Package)
+
+    if (-not $Package -or -not $Package.InstallLocation) { return '' }
+    $cert = Read-P7xCertificate -Path (Join-Path $Package.InstallLocation 'AppxSignature.p7x')
+    if ($cert) { return $cert.Thumbprint }
+    return ''
 }
 
 function Get-TrackedCerts {
@@ -696,14 +718,22 @@ function Get-TrackedCerts {
         anchors, so cleanup is driven by what we added rather than by matching on subject.
     #>
     if (-not (Test-Path $TrustedFile)) { return @() }
-    try { return @(Get-Content $TrustedFile -Raw | ConvertFrom-Json) } catch { return @() }
+    try {
+        $values = @(Get-Content $TrustedFile -Raw | ConvertFrom-Json)
+    }
+    catch {
+        return @()
+    }
+    # This file is user-writable and its values are interpolated into an elevated command.
+    return @($values | Where-Object { Test-Thumbprint -Value $_ })
 }
 
 function Set-TrackedCerts {
     param([string[]]$Thumbprints)
 
     New-Item -ItemType Directory -Path $ToolHome -Force | Out-Null
-    ,@($Thumbprints) | ConvertTo-Json | Set-Content -Path $TrustedFile -Encoding UTF8
+    $clean = @($Thumbprints | Where-Object { Test-Thumbprint -Value $_ })
+    ,$clean | ConvertTo-Json | Set-Content -Path $TrustedFile -Encoding UTF8
 }
 
 function Get-PackageCertificate {
@@ -754,9 +784,13 @@ function Grant-CertificateTrust {
 
     # Retire the certs we trusted for earlier builds in the same elevated step, so cleanup
     # never costs an extra prompt. Removing one does not affect an already-installed package.
-    $retire = @($tracked | Where-Object { $_ -and $_ -ne $Certificate.Thumbprint })
+    $retire = @($tracked | Where-Object { $_ -and $_ -ne $Certificate.Thumbprint -and (Test-Thumbprint -Value $_) })
     if ($retire) {
         Write-Detail "Also retiring $($retire.Count) certificate(s) from earlier installs."
+    }
+
+    if (-not (Test-Thumbprint -Value $Certificate.Thumbprint)) {
+        Fail "Refusing to trust a certificate with an unexpected thumbprint format."
     }
 
     $statements = @(
@@ -819,7 +853,7 @@ function Remove-StaleCertificates {
         return
     }
 
-    $removals = ($stale | ForEach-Object {
+    $removals = ($stale | Where-Object { Test-Thumbprint -Value $_.Thumbprint } | ForEach-Object {
         "Remove-Item 'Cert:\LocalMachine\TrustedPeople\$($_.Thumbprint)' -Force -ErrorAction SilentlyContinue"
     }) -join '; '
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($removals))
@@ -909,8 +943,16 @@ function Test-StateMatchesInstall {
     param([object]$State, [object]$Package)
 
     if (-not $State -or -not $Package) { return $false }
+
+    # Prefer the signing certificate: dev versions are a commit count, so unrelated branches at
+    # the same depth produce identical name/version/architecture and would compare equal.
+    $installedThumb = Get-InstalledCertThumbprint -Package $Package
+    if ($installedThumb) {
+        return ($installedThumb -eq $State.Thumbprint)
+    }
+
+    # Signature unreadable: fall back to the weaker check rather than refusing to work.
     if ($State.Version -ne $Package.Version) { return $false }
-    # Records written before Arch was tracked can't be checked on it; version alone will do.
     if ($State.Arch -and $State.Arch -ne (Get-InstalledArch -Package $Package)) { return $false }
     return $true
 }
