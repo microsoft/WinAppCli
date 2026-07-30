@@ -40,29 +40,37 @@ internal sealed partial class ProjectRunService
     internal static ProjectRunOptions ResolvePlatformInjection(FileInfo csproj, ProjectRunOptions options)
     {
         // A user -p:Platform is authoritative and forwarded as-is (WarnOnOverriddenFlags surfaces an
-        // arch/Platform mismatch); never override it.
-        if (UserSpecifiesProperty(options.Properties, "Platform"))
-        {
-            return options;
-        }
+        // arch/Platform mismatch); never override it. It still conveys the architecture, so it counts when
+        // deciding whether the RID is redundant below.
+        var userPlatform = UserSpecifiesProperty(options.Properties, "Platform");
 
         // The target must declare a <Platforms> that includes the target arch. Capture the exact declared
         // token so the injected Platform matches the solution config the project defines.
-        var token = FindArchPlatformToken(csproj, options.Architecture);
-        if (token is null)
-        {
-            return options;
-        }
+        var token = userPlatform ? null : FindArchPlatformToken(csproj, options.Architecture);
 
         // Multi-project guard: a global -p:Platform reaches every ProjectReference, so inject only when the
         // whole closure also declares the arch. A no-<Platforms> (implicit-AnyCPU) library is exactly the
         // MSB3030/PRI252 case the RID-only default was chosen to avoid.
-        if (!ProjectReferenceClosureSupportsArch(csproj, options.Architecture))
+        if (token is not null && !ProjectReferenceClosureSupportsArch(csproj, options.Architecture))
         {
-            return options;
+            token = null;
         }
 
-        return options with { Platform = token };
+        // With an effective Platform the architecture is already conveyed (Platform sets PlatformTarget, so
+        // the apphost and compile land on the target arch without a RID). The RID is then redundant — and
+        // actively harmful when the closure splits on it: the same project builds both with and without the
+        // RID into two output directories, and a packaged app harvests both copies into the MSIX payload,
+        // failing with APPX1101 "two or more files with the same destination path". Drop the RID only for
+        // that provable case; every other project keeps today's behavior, including a split closure with no
+        // effective Platform, where the RID is the only thing conveying the architecture.
+        var platformInEffect = userPlatform || token is not null;
+        var omitRid = platformInEffect && ProjectReferenceClosureSplitsOnRuntimeIdentifier(csproj);
+
+        return options with
+        {
+            Platform = token ?? options.Platform,
+            OmitRuntimeIdentifier = omitRid,
+        };
     }
 
     /// <summary>
@@ -258,5 +266,132 @@ internal sealed partial class ProjectRunService
 
         var child = item.Elements().FirstOrDefault(e => string.Equals(e.Name.LocalName, name, StringComparison.OrdinalIgnoreCase));
         return string.IsNullOrWhiteSpace(child?.Value) ? null : child.Value.Trim();
+    }
+
+    /// <summary>
+    /// Resolves a <c>ProjectReference</c> <c>Include</c> to an existing file relative to the referencing
+    /// project. Returns <see langword="false"/> for an unresolvable include (an MSBuild macro or glob), a
+    /// malformed path, or a file that doesn't exist — callers treat that as "can't reason about it".
+    /// </summary>
+    private static bool TryResolveReferencePath(FileInfo referencingProject, string include, out FileInfo resolved)
+    {
+        resolved = null!;
+        if (include.Contains("$(", StringComparison.Ordinal) || include.Contains('*', StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var referenceDir = referencingProject.Directory?.FullName ?? Directory.GetCurrentDirectory();
+        try
+        {
+            resolved = new FileInfo(Path.GetFullPath(Path.Combine(referenceDir, include)));
+        }
+        catch
+        {
+            return false;
+        }
+
+        return resolved.Exists;
+    }
+
+    /// <summary>
+    /// Reports whether injecting a <c>RuntimeIdentifier</c> would make some project in the
+    /// <c>ProjectReference</c> closure build TWICE — once carrying the RID and once without it.
+    /// </summary>
+    /// <remarks>
+    /// MSBuild builds a project once per distinct set of global properties, and an edge carrying
+    /// <c>GlobalPropertiesToRemove</c>/<c>UndefineProperties</c> that lists <c>RuntimeIdentifier</c> drops
+    /// the RID for that subtree. When the same project is reachable both with and without the RID it is
+    /// built into two different output directories (<c>bin\…\&lt;tfm&gt;\</c> and
+    /// <c>bin\…\&lt;tfm&gt;\win-&lt;arch&gt;\</c>). For a packaged app both copies are harvested into the
+    /// MSIX payload, which fails the build with <c>APPX1101: Payload contains two or more files with the
+    /// same destination path</c>. Detecting it statically lets the caller convey the architecture with
+    /// <c>Platform</c> alone instead.
+    /// </remarks>
+    internal static bool ProjectReferenceClosureSplitsOnRuntimeIdentifier(FileInfo start)
+    {
+        // Walk (project, carriesRid) states; a project seen in both states is built twice.
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var ridStates = new Dictionary<string, HashSet<bool>>(StringComparer.OrdinalIgnoreCase);
+        var queue = new Queue<(FileInfo Project, bool CarriesRid)>();
+        queue.Enqueue((start, true));
+
+        var visited = 0;
+        while (queue.Count > 0 && visited < MaxProjectReferenceClosure)
+        {
+            var (current, carriesRid) = queue.Dequeue();
+            visited++;
+
+            if (!seen.Add($"{current.FullName}|{carriesRid}"))
+            {
+                continue;
+            }
+
+            if (!ridStates.TryGetValue(current.FullName, out var states))
+            {
+                states = [];
+                ridStates[current.FullName] = states;
+            }
+
+            states.Add(carriesRid);
+            if (states.Count > 1)
+            {
+                return true;
+            }
+
+            foreach (var (include, stripsRid) in ReadProjectReferenceRidEdges(current))
+            {
+                if (!TryResolveReferencePath(current, include, out var referenced))
+                {
+                    // Unresolvable path (an MSBuild macro, or a missing file): stay conservative and
+                    // report no split, preserving today's RID behavior.
+                    continue;
+                }
+
+                queue.Enqueue((referenced, carriesRid && !stripsRid));
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Enumerates runtime-relevant <c>ProjectReference</c> includes paired with whether the edge drops
+    /// <c>RuntimeIdentifier</c> from the referenced project's global properties.
+    /// </summary>
+    private static List<(string Include, bool StripsRid)> ReadProjectReferenceRidEdges(FileInfo project)
+    {
+        XDocument doc;
+        try
+        {
+            doc = XDocument.Load(project.FullName);
+        }
+        catch
+        {
+            return [];
+        }
+
+        var edges = new List<(string, bool)>();
+        foreach (var element in doc.Descendants().Where(e => e.Name.LocalName == "ProjectReference"))
+        {
+            var include = element.Attribute("Include")?.Value;
+            if (string.IsNullOrWhiteSpace(include) || IsBuildOnlyReference(element))
+            {
+                continue;
+            }
+
+            // GlobalPropertiesToRemove and UndefineProperties are equivalent spellings.
+            var removed = $"{ReadMetadata(element, "GlobalPropertiesToRemove")};{ReadMetadata(element, "UndefineProperties")}";
+            var stripsRid = removed
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Any(p => string.Equals(p, "RuntimeIdentifier", StringComparison.OrdinalIgnoreCase));
+
+            foreach (var segment in include.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                edges.Add((segment, stripsRid));
+            }
+        }
+
+        return edges;
     }
 }

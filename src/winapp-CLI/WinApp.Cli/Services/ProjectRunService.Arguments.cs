@@ -27,12 +27,17 @@ internal sealed partial class ProjectRunService
         {
             "restore",
             csproj.FullName,
-            "-r",
-            rid,
-            // 'dotnet restore' has no -c switch; Configuration flows as a property so config-conditional
-            // <PackageReference> lands in project.assets.json before the --no-restore build consumes it.
-            $"-p:Configuration={options.Configuration}",
         };
+
+        if (!options.OmitRuntimeIdentifier)
+        {
+            tokens.Add("-r");
+            tokens.Add(rid);
+        }
+
+        // 'dotnet restore' has no -c switch; Configuration flows as a property so config-conditional
+        // <PackageReference> lands in project.assets.json before the --no-restore build consumes it.
+        tokens.Add($"-p:Configuration={options.Configuration}");
 
         // Mirror the build pass's injected Platform (when resolved) so platform-conditional
         // <PackageReference> restore under the same Platform the build resolves. Null = RID-only default.
@@ -73,9 +78,13 @@ internal sealed partial class ProjectRunService
             csproj.FullName,
             "-c",
             options.Configuration,
-            "-r",
-            rid,
         };
+
+        if (!options.OmitRuntimeIdentifier)
+        {
+            tokens.Add("-r");
+            tokens.Add(rid);
+        }
 
         if (options.NoRestore)
         {
@@ -162,7 +171,7 @@ internal sealed partial class ProjectRunService
         AppendSolutionProperties(tokens, options);
 
         tokens.Add($"-p:Configuration={options.Configuration}");
-        if (includeRuntimeIdentifier)
+        if (includeRuntimeIdentifier && !options.OmitRuntimeIdentifier)
         {
             tokens.Add($"-p:RuntimeIdentifier={rid}");
         }

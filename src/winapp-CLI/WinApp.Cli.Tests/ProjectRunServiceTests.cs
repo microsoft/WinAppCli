@@ -2051,6 +2051,167 @@ public class ProjectRunServiceTests
     private static ProjectRunOptions PlatformOptions(string arch, params string[] properties) =>
         new("Debug", arch, null, NoBuild: false, NoRestore: false, Properties: properties);
 
+    #region RID-split detection (APPX1101 guard)
+
+    // MSBuild builds a project once per distinct global-property set. An edge carrying
+    // GlobalPropertiesToRemove="RuntimeIdentifier" drops the RID for that subtree, so a project reachable
+    // both directly (RID inherited) and through such an edge is built into two output directories. A
+    // packaged app harvests both copies into the MSIX payload and fails with APPX1101.
+
+    private const string SharedLibCsproj = """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+            <Platforms>AnyCPU;x64;ARM64</Platforms>
+          </PropertyGroup>
+        </Project>
+        """;
+
+    private FileInfo WriteRidSplitGraph(bool stripRidOnMiddleEdge)
+    {
+        WriteFile("Shared.csproj", SharedLibCsproj);
+        var strip = stripRidOnMiddleEdge ? " GlobalPropertiesToRemove=\"RuntimeIdentifier\"" : string.Empty;
+        WriteFile("Middle.csproj", $"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+                <Platforms>AnyCPU;x64;ARM64</Platforms>
+              </PropertyGroup>
+              <ItemGroup>
+                <ProjectReference Include="Shared.csproj"{strip} />
+              </ItemGroup>
+            </Project>
+            """);
+
+        // The app reaches Shared BOTH directly (RID inherited) and via Middle.
+        return WriteFile("App.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>WinExe</OutputType>
+                <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+                <Platforms>x86;x64;ARM64</Platforms>
+              </PropertyGroup>
+              <ItemGroup>
+                <ProjectReference Include="Shared.csproj" />
+                <ProjectReference Include="Middle.csproj" />
+              </ItemGroup>
+            </Project>
+            """);
+    }
+
+    [TestMethod]
+    public void RidSplit_SharedProjectReachedWithAndWithoutRid_OmitsRuntimeIdentifier()
+    {
+        var app = WriteRidSplitGraph(stripRidOnMiddleEdge: true);
+
+        var resolved = ProjectRunService.ResolvePlatformInjection(app, PlatformOptions("arm64"));
+
+        Assert.IsTrue(resolved.OmitRuntimeIdentifier, "a RID split with an effective Platform must drop the RID");
+        Assert.AreEqual("ARM64", resolved.Platform, "Platform must still convey the architecture");
+
+        // Every pass must agree, or the evaluate would resolve a TargetDir the build never wrote.
+        Assert.IsFalse(ProjectRunService.BuildBuildPassArguments(app, resolved, "minimal").Contains("-r win-arm64", StringComparison.Ordinal));
+        Assert.IsFalse(ProjectRunService.BuildRestorePassArguments(app, resolved).Contains("-r win-arm64", StringComparison.Ordinal));
+        Assert.IsFalse(ProjectRunService.BuildEvaluateArguments(app, resolved).Contains("-p:RuntimeIdentifier=", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void RidSplit_NoStrippingEdge_KeepsRuntimeIdentifier()
+    {
+        var app = WriteRidSplitGraph(stripRidOnMiddleEdge: false);
+
+        var resolved = ProjectRunService.ResolvePlatformInjection(app, PlatformOptions("arm64"));
+
+        Assert.IsFalse(resolved.OmitRuntimeIdentifier, "without a split the RID must be preserved");
+        StringAssert.Contains(ProjectRunService.BuildBuildPassArguments(app, resolved, "minimal"), "-r win-arm64");
+    }
+
+    [TestMethod]
+    public void RidSplit_WithoutEffectivePlatform_KeepsRuntimeIdentifier()
+    {
+        // Same split, but a referenced project declares no <Platforms>, so Platform injection is off.
+        // The RID is then the ONLY thing conveying the architecture and must never be dropped.
+        WriteFile("Shared.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup><TargetFramework>net8.0-windows10.0.19041.0</TargetFramework></PropertyGroup>
+            </Project>
+            """);
+        WriteFile("Middle.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup><TargetFramework>net8.0-windows10.0.19041.0</TargetFramework></PropertyGroup>
+              <ItemGroup>
+                <ProjectReference Include="Shared.csproj" GlobalPropertiesToRemove="RuntimeIdentifier" />
+              </ItemGroup>
+            </Project>
+            """);
+        var app = WriteFile("App.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>WinExe</OutputType>
+                <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+                <Platforms>x86;x64;ARM64</Platforms>
+              </PropertyGroup>
+              <ItemGroup>
+                <ProjectReference Include="Shared.csproj" />
+                <ProjectReference Include="Middle.csproj" />
+              </ItemGroup>
+            </Project>
+            """);
+
+        var resolved = ProjectRunService.ResolvePlatformInjection(app, PlatformOptions("arm64"));
+
+        Assert.IsNull(resolved.Platform, "closure lacks <Platforms>, so Platform must not be injected");
+        Assert.IsFalse(resolved.OmitRuntimeIdentifier, "with no Platform the RID is the only arch carrier");
+    }
+
+    [TestMethod]
+    public void RidSplit_UserSuppliedPlatform_StillOmitsRuntimeIdentifier()
+    {
+        // The reported repro passed -p Platform=arm64 explicitly; that path must be handled too.
+        var app = WriteRidSplitGraph(stripRidOnMiddleEdge: true);
+
+        var resolved = ProjectRunService.ResolvePlatformInjection(app, PlatformOptions("arm64", "Platform=arm64"));
+
+        Assert.IsTrue(resolved.OmitRuntimeIdentifier);
+        Assert.IsNull(resolved.Platform, "a user-supplied Platform is forwarded as-is, not re-injected");
+    }
+
+    [TestMethod]
+    public void RidSplit_UndefinePropertiesSpelling_IsDetected()
+    {
+        WriteFile("Shared.csproj", SharedLibCsproj);
+        WriteFile("Middle.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+                <Platforms>AnyCPU;x64;ARM64</Platforms>
+              </PropertyGroup>
+              <ItemGroup>
+                <ProjectReference Include="Shared.csproj" UndefineProperties="PublishAot;RuntimeIdentifier" />
+              </ItemGroup>
+            </Project>
+            """);
+        var app = WriteFile("App.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>WinExe</OutputType>
+                <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+                <Platforms>x86;x64;ARM64</Platforms>
+              </PropertyGroup>
+              <ItemGroup>
+                <ProjectReference Include="Shared.csproj" />
+                <ProjectReference Include="Middle.csproj" />
+              </ItemGroup>
+            </Project>
+            """);
+
+        var resolved = ProjectRunService.ResolvePlatformInjection(app, PlatformOptions("arm64"));
+
+        Assert.IsTrue(resolved.OmitRuntimeIdentifier, "UndefineProperties is an equivalent spelling of GlobalPropertiesToRemove");
+    }
+
+    #endregion
+
     [TestMethod]
     public void ResolvePlatformInjection_SingleProjectDeclaresArch_InjectsDeclaredToken()
     {
