@@ -18,67 +18,10 @@
         & ([scriptblock]::Create((irm https://raw.githubusercontent.com/microsoft/winappCli/main/scripts/winapp-pr.ps1))) -AddToPath
 
     From a clone, run with -AddToPath instead. Either way the script is copied to a directory
-    on your user PATH so `winapp-pr` works from anywhere; -Update refreshes it later.
+    on your user PATH so `winapp-pr` works from anywhere; -UpdateTool refreshes it later.
 
-.PARAMETER Target
-    A PR number (690) or a branch name (main, zt/new-command). Omit it to choose interactively.
+    Run `winapp-pr -Help` for the full list of commands and options.
 
-.PARAMETER Repo
-    Repository to pull builds from, as owner/name. Defaults to $env:WINAPP_PR_REPO, then
-    microsoft/winappCli. Use this to install from a private fork.
-
-.PARAMETER Run
-    Install from an explicit workflow run ID, bypassing PR/branch resolution.
-
-.PARAMETER Arch
-    Package architecture: x64 or arm64. Defaults to this machine's architecture.
-
-.PARAMETER List
-    Show recent candidate runs for the target instead of installing.
-
-.PARAMETER Status
-    Show the currently installed winapp package and exit.
-
-.PARAMETER PruneCerts
-    Remove trusted CI dev certificates left behind by previous installs, keeping the one the
-    installed package needs. Requires admin.
-
-.PARAMETER AddToPath
-    Copy this script to %LOCALAPPDATA%\Programs\winapp-dev, add it to the user PATH, and exit.
-
-.PARAMETER Update
-    Download the latest winapp-pr from main and reinstall it to the user PATH.
-
-.PARAMETER NonInteractive
-    Skip the picker when no target is given and use the current git branch instead.
-
-.PARAMETER Force
-    Re-download the artifact even if a cached copy exists.
-
-.EXAMPLE
-    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/microsoft/winappCli/main/scripts/winapp-pr.ps1))) -AddToPath
-
-    Install winapp-pr on a machine that has no clone of the repo. Requires the GitHub CLI.
-
-.EXAMPLE
-    winapp-pr
-    Pick an open PR (or the default branch) from a list and install it.
-
-.EXAMPLE
-    winapp-pr 690
-    Install the latest build for PR 690.
-
-.EXAMPLE
-    winapp-pr main
-    Install the latest build from main.
-
-.EXAMPLE
-    winapp-pr 42 -Repo contoso/winappCli-private
-    Install PR 42 from a private fork.
-
-.EXAMPLE
-    winapp-pr -List
-    Show recent runs for the current branch without installing.
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'Install')]
@@ -99,11 +42,15 @@ param(
 
     [switch]$PruneCerts,
 
-    [switch]$AddToPath,
-
     [switch]$Update,
 
+    [switch]$AddToPath,
+
+    [switch]$UpdateTool,
+
     [switch]$NonInteractive,
+
+    [switch]$Help,
 
     [switch]$Force
 )
@@ -130,6 +77,7 @@ $GhExe = 'gh'
 $ToolHome     = Join-Path $env:LOCALAPPDATA 'winapp-dev'
 $CacheRoot    = Join-Path $ToolHome 'cache'
 $StateFile    = Join-Path $ToolHome 'current.json'
+$TrustedFile  = Join-Path $ToolHome 'trusted-certs.json'
 $InstallDir   = Join-Path $env:LOCALAPPDATA 'Programs\winapp-dev'
 
 function Write-Step   { param([string]$m) Write-Host "`n>> $m" -ForegroundColor Cyan }
@@ -228,8 +176,24 @@ Install the GitHub CLI, then re-run:
     }
     $script:GhExe = $ghPath
 
-    & $script:GhExe auth status *> $null
+    # Scoped to the active github.com account: a bare `gh auth status` fails when ANY configured
+    # account on any host is stale, which would send people with a second account into sign-in.
+    & $script:GhExe auth status --active --hostname github.com *> $null
     if ($LASTEXITCODE -eq 0) { return }
+
+    # gh refuses to store credentials while an env token is set, so offering login would dead-end.
+    $envTokenName = @('GH_TOKEN', 'GITHUB_TOKEN') |
+        Where-Object { [Environment]::GetEnvironmentVariable($_) } |
+        Select-Object -First 1
+    if ($envTokenName) {
+        Fail @"
+GitHub rejected the token in `$env:$envTokenName.
+
+Update it, or clear it and sign in interactively:
+  Remove-Item Env:\$envTokenName
+  gh auth login
+"@
+    }
 
     Write-Warn 'The GitHub CLI is installed but not signed in.'
     if (-not (Confirm-Action '   Sign in now?')) {
@@ -241,7 +205,7 @@ Sign in, then re-run:
 
     # gh drives its own prompts here, so let it own the console.
     & $script:GhExe auth login
-    & $script:GhExe auth status *> $null
+    & $script:GhExe auth status --active --hostname github.com *> $null
     if ($LASTEXITCODE -ne 0) {
         Fail 'Still not signed in. Run gh auth login manually, then re-run.'
     }
@@ -427,6 +391,27 @@ function Get-MenuItems {
     $state = Get-InstallState
     $localBranch = Get-LocalBranch
 
+    # Only claim a build is installed when the record still describes the installed package and
+    # came from the repo being listed; branch names collide across forks.
+    $installedBranch = ''
+    $installedIsCurrent = $true
+    $liveState = Test-StateMatchesInstall -State $state -Package (Get-InstalledWinapp | Select-Object -First 1)
+    if ($liveState -and $state.Branch -and $state.Repo -eq $RepoName) {
+        $installedBranch = $state.Branch
+        $newest = Get-MsixArtifact -RepoName $RepoName -Quiet `
+            -Runs (Get-BranchRuns -RepoName $RepoName -Branch $installedBranch -HeadRepo $state.HeadRepo)
+        if ($newest -and $newest.Run.id -ne $state.RunId) { $installedIsCurrent = $false }
+    }
+
+    function Get-Marker {
+        param([string]$Branch)
+        if ($installedBranch -and $installedBranch -eq $Branch) {
+            return $(if ($installedIsCurrent) { '*' } else { '^' })
+        }
+        if ($localBranch -and $localBranch -eq $Branch) { return '.' }
+        return ' '
+    }
+
     $items = foreach ($pr in @($prs)) {
         $meta = @($pr.author, (Get-RelativeAge ([datetime]$pr.updated)))
         if ($pr.draft) { $meta = @($pr.author, 'draft', (Get-RelativeAge ([datetime]$pr.updated))) }
@@ -436,9 +421,7 @@ function Get-MenuItems {
             Name   = "#$($pr.number)"
             Title  = $pr.title
             Meta   = ($meta -join ' - ')
-            Marker = if ($state -and $state.Branch -eq $pr.branch) { '*' }
-                     elseif ($localBranch -eq $pr.branch) { '.' }
-                     else { ' ' }
+            Marker = Get-Marker -Branch $pr.branch
         }
     }
 
@@ -448,7 +431,7 @@ function Get-MenuItems {
         Name   = $defaultBranch
         Title  = 'latest build from the default branch'
         Meta   = ''
-        Marker = if ($state -and $state.Branch -eq $defaultBranch) { '*' } else { ' ' }
+        Marker = Get-Marker -Branch $defaultBranch
     }
 
     return @($items)
@@ -555,7 +538,7 @@ function Select-InstallTarget {
     $items = Get-MenuItems -RepoName $RepoName
     if (-not $items) { Fail "No open pull requests or branches found in $RepoName." }
 
-    Write-Host "   * installed   . current branch   (Up/Down, Enter to install, Esc to cancel)`n" -ForegroundColor DarkGray
+    Write-Host "   * installed   ^ newer build available   . current branch   (Up/Down, Enter to install, Esc to cancel)`n" -ForegroundColor DarkGray
 
     $canDrawMenu = -not ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected)
     $choice = if ($canDrawMenu) {
@@ -576,13 +559,20 @@ function Select-InstallTarget {
 }
 
 function Get-BranchRuns {
-    param([string]$RepoName, [string]$Branch)
+    param([string]$RepoName, [string]$Branch, [string]$HeadRepo)
 
     $encoded = [uri]::EscapeDataString($Branch)
     $runs = Invoke-Gh @('api', "repos/$RepoName/actions/runs?branch=$encoded&per_page=50",
         '--jq', '.workflow_runs')
-    return @($runs | Where-Object { $_.name -eq $WorkflowName } |
-        Sort-Object { [datetime]$_.created_at } -Descending)
+    $runs = @($runs | Where-Object { $_.name -eq $WorkflowName })
+
+    # Fork PRs run in the base repo and can share a branch name with another fork -- "main"
+    # especially -- so pin to the head repository when the caller knows which one it wants.
+    if ($HeadRepo) {
+        $runs = @($runs | Where-Object { $_.head_repository.full_name -eq $HeadRepo })
+    }
+
+    return @($runs | Sort-Object { [datetime]$_.created_at } -Descending)
 }
 
 function Get-CandidateRuns {
@@ -591,11 +581,11 @@ function Get-CandidateRuns {
         head commit come first, then older builds of the same branch so an in-progress or
         artifact-less newest run degrades to the previous good build instead of failing.
     #>
-    param([string]$RepoName, [string]$TargetSpec)
+    param([string]$RepoName, [string]$TargetSpec, [string]$HeadRepo)
 
     if ($TargetSpec -notmatch '^\d+$') {
         Write-Detail "Branch: $TargetSpec"
-        return Get-BranchRuns -RepoName $RepoName -Branch $TargetSpec
+        return Get-BranchRuns -RepoName $RepoName -Branch $TargetSpec -HeadRepo $HeadRepo
     }
 
     $pr = Invoke-Gh @('api', "repos/$RepoName/pulls/$TargetSpec",
@@ -604,6 +594,7 @@ function Get-CandidateRuns {
     Write-Detail "Branch: $($pr.branch)  @ $($pr.sha.Substring(0,8))"
 
     $script:TargetHeadSha = $pr.sha
+    $script:TargetPr = $TargetSpec
 
     $headRuns = Invoke-Gh @('api', "repos/$RepoName/actions/runs?head_sha=$($pr.sha)&per_page=100",
         '--jq', '.workflow_runs')
@@ -622,7 +613,7 @@ function Get-CandidateRuns {
 
 function Get-MsixArtifact {
     <# First run in the list that has a downloadable msix-packages artifact. #>
-    param([string]$RepoName, [object[]]$Runs)
+    param([string]$RepoName, [object[]]$Runs, [switch]$Quiet)
 
     foreach ($run in $Runs) {
         $artifacts = Invoke-Gh @('api', "repos/$RepoName/actions/runs/$($run.id)/artifacts",
@@ -632,7 +623,9 @@ function Get-MsixArtifact {
         if ($msix) {
             return [pscustomobject]@{ Run = $run; Artifact = $msix }
         }
-        Write-Detail "Run $($run.id) has no usable $ArtifactName artifact, trying older run..."
+        if (-not $Quiet) {
+            Write-Detail "Run $($run.id) has no usable $ArtifactName artifact, trying older run..."
+        }
     }
     return $null
 }
@@ -683,18 +676,64 @@ function Get-CachedMsixPackage {
 
 # ── Certificate trust ────────────────────────────────────────────────────────
 
+function Test-Thumbprint {
+    <# Thumbprints get interpolated into an elevated command, so treat them as untrusted input. #>
+    param([string]$Value)
+    return ($Value -match '^[0-9A-Fa-f]{40}$')
+}
+
 function Read-P7xCertificate {
     param([string]$Path)
 
     if (-not (Test-Path $Path)) { return $null }
     try {
+        $bytes = [System.IO.File]::ReadAllBytes($Path)
+        # AppxSignature.p7x is a PKCS#7 blob behind a 4-byte 'PKCX' magic; SignedCms rejects it.
+        if ($bytes.Length -gt 4 -and
+            $bytes[0] -eq 0x50 -and $bytes[1] -eq 0x4B -and $bytes[2] -eq 0x43 -and $bytes[3] -eq 0x58) {
+            $bytes = $bytes[4..($bytes.Length - 1)]
+        }
         $cms = New-Object System.Security.Cryptography.Pkcs.SignedCms
-        $cms.Decode([System.IO.File]::ReadAllBytes($Path))
+        $cms.Decode($bytes)
         return $cms.Certificates[0]
     }
     catch {
         return $null
     }
+}
+
+function Get-InstalledCertThumbprint {
+    <# The signing certificate of the installed package. CI mints one per run, so it is unique. #>
+    param([object]$Package)
+
+    if (-not $Package -or -not $Package.InstallLocation) { return '' }
+    $cert = Read-P7xCertificate -Path (Join-Path $Package.InstallLocation 'AppxSignature.p7x')
+    if ($cert) { return $cert.Thumbprint }
+    return ''
+}
+
+function Get-TrackedCerts {
+    <#
+        Thumbprints this tool has trusted. TrustedPeople is a shared store holding unrelated
+        anchors, so cleanup is driven by what we added rather than by matching on subject.
+    #>
+    if (-not (Test-Path $TrustedFile)) { return @() }
+    try {
+        $values = @(Get-Content $TrustedFile -Raw | ConvertFrom-Json)
+    }
+    catch {
+        return @()
+    }
+    # This file is user-writable and its values are interpolated into an elevated command.
+    return @($values | Where-Object { Test-Thumbprint -Value $_ })
+}
+
+function Set-TrackedCerts {
+    param([string[]]$Thumbprints)
+
+    New-Item -ItemType Directory -Path $ToolHome -Force | Out-Null
+    $clean = @($Thumbprints | Where-Object { Test-Thumbprint -Value $_ })
+    ,$clean | ConvertTo-Json | Set-Content -Path $TrustedFile -Encoding UTF8
 }
 
 function Get-PackageCertificate {
@@ -725,10 +764,15 @@ function Grant-CertificateTrust {
     <# Imports the cert into LocalMachine\TrustedPeople, elevating only for that step. #>
     param([System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate)
 
+    $tracked = Get-TrackedCerts
+
     $already = Get-ChildItem Cert:\LocalMachine\TrustedPeople |
         Where-Object { $_.Thumbprint -eq $Certificate.Thumbprint }
     if ($already) {
         Write-Ok "Certificate already trusted ($($Certificate.Thumbprint.Substring(0,12))...)"
+        if ($tracked -notcontains $Certificate.Thumbprint) {
+            Set-TrackedCerts -Thumbprints (@($tracked) + $Certificate.Thumbprint)
+        }
         return
     }
 
@@ -738,8 +782,24 @@ function Grant-CertificateTrust {
     Write-Detail "Trusting $($Certificate.Subject) ($($Certificate.Thumbprint.Substring(0,12))...)"
     Write-Detail 'Approve the elevation prompt to add it to LocalMachine\TrustedPeople.'
 
-    $command = "Import-Certificate -FilePath '$cerPath' -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null"
-    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+    # Retire the certs we trusted for earlier builds in the same elevated step, so cleanup
+    # never costs an extra prompt. Removing one does not affect an already-installed package.
+    $retire = @($tracked | Where-Object { $_ -and $_ -ne $Certificate.Thumbprint -and (Test-Thumbprint -Value $_) })
+    if ($retire) {
+        Write-Detail "Also retiring $($retire.Count) certificate(s) from earlier installs."
+    }
+
+    if (-not (Test-Thumbprint -Value $Certificate.Thumbprint)) {
+        Fail "Refusing to trust a certificate with an unexpected thumbprint format."
+    }
+
+    $statements = @(
+        "Import-Certificate -FilePath '$cerPath' -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null"
+    ) + @($retire | ForEach-Object {
+        "Remove-Item 'Cert:\LocalMachine\TrustedPeople\$_' -Force -ErrorAction SilentlyContinue"
+    })
+
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($statements -join '; '))
     $shell = if (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell' }
 
     try {
@@ -762,6 +822,7 @@ function Grant-CertificateTrust {
     if (-not $verify) {
         Fail 'Certificate import reported success but the certificate is not in the store.'
     }
+    Set-TrackedCerts -Thumbprints @($Certificate.Thumbprint)
     Write-Ok 'Certificate trusted'
 }
 
@@ -787,11 +848,12 @@ function Remove-StaleCertificates {
         foreach ($cert in $stale) {
             Remove-Item "Cert:\LocalMachine\TrustedPeople\$($cert.Thumbprint)" -Force
         }
+        Set-TrackedCerts -Thumbprints @(Get-TrackedCerts | Where-Object { $_ -eq $KeepThumbprint })
         Write-Ok "Removed $($stale.Count) certificate(s)"
         return
     }
 
-    $removals = ($stale | ForEach-Object {
+    $removals = ($stale | Where-Object { Test-Thumbprint -Value $_.Thumbprint } | ForEach-Object {
         "Remove-Item 'Cert:\LocalMachine\TrustedPeople\$($_.Thumbprint)' -Force -ErrorAction SilentlyContinue"
     }) -join '; '
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($removals))
@@ -802,6 +864,7 @@ function Remove-StaleCertificates {
     if ($proc.ExitCode -ne 0) {
         Fail "Certificate cleanup failed with exit code $($proc.ExitCode)."
     }
+    Set-TrackedCerts -Thumbprints @(Get-TrackedCerts | Where-Object { $_ -eq $KeepThumbprint })
     Write-Ok "Removed $($stale.Count) certificate(s)"
 }
 
@@ -821,6 +884,79 @@ function Install-WinappPackage {
     Write-Ok 'Package installed'
 }
 
+function Show-ScriptHelp {
+    # Hand-written rather than Get-Help: it stays readable, and it works identically when the
+    # script is run from the web as a scriptblock, where Get-Help has no file to read.
+    # Written to the pipeline a line at a time so it can be piped, paged, or grepped.
+    @'
+winapp-pr - install winapp CLI MSIX builds produced by CI
+
+USAGE
+  winapp-pr [<pr>|<branch>] [options]
+
+PICKING A BUILD
+  winapp-pr                 choose from a list of open pull requests
+  winapp-pr 690             a pull request
+  winapp-pr main            a branch
+  winapp-pr -Run <id>       an exact workflow run
+
+COMMANDS
+  -Update                   install the newest build of whatever you have
+  -Status                   show the installed build and where it came from
+  -List                     list recent builds for the target
+  -PruneCerts               remove trusted CI certificates from past installs
+                            (installs retire their own automatically)
+  -AddToPath                install winapp-pr itself onto your PATH
+  -UpdateTool               update winapp-pr itself
+  -Help                     show this
+
+OPTIONS
+  -Repo <owner/name>        install from another repo, such as a private fork
+  -Arch <x64|arm64>         override the detected architecture
+  -Force                    reinstall even if that build is already installed
+  -NonInteractive           skip the picker and use the current git branch
+
+Installing a build replaces any winapp package already installed, and needs the
+GitHub CLI; winapp-pr offers to install it and sign you in if it is missing.
+Set $env:WINAPP_PR_REPO to change the default repo.
+'@ -split "`r?`n"
+}
+
+function Get-InstalledArch {
+    <# Maps the installed package's architecture onto the names used for artifacts. #>
+    param([object]$Package)
+
+    if (-not $Package) { return '' }
+    switch ("$($Package.Architecture)".ToLower()) {
+        'x64'   { 'x64' }
+        'arm64' { 'arm64' }
+        default { "$($Package.Architecture)".ToLower() }
+    }
+}
+
+function Test-StateMatchesInstall {
+    <#
+        True when the install record still describes the package that is actually installed.
+        A package installed by other means -- double-clicking an MSIX, setup-winapprun.ps1 --
+        leaves the record describing a build that is no longer there.
+    #>
+    param([object]$State, [object]$Package)
+
+    if (-not $State -or -not $Package) { return $false }
+
+    # Prefer the signing certificate: dev versions are a commit count, so unrelated branches at
+    # the same depth produce identical name/version/architecture and would compare equal.
+    $installedThumb = Get-InstalledCertThumbprint -Package $Package
+    if ($installedThumb) {
+        return ($installedThumb -eq $State.Thumbprint)
+    }
+
+    # Signature unreadable: fall back to the weaker check rather than refusing to work.
+    if ($State.Version -ne $Package.Version) { return $false }
+    if ($State.Arch -and $State.Arch -ne (Get-InstalledArch -Package $Package)) { return $false }
+    return $true
+}
+
 function Show-Status {
     $installed = Get-InstalledWinapp
     if (-not $installed) {
@@ -832,16 +968,24 @@ function Show-Status {
     }
 
     $state = Get-InstallState
-    if ($state -and $state.Version -eq ($installed | Select-Object -First 1).Version) {
+    if (Test-StateMatchesInstall -State $state -Package ($installed | Select-Object -First 1)) {
         Write-Detail "Source: $($state.Repo)  $($state.Branch)  @ $($state.HeadSha)"
         Write-Detail "Run   : $($state.RunId)  installed $($state.InstalledAt)"
+    }
+    elseif ($state) {
+        Write-Warn 'This package was not installed by winapp-pr; its source is unknown.'
     }
 }
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 function Invoke-Main {
-    if ($Update) {
+    if ($Help) {
+        Show-ScriptHelp
+        return
+    }
+
+    if ($UpdateTool) {
         Write-Step 'Updating winapp-pr from main'
         Update-Self
         return
@@ -863,6 +1007,30 @@ function Invoke-Main {
 
 
     $repoName = Resolve-Repo
+    $installState = Get-InstallState
+    $installedPackage = Get-InstalledWinapp | Select-Object -First 1
+    $stateIsLive = Test-StateMatchesInstall -State $installState -Package $installedPackage
+
+    if ($Update) {
+        if (-not $installState -or -not ($installState.Pr -or $installState.Branch)) {
+            Fail 'No record of a previous install to update. Pass a PR number or branch instead.'
+        }
+        if ($installedPackage -and -not $stateIsLive) {
+            Fail @"
+The installed package ($($installedPackage.Name) $($installedPackage.Version)) was not installed
+by winapp-pr, so there is no way to tell which build it came from.
+
+Name what you want instead, for example:
+  winapp-pr $($installState.Branch)
+"@
+        }
+        # The record describes where this build came from, so only an explicit -Repo may
+        # override it; WINAPP_PR_REPO is a default for new installs, not a redirect for this one.
+        if (-not $Repo -and $installState.Repo) {
+            $repoName = $installState.Repo
+        }
+    }
+
     if ($repoName -notmatch '^[^/]+/[^/]+$') {
         Fail "Repo must be in owner/name form, got '$repoName'."
     }
@@ -892,6 +1060,20 @@ function Invoke-Main {
     }
     else {
         $spec = $Target
+        $updateHeadRepo = ''
+        if (-not $spec -and $Update) {
+            # Prefer the PR the build came from: a branch name alone can match another fork's
+            # runs in this same base repo. Fall back to the branch, pinned to its head repo.
+            if ($installState.Pr) {
+                $spec = [string]$installState.Pr
+                Write-Detail "Updating the installed build: PR #$($installState.Pr)"
+            }
+            else {
+                $spec = $installState.Branch
+                $updateHeadRepo = $installState.HeadRepo
+                Write-Detail "Updating the installed build: $($installState.Branch)"
+            }
+        }
         if (-not $spec) {
             $spec = if ($NonInteractive -or $List) {
                 Resolve-CurrentBranch -RepoName $repoName
@@ -901,7 +1083,7 @@ function Invoke-Main {
             }
         }
         Write-Step "Resolving build from $repoName"
-        $runs = Get-CandidateRuns -RepoName $repoName -TargetSpec $spec
+        $runs = Get-CandidateRuns -RepoName $repoName -TargetSpec $spec -HeadRepo $updateHeadRepo
         if (-not $runs) {
             Fail "No '$WorkflowName' runs found for '$spec' in $repoName."
         }
@@ -932,6 +1114,17 @@ function Invoke-Main {
         Write-Warn "No package for the PR's head commit ($($script:TargetHeadSha.Substring(0,8))) yet -- using an earlier build."
     }
 
+    # Re-resolving often lands on the build already installed; don't churn the package for nothing.
+    # Requires the record to still describe the installed package, and the same architecture,
+    # so asking for a different -Arch is never mistaken for a no-op.
+    if (-not $Force -and $stateIsLive -and
+        $installState.RunId -eq $selected.Run.id -and
+        (Get-InstalledArch -Package $installedPackage) -eq $architecture) {
+        Write-Ok "Already on this build -- nothing to do."
+        Write-Detail 'Use -Force to reinstall it anyway.'
+        return
+    }
+
     Write-Step "Fetching $architecture package"
     $package = Get-CachedMsixPackage -RepoName $repoName -Run $selected.Run -Architecture $architecture
 
@@ -952,9 +1145,12 @@ function Invoke-Main {
         Set-InstallState @{
             Repo        = $repoName
             RunId       = $selected.Run.id
+            Pr          = $script:TargetPr
             Branch      = $selected.Run.head_branch
+            HeadRepo    = $selected.Run.head_repository.full_name
             HeadSha     = $selected.Run.head_sha.Substring(0, 8)
             Version     = $installed.Version
+            Arch        = $architecture
             Thumbprint  = $certificate.Thumbprint
             InstalledAt = (Get-Date).ToString('s')
         }
@@ -967,7 +1163,7 @@ function Invoke-Main {
         Write-Warn "'winapp --version' failed; open a new terminal and try again."
     }
 
-    Write-Host "`nDone. Run 'winapp-pr -PruneCerts' occasionally to clear old CI certificates.`n" -ForegroundColor Green
+    Write-Host "`nDone.`n" -ForegroundColor Green
 }
 
 $exitCode = 0
