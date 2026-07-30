@@ -300,6 +300,45 @@ function manifestUpdateAssets(options: ManifestUpdateAssetsOptions): Promise<Win
 
 ---
 
+### `migrateScaffold()`
+
+Copy UWP source (C#/XAML/assets) into an existing WinUI 3 scaffold and apply the mechanical, deterministic transforms a migration always needs: merge SDK-sample shared/ + SharedContent/ assets, preserve the original .csproj/.appxmanifest under .uwp-source/, patch the csproj RuntimeIdentifier for x86/x64/ARM64 F5, rewrite Windows.UI.Xaml -> Microsoft.UI.Xaml, neutralize content-filter-prone helper classes, and wire the MainWindow RootFrame + initial Navigate. Triage / per-line findings are produced separately by the migration skill's analysis step.
+
+```typescript
+function migrateScaffold(options: MigrateScaffoldOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `source` | `string` | Yes | UWP project source folder (contains the .csproj and Package.appxmanifest). |
+| `fromUwp` | `boolean \| undefined` | No | Migrate from UWP source (currently the only supported source). |
+| `target` | `string` | Yes | Existing WinUI 3 scaffold to migrate into (produced by 'dotnet new winui'). |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `migrateValidate()`
+
+Validate a migrated WinUI 3 project before declaring the migration done. Runs source-only static gates: UWP namespace/csproj residue markers, single-project layout, MainWindow shell wiring, and Package.appxmanifest packaging requirements. Emits sanitized [PASS]/[FAIL]/[WARN] lines to stdout with full diagnostics in .validator-diagnostics.txt, and returns non-zero when any [FAIL] remains. Build/run health is covered separately by 'winapp build' / 'winapp run'.
+
+```typescript
+function migrateValidate(options?: MigrateValidateOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `directory` | `string \| undefined` | No | Migrated WinUI 3 project root to validate (default: current directory) |
+| `fromUwp` | `boolean \| undefined` | No | Validate a UWP→WinUI 3 migration (currently the only supported direction). |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `packageApp()`
 
 Create MSIX installer from your built app. Run after building your app. A manifest (Package.appxmanifest or appxmanifest.xml) is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest Package.appxmanifest --cert ./devcert.pfx
@@ -1408,6 +1447,27 @@ type ManifestTemplates = "packaged" | "sparse"
 | `imagePath` | `string` | Yes | Path to source image file (SVG, PNG, ICO, JPG, BMP, GIF) |
 | `lightImage` | `string \| undefined` | No | Path to source image for light theme variants (SVG, PNG, ICO, JPG, BMP, GIF) |
 | `manifest` | `string \| undefined` | No | Path to Package.appxmanifest or appxmanifest.xml file (default: search current directory) |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `MigrateScaffoldOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `source` | `string` | Yes | UWP project source folder (contains the .csproj and Package.appxmanifest). |
+| `fromUwp` | `boolean \| undefined` | No | Migrate from UWP source (currently the only supported source). |
+| `target` | `string` | Yes | Existing WinUI 3 scaffold to migrate into (produced by 'dotnet new winui'). |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `MigrateValidateOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `directory` | `string \| undefined` | No | Migrated WinUI 3 project root to validate (default: current directory) |
+| `fromUwp` | `boolean \| undefined` | No | Validate a UWP→WinUI 3 migration (currently the only supported direction). |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

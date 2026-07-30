@@ -282,7 +282,8 @@ function generate(schema) {
     positionalArgs.sort((a, b) => (a.def.order ?? 0) - (b.def.order ?? 0));
 
     // Determine which positional args are required (arity minimum >= 1)
-    const hasRequiredArgs = positionalArgs.some((a) => a.def.arity?.minimum >= 1);
+    const hasRequiredArgs = positionalArgs.some((a) => a.def.arity?.minimum >= 1)
+      || opts.some((o) => o.def.required === true && !isBoolFlag(o.def));
 
     L();
     L('// ---------------------------------------------------------------------------');
@@ -303,8 +304,9 @@ function generate(schema) {
     // then named options
     for (const opt of opts) {
       const tp = tsType(opt.def.valueType, opt.def.helpName);
+      const required = opt.def.required === true && !isBoolFlag(opt.def);
       L(`  /** ${cleanDesc(opt.def.description)} */`);
-      L(`  ${opt.propName}?: ${tp};`);
+      L(`  ${opt.propName}${required ? '' : '?'}: ${tp};`);
     }
     // passthrough args property
     if (passthrough) {
@@ -361,6 +363,8 @@ function generate(schema) {
         L(`  if (options.${opt.propName}) args.push('${opt.cliName}');`);
       } else if (tsType(opt.def.valueType) === 'number') {
         L(`  if (options.${opt.propName} !== undefined) args.push('${opt.cliName}', options.${opt.propName}.toString());`);
+      } else if (opt.def.required === true) {
+        L(`  args.push('${opt.cliName}', options.${opt.propName});`);
       } else {
         L(`  if (options.${opt.propName}) args.push('${opt.cliName}', options.${opt.propName});`);
       }
