@@ -27,16 +27,20 @@ internal partial class MigrateScaffoldCommand : Command, IShortDescription
     public static Option<bool> FromUwpOption { get; }
 
     // Files that must NOT be copied from the UWP source into the WinUI target: build artifacts,
-    // project/solution system files, IDE state, and packaging outputs. Everything else — including
-    // fonts, JSON/XML data, audio/video, shaders and other project content — is copied so the
-    // migrated code never references a missing runtime asset. (Directories such as bin/obj are
-    // already pruned by ExcludeDirSegments; Package.appxmanifest is handled by PreserveUwpReferences.)
+    // project/solution system files, IDE state, packaging outputs, and private signing material.
+    // Everything else — including fonts, JSON/XML data, audio/video, shaders and other project
+    // content — is copied so the migrated code never references a missing runtime asset.
+    // (Directories such as bin/obj are already pruned by ExcludeDirSegments; Package.appxmanifest
+    // is handled by PreserveUwpReferences.)
     private static readonly string[] DoNotCopyExtensions =
     [
         ".csproj", ".vcxproj", ".vbproj", ".shproj", ".projitems", ".sln", ".slnf",
         ".user", ".suo", ".cache", ".vsidx", ".pdb", ".ilk", ".exp", ".idb", ".tlog",
         ".exe", ".dll", ".lib", ".obj", ".appxmanifest",
-        ".appx", ".msix", ".appxbundle", ".appxupload", ".nupkg", ".snupkg"
+        ".appx", ".msix", ".appxbundle", ".appxupload", ".nupkg", ".snupkg",
+        // Private signing material — must never be copied into (and risk being committed with)
+        // the migrated project.
+        ".pfx", ".snk", ".p12", ".pvk", ".cer", ".key"
     ];
 
     private static readonly string[] ExcludeDirSegments =

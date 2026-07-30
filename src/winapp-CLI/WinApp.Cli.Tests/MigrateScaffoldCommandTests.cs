@@ -52,6 +52,28 @@ public class MigrateScaffoldCommandTests : MigrateCommandTestBase
     }
 
     [TestMethod]
+    public async Task Scaffold_ExcludesSigningKeysButCopiesContent()
+    {
+        var source = await CreateUwpSourceAsync("scaffold-pfx-src");
+        await WriteAsync(source, "MyApp_TemporaryKey.pfx", "PRIVATE-SIGNING-MATERIAL");
+        await WriteAsync(source, "keys\\strong.snk", "SNK");
+        await WriteAsync(source, "assets\\data.json", "{ \"ok\": true }");
+        var target = await CreateWinuiTargetAsync("scaffold-pfx-target");
+
+        var command = GetRequiredService<MigrateScaffoldCommand>();
+        var (exit, output) = await InvokeCapturingConsoleAsync(
+            command, source.FullName, "--target", target.FullName, "--from-uwp");
+
+        Assert.AreEqual(0, exit, output);
+        Assert.IsFalse(File.Exists(Path.Combine(target.FullName, "MyApp_TemporaryKey.pfx")),
+            "private .pfx signing material must not be copied into the migrated project");
+        Assert.IsFalse(File.Exists(Path.Combine(target.FullName, "keys", "strong.snk")),
+            ".snk signing keys must not be copied");
+        Assert.IsTrue(File.Exists(Path.Combine(target.FullName, "assets", "data.json")),
+            "ordinary content files must still be copied");
+    }
+
+    [TestMethod]
     public async Task Scaffold_RewritesWindowsUiXamlNamespace()
     {
         var source = await CreateUwpSourceAsync("scaffold-ns-src");
