@@ -158,6 +158,11 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
                     "internet and run the command once to populate the local cache.");
             }
 
+            // Single corpus-boundary guard: strip terminal-control characters and drop
+            // structurally-broken XAML / brace-unbalanced C# before anything downstream
+            // (search, --id output, --json) can emit it. Runs once per engine build.
+            ScenarioSanitizer.SanitizeAll(allScenarios);
+
             var engine = new SearchEngine(
                 allScenarios.ToArray(),
                 DataLoader.LoadCorePatterns(),

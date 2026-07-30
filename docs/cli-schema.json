@@ -752,7 +752,7 @@
           "recursive": false
         },
         "--max": {
-          "description": "Maximum number of matched controls to return.",
+          "description": "Maximum number of matched controls to return. Applies to search only; ignored with --list and --id.",
           "hidden": false,
           "valueType": "System.Int32",
           "hasDefaultValue": true,

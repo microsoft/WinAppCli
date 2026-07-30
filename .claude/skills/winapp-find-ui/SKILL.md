@@ -128,6 +128,6 @@ Search WinUI controls and samples for a working code example. WinUI-only: covers
 | `--id` | Fetch the code (Gallery/Toolkit return XAML and/or C#; Reactor is C#-only) plus prerequisite notes for one or more scenario ids from a prior search (e.g. gallery-tabview-1). | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--list` | List every discoverable control/sample id instead of searching. Covers Gallery, Toolkit, and core; the opt-in Reactor source is excluded (search it with --source reactor). | (none) |
-| `--max` | Maximum number of matched controls to return. | `3` |
+| `--max` | Maximum number of matched controls to return. Applies to search only; ignored with --list and --id. | `3` |
 | `--refresh` | Bypass the local cache and re-fetch the WinUI corpus from GitHub. | (none) |
 | `--source` | Restrict results to a single source: gallery (WinUI 3 Gallery), toolkit (Windows Community Toolkit), reactor (microsoft-ui-reactor, C#-only declarative WinUI), or core (curated patterns). Reactor is opt-in — it is excluded from a normal search, so pass --source reactor to search it (only do this for a Reactor/MVU project; its C#-only samples don't paste into a standard XAML app). | (none) |

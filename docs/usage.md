@@ -935,9 +935,9 @@ The corpus is fetched from GitHub on first use and cached per-user under `<globa
 - `--id <id>` - Fetch the code (Gallery/Toolkit return XAML and/or C#; Reactor is C#-only) plus prerequisite notes for one or more scenario ids from a prior search (e.g. `gallery-tabview-1`). Repeatable.
 - `--list` - List every discoverable control/sample id instead of searching (Gallery + Toolkit + core; the opt-in Reactor source is excluded).
 - `--source <gallery|toolkit|reactor|core>` - Restrict search results to a single source. (Search only — not valid with `--list`/`--id`.) **Reactor is opt-in** — it is excluded from a normal search, so `--source reactor` is the only way to search it.
-- `--max <N>` - Maximum number of matched controls to return (default: 3).
+- `--max <N>` - Maximum number of matched controls to return (default: 3). Applies to search only; ignored with `--list`/`--id`.
 - `--refresh` - Bypass the local cache and re-fetch the WinUI corpus from GitHub.
-- `--json` - Emit structured JSON (agent-friendly): a compact list of matches (`id`, `control`, `source`, `header`, `score`) for search, or full code for `--id`.
+- `--json` - Emit structured JSON (agent-friendly). For search, each match carries `source`, `control`, `score`, `description`, and a `scenarios` array whose entries hold the per-scenario `id` and `header`; for `--id`, full code.
 
 **Workflow:** search compactly to find the right control and its scenario ids, then fetch the full code for the best match with `--id`.
 

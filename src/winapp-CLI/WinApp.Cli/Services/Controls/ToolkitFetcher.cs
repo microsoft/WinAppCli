@@ -360,7 +360,7 @@ internal static partial class ToolkitFetcher
                     var focused = ExtractCoreControl(xamlOut, controlName);
                     if (focused != null) xamlOut = focused;
                 }
-                xamlOut = TruncateXaml(xamlOut, MaxXamlChars);
+                xamlOut = ControlSnippetText.TruncateXaml(xamlOut, MaxXamlChars);
 
                 // No code-behind for this scenario → strip dangling event handlers so the
                 // emitted XAML doesn't reference a handler that isn't returned.
@@ -376,7 +376,7 @@ internal static partial class ToolkitFetcher
                     ControlName = controlName,
                     HeaderText = friendly,
                     Xaml = xamlOut,
-                    CSharp = string.IsNullOrEmpty(cs) ? null : TruncateCSharp(cs, MaxCSharpChars),
+                    CSharp = string.IsNullOrEmpty(cs) ? null : ControlSnippetText.TruncateCode(cs, MaxCSharpChars, "// ...truncated"),
                     Source = "toolkit",
                     NuGetPackage = nuget,
                     XmlnsImports = xmlns,
@@ -930,69 +930,6 @@ internal static partial class ToolkitFetcher
         }
 
         return string.Join('\n', output);
-    }
-
-    [GeneratedRegex(@"<(/?)([A-Za-z_][\w:.\-]*)\b([^>]*?)(/?)>")]
-    private static partial Regex AnyTagRegex();
-
-    private static string TruncateXaml(string xaml, int maxChars)
-    {
-        bool needsTrunc = xaml.Length > maxChars;
-        string head;
-        if (needsTrunc)
-        {
-            int cut = maxChars;
-            while (cut > 0)
-            {
-                cut = xaml.LastIndexOf('>', cut - 1);
-                if (cut < 0) return "";
-                cut += 1;
-                int lastLt = xaml.LastIndexOf('<', cut - 1);
-                int lastGt = xaml.LastIndexOf('>', cut - 1);
-                if (lastLt < lastGt) break;
-                cut = lastLt;
-            }
-            if (cut <= 0) return "";
-            head = xaml.Substring(0, cut);
-        }
-        else
-        {
-            head = xaml;
-        }
-
-        var stack = new Stack<string>();
-        bool sawMismatch = false;
-        foreach (Match m in AnyTagRegex().Matches(head))
-        {
-            bool isClose = m.Groups[1].Value == "/";
-            bool isSelf = m.Groups[4].Value == "/";
-            string nm = m.Groups[2].Value;
-            if (isSelf) continue;
-            if (isClose)
-            {
-                if (stack.Count > 0 && stack.Peek() == nm) stack.Pop();
-                else sawMismatch = true;
-            }
-            else
-            {
-                stack.Push(nm);
-            }
-        }
-
-        if (!needsTrunc && stack.Count == 0 && !sawMismatch) return xaml;
-
-        var sb = new System.Text.StringBuilder(head.TrimEnd());
-        while (stack.Count > 0) sb.Append("</").Append(stack.Pop()).Append('>');
-        if (needsTrunc) sb.Append("\n<!-- ...truncated -->");
-        return sb.ToString();
-    }
-
-    private static string TruncateCSharp(string code, int maxChars)
-    {
-        if (code.Length <= maxChars) return code;
-        int cut = code.LastIndexOf('\n', maxChars - 1);
-        if (cut < 0) cut = maxChars;
-        return code.Substring(0, cut).TrimEnd() + "\n// ...truncated";
     }
 
     private static string MakeScenarioId(string controlId, string header)

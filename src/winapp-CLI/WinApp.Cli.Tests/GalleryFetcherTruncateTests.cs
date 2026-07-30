@@ -6,7 +6,7 @@ using WinApp.Cli.Services.Controls;
 namespace WinApp.Cli.Tests;
 
 /// <summary>
-/// Hermetic tests for <see cref="GalleryFetcher.TruncateCode"/> — the brace-balanced
+/// Hermetic tests for <see cref="ControlSnippetText.TruncateCode"/> — the brace-balanced
 /// C# truncation. The key invariant: the emitted snippet must have balanced braces so
 /// agents can paste it without a build break, even when the cut lands mid-line after a
 /// brace opened between the previous newline and the cap.
@@ -23,7 +23,7 @@ public class GalleryFetcherTruncateTests
     public void TruncateCode_ShortInput_ReturnedUnchanged()
     {
         var code = "void M()\n{\n    Do();\n}";
-        Assert.AreEqual(code, GalleryFetcher.TruncateCode(code, 1000, Marker));
+        Assert.AreEqual(code, ControlSnippetText.TruncateCode(code, 1000, Marker));
     }
 
     [TestMethod]
@@ -39,7 +39,7 @@ public class GalleryFetcherTruncateTests
             "    Inner(() => { A(); B(); C(); D(); E(); F(); G(); H(); I(); J(); K(); L(); M(); N(); O(); });\n" +
             "}";
 
-        var result = GalleryFetcher.TruncateCode(code, 40, Marker);
+        var result = ControlSnippetText.TruncateCode(code, 40, Marker);
 
         var (open, close) = BraceCounts(result);
         Assert.AreEqual(open, close, $"truncated snippet must have balanced braces. Got:\n{result}");
@@ -55,7 +55,7 @@ public class GalleryFetcherTruncateTests
             "void A()\n{\n    Do();\n}\n\n" +
             "void B()\n{\n    var reallyLongTail = 123456789012345678901234567890;\n    More();\n}";
 
-        var result = GalleryFetcher.TruncateCode(code, 25, Marker);
+        var result = ControlSnippetText.TruncateCode(code, 25, Marker);
 
         var (open, close) = BraceCounts(result);
         Assert.AreEqual(open, close, $"truncated snippet must have balanced braces. Got:\n{result}");
@@ -73,7 +73,7 @@ public class GalleryFetcherTruncateTests
             "    Do();\n" +
             "}";
 
-        var result = GalleryFetcher.TruncateCode(code, 45, Marker);
+        var result = ControlSnippetText.TruncateCode(code, 45, Marker);
 
         var (open, close) = BraceCounts(result);
         Assert.AreEqual(open, close, $"string/comment braces must not unbalance output. Got:\n{result}");

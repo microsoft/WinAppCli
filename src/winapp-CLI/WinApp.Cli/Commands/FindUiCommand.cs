@@ -58,7 +58,7 @@ internal sealed class FindUiCommand : Command, IShortDescription
 
         MaxOption = new Option<int>("--max")
         {
-            Description = "Maximum number of matched controls to return.",
+            Description = "Maximum number of matched controls to return. Applies to search only; ignored with --list and --id.",
             DefaultValueFactory = _ => 3
         };
 

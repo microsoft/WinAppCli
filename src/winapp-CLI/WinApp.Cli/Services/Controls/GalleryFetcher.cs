@@ -259,8 +259,8 @@ internal static partial class GalleryFetcher
                         headerText = controlSubtitle!.Trim();
                 }
 
-                if (xaml != null) xaml = TruncateXaml(xaml, MaxXamlChars);
-                if (csharp != null) csharp = TruncateCode(csharp, MaxCSharpChars, "// NOTE: snippet truncated — refer to full sample for additional code");
+                if (xaml != null) xaml = ControlSnippetText.TruncateXaml(xaml, MaxXamlChars);
+                if (csharp != null) csharp = ControlSnippetText.TruncateCode(csharp, MaxCSharpChars, "// NOTE: snippet truncated — refer to full sample for additional code");
 
                 if (string.IsNullOrWhiteSpace(xaml)) xaml = null;
                 if (string.IsNullOrWhiteSpace(csharp)) csharp = null;
@@ -363,9 +363,6 @@ internal static partial class GalleryFetcher
 
     private const int MaxXamlChars = 2000;
     private const int MaxCSharpChars = 2500;
-
-    [GeneratedRegex(@"<(/?)([A-Za-z_][\w:.\-]*)\b([^>]*?)(/?)>")]
-    private static partial Regex AnyTagRegex();
 
     /// <summary>
     /// Find all top-level &lt;controls:ControlExample&gt; blocks via stack-aware tag matching,
@@ -471,131 +468,6 @@ internal static partial class GalleryFetcher
         if (collapsed.Length > MaxHeaderLen) collapsed = collapsed.Substring(0, MaxHeaderLen).TrimEnd() + "…";
 
         return collapsed.Trim();
-    }
-
-    /// <summary>Truncate XAML at a safe boundary, appending closing tags for unclosed elements.</summary>
-    private static string TruncateXaml(string xaml, int maxChars)
-    {
-        bool needsTruncate = xaml.Length > maxChars;
-        string head;
-        if (needsTruncate)
-        {
-            // Find a safe '>' boundary
-            int cut = maxChars;
-            while (cut > 0)
-            {
-                cut = xaml.LastIndexOf('>', cut - 1);
-                if (cut < 0) return "";
-                cut += 1;
-                int lastLt = xaml.LastIndexOf('<', cut - 1);
-                int lastGt = xaml.LastIndexOf('>', cut - 1);
-                if (lastLt < lastGt) break;
-                cut = lastLt;
-            }
-            if (cut <= 0) return "";
-            head = xaml.Substring(0, cut);
-        }
-        else
-        {
-            head = xaml;
-        }
-
-        // Count open/close tags. Ignore anything inside XML comments so that generic-type
-        // text like "ObservableCollection<CustomDataObject>" inside an explanatory
-        // <!-- ... --> comment isn't mistaken for a real element (which would otherwise
-        // append a bogus </CustomDataObject>). A trailing unterminated comment (possible
-        // after a truncation cut) is stripped to end-of-string too.
-        var scanText = Regex.Replace(head, @"<!--[\s\S]*?(?:-->|$)", "");
-        var stack = new Stack<string>();
-        bool sawMismatch = false;
-        foreach (Match m in AnyTagRegex().Matches(scanText))
-        {
-            bool isClose = m.Groups[1].Value == "/";
-            bool isSelf = m.Groups[4].Value == "/";
-            string name = m.Groups[2].Value;
-            if (isSelf) continue;
-            if (isClose)
-            {
-                if (stack.Count > 0 && stack.Peek() == name) stack.Pop();
-                else sawMismatch = true;
-            }
-            else
-            {
-                stack.Push(name);
-            }
-        }
-
-        // If balanced and not truncated, return original
-        if (!needsTruncate && stack.Count == 0 && !sawMismatch) return xaml;
-
-        var sb = new System.Text.StringBuilder(head.TrimEnd());
-        while (stack.Count > 0) sb.Append("</").Append(stack.Pop()).Append('>');
-        if (needsTruncate) sb.Append("\n<!-- ...truncated -->");
-        return sb.ToString();
-    }
-
-    /// <summary>Truncate C# code at a brace-balanced boundary.
-    /// Walks forward tracking depth (skipping strings/chars/comments/verbatim) and
-    /// prefers the most recent depth=0 cut. When none exists in the prefix, cuts at
-    /// the last newline and appends synthetic `}` braces equal to the open depth so
-    /// agents can copy the snippet without the build breaking on unbalanced braces.</summary>
-    internal static string TruncateCode(string code, int maxChars, string marker)
-    {
-        if (code.Length <= maxChars) return code;
-
-        if (code.Contains('{'))
-        {
-            int depth = 0, lastZeroPos = -1, finalDepth = 0;
-            bool inStr = false, inChr = false, inLine = false, inBlk = false, inVerb = false;
-            int lastBeforeMax = 0;
-            // Track the last newline boundary reached at a known brace depth, so that
-            // when we have to cut back to a line we append exactly the closers that
-            // line needs — measured AT the cut, not at maxChars (braces between the cut
-            // and maxChars would otherwise skew the closer count and emit broken C#).
-            int safeCutPos = 0, depthAtSafeCut = 0;
-            for (int i = 0; i < code.Length && i < maxChars; i++)
-            {
-                char c = code[i]; char prev = i > 0 ? code[i - 1] : '\0';
-                if (inLine) { if (c == '\n') { inLine = false; safeCutPos = i + 1; depthAtSafeCut = depth; } continue; }
-                if (inBlk)  { if (c == '/' && prev == '*') inBlk = false; continue; }
-                if (inStr)
-                {
-                    if (inVerb) { if (c == '"' && (i + 1 >= code.Length || code[i + 1] != '"')) { inStr = false; inVerb = false; } else if (c == '"') i++; }
-                    else if (c == '"' && prev != '\\') inStr = false;
-                    continue;
-                }
-                if (inChr) { if (c == '\'' && prev != '\\') inChr = false; continue; }
-                if (c == '/' && i + 1 < code.Length && code[i + 1] == '/') { inLine = true; continue; }
-                if (c == '/' && i + 1 < code.Length && code[i + 1] == '*') { inBlk = true; continue; }
-                if (c == '@' && i + 1 < code.Length && code[i + 1] == '"') { inStr = true; inVerb = true; i++; continue; }
-                if (c == '"') { inStr = true; continue; }
-                if (c == '\'') { inChr = true; continue; }
-                if (c == '{') depth++;
-                else if (c == '}') { depth--; if (depth == 0) lastZeroPos = i + 1; }
-                else if (c == '\n') { safeCutPos = i + 1; depthAtSafeCut = depth; }
-                lastBeforeMax = i + 1;
-                finalDepth = depth;
-            }
-            if (lastZeroPos > 0)
-                return code.Substring(0, lastZeroPos).TrimEnd() + "\n" + marker;
-            // No clean top-level close within the cap. Prefer cutting at the last
-            // recorded newline boundary and closing to the depth measured there.
-            if (safeCutPos > 0)
-            {
-                var prefixSafe = code.Substring(0, safeCutPos).TrimEnd();
-                var closersSafe = depthAtSafeCut > 0 ? "\n" + new string('}', depthAtSafeCut) : "";
-                return prefixSafe + closersSafe + "\n" + marker;
-            }
-            // No newline boundary at all (single very long line): fall back to the raw
-            // prefix with the depth measured at that same cut point.
-            var prefix = code.Substring(0, Math.Min(lastBeforeMax, code.Length)).TrimEnd();
-            var closers = finalDepth > 0 ? "\n" + new string('}', finalDepth) : "";
-            return prefix + closers + "\n" + marker;
-        }
-
-        int cut = code.LastIndexOf('\n', maxChars - 1);
-        if (cut < 0) cut = maxChars;
-        return code.Substring(0, cut).TrimEnd() + "\n" + marker;
     }
 
     private static string? ExtractInlineCode(string block, string tagName)
