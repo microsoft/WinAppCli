@@ -6,6 +6,7 @@ using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Text;
 using System.Text.RegularExpressions;
+using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Commands;
 
@@ -14,7 +15,8 @@ namespace WinApp.Cli.Commands;
 /// migration. Copies UWP source into an existing WinUI 3 scaffold, merges SDK-sample shared assets,
 /// rewrites the <c>Windows.UI.Xaml</c> namespace, patches the csproj RuntimeIdentifier for cross-arch
 /// F5, neutralizes content-filter-prone helper classes, and wires up the MainWindow RootFrame + initial
-/// navigation. It does NOT triage APIs or inject TODO markers — that is <c>migrate analyze</c>'s job.
+/// navigation. It does NOT triage APIs or inject TODO markers — API triage is handled separately
+/// by the migration skill's analysis step (the WinUI analyzer).
 /// </summary>
 internal partial class MigrateScaffoldCommand : Command, IShortDescription
 {
@@ -24,11 +26,17 @@ internal partial class MigrateScaffoldCommand : Command, IShortDescription
     public static Option<DirectoryInfo> TargetOption { get; }
     public static Option<bool> FromUwpOption { get; }
 
-    // Source files worth copying (source + assets). Build artifacts and projects are excluded.
-    private static readonly string[] CopyExtensions =
+    // Files that must NOT be copied from the UWP source into the WinUI target: build artifacts,
+    // project/solution system files, IDE state, and packaging outputs. Everything else — including
+    // fonts, JSON/XML data, audio/video, shaders and other project content — is copied so the
+    // migrated code never references a missing runtime asset. (Directories such as bin/obj are
+    // already pruned by ExcludeDirSegments; Package.appxmanifest is handled by PreserveUwpReferences.)
+    private static readonly string[] DoNotCopyExtensions =
     [
-        ".xaml", ".cs", ".resw", ".resjson",
-        ".png", ".jpg", ".jpeg", ".svg", ".ico", ".gif"
+        ".csproj", ".vcxproj", ".vbproj", ".shproj", ".projitems", ".sln", ".slnf",
+        ".user", ".suo", ".cache", ".vsidx", ".pdb", ".ilk", ".exp", ".idb", ".tlog",
+        ".exe", ".dll", ".lib", ".obj", ".appxmanifest",
+        ".appx", ".msix", ".appxbundle", ".appxupload", ".nupkg", ".snupkg"
     ];
 
     private static readonly string[] ExcludeDirSegments =
@@ -62,7 +70,7 @@ internal partial class MigrateScaffoldCommand : Command, IShortDescription
     }
 
     public MigrateScaffoldCommand()
-        : base("scaffold", "Copy UWP source (C#/XAML/assets) into an existing WinUI 3 scaffold and apply the mechanical, deterministic transforms a migration always needs: merge SDK-sample shared/ + SharedContent/ assets, preserve the original .csproj/.appxmanifest under .uwp-source/, patch the csproj RuntimeIdentifier for x86/x64/ARM64 F5, rewrite Windows.UI.Xaml -> Microsoft.UI.Xaml, neutralize content-filter-prone helper classes, and wire the MainWindow RootFrame + initial Navigate. Triage / per-line findings are produced separately by 'migrate analyze'.")
+        : base("scaffold", "Copy UWP source (C#/XAML/assets) into an existing WinUI 3 scaffold and apply the mechanical, deterministic transforms a migration always needs: merge SDK-sample shared/ + SharedContent/ assets, preserve the original .csproj/.appxmanifest under .uwp-source/, patch the csproj RuntimeIdentifier for x86/x64/ARM64 F5, rewrite Windows.UI.Xaml -> Microsoft.UI.Xaml, neutralize content-filter-prone helper classes, and wire the MainWindow RootFrame + initial Navigate. Triage / per-line findings are produced separately by the migration skill's analysis step.")
     {
         Arguments.Add(SourceArgument);
         Options.Add(TargetOption);
@@ -72,6 +80,21 @@ internal partial class MigrateScaffoldCommand : Command, IShortDescription
     public class Handler(ILogger<MigrateScaffoldCommand> logger) : AsynchronousCommandLineAction
     {
         public override Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
+        {
+            var quiet = parseResult.GetValue(WinAppRootCommand.QuietOption);
+            var originalOut = Console.Out;
+            if (quiet) { Console.SetOut(new QuietFilteringTextWriter(originalOut)); }
+            try
+            {
+                return InvokeCore(parseResult, cancellationToken);
+            }
+            finally
+            {
+                if (quiet) { Console.SetOut(originalOut); }
+            }
+        }
+
+        private Task<int> InvokeCore(ParseResult parseResult, CancellationToken cancellationToken)
         {
             var source = parseResult.GetValue(SourceArgument)!;
             var target = parseResult.GetValue(TargetOption)!;
@@ -115,7 +138,7 @@ internal partial class MigrateScaffoldCommand : Command, IShortDescription
             // ── 1. Copy source files (everything but the project) ────────────────
             foreach (var file in EnumerateFiles(sourceRoot))
             {
-                if (!HasCopyExtension(file))
+                if (!ShouldCopy(file))
                 {
                     continue;
                 }
@@ -168,7 +191,7 @@ internal partial class MigrateScaffoldCommand : Command, IShortDescription
             Console.Out.WriteLine();
             Console.Out.WriteLine("=== SCAFFOLD COMPLETE ===");
             Console.Out.WriteLine("Next:");
-            Console.Out.WriteLine("  1. Run 'winapp migrate analyze <target> --from-uwp' for the triage plan (JSON).");
+            Console.Out.WriteLine("  1. Triage the remaining UWP APIs using your migration analysis tooling (the WinUI analyzer).");
             Console.Out.WriteLine("  2. Resolve the findings, building per-file (never per-finding).");
             Console.Out.WriteLine("  3. Run 'winapp migrate validate <target> --from-uwp' before declaring done.");
             Console.Out.WriteLine("=========================");
@@ -190,7 +213,7 @@ internal partial class MigrateScaffoldCommand : Command, IShortDescription
             var collisions = new List<string>();
             foreach (var file in EnumerateFiles(sharedRoot))
             {
-                if (!HasCopyExtension(file))
+                if (!ShouldCopy(file))
                 {
                     continue;
                 }
@@ -265,7 +288,7 @@ internal partial class MigrateScaffoldCommand : Command, IShortDescription
                 int mediaCopied = 0;
                 foreach (var file in Directory.EnumerateFiles(mediaDir))
                 {
-                    if (!HasCopyExtension(file))
+                    if (!ShouldCopy(file))
                     {
                         continue;
                     }
@@ -362,7 +385,7 @@ internal partial class MigrateScaffoldCommand : Command, IShortDescription
             if (extensions.Count > 0)
             {
                 Console.Out.WriteLine($"    WARNING: UWP manifest declares {extensions.Count} Extension(s): {string.Join(", ", extensions)}");
-                Console.Out.WriteLine("      Do NOT copy them verbatim — most UWP manifest extensions have no WinUI 3 desktop equivalent and must be re-implemented or dropped. Run 'winapp migrate analyze --from-uwp' for per-item guidance.");
+                Console.Out.WriteLine("      Do NOT copy them verbatim — most UWP manifest extensions have no WinUI 3 desktop equivalent and must be re-implemented or dropped. See your migration analysis output for per-item guidance.");
             }
         }
 
@@ -655,10 +678,12 @@ internal partial class MigrateScaffoldCommand : Command, IShortDescription
             return false;
         }
 
-        private static bool HasCopyExtension(string file)
+        private static bool ShouldCopy(string file) => !IsBuildOrProjectFile(file);
+
+        private static bool IsBuildOrProjectFile(string file)
         {
             var name = file.ToLowerInvariant();
-            foreach (var ext in CopyExtensions)
+            foreach (var ext in DoNotCopyExtensions)
             {
                 if (name.EndsWith(ext, StringComparison.Ordinal))
                 {

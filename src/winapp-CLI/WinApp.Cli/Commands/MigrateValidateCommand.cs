@@ -4,10 +4,8 @@
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Text;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using WinApp.Cli.Helpers;
-using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
@@ -18,7 +16,6 @@ internal partial class MigrateValidateCommand : Command, IShortDescription
 
     public static Argument<DirectoryInfo> DirectoryArgument { get; }
     public static Option<bool> FromUwpOption { get; }
-    public static Option<FileInfo?> ProjectOption { get; }
 
     static MigrateValidateCommand()
     {
@@ -33,19 +30,13 @@ internal partial class MigrateValidateCommand : Command, IShortDescription
         {
             Description = "Validate a UWP→WinUI 3 migration (currently the only supported direction)."
         };
-
-        ProjectOption = new Option<FileInfo?>("--project")
-        {
-            Description = "Target a specific .csproj (default: scan the whole directory)."
-        };
     }
 
     public MigrateValidateCommand()
-        : base("validate", "Validate a migrated WinUI 3 project before declaring the migration done. Runs source-only static gates: UWP API/namespace residue (backed by the analyzer), single-project layout, MainWindow shell wiring, and Package.appxmanifest packaging requirements. Emits sanitized [PASS]/[FAIL]/[WARN] lines to stdout with full diagnostics in .validator-diagnostics.txt, and returns non-zero when any [FAIL] remains. Build/run health is covered separately by 'winapp build' / 'winapp run'.")
+        : base("validate", "Validate a migrated WinUI 3 project before declaring the migration done. Runs source-only static gates: UWP namespace/csproj residue markers, single-project layout, MainWindow shell wiring, and Package.appxmanifest packaging requirements. Emits sanitized [PASS]/[FAIL]/[WARN] lines to stdout with full diagnostics in .validator-diagnostics.txt, and returns non-zero when any [FAIL] remains. Build/run health is covered separately by 'winapp build' / 'winapp run'.")
     {
         Arguments.Add(DirectoryArgument);
         Options.Add(FromUwpOption);
-        Options.Add(ProjectOption);
     }
 
     // ── Residue text markers (UWP-only namespaces / csproj shape) ───────────────
@@ -60,12 +51,16 @@ internal partial class MigrateValidateCommand : Command, IShortDescription
 
     private static readonly string[] ExcludeDirs = ["bin", "obj", ".uwp-source", ".vs", ".git", ".github", ".copilot", "Generated Files", "node_modules"];
 
-    public class Handler(ICurrentDirectoryProvider currentDirectoryProvider, IMigrateAnalyzerDriver driver) : AsynchronousCommandLineAction
+    public class Handler(ICurrentDirectoryProvider currentDirectoryProvider) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
+            var quiet = parseResult.GetValue(WinAppRootCommand.QuietOption);
+            var originalOut = Console.Out;
+            if (quiet) { Console.SetOut(new QuietFilteringTextWriter(originalOut)); }
+            try
+            {
             var target = parseResult.GetValue(DirectoryArgument) ?? currentDirectoryProvider.GetCurrentDirectoryInfo();
-            var project = parseResult.GetValue(ProjectOption);
             var root = target.FullName;
 
             var diagnostics = new StringBuilder();
@@ -73,10 +68,7 @@ internal partial class MigrateValidateCommand : Command, IShortDescription
 
             var deferred = LoadDeferredFiles(root);
 
-            // ─── 1. Residue: analyzer-backed API residue (startup-crash / unsupported) ───
-            failures += await CheckAnalyzerResidueAsync(target, project, deferred, diagnostics, cancellationToken);
-
-            // ─── 1b. Residue: text markers (UWP namespaces / csproj shape) ───
+            // ─── 1. Residue: text markers (UWP namespaces / csproj shape) ───
             failures += CheckTextResidue(root, deferred, diagnostics);
 
             // ─── 2. Shell wiring integrity ───
@@ -109,92 +101,11 @@ internal partial class MigrateValidateCommand : Command, IShortDescription
 
             Console.Out.WriteLine($"[FAIL] Validation gate — {failures} check(s) failed. Full diagnostics in .validator-diagnostics.txt.");
             return 1;
-        }
-
-        private async Task<int> CheckAnalyzerResidueAsync(DirectoryInfo target, FileInfo? project, HashSet<string> deferred, StringBuilder diag, CancellationToken ct)
-        {
-            MigrateAnalyzerRun run;
-            try
-            {
-                run = await driver.RunAsync(target, project, fromUwp: true, ct);
             }
-            catch (OperationCanceledException)
+            finally
             {
-                throw;
+                if (quiet) { Console.SetOut(originalOut); }
             }
-            catch (Exception ex)
-            {
-                // Fail closed: the API-residue gate was declared but could not execute.
-                Console.Out.WriteLine($"[FAIL] Residue (API) — analyzer driver failed to run: {ex.Message}. Cannot verify API residue.");
-                diag.AppendLine("[Residue — API]").AppendLine($"  analyzer driver failed to run: {ex.Message}").AppendLine();
-                return 1;
-            }
-
-            if (!run.DriverFound)
-            {
-                Console.Out.WriteLine("[WARN] Residue (API) — analyzer driver 'winui-analyze' not found; skipped API-residue check. Text-marker residue still enforced.");
-                return 0;
-            }
-
-            if (run.ExitCode != 0)
-            {
-                // Fail closed: a nonzero analyzer exit means the run is untrustworthy even if it
-                // emitted a (partial) JSON report, so we must not treat its findings as complete.
-                Console.Out.WriteLine($"[FAIL] Residue (API) — analyzer exited with code {run.ExitCode}; cannot trust its report.");
-                if (run.StdErr.Length > 0) { diag.AppendLine("[Residue API driver stderr]").AppendLine(run.StdErr.TrimEnd()).AppendLine(); }
-                return 1;
-            }
-
-            MigrateAnalyzeReport? report = null;
-            try
-            {
-                report = JsonSerializer.Deserialize(run.StdOut, MigrateJsonContext.Default.MigrateAnalyzeReport);
-            }
-            catch (JsonException)
-            {
-                // fall through to null handling below
-            }
-
-            if (report is null)
-            {
-                // Fail closed: the driver ran but produced no usable plan, so residue is unverifiable.
-                Console.Out.WriteLine("[FAIL] Residue (API) — analyzer produced no parseable output; cannot verify API residue.");
-                if (run.StdErr.Length > 0) { diag.AppendLine("[Residue API driver stderr]").AppendLine(run.StdErr.TrimEnd()).AppendLine(); }
-                return 1;
-            }
-
-            // A migrated (non-deferred) file must carry no must-fix API residue.
-            var hits = new List<(string File, int Line, string Id, string Severity, string Detected)>();
-            foreach (var file in report.Files)
-            {
-                var rel = Normalize(file.Path);
-                if (deferred.Contains(rel)) { continue; }
-                foreach (var f in file.Findings)
-                {
-                    var sev = f.Severity ?? "";
-                    if (sev is "startup-crash" or "unsupported")
-                    {
-                        hits.Add((rel, f.Location?.Line ?? 0, f.Id ?? "?", sev, f.Detected ?? ""));
-                    }
-                }
-            }
-
-            if (hits.Count == 0)
-            {
-                Console.Out.WriteLine("[PASS] Residue (API) — 0 startup-crash / unsupported API references in non-deferred files.");
-                return 0;
-            }
-
-            Console.Out.WriteLine($"[FAIL] Residue (API) — {hits.Count} must-fix UWP API reference(s) remain in non-deferred files (see .validator-diagnostics.txt):");
-            diag.AppendLine("[Residue — API (analyzer)]");
-            foreach (var g in hits.GroupBy(h => h.File).Take(30))
-            {
-                foreach (var h in g.Take(10)) { Console.Out.WriteLine($"       {g.Key}:{h.Line}"); }
-                if (g.Count() > 10) { Console.Out.WriteLine($"       {g.Key}: ({g.Count() - 10} more)"); }
-                foreach (var h in g) { diag.AppendLine($"  {h.File}:{h.Line}  [{h.Id} {h.Severity}]  {h.Detected}"); }
-            }
-            diag.AppendLine();
-            return 1;
         }
 
         private static int CheckTextResidue(string root, HashSet<string> deferred, StringBuilder diag)
@@ -206,11 +117,18 @@ internal partial class MigrateValidateCommand : Command, IShortDescription
                 if (deferred.Contains(rel)) { continue; }
                 string[] lines;
                 try { lines = File.ReadAllLines(file); } catch { continue; }
+
+                // Match markers against a copy with comments (and, for C#, string/char literals)
+                // blanked out, so prose like `// Previously used using Windows.UI.Xaml` or a string
+                // literal "using Windows.UI.Xaml" does not fail the gate. The original lines are
+                // still used for the diagnostic snippet.
+                var isCSharp = file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
+                var scan = SanitizeForMarkers(lines, isCSharp);
                 foreach (var (rx, name) in ResidueMarkers)
                 {
-                    for (int i = 0; i < lines.Length; i++)
+                    for (int i = 0; i < scan.Length; i++)
                     {
-                        if (rx.IsMatch(lines[i]))
+                        if (rx.IsMatch(scan[i]))
                         {
                             hits.Add((rel, i + 1, name, lines[i].Trim()));
                             break; // one hit per marker per file is enough
@@ -424,6 +342,83 @@ internal partial class MigrateValidateCommand : Command, IShortDescription
         }
 
         private static string Normalize(string relPath) => relPath.Replace('\\', '/');
+
+        // Returns a copy of the source lines with comments (and, for C#, string/char literals)
+        // blanked to spaces, so residue markers only match real code/markup — not the same text
+        // appearing in a comment or a string literal. This is a lightweight tokenizer, not a full
+        // parser, but it removes the common false positives. Block comments (C# /* */ and XML
+        // <!-- -->) are tracked across lines; single-line C# strings are not carried over.
+        private static string[] SanitizeForMarkers(string[] lines, bool isCSharp)
+        {
+            var result = new string[lines.Length];
+            var inBlockComment = false;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                result[i] = isCSharp
+                    ? SanitizeCSharpLine(lines[i], ref inBlockComment)
+                    : SanitizeXmlLine(lines[i], ref inBlockComment);
+            }
+            return result;
+        }
+
+        private static string SanitizeCSharpLine(string line, ref bool inBlockComment)
+        {
+            var sb = new StringBuilder(line.Length);
+            bool inLineComment = false, inString = false, inChar = false, inVerbatim = false;
+            for (int j = 0; j < line.Length; j++)
+            {
+                char c = line[j];
+                char next = j + 1 < line.Length ? line[j + 1] : '\0';
+                if (inLineComment) { sb.Append(' '); continue; }
+                if (inBlockComment)
+                {
+                    if (c == '*' && next == '/') { inBlockComment = false; sb.Append("  "); j++; }
+                    else { sb.Append(' '); }
+                    continue;
+                }
+                if (inString)
+                {
+                    if (inVerbatim && c == '"' && next == '"') { sb.Append("  "); j++; continue; }
+                    if (!inVerbatim && c == '\\' && next != '\0') { sb.Append("  "); j++; continue; }
+                    if (c == '"') { inString = false; inVerbatim = false; }
+                    sb.Append(' ');
+                    continue;
+                }
+                if (inChar)
+                {
+                    if (c == '\\' && next != '\0') { sb.Append("  "); j++; continue; }
+                    if (c == '\'') { inChar = false; }
+                    sb.Append(' ');
+                    continue;
+                }
+                if (c == '/' && next == '/') { inLineComment = true; sb.Append(' '); continue; }
+                if (c == '/' && next == '*') { inBlockComment = true; sb.Append(' '); continue; }
+                if (c == '@' && next == '"') { inString = true; inVerbatim = true; sb.Append("  "); j++; continue; }
+                if (c == '"') { inString = true; inVerbatim = false; sb.Append(' '); continue; }
+                if (c == '\'') { inChar = true; sb.Append(' '); continue; }
+                sb.Append(c);
+            }
+            return sb.ToString();
+        }
+
+        private static string SanitizeXmlLine(string line, ref bool inBlockComment)
+        {
+            var sb = new StringBuilder(line.Length);
+            for (int j = 0; j < line.Length; j++)
+            {
+                if (inBlockComment)
+                {
+                    if (j + 2 < line.Length && line[j] == '-' && line[j + 1] == '-' && line[j + 2] == '>')
+                    { inBlockComment = false; sb.Append("   "); j += 2; }
+                    else { sb.Append(' '); }
+                    continue;
+                }
+                if (j + 3 < line.Length && line[j] == '<' && line[j + 1] == '!' && line[j + 2] == '-' && line[j + 3] == '-')
+                { inBlockComment = true; sb.Append("    "); j += 3; continue; }
+                sb.Append(line[j]);
+            }
+            return sb.ToString();
+        }
     }
 
     // ── Compiled regexes ─────────────────────────────────────────────────────

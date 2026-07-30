@@ -134,4 +134,33 @@ public class MigrateScaffoldCommandTests : MigrateCommandTestBase
         Assert.AreEqual(1, exit);
         StringAssert.Contains(output, "[ERROR] Target is not a WinUI 3 scaffold");
     }
+
+    [TestMethod]
+    public async Task Scaffold_Quiet_SuppressesProgressOutput()
+    {
+        var source = await CreateUwpSourceAsync("scaffold-quiet-src");
+        await WriteAsync(source, "MainPage.xaml.cs", "namespace S { class MainPage { } }");
+        var target = await CreateWinuiTargetAsync("scaffold-quiet-target");
+
+        var command = GetRequiredService<MigrateScaffoldCommand>();
+        var (exit, output) = await InvokeCapturingConsoleAsync(
+            command, source.FullName, "--target", target.FullName, "--from-uwp", "--quiet");
+
+        Assert.AreEqual(0, exit, output);
+        Assert.IsFalse(output.Contains("=== SCAFFOLD COMPLETE ==="), $"progress should be suppressed under --quiet, got: {output}");
+        Assert.IsFalse(output.Contains("==> winapp migrate scaffold"), "banner should be suppressed under --quiet");
+    }
+
+    [TestMethod]
+    public async Task Scaffold_Quiet_StillReportsErrors()
+    {
+        var dir = await CreateWinuiTargetAsync("scaffold-quiet-overlap");
+
+        var command = GetRequiredService<MigrateScaffoldCommand>();
+        var (exit, output) = await InvokeCapturingConsoleAsync(
+            command, dir.FullName, "--target", dir.FullName, "--from-uwp", "--quiet");
+
+        Assert.AreEqual(1, exit);
+        StringAssert.Contains(output, "[ERROR]");
+    }
 }
