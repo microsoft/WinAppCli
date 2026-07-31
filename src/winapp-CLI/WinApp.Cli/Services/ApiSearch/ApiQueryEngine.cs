@@ -35,7 +35,7 @@ internal static class ApiQueryEngine
             }
             foreach (string ns in Deserialize(nsPath, ApiSearchJsonContext.Default.ListString) ?? new List<string>())
             {
-                string typesFile = Path.Combine(dir, "types", ns.Replace('.', '_') + ".json");
+                string typesFile = Path.Combine(dir, "types", ApiCachePaths.NamespaceFileName(ns));
                 if (!File.Exists(typesFile))
                 {
                     continue;
@@ -148,59 +148,43 @@ internal static class ApiQueryEngine
         return cut > 0 ? fullName.Substring(0, cut) : string.Empty;
     }
 
-    public static ApiQueryResult<ApiMembersOutput> Members(string fullName, string cacheDir, ProjectManifest manifest)
+    public static ApiQueryResult<ApiMembersOutput> Members(string typeName, string cacheDir, ProjectManifest manifest)
     {
-        if (string.IsNullOrWhiteSpace(fullName))
+        if (string.IsNullOrWhiteSpace(typeName))
         {
             return ApiQueryResult<ApiMembersOutput>.InvalidInput("A type name is required.");
         }
-        int dot = fullName.LastIndexOf('.');
-        if (dot < 0)
-        {
-            return ApiQueryResult<ApiMembersOutput>.InvalidInput(
-                $"Type name must include a namespace (e.g. 'Namespace.TypeName'). Provided: {fullName}");
-        }
 
-        string typesFileName = fullName.Substring(0, dot).Replace('.', '_') + ".json";
         List<string> packageCacheDirs = GetPackageCacheDirs(cacheDir, manifest);
-        foreach (string dir in packageCacheDirs)
+        var allTypes = LoadAllTypes(packageCacheDirs);
+        var type = ResolveType(typeName, allTypes);
+        if (type == null)
         {
-            string typesFile = Path.Combine(dir, "types", typesFileName);
-            if (!File.Exists(typesFile))
-            {
-                continue;
-            }
-            var type = Deserialize(typesFile, ApiSearchJsonContext.Default.ListWinMdTypeInfo)?.FirstOrDefault(t => t.FullName == fullName);
-            if (type == null)
-            {
-                continue;
-            }
-
-            var allTypes = LoadAllTypes(packageCacheDirs);
-            var members = CollectMembersWithInheritance(type, allTypes);
-
-            List<ApiMemberOutput> Project(MemberKind kind) => members
-                .Where(m => m.Member.Kind == kind)
-                .Select(m => ToMemberOutput(m.Member, m.DeclaringType, type.FullName))
-                .ToList();
-
-            var methods = Project(MemberKind.Method);
-            bool getForCurrentView = methods.Any(m => m.Name.Equals("GetForCurrentView", StringComparison.Ordinal));
-
-            return ApiQueryResult<ApiMembersOutput>.Ok(new ApiMembersOutput
-            {
-                FullName = type.FullName,
-                Kind = type.Kind.ToString(),
-                Description = type.Description,
-                BaseType = type.BaseType,
-                Deprecated = type.DeprecatedMessage,
-                Properties = Project(MemberKind.Property),
-                Events = Project(MemberKind.Event),
-                Methods = methods,
-                GetForCurrentViewWarning = getForCurrentView,
-            });
+            return ApiQueryResult<ApiMembersOutput>.NotFound($"Type not found: {typeName}");
         }
-        return ApiQueryResult<ApiMembersOutput>.NotFound($"Type not found: {fullName}");
+
+        var members = CollectMembersWithInheritance(type, allTypes);
+
+        List<ApiMemberOutput> Project(MemberKind kind) => members
+            .Where(m => m.Member.Kind == kind)
+            .Select(m => ToMemberOutput(m.Member, m.DeclaringType, type.FullName))
+            .ToList();
+
+        var methods = Project(MemberKind.Method);
+        bool getForCurrentView = methods.Any(m => m.Name.Equals("GetForCurrentView", StringComparison.Ordinal));
+
+        return ApiQueryResult<ApiMembersOutput>.Ok(new ApiMembersOutput
+        {
+            FullName = type.FullName,
+            Kind = type.Kind.ToString(),
+            Description = type.Description,
+            BaseType = type.BaseType,
+            Deprecated = type.DeprecatedMessage,
+            Properties = Project(MemberKind.Property),
+            Events = Project(MemberKind.Event),
+            Methods = methods,
+            GetForCurrentViewWarning = getForCurrentView,
+        });
     }
 
     public static ApiQueryResult<ApiTypesOutput> Types(string ns, string cacheDir, ProjectManifest manifest)
@@ -209,7 +193,7 @@ internal static class ApiQueryEngine
         {
             return ApiQueryResult<ApiTypesOutput>.InvalidInput("A namespace is required.");
         }
-        string typesFileName = ns.Replace('.', '_') + ".json";
+        string typesFileName = ApiCachePaths.NamespaceFileName(ns);
         List<string> packageCacheDirs = GetPackageCacheDirs(cacheDir, manifest);
         bool found = false;
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -242,42 +226,26 @@ internal static class ApiQueryEngine
         return ApiQueryResult<ApiTypesOutput>.Ok(new ApiTypesOutput { Namespace = ns, Types = types });
     }
 
-    public static ApiQueryResult<ApiEnumsOutput> Enums(string fullName, string cacheDir, ProjectManifest manifest)
+    public static ApiQueryResult<ApiEnumsOutput> Enums(string typeName, string cacheDir, ProjectManifest manifest)
     {
-        if (string.IsNullOrWhiteSpace(fullName))
+        if (string.IsNullOrWhiteSpace(typeName))
         {
             return ApiQueryResult<ApiEnumsOutput>.InvalidInput("A type name is required.");
         }
-        int dot = fullName.LastIndexOf('.');
-        if (dot < 1)
+        var type = ResolveType(typeName, LoadAllTypes(GetPackageCacheDirs(cacheDir, manifest)));
+        if (type == null)
         {
-            return ApiQueryResult<ApiEnumsOutput>.InvalidInput(
-                $"Type name must be fully-qualified (e.g. 'Namespace.TypeName'). Provided: {fullName}");
+            return ApiQueryResult<ApiEnumsOutput>.NotFound($"Type not found: {typeName}");
         }
-        string typesFileName = fullName.Substring(0, dot).Replace('.', '_') + ".json";
-        foreach (string dir in GetPackageCacheDirs(cacheDir, manifest))
+        if (type.Kind != TypeKind.Enum)
         {
-            string typesFile = Path.Combine(dir, "types", typesFileName);
-            if (!File.Exists(typesFile))
-            {
-                continue;
-            }
-            var type = Deserialize(typesFile, ApiSearchJsonContext.Default.ListWinMdTypeInfo)?.FirstOrDefault(t => t.FullName == fullName);
-            if (type == null)
-            {
-                continue;
-            }
-            if (type.Kind != TypeKind.Enum)
-            {
-                return ApiQueryResult<ApiEnumsOutput>.NotAnEnum($"{fullName} is not an Enum (kind: {type.Kind}).");
-            }
-            return ApiQueryResult<ApiEnumsOutput>.Ok(new ApiEnumsOutput
-            {
-                FullName = type.FullName,
-                Values = type.EnumValues ?? new List<string>(),
-            });
+            return ApiQueryResult<ApiEnumsOutput>.NotAnEnum($"{type.FullName} is not an Enum (kind: {type.Kind}).");
         }
-        return ApiQueryResult<ApiEnumsOutput>.NotFound($"Type not found: {fullName}");
+        return ApiQueryResult<ApiEnumsOutput>.Ok(new ApiEnumsOutput
+        {
+            FullName = type.FullName,
+            Values = type.EnumValues ?? new List<string>(),
+        });
     }
 
     public static ApiQueryResult<ApiNamespacesOutput> Namespaces(string? filter, string cacheDir, ProjectManifest manifest)
@@ -410,8 +378,11 @@ internal static class ApiQueryEngine
 
         var members = CollectMembersWithInheritance(targetType, allTypes);
 
-        // 1. Direct or inherited member.
-        var exact = members.FirstOrDefault(m => m.Member.Name.Equals(propertyName, StringComparison.OrdinalIgnoreCase));
+        // 1. Direct or inherited member. Only a Property counts as "found" — a
+        // method or event with the same name is not a settable property.
+        var exact = members.FirstOrDefault(m =>
+            m.Member.Kind == MemberKind.Property &&
+            m.Member.Name.Equals(propertyName, StringComparison.OrdinalIgnoreCase));
         if (exact.Member != null)
         {
             return ApiQueryResult<ApiCheckPropertyOutput>.Ok(new ApiCheckPropertyOutput
@@ -591,7 +562,7 @@ internal static class ApiQueryEngine
             }
             foreach (string ns in namespaces)
             {
-                string typesFile = Path.Combine(dir, "types", ns.Replace('.', '_') + ".json");
+                string typesFile = Path.Combine(dir, "types", ApiCachePaths.NamespaceFileName(ns));
                 if (!File.Exists(typesFile))
                 {
                     continue;

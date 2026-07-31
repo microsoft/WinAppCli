@@ -43,7 +43,7 @@ internal interface IApiMetadataService
 
     ApiProjectsOutput Projects();
 
-    ApiRefreshOutput Refresh(ApiRequestScope scope, bool scan, Action<string>? onProgress = null);
+    ApiRefreshOutput Refresh(ApiRequestScope scope, bool scan, Action<string>? onProgress = null, bool force = false);
 }
 
 internal sealed class ApiMetadataService(
@@ -80,12 +80,42 @@ internal sealed class ApiMetadataService(
 
     public ApiProjectsOutput Projects() => ApiQueryEngine.Projects(GetCacheDir());
 
-    public ApiRefreshOutput Refresh(ApiRequestScope scope, bool scan, Action<string>? onProgress = null)
+    public ApiRefreshOutput Refresh(ApiRequestScope scope, bool scan, Action<string>? onProgress = null, bool force = false)
     {
         string cacheDir = GetCacheDir();
-        string projectDir = ResolveProjectDir(scope);
+        string projectDir = ResolveRefreshProjectDir(scope, cacheDir);
         string? runtimePath = ApiCacheBuilder.DetectWinAppSdkRuntime();
-        return ApiCacheBuilder.BuildCache(projectDir, cacheDir, scan, runtimePath, onProgress);
+        return ApiCacheBuilder.BuildCache(projectDir, cacheDir, scan, runtimePath, onProgress, force);
+    }
+
+    /// <summary>
+    /// Resolve the directory to (re)index for a refresh. An explicit
+    /// <c>--project</c> name refreshes that indexed project's recorded directory;
+    /// otherwise the <c>--project-dir</c> (or current directory) is used.
+    /// </summary>
+    private string ResolveRefreshProjectDir(ApiRequestScope scope, string cacheDir)
+    {
+        if (scope.Project is not null)
+        {
+            string projectsDir = Path.Combine(cacheDir, "projects");
+            if (Directory.Exists(projectsDir))
+            {
+                foreach (string path in Directory.GetFiles(projectsDir, "*.json"))
+                {
+                    string name = Path.GetFileNameWithoutExtension(path);
+                    if (name.Equals(scope.Project, StringComparison.OrdinalIgnoreCase) ||
+                        name.StartsWith(scope.Project + "_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ProjectManifest? manifest = DeserializeManifest(path);
+                        if (manifest is not null && !string.IsNullOrEmpty(manifest.ProjectDir))
+                        {
+                            return manifest.ProjectDir;
+                        }
+                    }
+                }
+            }
+        }
+        return ResolveProjectDir(scope);
     }
 
     /// <summary>
@@ -169,28 +199,47 @@ internal sealed class ApiMetadataService(
     {
         Directory.CreateDirectory(cacheDir);
         string lockPath = Path.Combine(cacheDir, ".lock");
+
+        FileStream lockFile;
         try
         {
-            using var lockFile = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-            logger.LogInformation("Indexing API metadata for this project…");
-            Refresh(scope, scan: false, onProgress: msg => logger.LogInformation("{Message}", msg));
+            lockFile = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         }
         catch (IOException)
         {
-            // Another winapp process is indexing the same cache. Wait briefly for it
-            // to finish, then fall through to querying whatever is on disk.
+            // Another winapp process holds the lock and is indexing the same cache.
+            // Wait briefly for it to finish, then fall through to querying whatever
+            // is on disk. This contention path must NOT wrap the indexing work
+            // below, or a genuine I/O failure during Refresh would be misreported
+            // as lock contention (and trigger a needless 30s wait).
             logger.LogInformation("API metadata cache is being indexed by another process, waiting…");
             for (int i = 0; i < 30; i++)
             {
                 Thread.Sleep(1000);
                 try
                 {
-                    using var lockFile = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                    using var probe = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
                     break;
                 }
                 catch (IOException)
                 {
                 }
+            }
+            return;
+        }
+
+        using (lockFile)
+        {
+            try
+            {
+                logger.LogInformation("Indexing API metadata for this project…");
+                Refresh(scope, scan: false, onProgress: msg => logger.LogInformation("{Message}", msg));
+            }
+            catch (Exception ex)
+            {
+                // Auto-indexing is best-effort: log and let the caller query the
+                // existing (possibly stale/empty) cache rather than failing hard.
+                logger.LogWarning(ex, "Failed to index API metadata; continuing with the existing cache.");
             }
         }
     }
@@ -253,6 +302,12 @@ internal sealed class ApiMetadataService(
                     }
                 }
             }
+
+            // An explicit --project-dir was given but nothing matched. Do NOT fall
+            // back to a lone/current project — that would silently answer for an
+            // unrelated project. Report it as not indexed instead.
+            return (null, $"No indexed API metadata was found for '{fullPath}'. Restore the project (so 'project.assets.json' exists), " +
+                $"then run 'winapp find-api refresh' in that directory. Indexed projects: {AvailableProjects(files)}.");
         }
 
         if (files.Length == 1)

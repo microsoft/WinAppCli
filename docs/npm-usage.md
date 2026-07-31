@@ -192,6 +192,213 @@ function createExternalCatalog(options: CreateExternalCatalogOptions): Promise<W
 
 ---
 
+### `findApi()`
+
+Search and inspect the Windows/WinRT API surface (types, members, enums, namespaces) available to a project, resolved from its referenced .winmd/.dll metadata. The bare form searches; sub-verbs drill into a specific type, namespace, or the index itself. The index is built from the project's restored NuGet/SDK packages and refreshed automatically when the project is restored.
+
+```typescript
+function findApi(options?: FindApiOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `query` | `string \| undefined` | No | What to search for, e.g. "acrylic brush" or "NavigationView". Matched lexically against type and member names across the project's indexed API metadata. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `max` | `number \| undefined` | No | Maximum number of namespace-grouped results to return. |
+| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `findApiCheckProperty()`
+
+Validate that a property exists on a type before you write XAML/code against it. On a miss, suggests similar properties on the type, attached-property forms, and other types that declare the property. Exits non-zero when the property does not exist.
+
+```typescript
+function findApiCheckProperty(options?: FindApiCheckPropertyOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `type` | `string \| undefined` | No | The type to check. |
+| `property` | `string \| undefined` | No | The property name to validate on the type. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `findApiEnums()`
+
+List the values of an enum type. Exits non-zero when the type exists but is not an enum.
+
+```typescript
+function findApiEnums(options?: FindApiEnumsOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `type` | `string \| undefined` | No | The enum type to list, e.g. Symbol or Microsoft.UI.Xaml.Controls.Symbol. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `findApiMembers()`
+
+List the properties, events, and methods of a type (with XML-doc descriptions and inherited members), resolved from the project's indexed API metadata.
+
+```typescript
+function findApiMembers(options?: FindApiMembersOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `type` | `string \| undefined` | No | The type to inspect. Accepts a short name (NavigationView) or a fully-qualified name (Microsoft.UI.Xaml.Controls.NavigationView). |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `findApiNamespaces()`
+
+List the namespaces available to the project across its indexed API metadata, optionally filtered by prefix.
+
+```typescript
+function findApiNamespaces(options?: FindApiNamespacesOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `filter` | `string \| undefined` | No | Only list namespaces starting with this prefix, e.g. --filter Microsoft.UI. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `findApiPackages()`
+
+List the NuGet/SDK packages whose API metadata is indexed for a project, with per-package type and member counts.
+
+```typescript
+function findApiPackages(options?: FindApiPackagesOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `findApiProjects()`
+
+List every project that currently has an API index in the shared cache, with the number of packages indexed for each.
+
+```typescript
+function findApiProjects(options?: FindApiProjectsOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `findApiRefresh()`
+
+Rebuild the API metadata index for a project from its restored packages. Runs automatically when a project is restored; run it manually to force a re-index or to index a project for the first time.
+
+```typescript
+function findApiRefresh(options?: FindApiRefreshOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
+| `scan` | `boolean \| undefined` | No | Recursively discover and index every project under the directory instead of just the top-level project(s). |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `findApiStats()`
+
+Show aggregate statistics for a project's API index: package, namespace, type, member, and .winmd file counts.
+
+```typescript
+function findApiStats(options?: FindApiStatsOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `findApiTypes()`
+
+List the types declared in a namespace (class/struct/enum/interface/delegate) with their base types.
+
+```typescript
+function findApiTypes(options?: FindApiTypesOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `namespace` | `string \| undefined` | No | The namespace to list, e.g. Microsoft.UI.Xaml.Controls. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `getWinappPath()`
 
 Print the path to the .winapp directory. Use --global for the shared cache location, or omit for the project-local .winapp folder. Useful for build scripts that need to reference installed packages.
@@ -1345,6 +1552,123 @@ type ManifestTemplates = "packaged" | "sparse"
 | `output` | `string \| undefined` | No | Output catalog file path. If not specified, the default CodeIntegrityExternal.cat name is used. |
 | `recursive` | `boolean \| undefined` | No | Include files from subdirectories |
 | `usePageHashes` | `boolean \| undefined` | No | Include page hashes when generating the catalog |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `FindApiOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `query` | `string \| undefined` | No | What to search for, e.g. "acrylic brush" or "NavigationView". Matched lexically against type and member names across the project's indexed API metadata. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `max` | `number \| undefined` | No | Maximum number of namespace-grouped results to return. |
+| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `FindApiCheckPropertyOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `type` | `string \| undefined` | No | The type to check. |
+| `property` | `string \| undefined` | No | The property name to validate on the type. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `FindApiEnumsOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `type` | `string \| undefined` | No | The enum type to list, e.g. Symbol or Microsoft.UI.Xaml.Controls.Symbol. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `FindApiMembersOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `type` | `string \| undefined` | No | The type to inspect. Accepts a short name (NavigationView) or a fully-qualified name (Microsoft.UI.Xaml.Controls.NavigationView). |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `FindApiNamespacesOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `filter` | `string \| undefined` | No | Only list namespaces starting with this prefix, e.g. --filter Microsoft.UI. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `FindApiPackagesOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `FindApiProjectsOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `FindApiRefreshOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
+| `scan` | `boolean \| undefined` | No | Recursively discover and index every project under the directory instead of just the top-level project(s). |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `FindApiStatsOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `FindApiTypesOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `namespace` | `string \| undefined` | No | The namespace to list, e.g. Microsoft.UI.Xaml.Controls. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

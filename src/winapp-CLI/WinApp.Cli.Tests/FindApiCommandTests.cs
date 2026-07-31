@@ -27,6 +27,7 @@ internal sealed class FakeApiMetadataService : IApiMetadataService
     public string? LastCheckType { get; private set; }
     public string? LastCheckProperty { get; private set; }
     public ApiRequestScope LastScope { get; private set; }
+    public bool LastRefreshForce { get; private set; }
 
     public ApiQueryResult<ApiSearchOutput> Search(string query, int maxResults, ApiRequestScope scope)
     {
@@ -143,9 +144,10 @@ internal sealed class FakeApiMetadataService : IApiMetadataService
         Projects = new List<ApiProjectSummary> { new() { Name = "TestApp", PackageCount = 1 } },
     };
 
-    public ApiRefreshOutput Refresh(ApiRequestScope scope, bool scan, Action<string>? onProgress = null)
+    public ApiRefreshOutput Refresh(ApiRequestScope scope, bool scan, Action<string>? onProgress = null, bool force = false)
     {
         LastScope = scope;
+        LastRefreshForce = force;
         return new ApiRefreshOutput
         {
             ProjectsProcessed = 1, PackagesParsed = 1, PackagesReused = 0, ProjectNames = new List<string> { "TestApp" },
@@ -260,6 +262,24 @@ public sealed class FindApiCommandTests : BaseCommandTests
     public async Task ProjectOption_FlowsIntoScope()
     {
         int exit = await ParseAndInvokeWithCaptureAsync(Command, ["NavigationView", "--project", "MyApp"]);
+
+        Assert.AreEqual(0, exit);
+        Assert.AreEqual("MyApp", _fake.LastScope.Project);
+    }
+
+    [TestMethod]
+    public async Task Refresh_ForcesFullRebuild()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(Command, ["refresh"]);
+
+        Assert.AreEqual(0, exit);
+        Assert.IsTrue(_fake.LastRefreshForce);
+    }
+
+    [TestMethod]
+    public async Task Refresh_ProjectOption_FlowsIntoScope()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(Command, ["refresh", "--project", "MyApp"]);
 
         Assert.AreEqual(0, exit);
         Assert.AreEqual("MyApp", _fake.LastScope.Project);

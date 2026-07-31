@@ -364,13 +364,15 @@ internal sealed class FindApiRefreshCommand : Command, IShortDescription
         private int Execute(ParseResult parseResult)
         {
             bool json = parseResult.GetValue(WinAppRootCommand.JsonOption);
+            bool quiet = parseResult.GetValue(WinAppRootCommand.QuietOption);
             bool scan = parseResult.GetValue(ScanOption);
             var scope = FindApiShared.ReadScope(parseResult, ProjectDirOption, ProjectOption);
 
-            // Progress prints in text mode only; --json is suppressed so scripted
-            // callers get a clean payload on stdout.
-            Action<string>? onProgress = json ? null : msg => console.MarkupLineInterpolated($"[grey]{msg}[/]");
-            var data = service.Refresh(scope, scan, onProgress);
+            // Progress prints in text mode only; --json and --quiet suppress it so
+            // scripted/quiet callers get a clean payload on stdout.
+            Action<string>? onProgress = (json || quiet) ? null : msg => console.MarkupLineInterpolated($"[grey]{msg}[/]");
+            // An explicit refresh forces a full rebuild (ignoring reused caches).
+            var data = service.Refresh(scope, scan, onProgress, force: true);
             return FindApiShared.EmitRaw(
                 console, json, "refresh", data, WinAppJsonContext.Default.ApiRefreshOutput,
                 d => FindApiShared.RenderRefresh(console, d),

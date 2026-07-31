@@ -214,8 +214,24 @@ Want to inspect or interact with a running app's UI?
 **Purpose:** Generate a `CodeIntegrityExternal.cat` catalog file for sparse packages with `AllowExternalContent`.
 **When to use:** When your sparse package manifest uses `TrustedLaunch` and you need to catalog external executable files.
 
+### `winapp find-api [query]` — API metadata discovery
+**Purpose:** Search a project's referenced WinRT/.NET API metadata (`.winmd`/`.dll` + XML docs) for types and members, and inspect them — without guessing API shapes. The index builds automatically after a restore; run `winapp find-api refresh` to (re)build it manually.
+**When to use:** When an AI agent or developer needs to confirm that a type/property/enum exists, discover the members of a control, or find the right API by intent (e.g. "acrylic brush") before writing WinUI/WinRT code. Add `--json` for machine-readable output.
+
+**Key subcommands:**
+- `find-api "<query>"` — lexical search for types/members by name or intent (bare form).
+- `find-api members <type>` — list properties, events, and methods of a type (accepts a short name like `NavigationView` or a fully-qualified name), including inherited members.
+- `find-api check-property <type> <property>` — verify a (dependency/attached) property exists on a type; suggests near-matches when it doesn't.
+- `find-api types <namespace>` — list the types in a namespace.
+- `find-api enums <type>` — list an enum's values (accepts a short or fully-qualified name).
+- `find-api namespaces [filter]` — list indexed namespaces.
+- `find-api packages` / `find-api stats` — show indexed packages / index statistics for the project.
+- `find-api projects` — list all indexed projects.
+- `find-api refresh [--scan] [--project <name>]` — rebuild the API index for the project (forces a full re-index).
+
 ### `winapp ui` — UI automation commands
 **Purpose:** Inspect and interact with running Windows app UIs using Windows UI Automation (UIA).
+**When to use:** When an AI agent or developer needs to verify UI state, find controls, take screenshots, click buttons, or automate UI testing in a running Windows app. Works with any framework (WinUI 3, WPF, WinForms, Win32, Electron).
 **When to use:** When an AI agent or developer needs to verify UI state, find controls, take screenshots, click buttons, or automate UI testing in a running Windows app. Works with any framework (WinUI 3, WPF, WinForms, Win32, Electron).
 
 **Targeting apps:** Use `-a <name>` (fuzzy match by process name, window title, or PID) or `-w <hwnd>` for stable window targeting.

@@ -76,6 +76,17 @@ public sealed class ApiQueryEngineTests
     }
 
     [TestMethod]
+    public void Members_ShortName_ResolvesType()
+    {
+        // Regression (C3): members must accept a short name, matching the help text
+        // and the check-property resolution behavior.
+        var result = ApiQueryEngine.Members("Widget", _cacheDir, _manifest);
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.AreEqual("My.Ns.Widget", result.Data!.FullName);
+    }
+
+    [TestMethod]
     public void Members_UnknownType_IsNotFound()
     {
         var result = ApiQueryEngine.Members("My.Ns.Nope", _cacheDir, _manifest);
@@ -90,6 +101,16 @@ public sealed class ApiQueryEngineTests
 
         Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
         CollectionAssert.AreEqual(new[] { "Happy", "Sad" }, result.Data!.Values);
+    }
+
+    [TestMethod]
+    public void Enums_ShortName_ResolvesType()
+    {
+        // Regression (C3): enums must accept a short name too.
+        var result = ApiQueryEngine.Enums("Mood", _cacheDir, _manifest);
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.AreEqual("My.Ns.Mood", result.Data!.FullName);
     }
 
     [TestMethod]
@@ -128,6 +149,17 @@ public sealed class ApiQueryEngineTests
 
         Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
         Assert.IsTrue(result.Data!.Found);
+    }
+
+    [TestMethod]
+    public void CheckProperty_MethodNameCollision_IsNotFound()
+    {
+        // Regression (C1): a method whose name matches the queried property must
+        // not be reported as a found property. "DoThing" is a method on Widget.
+        var result = ApiQueryEngine.CheckProperty("My.Ns.Widget", "DoThing", _cacheDir, _manifest);
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.IsFalse(result.Data!.Found);
     }
 
     [TestMethod]

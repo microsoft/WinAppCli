@@ -119,4 +119,20 @@ public sealed class ApiMetadataServiceTests
         Assert.AreEqual(ApiQueryOutcome.NoProject, result.Outcome);
         StringAssert.Contains(result.Message, "not indexed");
     }
+
+    [TestMethod]
+    public void Query_ExplicitProjectDir_NoMatch_DoesNotFallBackToLoneProject()
+    {
+        // Regression (C2): an explicit --project-dir that matches no indexed
+        // project must report "not indexed" rather than silently answering for the
+        // unrelated lone cached project.
+        WriteManifest("Alpha");
+        string unrelated = Path.Combine(Directory.GetParent(_globalDir)!.FullName, "unrelated");
+        Directory.CreateDirectory(unrelated);
+
+        var result = CreateService().Members("Some.Ns.Type", new ApiRequestScope(unrelated, null));
+
+        Assert.AreEqual(ApiQueryOutcome.NoProject, result.Outcome);
+        StringAssert.Contains(result.Message, "No indexed API metadata was found for");
+    }
 }

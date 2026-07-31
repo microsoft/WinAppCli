@@ -23,7 +23,8 @@ internal static class ApiCacheBuilder
         string cacheDir,
         bool scan,
         string? winAppSdkRuntimePath,
-        Action<string>? onProgress = null)
+        Action<string>? onProgress = null,
+        bool force = false)
     {
         string fullDir = Path.GetFullPath(projectDir);
         winAppSdkRuntimePath ??= DetectWinAppSdkRuntime();
@@ -49,8 +50,18 @@ internal static class ApiCacheBuilder
             var packageRefs = new List<ProjectPackageRef>();
             foreach (PackageWithWinMd package in packages)
             {
-                string packageCacheDir = Path.Combine(cacheDir, "packages", package.Id, package.Version);
-                if (File.Exists(Path.Combine(packageCacheDir, "meta.json")))
+                string packagesRoot = Path.Combine(cacheDir, "packages");
+                if (!ApiCachePaths.TryCombineContained(packagesRoot, new[] { package.Id, package.Version }, out string packageCacheDir))
+                {
+                    // Untrusted Id/Version would escape the cache dir — skip it.
+                    onProgress?.Invoke($"Skipping package with unsafe path: {package.Id} {package.Version}");
+                    continue;
+                }
+                // A project reference is exported with version "local" and can change
+                // without a version bump, so its cache is never safe to reuse. An
+                // explicit refresh (force) rebuilds every package.
+                bool mustRebuild = force || string.Equals(package.Version, "local", StringComparison.OrdinalIgnoreCase);
+                if (!mustRebuild && File.Exists(Path.Combine(packageCacheDir, "meta.json")))
                 {
                     reused++;
                 }
@@ -148,7 +159,7 @@ internal static class ApiCacheBuilder
         {
             string key = ns == "_GlobalNamespace" ? string.Empty : ns;
             List<WinMdTypeInfo> namespaceTypes = byNamespace[key];
-            string fileName = ns.Replace('.', '_') + ".json";
+            string fileName = ApiCachePaths.NamespaceFileName(ns);
             WriteFileAtomic(Path.Combine(typesDir, fileName), JsonSerializer.Serialize(namespaceTypes, ApiSearchJsonContext.Default.ListWinMdTypeInfo));
         }
     }
@@ -234,9 +245,18 @@ internal static class ApiCacheBuilder
         try
         {
             string arch = RuntimeInformation.OSArchitecture.ToString();
+            // Use the absolute, well-known Windows PowerShell path so a
+            // "powershell.exe" planted in the project directory (or anywhere on
+            // PATH) can't be executed instead.
+            string systemRoot = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            string powershellPath = Path.Combine(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+            if (!File.Exists(powershellPath))
+            {
+                return null;
+            }
             using Process? process = Process.Start(new ProcessStartInfo
             {
-                FileName = "powershell.exe",
+                FileName = powershellPath,
                 Arguments = "-NoProfile -Command \"Get-AppxPackage -Name 'Microsoft.WindowsAppRuntime.*' | Where-Object { $_.Name -notmatch 'CBS' -and $_.Architecture -eq '" + arch + "' } | Sort-Object -Property Version -Descending | Select-Object -First 1 -ExpandProperty InstallLocation\"",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
