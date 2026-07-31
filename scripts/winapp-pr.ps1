@@ -629,7 +629,7 @@ function Get-MsixArtifact {
             return [pscustomobject]@{ Run = $run; Artifact = $msix }
         }
         if (-not $Quiet) {
-            Write-Detail "Run $($run.id) has no $ArtifactName artifact among its $(($artifacts | Measure-Object).Count), trying older run..."
+            Write-Detail "Run $($run.id) has no usable $ArtifactName artifact among its $(($artifacts | Measure-Object).Count), trying older run..."
         }
     }
     return $null
