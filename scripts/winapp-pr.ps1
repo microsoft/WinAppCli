@@ -418,7 +418,7 @@ function Get-MenuItems {
 
         [pscustomobject]@{
             Spec   = [string]$pr.number
-            Name   = "#$($pr.number)"
+            Name   = "PR #$($pr.number)"
             Title  = $pr.title
             Meta   = ($meta -join ' - ')
             Marker = Get-Marker -Branch $pr.branch
@@ -969,7 +969,12 @@ function Show-Status {
 
     $state = Get-InstallState
     if (Test-StateMatchesInstall -State $state -Package ($installed | Select-Object -First 1)) {
-        Write-Detail "Source: $($state.Repo)  $($state.Branch)  @ $($state.HeadSha)"
+        # Name the PR as well as the branch: the picker offers builds by PR number, so that is
+        # the identifier you chose it by.
+        $source = @($state.Repo)
+        if ($state.Pr) { $source += "PR #$($state.Pr)" }
+        $source += $state.Branch
+        Write-Detail "Source: $($source -join '  ')  @ $($state.HeadSha)"
         Write-Detail "Run   : $($state.RunId)  installed $($state.InstalledAt)"
     }
     elseif ($state) {
