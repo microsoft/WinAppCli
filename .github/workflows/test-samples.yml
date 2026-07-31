@@ -20,6 +20,9 @@ on:
           - rust-app
           - tauri-app
           - wpf-app
+          - winui-app
+          - winui-solution
+          - winui-unpackaged-app
 
 permissions:
   contents: read
@@ -57,7 +60,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sample: [cpp-app, dotnet-app, electron, flutter-app, packaging-cli, rust-app, tauri-app, wpf-app]
+        sample: [cpp-app, dotnet-app, electron, flutter-app, packaging-cli, rust-app, tauri-app, wpf-app, winui-app, winui-solution, winui-unpackaged-app]
     runs-on: windows-latest
     name: ${{ matrix.sample }}
 
@@ -116,7 +119,7 @@ jobs:
     - name: Setup .NET
       if: >-
         steps.check.outputs.skip != 'true' &&
-        contains(fromJson('["dotnet-app", "wpf-app", "packaging-cli", "electron"]'), matrix.sample)
+        contains(fromJson('["dotnet-app", "wpf-app", "packaging-cli", "electron", "winui-app", "winui-solution", "winui-unpackaged-app"]'), matrix.sample)
       uses: actions/setup-dotnet@v5
       with:
         dotnet-version: '10.0.x'
@@ -124,7 +127,7 @@ jobs:
     - name: Setup Node.js
       if: >-
         steps.check.outputs.skip != 'true' &&
-        contains(fromJson('["electron", "tauri-app", "cpp-app", "dotnet-app", "wpf-app", "rust-app", "flutter-app", "packaging-cli"]'), matrix.sample)
+        contains(fromJson('["electron", "tauri-app", "cpp-app", "dotnet-app", "wpf-app", "rust-app", "flutter-app", "packaging-cli", "winui-app", "winui-solution", "winui-unpackaged-app"]'), matrix.sample)
       uses: actions/setup-node@v5
       with:
         node-version: '22'
@@ -145,15 +148,44 @@ jobs:
 
     # --- Run the sample's self-contained Pester test ---
 
+    # Hosted Windows images ship Pester 5.x, so this normally short-circuits.
+    # When it does need to install, PSGallery registration/download is a known
+    # flake ("Missing option value for: '-source'"), so retry before failing.
     - name: Install Pester
       if: steps.check.outputs.skip != 'true'
       shell: pwsh
       run: |
-        if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
-          Register-PSRepository -Default
+        function Get-Pester5 {
+          Get-Module -Name Pester -ListAvailable |
+            Where-Object { $_.Version.Major -ge 5 } |
+            Sort-Object Version -Descending |
+            Select-Object -First 1
         }
-        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-        Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser -MinimumVersion 5.0 -Repository PSGallery
+
+        $pester = Get-Pester5
+        if (-not $pester) {
+          foreach ($attempt in 1..3) {
+            try {
+              if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
+                Register-PSRepository -Default -ErrorAction Stop
+              }
+              Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction Stop
+              Install-Module -Name Pester -Force -SkipPublisherCheck -Scope CurrentUser -MinimumVersion 5.0 -Repository PSGallery -ErrorAction Stop
+            } catch {
+              Write-Host "::warning::Pester install attempt $attempt failed: $($_.Exception.Message)"
+            }
+
+            $pester = Get-Pester5
+            if ($pester) { break }
+            if ($attempt -lt 3) { Start-Sleep -Seconds (10 * $attempt) }
+          }
+        }
+
+        if (-not $pester) {
+          Write-Error "Pester 5.x is not available after 3 install attempts"
+          exit 1
+        }
+        Write-Host "Using Pester $($pester.Version)"
 
     - name: Run ${{ matrix.sample }} test
       if: steps.check.outputs.skip != 'true'

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Window
+    x:Class="winui_solution_app.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Title="WinUI Solution Sample"
+    mc:Ignorable="d">
+    <Window.SystemBackdrop>
+        <MicaBackdrop />
+    </Window.SystemBackdrop>
+
+    <StackPanel
+        Padding="40"
+        HorizontalAlignment="Center"
+        VerticalAlignment="Center"
+        Spacing="12">
+        <TextBlock
+            AutomationProperties.AutomationId="PageTitle"
+            Style="{StaticResource TitleTextBlockStyle}"
+            Text="WinUI Solution Sample" />
+        <TextBlock
+            AutomationProperties.AutomationId="PageSubtitle"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+            Text="The runnable app in a multi-project solution used to test winapp run solution mode." />
+        <TextBlock
+            x:Name="CoreGreetingText"
+            AutomationProperties.AutomationId="CoreGreeting"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+    </StackPanel>
+</Window>

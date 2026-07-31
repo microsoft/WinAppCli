@@ -36,7 +36,7 @@ public class ProjectDetectionServiceAccessDeniedTests
     {
         _tempDir = Path.Combine(Path.GetTempPath(), $"ProjDetectDenied_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
-        _sut = new ProjectDetectionService(NullLogger<ProjectDetectionService>.Instance);
+        _sut = new ProjectDetectionService(NullLogger<ProjectDetectionService>.Instance, new FakeDotNetService());
     }
 
     [TestCleanup]

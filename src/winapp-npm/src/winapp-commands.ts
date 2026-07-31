@@ -52,8 +52,15 @@ export interface WinappResult {
 // ---------------------------------------------------------------------------
 
 function pushCommon(args: string[], opts: CommonOptions): void {
-  if (opts.quiet) args.push('--quiet');
-  if (opts.verbose) args.push('--verbose');
+  // Insert global flags before any "--" passthrough separator so winapp consumes them rather
+  // than forwarding them to the launched app/tool (e.g. run ... -- appArgs).
+  const flags: string[] = [];
+  if (opts.quiet) flags.push('--quiet');
+  if (opts.verbose) flags.push('--verbose');
+  if (flags.length === 0) return;
+  const sep = args.indexOf('--');
+  if (sep === -1) args.push(...flags);
+  else args.splice(sep, 0, ...flags);
 }
 
 function captureOpts(opts: CommonOptions): CallWinappCliCaptureOptions {
@@ -262,7 +269,7 @@ export interface FindUiOptions extends CommonOptions {
   json?: boolean;
   /** List every discoverable control/sample id instead of searching. Covers Gallery, Toolkit, and core; the opt-in Reactor source is excluded (search it with --source reactor). */
   list?: boolean;
-  /** Maximum number of matched controls to return. */
+  /** Maximum number of matched controls to return. Applies to search only; ignored with --list and --id. */
   max?: number;
   /** Bypass the local cache and re-fetch the WinUI corpus from GitHub. */
   refresh?: boolean;
@@ -510,58 +517,90 @@ export async function restore(options: RestoreOptions = {}): Promise<WinappResul
 // ---------------------------------------------------------------------------
 
 export interface RunOptions extends CommonOptions {
-  /** Input folder containing the app to run */
-  inputFolder: string;
-  /** Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). */
-  appArgs?: string | string[];
+  /** Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory). */
+  input?: string;
+  /** @deprecated Use `input` instead. Retained for backward compatibility. */
+  inputFolder?: string;
+  /** Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Default: the current process architecture. */
+  arch?: string;
   /** Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). */
   args?: string;
   /** Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. */
   clean?: boolean;
+  /** Project mode: build configuration (e.g., Debug, Release). Ignored in folder mode. Default: Debug. */
+  configuration?: string;
   /** Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. For WinUI apps, a crash also triggers a stowed-exception triage pass; the first run downloads debugger components (cached under the winapp global directory) and can be pointed at an existing debugger install via the WINAPP_DBGTOOLS_DIR environment variable. Cannot be combined with --no-launch or --json. */
   debugOutput?: boolean;
   /** Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). */
   detach?: boolean;
   /** Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. */
   executable?: string;
+  /** Project mode: target framework moniker for multi-targeted projects (e.g. net10.0-windows10.0.26100.0). Ignored in folder mode. */
+  framework?: string;
   /** Format output as JSON */
   json?: boolean;
   /** Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) */
   manifest?: string;
+  /** Project mode: skip building and run the existing build output (still evaluates output properties). Ignored in folder mode. */
+  noBuild?: boolean;
   /** Only create the debug identity and register the package without launching the application */
   noLaunch?: boolean;
-  /** Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used. */
+  /** Project mode: skip restoring the project before building. Ignored in folder mode. */
+  noRestore?: boolean;
+  /** Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory will be used. */
   outputAppxDirectory?: string;
+  /** Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode. */
+  project?: string;
+  /** Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. */
+  property?: string | string[];
+  /** Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode. */
+  runtime?: string;
   /** Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. */
   symbols?: boolean;
   /** Unregister the development package after the application exits. Only removes packages registered in development mode. */
   unregisterOnExit?: boolean;
   /** Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. */
   withAlias?: boolean;
+  /** Arguments to pass to the launched application (forwarded after --). */
+  appArgs?: string | string[];
 }
 
 /**
- * Creates packaged layout, registers the Application, and launches the packaged application.
+ * Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.
  */
-export async function run(options: RunOptions): Promise<WinappResult> {
+export async function run(options: RunOptions = {}): Promise<WinappResult> {
   const args: string[] = ['run'];
-  args.push(options.inputFolder);
-  if (options.appArgs) {
-    const appArgsArr = Array.isArray(options.appArgs) ? options.appArgs : [options.appArgs];
-    args.push(...appArgsArr);
-  }
+  const inputValue = options.input ?? options.inputFolder;
+  if (inputValue) args.push(inputValue);
+  if (options.arch) args.push('--arch', options.arch);
   if (options.args) args.push('--args', options.args);
   if (options.clean) args.push('--clean');
+  if (options.configuration) args.push('--configuration', options.configuration);
   if (options.debugOutput) args.push('--debug-output');
   if (options.detach) args.push('--detach');
   if (options.executable) args.push('--executable', options.executable);
+  if (options.framework) args.push('--framework', options.framework);
   if (options.json) args.push('--json');
   if (options.manifest) args.push('--manifest', options.manifest);
+  if (options.noBuild) args.push('--no-build');
   if (options.noLaunch) args.push('--no-launch');
+  if (options.noRestore) args.push('--no-restore');
   if (options.outputAppxDirectory) args.push('--output-appx-directory', options.outputAppxDirectory);
+  if (options.project) args.push('--project', options.project);
+  if (options.property) {
+    const propertyArr = Array.isArray(options.property) ? options.property : [options.property];
+    for (const v of propertyArr) args.push('--property', v);
+  }
+  if (options.runtime) args.push('--runtime', options.runtime);
   if (options.symbols) args.push('--symbols');
   if (options.unregisterOnExit) args.push('--unregister-on-exit');
   if (options.withAlias) args.push('--with-alias');
+  if (options.appArgs !== undefined) {
+    const appArgsArr = Array.isArray(options.appArgs) ? options.appArgs : [options.appArgs];
+    if (appArgsArr.length > 0) {
+      args.push('--', ...appArgsArr);
+    }
+  }
   return execCommand(args, options);
 }
 
@@ -598,7 +637,7 @@ export async function sign(options: SignOptions): Promise<WinappResult> {
 
 export interface StoreOptions extends CommonOptions {
   /** Arguments to pass through to the Microsoft Store Developer CLI. */
-  storeArgs?: string[];
+  storeArgs?: string | string[];
 }
 
 /**
@@ -606,7 +645,10 @@ export interface StoreOptions extends CommonOptions {
  */
 export async function store(options: StoreOptions = {}): Promise<WinappResult> {
   const args: string[] = ['store'];
-  if (options.storeArgs) args.push(...options.storeArgs);
+  if (options.storeArgs !== undefined) {
+    const storeArgsArr = Array.isArray(options.storeArgs) ? options.storeArgs : [options.storeArgs];
+    args.push(...storeArgsArr);
+  }
   return execCommand(args, options);
 }
 
@@ -616,7 +658,7 @@ export async function store(options: StoreOptions = {}): Promise<WinappResult> {
 
 export interface ToolOptions extends CommonOptions {
   /** Arguments to pass to the SDK tool, e.g. ['makeappx', 'pack', '/d', './folder', '/p', './out.msix']. */
-  toolArgs?: string[];
+  toolArgs?: string | string[];
 }
 
 /**
@@ -624,8 +666,11 @@ export interface ToolOptions extends CommonOptions {
  */
 export async function tool(options: ToolOptions = {}): Promise<WinappResult> {
   const args: string[] = ['tool'];
-  if (options.toolArgs && options.toolArgs.length > 0) {
-    args.push('--', ...options.toolArgs);
+  if (options.toolArgs !== undefined) {
+    const toolArgsArr = Array.isArray(options.toolArgs) ? options.toolArgs : [options.toolArgs];
+    if (toolArgsArr.length > 0) {
+      args.push('--', ...toolArgsArr);
+    }
   }
   return execCommand(args, options);
 }

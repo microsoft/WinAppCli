@@ -68,6 +68,34 @@ internal interface IDotNetService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Runs a dotnet CLI command in the given working directory, delivering each stdout/stderr line
+    /// to the supplied callbacks as it is produced (rather than capturing it all up front). Used for
+    /// the project-mode build pass so build progress is visible live. Returns the process exit code.
+    /// The callbacks are invoked on background threads; callers that touch shared state must
+    /// synchronize. The command's own output is NOT written anywhere unless a callback does so.
+    /// </summary>
+    Task<int> RunDotnetStreamingAsync(
+        DirectoryInfo workingDirectory,
+        string arguments,
+        Action<string>? onOutputLine,
+        Action<string>? onErrorLine,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Runs a dotnet CLI command with <b>inherited</b> stdio: the child inherits winapp's own console
+    /// handles (no redirection, no read pumps), so dotnet sees a real terminal and its native terminal
+    /// logger renders the live build (single warnings, live progress) directly. Used for the project-mode
+    /// build pass when winapp is attached to a real interactive terminal. Returns the process exit code.
+    /// The command's output goes straight to the inherited console — winapp never sees the lines, so this
+    /// must not be used for any pass whose output winapp needs to parse. Shares the same kill-on-cancel
+    /// tree-kill policy as the streaming/buffered launchers.
+    /// </summary>
+    Task<int> RunDotnetInheritedAsync(
+        DirectoryInfo workingDirectory,
+        string arguments,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Ensures the .csproj has a RuntimeIdentifier element with a default that auto-detects
     /// the current platform architecture. Only adds the element if no RuntimeIdentifier or
     /// RuntimeIdentifiers element already exists in the project.
@@ -95,8 +123,9 @@ internal interface IDotNetService
     /// </summary>
     /// <param name="csprojFile">The .csproj file to query.</param>
     /// <param name="includeTransitive">When true, includes transitive package references in the output.</param>
+    /// <param name="noRestore">When true, pass <c>--no-restore</c> so the query doesn't trigger an implicit restore.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, CancellationToken cancellationToken = default);
+    Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, bool noRestore = false, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Ensures the .csproj has <c>&lt;EnableMsixTooling&gt;true&lt;/EnableMsixTooling&gt;</c>.

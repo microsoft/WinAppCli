@@ -160,12 +160,30 @@ This confirms your app is running with a valid package identity!
 
 ### Alternative: Manual `winapp run`
 
-If you didn't use `winapp init` (or removed the NuGet package), you can build and run manually:
+If you didn't use `winapp init` (or removed the NuGet package), you can build and run manually. `winapp run` accepts the project directly (project mode) — it builds the `.csproj` and launches it, so you don't have to point at the build-output folder or build separately:
+
+```powershell
+# Build and run the project in one step (project mode)
+winapp run .
+
+# ...or run a specific project / configuration / architecture
+winapp run .\dotnet-app.csproj -c Debug --arch x64
+```
+
+You can still point `winapp run` at a pre-built output folder if you prefer (folder mode):
 
 ```powershell
 dotnet build -c Debug
 winapp run .\bin\Debug\net10.0-windows10.0.26100.0
 ```
+
+Project mode supports both **packaged** and **unpackaged** WinUI apps — it detects which from the project's `WindowsPackageType` and installs the matching-architecture Windows App Runtime automatically. To force an unpackaged run of a packaged project, add `-p WindowsPackageType=None`.
+
+**Multi-project apps** (an app referencing class libraries) build correctly: winapp negotiates each project reference's platform automatically, so referencing an `AnyCPU`/`netstandard2.0` library doesn't fail with `CS0006` "metadata file could not be found".
+
+The `dotnet build` output streams live, with the exact invocation printed first. Add `--verbose` for winapp's own build decision traces. Requires .NET SDK 8.0.100 or newer. See [`winapp run` in the usage reference](../usage.md#project-mode-net-sdk-projects) for the full option list.
+
+> **No Windows SDK installed?** C#/WinRT authoring projects normally need a registered Windows SDK to build. When project mode detects none (clean CI, containers, SDK-less dev boxes), it points cswinrt at the winmds from the auto-restored `Microsoft.Windows.SDK.NET.Ref` package so the build still succeeds — no action needed. It does nothing when an SDK is installed or when you set `-p CsWinRTWindowsMetadata=…` yourself.
 
 To add the NuGet package back: `dotnet add package Microsoft.Windows.SDK.BuildTools.WinApp --prerelease`
 

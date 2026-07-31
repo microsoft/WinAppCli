@@ -83,6 +83,23 @@ const COMMON_OPTIONS = new Set(['--quiet', '--verbose', '--help']);
 const TS_RESERVED = new Set(['package', 'default', 'export', 'import', 'class', 'function', 'return', 'delete', 'new']);
 
 /**
+ * Deprecated positional-argument property aliases, keyed by command path.
+ *
+ * When a CLI positional argument is renamed, the old npm SDK property name is a
+ * breaking change for existing JS/TS callers. To avoid that, list the old name
+ * here: the generator emits it as an optional, `@deprecated` field and resolves
+ * `canonicalProp ?? aliasProp` when forwarding to the CLI, so old callers keep
+ * working while `--help`/the schema use the new name.
+ *
+ * Map shape: `{ '<cmd path>': { '<canonicalProp>': '<deprecatedAliasProp>' } }`.
+ */
+const DEPRECATED_ARG_ALIASES = {
+  // `run`'s positional was renamed from `input-folder` to `input` (it accepts a
+  // .csproj/.sln/folder, not just a folder). Keep `inputFolder` working.
+  run: { input: 'inputFolder' },
+};
+
+/**
  * Nullable enum types — strip `System.Nullable<...>` wrapper.
  */
 const NULLABLE_ENUM_RE = /^System\.Nullable<(.+)>$/;
@@ -140,12 +157,22 @@ function isVariadicArg(argDef) {
 }
 
 /**
+ * Whether a named option accepts multiple values (a C# Option<T[]>, e.g. run's repeatable
+ * `--property`). Keyed strictly on an array value type so single-valued options with an
+ * open-ended arity aren't misclassified.
+ */
+function isVariadicOption(optDef) {
+  return !!(optDef.valueType && optDef.valueType.endsWith('[]'));
+}
+
+/**
  * Commands that act as pass-throughs (arbitrary extra args forwarded to
  * an underlying tool). We add a `string[]` property for the extra args.
  */
 const PASSTHROUGH_COMMANDS = {
   tool: { propName: 'toolArgs', description: "Arguments to pass to the SDK tool, e.g. ['makeappx', 'pack', '/d', './folder', '/p', './out.msix'].", separator: ' -- ' },
   store: { propName: 'storeArgs', description: 'Arguments to pass through to the Microsoft Store Developer CLI.', separator: '' },
+  run: { propName: 'appArgs', description: 'Arguments to pass to the launched application (forwarded after --).', separator: ' -- ' },
 };
 
 // ---------------------------------------------------------------------------
@@ -241,8 +268,15 @@ function generate(schema) {
   L('// ---------------------------------------------------------------------------');
   L();
   L('function pushCommon(args: string[], opts: CommonOptions): void {');
-  L("  if (opts.quiet) args.push('--quiet');");
-  L("  if (opts.verbose) args.push('--verbose');");
+  L('  // Insert global flags before any "--" passthrough separator so winapp consumes them rather');
+  L('  // than forwarding them to the launched app/tool (e.g. run ... -- appArgs).');
+  L('  const flags: string[] = [];');
+  L("  if (opts.quiet) flags.push('--quiet');");
+  L("  if (opts.verbose) flags.push('--verbose');");
+  L('  if (flags.length === 0) return;');
+  L("  const sep = args.indexOf('--');");
+  L('  if (sep === -1) args.push(...flags);');
+  L('  else args.splice(sep, 0, ...flags);');
   L('}');
   L();
   L('function captureOpts(opts: CommonOptions): CallWinappCliCaptureOptions {');
@@ -274,9 +308,13 @@ function generate(schema) {
     }
 
     // Collect arguments (positional)
+    const argAliases = DEPRECATED_ARG_ALIASES[cmdPathStr] || {};
     const positionalArgs = [];
     for (const [argName, argDef] of Object.entries(cmd.arguments || {})) {
-      positionalArgs.push({ cliName: argName, def: argDef, propName: kebabToCamel(argName) });
+      const propName = kebabToCamel(argName);
+      // The passthrough arg (e.g. run's app-args) is emitted after '--' below, not as a positional.
+      if (passthrough && propName === passthrough.propName) continue;
+      positionalArgs.push({ cliName: argName, def: argDef, propName, alias: argAliases[propName] || null });
     }
     // Sort by order
     positionalArgs.sort((a, b) => (a.def.order ?? 0) - (b.def.order ?? 0));
@@ -299,17 +337,24 @@ function generate(schema) {
       const type = variadic ? 'string | string[]' : tsType(arg.def.valueType);
       L(`  /** ${cleanDesc(arg.def.description)} */`);
       L(`  ${arg.propName}${required ? '' : '?'}: ${type};`);
+      if (arg.alias) {
+        L(`  /** @deprecated Use \`${arg.propName}\` instead. Retained for backward compatibility. */`);
+        L(`  ${arg.alias}?: ${type};`);
+      }
     }
     // then named options
     for (const opt of opts) {
-      const tp = isVariadicArg(opt.def) ? 'string | string[]' : tsType(opt.def.valueType, opt.def.helpName);
+      const tp = isVariadicOption(opt.def) ? 'string | string[]' : tsType(opt.def.valueType, opt.def.helpName);
       L(`  /** ${cleanDesc(opt.def.description)} */`);
       L(`  ${opt.propName}?: ${tp};`);
     }
     // passthrough args property
     if (passthrough) {
       L(`  /** ${passthrough.description} */`);
-      L(`  ${passthrough.propName}?: string[];`);
+      // Accept a single string OR an array. A bare string is normalized to a one-element
+      // array before emission (below) so it isn't spread into individual characters — this
+      // preserves the string form callers relied on before `run` moved onto this path.
+      L(`  ${passthrough.propName}?: string | string[];`);
     }
     L('}');
     L();
@@ -338,20 +383,28 @@ function generate(schema) {
     for (const arg of positionalArgs) {
       const required = arg.def.arity?.minimum >= 1;
       const variadic = isVariadicArg(arg.def);
+      // When a deprecated alias exists, prefer the canonical property but fall
+      // back to the alias so pre-rename callers keep working. Hoist to a local so
+      // TypeScript can narrow it (a re-evaluated `??` expression is not narrowed).
+      let accessor = `options.${arg.propName}`;
+      if (arg.alias) {
+        accessor = `${arg.propName}Value`;
+        L(`  const ${accessor} = options.${arg.propName} ?? options.${arg.alias};`);
+      }
       if (variadic) {
         if (required) {
-          L(`  const ${arg.propName}Arr = Array.isArray(options.${arg.propName}) ? options.${arg.propName} : [options.${arg.propName}];`);
+          L(`  const ${arg.propName}Arr = Array.isArray(${accessor}) ? ${accessor} : [${accessor}];`);
           L(`  args.push(...${arg.propName}Arr);`);
         } else {
-          L(`  if (options.${arg.propName}) {`);
-          L(`    const ${arg.propName}Arr = Array.isArray(options.${arg.propName}) ? options.${arg.propName} : [options.${arg.propName}];`);
+          L(`  if (${accessor}) {`);
+          L(`    const ${arg.propName}Arr = Array.isArray(${accessor}) ? ${accessor} : [${accessor}];`);
           L(`    args.push(...${arg.propName}Arr);`);
           L('  }');
         }
       } else if (required) {
-        L(`  args.push(options.${arg.propName});`);
+        L(`  args.push(${accessor});`);
       } else {
-        L(`  if (options.${arg.propName}) args.push(options.${arg.propName});`);
+        L(`  if (${accessor}) args.push(${accessor});`);
       }
     }
 
@@ -359,28 +412,32 @@ function generate(schema) {
     for (const opt of opts) {
       if (isBoolFlag(opt.def)) {
         L(`  if (options.${opt.propName}) args.push('${opt.cliName}');`);
-      } else if (tsType(opt.def.valueType) === 'number') {
-        L(`  if (options.${opt.propName} !== undefined) args.push('${opt.cliName}', options.${opt.propName}.toString());`);
-      } else if (isVariadicArg(opt.def)) {
-        // Repeatable option (e.g. --id): accept a single value or an array and emit '--opt <v>' per value.
+      } else if (isVariadicOption(opt.def)) {
+        // Repeatable option: emit one flag+value pair per element (e.g. --property A=1 --property B=2, or --id x --id y).
         L(`  if (options.${opt.propName}) {`);
         L(`    const ${opt.propName}Arr = Array.isArray(options.${opt.propName}) ? options.${opt.propName} : [options.${opt.propName}];`);
         L(`    for (const v of ${opt.propName}Arr) args.push('${opt.cliName}', v);`);
         L('  }');
+      } else if (tsType(opt.def.valueType) === 'number') {
+        L(`  if (options.${opt.propName} !== undefined) args.push('${opt.cliName}', options.${opt.propName}.toString());`);
       } else {
         L(`  if (options.${opt.propName}) args.push('${opt.cliName}', options.${opt.propName});`);
       }
     }
 
-    // Passthrough args
+    // Passthrough args. Normalize a single string to a one-element array so a bare-string
+    // argument is forwarded as one token, not spread into individual characters.
     if (passthrough) {
+      L(`  if (options.${passthrough.propName} !== undefined) {`);
+      L(`    const ${passthrough.propName}Arr = Array.isArray(options.${passthrough.propName}) ? options.${passthrough.propName} : [options.${passthrough.propName}];`);
       if (passthrough.separator === ' -- ') {
-        L(`  if (options.${passthrough.propName} && options.${passthrough.propName}.length > 0) {`);
-        L(`    args.push('--', ...options.${passthrough.propName});`);
-        L('  }');
+        L(`    if (${passthrough.propName}Arr.length > 0) {`);
+        L(`      args.push('--', ...${passthrough.propName}Arr);`);
+        L('    }');
       } else {
-        L(`  if (options.${passthrough.propName}) args.push(...options.${passthrough.propName});`);
+        L(`    args.push(...${passthrough.propName}Arr);`);
       }
+      L('  }');
     }
 
     L('  return execCommand(args, options);');

@@ -4,6 +4,7 @@
 using System.Text.Json;
 using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
+using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Services;
 
@@ -11,7 +12,9 @@ namespace WinApp.Cli.Services;
 /// Performs breadth-first detection of compatible projects in a directory tree.
 /// Pure detection logic — no UI dependencies. Use <see cref="IProgress{T}"/> for live updates.
 /// </summary>
-internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> logger) : IProjectDetectionService
+internal sealed class ProjectDetectionService(
+    ILogger<ProjectDetectionService> logger,
+    IDotNetService dotNetService) : IProjectDetectionService
 {
     /// <summary>
     /// Directory names that are skipped by default during project search.
@@ -242,7 +245,16 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
         return null;
     }
 
-    private static bool IsExecutableNonTestProject(FileInfo csprojFile)
+    internal static bool IsExecutableNonTestProject(FileInfo csprojFile)
+        => ClassifyRunnableStatic(csprojFile) == ProjectRunnability.App;
+
+    /// <summary>
+    /// Static (XML-only) classification used by directory detection and as the fallback when MSBuild
+    /// evaluation is unavailable. Reads <c>OutputType</c>/<c>IsTestProject</c> plus inline
+    /// <c>ProjectCapability</c>/<c>PackageReference</c> items. Cannot see imported values (SDK defaults,
+    /// the test SDK) — that is what <see cref="ClassifyRunnableAsync"/>'s evaluation adds.
+    /// </summary>
+    internal static ProjectRunnability ClassifyRunnableStatic(FileInfo csprojFile)
     {
         try
         {
@@ -269,27 +281,212 @@ internal sealed class ProjectDetectionService(ILogger<ProjectDetectionService> l
                 }
             }
 
-            // Exclude test projects
-            if (isTestProject == true)
+            // Only executable projects (Exe or WinExe) are ever runnable.
+            if (!IsExecutableOutputType(outputType))
             {
-                return false;
+                return ProjectRunnability.NotRunnable;
             }
 
-            // Only include executable projects (Exe or WinExe)
-            if (outputType == null)
+            // Test signals: explicit IsTestProject, the VS TestContainer capability, or a test-framework
+            // package reference. WinUI MSTest projects are WinExe apps that omit IsTestProject, so
+            // OutputType alone cannot tell them apart from the real app.
+            if (isTestProject == true || HasInlineTestMarkers(doc))
             {
-                return false;
+                return ProjectRunnability.Test;
             }
 
-            return string.Equals(outputType, "Exe", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(outputType, "WinExe", StringComparison.OrdinalIgnoreCase);
+            return ProjectRunnability.App;
         }
         catch
         {
             // If we can't parse the csproj, skip it
-            return false;
+            return ProjectRunnability.NotRunnable;
         }
     }
+
+    /// <summary>
+    /// Reads the <em>explicitly declared</em> <c>OutputType</c> from the project XML (last-wins across
+    /// PropertyGroups, namespace-agnostic), or <see langword="null"/> when none is declared (the value is
+    /// then an SDK default that only an evaluation can resolve). Unlike <see cref="ClassifyRunnableStatic"/>
+    /// this does NOT collapse an absent value to "not runnable" — the caller distinguishes the two so a
+    /// project relying on an imported/SDK-default OutputType is never statically misjudged.
+    /// </summary>
+    internal static string? TryGetDeclaredOutputType(FileInfo csprojFile)
+    {
+        try
+        {
+            var doc = XDocument.Load(csprojFile.FullName);
+            string? outputType = null;
+            foreach (var pg in doc.Descendants().Where(e => e.Name.LocalName == "PropertyGroup"))
+            {
+                var outputTypeEl = pg.Elements().FirstOrDefault(e => e.Name.LocalName == "OutputType");
+                if (outputTypeEl != null)
+                {
+                    outputType = outputTypeEl.Value.Trim();
+                }
+            }
+
+            return string.IsNullOrEmpty(outputType) ? null : outputType;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<ProjectRunnability> ClassifyRunnableAsync(
+        FileInfo csproj,
+        DirectoryInfo workingDirectory,
+        IReadOnlyList<string>? extraMsbuildProperties,
+        CancellationToken cancellationToken)
+    {
+        // Evaluate-only (no -t:Build): fast and side-effect free. We read static-ish properties plus the
+        // ProjectCapability/PackageReference items, which are all evaluation-time (no restore needed).
+        var argTokens = new List<string>
+        {
+            "msbuild",
+            csproj.FullName,
+            "--getProperty:OutputType",
+            "--getProperty:IsTestProject",
+            "--getItem:ProjectCapability",
+            "--getItem:PackageReference",
+        };
+
+        // Match what the build pass will see: a project whose OutputType/IsTestProject depends on
+        // $(SolutionDir) (shared prop imports) would otherwise evaluate differently here than at build
+        // time and be misclassified. The caller injects the same Solution* properties when resolving
+        // from a solution.
+        if (extraMsbuildProperties is { Count: > 0 })
+        {
+            argTokens.AddRange(extraMsbuildProperties);
+        }
+
+        var arguments = WindowsCommandLine.JoinArguments(argTokens) ?? string.Empty;
+
+        try
+        {
+            var (exitCode, stdout, _) = await dotNetService.RunDotnetCommandAsync(workingDirectory, arguments, cancellationToken);
+            if (exitCode == 0)
+            {
+                var props = MsBuildPropertyReader.Parse(stdout, ["OutputType", "IsTestProject"]);
+                if (props.Count > 0)
+                {
+                    var outputType = props.TryGetValue("OutputType", out var ot) ? ot.Trim() : null;
+                    if (!IsExecutableOutputType(outputType))
+                    {
+                        return ProjectRunnability.NotRunnable;
+                    }
+
+                    var isTest = props.TryGetValue("IsTestProject", out var it)
+                        && string.Equals(it.Trim(), "true", StringComparison.OrdinalIgnoreCase);
+                    if (isTest)
+                    {
+                        return ProjectRunnability.Test;
+                    }
+
+                    var items = MsBuildPropertyReader.ParseItems(stdout);
+                    return HasEvaluatedTestMarkers(items) ? ProjectRunnability.Test : ProjectRunnability.App;
+                }
+            }
+
+            logger.LogDebug("{UISymbol} Could not evaluate {Project} for disambiguation; falling back to static parse.", UiSymbols.Note, csproj.Name);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Caller requested cancellation (e.g. Ctrl+C) — propagate instead of masking it as an
+            // evaluation failure and silently continuing with the static fallback.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // dotnet not on PATH / evaluation failed → fall back to the static parse below.
+            logger.LogDebug("{UISymbol} Evaluation of {Project} failed ({Message}); falling back to static parse.", UiSymbols.Note, csproj.Name, ex.Message);
+        }
+
+        return ClassifyRunnableStatic(csproj);
+    }
+
+    /// <summary>
+    /// Package-id prefixes (case-insensitive) that mark a project as a test project: the .NET test SDK
+    /// and test host plus the MSTest/xUnit/NUnit families. A WinUI MSTest app references these but does
+    /// not set <c>IsTestProject</c>, so this is how it is told apart from a real app.
+    /// </summary>
+    private static readonly string[] TestPackagePrefixes =
+    [
+        "microsoft.net.test.sdk",
+        "microsoft.testplatform.testhost",
+        "mstest",
+        "xunit",
+        "nunit",
+    ];
+
+    /// <summary>True when a project capability marks a test container (the VS/WinUI test marker).</summary>
+    internal static bool IsTestContainerCapability(string? capability) =>
+        string.Equals(capability?.Trim(), "TestContainer", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>True when a package id belongs to a known test framework / test host.</summary>
+    internal static bool IsKnownTestPackage(string? packageId)
+    {
+        if (string.IsNullOrWhiteSpace(packageId))
+        {
+            return false;
+        }
+
+        var id = packageId.Trim();
+        return TestPackagePrefixes.Any(prefix => id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Scans inline csproj XML for a TestContainer capability or a test-framework package ref, counting
+    /// ONLY unconditional markers — an element (or any ancestor <c>ItemGroup</c>/<c>Choose</c>/<c>When</c>/
+    /// <c>Project</c>) carrying a <c>Condition</c> is ignored. This is the static fallback used when an
+    /// evaluated classification isn't available; a test <c>PackageReference</c>/capability gated behind an
+    /// inactive Condition (e.g. a Configuration-specific <c>ItemGroup</c>) would otherwise misclassify a
+    /// runnable app as a test project and drop it from directory detection. The evaluated path
+    /// (<see cref="HasEvaluatedTestMarkers"/>) already resolves Conditions under the real globals.
+    /// </summary>
+    private static bool HasInlineTestMarkers(XDocument doc)
+    {
+        // Trust a marker only when neither it nor any ancestor carries a Condition (mirrors the
+        // unconditional-inline check used for static <TargetFrameworks> reads). A conditioned marker is
+        // deferred to the authoritative evaluated classification rather than assumed active.
+        static bool IsUnconditional(XElement element) =>
+            !element.AncestorsAndSelf().Any(a => !string.IsNullOrWhiteSpace(a.Attribute("Condition")?.Value));
+
+        var capabilities = doc.Descendants()
+            .Where(e => e.Name.LocalName == "ProjectCapability" && IsUnconditional(e))
+            .Select(e => (string?)e.Attribute("Include"));
+        if (capabilities.Any(IsTestContainerCapability))
+        {
+            return true;
+        }
+
+        var packageRefs = doc.Descendants()
+            .Where(e => e.Name.LocalName == "PackageReference" && IsUnconditional(e))
+            .Select(e => (string?)e.Attribute("Include") ?? (string?)e.Attribute("Update"));
+        return packageRefs.Any(IsKnownTestPackage);
+    }
+
+    /// <summary>Scans evaluated MSBuild items for a TestContainer capability or a test-framework package ref.</summary>
+    private static bool HasEvaluatedTestMarkers(IReadOnlyDictionary<string, IReadOnlyList<string>> items)
+    {
+        if (items.TryGetValue("ProjectCapability", out var caps) && caps.Any(IsTestContainerCapability))
+        {
+            return true;
+        }
+
+        return items.TryGetValue("PackageReference", out var pkgs) && pkgs.Any(IsKnownTestPackage);
+    }
+
+    /// <summary>
+    /// The single source of truth for which <c>OutputType</c> values count as a runnable executable
+    /// (<c>Exe</c> or <c>WinExe</c>). Shared by the static parse and the evaluated classification so the
+    /// rule cannot drift between them.
+    /// </summary>
+    internal static bool IsExecutableOutputType(string? outputType) =>
+        string.Equals(outputType, "Exe", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(outputType, "WinExe", StringComparison.OrdinalIgnoreCase);
 
     private void EnqueueSubdirectories(Queue<DirectoryInfo> queue, DirectoryInfo parent, HashSet<string> ignoredNames)
     {
