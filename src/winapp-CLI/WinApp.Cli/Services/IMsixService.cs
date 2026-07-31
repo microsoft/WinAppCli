@@ -57,5 +57,36 @@ internal interface IMsixService
         TaskContext taskContext,
         bool clean = false,
         string? executable = null,
+        string? runtimeArch = null,
+        FileInfo? projectFile = null,
+        string? framework = null,
+        bool noRestore = false,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Ensures the Windows App Runtime framework packages (Framework / DDLM / Singleton / Main) are
+    /// installed for a project-mode <b>unpackaged</b> app before it is launched. The DDLM this lays down
+    /// is exactly what an unpackaged WinUI app's bootstrapper resolves at startup. Reuses the same install
+    /// path as the packaged flow; callers must gate on <c>WindowsAppSDKSelfContained</c> (skip when true).
+    /// Returns <c>true</c> when a runtime was actually provisioned, or <c>false</c> when the project has no
+    /// Windows App SDK reference and the install was skipped (so callers don't report a runtime as "ready"
+    /// for a plain desktop/console app).
+    /// </summary>
+    /// <param name="projectFile">The project whose package list drives runtime version resolution; <c>null</c> falls back to a cwd glob.</param>
+    /// <param name="architecture">The app's resolved architecture (<c>x64</c> / <c>arm64</c> / <c>x86</c>), so the correct-arch Framework/DDLM is installed.</param>
+    /// <param name="framework">
+    /// The effective target framework moniker the app was built for (e.g. <c>net10.0-windows10.0.26100.0</c>),
+    /// or <c>null</c>. For a multi-targeted project this pins runtime resolution to the built TFM's Windows App
+    /// SDK version, so a sibling TFM referencing a different SDK version can't gate the wrong runtime.
+    /// </param>
+    /// <param name="taskContext">Status/debug sink.</param>
+    /// <param name="noRestore">When true, runtime discovery passes <c>--no-restore</c> to <c>dotnet list package</c> so a no-restore run doesn't trigger an implicit restore.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<bool> EnsureWindowsAppRuntimeInstalledAsync(
+        FileInfo? projectFile,
+        string? architecture,
+        string? framework,
+        bool noRestore,
+        TaskContext taskContext,
         CancellationToken cancellationToken = default);
 }

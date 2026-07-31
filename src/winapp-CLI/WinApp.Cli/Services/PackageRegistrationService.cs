@@ -196,17 +196,129 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
     }
 
     /// <inheritdoc />
-    public string? GetInstalledVersion(string packageName)
+    public string? GetInstalledVersion(string packageName, string? architecture = null)
     {
+        var wantedArch = MapArchitecture(architecture);
+
+        // Multiple servicing versions of the same package can be registered at once and the enumeration
+        // order is not guaranteed newest-first, so track the HIGHEST matching version. Returning an
+        // arbitrary (possibly older) match could make the runtime gate reinstall or fail even when a
+        // newer, sufficient version is already present.
+        (ushort Major, ushort Minor, ushort Build, ushort Revision)? best = null;
+
         foreach (var pkg in EnumerateUserPackagesImpl())
         {
-            if (string.Equals(pkg.Name, packageName, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(pkg.Name, packageName, StringComparison.OrdinalIgnoreCase))
             {
-                return $"{pkg.VersionMajor}.{pkg.VersionMinor}.{pkg.VersionBuild}.{pkg.VersionRevision}";
+                continue;
+            }
+
+            // Arch filter: when an architecture was requested, only a matching-arch package counts
+            // as "installed" so the caller doesn't skip installing the Framework/DDLM for a
+            // different target arch (e.g. building x86 on an x64 host).
+            if (wantedArch is not null && pkg.Architecture != wantedArch.Value)
+            {
+                continue;
+            }
+
+            var candidate = (pkg.VersionMajor, pkg.VersionMinor, pkg.VersionBuild, pkg.VersionRevision);
+            if (best is null || candidate.CompareTo(best.Value) > 0)
+            {
+                best = candidate;
             }
         }
 
-        return null;
+        return best is { } v ? $"{v.Major}.{v.Minor}.{v.Build}.{v.Revision}" : null;
+    }
+
+    /// <inheritdoc />
+    public bool IsPackageInstalled(string namePrefix, string? architecture = null, string? excludeNameSubstring = null)
+    {
+        var wantedArch = MapArchitecture(architecture);
+
+        foreach (var pkg in EnumerateUserPackagesImpl())
+        {
+            if (!pkg.Name.StartsWith(namePrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (excludeNameSubstring is not null &&
+                pkg.Name.Contains(excludeNameSubstring, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (wantedArch is not null && pkg.Architecture != wantedArch.Value)
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <inheritdoc />
+    public string? GetHighestInstalledVersion(string namePrefix, string? architecture = null, string? excludeNameSubstring = null)
+    {
+        var wantedArch = MapArchitecture(architecture);
+
+        // Track the HIGHEST matching version across every side-by-side servicing package whose name
+        // starts with the prefix (enumeration order is not guaranteed newest-first), so a stale older
+        // release can never mask a newer one that satisfies the caller's gate.
+        (ushort Major, ushort Minor, ushort Build, ushort Revision)? best = null;
+
+        foreach (var pkg in EnumerateUserPackagesImpl())
+        {
+            if (!pkg.Name.StartsWith(namePrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (excludeNameSubstring is not null &&
+                pkg.Name.Contains(excludeNameSubstring, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (wantedArch is not null && pkg.Architecture != wantedArch.Value)
+            {
+                continue;
+            }
+
+            var candidate = (pkg.VersionMajor, pkg.VersionMinor, pkg.VersionBuild, pkg.VersionRevision);
+            if (best is null || candidate.CompareTo(best.Value) > 0)
+            {
+                best = candidate;
+            }
+        }
+
+        return best is { } v ? $"{v.Major}.{v.Minor}.{v.Build}.{v.Revision}" : null;
+    }
+
+    /// <summary>
+    /// Maps a winapp architecture string (<c>x64</c> / <c>arm64</c> / <c>x86</c>) to the WinRT
+    /// <see cref="Windows.System.ProcessorArchitecture"/> used by installed package identities.
+    /// A <c>null</c> result means "no arch filtering" — which is how folder-mode <c>run</c>
+    /// (architecture == null) preserves its pre-project-mode behavior of matching any installed
+    /// package, including Neutral-arch ones. Exposed as <c>internal</c> for unit tests.
+    /// </summary>
+    internal static Windows.System.ProcessorArchitecture? MapArchitecture(string? architecture)
+    {
+        if (string.IsNullOrWhiteSpace(architecture))
+        {
+            return null;
+        }
+
+        return architecture.Trim().ToLowerInvariant() switch
+        {
+            "x64" => Windows.System.ProcessorArchitecture.X64,
+            "arm64" => Windows.System.ProcessorArchitecture.Arm64,
+            "x86" => Windows.System.ProcessorArchitecture.X86,
+            _ => null,
+        };
     }
 
     /// <inheritdoc />
@@ -374,7 +486,8 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
                 v.Build,
                 v.Revision,
                 p.IsDevelopmentMode,
-                () => p.InstalledLocation?.Path));
+                () => p.InstalledLocation?.Path,
+                p.Id.Architecture));
         }
 
         return views;
@@ -419,5 +532,6 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
         ushort VersionBuild,
         ushort VersionRevision,
         bool IsDevelopmentMode,
-        Func<string?> InstalledLocationAccessor);
+        Func<string?> InstalledLocationAccessor,
+        Windows.System.ProcessorArchitecture Architecture = Windows.System.ProcessorArchitecture.Unknown);
 }

@@ -2,11 +2,14 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using Spectre.Console.Testing;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using WinApp.Cli.Commands;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -18,6 +21,9 @@ public class RunCommandTests : BaseCommandTests
     private FakeAppLauncherService _fakeAppLauncherService = null!;
     private FakeDebugOutputService _fakeDebugOutputService = null!;
     private FakePackageRegistrationService _fakePackageRegistrationService = null!;
+
+    private static readonly string[] SupportedArchitectures = ["x64", "arm64", "x86"];
+    private static readonly string[] ForcedUnpackagedProperties = ["WindowsPackageType=None", "Foo=Bar"];
 
     private const string TestManifestContent = """
         <?xml version="1.0" encoding="utf-8"?>
@@ -121,13 +127,13 @@ public class RunCommandTests : BaseCommandTests
 
         // Assert
         Assert.IsEmpty(parseResult.Errors, "There should be no parsing errors");
-        var folder = parseResult.GetValue(RunCommand.InputFolderArgument);
+        var folder = parseResult.GetValue(RunCommand.InputArgument);
         Assert.IsNotNull(folder);
         Assert.AreEqual(_tempDirectory.FullName, folder.FullName);
     }
 
     [TestMethod]
-    public void ParseOptions_NoInputFolder_HasParseError()
+    public void ParseOptions_NoInputFolder_NoParseError_ArgumentIsNull()
     {
         // Arrange
         var command = GetRequiredService<RunCommand>();
@@ -135,8 +141,65 @@ public class RunCommandTests : BaseCommandTests
         // Act
         var parseResult = command.Parse([]);
 
+        // Assert: input-folder is now optional (ArgumentArity.ZeroOrOne). With no path there is no
+        // parse error; the argument value is null and the handler substitutes the current directory.
+        Assert.IsEmpty(parseResult.Errors, "Omitting the optional input-folder should not produce a parse error");
+        Assert.IsNull(parseResult.GetValue(RunCommand.InputArgument),
+            "With no positional token, the input-folder value should be null (handler defaults it to cwd)");
+    }
+
+    [TestMethod]
+    public void ParseOptions_NoInputFolderWithPassthrough_ProducesNoParseErrors()
+    {
+        // Arrange
+        var command = GetRequiredService<RunCommand>();
+
+        // Act: no path, straight into '-- --appflag value'. With input-folder now optional
+        // (ArgumentArity.ZeroOrOne) and AcceptExistingOnly removed, System.CommandLine greedily
+        // binds the first post-'--' token to the positional, but that no longer hard-errors. The
+        // handler detects the stolen token and falls back to cwd (see the handler-level test
+        // RunCommand_NoInputFolderWithPassthrough_UsesCwdAndForwardsAppArgs).
+        var parseResult = command.Parse(["--", "--appflag", "value"]);
+
         // Assert
-        Assert.IsNotEmpty(parseResult.Errors, "Missing required input-folder should produce a parse error");
+        Assert.IsEmpty(parseResult.Errors,
+            "A bare '-- <app args>' with no path must not produce a parse error");
+    }
+
+    [TestMethod]
+    public void ParseOptions_DotInputFolder_ResolvesToProcessCurrentDirectory()
+    {
+        // Arrange
+        var command = GetRequiredService<RunCommand>();
+
+        // Act: an explicit '.' is a normal pre-'--' path token and binds to input-folder.
+        var parseResult = command.Parse(["."]);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors, "'.' is a valid explicit path and should not error");
+        var input = parseResult.GetValue(RunCommand.InputArgument);
+        Assert.IsNotNull(input, "'.' should bind to the input-folder argument");
+        Assert.AreEqual(Path.GetFullPath("."), input.FullName,
+            "'.' should resolve to the current directory");
+    }
+
+    [TestMethod]
+    public void ParseOptions_DotInputFolderWithPassthrough_PassthroughCaptured()
+    {
+        // Arrange
+        var command = GetRequiredService<RunCommand>();
+
+        // Act: an explicit path before '--' must not disturb passthrough capture.
+        var parseResult = command.Parse([".", "--", "--appflag", "value"]);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors, "'. -- <app args>' should not produce a parse error");
+        Assert.IsNotNull(parseResult.GetValue(RunCommand.InputArgument),
+            "'.' should bind to the input-folder argument");
+        var passthrough = parseResult.GetValue(RunCommand.PassthroughArgument);
+        var expectedPassthrough = new[] { "--appflag", "value" };
+        CollectionAssert.AreEqual(expectedPassthrough, passthrough,
+            "The post-'--' tokens should be captured by the passthrough argument");
     }
 
     [TestMethod]
@@ -162,7 +225,7 @@ public class RunCommandTests : BaseCommandTests
         Assert.IsEmpty(parseResult.Errors, "There should be no parsing errors");
         Assert.IsTrue(parseResult.GetValue(RunCommand.NoLaunchOption));
         Assert.AreEqual("arg1 arg2", parseResult.GetValue(RunCommand.ArgsOption));
-        var folder = parseResult.GetValue(RunCommand.InputFolderArgument);
+        var folder = parseResult.GetValue(RunCommand.InputArgument);
         Assert.IsNotNull(folder);
         Assert.AreEqual(_tempDirectory.FullName, folder.FullName);
     }
@@ -391,6 +454,118 @@ public class RunCommandTests : BaseCommandTests
 
         var output = TestAnsiConsole.Output;
         Assert.Contains("{\n", output, "JSON should use \\n line endings");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_MutualExclusionViolation_WithJson_EmitsJsonError()
+    {
+        // Change 2 (L5): run's own mutual-exclusion validation errors must be emitted as a JSON
+        // error object under --json, not a plain-text banner. --detach + --no-launch is one such
+        // invalid combination; it fails fast before any identity/launch work, so no manifest is
+        // needed. The test logger routes LogError to stderr, so stdout carries only the JSON.
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--detach", "--no-launch", "--json"]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "A mutually-exclusive option combination should fail");
+
+        // stdout must be pure JSON with no plain-text banner.
+        var stdout = TestAnsiConsole.Output.Trim();
+        Assert.IsTrue(stdout.StartsWith('{') && stdout.EndsWith('}'),
+            $"Under --json, stdout should contain only the JSON error object, but was: {stdout}");
+
+        var json = ParseJsonOutput();
+        Assert.AreEqual("--detach and --no-launch cannot be used together.",
+            json.GetProperty("Error").GetString(),
+            "The mutual-exclusion error should be surfaced in the JSON Error field");
+        Assert.IsFalse(json.TryGetProperty("AUMID", out _), "AUMID should not be present on a validation error");
+        Assert.IsFalse(json.TryGetProperty("ProcessId", out _), "ProcessId should not be present on a validation error");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_LongPathValidation_WithJson_EmitsJsonError()
+    {
+        // Change 2 (L5) completeness: the early long-path validation is another run-local validation
+        // and, like the mutual-exclusion checks, must emit a JSON error object under --json rather than
+        // a suppressed-logger silent exit. ValidatePathLength only throws when the OS does not have long
+        // path support enabled, so guard on that (mirrors LongPathHelperTests). The >260-char path is
+        // supplied via the current-directory default (no input arg) so it is not pre-empted by the
+        // provided-path existence check, and needs no long path to exist on disk. The base harness
+        // registers ICurrentDirectoryProvider last (last-wins), so the long cwd is injected by
+        // constructing the handler directly with a CurrentDirectoryProvider override.
+        if (LongPathHelper.IsSystemLongPathEnabled())
+        {
+            Assert.Inconclusive(
+                "System long path support is enabled; ValidatePathLength does not throw, so the JSON error path cannot be exercised.");
+            return;
+        }
+
+        var longCwd = @"C:\" + new string('a', 300);
+        var command = GetRequiredService<RunCommand>();
+        var parseResult = command.Parse(["--json"]);
+
+        var handler = new RunCommand.Handler(
+            GetRequiredService<IMsixService>(),
+            GetRequiredService<IAppLauncherService>(),
+            GetRequiredService<IPackageRegistrationService>(),
+            GetRequiredService<IDebugOutputService>(),
+            new CurrentDirectoryProvider(longCwd),
+            GetRequiredService<IAnsiConsole>(),
+            GetRequiredService<IStatusService>(),
+            GetRequiredService<IProjectRunService>(),
+            GetRequiredService<ILogger<RunCommand>>());
+
+        // Act
+        var exitCode = await handler.InvokeAsync(parseResult, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "A path exceeding MAX_PATH without long-path support should fail");
+
+        // stdout must be pure JSON with no plain-text banner.
+        var stdout = TestAnsiConsole.Output.Trim();
+        Assert.IsTrue(stdout.StartsWith('{') && stdout.EndsWith('}'),
+            $"Under --json, stdout should contain only the JSON error object, but was: {stdout}");
+
+        var json = ParseJsonOutput();
+        Assert.IsTrue(json.GetProperty("Error").GetString()!.Contains("MAX_PATH"),
+            "The long-path validation error should be surfaced in the JSON Error field");
+        Assert.IsFalse(json.TryGetProperty("AUMID", out _), "AUMID should not be present on a validation error");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_LongErrorMessage_WithJson_EmitsValidParseableJson()
+    {
+        // Regression (M1): run's PrintJson previously emitted the payload via ansiConsole.WriteLine,
+        // which routes through Spectre's word-wrapping renderer and injects raw CR/LF *inside* the
+        // "Error" string value once the message exceeds the redirected console width (~80 cols) — the
+        // result is INVALID, unparseable JSON for any long error. Unlike the long-path validation above
+        // (which only throws when OS long-path support is disabled, so it self-skips on most machines),
+        // the provided-path existence check emits an always-long "'<path>' does not exist." message on
+        // EVERY machine, so this exercises the wrapping fix with a strict parser (JsonDocument.Parse)
+        // independent of any registry/OS state. The path stays under MAX_PATH (260) so FileSystemInfo
+        // binding never throws, but the full message comfortably exceeds the wrap width.
+        var longMissingPath = @"C:\" + new string('a', 200) + @"\does-not-exist";
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [longMissingPath, "--json"]);
+
+        Assert.AreEqual(1, exitCode, "A non-existent input path should fail");
+
+        // stdout must be pure, single-object JSON that a strict parser accepts (PowerShell's lenient
+        // ConvertFrom-Json masked the wrapping; JsonDocument.Parse does not).
+        var output = TestAnsiConsole.Output.Trim();
+        Assert.IsTrue(output.StartsWith('{') && output.EndsWith('}'),
+            $"Under --json, stdout should contain only the JSON error object, but was: {output}");
+
+        var root = JsonDocument.Parse(output).RootElement;
+        var error = root.GetProperty("Error").GetString();
+        Assert.IsNotNull(error, "The JSON error object must carry an Error field");
+        StringAssert.Contains(error, "does not exist",
+            "The existence error should be surfaced in the JSON Error field");
+        Assert.IsFalse(root.TryGetProperty("AUMID", out _), "AUMID should not be present on a validation error");
     }
 
     [TestMethod]
@@ -876,7 +1051,7 @@ public class RunCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task RunCommand_DetachWithoutJson_DoesNotOutputJson()
+    public async Task RunCommand_DetachWithoutJson_PrintsPidAndNoJson()
     {
         // Arrange
         await CreateTestManifestAsync();
@@ -891,6 +1066,10 @@ public class RunCommandTests : BaseCommandTests
         var output = TestAnsiConsole.Output;
         Assert.IsFalse(output.Contains("\"AUMID\""), "JSON fields should not appear without --json flag");
         Assert.IsFalse(output.Contains("\"ProcessId\""), "JSON fields should not appear without --json flag");
+        // Change 3 (L6): the packaged --detach path must surface the launched PID in human-readable
+        // output too, consistent with the unpackaged/project-mode detach path.
+        Assert.Contains(_fakeAppLauncherService.FakeProcessId.ToString(), output,
+            "The launched PID should be printed in non-JSON output for the packaged --detach path");
     }
 
     #endregion
@@ -1008,6 +1187,46 @@ public class RunCommandTests : BaseCommandTests
         Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
         Assert.AreEqual("--title \"hello world\"", _fakeAppLauncherService.LaunchCalls[0].Arguments,
             "Values containing spaces must be quoted in the final command-line string");
+    }
+
+    // --- Handler: default-to-current-directory (no input path) ---
+
+    [TestMethod]
+    public async Task RunCommand_NoInputFolder_DefaultsToCurrentDirectory()
+    {
+        // `winapp run` with no path must default to the current directory (matches `dotnet run`).
+        // ICurrentDirectoryProvider is wired to _tempDirectory in the test harness, where
+        // CreateTestManifestAsync places a manifest, so folder mode resolves and launches.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, []);
+
+        Assert.AreEqual(0, exitCode, "Command with no path should default to cwd and succeed");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count,
+            "Application should be launched from the current directory");
+        Assert.IsNull(_fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "No app args should be passed when only the default input is used");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_NoInputFolderWithPassthrough_UsesCwdAndForwardsAppArgs()
+    {
+        // The tricky parser-interaction case: `winapp run -- --appflag value`. With input-folder
+        // optional, System.CommandLine binds the first post-'--' token ('--appflag') to the
+        // positional. The handler must detect that the token was stolen from passthrough, fall back
+        // to the current directory, AND still forward '--appflag value' to the launched app.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["--", "--appflag", "value"]);
+
+        Assert.AreEqual(0, exitCode, "No-path invocation with passthrough should default to cwd and succeed");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count,
+            "Application should be launched from the current directory");
+        Assert.AreEqual("--appflag value", _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "The post-'--' tokens must be forwarded to the app, not consumed as the input path");
     }
 
     // --- Handler: unknown-token rejection ---
@@ -1155,19 +1374,14 @@ public class RunCommandTests : BaseCommandTests
         Assert.AreEqual(1, exitCode, "Bad pre-dash token must cause exit code 1 even in --json mode");
         Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "App must NOT be launched");
 
-        // The handler must have written a JSON document (with an Error field that names the
-        // offending token) to stdout. We avoid full JsonDocument.Parse here because the test
-        // console wraps long string values at width boundaries; substring assertions are
-        // sufficient to demonstrate the error body was produced and references the bad token.
-        var output = TestAnsiConsole.Output;
-        StringAssert.Contains(output, "\"Error\":",
-            "JSON output must contain an Error field in --json mode (got: " + output + ")");
-        StringAssert.Contains(output, "--badtoken",
-            "Error message should name the offending token");
-        StringAssert.Contains(output, "{",
-            "Output should contain a JSON object opening brace");
-        StringAssert.Contains(output, "}",
-            "Output should contain a JSON object closing brace");
+        // The handler must have written a single-object JSON document (with an Error field that names
+        // the offending token) to stdout. With the M1 fix, run's --json payload is emitted without
+        // Spectre word-wrapping, so a strict parser accepts it directly even though this message
+        // (~105 chars) exceeds the redirected console width.
+        var json = ParseJsonOutput();
+        var error = json.GetProperty("Error").GetString();
+        Assert.IsNotNull(error, "JSON output must contain an Error field in --json mode");
+        StringAssert.Contains(error, "--badtoken", "Error message should name the offending token");
     }
 
     // --- BuildAliasProcessStartInfo: passthrough forwarded into execution-alias ProcessStartInfo ---
@@ -1808,6 +2022,239 @@ public class RunCommandTests : BaseCommandTests
         {
             // The process may have already exited — nothing to clean up.
         }
+    }
+
+    #endregion
+
+    #region Project-mode option parsing
+
+    [TestMethod]
+    public void ParseOptions_Configuration_DefaultsToDebug()
+    {
+        var command = GetRequiredService<RunCommand>();
+
+        var parseResult = command.Parse([_tempDirectory.FullName]);
+
+        Assert.IsEmpty(parseResult.Errors);
+        Assert.AreEqual("Debug", parseResult.GetValue(RunCommand.ConfigurationOption));
+    }
+
+    [TestMethod]
+    public void ParseOptions_ConfigurationShortAlias_IsParsed()
+    {
+        var command = GetRequiredService<RunCommand>();
+
+        var parseResult = command.Parse([_tempDirectory.FullName, "-c", "Release"]);
+
+        Assert.IsEmpty(parseResult.Errors);
+        Assert.AreEqual("Release", parseResult.GetValue(RunCommand.ConfigurationOption));
+    }
+
+    [TestMethod]
+    public void ParseOptions_ArchAndRuntime_AreParsed()
+    {
+        var command = GetRequiredService<RunCommand>();
+
+        var parseResult = command.Parse([_tempDirectory.FullName, "--arch", "arm64", "-r", "win-x64"]);
+
+        Assert.IsEmpty(parseResult.Errors);
+        Assert.AreEqual("arm64", parseResult.GetValue(RunCommand.ArchOption));
+        Assert.AreEqual("win-x64", parseResult.GetValue(RunCommand.RuntimeOption));
+    }
+
+    [TestMethod]
+    public void ParseOptions_FrameworkShortAlias_IsParsed()
+    {
+        var command = GetRequiredService<RunCommand>();
+
+        var parseResult = command.Parse([_tempDirectory.FullName, "-f", "net10.0-windows10.0.26100.0"]);
+
+        Assert.IsEmpty(parseResult.Errors);
+        Assert.AreEqual("net10.0-windows10.0.26100.0", parseResult.GetValue(RunCommand.FrameworkOption));
+    }
+
+    [TestMethod]
+    public void ParseOptions_NoBuildAndNoRestore_AreParsed()
+    {
+        var command = GetRequiredService<RunCommand>();
+
+        var parseResult = command.Parse([_tempDirectory.FullName, "--no-build", "--no-restore"]);
+
+        Assert.IsEmpty(parseResult.Errors);
+        Assert.IsTrue(parseResult.GetValue(RunCommand.NoBuildOption));
+        Assert.IsTrue(parseResult.GetValue(RunCommand.NoRestoreOption));
+    }
+
+    [TestMethod]
+    public void ParseOptions_RepeatableProperty_CollectsDotnetStyleTokens()
+    {
+        var command = GetRequiredService<RunCommand>();
+
+        // System.CommandLine splits -p:Name=Value on the first ':' so dotnet-style tokens work.
+        var parseResult = command.Parse(
+            [_tempDirectory.FullName, "-p", "WindowsPackageType=None", "-p", "Foo=Bar"]);
+
+        Assert.IsEmpty(parseResult.Errors);
+        var properties = parseResult.GetValue(RunCommand.PropertyOption);
+        Assert.IsNotNull(properties);
+        CollectionAssert.AreEquivalent(ForcedUnpackagedProperties, properties);
+    }
+
+    #endregion
+
+    #region TryResolveArchitecture
+
+    [TestMethod]
+    public void TryResolveArchitecture_NoOptions_UsesProcessDefault()
+    {
+        var ok = RunCommand.Handler.TryResolveArchitecture(null, null, out var arch, out var error);
+
+        Assert.IsTrue(ok);
+        Assert.IsNull(error);
+        CollectionAssert.Contains(SupportedArchitectures, arch);
+    }
+
+    [TestMethod]
+    public void TryResolveArchitecture_ArchOption_IsNormalized()
+    {
+        var ok = RunCommand.Handler.TryResolveArchitecture("ARM64", null, out var arch, out var error);
+
+        Assert.IsTrue(ok);
+        Assert.IsNull(error);
+        Assert.AreEqual("arm64", arch);
+    }
+
+    [TestMethod]
+    [DataRow("win-x64", "x64")]
+    [DataRow("win-arm64", "arm64")]
+    [DataRow("win-x86", "x86")]
+    [DataRow("x64", "x64")]
+    [DataRow("arm64", "arm64")]
+    [DataRow("x86", "x86")]
+    public void TryResolveArchitecture_RuntimeAlone_ResolvesArchFromRid(string runtime, string expected)
+    {
+        // M6: with only --runtime (no --arch), the architecture is derived from the RID. A bare arch
+        // (no win- prefix, e.g. `--runtime x64`) is also accepted and used directly.
+        var ok = RunCommand.Handler.TryResolveArchitecture(null, runtime, out var arch, out var error);
+
+        Assert.IsTrue(ok);
+        Assert.IsNull(error);
+        Assert.AreEqual(expected, arch);
+    }
+
+    [TestMethod]
+    public void TryResolveArchitecture_RuntimeArchBeatsArch()
+    {
+        // --runtime is more specific (a RID) so its architecture wins over --arch.
+        var ok = RunCommand.Handler.TryResolveArchitecture("x64", "win-arm64", out var arch, out var error);
+
+        Assert.IsTrue(ok);
+        Assert.IsNull(error);
+        Assert.AreEqual("arm64", arch);
+    }
+
+    [TestMethod]
+    public void TryResolveArchitecture_InvalidArch_ReturnsError()
+    {
+        var ok = RunCommand.Handler.TryResolveArchitecture("sparc", null, out _, out var error);
+
+        Assert.IsFalse(ok);
+        Assert.IsNotNull(error);
+        StringAssert.Contains(error, "sparc");
+    }
+
+    [TestMethod]
+    public void TryResolveArchitecture_InvalidRuntime_ReturnsError()
+    {
+        var ok = RunCommand.Handler.TryResolveArchitecture(null, "win-loongarch64", out _, out var error);
+
+        Assert.IsFalse(ok);
+        Assert.IsNotNull(error);
+        StringAssert.Contains(error, "win-loongarch64");
+    }
+
+    [TestMethod]
+    [DataRow("linux-x64")]
+    [DataRow("osx-arm64")]
+    public void TryResolveArchitecture_NonWindowsRuntime_ReturnsError(string runtime)
+    {
+        // A non-Windows RID must not be silently reduced to win-<arch>; the user asked for a runtime
+        // target project mode can't produce, so surface an error instead of building something else.
+        var ok = RunCommand.Handler.TryResolveArchitecture(null, runtime, out _, out var error);
+
+        Assert.IsFalse(ok);
+        Assert.IsNotNull(error);
+        StringAssert.Contains(error, runtime);
+    }
+
+    #endregion
+
+    #region CombineLaunchArguments (non-apphost RunCommand arg ordering)
+
+    [TestMethod]
+    public void CombineLaunchArguments_PrependsRunArgumentsBeforeAppArgs()
+    {
+        var combined = RunCommand.Handler.CombineLaunchArguments("exec \"App.dll\"", "--flag value");
+
+        Assert.AreEqual("exec \"App.dll\" --flag value", combined);
+    }
+
+    [TestMethod]
+    [DataRow(null, "--flag", "--flag")]
+    [DataRow("exec App.dll", null, "exec App.dll")]
+    [DataRow("exec App.dll", "", "exec App.dll")]
+    [DataRow(null, null, null)]
+    public void CombineLaunchArguments_HandlesMissingSides(string? runArguments, string? appArgs, string? expected)
+    {
+        Assert.AreEqual(expected, RunCommand.Handler.CombineLaunchArguments(runArguments, appArgs));
+    }
+
+    #endregion
+
+    #region F2 cross-arch launch diagnostics
+
+    // The reviewer's F2 repro (arm64 target on an x64 host) can't be reproduced on an arm64 machine,
+    // because arm64 Windows executes arm64 AND x64 AND x86. These assert the decision table in a
+    // host-agnostic way so the behavior is pinned on whichever machine runs the suite.
+
+    [TestMethod]
+    public void CanCurrentOsRunArchitecture_HostOwnArchitecture_IsAlwaysRunnable()
+    {
+        var hostArch = RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant();
+
+        Assert.IsTrue(RunCommand.Handler.CanCurrentOsRunArchitecture(hostArch),
+            $"the host's own architecture ('{hostArch}') must always be considered runnable");
+    }
+
+    [TestMethod]
+    public void CanCurrentOsRunArchitecture_Arm64_RunnableOnlyOnArm64Host()
+    {
+        var expected = RuntimeInformation.OSArchitecture == Architecture.Arm64;
+
+        Assert.AreEqual(expected, RunCommand.Handler.CanCurrentOsRunArchitecture("arm64"),
+            "arm64 binaries run only on an arm64 host — this is the case that triggers the F2 hint on x64");
+    }
+
+    [TestMethod]
+    public void CanCurrentOsRunArchitecture_X86_RunnableOnEveryWindowsHostArch()
+    {
+        // x86 is emulated on x64 and arm64, and native on x86.
+        Assert.IsTrue(RunCommand.Handler.CanCurrentOsRunArchitecture("x86"));
+    }
+
+    [TestMethod]
+    public void CanCurrentOsRunArchitecture_UnknownMoniker_TreatedAsRunnable()
+    {
+        // Never mask a genuine launch failure behind a bogus "wrong architecture" message.
+        Assert.IsTrue(RunCommand.Handler.CanCurrentOsRunArchitecture("sparc"));
+    }
+
+    [TestMethod]
+    public void CanCurrentOsRunArchitecture_IsCaseInsensitive()
+    {
+        Assert.AreEqual(
+            RunCommand.Handler.CanCurrentOsRunArchitecture("arm64"),
+            RunCommand.Handler.CanCurrentOsRunArchitecture("ARM64"));
     }
 
     #endregion
