@@ -18,7 +18,7 @@ public class ProjectDetectionServiceTests
     {
         _tempDir = Path.Combine(Path.GetTempPath(), $"ProjectDetectTest_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
-        _sut = new ProjectDetectionService(NullLogger<ProjectDetectionService>.Instance);
+        _sut = new ProjectDetectionService(NullLogger<ProjectDetectionService>.Instance, new FakeDotNetService());
     }
 
     [TestCleanup]
@@ -696,6 +696,186 @@ public class ProjectDetectionServiceTests
 
         Assert.AreEqual(1, results.Count, "Only the non-junction project should be found");
         Assert.AreEqual(DetectedProjectType.CPP, results[0].Type);
+    }
+
+    [TestMethod]
+    public async Task ClassifyRunnableAsync_Cancellation_RethrowsInsteadOfFallback()
+    {
+        // A user Ctrl+C surfaces as OperationCanceledException from the token-aware dotnet call. It must
+        // propagate — not be swallowed and downgraded to the static fallback (Copilot review C3). Without
+        // the re-throw this would return a runnability from the static parse and the test would fail.
+        CreateFile("App.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+        </Project>
+        """);
+        var csproj = new FileInfo(Path.Combine(_tempDir, "App.csproj"));
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = _ => throw new OperationCanceledException(cts.Token),
+        };
+        var sut = new ProjectDetectionService(NullLogger<ProjectDetectionService>.Instance, dotnet);
+
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(
+            () => sut.ClassifyRunnableAsync(csproj, Root, null, cts.Token));
+    }
+
+    [TestMethod]
+    public void ClassifyRunnableStatic_TestPackageUnderInactiveCondition_IsAppNotTest()
+    {
+        // Static fallback must ignore a test PackageReference gated behind a Condition — it can't evaluate
+        // the Condition, so assuming the marker is active would misclassify a runnable app as a test and
+        // drop it from directory detection (Copilot review). The evaluated path handles Conditions.
+        CreateFile("App.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup><OutputType>WinExe</OutputType></PropertyGroup>
+          <ItemGroup Condition="'$(Configuration)'=='Test'">
+            <PackageReference Include="xunit" Version="2.9.0" />
+          </ItemGroup>
+        </Project>
+        """);
+        var csproj = new FileInfo(Path.Combine(_tempDir, "App.csproj"));
+
+        Assert.AreEqual(ProjectRunnability.App, ProjectDetectionService.ClassifyRunnableStatic(csproj));
+    }
+
+    [TestMethod]
+    public void ClassifyRunnableStatic_UnconditionalTestPackage_IsTest()
+    {
+        // The unconditional-marker filter must not regress genuine detection: an ungated test package
+        // reference on a WinExe app (the WinUI MSTest shape) still classifies as a test.
+        CreateFile("App.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup><OutputType>WinExe</OutputType></PropertyGroup>
+          <ItemGroup>
+            <PackageReference Include="MSTest.TestFramework" Version="3.6.0" />
+          </ItemGroup>
+        </Project>
+        """);
+        var csproj = new FileInfo(Path.Combine(_tempDir, "App.csproj"));
+
+        Assert.AreEqual(ProjectRunnability.Test, ProjectDetectionService.ClassifyRunnableStatic(csproj));
+    }
+
+    [TestMethod]
+    public void ClassifyRunnableStatic_UnconditionalTestContainerCapability_IsTest()
+    {
+        // The unconditional filter is applied to the ProjectCapability scan too, not just PackageReference:
+        // an ungated <ProjectCapability Include="TestContainer"> (the SDK-style test shape) classifies as a
+        // test even when the app declares WinExe.
+        CreateFile("App.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup><OutputType>WinExe</OutputType></PropertyGroup>
+          <ItemGroup>
+            <ProjectCapability Include="TestContainer" />
+          </ItemGroup>
+        </Project>
+        """);
+        var csproj = new FileInfo(Path.Combine(_tempDir, "App.csproj"));
+
+        Assert.AreEqual(ProjectRunnability.Test, ProjectDetectionService.ClassifyRunnableStatic(csproj));
+    }
+
+    [TestMethod]
+    public void ClassifyRunnableStatic_TestContainerCapabilityUnderInactiveCondition_IsAppNotTest()
+    {
+        // The static fallback can't evaluate Conditions, so a TestContainer capability gated behind an
+        // inactive Condition — here via a <Choose>/<When> ancestor, exercising the AncestorsAndSelf walk —
+        // must be ignored rather than misclassifying a runnable app as a test.
+        CreateFile("App.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup><OutputType>WinExe</OutputType></PropertyGroup>
+          <Choose>
+            <When Condition="'$(Configuration)'=='Test'">
+              <ItemGroup>
+                <ProjectCapability Include="TestContainer" />
+              </ItemGroup>
+            </When>
+          </Choose>
+        </Project>
+        """);
+        var csproj = new FileInfo(Path.Combine(_tempDir, "App.csproj"));
+
+        Assert.AreEqual(ProjectRunnability.App, ProjectDetectionService.ClassifyRunnableStatic(csproj));
+    }
+
+    // --- TryGetDeclaredOutputType (F1 pre-build gate) ---
+
+    [TestMethod]
+    public void TryGetDeclaredOutputType_Exe_ReturnsExe()
+    {
+        CreateFile("App.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Exe</OutputType>
+          </PropertyGroup>
+        </Project>
+        """);
+        var csproj = new FileInfo(Path.Combine(_tempDir, "App.csproj"));
+
+        Assert.AreEqual("Exe", ProjectDetectionService.TryGetDeclaredOutputType(csproj));
+    }
+
+    [TestMethod]
+    public void TryGetDeclaredOutputType_Library_ReturnsLibrary()
+    {
+        CreateFile("Lib.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Library</OutputType>
+          </PropertyGroup>
+        </Project>
+        """);
+        var csproj = new FileInfo(Path.Combine(_tempDir, "Lib.csproj"));
+
+        Assert.AreEqual("Library", ProjectDetectionService.TryGetDeclaredOutputType(csproj));
+    }
+
+    [TestMethod]
+    public void TryGetDeclaredOutputType_Absent_ReturnsNull()
+    {
+        // No OutputType declared: must return null (an SDK default only an evaluation can resolve),
+        // NOT collapse to "not runnable" the way ClassifyRunnableStatic does.
+        CreateFile("Lib.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net8.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+        var csproj = new FileInfo(Path.Combine(_tempDir, "Lib.csproj"));
+
+        Assert.IsNull(ProjectDetectionService.TryGetDeclaredOutputType(csproj));
+    }
+
+    [TestMethod]
+    public void TryGetDeclaredOutputType_LastWinsAcrossPropertyGroups()
+    {
+        CreateFile("App.csproj", """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Library</OutputType>
+          </PropertyGroup>
+          <PropertyGroup>
+            <OutputType>WinExe</OutputType>
+          </PropertyGroup>
+        </Project>
+        """);
+        var csproj = new FileInfo(Path.Combine(_tempDir, "App.csproj"));
+
+        Assert.AreEqual("WinExe", ProjectDetectionService.TryGetDeclaredOutputType(csproj));
+    }
+
+    [TestMethod]
+    public void TryGetDeclaredOutputType_MalformedXml_ReturnsNull()
+    {
+        CreateFile("Broken.csproj", "<Project><PropertyGroup><OutputType>Exe");
+        var csproj = new FileInfo(Path.Combine(_tempDir, "Broken.csproj"));
+
+        Assert.IsNull(ProjectDetectionService.TryGetDeclaredOutputType(csproj));
     }
 }
 

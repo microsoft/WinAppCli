@@ -23,6 +23,19 @@ This sample demonstrates a WinUI 3 desktop application with UI controls designed
 
 ## Building and Running
 
+The simplest path is **project mode** — point `winapp run` at the `.csproj` (or this folder) and it
+builds with `dotnet build`, provisions the matching Windows App Runtime, and launches in one step:
+
+```powershell
+# Build + run in one step (project mode)
+winapp run .\winui-app.csproj
+
+# Target a specific architecture, or launch detached for automation
+winapp run .\winui-app.csproj --arch x64 --detach --json
+```
+
+Or build and run as separate steps by pointing `winapp run` at the build-output folder:
+
 ```powershell
 # Build
 dotnet build -c Debug -p:Platform=x64

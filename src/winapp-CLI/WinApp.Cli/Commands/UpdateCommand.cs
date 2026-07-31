@@ -24,7 +24,7 @@ internal class UpdateCommand : Command, IShortDescription
         IWinappDirectoryService winappDirectoryService,
         IPackageInstallationService packageInstallationService,
         IBuildToolsService buildToolsService,
-        IWorkspaceSetupService workspaceSetupService,
+        IWindowsAppRuntimeService windowsAppRuntimeService,
         IStatusService statusService) : AsynchronousCommandLineAction
     {
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
@@ -135,14 +135,14 @@ internal class UpdateCommand : Command, IShortDescription
                     }
 
                     // Step 3: Install Windows App SDK runtime if available
-                    // Find MSIX directory using WorkspaceSetupService logic
-                    var msixDir = workspaceSetupService.FindWindowsAppSdkMsixDirectory();
+                    // Find MSIX directory using WindowsAppRuntimeService logic
+                    var msixDir = windowsAppRuntimeService.FindWindowsAppSdkMsixDirectory();
 
                     if (msixDir != null)
                     {
                         taskContext.AddStatusMessage($"{UiSymbols.Wrench} Installing Windows App Runtime...");
 
-                        await workspaceSetupService.InstallWindowsAppRuntimeAsync(msixDir, taskContext, cancellationToken);
+                        await windowsAppRuntimeService.InstallWindowsAppRuntimeAsync(msixDir, taskContext, cancellationToken);
 
                         taskContext.AddStatusMessage($"{UiSymbols.Check} Windows App Runtime installation complete");
                     }

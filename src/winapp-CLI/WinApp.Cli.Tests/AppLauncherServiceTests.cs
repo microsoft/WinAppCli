@@ -149,6 +149,117 @@ public class AppLauncherServiceTests
         Assert.IsNull(result);
     }
 
+    // ---- LaunchExecutable (real stdio paths) -------------------------------
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task LaunchExecutable_SuppressMode_DrainsChattyOutputAndHonorsWorkingDir()
+    {
+        var workingDir = Directory.CreateTempSubdirectory("winapp-launch-suppress-");
+        try
+        {
+            // 500 echoed lines would fill and block on a full stdout pipe if the child's output weren't
+            // drained; the relative `marker.txt` write confirms the working directory + arguments took.
+            var args = "/c \"echo ok> marker.txt & for /L %i in (1,1,500) do @echo line%i\"";
+            using var launched = _service.LaunchExecutable("cmd.exe", args, workingDir.FullName, LaunchStdioMode.Suppress);
+
+            Assert.IsTrue(launched.ProcessId > 0);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            await launched.WaitForExitAsync(cts.Token);
+
+            Assert.AreEqual(0, launched.ExitCode, "Suppressed launch must drain output and exit, not deadlock on a full pipe");
+            Assert.IsTrue(File.Exists(Path.Combine(workingDir.FullName, "marker.txt")),
+                "The child must run in the supplied working directory with the given arguments");
+        }
+        finally
+        {
+            try { workingDir.Delete(recursive: true); } catch { /* best-effort cleanup */ }
+        }
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task LaunchExecutable_InheritMode_HonorsArgumentsAndReturnsExitCode()
+    {
+        // Inherit mode leaves stdio unredirected (streams inline like `dotnet run`); a trivial child
+        // that just sets an exit code exercises the non-suppress path and confirms arguments are honored.
+        using var launched = _service.LaunchExecutable("cmd.exe", "/c exit 3", null, LaunchStdioMode.Inherit);
+
+        Assert.IsTrue(launched.ProcessId > 0);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await launched.WaitForExitAsync(cts.Token);
+
+        Assert.AreEqual(3, launched.ExitCode, "Inherit-mode launch must run the given arguments and surface the exit code");
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task LaunchExecutable_SuppressMode_ChildDoesNotInheritOurStdHandles()
+    {
+        // H1 regression: point THIS process's STD_OUTPUT at an inheritable pipe, launch a long-lived child
+        // in Suppress mode, then close our own write end. If the child inherited a copy of our stdout handle
+        // (the CreateProcess(bInheritHandles=TRUE) leak), the read end never reaches EOF while the child is
+        // alive and `run({detach})` would hang. The fix clears inheritance across Start, so we get EOF fast.
+        if (!CreatePipe(out var readHandle, out var writeHandle, IntPtr.Zero, 0))
+        {
+            Assert.Inconclusive("CreatePipe failed; cannot exercise the handle-inheritance path.");
+        }
+
+        SetHandleInformation(writeHandle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+        var originalStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+        Process? child = null;
+        try
+        {
+            SetStdHandle(STD_OUTPUT_HANDLE, writeHandle);
+            var launched = _service.LaunchExecutable(
+                "cmd.exe", "/c ping 127.0.0.1 -n 60 > nul", null, LaunchStdioMode.Suppress);
+            child = Process.GetProcessById((int)launched.ProcessId);
+        }
+        finally
+        {
+            SetStdHandle(STD_OUTPUT_HANDLE, originalStdOut);
+            CloseHandle(writeHandle);
+        }
+
+        try
+        {
+            using var readStream = new FileStream(
+                new Microsoft.Win32.SafeHandles.SafeFileHandle(readHandle, ownsHandle: true), FileAccess.Read);
+            var readTask = readStream.ReadAsync(new byte[16].AsMemory()).AsTask();
+            var completed = await Task.WhenAny(readTask, Task.Delay(TimeSpan.FromSeconds(10)));
+
+            Assert.AreSame(readTask, completed,
+                "Read must reach EOF promptly — the child must NOT inherit winapp's stdout handle.");
+            Assert.AreEqual(0, await readTask, "With our write end closed and no inherited copy, the read is EOF.");
+        }
+        finally
+        {
+            KillIfRunning(child!);
+        }
+    }
+
+    private const int STD_OUTPUT_HANDLE = -11;
+    private const uint HANDLE_FLAG_INHERIT = 0x1;
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool CreatePipe(out IntPtr hReadPipe, out IntPtr hWritePipe, IntPtr lpPipeAttributes, uint nSize);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool SetHandleInformation(IntPtr hObject, uint dwMask, uint dwFlags);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr GetStdHandle(int nStdHandle);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool SetStdHandle(int nStdHandle, IntPtr hHandle);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr hObject);
+
     // ---- TerminatePackageProcesses -----------------------------------------
 
     [TestMethod]
