@@ -233,6 +233,10 @@ See also: [Debugging Guide](./docs/debugging.md) — choosing between `winapp ru
 - [`store`](./docs/usage.md#store) - Run Microsoft Store Developer CLI commands
 - [`get-winapp-path`](./docs/usage.md#get-winapp-path) - Get paths to installed SDK components
 
+**API Discovery:**
+
+- [`find-api`](./docs/usage.md#find-api) - Search and inspect the Windows/WinRT API surface (types, members, enums, namespaces) a project references
+
 **Node.js/Electron Specific:**
 
 - [`node create-addon`](./docs/usage.md#node-create-addon) - Generate native C# or C++ addons

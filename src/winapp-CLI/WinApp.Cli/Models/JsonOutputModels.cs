@@ -49,6 +49,16 @@ internal class JsonErrorOutput
 [JsonSerializable(typeof(CertGenerateJsonOutput))]
 [JsonSerializable(typeof(CertInfoJsonOutput))]
 [JsonSerializable(typeof(JsonErrorOutput))]
+[JsonSerializable(typeof(WinApp.Cli.Services.ApiSearch.ApiSearchOutput))]
+[JsonSerializable(typeof(WinApp.Cli.Services.ApiSearch.ApiMembersOutput))]
+[JsonSerializable(typeof(WinApp.Cli.Services.ApiSearch.ApiCheckPropertyOutput))]
+[JsonSerializable(typeof(WinApp.Cli.Services.ApiSearch.ApiTypesOutput))]
+[JsonSerializable(typeof(WinApp.Cli.Services.ApiSearch.ApiEnumsOutput))]
+[JsonSerializable(typeof(WinApp.Cli.Services.ApiSearch.ApiNamespacesOutput))]
+[JsonSerializable(typeof(WinApp.Cli.Services.ApiSearch.ApiPackagesOutput))]
+[JsonSerializable(typeof(WinApp.Cli.Services.ApiSearch.ApiStatsOutput))]
+[JsonSerializable(typeof(WinApp.Cli.Services.ApiSearch.ApiProjectsOutput))]
+[JsonSerializable(typeof(WinApp.Cli.Services.ApiSearch.ApiRefreshOutput))]
 [JsonSourceGenerationOptions(
     WriteIndented = true,
     NewLine = "\n",

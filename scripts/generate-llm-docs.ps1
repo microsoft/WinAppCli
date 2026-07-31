@@ -105,6 +105,7 @@ $SkillCommandMap = @{
     "troubleshoot"    = @("get-winapp-path", "tool", "store")
     "frameworks"      = @()       # No auto-generated command sections — links to guides
     "ui-automation"   = @("ui status", "ui inspect", "ui search", "ui get-property", "ui get-value", "ui screenshot", "ui record", "ui invoke", "ui click", "ui drag", "ui touch", "ui pen", "ui hover", "ui send-keys", "ui set-value", "ui focus", "ui scroll-into-view", "ui scroll", "ui wait-for", "ui list-windows", "ui get-focused")
+    "find-api"        = @("find-api members", "find-api check-property", "find-api types", "find-api enums", "find-api namespaces", "find-api packages", "find-api stats", "find-api projects", "find-api refresh")
 }
 
 # Validate that all CLI commands are covered by at least one skill
@@ -241,7 +242,7 @@ function Format-CommandSections {
 }
 
 # Generate each skill
-$SkillNames = @("setup", "package", "identity", "signing", "manifest", "troubleshoot", "frameworks", "ui-automation")
+$SkillNames = @("setup", "package", "identity", "signing", "manifest", "troubleshoot", "frameworks", "ui-automation", "find-api")
 $SkillDescriptions = @{
     "setup"        = "Set up a Windows app project for MSIX packaging, Windows SDK access, or Windows API usage. Use when adding Windows support to an Electron, .NET, C++, Rust, Flutter, or Tauri project, or restoring SDK packages after cloning."
     "package"      = "Package a Windows app as an MSIX installer for distribution or testing. Use when creating a Windows installer, packaging an Electron/Flutter/.NET/Rust/C++/Tauri app for Windows, building an MSIX, distributing a desktop app, packaging a console app or CLI tool, or adding MSIX packaging to a build script or CI/CD pipeline."
@@ -251,6 +252,7 @@ $SkillDescriptions = @{
     "troubleshoot" = "Diagnose and fix common Windows app packaging, signing, identity, and SDK errors. Use when encountering errors with MSIX packaging, certificate signing, Windows SDK setup, or app installation."
     "frameworks"      = "Framework-specific Windows development guidance for Electron, .NET (WPF, WinForms), C++, Rust, Flutter, and Tauri. Use when packaging or adding Windows features to an Electron app, .NET desktop app, Flutter app, Tauri app, Rust app, or C++ app."
     "ui-automation"   = "Inspect and interact with running Windows app UIs from the command line using UI Automation (UIA). Use when an AI agent or developer needs to inspect a UI element tree, find controls, take screenshots, click buttons, read or set text, or verify UI state in a running Windows app. Works with any framework WinUI 3, WPF, WinForms, Win32, Electron."
+    "find-api"        = "Search and inspect the Windows/WinRT API surface (types, members, enums, namespaces) available to a project, resolved from its referenced .winmd/.dll metadata. Use when an AI agent or developer needs to discover an API, list a type's properties/events/methods, validate that a property exists before writing XAML/code, enumerate an enum's values, or explore the namespaces and packages a project can call. Works with WinUI 3, WinRT/UWP, and any project with .winmd/.dll references."
 }
 
 foreach ($skillName in $SkillNames) {

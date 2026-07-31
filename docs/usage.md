@@ -1181,3 +1181,54 @@ With `--json`, emits a `UiRecordResult` envelope including the output `path`, `f
 > stills. Tracked in [#646](https://github.com/microsoft/winappCli/issues/646).
 
 For full documentation, see [docs/ui-automation.md](ui-automation.md).
+
+### find-api
+
+Search and inspect the Windows/WinRT API surface (types, members, enums, namespaces) available to a project, resolved from its referenced `.winmd`/`.dll` metadata. The bare form searches; sub-verbs drill into a specific type, namespace, or the index itself.
+
+```bash
+winapp find-api "<query>" [options]
+winapp find-api [command] [options]
+```
+
+The index is built from the project's restored NuGet/SDK packages (via `project.assets.json`) on first use and refreshed automatically when the project is restored. It lives under the global `.winapp` cache (`cache/find-api/`) and is shared across projects. Restore the project first (`winapp restore` or `dotnet restore`).
+
+**Commands:**
+- *(bare)* `find-api "<query>"` - Lexically search type and member names, grouped by namespace
+- `members <type>` - List a type's properties, events, and methods (with descriptions and inherited members)
+- `check-property <type> <property>` - Validate a property exists on a type (exits non-zero on a miss)
+- `types <namespace>` - List the types declared in a namespace
+- `enums <type>` - List an enum's values (exits non-zero when the type is not an enum)
+- `namespaces [--filter <prefix>]` - List the namespaces available to the project
+- `packages` - List the indexed metadata packages, with per-package type/member counts
+- `stats` - Show aggregate index statistics (packages, namespaces, types, members, `.winmd` files)
+- `projects` - List every project that currently has an API index in the shared cache
+- `refresh [--scan]` - Rebuild the index for a project (`--scan` indexes every project under the directory)
+
+**Options:**
+- `--max <n>` - Maximum number of namespace-grouped search results (default `30`; search only)
+- `--filter <prefix>` - Only list namespaces starting with this prefix (`namespaces` only)
+- `--scan` - Recursively discover and index every project under the directory (`refresh` only)
+- `--project <name>` - Disambiguate when several projects are indexed (matches the `.csproj`/`.vcxproj` name)
+- `--project-dir <path>` - Project directory to query (defaults to the current directory)
+- `--json` - Emit a machine-readable payload on stdout (supported by every verb)
+
+**Examples:**
+```bash
+# Search
+winapp find-api "acrylic brush"
+winapp find-api NavigationView --max 10
+
+# Inspect and validate
+winapp find-api members Microsoft.UI.Xaml.Controls.NavigationView
+winapp find-api check-property Button Background
+winapp find-api enums Symbol
+
+# Explore and manage the index
+winapp find-api namespaces --filter Microsoft.UI.Xaml
+winapp find-api types Microsoft.UI.Xaml.Controls
+winapp find-api projects
+winapp find-api refresh
+```
+
+**Exit codes:** `search` with no hits, `check-property` on a missing property, and `enums` on a non-enum type all exit non-zero — gate code generation and CI checks on them.
