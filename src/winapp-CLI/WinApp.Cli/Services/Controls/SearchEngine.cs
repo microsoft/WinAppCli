@@ -44,6 +44,24 @@ internal sealed class SearchEngine
             .ToArray();
     }
 
+    /// <summary>
+    /// True when this engine actually holds data for <paramref name="source"/> — i.e. the
+    /// provider loaded at least one scenario, or (for the pseudo-source <c>"core"</c>) the
+    /// embedded core patterns are present. Lets callers tell "this source loaded but has no
+    /// match for the query" apart from "this source never loaded" (a failed/cold fetch that
+    /// another warm source is masking), so a filtered <c>--source</c>/<c>--id</c> request
+    /// against an unloaded source surfaces the friendly "connect and run once" error instead
+    /// of a false "no match".
+    /// </summary>
+    public bool HasSource(string source)
+    {
+        if (string.Equals(source, "core", StringComparison.OrdinalIgnoreCase))
+        {
+            return _corePatterns.Length > 0;
+        }
+        return _knownSources.Contains(source, StringComparer.OrdinalIgnoreCase);
+    }
+
     public record SearchResult(string Id, string Scenario, string Type, double Score);
 
     /// <summary>One entry inside a control group (a single scenario row).</summary>

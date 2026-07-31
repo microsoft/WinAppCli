@@ -173,4 +173,98 @@ public class ToolkitFetcherCleanXamlTests
 
         Assert.AreEqual(xaml, stripped, "non-event attributes with identifier values must be untouched");
     }
+
+    // --- Sample-option bindings: XAML must not reference docs-generated members ------
+
+    // Real ColorPicker sample shape (CommunityToolkit/Windows): class-level
+    // [ToolkitSample*Option("Name", …)] attributes back generated members the sample
+    // XAML x:Binds to. CleanCSharp strips those attributes, so the members never exist
+    // in emitted C# — the bindings must be removed or the snippet won't compile.
+    private const string ColorPickerCs = """
+        namespace ColorPickerExperiment.Samples;
+        [ToolkitSampleBoolOption("AccentColors", true, Title = "ShowAccentColors")]
+        [ToolkitSampleBoolOption("AlphaEnabled", true, Title = "IsAlphaEnabled")]
+        [ToolkitSampleMultiChoiceOption("SpectrumShape", "Box", "Ring", Title = "ColorSpectrumShape")]
+        [ToolkitSample(id: nameof(ColorPickerSample), "ColorPicker", description: "…")]
+        public sealed partial class ColorPickerSample : Page { }
+        """;
+
+    private const string ColorPickerXaml = """
+        <controls:ColorPicker HorizontalAlignment="Center"
+                              ColorSpectrumShape="{x:Bind local:ColorPickerSample.ConvertStringToColorSpectrumShape(SpectrumShape), Mode=OneWay}"
+                              IsAlphaEnabled="{x:Bind AlphaEnabled, Mode=OneWay}"
+                              ShowAccentColors="{x:Bind AccentColors, Mode=OneWay}"
+                              Color="LightBlue" />
+        """;
+
+    [TestMethod]
+    public void ExtractSampleOptionNames_CapturesEveryOptionMember()
+    {
+        var names = ToolkitFetcher.ExtractSampleOptionNames(ColorPickerCs);
+        string[] expected = ["AccentColors", "AlphaEnabled", "SpectrumShape"];
+        CollectionAssert.AreEquivalent(
+            expected,
+            names.ToArray(),
+            "every [ToolkitSample*Option] first-arg member name must be captured");
+    }
+
+    [TestMethod]
+    public void ExtractSampleOptionNames_IgnoresPlainToolkitSample()
+    {
+        // [ToolkitSample(id:, …)] registers the sample; it generates no bound member.
+        var names = ToolkitFetcher.ExtractSampleOptionNames(
+            "[ToolkitSample(id: nameof(X), \"X\", description: \"y\")] class X {}");
+        Assert.AreEqual(0, names.Count, "plain ToolkitSample must not be treated as an option member");
+    }
+
+    [TestMethod]
+    public void StripSampleOptionBindings_RemovesBindingsToGeneratedMembers()
+    {
+        var names = ToolkitFetcher.ExtractSampleOptionNames(ColorPickerCs);
+        var stripped = ToolkitFetcher.StripSampleOptionBindings(ColorPickerXaml, names);
+
+        Assert.IsFalse(stripped.Contains("SpectrumShape", StringComparison.Ordinal),
+            "the converter binding referencing SpectrumShape must be removed");
+        Assert.IsFalse(stripped.Contains("AlphaEnabled", StringComparison.Ordinal),
+            "the x:Bind to AlphaEnabled must be removed");
+        Assert.IsFalse(stripped.Contains("AccentColors", StringComparison.Ordinal),
+            "the x:Bind to AccentColors must be removed");
+    }
+
+    [TestMethod]
+    public void StripSampleOptionBindings_KeepsNonBindingAttributes()
+    {
+        var names = ToolkitFetcher.ExtractSampleOptionNames(ColorPickerCs);
+        var stripped = ToolkitFetcher.StripSampleOptionBindings(ColorPickerXaml, names);
+
+        StringAssert.Contains(stripped, "HorizontalAlignment=\"Center\"", "literal attributes must survive");
+        StringAssert.Contains(stripped, "Color=\"LightBlue\"", "literal attributes must survive");
+        StringAssert.Contains(stripped, "<controls:ColorPicker", "the control element itself must survive");
+    }
+
+    [TestMethod]
+    public void StripSampleOptionBindings_LeavesBindingsToRealMembersAlone()
+    {
+        // A binding to a member that is NOT a stripped sample option must be preserved.
+        var names = ToolkitFetcher.ExtractSampleOptionNames(ColorPickerCs);
+        var xaml = "<TextBlock Text=\"{x:Bind ViewModel.Title, Mode=OneWay}\" />";
+        var stripped = ToolkitFetcher.StripSampleOptionBindings(xaml, names);
+        Assert.AreEqual(xaml, stripped, "bindings to real members must be untouched");
+    }
+
+    [TestMethod]
+    public void StripSampleOptionBindings_WholeWordMatch_DoesNotStripSimilarNames()
+    {
+        var xaml = "<Ctl Foo=\"{x:Bind AlphaEnabledExtra, Mode=OneWay}\" />";
+        string[] names = ["AlphaEnabled"];
+        var stripped = ToolkitFetcher.StripSampleOptionBindings(xaml, names);
+        Assert.AreEqual(xaml, stripped, "a partial name (AlphaEnabledExtra) must not be stripped by 'AlphaEnabled'");
+    }
+
+    [TestMethod]
+    public void StripSampleOptionBindings_NoOptions_ReturnsInputUnchanged()
+    {
+        Assert.AreEqual(ColorPickerXaml,
+            ToolkitFetcher.StripSampleOptionBindings(ColorPickerXaml, System.Array.Empty<string>()));
+    }
 }

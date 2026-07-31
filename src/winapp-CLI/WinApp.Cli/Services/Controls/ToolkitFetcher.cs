@@ -297,6 +297,15 @@ internal static partial class ToolkitFetcher
             var pageContent = ExtractPageContent(xamlText);
             var cleanedXaml = CleanXaml(pageContent);
 
+            // Toolkit "options pane" members (e.g. AlphaEnabled, SpectrumShape) are
+            // materialized only by the docs source generator from class-level
+            // [ToolkitSample*Option] attributes — which CleanCSharp strips as noise, so
+            // they never exist in the emitted C#. Any XAML that x:Bind's to them would
+            // therefore reference a missing member and fail to compile, so drop those
+            // bindings up front (before splitting) using the names declared in the raw C#.
+            var optionNames = ExtractSampleOptionNames(csText);
+            cleanedXaml = StripSampleOptionBindings(cleanedXaml, optionNames);
+
             // Try splitting StackPanel children
             var splits = SplitStackPanelChildren(cleanedXaml, controlName);
 
@@ -841,6 +850,59 @@ internal static partial class ToolkitFetcher
         // Drop trailing blank lines
         cs = Regex.Replace(cs, @"\n\s*\n\s*\n+", "\n\n");
         return cs.Trim();
+    }
+
+    /// <summary>Captures the generated member name (first string argument) of a class-level
+    /// Toolkit sample <em>option</em> attribute. The Toolkit source generator materializes a
+    /// partial member with that name for the docs options pane, and the sample XAML binds to
+    /// it. Only the <c>*Option</c> variants generate a bound member — plain <c>ToolkitSample</c>
+    /// and <c>ToolkitSampleOptionsPane</c> don't, so they're excluded here.</summary>
+    [GeneratedRegex(@"\[ToolkitSample(?:BoolOption|MultiChoiceOption|NumericOption|TextOption)\s*\(\s*""([^""]+)""")]
+    private static partial Regex SampleOptionNameRegex();
+
+    /// <summary>Matches one XAML attribute whose value is a markup-extension binding, e.g.
+    /// <c>Foo="{x:Bind Bar, Mode=OneWay}"</c>. Group 1 is the text between the braces. The
+    /// leading whitespace is part of the match so removing the attribute doesn't glue its
+    /// neighbours together.</summary>
+    [GeneratedRegex(@"\s+[\w:.\-]+\s*=\s*""\{([^""]*)\}""")]
+    private static partial Regex BindingAttributeRegex();
+
+    /// <summary>Names of the docs-only sample-option members declared by
+    /// <c>[ToolkitSample*Option("Name", …)]</c> attributes in <paramref name="csText"/>. These
+    /// are the members the docs generator would create but the emitted C# never will (the
+    /// attributes are stripped by <see cref="CleanCSharp"/>).</summary>
+    internal static IReadOnlyCollection<string> ExtractSampleOptionNames(string csText)
+    {
+        if (string.IsNullOrEmpty(csText)) return Array.Empty<string>();
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (Match m in SampleOptionNameRegex().Matches(csText))
+        {
+            var name = m.Groups[1].Value;
+            if (!string.IsNullOrEmpty(name)) names.Add(name);
+        }
+        return names;
+    }
+
+    /// <summary>Remove every XAML attribute whose binding references one of
+    /// <paramref name="optionNames"/> — the sample-option members that won't exist in the
+    /// emitted C#. Non-binding attributes (e.g. <c>Color="LightBlue"</c>) and bindings to real
+    /// members are left untouched, so the result compiles instead of referencing a missing
+    /// member. Matches whole words so <c>Alpha</c> doesn't strip a binding to <c>AlphaEx</c>.</summary>
+    internal static string StripSampleOptionBindings(string xaml, IReadOnlyCollection<string> optionNames)
+    {
+        if (optionNames.Count == 0 || string.IsNullOrEmpty(xaml)) return xaml;
+        return BindingAttributeRegex().Replace(xaml, m =>
+        {
+            var body = m.Groups[1].Value;
+            foreach (var name in optionNames)
+            {
+                if (Regex.IsMatch(body, $@"\b{Regex.Escape(name)}\b"))
+                {
+                    return "";
+                }
+            }
+            return m.Value;
+        });
     }
 
     /// <summary>

@@ -178,6 +178,15 @@ internal sealed class FindUiCommand : Command, IShortDescription
 
         private int EmitSearch(SearchEngine engine, string query, int max, string? source, bool includeReactor, bool json)
         {
+            // H4 guard: a --source filter naming a source that never loaded (a failed/cold
+            // fetch masked by another warm source) must surface the friendly "run online
+            // once" error, not a confident — and wrong — "no match". Distinguishing the two
+            // is exactly what SearchEngine.HasSource is for.
+            if (source is not null && !engine.HasSource(source))
+            {
+                return Fail(json, SourceUnavailableMessage(source));
+            }
+
             var groups = engine.SearchGrouped(query, maxControls: max, maxScenariosPerControl: 3, sourceFilter: source);
 
             // Usage telemetry: mode + registry-validated source + match count. The
@@ -233,6 +242,18 @@ internal sealed class FindUiCommand : Command, IShortDescription
 
         private int EmitCode(SearchEngine engine, string[] ids, bool includeReactor, bool json)
         {
+            // H4 guard: if any requested id targets a real provider source (its "gallery-"/
+            // "toolkit-"/"reactor-" prefix) that never loaded, report the friendly "run online
+            // once" error naming that source rather than a misleading "Pattern not found" —
+            // the id may well exist upstream; we just failed to fetch its corpus.
+            foreach (var unavailable in ids
+                .Select(id => ProviderRegistry.ForScenarioId(id)?.Id)
+                .Where(sourceId => sourceId is not null && !engine.HasSource(sourceId))
+                .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                return Fail(json, SourceUnavailableMessage(unavailable!));
+            }
+
             var entries = new List<FindUiCodeEntryJson>(ids.Length);
             // Telemetry uses the corpus-canonical id (e.g. "gallery-tabview-1"), never
             // the caller's raw --id token — the fallback resolver accepts bare control
@@ -410,5 +431,16 @@ internal sealed class FindUiCommand : Command, IShortDescription
             logger.LogError("{Symbol} {Message}", UiSymbols.Error, message);
             return 1;
         }
+
+        /// <summary>
+        /// Message for a filtered request (<c>--source X</c> or an <c>X-*</c> <c>--id</c>) whose
+        /// source loaded no scenarios. find-ui ships no embedded snapshot, so a source that
+        /// never fetched (offline, proxy-blocked, or an upstream path rename) is simply absent —
+        /// naming it keeps the "run online once" guidance actionable instead of a false "no match".
+        /// </summary>
+        private static string SourceUnavailableMessage(string source) =>
+            $"No '{source}' control data is available locally. find-ui fetches each source from " +
+            "GitHub on first use — connect to the internet and run the command once (or add --refresh) " +
+            $"to populate the '{source}' cache.";
     }
 }

@@ -359,4 +359,40 @@ public class FindUiCommandTests : BaseCommandTests
         Assert.AreEqual(0, exit);
         Assert.IsTrue(fake.LastForceRefresh, "--refresh should be forwarded to the search service");
     }
+
+    // ── H4: a source that never loaded must not be reported as a plain "no match" ──
+    // BuildEngine() holds only gallery + toolkit scenarios, so this engine models a
+    // partially-warm corpus in which the reactor fetch failed but another source is warm.
+
+    [TestMethod]
+    public async Task SearchSourceReactor_SourceFailedToLoad_ReportsUnavailable_Exit1()
+    {
+        _fakeService = FakeControlsSearchService.WithEngine(BuildEngine());
+        var exit = await ParseAndInvokeWithCaptureAsync(Command(), ["flex layout", "--source", "reactor", "--json"]);
+        Assert.AreEqual(1, exit);
+        StringAssert.Contains(TestAnsiConsole.Output, "control data is available locally",
+            "a --source whose corpus never loaded must surface the friendly error, not a false 'no match'");
+        StringAssert.Contains(TestAnsiConsole.Output, "reactor", "the error must name the unavailable source");
+    }
+
+    [TestMethod]
+    public async Task IdReactor_SourceFailedToLoad_ReportsUnavailable_Exit1()
+    {
+        _fakeService = FakeControlsSearchService.WithEngine(BuildEngine());
+        var exit = await ParseAndInvokeWithCaptureAsync(Command(), ["--id", "reactor-flex-1", "--json"]);
+        Assert.AreEqual(1, exit);
+        StringAssert.Contains(TestAnsiConsole.Output, "control data is available locally",
+            "a --id whose source never loaded must surface the friendly error, not 'Pattern not found'");
+        StringAssert.Contains(TestAnsiConsole.Output, "reactor", "the error must name the unavailable source");
+    }
+
+    [TestMethod]
+    public async Task SearchSourceGallery_SourceLoaded_StillSearches_Exit0()
+    {
+        // A loaded source must NOT trip the H4 guard — regression check that HasSource is honored.
+        _fakeService = FakeControlsSearchService.WithEngine(BuildEngine());
+        var exit = await ParseAndInvokeWithCaptureAsync(Command(), ["tabview", "--source", "gallery"]);
+        Assert.AreEqual(0, exit);
+        StringAssert.Contains(TestAnsiConsole.Output, "gallery-tabview-1");
+    }
 }

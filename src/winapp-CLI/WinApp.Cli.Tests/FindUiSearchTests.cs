@@ -65,6 +65,54 @@ public class FindUiSearchTests
     }
 
     [TestMethod]
+    public void HasSource_LoadedSource_True()
+    {
+        var engine = BuildEngine();
+        Assert.IsTrue(engine.HasSource("gallery"));
+        Assert.IsTrue(engine.HasSource("toolkit"));
+        Assert.IsTrue(engine.HasSource("reactor"));
+    }
+
+    [TestMethod]
+    public void HasSource_IsCaseInsensitive()
+    {
+        Assert.IsTrue(BuildEngine().HasSource("Gallery"));
+    }
+
+    [TestMethod]
+    public void HasSource_UnloadedSource_False()
+    {
+        // A corpus with no reactor scenarios (its fetch failed) must report the
+        // source as absent so the command surfaces the friendly "run online once"
+        // error rather than a false "no match".
+        var engine = new SearchEngine(
+            [Scn("gallery", "tabview", "TabView", "tabview-1", "Tabs")],
+            corePatterns: [],
+            enrichmentTags: new(),
+            curatedKeywords: new());
+        Assert.IsFalse(engine.HasSource("reactor"));
+        Assert.IsFalse(engine.HasSource("toolkit"));
+    }
+
+    [TestMethod]
+    public void HasSource_Core_TrueOnlyWhenCorePatternsPresent()
+    {
+        var withCore = new SearchEngine(
+            System.Array.Empty<Scenario>(),
+            corePatterns: [new CorePattern { Id = "file-picker-desktop", Scenario = "Pick a file", CSharp = "// ..." }],
+            enrichmentTags: new(),
+            curatedKeywords: new());
+        Assert.IsTrue(withCore.HasSource("core"));
+
+        var noCore = new SearchEngine(
+            [Scn("gallery", "tabview", "TabView", "tabview-1", "Tabs")],
+            corePatterns: [],
+            enrichmentTags: new(),
+            curatedKeywords: new());
+        Assert.IsFalse(noCore.HasSource("core"));
+    }
+
+    [TestMethod]
     public void SearchGrouped_SourceFilter_RestrictsToProvider()
     {
         var engine = BuildEngine();
