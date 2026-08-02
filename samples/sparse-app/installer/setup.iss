@@ -127,9 +127,10 @@ end;
 { Registers the sparse identity package. Invoked as the AfterInstall callback of the .msix [Files]
   entry, so it runs DURING file installation while Inno's automatic rollback is still active: a
   RaiseException here makes Setup roll back exactly the files this run installed (it does NOT touch
-  a pre-existing {app} from an earlier install, and it does not run at ssPostInstall where rollback
-  is already unavailable). Registration is idempotent and non-destructive on upgrades: a fresh
-  add is tried first, and an existing same-name registration is only removed if that add fails. }
+  a pre-existing install directory from an earlier install, and it does not run at ssPostInstall
+  where rollback is already unavailable). Registration is idempotent and non-destructive on
+  upgrades: a fresh add is tried first, and an existing same-name registration is only removed if
+  that add fails. }
 procedure RegisterSparsePackage;
 var
   ResultCode: Integer;

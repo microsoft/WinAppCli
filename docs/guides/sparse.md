@@ -1,4 +1,5 @@
 <!-- mslearn: true -->
+<!-- description: Grant package identity to an unpackaged desktop app using an identity-only (sparse) MSIX and external-location registration with the winapp CLI. -->
 # Sparse packaging: grant identity to an unpackaged app
 
 > For a working end-to-end example (WPF app + Inno Setup installer), see the [sparse-app](../../samples/sparse-app) sample.
