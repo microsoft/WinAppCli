@@ -37,6 +37,9 @@ Does the project already have an appxmanifest.xml?
    │  └─ winapp package <build-output-dir>
    │     (add --cert ./devcert.pfx to sign in one step)
    ├─ Need package identity for debugging Windows APIs?
+   │  ├─ Have a .NET/WinUI .csproj or .sln/.slnx (or a folder with one)? (build + run in one step)
+   │  │  └─ winapp run <project-or-solution>  (dotnet build + provision runtime + launch)
+   │  │     (packaged apps launch with identity; unpackaged apps launch the .exe directly, no identity)
    │  ├─ Is the exe in the same folder as your build output? (most frameworks)
    │  │  └─ winapp run <build-output-dir>  (registers loose layout + launches)
    │  └─ Is the exe separate from your app code? (Electron, sparse package testing)
@@ -145,18 +148,27 @@ Want to inspect or interact with a running app's UI?
 - `--manifest <path>` — sparse `appxmanifest.xml` to read identity from (defaults to a `sparse/` folder beside the target first, then in the current directory — where `winapp init --exe --sparse` writes it — then beside the target and in the current directory)
 **Requires:** a sparse `appxmanifest.xml` + the target `.exe` or `.xml`/`.manifest`
 
-### `winapp run <input-folder>`
-**Purpose:** Create a loose layout package from a build output folder, register it with Windows via `Add-AppxPackage`, and launch the app — simulating a full MSIX install for debugging.
-**When to use:** The **preferred command** for iterative development and debugging with package identity. Use this whenever your exe lives inside the build output folder (most .NET, C++, Rust, Flutter, Tauri projects).
+### `winapp run [<input>]`
+**Purpose:** Build and/or package a Windows app and launch it — for **packaged** apps this simulates a full MSIX install with package identity; for **unpackaged** apps it launches the built `.exe` directly (no package identity). Returns the launched process ID for debugger attachment. Operates in one of two modes, auto-selected from the input:
+- **Folder mode** — input is a build-output folder (contains `Package.appxmanifest`/`AppxManifest.xml`). Creates a loose-layout package, registers it with Windows, and launches it. Original behavior, unchanged.
+- **Project mode** — input is a `.csproj`, a `.sln`/`.slnx` solution, or a directory containing one (including `.`). Builds the project with `dotnet build`, installs the matching-architecture Windows App Runtime if the app uses the Windows App SDK, then launches it. Supports both **packaged** (`WindowsPackageType=MSIX` → loose-layout + AUMID) and **unpackaged** (`WindowsPackageType=None` → launch the built `.exe` directly) WinUI apps, detected from the effective `WindowsPackageType` MSBuild property. Input defaults to the current directory when omitted (like `dotnet run`). Requires .NET SDK 8.0.100+.
+**When to use:** The **preferred command** for iterative development and debugging with package identity (.NET, C++, Rust, Flutter, Tauri). Point it at a project/solution to build-and-run in one step, or at a build-output folder to package-and-run existing output.
 **Key options:**
-- `--manifest <path>` — path to `appxmanifest.xml` (default: auto-detect)
-- `--args <string>` — command-line arguments to pass to the app
-- `--no-launch` — register the package without launching
+- `--manifest <path>` — path to `appxmanifest.xml` (folder mode and packaged project mode; default: auto-detect)
+- `--args <string>` — command-line arguments to pass to the app. Alternatively pass app args after `--` (e.g., `winapp run . -- --flag value`)
+- `--no-launch` — register/prepare without launching
 - `--with-alias` — launch via execution alias (console apps run in current terminal)
+- `-c, --configuration <name>` — (project mode) build configuration; default `Debug`
+- `--arch <x64|arm64|x86>` — (project mode) target architecture; default: current process arch. Sets both the build RID and the Windows App Runtime arch
+- `-r, --runtime <rid>` — (project mode) target .NET RID (e.g. `win-x64`); **only the RID's architecture is used** — project mode reduces it and always builds the canonical `win-<arch>` RID, so a version-specific or non-Windows RID is not forwarded (a non-Windows RID like `linux-x64` is rejected). Overrides `--arch`.
+- `-f, --framework <tfm>` — (project mode) target framework for multi-targeted projects
+- `--project <name-or-path>` — (project mode) select which project to launch when a solution/directory has multiple runnable app projects (errors listing candidates if ambiguous)
+- `--no-build` / `--no-restore` — (project mode) skip build / restore
+- `-p, --property <Name=Value>` — (project mode) MSBuild property forwarded to build + evaluation; repeatable (e.g. `-p WindowsPackageType=None`)
 - `--debug-output` — capture `OutputDebugString` messages and first-chance exceptions (prevents other debuggers like VS/VS Code from attaching). For WinUI apps it also auto-runs a stowed-exception (`0xC000027B`) triage pass (`!xamlstowed`/`!xamltriage`) that recovers the originating HRESULT and native XAML dispatch stack. The first triage run downloads debugger components (engine bits from NuGet + `JsProvider.dll` from the WinDbg CDN) and caches them under `~\.winapp\dbgtools\`; if downloads are blocked, install Debugging Tools for Windows or point `WINAPP_DBGTOOLS_DIR` at a debugger directory containing `dbgeng.dll` and `JsProvider.dll`.
 - `--symbols` — with `--debug-output`, download Microsoft public symbols for richer native crash stacks (first run downloads and caches them)
-- `--output-appx-directory <path>` — custom output directory for loose layout
-**Requires:** Built app output directory + `appxmanifest.xml`
+- `--output-appx-directory <path>` — custom output directory for the loose layout
+**Requires:** Folder mode — built app output directory + `appxmanifest.xml`. Project mode — a `.csproj`/`.sln`/`.slnx` (or directory containing one) + .NET SDK 8.0.100+.
 
 ### `winapp cert generate`
 **Purpose:** Create a self-signed PFX certificate for local testing.

@@ -252,6 +252,9 @@ This repository includes samples demonstrating how to use the CLI with various f
 | [C++ App](/samples/cpp-app/README.md) | Native C++ Win32 application with CMake |
 | [.NET Console](/samples/dotnet-app/README.md) | .NET console application |
 | [WPF App](/samples/wpf-app/README.md) | WPF desktop application |
+| [WinUI App](/samples/winui-app/README.md) | Packaged WinUI 3 app registered and launched via `winapp run <csproj>` |
+| [WinUI Unpackaged App](/samples/winui-unpackaged-app/README.md) | Unpackaged WinUI 3 app launched via `winapp run <csproj>` |
+| [WinUI Solution](/samples/winui-solution/README.md) | Multi-project `.sln` (app + test project) demonstrating `winapp run` solution-mode auto-selection |
 | [Electron](/samples/electron/README.md) | Electron Forge app with appxmanifest, assets, native C++ addon, and C# addon |
 | [Electron WinML](/samples/electron-winml/README.md) | Electron app using Windows ML for image classification |
 | [Rust App](/samples/rust-app/README.md) | Rust application using Windows APIs |
@@ -307,10 +310,11 @@ The binaries and packages will be placed in the `artifacts` folder
 Developer-facing AI skills live under [`.github/skills/`](./.github/skills/).
 Before pushing a PR, you can ask Copilot CLI (or any agent that reads skill
 files) to "review my PR" — the [`pr-review`](./.github/skills/pr-review/SKILL.md)
-skill fans out parallel sub-agents covering security, correctness, CLI UX,
-alternative-solution check, test coverage, docs/samples sync, packaging
-impact, and a multi-model cross-check, then prints a consolidated finding
-list to stdout.
+skill fans out parallel sub-agents covering security, correctness and tests,
+CLI UX, alternative solutions, necessity and simplicity, shipping surfaces
+(docs/samples/packaging), and a different-model cross-check. It then builds and
+runs the CLI to validate the critical findings, and prints a short list to
+stdout.
 
 ## Trademarks
 

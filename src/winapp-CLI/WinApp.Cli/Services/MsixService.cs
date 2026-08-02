@@ -18,7 +18,7 @@ internal partial class MsixService(
     IConfigService configService,
     IBuildToolsService buildToolsService,
     ICertificateService certificateService,
-    IWorkspaceSetupService workspaceSetupService,
+    IWindowsAppRuntimeService windowsAppRuntimeService,
     IDevModeService devModeService,
     IDotNetService dotNetService,
     INugetService nugetService,

@@ -54,7 +54,7 @@ internal partial class MsixService
             FileInfo? msixPath = null;
             try
             {
-                var packageEntries = await WorkspaceSetupService.ParseMsixInventoryAsync(taskContext, msixDir, cancellationToken);
+                var packageEntries = await WindowsAppRuntimeService.ParseMsixInventoryAsync(taskContext, msixDir, cancellationToken);
                 if (packageEntries != null)
                 {
                     // Look for the base Windows App Runtime package (not Framework, DDLM, or Singleton packages)
@@ -658,7 +658,7 @@ internal partial class MsixService
         }
     }
 
-    private async Task<DirectoryInfo?> GetRuntimeMsixDirAsync(DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
+    private async Task<DirectoryInfo?> GetRuntimeMsixDirAsync(DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken, bool requireExactVersion = false)
     {
         (var packageDependencies, var mainVersion) = await GetWinAppSDKPackageDependenciesAsync(dotNetPackageList, taskContext, cancellationToken);
         if (packageDependencies == null || mainVersion == null)
@@ -692,7 +692,7 @@ internal partial class MsixService
         }
 
         // Find the MSIX directory with the runtime package
-        var msixDir = workspaceSetupService.FindWindowsAppSdkMsixDirectory(usedVersions);
+        var msixDir = windowsAppRuntimeService.FindWindowsAppSdkMsixDirectory(usedVersions, requireExactVersion);
         if (msixDir == null)
         {
             taskContext.AddDebugMessage($"{UiSymbols.Warning} Windows App SDK MSIX directory not found for dependent runtime package");
@@ -705,6 +705,9 @@ internal partial class MsixService
     internal async Task<(Dictionary<string, string>? CachedPackages, string? MainVersion)> GetWinAppSDKPackageDependenciesAsync(DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
     {
         string? mainVersion = null;
+        string? localRuntimeId = null;
+        string? localRuntimeVersion = null;
+
         // Path 1: Try .csproj via `dotnet list package --format json`
         if (dotNetPackageList != null)
         {
@@ -712,7 +715,8 @@ internal partial class MsixService
 
             var allPackages = dotNetPackageList.Projects?
                 .SelectMany(p => p.Frameworks ?? [])
-                .SelectMany(f => (f.TopLevelPackages ?? []).Concat(f.TransitivePackages ?? []));
+                .SelectMany(f => (f.TopLevelPackages ?? []).Concat(f.TransitivePackages ?? []))
+                .ToList();
 
             var winAppSdkPkg = allPackages?
                 .FirstOrDefault(p => string.Equals(p.Id, BuildToolsService.WINAPP_SDK_PACKAGE, StringComparison.OrdinalIgnoreCase));
@@ -720,6 +724,20 @@ internal partial class MsixService
             if (winAppSdkPkg != null && !string.IsNullOrEmpty(winAppSdkPkg.ResolvedVersion))
             {
                 mainVersion = winAppSdkPkg.ResolvedVersion;
+            }
+
+            // Windows App SDK 1.8+ ships the runtime as a separate NuGet package that is a transitive
+            // dependency of the main package — so a restored project already lists it (with the exact
+            // version on disk). Resolve it here to avoid the network round-trip below: an offline
+            // `--no-build` run must not need to reach NuGet when the runtime is already in the cache.
+            var runtimePkg = allPackages?
+                .FirstOrDefault(p => !string.IsNullOrEmpty(p.Id)
+                    && p.Id.StartsWith(BuildToolsService.WINAPP_SDK_RUNTIME_PACKAGE, StringComparison.OrdinalIgnoreCase)
+                    && !string.IsNullOrEmpty(p.ResolvedVersion));
+            if (runtimePkg != null)
+            {
+                localRuntimeId = runtimePkg.Id;
+                localRuntimeVersion = runtimePkg.ResolvedVersion;
             }
         }
 
@@ -730,15 +748,38 @@ internal partial class MsixService
             mainVersion = config.GetVersion(BuildToolsService.WINAPP_SDK_PACKAGE);
         }
 
+        // Prefer the runtime package resolved from the restored package graph — no network needed.
+        // Also covers the framework-dependent app that pulls in the Windows App SDK via the runtime
+        // (and other sub-packages) without the meta Microsoft.WindowsAppSDK package: mainVersion is
+        // then unavailable, but the runtime version alone locates the exact MSIX.
+        if (localRuntimeId != null && localRuntimeVersion != null)
+        {
+            taskContext.AddDebugMessage($"{UiSymbols.Package} Resolved runtime package locally from restored package list: {localRuntimeId} v{localRuntimeVersion}");
+            var localDeps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [localRuntimeId] = localRuntimeVersion,
+            };
+            if (!string.IsNullOrEmpty(mainVersion))
+            {
+                localDeps[BuildToolsService.WINAPP_SDK_PACKAGE] = mainVersion;
+            }
+            // The runtime version is authoritative for the MSIX lookup; fall back to it as the
+            // returned main version when the meta package isn't in the graph.
+            return (localDeps, mainVersion ?? localRuntimeVersion);
+        }
+
         if (string.IsNullOrEmpty(mainVersion))
         {
             taskContext.AddDebugMessage($"{UiSymbols.Warning} No {BuildToolsService.WINAPP_SDK_PACKAGE} package found");
             return (null, null);
         }
         taskContext.AddDebugMessage($"{UiSymbols.Package} Found Windows App SDK main package: v{mainVersion}");
+
         try
         {
-            // Query NuGet API for the dependency tree of this package
+            // Query the NuGet API for the dependency tree. Only reached when the runtime package
+            // wasn't in the restored list — e.g. the winapp.yaml/C++ path (no dotnet package list),
+            // or Windows App SDK 1.7 and earlier where the runtime ships inside the main package.
             var deps = await nugetService.GetPackageDependenciesAsync(BuildToolsService.WINAPP_SDK_PACKAGE, mainVersion, cancellationToken);
 
             // Include the main package itself in the result
@@ -764,7 +805,7 @@ internal partial class MsixService
         try
         {
             // Use the shared inventory parsing logic (synchronous version)
-            var packageEntries = WorkspaceSetupService.ParseMsixInventoryAsync(taskContext, msixDir, cancellationToken).GetAwaiter().GetResult();
+            var packageEntries = WindowsAppRuntimeService.ParseMsixInventoryAsync(taskContext, msixDir, cancellationToken).GetAwaiter().GetResult();
 
             if (packageEntries == null || packageEntries.Count == 0)
             {

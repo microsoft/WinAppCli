@@ -1587,17 +1587,17 @@
       }
     },
     "run": {
-      "description": "Creates packaged layout, registers the Application, and launches the packaged application.",
+      "description": "Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.",
       "hidden": false,
       "arguments": {
-        "input-folder": {
-          "description": "Input folder containing the app to run",
+        "input": {
+          "description": "Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory).",
           "order": 0,
           "hidden": false,
-          "valueType": "System.IO.DirectoryInfo",
+          "valueType": "System.IO.FileSystemInfo",
           "hasDefaultValue": false,
           "arity": {
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 1
           }
         },
@@ -1613,6 +1613,18 @@
         }
       },
       "options": {
+        "--arch": {
+          "description": "Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Default: the current process architecture.",
+          "hidden": false,
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--args": {
           "description": "Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value).",
           "hidden": false,
@@ -1633,6 +1645,22 @@
           "defaultValue": false,
           "arity": {
             "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--configuration": {
+          "description": "Project mode: build configuration (e.g., Debug, Release). Ignored in folder mode. Default: Debug.",
+          "hidden": false,
+          "aliases": [
+            "-c"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": true,
+          "defaultValue": "Debug",
+          "arity": {
+            "minimum": 1,
             "maximum": 1
           },
           "required": false,
@@ -1679,6 +1707,21 @@
           "required": false,
           "recursive": false
         },
+        "--framework": {
+          "description": "Project mode: target framework moniker for multi-targeted projects (e.g. net10.0-windows10.0.26100.0). Ignored in folder mode.",
+          "hidden": false,
+          "aliases": [
+            "-f"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--json": {
           "description": "Format output as JSON",
           "hidden": false,
@@ -1704,6 +1747,19 @@
           "required": false,
           "recursive": false
         },
+        "--no-build": {
+          "description": "Project mode: skip building and run the existing build output (still evaluates output properties). Ignored in folder mode.",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--no-launch": {
           "description": "Only create the debug identity and register the package without launching the application",
           "hidden": false,
@@ -1717,14 +1773,53 @@
           "required": false,
           "recursive": false
         },
+        "--no-restore": {
+          "description": "Project mode: skip restoring the project before building. Ignored in folder mode.",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--output-appx-directory": {
-          "description": "Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used.",
+          "description": "Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory will be used.",
           "hidden": false,
           "valueType": "System.IO.DirectoryInfo",
           "hasDefaultValue": false,
           "arity": {
             "minimum": 1,
             "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--project": {
+          "description": "Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode.",
+          "hidden": false,
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--property": {
+          "description": "Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode.",
+          "hidden": false,
+          "aliases": [
+            "-p"
+          ],
+          "valueType": "System.String[]",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 0
           },
           "required": false,
           "recursive": false
@@ -1740,6 +1835,21 @@
           "defaultValue": false,
           "arity": {
             "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--runtime": {
+          "description": "Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode.",
+          "hidden": false,
+          "aliases": [
+            "-r"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
             "maximum": 1
           },
           "required": false,

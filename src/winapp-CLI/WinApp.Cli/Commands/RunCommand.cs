@@ -5,20 +5,22 @@ using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using System.CommandLine;
 using System.CommandLine.Invocation;
+using System.CommandLine.Parsing;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using WinApp.Cli.Helpers;
+using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
 internal partial class RunCommand : Command, IShortDescription
 {
-    public string ShortDescription => "Create debug identity and launch the packaged application.";
+    public string ShortDescription => "Run a Windows app: build and launch from a .csproj/.sln, or launch an existing build-output folder.";
 
-    public static Argument<DirectoryInfo> InputFolderArgument { get; }
+    public static Argument<FileSystemInfo> InputArgument { get; }
     public static Option<FileInfo> ManifestOption { get; }
     public static Option<DirectoryInfo?> OutputAppXDirectoryOption { get; }
     public static Option<string> ArgsOption { get; }
@@ -31,6 +33,16 @@ internal partial class RunCommand : Command, IShortDescription
     public static Option<bool> SymbolsOption { get; }
     public static Option<string?> ExecutableOption { get; }
 
+    // Project-mode build options. Additive and inert in folder mode.
+    public static Option<string> ConfigurationOption { get; }
+    public static Option<string?> ArchOption { get; }
+    public static Option<string?> RuntimeOption { get; }
+    public static Option<string?> FrameworkOption { get; }
+    public static Option<bool> NoBuildOption { get; }
+    public static Option<bool> NoRestoreOption { get; }
+    public static Option<string[]> PropertyOption { get; }
+    public static Option<string?> ProjectOption { get; }
+
     /// <summary>
     /// Captures zero or more arguments after the <c>--</c> separator and forwards them to the
     /// launched application. System.CommandLine routes all post-<c>--</c> tokens here as
@@ -40,12 +52,11 @@ internal partial class RunCommand : Command, IShortDescription
 
     static RunCommand()
     {
-        InputFolderArgument = new Argument<DirectoryInfo>("input-folder")
+        InputArgument = new Argument<FileSystemInfo>("input")
         {
-            Description = "Input folder containing the app to run",
-            Arity = ArgumentArity.ExactlyOne
+            Description = "Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory).",
+            Arity = ArgumentArity.ZeroOrOne
         };
-        InputFolderArgument.AcceptExistingOnly();
 
         PassthroughArgument = new Argument<string[]>("app-args")
         {
@@ -53,7 +64,7 @@ internal partial class RunCommand : Command, IShortDescription
             Arity = ArgumentArity.ZeroOrMore,
             // Hidden from help/schema: this argument exists only to absorb tokens after '--'
             // so System.CommandLine doesn't reject them. Exposing it would mislead users and
-            // schema consumers into thinking `winapp run <input-folder> [<app-args>...]` is
+            // schema consumers into thinking `winapp run <input> [<app-args>...]` is
             // a valid direct invocation; in reality, app args MUST be preceded by '--'.
             Hidden = true,
         };
@@ -62,11 +73,10 @@ internal partial class RunCommand : Command, IShortDescription
         {
             Description = "Path to the Package.appxmanifest (default: auto-detect from input folder or current directory)"
         };
-        ManifestOption.AcceptExistingOnly();
 
         OutputAppXDirectoryOption = new Option<DirectoryInfo?>("--output-appx-directory")
         {
-            Description = "Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used."
+            Description = "Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory will be used."
         };
 
         ArgsOption = new Option<string>("--args")
@@ -114,11 +124,60 @@ internal partial class RunCommand : Command, IShortDescription
             Description = "Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder."
         };
         ExecutableOption.Aliases.Add("--exe");
+
+        ConfigurationOption = new Option<string>("--configuration")
+        {
+            Description = "Project mode: build configuration (e.g., Debug, Release). Ignored in folder mode. Default: Debug.",
+            DefaultValueFactory = _ => "Debug",
+        };
+        ConfigurationOption.Aliases.Add("-c");
+
+        ArchOption = new Option<string?>("--arch")
+        {
+            Description = "Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Default: the current process architecture."
+        };
+
+        RuntimeOption = new Option<string?>("--runtime")
+        {
+            Description = "Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode."
+        };
+        RuntimeOption.Aliases.Add("-r");
+
+        FrameworkOption = new Option<string?>("--framework")
+        {
+            Description = "Project mode: target framework moniker for multi-targeted projects (e.g. net10.0-windows10.0.26100.0). Ignored in folder mode."
+        };
+        FrameworkOption.Aliases.Add("-f");
+
+        NoBuildOption = new Option<bool>("--no-build")
+        {
+            Description = "Project mode: skip building and run the existing build output (still evaluates output properties). Ignored in folder mode."
+        };
+
+        NoRestoreOption = new Option<bool>("--no-restore")
+        {
+            Description = "Project mode: skip restoring the project before building. Ignored in folder mode."
+        };
+
+        PropertyOption = new Option<string[]>("--property")
+        {
+            Description = "Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode.",
+            // ZeroOrMore (not OneOrMore) so a valueless '-p' reaches the handler, which emits a
+            // --json-aware error; OneOrMore would raise a plain-text parser error, bypassing --json.
+            Arity = ArgumentArity.ZeroOrMore,
+            AllowMultipleArgumentsPerToken = false,
+        };
+        PropertyOption.Aliases.Add("-p");
+
+        ProjectOption = new Option<string?>("--project")
+        {
+            Description = "Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode."
+        };
     }
 
-    public RunCommand() : base("run", "Creates packaged layout, registers the Application, and launches the packaged application.")
+    public RunCommand() : base("run", "Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.")
     {
-        Arguments.Add(InputFolderArgument);
+        Arguments.Add(InputArgument);
         Arguments.Add(PassthroughArgument);
         Options.Add(ManifestOption);
         Options.Add(OutputAppXDirectoryOption);
@@ -131,10 +190,18 @@ internal partial class RunCommand : Command, IShortDescription
         Options.Add(CleanOption);
         Options.Add(SymbolsOption);
         Options.Add(ExecutableOption);
+        Options.Add(ConfigurationOption);
+        Options.Add(ArchOption);
+        Options.Add(RuntimeOption);
+        Options.Add(FrameworkOption);
+        Options.Add(NoBuildOption);
+        Options.Add(NoRestoreOption);
+        Options.Add(PropertyOption);
+        Options.Add(ProjectOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
-    public class Handler(
+    public partial class Handler(
         IMsixService msixService,
         IAppLauncherService appLauncherService,
         IPackageRegistrationService packageRegistrationService,
@@ -142,6 +209,7 @@ internal partial class RunCommand : Command, IShortDescription
         ICurrentDirectoryProvider currentDirectoryProvider,
         IAnsiConsole ansiConsole,
         IStatusService statusService,
+        IProjectRunService projectRunService,
         ILogger<RunCommand> logger) : AsynchronousCommandLineAction
     {
         // Test seams for the execution-alias launch path. They isolate the two operating-system
@@ -155,7 +223,12 @@ internal partial class RunCommand : Command, IShortDescription
 
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
-            var inputFolder = parseResult.GetRequiredValue(InputFolderArgument);
+            // input is optional (ArgumentArity.ZeroOrOne). The final FileSystemInfo is resolved
+            // below, AFTER the passthrough split, because a bare `winapp run -- <app-arg>` makes the
+            // parser greedily bind the first post-'--' token to this positional. That "stolen" case is
+            // detected by comparing what the passthrough argument absorbed against the raw post-'--'
+            // tokens; when it happens we fall back to the current directory (see resolution below).
+            var inputArg = parseResult.GetValue(InputArgument);
             var manifest = parseResult.GetValue(ManifestOption);
             var outputAppXDirectory = parseResult.GetValue(OutputAppXDirectoryOption);
             var appArgs = parseResult.GetValue(ArgsOption);
@@ -168,6 +241,18 @@ internal partial class RunCommand : Command, IShortDescription
             var useSymbols = parseResult.GetValue(SymbolsOption);
             var executable = parseResult.GetValue(ExecutableOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
+
+            // Reject a valueless -p/--property. The option uses ZeroOrMore arity so a bare
+            // '-p' (no Name=Value) parses without a value instead of raising a System.CommandLine
+            // arity error -- which would bypass this command's --json error envelope and print only
+            // plain text. Detect it from the raw result: there is one identifier token per '-p'
+            // occurrence, so more identifiers than captured value tokens means at least one '-p' was
+            // supplied without its argument. Handling it here lets --json callers get structured JSON.
+            if (parseResult.GetResult(PropertyOption) is OptionResult propertyResult &&
+                propertyResult.IdentifierTokenCount > propertyResult.Tokens.Count)
+            {
+                return Fail("A --property/-p option was provided without a value. Expected Name=Value (for example: -p WindowsPackageType=None).", isJson);
+            }
 
             // Collect passthrough args from the token stream.
             // With a ZeroOrMore positional argument, System.CommandLine absorbs ALL extra
@@ -199,6 +284,29 @@ internal partial class RunCommand : Command, IShortDescription
                 return 1;
             }
 
+            // Resolve the effective input path now that the passthrough split is known.
+            // ZeroOrOne input + a trailing ZeroOrMore passthrough means the parser binds the
+            // FIRST positional token to input even when it appears after '--' (e.g.
+            // `winapp run -- --flag`). SplitPassthroughTokens returns the RAW post-'--' tokens
+            // (passthroughArgs) independent of that binding, so when input "stole" the first
+            // post-'--' token, passthrough absorbed one fewer token than actually followed '--'.
+            // In that case (or when no positional was supplied at all) default to the current
+            // directory and let ResolveInputAsync decide project-vs-folder mode from cwd (matches
+            // `dotnet run`). The stolen token still reaches the app because passthroughArgs is raw.
+            var inputStolenFromPassthrough = allAbsorbed.Length < passthroughArgs.Count;
+            var inputFsi = (inputArg is null || inputStolenFromPassthrough)
+                ? currentDirectoryProvider.GetCurrentDirectoryInfo()
+                : inputArg;
+
+            // Preserve the pre-existing "path must exist" guarantee. The input argument no
+            // longer uses AcceptExistingOnly (that validator hard-errors on the stolen post-'--'
+            // token above, bypassing the --json envelope), so validate a genuinely-provided path
+            // here instead. Defaulted/stolen inputs resolve to the current directory and are skipped.
+            if (inputArg is not null && !inputStolenFromPassthrough && !inputArg.Exists)
+            {
+                return Fail($"'{inputArg.FullName}' does not exist.", isJson);
+            }
+
             // Merge '--args' value with any tokens collected after '--'.
             var passthroughStr = WindowsCommandLine.JoinArguments(passthroughArgs);
             if (passthroughStr != null)
@@ -206,65 +314,51 @@ internal partial class RunCommand : Command, IShortDescription
                 appArgs = string.IsNullOrEmpty(appArgs) ? passthroughStr : $"{appArgs} {passthroughStr}";
             }
 
-            // Validate mutually exclusive options
+            // Validate mutually exclusive options. Route through Fail so that under --json these
+            // emit the structured error envelope instead of a plain-text banner (Change 2 / L5).
             if (withAlias && noLaunch)
             {
-                logger.LogError("{UISymbol} --with-alias and --no-launch cannot be used together.", UiSymbols.Error);
-                return 1;
+                return Fail("--with-alias and --no-launch cannot be used together.", isJson);
             }
 
             if (debugOutput && noLaunch)
             {
-                logger.LogError("{UISymbol} --debug-output and --no-launch cannot be used together.", UiSymbols.Error);
-                return 1;
+                return Fail("--debug-output and --no-launch cannot be used together.", isJson);
             }
 
             if (isJson && debugOutput)
             {
-                const string msg = "--json and --debug-output cannot be used together.";
-                logger.LogError("{UISymbol} {Message}", UiSymbols.Error, msg);
-
-                // In --json mode the logger above is suppressed (LogLevel.None), so users would
-                // otherwise see only an empty stdout and exit code 1. Emit a structured error so
-                // machine-readable callers can surface a useful message.
-                PrintJson(aumid: null, processId: null, errorMessage: msg);
-                return 1;
+                return Fail("--json and --debug-output cannot be used together.", isJson);
             }
 
             if (isJson && withAlias)
             {
-                logger.LogError("{UISymbol} --json and --with-alias cannot be used together.", UiSymbols.Error);
-                return 1;
+                return Fail("--json and --with-alias cannot be used together.", isJson);
             }
 
             if (unregisterOnExit && noLaunch)
             {
-                logger.LogError("{UISymbol} --unregister-on-exit and --no-launch cannot be used together.", UiSymbols.Error);
-                return 1;
+                return Fail("--unregister-on-exit and --no-launch cannot be used together.", isJson);
             }
 
             if (detach && noLaunch)
             {
-                logger.LogError("{UISymbol} --detach and --no-launch cannot be used together.", UiSymbols.Error);
-                return 1;
+                return Fail("--detach and --no-launch cannot be used together.", isJson);
             }
 
             if (detach && debugOutput)
             {
-                logger.LogError("{UISymbol} --detach and --debug-output cannot be used together.", UiSymbols.Error);
-                return 1;
+                return Fail("--detach and --debug-output cannot be used together.", isJson);
             }
 
             if (detach && withAlias)
             {
-                logger.LogError("{UISymbol} --detach and --with-alias cannot be used together.", UiSymbols.Error);
-                return 1;
+                return Fail("--detach and --with-alias cannot be used together.", isJson);
             }
 
             if (detach && unregisterOnExit)
             {
-                logger.LogError("{UISymbol} --detach and --unregister-on-exit cannot be used together.", UiSymbols.Error);
-                return 1;
+                return Fail("--detach and --unregister-on-exit cannot be used together.", isJson);
             }
 
             // --symbols only affects the stowed-exception triage that runs under --debug-output.
@@ -274,18 +368,122 @@ internal partial class RunCommand : Command, IShortDescription
                 logger.LogWarning("{UISymbol} --symbols has no effect without --debug-output; ignoring.", UiSymbols.Warning);
             }
 
-            // Validate the input folder path early so the command fails fast with a clear
+            // Validate the input path early so the command fails fast with a clear
             // long-path message before any file system operations are attempted.
             try
             {
-                LongPathHelper.ValidatePathLength(inputFolder.FullName);
+                LongPathHelper.ValidatePathLength(inputFsi.FullName);
             }
             catch (InvalidOperationException ex)
             {
-                logger.LogError("{UISymbol} {Message}", UiSymbols.Error, ex.Message);
-                return 1;
+                // Route through Fail so this run-local validation emits the structured error
+                // envelope under --json instead of a suppressed-logger silent exit (Change 2 / L5).
+                // Non-json output is unchanged (Fail's log call is identical to the prior line).
+                return Fail(ex.Message, isJson);
             }
 
+            // Route folder mode (existing, unchanged behavior) vs project mode (build a .csproj).
+            // Project mode is keyed on the input pointing at / containing a top-level buildable .csproj.
+            RunInputResolution inputResolution;
+            try
+            {
+                var projectSelector = parseResult.GetValue(ProjectOption);
+                // Classify candidates (multi-.csproj / solution) under the SAME effective build inputs
+                // the subsequent build uses, so a project whose OutputType/test markers are conditional
+                // on Configuration/arch/TFM/user -p is picked the way it will build (e.g.
+                // `winapp run App.sln -c Release` must not select a Debug-only app then build Release).
+                var classificationInputs = BuildClassificationInputs(parseResult);
+
+                // Input resolution runs BEFORE the first `🔎` context line, and for a directory /
+                // solution / multi-project input it spawns silent MSBuild classification evaluates that
+                // can take a couple of seconds (several on a large solution like AI Dev Gallery) — long
+                // enough that the command looks hung with nothing on screen. On a real interactive
+                // terminal, animate a spinner around it so liveness shows immediately (~150 ms) instead
+                // of a dead gap. Skipped under --verbose (Debug) so any phase traces render plainly, and
+                // under --json/--quiet/agent/CI/redirected (ShouldUseLiveSpinner == false), where it runs
+                // exactly as before with no status output.
+                if (ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger) && !logger.IsEnabled(LogLevel.Debug))
+                {
+                    inputResolution = await ansiConsole.Status()
+                        .AutoRefresh(true)
+                        .Spinner(Spinner.Known.Dots)
+                        .SpinnerStyle(Style.Parse("blue"))
+                        .StartAsync("Resolving project...", async _ =>
+                            await projectRunService.ResolveInputAsync(inputFsi, cancellationToken, projectSelector, classificationInputs));
+                }
+                else
+                {
+                    // No live spinner here (--verbose/--json/--quiet/agent/CI/redirected). Resolution can
+                    // still spawn many silent MSBuild classification evaluates for a large solution, so
+                    // announce it up front on the plain path — otherwise a redirected/CI run looks hung
+                    // with nothing on screen. Suppressed for --json (pure stdout) and --quiet (Info off).
+                    if (!isJson && logger.IsEnabled(LogLevel.Information))
+                    {
+                        logger.LogInformation("{UISymbol} Resolving project...", UiSymbols.Search);
+                    }
+
+                    inputResolution = await projectRunService.ResolveInputAsync(inputFsi, cancellationToken, projectSelector, classificationInputs);
+                }
+            }
+            catch (ProjectRunException ex)
+            {
+                return Fail(ex.Message, isJson);
+            }
+
+            if (inputResolution.Mode == WinAppRunMode.Project)
+            {
+                return await RunProjectModeAsync(parseResult, inputResolution.Csproj!, inputResolution.Solution, inputResolution.SelectionReason, appArgs, isJson, cancellationToken);
+            }
+
+            // Folder mode: the FileSystemInfo converter yields a DirectoryInfo for an existing
+            // directory. Delegate to the shared pipeline with no project-mode runtime hints, so
+            // behavior is identical to before project mode existed.
+            var inputFolder = inputResolution.ProjectDirectory;
+
+            // Breadcrumb: we reached folder mode because no top-level .csproj/.sln/.slnx with a runnable
+            // app was found, so the path is treated as a pre-built layout (nothing is built). Without
+            // this, a user who pointed at a source directory expecting a build only sees a later
+            // "manifest not found" and can't tell why nothing built. Only meaningful when the input was a
+            // directory; suppressed for --json (pure stdout) and --quiet (Info off).
+            if (!isJson && inputFsi is DirectoryInfo && logger.IsEnabled(LogLevel.Information))
+            {
+                ansiConsole.MarkupLineInterpolated(
+                    $"{UiSymbols.Search} No .csproj/.sln/.slnx with a runnable app found in '{inputFolder.FullName}' — running it as a build-output folder.");
+            }
+
+            return await ExecuteRunPipelineAsync(
+                inputFolder, manifest, outputAppXDirectory, appArgs,
+                noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, isJson,
+                runtimeArch: null, projectFile: null, framework: null, noRestore: false, cancellationToken);
+        }
+
+        /// <summary>
+        /// The shared "run a loose layout" pipeline: resolve the manifest, create + register the
+        /// debug identity, launch (AUMID or execution alias), and wait/detach as requested. Folder
+        /// mode calls this directly; packaged project mode calls it with the build's TargetDir as
+        /// <paramref name="inputFolder"/> plus the resolved <paramref name="runtimeArch"/> and
+        /// <paramref name="projectFile"/> so the correct-arch Windows App Runtime is installed.
+        /// </summary>
+        internal async Task<int> ExecuteRunPipelineAsync(
+            DirectoryInfo inputFolder,
+            FileInfo? manifest,
+            DirectoryInfo? outputAppXDirectory,
+            string? appArgs,
+            bool noLaunch,
+            bool withAlias,
+            bool debugOutput,
+            bool unregisterOnExit,
+            bool detach,
+            bool clean,
+            bool useSymbols,
+            string? executable,
+            bool isJson,
+            string? runtimeArch,
+            FileInfo? projectFile,
+            string? framework,
+            bool noRestore,
+            CancellationToken cancellationToken)
+        {
             uint processId = 0;
             string? packageFamilyName = null;
             string? packageFullName = null;
@@ -304,6 +502,13 @@ internal partial class RunCommand : Command, IShortDescription
                     FileInfo resolvedManifest;
                     if (manifest != null)
                     {
+                        // --manifest no longer uses AcceptExistingOnly (that parser validator hard-errors
+                        // before the --json envelope and the packaging-mode gate); validate existence here.
+                        if (!manifest.Exists)
+                        {
+                            throw new FileNotFoundException($"Manifest file not found: {manifest.FullName}");
+                        }
+
                         resolvedManifest = manifest;
                         taskContext.AddDebugMessage($"{UiSymbols.Note} Using specified manifest: {resolvedManifest}");
                     }
@@ -347,6 +552,10 @@ internal partial class RunCommand : Command, IShortDescription
                         taskContext,
                         clean,
                         executable,
+                        runtimeArch,
+                        projectFile,
+                        framework,
+                        noRestore,
                         cancellationToken);
 
                     packageFamilyName = appLauncherService.ComputePackageFamilyName(
@@ -412,6 +621,12 @@ internal partial class RunCommand : Command, IShortDescription
                 if (isJson)
                 {
                     PrintJson(aumid, processId, errorMessage: null);
+                }
+                else
+                {
+                    // Surface the launched PID for automation, consistent with the unpackaged
+                    // project-mode detach path (Change 3 / L6).
+                    ansiConsole.WriteLine(processId.ToString());
                 }
                 return 0;
             }
@@ -498,7 +713,13 @@ internal partial class RunCommand : Command, IShortDescription
             };
 
             var json = JsonSerializer.Serialize(result, RunCommandJsonContext.Default.RunCommandResult);
-            ansiConsole.WriteLine(json);
+
+            // Write the machine-readable payload straight to the underlying stdout writer rather than
+            // ansiConsole.WriteLine, which renders through Spectre's word-wrapping layer and injects raw
+            // CR/LF *inside* the JSON string values once a message exceeds the (redirected) console width
+            // (~80 cols) — corrupting the payload so strict parsers (JsonDocument.Parse) reject it. This
+            // mirrors how the other JSON-emitting commands (cert/ui) write their output.
+            ansiConsole.Profile.Out.Writer.WriteLine(json);
         }
 
         private static FileInfo FindManifest(string directory) => ManifestHelper.FindManifest(directory);
