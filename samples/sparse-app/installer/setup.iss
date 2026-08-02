@@ -102,13 +102,13 @@ end;
 { Builds the full powershell.exe argument string for registering the sparse package,
   escaping the runtime-resolved install directory so it cannot break out of the literal.
   Registration is attempted directly FIRST: a fresh install or a version-bumped upgrade
-  registers/updates in place without disturbing any existing registration. Only if that add
-  fails (e.g. the fixed 1.0.0.0 identity is already registered from a previous same-version
-  install, which Add-AppxPackage rejects) do we unregister the existing package and retry.
-  This keeps the common upgrade path non-destructive — a working prior registration is only
-  removed when a plain add has already proven it can't proceed. Add-AppxPackage runs with
-  -ErrorAction Stop inside try/catch so any real failure produces a nonzero process exit code,
-  which the caller inspects to abort the install. }
+  registers/updates in place without disturbing any existing registration. The unregister+retry
+  path fires ONLY for the one failure it can safely fix — the fixed 1.0.0.0 identity is already
+  registered from a previous same-version install (HRESULT 0x80073CFB, ERROR_PACKAGE_ALREADY_EXISTS,
+  which Add-AppxPackage rejects). Any OTHER failure (untrusted/corrupt .msix, unsupported OS, ...)
+  is re-thrown WITHOUT unregistering, so a bad new package can never strip a working prior
+  registration of its identity. Add-AppxPackage runs with -ErrorAction Stop inside try/catch so any
+  real failure produces a nonzero process exit code, which the caller inspects to abort the install. }
 function RegisterParams(Param: string): string;
 var
   AppDir: string;
@@ -119,7 +119,8 @@ begin
   Result :=
     '-NoProfile -ExecutionPolicy Bypass -Command "try { ' +
     'try { Add-AppxPackage -Path ''' + MsixPath + ''' -ExternalLocation ''' + EscapePSLiteral(AppDir) + ''' -ErrorAction Stop } ' +
-    'catch { Get-AppxPackage -Name ''' + EscapePSLiteral('{#MyPackageName}') + ''' | Remove-AppxPackage -ErrorAction SilentlyContinue; ' +
+    'catch { if ($_.Exception.HResult -ne 0x80073CFB) { throw }; ' +
+    'Get-AppxPackage -Name ''' + EscapePSLiteral('{#MyPackageName}') + ''' | Remove-AppxPackage -ErrorAction SilentlyContinue; ' +
     'Add-AppxPackage -Path ''' + MsixPath + ''' -ExternalLocation ''' + EscapePSLiteral(AppDir) + ''' -ErrorAction Stop } ' +
     '} catch { Write-Error $_; exit 1 }"';
 end;
@@ -129,8 +130,9 @@ end;
   RaiseException here makes Setup roll back exactly the files this run installed (it does NOT touch
   a pre-existing install directory from an earlier install, and it does not run at ssPostInstall
   where rollback is already unavailable). Registration is idempotent and non-destructive on
-  upgrades: a fresh add is tried first, and an existing same-name registration is only removed if
-  that add fails. }
+  upgrades: a fresh add is tried first, and an existing same-name registration is only removed for
+  a same-version reinstall conflict (HRESULT 0x80073CFB); any other add failure aborts without
+  unregistering. }
 procedure RegisterSparsePackage;
 var
   ResultCode: Integer;

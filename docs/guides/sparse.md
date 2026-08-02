@@ -200,13 +200,17 @@ try {
   # Add-AppxPackage emits NON-terminating errors by default, so a failure would otherwise leave
   # the process exit code at 0 and let the installer complete without identity. Try the add
   # directly first: a fresh install or a version-bumped upgrade registers/updates in place
-  # without touching any existing registration. Only if that fails (e.g. the same version is
-  # already registered, which Add-AppxPackage rejects) unregister and retry — so a working prior
-  # registration is never removed on an upgrade that would have succeeded. -ErrorAction Stop + the
-  # trap make a real failure terminating so the installer (WiX Return="check" / NSIS) sees it.
+  # without touching any existing registration. -ErrorAction Stop + the outer trap make a real
+  # failure terminating so the installer (WiX Return="check" / NSIS) sees it.
   try {
     Add-AppxPackage -Path $MsixPath -ExternalLocation $ExternalLocation -ErrorAction Stop
   } catch {
+    # Only ONE failure is safe to resolve by unregister+retry: the exact same version is already
+    # registered (HRESULT 0x80073CFB, ERROR_PACKAGE_ALREADY_EXISTS — "already installed,
+    # reinstallation blocked"), which Add-AppxPackage rejects. Re-throw everything else
+    # (untrusted/corrupt .msix, unsupported OS, ...) so a bad new package can NEVER unregister a
+    # working prior registration and strip the installed app of the identity it already had.
+    if ($_.Exception.HResult -ne 0x80073CFB) { throw }
     Get-AppxPackage -Name $PackageName | Remove-AppxPackage -ErrorAction SilentlyContinue
     Add-AppxPackage -Path $MsixPath -ExternalLocation $ExternalLocation -ErrorAction Stop
   }
