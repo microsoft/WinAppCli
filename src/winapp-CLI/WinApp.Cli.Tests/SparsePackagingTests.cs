@@ -652,6 +652,69 @@ public class SparsePackagingTests : BaseCommandTests
         Assert.AreEqual("1.2.0.0", ManifestService.NormalizeManifestVersion("1.2 beta"));
     }
 
+    // A sparse manifest as produced by an older template / hand-edit: RuntimeBehavior is the
+    // incorrect "packagedClassicApp", the Identity has no ProcessorArchitecture, the
+    // TargetDeviceFamily MinVersion predates the 10.0.19041.0 AllowExternalContent requires, and a
+    // stray EntryPoint is present.
+    private const string StaleSparseManifest = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                 xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+                 IgnorableNamespaces="uap10">
+          <Identity Name="SparsePkg" Publisher="CN=TestPublisher" Version="1.0.0.0" />
+          <Properties>
+            <DisplayName>SparsePkg</DisplayName>
+            <PublisherDisplayName>Test</PublisherDisplayName>
+            <Logo>Assets\StoreLogo.png</Logo>
+            <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
+          </Properties>
+          <Dependencies>
+            <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.18362.0" MaxVersionTested="10.0.19041.0" />
+          </Dependencies>
+          <Applications>
+            <Application Id="SparsePkg" Executable="app.exe" EntryPoint="app.exe" uap10:RuntimeBehavior="packagedClassicApp" />
+          </Applications>
+        </Package>
+        """;
+
+    [TestMethod]
+    public void NormalizeSparseIdentityManifest_StaleManifest_CorrectsFields()
+    {
+        var result = MsixService.NormalizeSparseIdentityManifest(StaleSparseManifest, out var corrections);
+        var doc = XDocument.Parse(result);
+        XNamespace ns = "http://schemas.microsoft.com/appx/manifest/foundation/windows10";
+        XNamespace uap10 = "http://schemas.microsoft.com/appx/manifest/uap/windows10/10";
+
+        var app = doc.Root!.Element(ns + "Applications")!.Element(ns + "Application")!;
+        Assert.AreEqual("win32App", app.Attribute(uap10 + "RuntimeBehavior")?.Value, "RuntimeBehavior should be corrected");
+        Assert.AreEqual("mediumIL", app.Attribute(uap10 + "TrustLevel")?.Value, "TrustLevel should be set");
+        Assert.IsNull(app.Attribute("EntryPoint"), "EntryPoint should be removed");
+
+        var identity = doc.Root!.Element(ns + "Identity")!;
+        Assert.AreEqual("neutral", identity.Attribute("ProcessorArchitecture")?.Value, "Missing ProcessorArchitecture should default to neutral");
+
+        var tdf = doc.Root!.Element(ns + "Dependencies")!.Element(ns + "TargetDeviceFamily")!;
+        Assert.AreEqual("10.0.19041.0", tdf.Attribute("MinVersion")?.Value, "MinVersion below the floor should be raised");
+
+        Assert.IsFalse(corrections.Count == 0, "Corrections should be reported for a stale manifest");
+    }
+
+    [TestMethod]
+    public void NormalizeSparseIdentityManifest_CorrectManifest_IsNoOp()
+    {
+        var result = MsixService.NormalizeSparseIdentityManifest(MinimalSparseManifest, out var corrections);
+        var doc = XDocument.Parse(result);
+        XNamespace ns = "http://schemas.microsoft.com/appx/manifest/foundation/windows10";
+        XNamespace uap10 = "http://schemas.microsoft.com/appx/manifest/uap/windows10/10";
+
+        var app = doc.Root!.Element(ns + "Applications")!.Element(ns + "Application")!;
+        Assert.AreEqual("win32App", app.Attribute(uap10 + "RuntimeBehavior")?.Value);
+        Assert.AreEqual("mediumIL", app.Attribute(uap10 + "TrustLevel")?.Value);
+        Assert.AreEqual("neutral", doc.Root!.Element(ns + "Identity")!.Attribute("ProcessorArchitecture")?.Value);
+
+        Assert.IsEmpty(corrections, "An already-correct manifest should produce no corrections");
+    }
+
     [TestMethod]
     public void GetSparseFolderContentWarnings_SparseManifest_WarnsOnAssetsAndBinaries()
     {
