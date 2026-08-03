@@ -1024,7 +1024,7 @@ The corpus is fetched from GitHub on first use and cached per-user under `<globa
 winapp find-ui "tabbed layout"
 
 # Restrict to the Windows Community Toolkit
-winapp find-ui "swipeable list rows" --source toolkit
+winapp find-ui "settings card" --source toolkit
 
 # Restrict to Reactor (opt-in; C#-only declarative WinUI — Reactor projects only)
 winapp find-ui "flex layout" --source reactor

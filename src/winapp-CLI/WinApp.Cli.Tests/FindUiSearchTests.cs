@@ -239,4 +239,70 @@ public class FindUiSearchTests
         Assert.AreEqual("reactor", ProviderRegistry.ForScenarioId("reactor-flex-1")?.Id);
         Assert.IsNull(ProviderRegistry.ForScenarioId("core-navview"));
     }
+
+    /// <summary>
+    /// Corpus for the adjectival-intent tests. Tags mirror the shipped
+    /// <c>gallery-tags.json</c> entries verbatim, because the bug this guards against
+    /// only reproduces with the real tag distribution: SwipeControl's tags carry
+    /// neither "list" nor "rows", while ListView's carry both.
+    /// </summary>
+    private static SearchEngine BuildSwipeEngine() => new(
+        [
+            Scn("gallery", "swipecontrol", "SwipeControl", "swipecontrol-3", "Custom Swipe in a ListView", "Touch gesture for quick menu actions on items."),
+            Scn("gallery", "swipecontrol", "SwipeControl", "swipecontrol-1", "Swipe right to reveal actions", "Touch gesture for quick menu actions on items."),
+            Scn("gallery", "listview", "ListView", "listview-1", "Basic ListView with Simple DataTemplate", "Presents a collection of items in a vertical list."),
+        ],
+        corePatterns: [],
+        enrichmentTags: new()
+        {
+            ["gallery:swipecontrol"] = ["swipecontrol", "swipe", "gesture", "reveal", "action", "delete", "touch", "quick", "menu", "actions"],
+            ["gallery:listview"] = ["listview", "list", "scroll", "select", "virtualized", "data", "collection", "vertical", "table", "columns", "column", "sort", "sorting", "editable", "datagrid", "rows", "details"],
+        },
+        curatedKeywords: new());
+
+    [TestMethod]
+    public void SearchGrouped_AdvertisedSwipeableQuery_RanksSwipeControlFirst()
+    {
+        // "swipeable list rows" is advertised in docs/usage.md, the find-ui skill and
+        // the skill description, so it must actually work. It regressed three ways at
+        // once: the stemmer had no -able rule, so "swipeable" never reached the "swipe"
+        // tag; the coverage gate then zeroed SwipeControl for covering only 1 of the 3
+        // typed tokens; and ListView won on the incidental "list"/"rows" tags.
+        var groups = BuildSwipeEngine().SearchGrouped("swipeable list rows", maxControls: 5);
+        Assert.IsTrue(groups.Count > 0, "the advertised query must return matches");
+        Assert.AreEqual("SwipeControl", groups[0].ControlName, "SwipeControl must outrank ListView");
+    }
+
+    [TestMethod]
+    public void SearchGrouped_AdjectivalIntent_SurvivesCoverageGate()
+    {
+        // Same intent with no supporting nouns the other control shares. The coverage
+        // gate only applies at >= 3 typed tokens, so this pins the gate bypass itself
+        // rather than the ranking.
+        var groups = BuildSwipeEngine().SearchGrouped("swipeable rows of items", maxControls: 5);
+        Assert.IsTrue(groups.Any(g => g.ControlName == "SwipeControl"),
+            "a synonym that names a control must bypass the raw-token coverage gate");
+    }
+
+    [TestMethod]
+    public void Stem_AbleAndIbleSuffixes_YieldVerbBase()
+    {
+        // Agents phrase intent adjectivally while the corpus indexes the verb.
+        CollectionAssert.Contains(Synonyms.Stem("swipeable").ToList(), "swipe");
+        CollectionAssert.Contains(Synonyms.Stem("scrollable").ToList(), "scroll");
+        CollectionAssert.Contains(Synonyms.Stem("resizable").ToList(), "resize");
+        CollectionAssert.Contains(Synonyms.Stem("collapsible").ToList(), "collapse");
+        CollectionAssert.Contains(Synonyms.Stem("draggable").ToList(), "drag");
+    }
+
+    [TestMethod]
+    public void Stem_ShortAbleWords_AreNotStripped()
+    {
+        // "table", "enable", "usable", "visible" and "disable" are whole words, not
+        // inflections — stripping them would inject junk tokens into every query.
+        foreach (var w in new[] { "table", "enable", "usable", "visible", "disable" })
+        {
+            Assert.AreEqual(0, Synonyms.Stem(w).Count(), $"'{w}' must not be suffix-stripped");
+        }
+    }
 }

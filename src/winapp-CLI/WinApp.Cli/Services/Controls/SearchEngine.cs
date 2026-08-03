@@ -224,8 +224,9 @@ internal sealed class SearchEngine
             var controlLower = controlName.ToLowerInvariant();
             var controlCompact = CompactQuery(controlName);
 
-            // Whole-word match on control name (existing boost)
-            if (controlLower.Length > 2 && queryWords.Any(w => w == controlLower))
+            // Whole-word match on control name (existing boost). Matched against the
+            // synonym-expanded words, not just the typed ones — see SearchGrouped.
+            if (controlLower.Length > 2 && expandedWords.Any(w => w == controlLower))
                 s *= 2.0;
 
             // Compound-name match — but only the LONGEST match wins big.
@@ -428,7 +429,16 @@ internal sealed class SearchEngine
                 }
             }
 
-            if (controlLower.Length > 2 && queryWords.Any(w => w == controlLower))
+            // Exact control-name match. Checked against the synonym-expanded words rather
+            // than only the typed ones: the whole point of Synonyms.Map is that "snackbar",
+            // "modal" or "swipeable" names a WinUI control as surely as typing "InfoBar",
+            // "ContentDialog" or "SwipeControl" does, so those queries should earn the
+            // coverage-gate bypass below too. Without this, an intent word that maps to a
+            // control still loses to a control that merely shares the supporting nouns
+            // ("swipeable list rows" → ListView, because SwipeControl's tags carry neither
+            // "list" nor "rows"). Expansion only ever adds control names, so this widens
+            // what counts as naming a control without loosening the gate itself.
+            if (controlLower.Length > 2 && expandedWords.Any(w => w == controlLower))
             {
                 s *= 2.0;
                 hasNameBoost = true;

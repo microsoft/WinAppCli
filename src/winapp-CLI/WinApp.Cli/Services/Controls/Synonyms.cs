@@ -98,8 +98,10 @@ internal static class Synonyms
     /// <summary>
     /// Algorithmic suffix-stripping stemmer for query words. Yields candidate base
     /// forms (without removing the original token from the query). Handles -s, -ed,
-    /// and -ing inflections including doubled-consonant cases (dropped → drop,
-    /// dragging → drag) and silent-e cases (closing → close, themed → theme).
+    /// -ing, and -able/-ible inflections including doubled-consonant cases (dropped →
+    /// drop, dragging → drag) and silent-e cases (closing → close, themed → theme).
+    /// The -able/-ible rule matters because agents describe intent adjectivally
+    /// ("swipeable rows", "resizable panes") while the corpus indexes the verb.
     ///
     /// We emit multiple candidates per word to avoid false stems (e.g. "scrolled"
     /// stems to BOTH "scroll" and "scrol" — the wrong one matches nothing in the
@@ -124,6 +126,15 @@ internal static class Synonyms
             yield return b;
             yield return word[..^1];             // themed → theme
             if (b.Length >= 2 && b[^1] == b[^2]) // dropped → dropp → drop
+                yield return b[..^1];
+        }
+        else if (word.Length > 7
+                 && (word.EndsWith("able", StringComparison.Ordinal) || word.EndsWith("ible", StringComparison.Ordinal)))
+        {
+            var b = word[..^4];                  // swipeable → swipe, scrollable → scroll
+            yield return b;
+            yield return b + "e";                // resizable → resize, collapsible → collapse
+            if (b.Length >= 2 && b[^1] == b[^2]) // draggable → dragg → drag
                 yield return b[..^1];
         }
         else if (word.Length > 3 && word.EndsWith("s", StringComparison.Ordinal)
@@ -264,6 +275,9 @@ internal static class Synonyms
         ["scrollview"]      = ["scrollviewer"],
         ["lazy"]            = ["listview", "itemsrepeater"],
         ["infinite"]        = ["incrementalloadingcollection"],
+
+        // ─── Gestures ───
+        ["swipe"]           = ["swipecontrol", "swipeitem"],
 
         // ─── Tree / hierarchy ───
         ["folder"]          = ["treeview"],
