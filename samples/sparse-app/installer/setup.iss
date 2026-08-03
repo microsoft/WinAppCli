@@ -119,7 +119,7 @@ begin
   Result :=
     '-NoProfile -ExecutionPolicy Bypass -Command "try { ' +
     'try { Add-AppxPackage -Path ''' + MsixPath + ''' -ExternalLocation ''' + EscapePSLiteral(AppDir) + ''' -ErrorAction Stop } ' +
-    'catch { if ($_.Exception.HResult -ne 0x80073CFB) { throw }; ' +
+'catch { if (-not $_.Exception.InnerException -or $_.Exception.InnerException.HResult -ne 0x80073CFB) { throw }; ' +
     'Get-AppxPackage -Name ''' + EscapePSLiteral('{#MyPackageName}') + ''' | Remove-AppxPackage -ErrorAction SilentlyContinue; ' +
     'Add-AppxPackage -Path ''' + MsixPath + ''' -ExternalLocation ''' + EscapePSLiteral(AppDir) + ''' -ErrorAction Stop } ' +
     '} catch { Write-Error $_; exit 1 }"';
