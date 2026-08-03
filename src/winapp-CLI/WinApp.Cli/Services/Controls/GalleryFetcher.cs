@@ -493,7 +493,10 @@ internal static partial class GalleryFetcher
         return string.IsNullOrWhiteSpace(code) ? null : code;
     }
 
-    private static string CleanGalleryContent(string code)
+    /// <summary>Strip Gallery-internal namespaces/types and demo-only layout attributes so the
+    /// snippet pastes into a user's app. Internal for direct testing, mirroring
+    /// <see cref="ToolkitFetcher.CleanXaml"/>.</summary>
+    internal static string CleanGalleryContent(string code)
     {
         code = SampleMediaRegex().Replace(code, "ms-appx:///Assets/YourImage.png");
         code = GalleryClassRegex().Replace(code, @"x:Class=""YourApp.YourPage""");
@@ -505,7 +508,16 @@ internal static partial class GalleryFetcher
         code = Regex.Replace(code, @"namespace AppUIBasics[^{;\n]*;?", "namespace YourApp;");
         code = Regex.Replace(code, @".*NavigationHelper.*\n?", "");
 
-        // Clean demo-specific layout attributes (fixed sizes, negative margins, demo handlers).
+        // Demo `Loaded="X_Loaded"` handlers must go before the line filter below: unlike
+        // the fixed sizes and negative margins, this one usually sits INLINE inside a tag
+        // ("<TabView TabCloseRequested=... Loaded="TabView_Loaded" />"), where the filter's
+        // markup guard would keep it. The Gallery's code-behind extractor never surfaces
+        // the *_Loaded method, so leaving the attribute emits XAML referencing a handler
+        // the snippet doesn't define — which fails to compile when pasted. Consuming the
+        // leading whitespace also removes the line break when it does sit on its own line.
+        code = Regex.Replace(code, @"\s+Loaded=""[^""]*_Loaded""", "");
+
+        // Clean demo-specific layout attributes (fixed sizes, negative margins).
         // Only drop an attribute that sits on its OWN continuation line (no '<' or '>'), so we
         // never delete a line that also carries the tag's closing '>' or other markup — which
         // would corrupt multi-line open tags in the new SampleDefinition format
@@ -516,7 +528,6 @@ internal static partial class GalleryFetcher
             if (trimmed.IndexOf('<') >= 0 || trimmed.IndexOf('>') >= 0) return true;
             if (Regex.IsMatch(trimmed, @"^(Min|Max)?(Height|Width)=""\d")) return false;
             if (Regex.IsMatch(trimmed, @"^Margin=""-")) return false;
-            if (Regex.IsMatch(trimmed, @"^Loaded=""[^""]*_Loaded""")) return false;
             if (Regex.IsMatch(trimmed, @"^SelectedIndex=""\d+""")) return false;
             return true;
         });
