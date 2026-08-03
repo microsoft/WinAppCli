@@ -958,6 +958,15 @@ internal partial class MsixService(
                 doc.EnsureCapability("unvirtualizedResources", AppxManifestDocument.RescapNs);
                 doc.EnsureCapability("allowElevation", AppxManifestDocument.RescapNs);
             }
+
+            // Raise any TargetDeviceFamily MinVersion below the AllowExternalContent floor
+            // (10.0.19041.0). A folder created from an older sparse template keeps 10.0.18362.0;
+            // MakeAppx /nv would pack (and sign) it, but deployment rejects a sparse package below
+            // 19041. Apply the same floor the manifest-file path enforces.
+            foreach (var correction in RaiseSparseTargetDeviceFamilyMinVersion(doc))
+            {
+                taskContext.AddStatusMessage($"{UiSymbols.Info} Normalized sparse manifest: {correction}");
+            }
         }
 
         // Convert to string for remaining string-based operations

@@ -165,24 +165,47 @@ internal partial class MsixService
         }
 
         // AllowExternalContent requires Windows 10 2004 (10.0.19041.0); raise any lower MinVersion.
-        var minFloor = new Version(10, 0, 19041, 0);
-        var dependencies = doc.Document.Root?.Element(AppxManifestDocument.DefaultNs + "Dependencies");
-        if (dependencies != null)
-        {
-            foreach (var tdf in dependencies.Elements(AppxManifestDocument.DefaultNs + "TargetDeviceFamily"))
-            {
-                var minValue = tdf.Attribute("MinVersion")?.Value;
-                if (Version.TryParse(minValue, out var current) && current < minFloor)
-                {
-                    tdf.SetAttributeValue("MinVersion", "10.0.19041.0");
-                    var familyName = tdf.Attribute("Name")?.Value ?? "TargetDeviceFamily";
-                    messages.Add($"raised {familyName} MinVersion '{minValue}' to '10.0.19041.0'");
-                }
-            }
-        }
+        messages.AddRange(RaiseSparseTargetDeviceFamilyMinVersion(doc));
 
         corrections = messages;
         return doc.ToXml();
+    }
+
+    /// <summary>
+    /// The minimum OS version a sparse (<c>AllowExternalContent</c>) package supports. Windows 10
+    /// 2004 (build 19041) is the first release that honors external content, so any lower
+    /// TargetDeviceFamily MinVersion produces a package that packs under MakeAppx /nv yet is
+    /// rejected at deployment.
+    /// </summary>
+    internal const string SparseMinVersion = "10.0.19041.0";
+
+    /// <summary>
+    /// Raises any <c>TargetDeviceFamily/@MinVersion</c> below <see cref="SparseMinVersion"/> to that
+    /// floor, returning a human-readable description of each change made. Shared by the manifest-file
+    /// normalization path and the folder-packing sparse rewrite so both enforce the same floor.
+    /// </summary>
+    private static List<string> RaiseSparseTargetDeviceFamilyMinVersion(AppxManifestDocument doc)
+    {
+        var messages = new List<string>();
+        var minFloor = new Version(10, 0, 19041, 0);
+        var dependencies = doc.Document.Root?.Element(AppxManifestDocument.DefaultNs + "Dependencies");
+        if (dependencies == null)
+        {
+            return messages;
+        }
+
+        foreach (var tdf in dependencies.Elements(AppxManifestDocument.DefaultNs + "TargetDeviceFamily"))
+        {
+            var minValue = tdf.Attribute("MinVersion")?.Value;
+            if (Version.TryParse(minValue, out var current) && current < minFloor)
+            {
+                tdf.SetAttributeValue("MinVersion", SparseMinVersion);
+                var familyName = tdf.Attribute("Name")?.Value ?? "TargetDeviceFamily";
+                messages.Add($"raised {familyName} MinVersion '{minValue}' to '{SparseMinVersion}'");
+            }
+        }
+
+        return messages;
     }
 
     public async Task<CreateMsixPackageResult> CreateSparseIdentityPackageAsync(

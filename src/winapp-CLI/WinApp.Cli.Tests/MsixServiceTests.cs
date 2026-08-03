@@ -1242,6 +1242,37 @@ public class MsixServiceTests
         StringAssert.Contains(result, "uap10:TrustLevel=\"mediumIL\"");
     }
 
+    [TestMethod]
+    public async Task UpdateAppxManifestContentAsync_Sparse_FolderInput_RaisesMinVersionFloor()
+    {
+        // Arrange — a sparse folder created from an older template keeps MinVersion 10.0.18362.0.
+        // AllowExternalContent requires 10.0.19041.0, so the folder rewrite must raise it just as
+        // the manifest-file path does; otherwise MakeAppx /nv packs an MSIX deployment rejects.
+        var service = CreateMsixServiceForManifestRewriteTests();
+        var manifest = """
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                 xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10">
+    <Identity Name="TestApp" Publisher="CN=Test" Version="1.0.0.0" ProcessorArchitecture="neutral" />
+    <Properties>
+        <DisplayName>Test App</DisplayName>
+        <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
+    </Properties>
+    <Dependencies>
+        <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.18362.0" MaxVersionTested="10.0.19041.0" />
+    </Dependencies>
+    <Applications>
+        <Application Id="App" Executable="TestApp.exe" uap10:TrustLevel="mediumIL" uap10:RuntimeBehavior="win32App" />
+    </Applications>
+</Package>
+""";
+
+        var result = await InvokeUpdateAppxManifestContentAsync(service, manifest, entryPointPath: null, sparse: true);
+
+        StringAssert.Contains(result, "MinVersion=\"10.0.19041.0\"");
+        Assert.IsFalse(result.Contains("MinVersion=\"10.0.18362.0\""), "MinVersion below the AllowExternalContent floor must be raised for folder inputs");
+    }
+
     private MsixService CreateMsixServiceForManifestRewriteTests()
     {
         return new MsixService(
@@ -1281,7 +1312,7 @@ public class MsixServiceTests
             sparse,
             true,
             null,
-            null!,
+            CreateTestTaskContext(),
             CancellationToken.None
         ]) as dynamic;
 
