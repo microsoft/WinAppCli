@@ -616,15 +616,20 @@ function Get-MsixArtifact {
     param([string]$RepoName, [object[]]$Runs, [switch]$Quiet)
 
     foreach ($run in $Runs) {
+        # --paginate is load-bearing: the artifacts endpoint returns 30 per page, and a run that
+        # uploads more than that pushes msix-packages onto page 2, where an unpaginated query
+        # cannot see it. The symptom is indistinguishable from a run that genuinely never built a
+        # package -- the walk-back to an older run looks like it is working, and silently hands
+        # back a stale build. Do not remove this without checking .total_count on a busy run.
         $artifacts = Invoke-Gh @('api', "repos/$RepoName/actions/runs/$($run.id)/artifacts",
-            '--jq', '.artifacts')
+            '--paginate', '--jq', '.artifacts')
         $msix = $artifacts | Where-Object { $_.name -eq $ArtifactName -and -not $_.expired } |
             Select-Object -First 1
         if ($msix) {
             return [pscustomobject]@{ Run = $run; Artifact = $msix }
         }
         if (-not $Quiet) {
-            Write-Detail "Run $($run.id) has no usable $ArtifactName artifact, trying older run..."
+            Write-Detail "Run $($run.id) has no usable $ArtifactName artifact among its $(($artifacts | Measure-Object).Count), trying older run..."
         }
     }
     return $null
