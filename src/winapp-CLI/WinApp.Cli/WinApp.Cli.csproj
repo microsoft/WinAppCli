@@ -58,8 +58,6 @@
          from GitHub on first use and cached per-user. -->
     <EmbeddedResource Include="Services\Controls\Data\core-patterns.json" LogicalName="core-patterns.json" />
     <EmbeddedResource Include="Services\Controls\Data\gallery-tags.json" LogicalName="gallery-tags.json" />
-    <EmbeddedResource Include="Services\Controls\Data\toolkit-tags.json" LogicalName="toolkit-tags.json" />
-    <EmbeddedResource Include="Services\Controls\Data\toolkit-keywords.json" LogicalName="toolkit-keywords.json" />
   </ItemGroup>
 
   <ItemGroup>

@@ -11,9 +11,11 @@ using System.Text.Json;
 /// design the large Gallery/Toolkit scenario corpora are NOT embedded — they are
 /// fetched from GitHub on first use and cached per-user. Only lightweight,
 /// endpoint-less enrichment ships in the exe:
-///   • core-patterns.json  — curated foundational WinUI patterns (no upstream).
-///   • gallery-tags.json / toolkit-tags.json / toolkit-keywords.json — curated
-///     tag/keyword enrichment merged into fetched scenarios for BM25 scoring.
+///   • core-patterns.json — curated foundational WinUI patterns (no upstream).
+///   • gallery-tags.json  — curated tag enrichment merged into fetched Gallery
+///     scenarios for BM25 scoring. Gallery needs this because it can only derive
+///     tags from Title + Subtitle; the Toolkit derives richer tags AND keywords
+///     from its own md frontmatter, so it ships no embedded enrichment.
 /// </summary>
 internal static class DataLoader
 {
@@ -29,26 +31,5 @@ internal static class DataLoader
         using var stream = Assembly.GetExecutingAssembly()
             .GetManifestResourceStream("gallery-tags.json")!;
         return JsonSerializer.Deserialize(stream, ControlsJsonContext.Default.DictionaryStringStringArray)!;
-    }
-
-    public static Dictionary<string, string[]> LoadToolkitTags()
-    {
-        using var stream = Assembly.GetExecutingAssembly()
-            .GetManifestResourceStream("toolkit-tags.json")!;
-        return JsonSerializer.Deserialize(stream, ControlsJsonContext.Default.DictionaryStringStringArray)!;
-    }
-
-    /// <summary>Author-curated keywords from toolkit md frontmatter — short
-    /// list of high-quality intent terms scored at higher BM25 weight than
-    /// auto-extracted tags. Empty/missing → no extra signal.</summary>
-    public static Dictionary<string, string[]> LoadToolkitKeywords()
-    {
-        var stream = Assembly.GetExecutingAssembly()
-            .GetManifestResourceStream("toolkit-keywords.json");
-        if (stream == null) return new();
-        using (stream)
-        {
-            return JsonSerializer.Deserialize(stream, ControlsJsonContext.Default.DictionaryStringStringArray) ?? new();
-        }
     }
 }
