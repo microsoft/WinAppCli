@@ -14,11 +14,14 @@ using System.Xml;
 /// before the <see cref="SearchEngine"/> is built — so the console, <c>--json</c>,
 /// and cache-read paths are all covered by one call. It does three things:
 /// <list type="number">
-/// <item>Strips C0/C1 control characters (except tab/newline/carriage-return) from
-/// every emitted text field, so a booby-trapped upstream sample can't smuggle ANSI
-/// escape / OSC sequences to a terminal or into piped agent input. <c>Id</c> and
-/// <c>ControlId</c> are stripped harder still — tab/newline/CR go too, since an id is
-/// a lookup key echoed into output, <c>--json</c> and usage telemetry, never prose.</item>
+/// <item>Strips C0/C1 control characters from every emitted text field, so a
+/// booby-trapped upstream sample can't smuggle ANSI escape / OSC sequences to a
+/// terminal or into piped agent input. Only <c>Xaml</c> and <c>CSharp</c> keep
+/// tab/newline/CR — they are the sole fields rendered as multi-line blocks (inside a
+/// code fence). Every other field is emitted on a single line of the result markdown,
+/// so a line break in one would forge an extra output row; those collapse to a space
+/// (<see cref="StripLineControlChars(string?)"/>), and <c>Id</c>/<c>ControlId</c> drop
+/// them outright since an id is a lookup key, never prose.</item>
 /// <item>Drops XAML that is not well-formed rather than shipping broken markup an
 /// agent would paste and fail to compile — malformed truncation "repairs" and a
 /// small number of pre-existing upstream samples produce unparseable XAML.</item>
@@ -50,14 +53,17 @@ internal static partial class ScenarioSanitizer
         s.Id = StripIdControlChars(s.Id);
         s.ControlId = StripIdControlChars(s.ControlId);
 
-        s.HeaderText = StripControlChars(s.HeaderText) ?? "";
-        s.ControlName = StripControlChars(s.ControlName) ?? "";
-        s.ControlDescription = StripControlChars(s.ControlDescription);
-        s.Description = StripControlChars(s.Description);
-        s.NuGetPackage = StripControlChars(s.NuGetPackage);
-        s.ApiNamespace = StripControlChars(s.ApiNamespace);
-        s.XmlnsImports = StripControlChars(s.XmlnsImports);
-        s.RelatedControls = StripControlChars(s.RelatedControls);
+        // Everything below is rendered inline on a single line of the result markdown
+        // ("## {ControlName}: {HeaderText}", "**Setup:** …", "**See also:** …"), so a
+        // newline in any of them forges a row that reads as a separate search result.
+        s.HeaderText = StripLineControlChars(s.HeaderText) ?? "";
+        s.ControlName = StripLineControlChars(s.ControlName) ?? "";
+        s.ControlDescription = StripLineControlChars(s.ControlDescription);
+        s.Description = StripLineControlChars(s.Description);
+        s.NuGetPackage = StripLineControlChars(s.NuGetPackage);
+        s.ApiNamespace = StripLineControlChars(s.ApiNamespace);
+        s.XmlnsImports = StripLineControlChars(s.XmlnsImports);
+        s.RelatedControls = StripLineControlChars(s.RelatedControls);
 
         var xaml = StripControlChars(s.Xaml);
         s.Xaml = !string.IsNullOrWhiteSpace(xaml) && XamlIsWellFormed(xaml) ? xaml : null;
@@ -147,15 +153,51 @@ internal static partial class ScenarioSanitizer
         return depth == 0 && !inStr && !inBlk;
     }
 
-    private static string[] StripControlChars(string[] values)
+    private static string[] StripLineControlChars(string[] values)
     {
         if (values.Length == 0) return values;
         var result = new string[values.Length];
         for (int i = 0; i < values.Length; i++)
         {
-            result[i] = StripControlChars(values[i]) ?? "";
+            result[i] = StripLineControlChars(values[i]) ?? "";
         }
         return result;
+    }
+
+    /// <summary>
+    /// Line-strength stripping for the fields that are rendered inline on a single line
+    /// of the result markdown: everything <see cref="StripControlChars(string?)"/> removes,
+    /// plus tab/newline/carriage-return folded into a single space. Folding rather than
+    /// deleting keeps words either side of an upstream line break from being glued
+    /// together, while guaranteeing the value can't span two output lines — a newline in a
+    /// header would otherwise forge what reads as an extra result row (id + description)
+    /// even with every escape byte already removed.
+    /// </summary>
+    private static string? StripLineControlChars(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return value;
+
+        StringBuilder? sb = null;
+        for (int i = 0; i < value.Length; i++)
+        {
+            char c = value[i];
+            if (c is '\t' or '\n' or '\r')
+            {
+                sb ??= new StringBuilder(value.Length).Append(value, 0, i);
+                if (sb.Length > 0 && sb[^1] != ' ') sb.Append(' ');
+                continue;
+            }
+            bool strip = c < 0x20 || c == 0x7F || (c >= 0x80 && c <= 0x9F);
+            if (strip)
+            {
+                sb ??= new StringBuilder(value.Length).Append(value, 0, i);
+            }
+            else
+            {
+                sb?.Append(c);
+            }
+        }
+        return sb is null ? value : sb.ToString().Trim();
     }
 
     /// <summary>
@@ -192,6 +234,9 @@ internal static partial class ScenarioSanitizer
     /// and C1 control characters (0x80–0x9F). This neutralizes ANSI/OSC escape sequences (which
     /// begin with ESC, 0x1B) and other terminal-control bytes at the one boundary where fetched
     /// text becomes scenario content, so no downstream console/JSON/cache path can emit them.
+    /// Used only for <c>Xaml</c> and <c>CSharp</c>, the two fields rendered as multi-line blocks
+    /// where a line break is meaningful; every other field uses
+    /// <see cref="StripLineControlChars(string?)"/>.
     /// Returns the input unchanged (same reference) when nothing needs stripping.
     /// </summary>
     private static string? StripControlChars(string? value)
