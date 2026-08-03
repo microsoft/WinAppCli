@@ -16,7 +16,9 @@ using System.Xml;
 /// <list type="number">
 /// <item>Strips C0/C1 control characters (except tab/newline/carriage-return) from
 /// every emitted text field, so a booby-trapped upstream sample can't smuggle ANSI
-/// escape / OSC sequences to a terminal or into piped agent input.</item>
+/// escape / OSC sequences to a terminal or into piped agent input. <c>Id</c> and
+/// <c>ControlId</c> are stripped harder still — tab/newline/CR go too, since an id is
+/// a lookup key echoed into output, <c>--json</c> and usage telemetry, never prose.</item>
 /// <item>Drops XAML that is not well-formed rather than shipping broken markup an
 /// agent would paste and fail to compile — malformed truncation "repairs" and a
 /// small number of pre-existing upstream samples produce unparseable XAML.</item>
@@ -36,11 +38,18 @@ internal static partial class ScenarioSanitizer
     }
 
     /// <summary>
-    /// Strip control characters from every emitted field of <paramref name="s"/>, then
-    /// null out its XAML if it isn't well-formed and its C# if the braces don't balance.
+    /// Strip control characters from every emitted field of <paramref name="s"/> (ids
+    /// included), then null out its XAML if it isn't well-formed and its C# if the
+    /// braces don't balance.
     /// </summary>
     public static void Sanitize(Scenario s)
     {
+        // Ids are stripped harder than prose (see StripIdControlChars): they are
+        // single-token lookup keys echoed into search output, --json and usage
+        // telemetry, and Reactor takes ControlId straight from downloaded JSON.
+        s.Id = StripIdControlChars(s.Id);
+        s.ControlId = StripIdControlChars(s.ControlId);
+
         s.HeaderText = StripControlChars(s.HeaderText) ?? "";
         s.ControlName = StripControlChars(s.ControlName) ?? "";
         s.ControlDescription = StripControlChars(s.ControlDescription);
@@ -147,6 +156,35 @@ internal static partial class ScenarioSanitizer
             result[i] = StripControlChars(values[i]) ?? "";
         }
         return result;
+    }
+
+    /// <summary>
+    /// Identifier-strength stripping: everything <see cref="StripControlChars(string?)"/>
+    /// removes, plus tab, newline and carriage-return. Those three are legitimate inside
+    /// prose, XAML and C#, but never inside an id. An id is a single-token lookup key that
+    /// gets echoed back in search/list output, in <c>--json</c>, and in usage telemetry, so
+    /// a newline inside one would let a poisoned upstream id forge an extra output line
+    /// (a fake result row) even after ANSI escapes were removed.
+    /// </summary>
+    private static string StripIdControlChars(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return "";
+
+        StringBuilder? sb = null;
+        for (int i = 0; i < value.Length; i++)
+        {
+            char c = value[i];
+            bool strip = c < 0x20 || c == 0x7F || (c >= 0x80 && c <= 0x9F);
+            if (strip)
+            {
+                sb ??= new StringBuilder(value.Length).Append(value, 0, i);
+            }
+            else
+            {
+                sb?.Append(c);
+            }
+        }
+        return sb?.ToString() ?? value;
     }
 
     /// <summary>

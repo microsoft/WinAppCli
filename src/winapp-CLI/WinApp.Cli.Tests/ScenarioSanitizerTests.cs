@@ -151,4 +151,88 @@ public class ScenarioSanitizerTests
         Assert.IsNotNull(s.Xaml, "valid XAML is retained");
         Assert.IsNull(s.CSharp, "brace-unbalanced C# is dropped");
     }
+
+    // ── Id / ControlId ──────────────────────────────────────────────────────
+
+    [TestMethod]
+    public void Sanitize_StripsEscapeSequences_FromIdAndControlId()
+    {
+        // Reactor supplies ControlId straight from its downloaded index JSON, and both
+        // ids are echoed into search/list output, --json, and the ResolvedIds telemetry
+        // field — so they need the same corpus-boundary guard as the prose fields.
+        var s = new Scenario
+        {
+            Id = "reactor-\u001b]0;PWNED\u0007flex-1",
+            ControlId = "fl\u001b[31mex",
+            ControlName = "Flex",
+        };
+
+        ScenarioSanitizer.Sanitize(s);
+
+        Assert.AreEqual("reactor-]0;PWNEDflex-1", s.Id, "ESC/OSC/BEL stripped from id");
+        Assert.AreEqual("fl[31mex", s.ControlId, "ESC stripped from control id");
+    }
+
+    [TestMethod]
+    public void Sanitize_StripsNewlinesAndTabs_FromIdsOnly()
+    {
+        // Newline is legitimate in XAML/C#/prose but never in an id: left in place it
+        // would let a poisoned id forge an extra result row in console output.
+        var s = new Scenario
+        {
+            Id = "gallery-x-1\ngallery-fake-1",
+            ControlId = "x\ty\rz",
+            Xaml = "<Grid>\n\t<TextBox />\n</Grid>",
+        };
+
+        ScenarioSanitizer.Sanitize(s);
+
+        Assert.AreEqual("gallery-x-1gallery-fake-1", s.Id, "newline stripped from id");
+        Assert.AreEqual("xyz", s.ControlId, "tab and CR stripped from control id");
+        StringAssert.Contains(s.Xaml!, "\n", "newlines are still preserved in XAML");
+        StringAssert.Contains(s.Xaml!, "\t", "tabs are still preserved in XAML");
+    }
+
+    [TestMethod]
+    public void Sanitize_CleanIds_AreUnchanged()
+    {
+        var s = new Scenario { Id = "gallery-swipecontrol-3", ControlId = "swipecontrol" };
+        ScenarioSanitizer.Sanitize(s);
+        Assert.AreEqual("gallery-swipecontrol-3", s.Id);
+        Assert.AreEqual("swipecontrol", s.ControlId);
+    }
+
+    [TestMethod]
+    public void SanitizeAll_PoisonedId_CannotReachSearchOutputOrLookup()
+    {
+        // End-to-end at the real boundary: the sanitized id is what the engine indexes,
+        // so the poisoned form no longer resolves and the clean form does. The engine
+        // prefixes scenario ids with the source, so "tabview-…" surfaces as "gallery-tabview-…".
+        var scenarios = new[]
+        {
+            new Scenario
+            {
+                Id = "tabview-\u001b[2J1",
+                ControlId = "tabview",
+                ControlName = "TabView",
+                HeaderText = "Tabs",
+                Source = "gallery",
+                Xaml = "<TabView />",
+            },
+        };
+
+        ScenarioSanitizer.SanitizeAll(scenarios);
+        var engine = new SearchEngine(scenarios, corePatterns: [], enrichmentTags: new(), curatedKeywords: new());
+
+        var listed = engine.ListAll().Select(x => x.id).ToList();
+        Assert.IsFalse(listed.Any(id => id.Contains('\u001b')), "no listed id may carry an escape");
+        CollectionAssert.Contains(listed, "gallery-tabview-[2J1");
+
+        var (_, poisonedFound, _) = engine.GetPattern("gallery-tabview-\u001b[2J1");
+        Assert.IsFalse(poisonedFound, "the pre-sanitization id must no longer resolve");
+
+        var (_, cleanFound, canonicalId) = engine.GetPattern("gallery-tabview-[2J1");
+        Assert.IsTrue(cleanFound, "the sanitized id resolves");
+        Assert.IsFalse(canonicalId!.Contains('\u001b'), "the canonical id fed to telemetry is clean");
+    }
 }
