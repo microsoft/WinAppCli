@@ -714,14 +714,10 @@ internal sealed class SearchEngine
         if (p.Xaml != null)
         {
             sb.AppendLine("**XAML:**");
-            sb.AppendLine("```xml");
-            sb.AppendLine(NormalizeIndent(p.Xaml));
-            sb.AppendLine("```");
+            AppendFencedCode(sb, "xml", NormalizeIndent(p.Xaml));
         }
         sb.AppendLine("**C#:**");
-        sb.AppendLine("```csharp");
-        sb.AppendLine(NormalizeIndent(p.CSharp));
-        sb.AppendLine("```");
+        AppendFencedCode(sb, "csharp", NormalizeIndent(p.CSharp));
         if (p.Notes.Length > 0)
         {
             sb.AppendLine("**Important:**");
@@ -734,6 +730,45 @@ internal sealed class SearchEngine
     /// empty — a few legacy inline samples have no header source, and a bare ": " reads poorly.</summary>
     private static string ControlHeader(string controlName, string headerText)
         => string.IsNullOrWhiteSpace(headerText) ? controlName : $"{controlName}: {headerText}";
+
+    /// <summary>
+    /// Append a fenced code block whose fence is longer than any run of backticks inside
+    /// <paramref name="code"/>. Snippets come from remote corpora, and a sample containing
+    /// a line of three backticks would otherwise close the block early — everything after
+    /// it then renders as top-level prose, letting an upstream sample forge tool-authored
+    /// guidance (an "**Important:**" section is indistinguishable from the one find-ui's own
+    /// pitfall notes emit) in the result an agent reads. Both the console output and
+    /// the <c>--json</c> content field are built here, so this is the one place to size it.
+    /// CommonMark allows any opening fence of three or more backticks and requires a closing
+    /// fence to be at least as long, so out-running the longest interior run makes early
+    /// termination impossible without discarding a snippet that legitimately shows markdown.
+    /// </summary>
+    private static void AppendFencedCode(System.Text.StringBuilder sb, string language, string code)
+    {
+        var fence = new string('`', Math.Max(3, LongestBacktickRun(code) + 1));
+        sb.Append(fence).AppendLine(language);
+        sb.AppendLine(code);
+        sb.AppendLine(fence);
+    }
+
+    /// <summary>Length of the longest consecutive backtick run in <paramref name="s"/>.</summary>
+    private static int LongestBacktickRun(string s)
+    {
+        int longest = 0, run = 0;
+        foreach (var c in s)
+        {
+            if (c == '`')
+            {
+                run++;
+                if (run > longest) longest = run;
+            }
+            else
+            {
+                run = 0;
+            }
+        }
+        return longest;
+    }
 
     private static string FormatScenario(Scenario s)
     {
@@ -779,16 +814,12 @@ internal sealed class SearchEngine
         if (s.Xaml != null)
         {
             sb.AppendLine("**XAML:**");
-            sb.AppendLine("```xml");
-            sb.AppendLine(NormalizeIndent(s.Xaml));
-            sb.AppendLine("```");
+            AppendFencedCode(sb, "xml", NormalizeIndent(s.Xaml));
         }
         if (s.CSharp != null && !IsBoilerplatePageWrapper(s.CSharp))
         {
             sb.AppendLine("**C#:**");
-            sb.AppendLine("```csharp");
-            sb.AppendLine(NormalizeIndent(s.CSharp));
-            sb.AppendLine("```");
+            AppendFencedCode(sb, "csharp", NormalizeIndent(s.CSharp));
         }
         var notesPayload = Notes.Get(s.ControlName);
         if (notesPayload.Pitfalls.Length > 0)
