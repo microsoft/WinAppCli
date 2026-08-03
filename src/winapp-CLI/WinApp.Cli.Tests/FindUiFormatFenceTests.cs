@@ -39,8 +39,17 @@ public class FindUiFormatFenceTests
             var run = 0;
             foreach (var c in trimmed)
             {
-                if (c == '`') { run++; if (run > longest) longest = run; }
-                else break;   // only a run that STARTS the line can close a fence
+                // Only a run that STARTS the line can close a fence.
+                if (c != '`')
+                {
+                    break;
+                }
+
+                run++;
+                if (run > longest)
+                {
+                    longest = run;
+                }
             }
         }
         return longest;
