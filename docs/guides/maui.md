@@ -1,4 +1,5 @@
 <!-- mslearn: true -->
+<!-- description: Package and sign a .NET MAUI Windows app with winapp CLI by using the generated resizetizer manifest for reliable MSIX creation. -->
 # Using winapp CLI with .NET MAUI (Windows)
 
 This guide focuses on one MAUI-specific pitfall: the source manifest at `Platforms/Windows/Package.appxmanifest` contains `$placeholder$` tokens that `winapp package` does not resolve. For MAUI, package using the generated manifest from `obj\...\resizetizer\m\Package.appxmanifest`.
@@ -26,10 +27,10 @@ cd mymauiapp
 # The stock template targets every MAUI platform. Keep only Windows when
 # maui-windows is the only installed workload.
 [xml]$project = Get-Content .\mymauiapp.csproj
-$propertyGroup = $project.Project.PropertyGroup[0]
-$propertyGroup.SelectNodes("*[local-name()='TargetFrameworks']") |
-  ForEach-Object { $propertyGroup.RemoveChild($_) | Out-Null }
-$windowsTfm = $project.CreateElement("TargetFrameworks", $project.Project.NamespaceURI)
+$propertyGroup = $project.SelectSingleNode("/*[local-name()='Project']/*[local-name()='PropertyGroup'][1]")
+$project.SelectNodes("/*[local-name()='Project']/*[local-name()='PropertyGroup']/*[local-name()='TargetFrameworks']") |
+  ForEach-Object { $_.ParentNode.RemoveChild($_) | Out-Null }
+$windowsTfm = $project.CreateElement("TargetFrameworks", $project.DocumentElement.NamespaceURI)
 $windowsTfm.InnerText = "net10.0-windows10.0.19041.0"
 $propertyGroup.PrependChild($windowsTfm) | Out-Null
 $project.Save((Resolve-Path .\mymauiapp.csproj).Path)

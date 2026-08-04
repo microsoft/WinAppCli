@@ -62,13 +62,14 @@ Describe "maui-app sample" {
             # all conditional TargetFrameworks nodes from the template
             $csprojPath = Join-Path $script:projectDir "$($script:projectName).csproj"
             [xml]$xml = Get-Content $csprojPath
-            $ns = $xml.Project.NamespaceURI
-            $propertyGroup = $xml.Project.PropertyGroup[0]
+            $ns = $xml.DocumentElement.NamespaceURI
+            $propertyGroup = $xml.SelectSingleNode("/*[local-name()='Project']/*[local-name()='PropertyGroup'][1]")
+            $propertyGroup | Should -Not -BeNullOrEmpty
 
             # Remove all existing TargetFrameworks elements
-            $tfNodes = $propertyGroup.SelectNodes("*[local-name()='TargetFrameworks']")
+            $tfNodes = $xml.SelectNodes("/*[local-name()='Project']/*[local-name()='PropertyGroup']/*[local-name()='TargetFrameworks']")
             foreach ($node in $tfNodes) {
-                $propertyGroup.RemoveChild($node) | Out-Null
+                $node.ParentNode.RemoveChild($node) | Out-Null
             }
 
             # Add a single Windows-only TargetFrameworks element
