@@ -62,6 +62,8 @@
     "certificate",
     "distribution"
   ],
-  "agents": "plugins/winapp/agents/",
-  "skills": "plugins/winapp/skills/"
+  "agents": "agents/",
+  "skills": [
+    "skills/"
+  ]
 }
