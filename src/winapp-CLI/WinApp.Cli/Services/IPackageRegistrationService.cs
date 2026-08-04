@@ -66,8 +66,43 @@ internal interface IPackageRegistrationService
     /// or null if not found.
     /// </summary>
     /// <param name="packageName">The package identity name.</param>
+    /// <param name="architecture">
+    /// Optional architecture filter (<c>x64</c> / <c>arm64</c> / <c>x86</c>). When provided, only a
+    /// package whose identity architecture matches is considered installed — important for the
+    /// runtime install, where an x64 host may still need x86/arm64 Framework/DDLM packages.
+    /// When <c>null</c>, any architecture matches. In all cases, when several servicing versions of
+    /// the package are registered, the <em>highest</em> matching version is returned (registration
+    /// enumeration order is not guaranteed newest-first).
+    /// </param>
     /// <returns>The installed version, or null if not found.</returns>
-    string? GetInstalledVersion(string packageName);
+    string? GetInstalledVersion(string packageName, string? architecture = null);
+
+    /// <summary>
+    /// Returns <c>true</c> when at least one package registered for the current user has an identity
+    /// Name that starts with <paramref name="namePrefix"/> (ordinal, case-insensitive), optionally
+    /// filtered by architecture and excluding names that contain <paramref name="excludeNameSubstring"/>.
+    /// Used to detect a registered Windows App Runtime (Framework / DDLM) for a target architecture
+    /// without knowing the exact versioned package name.
+    /// </summary>
+    /// <param name="namePrefix">The package-name prefix to match (e.g. <c>Microsoft.WindowsAppRuntime.</c>).</param>
+    /// <param name="architecture">Optional architecture filter (<c>x64</c> / <c>arm64</c> / <c>x86</c>); <c>null</c> matches any.</param>
+    /// <param name="excludeNameSubstring">Optional substring; matching names that contain it are ignored (e.g. <c>.CBS.</c>).</param>
+    /// <returns><c>true</c> if a matching package is installed.</returns>
+    bool IsPackageInstalled(string namePrefix, string? architecture = null, string? excludeNameSubstring = null);
+
+    /// <summary>
+    /// Returns the <em>highest</em> installed package Version among all packages whose identity Name
+    /// starts with <paramref name="namePrefix"/> (ordinal, case-insensitive), optionally filtered by
+    /// architecture and excluding names that contain <paramref name="excludeNameSubstring"/>; or
+    /// <c>null</c> when none match. Unlike <see cref="GetInstalledVersion"/> (exact-name), this matches a
+    /// family by prefix — used to gate a side-by-side runtime (e.g. the DDLM, whose name embeds its full
+    /// version) on the newest registered release without knowing its exact versioned identity.
+    /// </summary>
+    /// <param name="namePrefix">The package-name prefix to match (e.g. <c>Microsoft.WinAppRuntime.DDLM.</c>).</param>
+    /// <param name="architecture">Optional architecture filter (<c>x64</c> / <c>arm64</c> / <c>x86</c>); <c>null</c> matches any.</param>
+    /// <param name="excludeNameSubstring">Optional substring; matching names that contain it are ignored.</param>
+    /// <returns>The highest matching installed version, or null if none match.</returns>
+    string? GetHighestInstalledVersion(string namePrefix, string? architecture = null, string? excludeNameSubstring = null);
 
     /// <summary>
     /// Finds all installed packages matching the given name that were registered in

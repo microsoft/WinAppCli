@@ -223,4 +223,103 @@ internal static class WindowsCommandLine
 
         return string.Join(" ", args.Select(EscapeArgument));
     }
+
+    /// <summary>
+    /// Splits a Windows command-line string back into argument tokens using the
+    /// <c>CommandLineToArgvW</c> backslash/quote rules — the inverse of <see cref="JoinArguments"/>.
+    /// Lets callers post-process a joined command line (e.g. redact secrets) at the token level so an
+    /// embedded quote in a value can't be mistaken for a token boundary.
+    /// </summary>
+    public static IReadOnlyList<string> SplitArguments(string commandLine)
+    {
+        var tokens = new List<string>();
+        if (string.IsNullOrEmpty(commandLine))
+        {
+            return tokens;
+        }
+
+        var sb = new StringBuilder();
+        var i = 0;
+        var n = commandLine.Length;
+
+        while (i < n)
+        {
+            while (i < n && (commandLine[i] == ' ' || commandLine[i] == '\t'))
+            {
+                i++;
+            }
+
+            if (i >= n)
+            {
+                break;
+            }
+
+            sb.Clear();
+            var inQuotes = false;
+
+            while (i < n)
+            {
+                var c = commandLine[i];
+
+                if (!inQuotes && (c == ' ' || c == '\t'))
+                {
+                    break;
+                }
+
+                if (c == '\\')
+                {
+                    var backslashes = 0;
+                    while (i < n && commandLine[i] == '\\')
+                    {
+                        backslashes++;
+                        i++;
+                    }
+
+                    if (i < n && commandLine[i] == '"')
+                    {
+                        sb.Append('\\', backslashes / 2);
+                        sb.Append('"'); // 2n+1 backslashes → literal quote
+                        if ((backslashes & 1) == 0)
+                        {
+                            sb.Length--; // 2n backslashes → the quote toggles state instead
+                            inQuotes = !inQuotes;
+                        }
+
+                        i++;
+                    }
+                    else
+                    {
+                        sb.Append('\\', backslashes); // backslashes not before a quote are literal
+                    }
+
+                    continue;
+                }
+
+                if (c == '"')
+                {
+                    // A doubled quote inside a quoted region is a literal quote; otherwise the quote
+                    // toggles quoting state.
+                    if (inQuotes && i + 1 < n && commandLine[i + 1] == '"')
+                    {
+                        sb.Append('"');
+                        i += 2;
+                    }
+                    else
+                    {
+                        inQuotes = !inQuotes;
+                        i++;
+                    }
+
+                    continue;
+                }
+
+                sb.Append(c);
+                i++;
+            }
+
+            tokens.Add(sb.ToString());
+        }
+
+        return tokens;
+    }
 }

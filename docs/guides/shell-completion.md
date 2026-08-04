@@ -1,4 +1,5 @@
 <!-- mslearn: true -->
+<!-- description: Enable tab completion for winapp CLI commands and options in PowerShell, Bash, and Zsh so you can discover and type commands faster. -->
 # Shell Completion
 
 Enable tab completion for `winapp` in your terminal. Once activated, pressing Tab will suggest commands, options, and argument values as you type.

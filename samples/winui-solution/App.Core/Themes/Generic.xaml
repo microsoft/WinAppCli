@@ -1,0 +1,10 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Presence of a XAML resource makes the WinUI XAML compiler emit a .pri for this library,
+         which the consuming app must merge. That merge is what fails with PRI252 under the
+         forced-Platform + EDPR split. -->
+    <x:String x:Key="CoreGreeting">Hello from App.Core (WinUI library, no &lt;Platforms&gt;)</x:String>
+
+</ResourceDictionary>

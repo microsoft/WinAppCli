@@ -177,6 +177,8 @@ extends:
                 $staging = "$(Build.ArtifactStagingDirectory)/mslearn-source"
                 New-Item -ItemType Directory -Path "$staging/scripts" -Force | Out-Null
                 Copy-Item "$(System.DefaultWorkingDirectory)/scripts/port-mslearn-docs.ps1" "$staging/scripts/" -Force
+                Copy-Item "$(System.DefaultWorkingDirectory)/scripts/validate-mslearn-docs.ps1" "$staging/scripts/" -Force
+                Copy-Item "$(System.DefaultWorkingDirectory)/scripts/mslearn-doc-lib.ps1" "$staging/scripts/" -Force
                 Copy-Item "$(System.DefaultWorkingDirectory)/docs" "$staging/docs" -Recurse -Force
                 Copy-Item "$(System.DefaultWorkingDirectory)/version.json" "$staging/" -Force
           - task: 1ES.PublishPipelineArtifact@1

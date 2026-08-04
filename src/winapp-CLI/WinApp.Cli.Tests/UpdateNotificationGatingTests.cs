@@ -18,18 +18,13 @@ namespace WinApp.Cli.Tests;
 [DoNotParallelize] // Modifies static Console streams and environment variables
 public class UpdateNotificationGatingTests
 {
+    private const string UpdateNoticeMarker = " is available. To update, ";
+
     private string _tempCacheDir = null!;
     private string? _savedCacheDir;
     private string? _savedCaller;
     private string? _savedUpdateCheck;
 
-    // All environment variable names checked by CIEnvironmentDetectorForTelemetry
-    private static readonly string[] CiVarNames =
-    [
-        "CI", "GITHUB_ACTIONS", "TF_BUILD", "APPVEYOR", "TRAVIS", "CIRCLECI",
-        "TEAMCITY_VERSION", "JB_SPACE_API_URL",
-        "CODEBUILD_BUILD_ID", "AWS_REGION", "BUILD_ID", "BUILD_URL", "PROJECT_ID"
-    ];
     private Dictionary<string, string?> _savedCiVars = [];
 
     [TestInitialize]
@@ -47,14 +42,14 @@ public class UpdateNotificationGatingTests
         _savedCacheDir = Environment.GetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY");
         _savedCaller = Environment.GetEnvironmentVariable("WINAPP_CLI_CALLER");
         _savedUpdateCheck = Environment.GetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK");
-        _savedCiVars = CiVarNames.ToDictionary(name => name, name => Environment.GetEnvironmentVariable(name));
+        _savedCiVars = ProgramMainTestHarness.CiVarNames.ToDictionary(name => name, name => Environment.GetEnvironmentVariable(name));
 
         Environment.SetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY", _tempCacheDir);
         Environment.SetEnvironmentVariable("WINAPP_CLI_CALLER", null);
         Environment.SetEnvironmentVariable("WINAPP_CLI_UPDATE_CHECK", null);
 
         // Clear CI vars to avoid suppression
-        foreach (var name in CiVarNames)
+        foreach (var name in ProgramMainTestHarness.CiVarNames)
         {
             Environment.SetEnvironmentVariable(name, null);
         }
@@ -77,33 +72,33 @@ public class UpdateNotificationGatingTests
     [TestMethod]
     public async Task JsonMode_SuppressesUpdateNotice_StdoutHasNoNotice()
     {
-        var (stdout, stderr, _) = await InvokeProgramAsync(["get-winapp-path", "--global", "--json"]);
+        var (stdout, stderr, _) = await ProgramMainTestHarness.InvokeProgramAsync(["get-winapp-path", "--global", "--json"]);
 
-        Assert.IsFalse(stdout.Contains("available", StringComparison.OrdinalIgnoreCase),
+        Assert.IsFalse(stdout.Contains(UpdateNoticeMarker, StringComparison.OrdinalIgnoreCase),
             $"--json stdout must not contain update notice. Got stdout: {stdout}");
-        Assert.IsFalse(stderr.Contains("available", StringComparison.OrdinalIgnoreCase),
+        Assert.IsFalse(stderr.Contains(UpdateNoticeMarker, StringComparison.OrdinalIgnoreCase),
             $"--json stderr must not contain update notice. Got stderr: {stderr}");
     }
 
     [TestMethod]
     public async Task QuietMode_SuppressesUpdateNotice()
     {
-        var (stdout, stderr, _) = await InvokeProgramAsync(["get-winapp-path", "--global", "--quiet"]);
+        var (stdout, stderr, _) = await ProgramMainTestHarness.InvokeProgramAsync(["get-winapp-path", "--global", "--quiet"]);
 
-        Assert.IsFalse(stdout.Contains("available", StringComparison.OrdinalIgnoreCase),
+        Assert.IsFalse(stdout.Contains(UpdateNoticeMarker, StringComparison.OrdinalIgnoreCase),
             $"--quiet stdout must not contain update notice. Got stdout: {stdout}");
-        Assert.IsFalse(stderr.Contains("available", StringComparison.OrdinalIgnoreCase),
+        Assert.IsFalse(stderr.Contains(UpdateNoticeMarker, StringComparison.OrdinalIgnoreCase),
             $"--quiet stderr must not contain update notice. Got stderr: {stderr}");
     }
 
     [TestMethod]
     public async Task CliSchemaMode_SuppressesUpdateNotice()
     {
-        var (stdout, stderr, _) = await InvokeProgramAsync(["--cli-schema"]);
+        var (stdout, stderr, _) = await ProgramMainTestHarness.InvokeProgramAsync(["--cli-schema"]);
 
-        Assert.IsFalse(stdout.Contains("available", StringComparison.OrdinalIgnoreCase),
+        Assert.IsFalse(stdout.Contains(UpdateNoticeMarker, StringComparison.OrdinalIgnoreCase),
             $"--cli-schema stdout must not contain update notice. Got stdout: {stdout}");
-        Assert.IsFalse(stderr.Contains("available", StringComparison.OrdinalIgnoreCase),
+        Assert.IsFalse(stderr.Contains(UpdateNoticeMarker, StringComparison.OrdinalIgnoreCase),
             $"--cli-schema stderr must not contain update notice. Got stderr: {stderr}");
     }
 
@@ -112,11 +107,11 @@ public class UpdateNotificationGatingTests
     {
         // Invoke through the real entrypoint — the notification should appear on stderr,
         // never stdout. We capture stderr via Console.SetError.
-        var (stdout, stderr, _) = await InvokeProgramAsync(["get-winapp-path", "--global"]);
+        var (stdout, stderr, _) = await ProgramMainTestHarness.InvokeProgramAsync(["get-winapp-path", "--global"]);
 
-        Assert.IsFalse(stdout.Contains("available", StringComparison.OrdinalIgnoreCase),
+        Assert.IsFalse(stdout.Contains(UpdateNoticeMarker, StringComparison.OrdinalIgnoreCase),
             $"Update notice must not appear on stdout. Got stdout: {stdout}");
-        Assert.IsTrue(stderr.Contains("available", StringComparison.OrdinalIgnoreCase),
+        Assert.IsTrue(stderr.Contains(UpdateNoticeMarker, StringComparison.OrdinalIgnoreCase),
             $"Update notice should appear on stderr in normal mode. Got stderr: {stderr}");
     }
 
@@ -125,7 +120,7 @@ public class UpdateNotificationGatingTests
     {
         // --caller npm should set WINAPP_CLI_CALLER=npm which makes the update notice
         // include the npm update hint.
-        var (_, stderr, _) = await InvokeProgramAsync(["get-winapp-path", "--global", "--caller", "npm"]);
+        var (_, stderr, _) = await ProgramMainTestHarness.InvokeProgramAsync(["get-winapp-path", "--global", "--caller", "npm"]);
 
         Assert.IsTrue(stderr.Contains("npm update", StringComparison.OrdinalIgnoreCase),
             $"With --caller npm, notice should contain npm update hint. Got stderr: {stderr}");
@@ -147,34 +142,5 @@ public class UpdateNotificationGatingTests
         return Version.TryParse(currentCore, out var parsed)
             ? $"{parsed.Major + 1}.0.0"
             : "5.0.0";
-    }
-
-    /// <summary>
-    /// Invokes Program.Main with captured stdout/stderr.
-    /// Writers are intentionally not disposed to avoid ObjectDisposedException from
-    /// Spectre.Console's static AnsiConsole.Console which may reference them after return.
-    /// </summary>
-    private static async Task<(string Stdout, string Stderr, int ExitCode)> InvokeProgramAsync(string[] args)
-    {
-        var originalOut = Console.Out;
-        var originalErr = Console.Error;
-
-        var stdoutWriter = new StringWriter();
-        var stderrWriter = new StringWriter();
-
-        try
-        {
-            Console.SetOut(stdoutWriter);
-            Console.SetError(stderrWriter);
-
-            var exitCode = await Program.Main(args);
-
-            return (stdoutWriter.ToString(), stderrWriter.ToString(), exitCode);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-            Console.SetError(originalErr);
-        }
     }
 }

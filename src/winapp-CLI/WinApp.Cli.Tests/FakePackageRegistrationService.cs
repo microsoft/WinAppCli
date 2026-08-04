@@ -16,7 +16,7 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
     public List<(string PackageName, bool PreserveAppData)> UnregisterCalls { get; } = [];
     public List<(string PackageFullName, bool PreserveAppData)> UnregisterByFullNameCalls { get; } = [];
     public List<string> InstallPackageCalls { get; } = [];
-    public List<string> GetInstalledVersionCalls { get; } = [];
+    public List<(string PackageName, string? Architecture)> GetInstalledVersionCalls { get; } = [];
     public List<string> FindDevPackagesCalls { get; } = [];
 
     /// <summary>
@@ -32,6 +32,13 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
     public string? FakeInstalledVersion { get; set; }
 
     /// <summary>
+    /// When set, <see cref="GetInstalledVersion"/> resolves the installed version per (name, arch), so a
+    /// test can model e.g. "an OLDER patch of the required Framework family is registered". Falls back to
+    /// <see cref="FakeInstalledVersion"/> when null.
+    /// </summary>
+    public Func<string, string?, string?>? GetInstalledVersionFunc { get; set; }
+
+    /// <summary>
     /// When set, <see cref="FindDevPackages"/> returns these values.
     /// Defaults to empty list.
     /// </summary>
@@ -39,15 +46,37 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
 
     public Task RegisterLooseLayoutAsync(string manifestPath, CancellationToken cancellationToken = default)
     {
+        if (RegisterLooseLayoutThrows is not null)
+        {
+            throw RegisterLooseLayoutThrows;
+        }
         RegisterLooseLayoutCalls.Add(manifestPath);
         return Task.CompletedTask;
     }
 
     public Task RegisterSparseAsync(string manifestPath, string externalLocation, CancellationToken cancellationToken = default)
     {
+        if (RegisterSparseThrows is not null)
+        {
+            throw RegisterSparseThrows;
+        }
         RegisterSparseCalls.Add((manifestPath, externalLocation));
         return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// When set to a non-null exception, <see cref="RegisterLooseLayoutAsync"/> throws it.
+    /// Used to exercise the exception-wrapping path in
+    /// <c>MsixService.RegisterLooseLayoutPackageAsync</c>.
+    /// </summary>
+    public Exception? RegisterLooseLayoutThrows { get; set; }
+
+    /// <summary>
+    /// When set to a non-null exception, <see cref="RegisterSparseAsync"/> throws it.
+    /// Used to exercise the exception-wrapping path in
+    /// <c>MsixService.RegisterSparsePackageAsync</c>.
+    /// </summary>
+    public Exception? RegisterSparseThrows { get; set; }
 
     public Task<bool> UnregisterAsync(string packageName, bool preserveAppData = true, CancellationToken cancellationToken = default)
     {
@@ -72,16 +101,77 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// When set to a non-null exception, <see cref="InstallPackageAsync"/> throws it
+    /// (after recording the call) instead of completing. Used to exercise the per-package
+    /// install-failure/error-count path in
+    /// <c>WindowsAppRuntimeService.InstallWindowsAppRuntimeAsync</c>.
+    /// </summary>
+    public Exception? InstallPackageThrows { get; set; }
+
     public Task InstallPackageAsync(string packagePath, CancellationToken cancellationToken = default)
     {
         InstallPackageCalls.Add(packagePath);
+        if (InstallPackageThrows is not null)
+        {
+            throw InstallPackageThrows;
+        }
         return Task.CompletedTask;
     }
 
-    public string? GetInstalledVersion(string packageName)
+    public string? GetInstalledVersion(string packageName, string? architecture = null)
     {
-        GetInstalledVersionCalls.Add(packageName);
-        return FakeInstalledVersion;
+        GetInstalledVersionCalls.Add((packageName, architecture));
+        return GetInstalledVersionFunc is not null
+            ? GetInstalledVersionFunc(packageName, architecture)
+            : FakeInstalledVersion;
+    }
+
+    /// <summary>
+    /// Records (namePrefix, architecture, excludeNameSubstring) calls. Returns
+    /// <see cref="FakeIsPackageInstalled"/> (default false).
+    /// </summary>
+    public List<(string NamePrefix, string? Architecture, string? ExcludeNameSubstring)> IsPackageInstalledCalls { get; } = [];
+
+    /// <summary>When set, <see cref="IsPackageInstalled"/> returns this value. Defaults to false.</summary>
+    public bool FakeIsPackageInstalled { get; set; }
+
+    /// <summary>
+    /// When set, <see cref="IsPackageInstalled"/> uses this predicate (keyed on the name prefix) to
+    /// decide the result, so a test can model e.g. "Framework present but DDLM missing". Falls back
+    /// to <see cref="FakeIsPackageInstalled"/> when null.
+    /// </summary>
+    public Func<string, bool>? IsPackageInstalledPredicate { get; set; }
+
+    public bool IsPackageInstalled(string namePrefix, string? architecture = null, string? excludeNameSubstring = null)
+    {
+        IsPackageInstalledCalls.Add((namePrefix, architecture, excludeNameSubstring));
+        return IsPackageInstalledPredicate?.Invoke(namePrefix) ?? FakeIsPackageInstalled;
+    }
+
+    /// <summary>
+    /// Records (namePrefix, architecture, excludeNameSubstring) calls. Returns
+    /// <see cref="GetHighestInstalledVersionFunc"/> (keyed on the name prefix) when set, otherwise
+    /// <see cref="FakeHighestInstalledVersion"/> (default null).
+    /// </summary>
+    public List<(string NamePrefix, string? Architecture, string? ExcludeNameSubstring)> GetHighestInstalledVersionCalls { get; } = [];
+
+    /// <summary>When set, <see cref="GetHighestInstalledVersion"/> returns this value. Defaults to null.</summary>
+    public string? FakeHighestInstalledVersion { get; set; }
+
+    /// <summary>
+    /// When set, <see cref="GetHighestInstalledVersion"/> resolves the highest installed version per
+    /// (namePrefix, arch), so a test can model e.g. "only an OLDER DDLM than required is registered".
+    /// Falls back to <see cref="FakeHighestInstalledVersion"/> when null.
+    /// </summary>
+    public Func<string, string?, string?>? GetHighestInstalledVersionFunc { get; set; }
+
+    public string? GetHighestInstalledVersion(string namePrefix, string? architecture = null, string? excludeNameSubstring = null)
+    {
+        GetHighestInstalledVersionCalls.Add((namePrefix, architecture, excludeNameSubstring));
+        return GetHighestInstalledVersionFunc is not null
+            ? GetHighestInstalledVersionFunc(namePrefix, architecture)
+            : FakeHighestInstalledVersion;
     }
 
     /// <summary>

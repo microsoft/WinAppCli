@@ -24,6 +24,9 @@ internal static class SharedUiOptions
     public static Option<bool> InteractiveOption { get; }
     public static Option<bool> HideDisabledOption { get; }
     public static Option<bool> HideOffscreenOption { get; }
+    public static Option<int> DurationSecOption { get; }
+    public static Option<int> FpsOption { get; }
+    public static Option<int> MaxEdgeOption { get; }
 
     static SharedUiOptions()
     {
@@ -57,7 +60,7 @@ internal static class SharedUiOptions
 
         OutputOption = new Option<string?>("--output", "-o")
         {
-            Description = "Save output to file path (e.g., screenshot)"
+            Description = "Save output to this file path."
         };
 
         TimeoutOption = new Option<int>("--timeout", "-t")
@@ -79,7 +82,7 @@ internal static class SharedUiOptions
 
         CaptureScreenOption = new Option<bool>("--capture-screen")
         {
-            Description = "Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). Implies --focus."
+            Description = "Capture from screen DC via BitBlt (includes popups/overlays not owned by the target)."
         };
 
         FocusOption = new Option<bool>("--focus")
@@ -100,6 +103,24 @@ internal static class SharedUiOptions
         HideOffscreenOption = new Option<bool>("--hide-offscreen")
         {
             Description = "Hide offscreen elements from output"
+        };
+
+        DurationSecOption = new Option<int>("--duration-sec")
+        {
+            Description = "Recording duration in seconds. 0 records until Ctrl+C or redirected-stdin newline/EOF.",
+            DefaultValueFactory = _ => 0
+        };
+
+        FpsOption = new Option<int>("--fps")
+        {
+            Description = "Frames per second to capture",
+            DefaultValueFactory = _ => 15
+        };
+
+        MaxEdgeOption = new Option<int>("--max-edge")
+        {
+            Description = "Downscale so the longest edge is at most this many pixels (0 = no downscale)",
+            DefaultValueFactory = _ => 0
         };
     }
 }

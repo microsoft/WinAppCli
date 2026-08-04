@@ -7,7 +7,7 @@
 
 ## Prerequisites
 - For UIA mode (any app): No setup needed — works with any running Windows app
-- For input-injecting verbs (`click`, `hover`, `drag`, `scroll --wheel`, `send-keys --via send-input`): an **unlocked, interactive desktop** with the target window foregroundable. On a locked/secure desktop they fail fast with `no_interactive_desktop`. The UIA-pattern verbs (`inspect`, `search`, `get-*`, `wait-for`, `set-value`, `invoke`, `scroll --direction/--to`, `screenshot`) are headless/locked-session friendly — prefer them in CI.
+- For input-injecting verbs (`click`, `hover`, `drag`, `touch`, `pen`, `scroll --wheel`, `send-keys --via send-input`): an **unlocked, interactive desktop** with the target window foregroundable. On a locked/secure desktop they fail fast with `no_interactive_desktop`. The UIA-pattern verbs (`inspect`, `search`, `get-*`, `wait-for`, `set-value`, `invoke`, `scroll --direction/--to`, `screenshot`) are headless/locked-session friendly — prefer them in CI.
 
 ## Common patterns
 
@@ -99,6 +99,28 @@ winapp ui screenshot -a myapp --capture-screen --output with-popups.png
 winapp ui screenshot -a myapp --focus --output focused.png
 ```
 
+### Record video (H.264 MP4)
+Record a window or element region to MP4. By default recording continues until stopped; use `--duration-sec N` for a timed run.
+```powershell
+# Record a window for 10s at 15 fps
+winapp ui record -a myapp --duration-sec 10 --fps 15 --output demo.mp4
+
+# Recommended agent evidence: MP4 plus timestamped JPEGs and an NDJSON index
+winapp ui record -a myapp --frames --duration-sec 10 --fps 10 --output demo.mp4 --json
+
+# Include overlays/popups (captures from screen DC; may include occluding windows)
+winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups.mp4
+
+# Programmatic stop: pipe a newline to stop and finalize the MP4 (for agent/script callers)
+"" | winapp ui record -a myapp --json --output capture.mp4
+```
+- Default `--duration-sec 0` records until Ctrl+C, a newline, or EOF on redirected stdin.
+- `--frames` writes `<output-name>.frames` with a manifest, NDJSON index, and changed JPEGs. It supports 1-30 fps and `--max-edge` 64-4096 (default 1280), with a 1 GiB cap. Use `elapsedMs` to bound transitions.
+- With `--frames`, existing MP4 and frame paths are not replaced. On partial failure, use the reported preserved path and `recoveryHint`.
+- `--capture-screen` captures from the screen DC so overlays and popups are included; the window is brought to the foreground first. When WGC is unavailable and `--capture-screen` is not passed, the CLI returns an error — re-run with `--capture-screen` to consent to screen-DC capture.
+- Providing a selector that doesn't match any element fails immediately with `element_not_found` (rather than silently recording the whole window).
+- `--json` writes the final result to stdout and one JSON event per line to stderr.
+
 ### Hover (for tooltips, flyouts, hover states)
 `--dwell-time <ms>` sets how long to wait after hovering (default: 800, range: 0–10000).
 ```powershell
@@ -129,28 +151,60 @@ winapp ui send-keys "Hello world" --target txt-name-a1b2 -a myapp
 
 # Transport: --via post-message (default, HWND-targeted, bypasses UIPI) or send-input (OS-wide)
 winapp ui send-keys "enter" -a myapp --via send-input
+
+# Fire a global hotkey: win+... is refused by default (acts on the shell); opt in with --allow-system-keys
+winapp ui send-keys "win+shift+v" -a myapp --via send-input --allow-system-keys
 ```
-- Default `post-message` is HWND-targeted and works across integrity levels, but can't fire `WH_KEYBOARD_LL` global hotkeys; for classic Win32/WinForms child-window controls, target the control with `-w`/`--target`.
+- Default `post-message` is HWND-targeted and works across integrity levels, but can't fire `WH_KEYBOARD_LL` global hotkeys. It automatically retargets to the **focused child control** of the target window, so classic Win32/WinForms child-window controls (e.g. an edit box) receive the input. **WinUI 3 / UWP / XAML controls are windowless and ignore posted `WM_CHAR`/`WM_KEYDOWN`** — post-message can't deliver keys *or* text to them (the command emits a warning and still exits 0, since `PostMessage` can't confirm delivery). Use **`--via send-input`** for WinUI 3 / UWP / XAML apps.
 - A token that collides with a key/modifier name (e.g. `enter`, `down`, `ctrl+a`) is pressed as that key. Prefix it with `text=` to type it as literal text instead — `text=enter` types the word "enter"; chain `text=` tokens to type a literal phrase like `text=down text=down text=enter`. Backslash escapes inside a `text=` value type whitespace the tokenizer would otherwise collapse: `\s`→space, `\t`→tab, `\n`→newline, `\r`→CR, `\\`→backslash (e.g. `text=a\s\sb` → "a  b"). When the *whole* argument is literal text, pass `--verbatim` instead of escaping each token: it types the entire keys argument as-is (no key/combo/`vk=`/`text=` parsing) and preserves exact whitespace — `send-keys "down down enter" --verbatim` types the words. (`--verbatim` does not decode backslash escapes; use a `text=` token for control characters.)
-- `send-input` is fully real input but goes to the foreground window and is UIPI-blocked when injecting from elevated → AppContainer/AppX. It **rejects system-reserved combos** (`win+l`, `alt+f4`, `ctrl+shift+esc`, `ctrl+alt+del`, `alt+tab`, …) because those act on the OS/shell, not just the target — use `--via post-message` (window-scoped) if you really need to send one to the window. On a locked/secure desktop `send-input` fails fast with `no_interactive_desktop`.
-- Per-keystroke events: named keys/combos fire a real `KeyDown` on both transports. For literal typed text, `--via send-input` maps each char to its VK (+Shift) so each character fires a real `KeyDown` + OS-composed `WM_CHAR` (`TextChanged`) — use it when downstream logic keys off `KeyDown` (e.g. WinUI 3/WPF `TextBox`); bring the target window to the foreground first. `--via post-message` posts `WM_CHAR` (raises `TextChanged`, lands correct text across integrity levels) but does not fire a per-character `KeyDown`.
+- `send-input` is fully real input but goes to the foreground window and is UIPI-blocked when injecting from elevated → AppContainer/AppX. It **rejects system-reserved combos** (`win+l`, `alt+f4`, `ctrl+shift+esc`, `ctrl+alt+del`, `alt+tab`, …) because those act on the OS/shell, not just the target — pass **`--allow-system-keys`** to opt in (e.g. to fire a global hotkey such as PowerToys' `win+shift+v` or `win+r`), or use `--via post-message` (window-scoped) to send one straight to the window. **`win+l` and `ctrl+alt+del` stay blocked even with `--allow-system-keys`** — `win+l` locks the workstation via `LockWorkStation()` (unrecoverable from automation), and `ctrl+alt+del` is a Secure Attention Sequence (SAS) that Windows drops from injected input regardless of the flag, so it errors (`invalid_arguments`) instead of falsely reporting success. On a locked/secure desktop `send-input` fails fast with `no_interactive_desktop`.
+- Per-keystroke events: named keys/combos fire a real `KeyDown` on both transports. For literal typed text, `--via send-input` maps each char to its VK (+Shift) so each character fires a real `KeyDown` + OS-composed `WM_CHAR` (`TextChanged`) — use it when downstream logic keys off `KeyDown` (e.g. WinUI 3/WPF `TextBox`); bring the target window to the foreground first. `--via post-message` posts a `WM_CHAR` per character to the focused child control (raises `TextChanged`, lands correct text into classic Win32 controls across integrity levels) but does not fire a per-character `KeyDown`, and — because WinUI 3 / UWP / XAML controls are windowless — does **not** reach them at all (named keys and text alike); use `--via send-input` there.
+- Long literal text on `--via send-input` is **auto-throttled**: the text is split into small character chunks injected one `SendInput` at a time with a brief pause between the chunks of that one run, so the target can drain its input queue and every character lands. A single unbroken burst overruns the queue and silently drops characters even though the command reports success. The pacing is scoped to a single long text run — short text, key names, and modifier combos (including sequences like `ctrl+a delete`) inject with no added delay, and the command emits an informational warning when a payload is large enough to be throttled. Because each paced chunk lands on whatever window is foreground, `send-input` re-verifies the target still owns the foreground before every continuation chunk and **aborts with `foreground_not_target`** if focus leaves the target mid-injection, so a focus change partway through can't spray the rest of the text into another window (a focus-changing chord such as `alt+tab` is exempt and is never treated as drift). For large bulk text, prefer `set-value` (atomic, no keystrokes or foreground needed) on controls that support it.
 
 ### Drag (reorder, resize, sliders, drag-and-drop)
-Press the mouse button at one point, move to another, then release with `drag <from> <to>`, where each endpoint is an element selector (uses its center) or app `x,y` coordinates from `ui inspect`. Uses `SendInput` with intermediate moves so apps see a realistic `WM_MOUSEMOVE` stream.
+Press the mouse button at one point, move to another, then release with `drag <from> <to>`, where each endpoint is an element selector (uses its center) or screen `x,y` coordinates from `ui inspect`. Uses `SendInput` with intermediate moves so apps see a realistic `WM_MOUSEMOVE` stream.
 ```powershell
 # Reorder one item onto another (center → center)
 winapp ui drag itm-card-9f8e itm-slot-2c1a -a myapp
 
-# Element center → app coordinates (as reported by `ui inspect`)
+# Element center → screen coordinates (as reported by `ui inspect`)
 winapp ui drag itm-card-9f8e 300,400 -a myapp
 
-# Raw app coordinates → app coordinates
+# Raw screen coordinates → screen coordinates
 winapp ui drag 120,200 480,200 -a myapp
 
 # Right-button drag
 winapp ui drag itm-card-9f8e itm-trash-0001 -a myapp --right
 ```
-- A selector drags from/to the element's center; `x,y` are app coordinates in the same space `ui inspect`/`search` report. Element endpoints are re-resolved just before the drag and fail with `target_moved` if still animating; on a locked/secure desktop the drag fails with `no_interactive_desktop`.
+- A selector drags from/to the element's center; `x,y` are screen coordinates in the same space `ui inspect`/`search` report. Element endpoints are re-resolved just before the drag and fail with `target_moved` if still animating; on a locked/secure desktop the drag fails with `no_interactive_desktop`.
+
+### Touch gestures (tap, swipe, pinch, stretch, long-press)
+Inject synthetic touch. The contact anchor is an element selector (its center) or an explicit `--at x,y` screen coordinate. Prefers the modern synthetic-pointer device and falls back to the legacy touch-injection API.
+```powershell
+# Tap an element center; or tap explicit screen coordinates
+winapp ui touch btn-ok-1a2b -a myapp
+winapp ui touch -a myapp --at 320,240
+
+# Long-press, swipe, and two-finger pinch/stretch (zoom)
+winapp ui touch tile-photo-7b3c -a myapp --gesture long-press --hold-ms 600
+winapp ui touch -a myapp --at 100,300 --gesture swipe --to-point 400,300
+winapp ui touch img-map-9f8e -a myapp --gesture pinch --distance 200
+winapp ui touch img-map-9f8e -a myapp --gesture stretch --distance 200
+```
+- Gestures: `tap` (default), `double-tap`, `long-press`, `swipe`, `pinch`, `stretch`. `--fingers` 1–10 (pinch/stretch always 2). Refuses without a non-zero foregrounded target (`no_target`/`foreground_not_target`/`no_interactive_desktop`); every coordinate is checked against the target window, and a point outside it produces a non-fatal warning (`warnings[]` in `--json`) while injection still proceeds — consistent with the mouse verbs. If injected touch is unsupported on the device, the command surfaces the real Win32 error rather than a false success. In a Remote Desktop/VM session delivery isn't guaranteed even on exit 0 — the command appends a delivery-uncertainty warning (`warnings[]` in `--json`); verify the effect with a screenshot.
+
+### Pen / stylus (taps and ink strokes)
+Inject synthetic pen input (Windows 10 1809+). Target an element center, an explicit `--at`, or a full `--path` ink stroke, with pressure/tilt/eraser control.
+```powershell
+# Pen tap at element center; firm tap at explicit coords
+winapp ui pen canvas-1a2b -a myapp
+winapp ui pen -a myapp --at 320,240 --pressure 0.8
+
+# Draw an ink stroke, or erase along one
+winapp ui pen -a myapp --path "100,100 150,120 210,140 260,120"
+winapp ui pen -a myapp --path "100,100 260,100" --eraser
+```
+- `--pressure` 0.0–1.0, `--tilt-x`/`--tilt-y` ±90°, `--eraser` for the eraser end. Same injection safety as `touch`: requires a non-zero foregrounded target window and checks every ink point (out-of-window → non-fatal `warnings[]` advisory, injection still proceeds). Pen routing is especially unreliable over Remote Desktop — exit 0 can mean the call succeeded but no pen reached the app; the command appends a delivery-uncertainty warning (`warnings[]` in `--json`). Validate pen flows on a local interactive desktop.
 
 ### Read element state
 ```powershell
@@ -263,3 +317,6 @@ Full schemas with examples: `references/ui-json-envelope.md`.
 | "does not support any invoke pattern" | Element can't be invoked | The error shows the invokable ancestor slug if one exists — use that |
 | "No UIA window found" | UIA can't see the window | Use `list-windows` to find HWND, then `-w` |
 | Popup not in screenshot | Default capture path doesn't include unowned overlays | Use `--capture-screen` flag |
+| `element_not_found` during record | Selector given but element not in tree | Re-run `inspect` or `search` to get a fresh selector |
+| `ambiguous_selector` during record | Plain-text selector matched multiple elements | Use a slug from the suggestions in the error message, or from `inspect` output |
+| WGC unavailable during record | WGC capture init failed; no silent fallback | Check GPU/driver; use `--capture-screen` to explicitly request screen DC capture |

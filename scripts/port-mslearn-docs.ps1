@@ -10,6 +10,7 @@
     4. Flattens electron subfolder guides
     5. Copies referenced images
     6. Generates guides/index.md
+    7. Generates toc.yml (the MS Learn left-nav for the winapp-cli node)
 
     The output directory can be directly committed to MicrosoftDocs/windows-dev-docs-pr
     under hub/apps/dev-tools/winapp-cli/.
@@ -31,6 +32,10 @@ param(
 $ErrorActionPreference = "Stop"
 $ProjectRoot = $PSScriptRoot | Split-Path -Parent
 $DocsRoot = Join-Path $ProjectRoot "docs"
+
+# Shared MS Learn front-matter rules (title/description/topic + YAML quoting),
+# kept in one place so this generator and validate-mslearn-docs.ps1 can't drift.
+. (Join-Path $PSScriptRoot 'mslearn-doc-lib.ps1')
 
 # ─── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -65,6 +70,22 @@ $msDate = Get-Date -Format "MM/dd/yyyy"
 
 Write-Step "Porting docs for v$Version"
 Write-Info "Output: $OutputPath"
+
+# ─── Step 0.5: Validate source docs against MS Learn publishing rules ────────────
+# Fail fast (and identically in CI) if any opted-in doc violates the docs-repo
+# conventions the reviewer enforces, so issues are fixed at the source of truth
+# rather than in generated output. See scripts/validate-mslearn-docs.ps1.
+
+Write-Step "Validating source docs"
+$validator = Join-Path $PSScriptRoot "validate-mslearn-docs.ps1"
+# Run in a separate process so the validator's `exit 1` can't terminate this
+# script before we inspect the exit code and emit our own error (matches how the
+# release stage and the Pester tests invoke it).
+& pwsh -NoProfile -File $validator -DocsRoot $DocsRoot
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "MS Learn doc validation failed. Fix the reported issues before porting."
+    exit $LASTEXITCODE
+}
 
 # ─── Step 1: Auto-discover files to port ────────────────────────────────────────
 
@@ -267,26 +288,18 @@ function Get-FrontMatter {
         [string]$DestRelPath
     )
 
-    # Extract title from first # heading
-    $title = "winapp CLI"
-    if ($Content -match '(?m)^#\s+(.+)$') {
-        $title = $Matches[1].Trim()
-    }
+    # Title = first H1 (fall back to a sane default for untitled docs).
+    $title = Get-MsLearnTitle $Content
+    if (-not $title) { $title = "winapp CLI" }
 
-    # Read per-file overrides from HTML-comment markers anywhere in the source.
-    # Supported: <!-- description: ... --> and <!-- ms.topic: ... -->
-    $description = $title
-    if ($Content -match '<!--\s*description:\s*(.+?)\s*-->') {
-        $description = $Matches[1].Trim()
-    }
-    $topic = "how-to"
-    if ($Content -match '<!--\s*ms\.topic:\s*(.+?)\s*-->') {
-        $topic = $Matches[1].Trim()
-    }
+    # Description + ms.topic resolved via the shared rules (marker override,
+    # else defaults). Quoting is applied through Format-MsLearnYamlValue so the
+    # emitted values always match what the validator gates on.
+    $description = (Resolve-MsLearnDescription -Content $Content -Title $title).Description
+    $topic = Get-MsLearnTopic -Content $Content
 
-    # Quote values that contain YAML-special characters (colons, brackets, etc.)
-    $safeTitle = if ($title -match '[:\[\]{}#&*!|>''"%@`]') { "`"$($title -replace '"', '\"')`"" } else { $title }
-    $safeDesc  = if ($description -match '[:\[\]{}#&*!|>''"%@`]') { "`"$($description -replace '"', '\"')`"" } else { $description }
+    $safeTitle = Format-MsLearnYamlValue $title
+    $safeDesc  = Format-MsLearnYamlValue $description
 
     $lines = @(
         "---"
@@ -494,8 +507,10 @@ if ($frameworkSection) {
 }
 
 # Add Electron deep-dive section (these only exist as guides, not in README)
-$guidesIndex += @"
-
+# Normalize the boundary: the extracted framework/additional-guides block can
+# carry a trailing bare CR from the source capture, which renders as a stray
+# character before the next heading. Trim it and join with exactly one blank line.
+$guidesIndex = $guidesIndex.TrimEnd() + "`r`n`r`n" + @"
 ## Electron deep-dive guides
 
 After completing the [Electron setup guide](electron-setup.md):
@@ -512,12 +527,158 @@ $guidesIndexPath = Join-Path $OutputPath "guides\index.md"
 Set-Content -Path $guidesIndexPath -Value $guidesIndex -NoNewline -Encoding UTF8
 Write-Info "  Generated guides/index.md"
 
-# ─── Step 6: Summary ───────────────────────────────────────────────────────────
+# ─── Step 7: Generate toc.yml (MS Learn left-nav) ───────────────────────────────
+#
+# Without a toc.yml in the winapp-cli folder, MS Learn renders no nested navigation
+# under the winapp-cli node — pages are only reachable via "Related topics". This
+# step emits the child TOC so every ported page appears in the left-hand nav.
+#
+# NOTE: The *parent* dev-tools TOC in MicrosoftDocs/windows-dev-docs-pr must branch
+# into this file, e.g.:
+#     - name: winapp CLI
+#       href: winapp-cli/toc.yml
+# That one-time edit lives in the docs repo (outside the winapp-cli folder this
+# script writes) and is not something the port script can generate.
+
+Write-Step "Generating toc.yml"
+
+# Curated left-nav labels keyed by output-relative path. Anything ported but not
+# listed here falls back to its H1 title (and is flagged so a maintainer can add it).
+$TocLabels = [ordered]@{
+    "index.md"                                   = "winapp CLI overview"
+    "usage.md"                                   = "Commands and usage"
+    "debugging.md"                               = "Debugging with package identity"
+    "ui-automation.md"                           = "UI Automation"
+    "guides/index.md"                            = "Framework guides"
+    "guides/dotnet.md"                           = ".NET / WPF / WinForms"
+    "guides/cpp.md"                              = "C++ (CMake)"
+    "guides/rust.md"                             = "Rust"
+    "guides/tauri.md"                            = "Tauri"
+    "guides/flutter.md"                          = "Flutter"
+    "guides/packaging-cli.md"                    = "Package an EXE or CLI"
+    "guides/sparse.md"                           = "Sparse packaging"
+    "guides/shell-completion.md"                 = "Shell completion"
+    "guides/electron-index.md"                   = "Electron"
+    "guides/electron-setup.md"                   = "Set up the environment"
+    "guides/electron-packaging.md"               = "Package for distribution"
+    "guides/electron-js-file-picker.md"          = "File picker (JS bindings)"
+    "guides/electron-js-notification.md"         = "Notifications (JS bindings)"
+    "guides/electron-js-phi-silica.md"           = "Phi Silica (JS bindings)"
+    "guides/electron-js-winml.md"                = "WinML (JS bindings)"
+    "guides/electron-phi-silica-addon.md"        = "Phi Silica addon"
+    "guides/electron-winml-addon.md"             = "WinML addon"
+    "guides/electron-cpp-notification-addon.md"  = "C++ notification addon"
+}
+
+# Set of markdown files actually present in the output (drives inclusion + warnings)
+$outFull = (Resolve-Path $OutputPath).Path
+$portedDest = @{}
+Get-ChildItem $outFull -Recurse -File -Filter "*.md" | ForEach-Object {
+    $rel = [System.IO.Path]::GetRelativePath($outFull, $_.FullName) -replace '\\', '/'
+    $portedDest[$rel] = $true
+}
+
+
+function Get-PortedTitle {
+    param([string]$DestRel)
+    $p = Join-Path $outFull ($DestRel -replace '/', '\')
+    if (-not (Test-Path $p)) { return $DestRel }
+    # Reuse the shared H1 parser so title extraction is identical to the
+    # validator and front-matter generation.
+    $title = Get-MsLearnTitle (Get-Content $p -Raw)
+    if ($title) { return $title }
+    return $DestRel
+}
+
+function New-TocNode {
+    param([string]$Href, [object[]]$Items = @())
+    $name = if ($TocLabels.Contains($Href)) { $TocLabels[$Href] } else { Get-PortedTitle $Href }
+    return @{ Name = $name; Href = $Href; Items = $Items }
+}
+
+function ConvertTo-TocLines {
+    param([object[]]$Nodes, [int]$Indent = 0)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $pad = ' ' * $Indent
+    foreach ($node in $Nodes) {
+        if (-not $portedDest.ContainsKey($node.Href)) {
+            Write-Warn "  Skipping TOC entry for un-ported file: $($node.Href)"
+            continue
+        }
+        $lines.Add("$pad- name: $(Format-MsLearnYamlValue $node.Name)")
+        $lines.Add("$pad  href: $($node.Href)")
+        if ($node.Items -and $node.Items.Count -gt 0) {
+            $childLines = ConvertTo-TocLines -Nodes $node.Items -Indent ($Indent + 2)
+            if ($childLines.Count -gt 0) {
+                $lines.Add("$pad  items:")
+                foreach ($cl in $childLines) { $lines.Add($cl) }
+            }
+        }
+    }
+    return , $lines.ToArray()
+}
+
+function Get-TocHrefs {
+    param([object[]]$Nodes)
+    $hrefs = [System.Collections.Generic.List[string]]::new()
+    foreach ($node in $Nodes) {
+        $hrefs.Add($node.Href)
+        if ($node.Items -and $node.Items.Count -gt 0) {
+            foreach ($h in (Get-TocHrefs -Nodes $node.Items)) { $hrefs.Add($h) }
+        }
+    }
+    return , $hrefs.ToArray()
+}
+
+$tocTree = @(
+    (New-TocNode "index.md")
+    (New-TocNode "usage.md")
+    (New-TocNode "debugging.md")
+    (New-TocNode "ui-automation.md")
+    (New-TocNode "guides/index.md" @(
+        (New-TocNode "guides/dotnet.md")
+        (New-TocNode "guides/cpp.md")
+        (New-TocNode "guides/electron-index.md" @(
+            (New-TocNode "guides/electron-setup.md")
+            (New-TocNode "guides/electron-packaging.md")
+            (New-TocNode "guides/electron-js-file-picker.md")
+            (New-TocNode "guides/electron-js-notification.md")
+            (New-TocNode "guides/electron-js-phi-silica.md")
+            (New-TocNode "guides/electron-js-winml.md")
+            (New-TocNode "guides/electron-phi-silica-addon.md")
+            (New-TocNode "guides/electron-winml-addon.md")
+            (New-TocNode "guides/electron-cpp-notification-addon.md")
+        ))
+        (New-TocNode "guides/rust.md")
+        (New-TocNode "guides/tauri.md")
+        (New-TocNode "guides/flutter.md")
+        (New-TocNode "guides/packaging-cli.md")
+        (New-TocNode "guides/sparse.md")
+        (New-TocNode "guides/shell-completion.md")
+    ))
+)
+
+# Warn about any ported page missing from the TOC so nothing silently drops out of nav
+$tocHrefs = @{}
+foreach ($h in (Get-TocHrefs -Nodes $tocTree)) { $tocHrefs[$h] = $true }
+foreach ($dest in ($portedDest.Keys | Sort-Object)) {
+    if (-not $tocHrefs.ContainsKey($dest)) {
+        Write-Warn "  Ported page not in toc.yml: $dest — add it to the TOC tree in port-mslearn-docs.ps1"
+    }
+}
+
+$tocLines = ConvertTo-TocLines -Nodes $tocTree -Indent 0
+$tocContent = ($tocLines -join "`r`n") + "`r`n"
+$tocPath = Join-Path $OutputPath "toc.yml"
+Set-Content -Path $tocPath -Value $tocContent -Encoding UTF8 -NoNewline
+Write-Info "  Generated toc.yml ($($tocLines.Count) lines)"
+
+# ─── Step 8: Summary ───────────────────────────────────────────────────────────
 
 Write-Step "Done"
 
 $fileCount = (Get-ChildItem $OutputPath -Recurse -File | Where-Object { $_.Extension -eq ".md" }).Count
-$imageCount = (Get-ChildItem $OutputPath -Recurse -File | Where-Object { $_.Extension -ne ".md" }).Count
+$imageCount = (Get-ChildItem $OutputPath -Recurse -File | Where-Object { $_.Extension -in @(".png", ".jpg", ".gif") }).Count
 
 Write-Ok "Ported $fileCount markdown files + $imageCount images to: $OutputPath"
 Write-Info "Ready to commit to MicrosoftDocs/windows-dev-docs-pr under hub/apps/dev-tools/winapp-cli/"

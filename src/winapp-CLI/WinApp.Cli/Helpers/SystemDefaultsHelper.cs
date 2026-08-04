@@ -19,7 +19,16 @@ internal static partial class SystemDefaultsHelper
 
     public static string GetDefaultPublisherCN()
     {
-        var user = Environment.UserName;
+        return BuildPublisherCN(Environment.UserName);
+    }
+
+    /// <summary>
+    /// Builds a <c>CN=</c> publisher value from an OS user name, falling back to
+    /// <c>"Developer"</c> when the name is missing or whitespace. Extracted as a pure
+    /// function so the whitespace-fallback branch can be unit tested deterministically.
+    /// </summary>
+    internal static string BuildPublisherCN(string? user)
+    {
         if (string.IsNullOrWhiteSpace(user))
         {
             user = "Developer";

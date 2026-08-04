@@ -21,6 +21,12 @@ internal class InitCommand : Command, IShortDescription
     public static Option<bool> NoGitignoreOption { get; }
     public static Option<bool> UseDefaults { get; }
     public static Option<bool> ConfigOnlyOption { get; }
+    public static Option<FileInfo> ExeOption { get; }
+    public static Option<bool> SparseOption { get; }
+    public static Option<string?> NameOption { get; }
+    public static Option<string?> PublisherOption { get; }
+    public static Option<DirectoryInfo> OutputDirOption { get; }
+    public static Option<bool> ForceOption { get; }
 
     static InitCommand()
     {
@@ -50,11 +56,36 @@ internal class InitCommand : Command, IShortDescription
         };
         UseDefaults = new Option<bool>("--use-defaults", "--no-prompt")
         {
-            Description = "Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults)"
+            Description = "Skip interactive prompts and use default answers. Normal init targets the positional project directory if given, otherwise the current directory (e.g., winapp init . --use-defaults). Sparse init (--exe --sparse) ignores the positional directory and writes to --output-dir instead."
         };
         ConfigOnlyOption = new Option<bool>("--config-only")
         {
             Description = "Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps."
+        };
+        ExeOption = new Option<FileInfo>("--exe")
+        {
+            Description = "Path to the application executable. Requires --sparse. Generates an identity-only sparse manifest for the exe instead of a full package/SDK setup."
+        };
+        ExeOption.AcceptExistingOnly();
+        SparseOption = new Option<bool>("--sparse")
+        {
+            Description = "Generate a sparse identity manifest (appxmanifest.xml) for an existing desktop exe instead of a full package manifest. Use with --exe. Skips SDK/package installation."
+        };
+        NameOption = new Option<string?>("--name")
+        {
+            Description = "Override the package name (sparse only; default: inferred from the exe)"
+        };
+        PublisherOption = new Option<string?>("--publisher")
+        {
+            Description = "Override the publisher CN (sparse only; default: inferred from the exe's company name). Bare names are auto-wrapped as CN=<name>."
+        };
+        OutputDirOption = new Option<DirectoryInfo>("--output-dir")
+        {
+            Description = "Directory to write the sparse manifest and Assets/ (sparse only; default: a 'sparse/' folder in the current directory)"
+        };
+        ForceOption = new Option<bool>("--force")
+        {
+            Description = "Overwrite an existing appxmanifest.xml in the target directory (sparse only). Without this, init fails instead of replacing existing manifest/asset files."
         };
     }
 
@@ -67,12 +98,20 @@ internal class InitCommand : Command, IShortDescription
         Options.Add(NoGitignoreOption);
         Options.Add(UseDefaults);
         Options.Add(ConfigOnlyOption);
+        Options.Add(ExeOption);
+        Options.Add(SparseOption);
+        Options.Add(NameOption);
+        Options.Add(PublisherOption);
+        Options.Add(OutputDirOption);
+        Options.Add(ForceOption);
     }
 
     public class Handler(
         IWorkspaceSetupService workspaceSetupService,
         IProjectDetectionService projectDetectionService,
         ICurrentDirectoryProvider currentDirectoryProvider,
+        IManifestService manifestService,
+        IStatusService statusService,
         IAnsiConsole ansiConsole,
         ILogger<Handler> logger) : AsynchronousCommandLineAction
     {
@@ -87,6 +126,33 @@ internal class InitCommand : Command, IShortDescription
             var noGitignore = parseResult.GetValue(NoGitignoreOption);
             var useDefaults = parseResult.GetValue(UseDefaults);
             var configOnly = parseResult.GetValue(ConfigOnlyOption);
+            var exe = parseResult.GetValue(ExeOption);
+            var sparse = parseResult.GetValue(SparseOption);
+            var name = parseResult.GetValue(NameOption);
+            var publisher = parseResult.GetValue(PublisherOption);
+            var outputDir = parseResult.GetValue(OutputDirOption);
+            var force = parseResult.GetValue(ForceOption);
+
+            // --exe and the sparse-only overrides (--name / --publisher / --output-dir / --force) apply
+            // only to the sparse identity flow. Reject them without --sparse so scripts don't report
+            // success after their input is silently discarded by the normal initialization path.
+            if (!sparse)
+            {
+                var sparseOnly = new List<string>();
+                if (exe != null) { sparseOnly.Add("--exe"); }
+                if (name != null) { sparseOnly.Add("--name"); }
+                if (publisher != null) { sparseOnly.Add("--publisher"); }
+                if (outputDir != null) { sparseOnly.Add("--output-dir"); }
+                if (parseResult.GetResult(ForceOption) is { Implicit: false }) { sparseOnly.Add("--force"); }
+
+                if (sparseOnly.Count > 0)
+                {
+                    logger.LogError(
+                        "{Options} require --sparse. Use 'winapp init --exe <exe> --sparse' for identity packaging, or remove these options for full package initialization.",
+                        string.Join(", ", sparseOnly));
+                    return 1;
+                }
+            }
 
             // Detect non-interactive environments (piped stdin, CI, etc.) and fall back
             // to --use-defaults behavior to avoid InvalidOperationException from prompts.
@@ -94,6 +160,41 @@ internal class InitCommand : Command, IShortDescription
             {
                 logger.LogWarning("{Warning}  Non-interactive environment detected. Using default values.", UiSymbols.Warning);
                 useDefaults = true;
+            }
+
+            // Sparse identity flow: generate an identity-only appxmanifest.xml + assets for an
+            // existing exe. This intentionally skips all SDK/package installation.
+            if (sparse)
+            {
+                // The positional base-directory argument configures the normal init flow only.
+                // Reject it in sparse mode rather than silently ignoring it — output location is
+                // controlled by --output-dir (default: a 'sparse/' folder in the current directory).
+                if (baseDirectoryExplicit)
+                {
+                    logger.LogError(
+                        "A positional directory is not used with --sparse. Use --output-dir <dir> to choose where the sparse manifest and Assets/ are written (default: ./sparse).");
+                    return 1;
+                }
+
+                // Sparse identity packaging has no SDK/config/gitignore steps, so the normal-init
+                // options below do nothing in this mode. Reject any that were explicitly supplied
+                // rather than exiting 0 while silently discarding them.
+                var normalOnly = new List<string>();
+                if (configOnly) { normalOnly.Add("--config-only"); }
+                if (parseResult.GetResult(SetupSdksOption) is { Implicit: false }) { normalOnly.Add("--setup-sdks"); }
+                if (configDirExplicit) { normalOnly.Add("--config-dir"); }
+                if (ignoreConfig) { normalOnly.Add("--ignore-config"); }
+                if (noGitignore) { normalOnly.Add("--no-gitignore"); }
+
+                if (normalOnly.Count > 0)
+                {
+                    logger.LogError(
+                        "{Options} are not used with --sparse (identity packaging installs no SDKs and writes no winapp.yaml). Remove them, or drop --sparse for full package initialization.",
+                        string.Join(", ", normalOnly));
+                    return 1;
+                }
+
+                return await RunSparseInitAsync(exe, name, publisher, outputDir, useDefaults, force, cancellationToken);
             }
 
             DirectoryInfo? selectedDirectory;
@@ -157,6 +258,118 @@ internal class InitCommand : Command, IShortDescription
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Generates an identity-only sparse manifest (appxmanifest.xml) plus placeholder assets
+        /// for an existing desktop executable. Skips all SDK/package installation because sparse
+        /// identity packages have no SDK dependencies.
+        /// </summary>
+        private async Task<int> RunSparseInitAsync(
+            FileInfo? exe,
+            string? name,
+            string? publisher,
+            DirectoryInfo? outputDir,
+            bool useDefaults,
+            bool force,
+            CancellationToken cancellationToken)
+        {
+            if (exe == null)
+            {
+                logger.LogError("--sparse requires --exe <path>. Provide the path to the application executable.");
+                return 1;
+            }
+
+            if (!string.Equals(exe.Extension, ".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                logger.LogError(
+                    "--exe must point to a .exe file, but '{Name}' is not an executable. Sparse identity is embedded into an .exe, so a non-exe target cannot be used with embed-identity.",
+                    exe.Name);
+                return 1;
+            }
+
+            // Default output location is a dedicated ./sparse/ folder in the current directory.
+            // Keeping the identity manifest and its Assets/ out of the exe's build-output directory
+            // means a clean/rebuild won't delete them, and the folder holds only the manifest +
+            // Assets/ so 'winapp pack' has nothing to warn about. The manifest references the exe by
+            // name, so its location is independent of where the exe lives.
+            var targetDir = outputDir ?? new DirectoryInfo(
+                Path.Join(currentDirectoryProvider.GetCurrentDirectory(), "sparse"));
+
+            // Guard against silently overwriting a hand-authored manifest or assets. Generation uses
+            // File.WriteAllTextAsync/File.Create, which would replace an existing appxmanifest.xml
+            // (and matching Assets/) in place — including the narrow case where assets exist but the
+            // manifest does not. Require --force to opt into overwriting either.
+            var existingManifest = new FileInfo(Path.Join(targetDir.FullName, "appxmanifest.xml"));
+            var existingAssets = new DirectoryInfo(Path.Join(targetDir.FullName, "Assets"));
+            var assetsHaveContent = existingAssets.Exists && existingAssets.EnumerateFiles("*", SearchOption.AllDirectories).Any();
+            if (!force && (existingManifest.Exists || assetsHaveContent))
+            {
+                var whatExists = existingManifest.Exists
+                    ? $"An appxmanifest.xml already exists at '{existingManifest.FullName}'"
+                    : $"Generated assets already exist in '{existingAssets.FullName}'";
+                logger.LogError(
+                    "{WhatExists}. Re-run with --force to overwrite, or choose a different --output-dir.",
+                    whatExists);
+                return 1;
+            }
+
+            // Resolve manifest metadata (inferring from the exe and, in interactive mode, prompting)
+            // BEFORE entering the status display. Spectre.Console throws if a prompt runs while a
+            // live progress spinner is active, so the interactive phase must happen outside it.
+            ManifestGenerationInfo manifestInfo;
+            try
+            {
+                manifestInfo = await manifestService.PrepareSparseManifestInfoAsync(
+                    targetDir, exe, name, publisher, useDefaults, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return 1;
+            }
+
+            SparseInitResult? sparseResult = null;
+            var exitCode = await statusService.ExecuteWithStatusAsync("Generating sparse identity manifest...", async (taskContext, ct) =>
+            {
+                try
+                {
+                    sparseResult = await manifestService.GenerateSparseIdentityManifestAsync(
+                        targetDir, exe, manifestInfo, taskContext, ct);
+                    return (0, "Sparse identity manifest generated.");
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    taskContext.AddDebugMessage($"Stack Trace: {ex.StackTrace}");
+                    return (1, $"{UiSymbols.Error} Failed to generate sparse manifest: {ex.GetBaseException().Message}");
+                }
+            }, cancellationToken);
+
+            if (exitCode != 0 || sparseResult == null)
+            {
+                return exitCode;
+            }
+
+            // Summary + next steps. Gated on info logging so --quiet/--json stay script-friendly.
+            if (logger.IsEnabled(LogLevel.Information))
+            {
+                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Check} Generated sparse identity package files:");
+                ansiConsole.MarkupLineInterpolated($"   {UiSymbols.Files} Manifest: {sparseResult.ManifestPath.FullName}");
+                ansiConsole.MarkupLineInterpolated($"   {UiSymbols.Files} Assets:   {sparseResult.AssetsDirectory.FullName}");
+                ansiConsole.MarkupLineInterpolated($"   {UiSymbols.Package} Package:  {sparseResult.Info.PackageName}  Version: {sparseResult.Info.Version}");
+                ansiConsole.WriteLine();
+                ansiConsole.MarkupLine("[yellow]Note:[/] This is an [bold]identity-only[/] package. The generated assets in [blue]Assets/[/] are resolved from the app's install directory (the external content location) at runtime — they are [bold]not[/] bundled into the .msix. Deploy them alongside your application.");
+                ansiConsole.WriteLine();
+                ansiConsole.MarkupLine("Next steps:");
+                ansiConsole.MarkupLineInterpolated($"   1. Run [blue]winapp pack \"{sparseResult.ManifestPath.FullName}\" --cert <dev.pfx>[/] to create the signed identity .msix");
+                ansiConsole.MarkupLineInterpolated($"   2. Run [blue]winapp embed-identity \"{exe.FullName}\" --manifest \"{sparseResult.ManifestPath.FullName}\"[/] to connect your exe to the identity package");
+                ansiConsole.MarkupLine("   3. Register in your installer with [blue]Add-AppxPackage -Path <msix> -ExternalLocation <install-dir>[/]");
+            }
+
+            return 0;
         }
 
         /// <summary>

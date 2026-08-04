@@ -4,6 +4,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using WinApp.Cli.Models;
+using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Helpers;
 
@@ -24,6 +25,11 @@ namespace WinApp.Cli.Helpers;
 [JsonSerializable(typeof(UiClickResult))]
 [JsonSerializable(typeof(UiScreenshotResult))]
 [JsonSerializable(typeof(UiScreenshotResult[]))]
+[JsonSerializable(typeof(UiRecordResult))]
+[JsonSerializable(typeof(UiRecordStartedEvent))]
+[JsonSerializable(typeof(RecordFrameArtifactResult))]
+[JsonSerializable(typeof(RecordFrameIndexEntry))]
+[JsonSerializable(typeof(RecordFrameBundleManifest))]
 [JsonSerializable(typeof(UiGetValueResult))]
 [JsonSerializable(typeof(UiWaitForResult))]
 [JsonSerializable(typeof(UiScrollResult))]
@@ -31,8 +37,13 @@ namespace WinApp.Cli.Helpers;
 [JsonSerializable(typeof(UiFocusResult))]
 [JsonSerializable(typeof(UiScrollIntoViewResult))]
 [JsonSerializable(typeof(UiHoverResult))]
+[JsonSerializable(typeof(List<string>))]
 [JsonSerializable(typeof(UiSendKeysResult))]
 [JsonSerializable(typeof(UiDragResult))]
+[JsonSerializable(typeof(UiTouchResult))]
+[JsonSerializable(typeof(UiPenResult))]
+[JsonSerializable(typeof(UiPointResult))]
+[JsonSerializable(typeof(UiPointResult[]))]
 [JsonSerializable(typeof(UiErrorResult))]
 [JsonSerializable(typeof(UiErrorInfo))]
 [JsonSerializable(typeof(UiFocusedResult))]
@@ -46,6 +57,14 @@ namespace WinApp.Cli.Helpers;
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 internal partial class UiJsonContext : JsonSerializerContext;
+
+[JsonSerializable(typeof(UiRecordStartedEvent))]
+[JsonSerializable(typeof(UiErrorResult))]
+[JsonSourceGenerationOptions(
+    WriteIndented = false,
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+internal partial class UiJsonLineContext : JsonSerializerContext;
 
 // JSON output models for --json mode
 
@@ -140,6 +159,36 @@ internal sealed class UiScreenshotWindowInfo
     public string? Error { get; set; }
 }
 
+internal sealed class UiRecordResult
+{
+    public string Path { get; set; } = "";
+    public int DurationSec { get; set; }
+    public int Fps { get; set; }
+    public int Frames { get; set; }
+    public int Width { get; set; }
+    public int Height { get; set; }
+    public long FileSize { get; set; }
+    public string Codec { get; set; } = "h264";
+    public string Mode { get; set; } = "";
+    public long ElapsedMs { get; set; }
+    public double AchievedFps { get; set; }
+    public double CadenceRatio { get; set; }
+    public string StopReason { get; set; } = "";
+    public RecordFrameArtifactResult? FrameArtifacts { get; set; }
+    public string[]? Warnings { get; set; }
+}
+
+internal sealed class UiRecordStartedEvent
+{
+    public string Event { get; set; } = "recording-started";
+    public string Path { get; set; } = "";
+    public int Fps { get; set; }
+    public int DurationSec { get; set; }
+    public string? FramesDirectory { get; set; }
+    public string? FramesManifest { get; set; }
+    public string? FramesIndex { get; set; }
+}
+
 internal sealed class UiWaitForResult
 {
     public bool Found { get; set; }
@@ -169,6 +218,14 @@ internal sealed class UiErrorInfo
     public string Message { get; set; } = "";
     public string? Selector { get; set; }
     public string? Details { get; set; }
+    public string? RecoveryHint { get; set; }
+    public UiPartialOutputInfo? PartialOutput { get; set; }
+}
+
+internal sealed class UiPartialOutputInfo
+{
+    public string? VideoPath { get; set; }
+    public string? FramesDirectory { get; set; }
 }
 
 internal sealed class WindowInfo
@@ -234,6 +291,7 @@ internal sealed class UiSendKeysResult
     public int ActionCount { get; set; }
     public string? Target { get; set; }
     public long Hwnd { get; set; }
+    public List<string> Warnings { get; set; } = [];
 }
 
 internal sealed class UiDragResult
@@ -248,4 +306,44 @@ internal sealed class UiDragResult
     public int HoldMs { get; set; }
     public int DwellMs { get; set; }
     public long Hwnd { get; set; }
+}
+
+/// <summary>A point in app/screen pixel space for touch/pen JSON output.</summary>
+internal sealed class UiPointResult
+{
+    public int X { get; set; }
+    public int Y { get; set; }
+}
+
+internal sealed class UiTouchResult
+{
+    public string Gesture { get; set; } = "";
+    /// <summary>The selector or app <c>x,y</c> the gesture targeted.</summary>
+    public string? Target { get; set; }
+    public UiPointResult[] Points { get; set; } = [];
+    public int Fingers { get; set; }
+    public int DurationMs { get; set; }
+    /// <summary>Effective hold time in milliseconds (populated for long-press; 0 for other gestures).</summary>
+    public int HoldMs { get; set; }
+    public long Hwnd { get; set; }
+
+    /// <summary>Non-fatal advisories (e.g. remote-session delivery uncertainty). Omitted when empty.</summary>
+    public string[]? Warnings { get; set; }
+}
+
+internal sealed class UiPenResult
+{
+    public string Action { get; set; } = "";
+    /// <summary>The selector or app <c>x,y</c> the pen action targeted.</summary>
+    public string? Target { get; set; }
+    public UiPointResult[] Points { get; set; } = [];
+    public float Pressure { get; set; }
+    public int TiltX { get; set; }
+    public int TiltY { get; set; }
+    public bool Eraser { get; set; }
+    public int DurationMs { get; set; }
+    public long Hwnd { get; set; }
+
+    /// <summary>Non-fatal advisories (e.g. remote-session delivery uncertainty). Omitted when empty.</summary>
+    public string[]? Warnings { get; set; }
 }

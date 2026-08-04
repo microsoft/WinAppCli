@@ -34,17 +34,23 @@ internal static class UiErrors
         UiJsonError.Emit(json, UiJsonError.CodeElementNotFound, $"No element found matching '{selector}'", selector);
     }
 
-    public static void StaleElement(ILogger logger, bool json = false)
+    public static void StaleElement(ILogger logger, bool json = false, TextWriter? errorOut = null)
     {
         const string msg = "Element is no longer accessible — the app may have navigated or the element was removed. Re-run 'winapp ui inspect' to refresh the element tree. Prefer targeting by AutomationId — these are stable across layout changes.";
         logger.LogError("{Symbol} {Message}", UiSymbols.Error, msg);
-        UiJsonError.Emit(json, UiJsonError.CodeStaleElement, "Element is no longer accessible");
+        UiJsonError.Emit(json, UiJsonError.CodeStaleElement, "Element is no longer accessible", errorOut: errorOut);
     }
 
-    public static void GenericError(ILogger logger, Exception ex, bool json = false)
+    public static void AmbiguousSelector(ILogger logger, string message, bool json = false)
+    {
+        logger.LogError("{Symbol} {Message}", UiSymbols.Error, message);
+        UiJsonError.Emit(json, UiJsonError.CodeAmbiguousSelector, message);
+    }
+
+    public static void GenericError(ILogger logger, Exception ex, bool json = false, TextWriter? errorOut = null)
     {
         logger.LogDebug("Stack trace: {StackTrace}", ex.StackTrace);
         logger.LogError("{Symbol} {Message}", UiSymbols.Error, ex.Message);
-        UiJsonError.Emit(json, UiJsonError.CodeInternalError, ex.Message, details: ex.GetType().Name);
+        UiJsonError.Emit(json, UiJsonError.CodeInternalError, ex.Message, details: ex.GetType().Name, errorOut: errorOut);
     }
 }

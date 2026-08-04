@@ -68,7 +68,7 @@ Perfect for:
 
 ## 🤔 Why?
 
-Many powerful Windows APIs require your app to have package identity, enabling you to leverage some of the OS components Windows offers, that you wouldn't otherwise have access to. With identity, your app gains access to user-first features like notifications, OS integration, and on-device AI.
+Many Windows APIs require your app to have package identity, enabling you to leverage some of the OS components Windows offers, that you wouldn't otherwise have access to. With identity, your app gains access to user-first features like notifications, OS integration, and on-device AI.
 
 Our goal is to support developers wherever they are, with the tools and frameworks they already use. Based on feedback from developers shipping cross-platform apps on Windows, we built this CLI to streamline integrating with the Windows developer platform - handling SDK setup, header generation, manifests, certificates, and packaging in just a few commands:
 
@@ -215,6 +215,7 @@ npx winapp --help
 - [`pack`](./docs/usage.md#pack) - Create MSIX packages from directories
 - [`run`](./docs/usage.md#run) - Run app as a packaged application for debugging (loose layout registration)
 - [`create-debug-identity`](./docs/usage.md#create-debug-identity) - Add sparse package identity to an existing exe
+- [`embed-identity`](./docs/usage.md#embed-identity) - Connect an exe to its sparse identity package by embedding the `<msix>` element
 - [`unregister`](./docs/usage.md#unregister) - Remove sideloaded dev packages registered by `run` or `create-debug-identity`
 - [`manifest`](./docs/usage.md#manifest) - Generate and manage AppxManifest.xml files
 
@@ -224,6 +225,7 @@ See also: [Debugging Guide](./docs/debugging.md) — choosing between `winapp ru
 
 - [`cert`](./docs/usage.md#cert) - Generate and install development certificates
 - [`sign`](./docs/usage.md#sign) - Sign MSIX packages and executables
+- [`az-sign`](./docs/usage.md#az-sign) - Sign with Azure Trusted Signing (cloud-managed identity, no local PFX)
 - [`create-external-catalog`](./docs/usage.md#create-external-catalog) - Generate CodeIntegrityExternal.cat for TrustedLaunch sparse packages
 
 **Development Tools:**
@@ -250,11 +252,16 @@ This repository includes samples demonstrating how to use the CLI with various f
 | [C++ App](/samples/cpp-app/README.md) | Native C++ Win32 application with CMake |
 | [.NET Console](/samples/dotnet-app/README.md) | .NET console application |
 | [WPF App](/samples/wpf-app/README.md) | WPF desktop application |
+| [WinUI App](/samples/winui-app/README.md) | Packaged WinUI 3 app registered and launched via `winapp run <csproj>` |
+| [WinUI Unpackaged App](/samples/winui-unpackaged-app/README.md) | Unpackaged WinUI 3 app launched via `winapp run <csproj>` |
+| [WinUI Solution](/samples/winui-solution/README.md) | Multi-project `.sln` (app + test project) demonstrating `winapp run` solution-mode auto-selection |
 | [Electron](/samples/electron/README.md) | Electron Forge app with appxmanifest, assets, native C++ addon, and C# addon |
 | [Electron WinML](/samples/electron-winml/README.md) | Electron app using Windows ML for image classification |
+| [Node.js WinUI 3](/samples/node-winui/README.md) | Native WinUI 3 controls created directly from JavaScript |
 | [Rust App](/samples/rust-app/README.md) | Rust application using Windows APIs |
 | [Tauri App](/samples/tauri-app/README.md) | Tauri cross-platform app with Rust backend |
 | [Flutter App](/samples/flutter-app/README.md) | Flutter desktop app with package identity and Windows App SDK |
+| [Sparse App](/samples/sparse-app/README.md) | WPF app with production sparse packaging (identity-only MSIX) and an Inno Setup installer |
 
 ## 🧩 VS Code Extension
 
@@ -308,10 +315,11 @@ The binaries and packages will be placed in the `artifacts` folder
 Developer-facing AI skills live under [`.github/skills/`](./.github/skills/).
 Before pushing a PR, you can ask Copilot CLI (or any agent that reads skill
 files) to "review my PR" — the [`pr-review`](./.github/skills/pr-review/SKILL.md)
-skill fans out parallel sub-agents covering security, correctness, CLI UX,
-alternative-solution check, test coverage, docs/samples sync, packaging
-impact, and a multi-model cross-check, then prints a consolidated finding
-list to stdout.
+skill fans out parallel sub-agents covering security, correctness and tests,
+CLI UX, alternative solutions, necessity and simplicity, shipping surfaces
+(docs/samples/packaging), and a different-model cross-check. It then builds and
+runs the CLI to validate the critical findings, and prints a short list to
+stdout.
 
 ## Trademarks
 

@@ -20,6 +20,14 @@ internal partial class ManifestService(
     IImageAssetService imageAssetService,
     IAnsiConsole ansiConsole) : IManifestService
 {
+    /// <summary>
+    /// Seam for extracting an icon from an executable. Defaults to the real shell-based
+    /// extractor. Tests override it so the extracted-icon -> app.ico path is exercised
+    /// deterministically, independent of whether the headless CI session has a populated
+    /// shell image list (<see cref="ShellIcon.GetJumboIcon"/> can return null there).
+    /// </summary>
+    internal Func<string, Icon?> ExecutableIconExtractor { get; set; } = ShellIcon.GetJumboIcon;
+
     public async Task<ManifestGenerationInfo> PromptForManifestInfoAsync(
         DirectoryInfo directory,
         string? packageName,
@@ -33,25 +41,42 @@ internal partial class ManifestService(
         // Interactive mode if not --use-defaults (get defaults for prompts)
         if (!string.IsNullOrEmpty(executable))
         {
-            var fileVersionInfo = FileVersionInfo.GetVersionInfo(executable);
-            packageName ??= !string.IsNullOrWhiteSpace(fileVersionInfo.FileDescription)
-                ? fileVersionInfo.FileDescription
-                : Path.GetFileNameWithoutExtension(executable);
-            if (!string.IsNullOrWhiteSpace(fileVersionInfo.Comments))
+            try
             {
-                description = fileVersionInfo.Comments;
+                var fileVersionInfo = FileVersionInfo.GetVersionInfo(executable);
+                packageName ??= !string.IsNullOrWhiteSpace(fileVersionInfo.FileDescription)
+                    ? fileVersionInfo.FileDescription
+                    : Path.GetFileNameWithoutExtension(executable);
+                if (!string.IsNullOrWhiteSpace(fileVersionInfo.Comments))
+                {
+                    description = fileVersionInfo.Comments;
+                }
+                if ((string.IsNullOrWhiteSpace(description) || description == packageName)
+                    && !string.IsNullOrWhiteSpace(fileVersionInfo.FileDescription))
+                {
+                    // Only override with FileDescription when it actually carries text; otherwise
+                    // leave description null so the default fallback below applies (assigning an
+                    // empty FileDescription here would defeat the ??= and emit Description="").
+                    description = fileVersionInfo.FileDescription;
+                }
+                if (!string.IsNullOrWhiteSpace(fileVersionInfo.CompanyName))
+                {
+                    publisherName ??= fileVersionInfo.CompanyName;
+                }
             }
-            if (string.IsNullOrWhiteSpace(description) || description == packageName)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                description = fileVersionInfo.FileDescription;
-            }
-            if (!string.IsNullOrWhiteSpace(fileVersionInfo.CompanyName))
-            {
-                publisherName ??= fileVersionInfo.CompanyName;
+                // Non-fatal: if the exe's version metadata can't be read (missing/locked file),
+                // fall back to the filename and system defaults rather than aborting. The version
+                // itself was already inferred (and guarded) by the caller and is passed in.
+                packageName ??= Path.GetFileNameWithoutExtension(executable);
             }
         }
         packageName ??= SystemDefaultsHelper.GetDefaultPackageName(directory);
-        description ??= SystemDefaultsHelper.GetDefaultDescription();
+        if (string.IsNullOrWhiteSpace(description))
+        {
+            description = SystemDefaultsHelper.GetDefaultDescription();
+        }
         publisherName ??= SystemDefaultsHelper.GetDefaultPublisherCN();
 
         packageName = CleanPackageName(packageName);
@@ -61,9 +86,23 @@ internal partial class ManifestService(
         {
             packageName = await PromptForValueAsync(ansiConsole, "Package name", packageName, cancellationToken);
             publisherName = await PromptForValueAsync(ansiConsole, "Publisher name", publisherName, cancellationToken);
-            version = await PromptForValueAsync(ansiConsole, "Version", version, cancellationToken);
+            var promptedVersion = await PromptForValueAsync(ansiConsole, "Version", version, cancellationToken);
+            // Normalize the (possibly hand-typed) version to MSIX's required four in-range
+            // components. An override like '2.0' becomes '2.0.0.0'; anything unparseable or
+            // out-of-range falls back to the inferred default so 'pack' can't fail later on a
+            // manifest that 'init' reported as successful.
+            var normalizedVersion = NormalizeManifestVersion(promptedVersion);
+            if (normalizedVersion == null && !string.Equals(promptedVersion?.Trim(), version.Trim(), StringComparison.Ordinal))
+            {
+                ansiConsole.MarkupLineInterpolated($"[yellow]Warning:[/] '{promptedVersion}' is not a valid MSIX version (needs up to four 0–65535 components). Using {version} instead.");
+            }
+            version = normalizedVersion ?? version;
             description = await PromptForValueAsync(ansiConsole, "Description", description, cancellationToken);
         }
+
+        // Re-clean after prompting: an interactive override (e.g. 'A&B') would otherwise flow raw
+        // into the manifest and produce malformed XML or an unpackable Identity name.
+        packageName = CleanPackageName(packageName);
 
         return new ManifestGenerationInfo(
             packageName,
@@ -112,7 +151,7 @@ internal partial class ManifestService(
             manifestTemplate,
             description,
             taskContext,
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
         string? extractedLogoPath = null;
 
@@ -120,32 +159,11 @@ internal partial class ManifestService(
         if (logoPath == null && !string.IsNullOrEmpty(executableAbsolute))
         {
             taskContext.AddDebugMessage($"No logo path provided, attempting to extract from executable: {executableAbsolute}");
-            Icon? extractedIcon = null;
-            try
+            extractedLogoPath = ExtractExeIconToTempPng(executableAbsolute);
+            if (extractedLogoPath != null)
             {
-                extractedIcon = ShellIcon.GetJumboIcon(executableAbsolute);
-                // save temporary
-                if (extractedIcon != null)
-                {
-                    string tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
-                    Directory.CreateDirectory(tempDir);
-
-                    extractedLogoPath = Path.Combine(tempDir, "StoreLogo.png");
-                    using (var stream = new FileStream(extractedLogoPath, FileMode.Create))
-                    {
-                        extractedIcon.ToBitmap().Save(stream, ImageFormat.Png);
-                    }
-
-                    logoPath = new FileInfo(extractedLogoPath);
-                    taskContext.AddDebugMessage($"Extracted logo path: {logoPath.FullName}");
-                }
-            }
-            finally
-            {
-                if (extractedIcon != null)
-                {
-                    extractedIcon.Dispose();
-                }
+                logoPath = new FileInfo(extractedLogoPath);
+                taskContext.AddDebugMessage($"Extracted logo path: {logoPath.FullName}");
             }
         }
 
@@ -180,7 +198,66 @@ internal partial class ManifestService(
     }
 
     /// <summary>
-    /// Cleans and sanitizes a package name to meet MSIX AppxManifest Identity Name schema requirements.
+    /// Extracts the jumbo icon from an executable and writes it to a temporary <c>StoreLogo.png</c>.
+    /// Returns the path to the temp PNG (the caller owns cleanup of the file and its directory),
+    /// or null if the executable has no extractable icon.
+    /// </summary>
+    private string? ExtractExeIconToTempPng(string executablePath)
+    {
+        using var extractedIcon = ExecutableIconExtractor(executablePath);
+        if (extractedIcon == null)
+        {
+            return null;
+        }
+
+        var tempDir = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString());
+        Directory.CreateDirectory(tempDir);
+        var logoPath = Path.Join(tempDir, "StoreLogo.png");
+        using var stream = new FileStream(logoPath, FileMode.Create);
+        using var bitmap = extractedIcon.ToBitmap();
+        bitmap.Save(stream, ImageFormat.Png);
+        return logoPath;
+    }
+
+    /// <summary>
+    /// Normalizes a version string to the 4-part Major.Minor.Build.Revision format required by
+    /// the MSIX Identity element. Returns null when the input cannot be parsed as a version.
+    /// </summary>
+    internal static string? NormalizeManifestVersion(string? version)
+    {
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            return null;
+        }
+
+        // FileVersionInfo.FileVersion (and hand-typed input) is frequently decorated, e.g.
+        // "10.0.26100.32860 (WinBuild.160101.0800)". Parse the leading numeric version token so a
+        // common executable still yields its real version instead of falling back to the default.
+        var match = LeadingVersionRegex().Match(version.Trim());
+        if (!match.Success || !Version.TryParse(match.Value, out var parsed))
+        {
+            return null;
+        }
+
+        // Each MSIX Identity/@Version component is a 16-bit unsigned integer. System.Version accepts
+        // larger values, but MakeAppx rejects them, so treat out-of-range metadata as unusable and let
+        // the caller fall back to a packable default (e.g. 1.0.0.0).
+        const int maxComponent = ushort.MaxValue;
+        if (parsed.Major > maxComponent || parsed.Minor > maxComponent
+            || parsed.Build > maxComponent || parsed.Revision > maxComponent)
+        {
+            return null;
+        }
+
+        var major = Math.Max(parsed.Major, 0);
+        var minor = Math.Max(parsed.Minor, 0);
+        var build = Math.Max(parsed.Build, 0);
+        var revision = Math.Max(parsed.Revision, 0);
+
+        return $"{major}.{minor}.{build}.{revision}";
+    }
+
+    /// <summary>
     /// The Identity Name must match the pattern [-.A-Za-z0-9]+ (only letters, digits, periods, and hyphens).
     /// </summary>
     /// <param name="packageName">The package name to clean</param>
@@ -240,6 +317,13 @@ internal partial class ManifestService(
     [GeneratedRegex(@"[^A-Za-z0-9.\-]")]
     private static partial Regex InvalidPackageNameCharRegex();
 
+    // Matches a leading numeric version token (up to four components) only when it is NOT followed
+    // by a further digit or dot. This lets a decorated value like "10.0.26100.32860 (WinBuild...)"
+    // parse to its four-part prefix, while a genuine five-part value such as "1.2.3.4.5" fails to
+    // match entirely (rather than being silently truncated to "1.2.3.4") so the caller falls back.
+    [GeneratedRegex(@"^\d+(\.\d+){0,3}(?![\d.])")]
+    private static partial Regex LeadingVersionRegex();
+
     public async Task UpdateManifestAssetsAsync(
         FileInfo manifestPath,
         FileInfo imagePath,
@@ -247,7 +331,7 @@ internal partial class ManifestService(
         FileInfo? lightImagePath = null,
         CancellationToken cancellationToken = default)
     {
-        taskContext.AddStatusMessage($"{UiSymbols.Info} Updating assets for manifest: {manifestPath.FullName}");
+        taskContext.AddDebugMessage($"Updating assets for manifest: {manifestPath.FullName}");
 
         var manifestDir = manifestPath.Directory;
         if (manifestDir == null)

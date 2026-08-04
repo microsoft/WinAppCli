@@ -62,6 +62,31 @@ When JS bindings are enabled (via `--add-js-bindings` or by answering yes in int
 - `.winapp/bindings/` — generated JS bindings for Windows App SDK APIs (npm-only, Node / Electron)
 - `package.json` update — adds the `winapp.jsBindings` namespace and `@microsoft/dynwinrt` dependency (npm-only)
 
+### Initialize a sparse identity package (existing exe)
+
+Use `--sparse` when you have an **already-built desktop exe** (WPF, WinForms, Win32, Electron, etc.) and only want to give it **package identity** — without repackaging the whole app into the MSIX. The app's files stay where they are and are resolved from an *external content location* at runtime.
+
+```powershell
+# Generate an identity-only sparse manifest for an existing exe
+winapp init --exe ./bin/Release/MyApp.exe --sparse
+
+# Non-interactive, with explicit identity values
+winapp init --exe ./bin/Release/MyApp.exe --sparse --name MyApp --publisher "CN=Contoso" --use-defaults
+```
+
+`--sparse` requires `--exe`. It skips all SDK/package installation (sparse identity packages have no SDK dependencies) and, by default, writes to a dedicated `sparse/` folder in the current directory (override with `--output-dir`) so the manifest and its `Assets/` stay out of a build-output folder that a rebuild would wipe:
+- `appxmanifest.xml` — identity-only sparse manifest (declares `uap10:AllowExternalContent`)
+- `Assets/` — placeholder visual assets (extracted from the exe's icon when possible), resolved from the **external location** at runtime — **not** bundled into the `.msix`
+
+If an `appxmanifest.xml` already exists in the target directory, init fails instead of overwriting it; re-run with `--force` to regenerate.
+
+This is step 1 of the sparse packaging workflow. Continue with:
+1. `winapp pack ./sparse/appxmanifest.xml --cert ./devcert.pfx` — build the signed identity `.msix`
+2. `winapp embed-identity ./bin/Release/MyApp.exe` — connect the exe to the identity package (re-sign the exe afterward)
+3. Register in your installer with `Add-AppxPackage -Path <msix> -ExternalLocation <install-dir>`
+
+For the full walkthrough, see the [Sparse packaging guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/sparse.md).
+
 ### Restore after cloning
 
 ```powershell
@@ -108,6 +133,29 @@ winapp run ./bin/Debug --debug-output
 
 Use `winapp run` during iterative development — it creates a loose layout package, registers a debug identity, and launches the app in one step. For identity-only registration without loose layout, use `winapp create-debug-identity` instead.
 
+#### Project mode: `winapp run` on a `.csproj` (.NET / WinUI)
+
+For .NET SDK projects you can point `winapp run` **at the project instead of the build output** — it builds the `.csproj` and launches it in one step, so there's no separate `dotnet build` and no need to know the output path:
+
+```powershell
+# Build and run the project in the current directory (input defaults to ".")
+winapp run
+
+# Run a specific project, configuration, and architecture
+winapp run ./src/MyApp/MyApp.csproj -c Release --arch arm64
+
+# Force an unpackaged run of a packaged project
+winapp run . -p WindowsPackageType=None
+
+# Show winapp's build decision traces (dotnet build stays at minimal verbosity)
+winapp run . --verbose
+```
+
+Project mode supports both **packaged** and **unpackaged** WinUI apps, detected from the project's effective `WindowsPackageType` (`MSIX` ⇒ loose-layout register + AUMID launch; `None` ⇒ launch the built `.exe`), and installs the matching-architecture Windows App Runtime before launching. Requires .NET SDK 8.0.100+.
+
+- **Build inputs:** `-c/--configuration`, `--arch`, `-r/--runtime`, `-f/--framework`, `--no-build`, `--no-restore`, `-p/--property` (repeatable).
+- **Packaged-only options:** `--manifest`, `--no-launch`, `--with-alias`, `--clean`, `--unregister-on-exit`, `--output-appx-directory`, `--executable` — rejected for unpackaged apps.
+- **Output:** winapp prints the exact `dotnet build …` invocation, then streams build output live (warnings included on success). Under `--json`/`--quiet` both go to **stderr** so stdout stays clean.
 
 #### Choosing between `run` and `create-debug-identity`
 

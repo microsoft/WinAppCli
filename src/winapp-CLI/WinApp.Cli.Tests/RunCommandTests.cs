@@ -2,8 +2,14 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Spectre.Console;
+using Spectre.Console.Testing;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using WinApp.Cli.Commands;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -14,6 +20,10 @@ public class RunCommandTests : BaseCommandTests
     private FakeMsixService _fakeMsixService = null!;
     private FakeAppLauncherService _fakeAppLauncherService = null!;
     private FakeDebugOutputService _fakeDebugOutputService = null!;
+    private FakePackageRegistrationService _fakePackageRegistrationService = null!;
+
+    private static readonly string[] SupportedArchitectures = ["x64", "arm64", "x86"];
+    private static readonly string[] ForcedUnpackagedProperties = ["WindowsPackageType=None", "Foo=Bar"];
 
     private const string TestManifestContent = """
         <?xml version="1.0" encoding="utf-8"?>
@@ -50,10 +60,12 @@ public class RunCommandTests : BaseCommandTests
         _fakeMsixService = new FakeMsixService();
         _fakeAppLauncherService = new FakeAppLauncherService();
         _fakeDebugOutputService = new FakeDebugOutputService();
+        _fakePackageRegistrationService = new FakePackageRegistrationService();
         return services
             .AddSingleton<IMsixService>(_fakeMsixService)
             .AddSingleton<IAppLauncherService>(_fakeAppLauncherService)
             .AddSingleton<IDebugOutputService>(_fakeDebugOutputService)
+            .AddSingleton<IPackageRegistrationService>(_fakePackageRegistrationService)
             .AddSingleton<INugetService, FakeNugetService>();
     }
 
@@ -66,6 +78,15 @@ public class RunCommandTests : BaseCommandTests
     }
 
     #region Option parsing tests
+
+    [TestMethod]
+    public void RunCommand_ExposesShortDescription()
+    {
+        // The command surfaces a non-empty short description used in help output.
+        var command = GetRequiredService<RunCommand>();
+
+        Assert.IsFalse(string.IsNullOrWhiteSpace(((IShortDescription)command).ShortDescription));
+    }
 
     [TestMethod]
     public void ParseOptions_NoLaunch_IsParsedCorrectly()
@@ -106,13 +127,13 @@ public class RunCommandTests : BaseCommandTests
 
         // Assert
         Assert.IsEmpty(parseResult.Errors, "There should be no parsing errors");
-        var folder = parseResult.GetValue(RunCommand.InputFolderArgument);
+        var folder = parseResult.GetValue(RunCommand.InputArgument);
         Assert.IsNotNull(folder);
         Assert.AreEqual(_tempDirectory.FullName, folder.FullName);
     }
 
     [TestMethod]
-    public void ParseOptions_NoInputFolder_HasParseError()
+    public void ParseOptions_NoInputFolder_NoParseError_ArgumentIsNull()
     {
         // Arrange
         var command = GetRequiredService<RunCommand>();
@@ -120,8 +141,65 @@ public class RunCommandTests : BaseCommandTests
         // Act
         var parseResult = command.Parse([]);
 
+        // Assert: input-folder is now optional (ArgumentArity.ZeroOrOne). With no path there is no
+        // parse error; the argument value is null and the handler substitutes the current directory.
+        Assert.IsEmpty(parseResult.Errors, "Omitting the optional input-folder should not produce a parse error");
+        Assert.IsNull(parseResult.GetValue(RunCommand.InputArgument),
+            "With no positional token, the input-folder value should be null (handler defaults it to cwd)");
+    }
+
+    [TestMethod]
+    public void ParseOptions_NoInputFolderWithPassthrough_ProducesNoParseErrors()
+    {
+        // Arrange
+        var command = GetRequiredService<RunCommand>();
+
+        // Act: no path, straight into '-- --appflag value'. With input-folder now optional
+        // (ArgumentArity.ZeroOrOne) and AcceptExistingOnly removed, System.CommandLine greedily
+        // binds the first post-'--' token to the positional, but that no longer hard-errors. The
+        // handler detects the stolen token and falls back to cwd (see the handler-level test
+        // RunCommand_NoInputFolderWithPassthrough_UsesCwdAndForwardsAppArgs).
+        var parseResult = command.Parse(["--", "--appflag", "value"]);
+
         // Assert
-        Assert.IsNotEmpty(parseResult.Errors, "Missing required input-folder should produce a parse error");
+        Assert.IsEmpty(parseResult.Errors,
+            "A bare '-- <app args>' with no path must not produce a parse error");
+    }
+
+    [TestMethod]
+    public void ParseOptions_DotInputFolder_ResolvesToProcessCurrentDirectory()
+    {
+        // Arrange
+        var command = GetRequiredService<RunCommand>();
+
+        // Act: an explicit '.' is a normal pre-'--' path token and binds to input-folder.
+        var parseResult = command.Parse(["."]);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors, "'.' is a valid explicit path and should not error");
+        var input = parseResult.GetValue(RunCommand.InputArgument);
+        Assert.IsNotNull(input, "'.' should bind to the input-folder argument");
+        Assert.AreEqual(Path.GetFullPath("."), input.FullName,
+            "'.' should resolve to the current directory");
+    }
+
+    [TestMethod]
+    public void ParseOptions_DotInputFolderWithPassthrough_PassthroughCaptured()
+    {
+        // Arrange
+        var command = GetRequiredService<RunCommand>();
+
+        // Act: an explicit path before '--' must not disturb passthrough capture.
+        var parseResult = command.Parse([".", "--", "--appflag", "value"]);
+
+        // Assert
+        Assert.IsEmpty(parseResult.Errors, "'. -- <app args>' should not produce a parse error");
+        Assert.IsNotNull(parseResult.GetValue(RunCommand.InputArgument),
+            "'.' should bind to the input-folder argument");
+        var passthrough = parseResult.GetValue(RunCommand.PassthroughArgument);
+        var expectedPassthrough = new[] { "--appflag", "value" };
+        CollectionAssert.AreEqual(expectedPassthrough, passthrough,
+            "The post-'--' tokens should be captured by the passthrough argument");
     }
 
     [TestMethod]
@@ -147,7 +225,7 @@ public class RunCommandTests : BaseCommandTests
         Assert.IsEmpty(parseResult.Errors, "There should be no parsing errors");
         Assert.IsTrue(parseResult.GetValue(RunCommand.NoLaunchOption));
         Assert.AreEqual("arg1 arg2", parseResult.GetValue(RunCommand.ArgsOption));
-        var folder = parseResult.GetValue(RunCommand.InputFolderArgument);
+        var folder = parseResult.GetValue(RunCommand.InputArgument);
         Assert.IsNotNull(folder);
         Assert.AreEqual(_tempDirectory.FullName, folder.FullName);
     }
@@ -379,6 +457,118 @@ public class RunCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task RunCommand_MutualExclusionViolation_WithJson_EmitsJsonError()
+    {
+        // Change 2 (L5): run's own mutual-exclusion validation errors must be emitted as a JSON
+        // error object under --json, not a plain-text banner. --detach + --no-launch is one such
+        // invalid combination; it fails fast before any identity/launch work, so no manifest is
+        // needed. The test logger routes LogError to stderr, so stdout carries only the JSON.
+        var command = GetRequiredService<RunCommand>();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--detach", "--no-launch", "--json"]);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "A mutually-exclusive option combination should fail");
+
+        // stdout must be pure JSON with no plain-text banner.
+        var stdout = TestAnsiConsole.Output.Trim();
+        Assert.IsTrue(stdout.StartsWith('{') && stdout.EndsWith('}'),
+            $"Under --json, stdout should contain only the JSON error object, but was: {stdout}");
+
+        var json = ParseJsonOutput();
+        Assert.AreEqual("--detach and --no-launch cannot be used together.",
+            json.GetProperty("Error").GetString(),
+            "The mutual-exclusion error should be surfaced in the JSON Error field");
+        Assert.IsFalse(json.TryGetProperty("AUMID", out _), "AUMID should not be present on a validation error");
+        Assert.IsFalse(json.TryGetProperty("ProcessId", out _), "ProcessId should not be present on a validation error");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_LongPathValidation_WithJson_EmitsJsonError()
+    {
+        // Change 2 (L5) completeness: the early long-path validation is another run-local validation
+        // and, like the mutual-exclusion checks, must emit a JSON error object under --json rather than
+        // a suppressed-logger silent exit. ValidatePathLength only throws when the OS does not have long
+        // path support enabled, so guard on that (mirrors LongPathHelperTests). The >260-char path is
+        // supplied via the current-directory default (no input arg) so it is not pre-empted by the
+        // provided-path existence check, and needs no long path to exist on disk. The base harness
+        // registers ICurrentDirectoryProvider last (last-wins), so the long cwd is injected by
+        // constructing the handler directly with a CurrentDirectoryProvider override.
+        if (LongPathHelper.IsSystemLongPathEnabled())
+        {
+            Assert.Inconclusive(
+                "System long path support is enabled; ValidatePathLength does not throw, so the JSON error path cannot be exercised.");
+            return;
+        }
+
+        var longCwd = @"C:\" + new string('a', 300);
+        var command = GetRequiredService<RunCommand>();
+        var parseResult = command.Parse(["--json"]);
+
+        var handler = new RunCommand.Handler(
+            GetRequiredService<IMsixService>(),
+            GetRequiredService<IAppLauncherService>(),
+            GetRequiredService<IPackageRegistrationService>(),
+            GetRequiredService<IDebugOutputService>(),
+            new CurrentDirectoryProvider(longCwd),
+            GetRequiredService<IAnsiConsole>(),
+            GetRequiredService<IStatusService>(),
+            GetRequiredService<IProjectRunService>(),
+            GetRequiredService<ILogger<RunCommand>>());
+
+        // Act
+        var exitCode = await handler.InvokeAsync(parseResult, TestContext.CancellationToken);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "A path exceeding MAX_PATH without long-path support should fail");
+
+        // stdout must be pure JSON with no plain-text banner.
+        var stdout = TestAnsiConsole.Output.Trim();
+        Assert.IsTrue(stdout.StartsWith('{') && stdout.EndsWith('}'),
+            $"Under --json, stdout should contain only the JSON error object, but was: {stdout}");
+
+        var json = ParseJsonOutput();
+        Assert.IsTrue(json.GetProperty("Error").GetString()!.Contains("MAX_PATH"),
+            "The long-path validation error should be surfaced in the JSON Error field");
+        Assert.IsFalse(json.TryGetProperty("AUMID", out _), "AUMID should not be present on a validation error");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_LongErrorMessage_WithJson_EmitsValidParseableJson()
+    {
+        // Regression (M1): run's PrintJson previously emitted the payload via ansiConsole.WriteLine,
+        // which routes through Spectre's word-wrapping renderer and injects raw CR/LF *inside* the
+        // "Error" string value once the message exceeds the redirected console width (~80 cols) — the
+        // result is INVALID, unparseable JSON for any long error. Unlike the long-path validation above
+        // (which only throws when OS long-path support is disabled, so it self-skips on most machines),
+        // the provided-path existence check emits an always-long "'<path>' does not exist." message on
+        // EVERY machine, so this exercises the wrapping fix with a strict parser (JsonDocument.Parse)
+        // independent of any registry/OS state. The path stays under MAX_PATH (260) so FileSystemInfo
+        // binding never throws, but the full message comfortably exceeds the wrap width.
+        var longMissingPath = @"C:\" + new string('a', 200) + @"\does-not-exist";
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [longMissingPath, "--json"]);
+
+        Assert.AreEqual(1, exitCode, "A non-existent input path should fail");
+
+        // stdout must be pure, single-object JSON that a strict parser accepts (PowerShell's lenient
+        // ConvertFrom-Json masked the wrapping; JsonDocument.Parse does not).
+        var output = TestAnsiConsole.Output.Trim();
+        Assert.IsTrue(output.StartsWith('{') && output.EndsWith('}'),
+            $"Under --json, stdout should contain only the JSON error object, but was: {output}");
+
+        var root = JsonDocument.Parse(output).RootElement;
+        var error = root.GetProperty("Error").GetString();
+        Assert.IsNotNull(error, "The JSON error object must carry an Error field");
+        StringAssert.Contains(error, "does not exist",
+            "The existence error should be surfaced in the JSON Error field");
+        Assert.IsFalse(root.TryGetProperty("AUMID", out _), "AUMID should not be present on a validation error");
+    }
+
+    [TestMethod]
     public void ParseOptions_JsonOption_IsParsedCorrectly()
     {
         // Arrange
@@ -541,6 +731,30 @@ public class RunCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task RunCommand_DebugOutput_CancelledDuringLoop_TerminatesPackageProcesses()
+    {
+        // --debug-output (AUMID launch): a Ctrl+C that arrives while the debug loop is running makes
+        // the loop return, after which the command terminates the package's processes before
+        // returning the loop's exit code. Covers the AUMID-path post-loop cancellation cleanup.
+        await CreateTestManifestAsync();
+        _fakeDebugOutputService.FakeExitCode = 42;
+        var handler = GetRequiredService<RunCommand.Handler>();
+        var command = GetRequiredService<RunCommand>();
+        var parseResult = command.Parse([_tempDirectory.FullName, "--debug-output"]);
+        using var cts = new CancellationTokenSource();
+        _fakeDebugOutputService.CancelTokenDuringLoop = cts;
+
+        var exitCode = await handler.InvokeAsync(parseResult, cts.Token);
+
+        Assert.AreEqual(42, exitCode, "The debug loop's exit code is returned even after cancellation cleanup");
+        Assert.AreEqual(1, _fakeDebugOutputService.AttachCalls.Count, "The debug loop should have run");
+        Assert.AreEqual(1, _fakeAppLauncherService.TerminateCalls.Count,
+            "Cancellation after the debug loop should terminate the package's processes");
+        Assert.AreEqual(_fakeAppLauncherService.FakeProcessId, _fakeAppLauncherService.TerminateCalls[0].ProcessId,
+            "Terminate should target the launched (AUMID) process");
+    }
+
+    [TestMethod]
     public async Task RunCommand_DebugOutputWithAlias_SkipsAumidLaunch()
     {
         // Arrange - with both --debug-output and --with-alias, the execution alias path is used.
@@ -576,7 +790,10 @@ public class RunCommandTests : BaseCommandTests
     [TestMethod]
     public async Task RunCommand_JsonAndDebugOutput_ReturnsError()
     {
-        // Arrange - --json and --debug-output are mutually exclusive
+        // Arrange - --json and --debug-output are mutually exclusive. In --json mode the
+        // human-readable logger is suppressed, so the rejection must still surface a
+        // machine-readable error object (not an empty stdout with exit code 1).
+        TestAnsiConsole.Profile.Width = 1000; // avoid line-wrapping that would corrupt the JSON string
         await CreateTestManifestAsync();
         var command = GetRequiredService<RunCommand>();
 
@@ -588,6 +805,49 @@ public class RunCommandTests : BaseCommandTests
         Assert.AreEqual(0, _fakeMsixService.AddLooseLayoutCalls.Count, "No identity should be created");
         Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
         Assert.AreEqual(0, _fakeDebugOutputService.AttachCalls.Count, "Debug loop should not run");
+
+        // Regression guard: without the structured-error fallback the command would exit 1 with
+        // empty stdout, so this assertion (not just the exit code) is what fails if PrintJson is removed.
+        var json = ParseJsonOutput();
+        Assert.IsTrue(json.TryGetProperty("Error", out var error),
+            "JSON output should contain an Error property when --json and --debug-output are combined");
+        StringAssert.Contains(error.GetString(), "--json and --debug-output cannot be used together",
+            "The structured error should explain the mutually exclusive options");
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // temporarily swaps the process-wide ambient AnsiConsole to capture logger warnings
+    public async Task RunCommand_SymbolsWithoutDebugOutput_WarnsAndContinues()
+    {
+        // Regression for issue #662: --symbols only affects the --debug-output stowed-exception
+        // triage. Passing it on its own must NOT silently no-op — it should emit a non-fatal
+        // warning and let the command continue (here the default AUMID launch path).
+        // Non-error logger output routes through the static ambient AnsiConsole (TextWriterLogger),
+        // so we swap it to a capturing console for the invoke; [DoNotParallelize] isolates the swap.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var previousAmbient = AnsiConsole.Console;
+        var ambient = new TestConsole();
+        AnsiConsole.Console = ambient;
+        int exitCode;
+        try
+        {
+            exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--symbols"]);
+        }
+        finally
+        {
+            AnsiConsole.Console = previousAmbient;
+        }
+
+        // Assert - non-fatal: the app is still launched normally and no debug loop runs.
+        Assert.AreEqual(0, exitCode, "--symbols without --debug-output must remain non-fatal");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "The app should still launch via AUMID");
+        Assert.AreEqual(0, _fakeDebugOutputService.AttachCalls.Count,
+            "No debug loop should run without --debug-output");
+
+        StringAssert.Contains(ambient.Output, "--symbols has no effect without --debug-output",
+            "A warning should tell the user --symbols was ignored");
     }
 
     [TestMethod]
@@ -791,7 +1051,7 @@ public class RunCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task RunCommand_DetachWithoutJson_DoesNotOutputJson()
+    public async Task RunCommand_DetachWithoutJson_PrintsPidAndNoJson()
     {
         // Arrange
         await CreateTestManifestAsync();
@@ -806,6 +1066,10 @@ public class RunCommandTests : BaseCommandTests
         var output = TestAnsiConsole.Output;
         Assert.IsFalse(output.Contains("\"AUMID\""), "JSON fields should not appear without --json flag");
         Assert.IsFalse(output.Contains("\"ProcessId\""), "JSON fields should not appear without --json flag");
+        // Change 3 (L6): the packaged --detach path must surface the launched PID in human-readable
+        // output too, consistent with the unpackaged/project-mode detach path.
+        Assert.Contains(_fakeAppLauncherService.FakeProcessId.ToString(), output,
+            "The launched PID should be printed in non-JSON output for the packaged --detach path");
     }
 
     #endregion
@@ -923,6 +1187,46 @@ public class RunCommandTests : BaseCommandTests
         Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "Application should be launched");
         Assert.AreEqual("--title \"hello world\"", _fakeAppLauncherService.LaunchCalls[0].Arguments,
             "Values containing spaces must be quoted in the final command-line string");
+    }
+
+    // --- Handler: default-to-current-directory (no input path) ---
+
+    [TestMethod]
+    public async Task RunCommand_NoInputFolder_DefaultsToCurrentDirectory()
+    {
+        // `winapp run` with no path must default to the current directory (matches `dotnet run`).
+        // ICurrentDirectoryProvider is wired to _tempDirectory in the test harness, where
+        // CreateTestManifestAsync places a manifest, so folder mode resolves and launches.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, []);
+
+        Assert.AreEqual(0, exitCode, "Command with no path should default to cwd and succeed");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count,
+            "Application should be launched from the current directory");
+        Assert.IsNull(_fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "No app args should be passed when only the default input is used");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_NoInputFolderWithPassthrough_UsesCwdAndForwardsAppArgs()
+    {
+        // The tricky parser-interaction case: `winapp run -- --appflag value`. With input-folder
+        // optional, System.CommandLine binds the first post-'--' token ('--appflag') to the
+        // positional. The handler must detect that the token was stolen from passthrough, fall back
+        // to the current directory, AND still forward '--appflag value' to the launched app.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["--", "--appflag", "value"]);
+
+        Assert.AreEqual(0, exitCode, "No-path invocation with passthrough should default to cwd and succeed");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count,
+            "Application should be launched from the current directory");
+        Assert.AreEqual("--appflag value", _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "The post-'--' tokens must be forwarded to the app, not consumed as the input path");
     }
 
     // --- Handler: unknown-token rejection ---
@@ -1070,19 +1374,14 @@ public class RunCommandTests : BaseCommandTests
         Assert.AreEqual(1, exitCode, "Bad pre-dash token must cause exit code 1 even in --json mode");
         Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "App must NOT be launched");
 
-        // The handler must have written a JSON document (with an Error field that names the
-        // offending token) to stdout. We avoid full JsonDocument.Parse here because the test
-        // console wraps long string values at width boundaries; substring assertions are
-        // sufficient to demonstrate the error body was produced and references the bad token.
-        var output = TestAnsiConsole.Output;
-        StringAssert.Contains(output, "\"Error\":",
-            "JSON output must contain an Error field in --json mode (got: " + output + ")");
-        StringAssert.Contains(output, "--badtoken",
-            "Error message should name the offending token");
-        StringAssert.Contains(output, "{",
-            "Output should contain a JSON object opening brace");
-        StringAssert.Contains(output, "}",
-            "Output should contain a JSON object closing brace");
+        // The handler must have written a single-object JSON document (with an Error field that names
+        // the offending token) to stdout. With the M1 fix, run's --json payload is emitted without
+        // Spectre word-wrapping, so a strict parser accepts it directly even though this message
+        // (~105 chars) exceeds the redirected console width.
+        var json = ParseJsonOutput();
+        var error = json.GetProperty("Error").GetString();
+        Assert.IsNotNull(error, "JSON output must contain an Error field in --json mode");
+        StringAssert.Contains(error, "--badtoken", "Error message should name the offending token");
     }
 
     // --- BuildAliasProcessStartInfo: passthrough forwarded into execution-alias ProcessStartInfo ---
@@ -1128,6 +1427,834 @@ public class RunCommandTests : BaseCommandTests
 
         Assert.AreEqual(string.Empty, psi.Arguments,
             "Empty appArgs must NOT set Arguments");
+    }
+
+    #endregion
+
+    #region Mutually-exclusive option / structured-error tests
+
+    [TestMethod]
+    public async Task RunCommand_UnregisterOnExitWithNoLaunch_ReturnsError()
+    {
+        // --unregister-on-exit and --no-launch are mutually exclusive: unregister-on-exit only
+        // makes sense when the app is actually launched.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--unregister-on-exit", "--no-launch"]);
+
+        Assert.AreEqual(1, exitCode,
+            "Command should fail when both --unregister-on-exit and --no-launch are specified");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_UnrecognizedPreDashToken_WithJson_EmitsStructuredError()
+    {
+        // In --json mode the human-readable logger is suppressed, so an unrecognized pre-dash
+        // token must still surface a machine-readable error object (and fail with exit code 1).
+        TestAnsiConsole.Profile.Width = 1000; // avoid line-wrapping that would corrupt the JSON string
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--json", "--unknown-winapp-option"]);
+
+        Assert.AreEqual(1, exitCode, "Unrecognized pre-dash token must fail even in --json mode");
+
+        var json = ParseJsonOutput();
+        Assert.IsTrue(json.TryGetProperty("Error", out var error),
+            "JSON output should contain an Error property when a token is unrecognized");
+        StringAssert.Contains(error.GetString(), "Unrecognized argument",
+            "The structured error should explain the unrecognized argument");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "No application should be launched");
+    }
+
+    #endregion
+
+    #region Default launch + wait tests
+
+    [TestMethod]
+    public async Task RunCommand_DefaultLaunch_LaunchesByAumidAndReturnsZero()
+    {
+        // Neither --no-launch, --detach, --with-alias nor --debug-output: the command launches
+        // via AUMID and then waits for the (fake) process to exit. The fake launcher returns a
+        // PID that is not a live process, so Process.GetProcessById throws ArgumentException,
+        // which the handler treats as "already exited" (exit code 0).
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName]);
+
+        Assert.AreEqual(0, exitCode, "A launched-then-exited app should return success");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count, "The app should be launched via AUMID");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DefaultLaunch_WithJson_PrintsAumidAndProcessId()
+    {
+        // The default (waiting) launch path still emits JSON when --json is passed.
+        TestAnsiConsole.Profile.Width = 1000;
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        var json = ParseJsonOutput();
+        Assert.AreEqual("TestPackage_fakefamily!TestApp", json.GetProperty("AUMID").GetString());
+        Assert.AreEqual(_fakeAppLauncherService.FakeProcessId, json.GetProperty("ProcessId").GetUInt32(),
+            "The launched PID should be reported in JSON on the default launch path");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DefaultLaunch_HugeProcessId_TreatedAsSuccess()
+    {
+        // PIDs above int.MaxValue cannot be tracked via Process.GetProcessById, so the handler
+        // skips the wait and returns success.
+        _fakeAppLauncherService.FakeProcessId = 3_000_000_000; // > int.MaxValue
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName]);
+
+        Assert.AreEqual(0, exitCode, "A PID above int.MaxValue is treated as an immediate success");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DefaultLaunch_WaitsForRealProcessExit_PropagatesExitCode()
+    {
+        // Point the fake launcher at a real, short-lived process so the handler exercises the
+        // Process.GetProcessById -> WaitForExitAsync -> ExitCode path and propagates the exit code.
+        await CreateTestManifestAsync();
+        using var helper = StartHelperProcess("/c exit 3");
+        _fakeAppLauncherService.FakeProcessId = (uint)helper.Id;
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName]);
+
+        // Either we attached and observed exit code 3, or the process already exited before we
+        // could attach (ArgumentException path) and the handler reported success. Both are valid
+        // real behaviours of the wait path; assert it did not hang or fault.
+        Assert.IsTrue(exitCode is 3 or 0, $"Expected 3 (observed exit) or 0 (already exited), got {exitCode}");
+        Assert.AreEqual(1, _fakeAppLauncherService.LaunchCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DefaultLaunch_CancelledDuringWait_TerminatesAndReturnsCancelled()
+    {
+        // Ctrl+C while the command is blocked in the post-launch WaitForExit terminates the
+        // package's processes and returns -1. A real, longer-lived helper process stands in for
+        // the launched app; the token is cancelled well after the (instant, faked) status phase
+        // completes but long before the helper would exit on its own.
+        await CreateTestManifestAsync();
+        using var longProc = StartHelperProcess("/c ping -n 6 127.0.0.1");
+        _fakeAppLauncherService.FakeProcessId = (uint)longProc.Id;
+        var handler = GetRequiredService<RunCommand.Handler>();
+        var command = GetRequiredService<RunCommand>();
+        var parseResult = command.Parse([_tempDirectory.FullName]);
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(750));
+
+        var exitCode = await handler.InvokeAsync(parseResult, cts.Token);
+
+        Assert.AreEqual(-1, exitCode, "Cancellation during the wait returns -1");
+        Assert.AreEqual(1, _fakeAppLauncherService.TerminateCalls.Count, "The package's processes should be terminated on cancel");
+        TryKill(longProc);
+    }
+
+    #endregion
+
+    #region --unregister-on-exit tests
+
+    [TestMethod]
+    public async Task RunCommand_UnregisterOnExit_DefaultLaunch_UnregistersOnlyDevPackages()
+    {
+        // After the launched app exits, dev-mode packages matching the identity name are
+        // unregistered. Non-dev packages are skipped.
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+            new DevPackageInfo("TestPackage_1.0.0.0_x64__dev", "TestPackage", "1.0.0.0", null, IsDevelopmentMode: true),
+            new DevPackageInfo("OtherPackage_1.0.0.0_x64__prod", "OtherPackage", "1.0.0.0", null, IsDevelopmentMode: false),
+        ];
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--unregister-on-exit"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakePackageRegistrationService.FindDevPackagesCalls.Count);
+        Assert.AreEqual("TestPackage", _fakePackageRegistrationService.FindDevPackagesCalls[0]);
+        Assert.AreEqual(1, _fakePackageRegistrationService.UnregisterCalls.Count, "Only the dev-mode package should be unregistered");
+        Assert.AreEqual("TestPackage", _fakePackageRegistrationService.UnregisterCalls[0].PackageName);
+        Assert.IsFalse(_fakePackageRegistrationService.UnregisterCalls[0].PreserveAppData, "unregister-on-exit should not preserve app data");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_UnregisterOnExit_SwallowsUnregisterFailures()
+    {
+        // A failure while unregistering on exit must not fault the command (it is best-effort).
+        _fakePackageRegistrationService.FindDevPackagesThrows = new InvalidOperationException("boom");
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--unregister-on-exit"]);
+
+        Assert.AreEqual(0, exitCode, "Unregister failures on exit are non-fatal");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DebugOutput_UnregisterOnExit_Unregisters()
+    {
+        // The --debug-output launch path also honours --unregister-on-exit after the debug loop.
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+            new DevPackageInfo("TestPackage_1.0.0.0_x64__dev", "TestPackage", "1.0.0.0", null, IsDevelopmentMode: true),
+        ];
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName, "--debug-output", "--unregister-on-exit"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeDebugOutputService.AttachCalls.Count, "The debug loop should run");
+        Assert.AreEqual(1, _fakePackageRegistrationService.UnregisterCalls.Count, "The dev package should be unregistered after the debug loop");
+    }
+
+    #endregion
+
+    #region --with-alias launch tests
+
+    [TestMethod]
+    public async Task RunCommand_WithAlias_ProcessedManifestMissing_ReturnsError()
+    {
+        // --with-alias reads the processed manifest from the AppX output directory. When it is
+        // absent, the command cannot determine an execution alias and fails.
+        await CreateTestManifestAsync();
+        var outputDir = _tempDirectory.CreateSubdirectory("appx-empty");
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--with-alias", "--output-appx-directory", outputDir.FullName]);
+
+        Assert.AreEqual(1, exitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "Processed manifest not found");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "AUMID launch must not be used with --with-alias");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_WithAlias_NoExecutionAlias_ReturnsError()
+    {
+        // A processed manifest without any ExecutionAlias entry fails with a helpful message.
+        await CreateTestManifestAsync();
+        var outputDir = await CreateProcessedManifestAsync("appx-noalias", alias: null);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--with-alias", "--output-appx-directory", outputDir.FullName]);
+
+        Assert.AreEqual(1, exitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "No execution alias found");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_WithAlias_UnsafeAlias_ReturnsError()
+    {
+        // An attacker-controlled alias that is not a bare .exe filename is rejected before launch.
+        await CreateTestManifestAsync();
+        var outputDir = await CreateProcessedManifestAsync("appx-unsafe", alias: "..\\evil.exe");
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--with-alias", "--output-appx-directory", outputDir.FullName]);
+
+        Assert.AreEqual(1, exitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "is not a valid bare");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task RunCommand_WithAlias_ProxyNotFound_ReturnsError()
+    {
+        // A safe alias whose Windows App Execution Alias proxy is not registered on this machine
+        // fails with a "not found at the expected location" error rather than launching.
+        await CreateTestManifestAsync();
+        var outputDir = await CreateProcessedManifestAsync("appx-proxy", alias: "winapp-run-test-missing.exe");
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--with-alias", "--output-appx-directory", outputDir.FullName]);
+
+        Assert.AreEqual(1, exitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "was not found");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_WithAlias_ResolveProxyReturnsNull_ReturnsError()
+    {
+        // The alias-resolution seam can yield null when no proxy path can be produced at all. The
+        // `aliasFile is null` operand of the proxy guard must be covered: the command reports the
+        // proxy-not-found error and returns 1 without falling back to an AUMID launch.
+        await CreateTestManifestAsync();
+        var outputDir = await CreateProcessedManifestAsync("appx-nullproxy", alias: "winapp-run-test.exe");
+        var handler = GetRequiredService<RunCommand.Handler>();
+        handler.ResolveAliasProxy = _ => null;
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--with-alias", "--output-appx-directory", outputDir.FullName]);
+
+        Assert.AreEqual(1, exitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "was not found");
+        Assert.AreEqual(0, _fakeAppLauncherService.LaunchCalls.Count, "The command must not fall back to an AUMID launch");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_WithAlias_UnregisterOnExit_UnregistersAfterAliasPath()
+    {
+        // --with-alias combined with --unregister-on-exit unregisters dev packages after the
+        // alias launch path returns (here it returns early because the proxy is missing).
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+            new DevPackageInfo("TestPackage_1.0.0.0_x64__dev", "TestPackage", "1.0.0.0", null, IsDevelopmentMode: true),
+        ];
+        await CreateTestManifestAsync();
+        var outputDir = await CreateProcessedManifestAsync("appx-proxy2", alias: "winapp-run-test-missing.exe");
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--with-alias", "--unregister-on-exit", "--output-appx-directory", outputDir.FullName]);
+
+        Assert.AreEqual(1, exitCode, "The alias proxy is missing, so the alias path returns 1");
+        Assert.AreEqual(1, _fakePackageRegistrationService.UnregisterCalls.Count, "Dev package should still be unregistered on exit");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_WithAlias_LaunchesViaProxy_ReturnsProcessExitCode()
+    {
+        // Happy path: with a registered alias proxy present, --with-alias resolves the proxy and
+        // launches it, propagating the launched process's exit code. The two operating-system
+        // boundaries (alias resolution + process start) are replaced with test seams so the test
+        // needs no real WindowsApps proxy registration and does not spawn the resolved binary.
+        await CreateTestManifestAsync();
+        var outputDir = await CreateProcessedManifestAsync("appx-launch", alias: "winapp-run-test.exe");
+        var aliasProxy = CreateExistingFile("winapp-run-test.exe");
+        var handler = GetRequiredService<RunCommand.Handler>();
+        handler.ResolveAliasProxy = _ => aliasProxy;
+        Process? started = null;
+        handler.ProcessStarter = _ => started = StartHelperProcess("/c exit 7");
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--with-alias", "--output-appx-directory", outputDir.FullName]);
+
+        Assert.AreEqual(7, exitCode, "The launched alias process's exit code should be propagated");
+        Assert.IsNotNull(started, "The process-start seam should have been invoked");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_WithAlias_ProcessStartReturnsNull_ReturnsError()
+    {
+        // Defensive branch: if Process.Start returns null the command reports a start failure.
+        await CreateTestManifestAsync();
+        var outputDir = await CreateProcessedManifestAsync("appx-null", alias: "winapp-run-test.exe");
+        var aliasProxy = CreateExistingFile("winapp-run-test.exe");
+        var handler = GetRequiredService<RunCommand.Handler>();
+        handler.ResolveAliasProxy = _ => aliasProxy;
+        handler.ProcessStarter = _ => null;
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--with-alias", "--output-appx-directory", outputDir.FullName]);
+
+        Assert.AreEqual(1, exitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "Failed to start process via execution alias");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_WithAlias_DebugOutput_RunsDebugLoopAndReturnsItsExitCode()
+    {
+        // --with-alias + --debug-output runs the debug event loop against the launched process and
+        // returns the loop's exit code instead of plain WaitForExit.
+        await CreateTestManifestAsync();
+        var outputDir = await CreateProcessedManifestAsync("appx-dbg", alias: "winapp-run-test.exe");
+        var aliasProxy = CreateExistingFile("winapp-run-test.exe");
+        _fakeDebugOutputService.FakeExitCode = 42;
+        var handler = GetRequiredService<RunCommand.Handler>();
+        handler.ResolveAliasProxy = _ => aliasProxy;
+        handler.ProcessStarter = _ => StartHelperProcess("/c exit 0");
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--with-alias", "--debug-output", "--output-appx-directory", outputDir.FullName]);
+
+        Assert.AreEqual(42, exitCode, "The debug loop's exit code should be returned in --debug-output mode");
+        Assert.AreEqual(1, _fakeDebugOutputService.AttachCalls.Count, "The debug loop should attach to the launched process");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_WithAlias_DebugOutput_CancelledDuringLoop_TerminatesPackageProcesses()
+    {
+        // --with-alias + --debug-output: a Ctrl+C that arrives while the debug loop is running makes
+        // the loop return, after which the command terminates the package's processes before
+        // returning the loop's exit code. Covers the alias-path post-loop cancellation cleanup.
+        await CreateTestManifestAsync();
+        var outputDir = await CreateProcessedManifestAsync("appx-dbgcancel", alias: "winapp-run-test.exe");
+        var aliasProxy = CreateExistingFile("winapp-run-test.exe");
+        _fakeDebugOutputService.FakeExitCode = 7;
+        var handler = GetRequiredService<RunCommand.Handler>();
+        handler.ResolveAliasProxy = _ => aliasProxy;
+        handler.ProcessStarter = _ => StartHelperProcess("/c exit 0");
+        var command = GetRequiredService<RunCommand>();
+        var parseResult = command.Parse([_tempDirectory.FullName, "--with-alias", "--debug-output", "--output-appx-directory", outputDir.FullName]);
+        using var cts = new CancellationTokenSource();
+        _fakeDebugOutputService.CancelTokenDuringLoop = cts;
+
+        var exitCode = await handler.InvokeAsync(parseResult, cts.Token);
+
+        Assert.AreEqual(7, exitCode, "The debug loop's exit code is returned even after cancellation cleanup");
+        Assert.AreEqual(1, _fakeDebugOutputService.AttachCalls.Count, "The debug loop should have run");
+        Assert.AreEqual(1, _fakeAppLauncherService.TerminateCalls.Count,
+            "Cancellation after the debug loop should terminate the package's processes on the alias path");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_WithAlias_ProcessStartThrows_ReturnsError()
+    {
+        // If starting the resolved proxy throws, the exception is caught and reported as a launch failure.
+        await CreateTestManifestAsync();
+        var outputDir = await CreateProcessedManifestAsync("appx-throw", alias: "winapp-run-test.exe");
+        var aliasProxy = CreateExistingFile("winapp-run-test.exe");
+        var handler = GetRequiredService<RunCommand.Handler>();
+        handler.ResolveAliasProxy = _ => aliasProxy;
+        handler.ProcessStarter = _ => throw new InvalidOperationException("boom");
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--with-alias", "--output-appx-directory", outputDir.FullName]);
+
+        Assert.AreEqual(1, exitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "Failed to launch via execution alias");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_WithAlias_CancelledDuringWait_TerminatesAndReturnsCancelled()
+    {
+        // Ctrl+C while blocked in the alias-launch WaitForExit terminates the package's processes
+        // and returns -1. The process-start seam yields a real, longer-lived helper process and the
+        // token is cancelled during the wait.
+        await CreateTestManifestAsync();
+        var outputDir = await CreateProcessedManifestAsync("appx-cancel", alias: "winapp-run-test.exe");
+        var aliasProxy = CreateExistingFile("winapp-run-test.exe");
+        var helperPid = 0;
+        var handler = GetRequiredService<RunCommand.Handler>();
+        handler.ResolveAliasProxy = _ => aliasProxy;
+        handler.ProcessStarter = _ =>
+        {
+            var p = StartHelperProcess("/c ping -n 6 127.0.0.1");
+            helperPid = p.Id;
+            return p;
+        };
+        var command = GetRequiredService<RunCommand>();
+        var parseResult = command.Parse([_tempDirectory.FullName, "--with-alias", "--output-appx-directory", outputDir.FullName]);
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(750));
+
+        var exitCode = await handler.InvokeAsync(parseResult, cts.Token);
+
+        Assert.AreEqual(-1, exitCode, "Cancellation during the alias wait returns -1");
+        Assert.AreEqual(1, _fakeAppLauncherService.TerminateCalls.Count, "The package's processes should be terminated on cancel");
+        TryKillByPid(helperPid);
+    }
+
+    #endregion
+
+    #region Manifest resolution + structured error tests
+
+    [TestMethod]
+    public async Task RunCommand_ResolvesManifestFromCurrentDirectory_WhenNotInInputFolder()
+    {
+        // Manifest resolution priority falls back to the current directory when neither --manifest
+        // nor the input folder contains a manifest. The current directory provider points at
+        // _tempDirectory, so place the manifest there and use an empty input subfolder.
+        await CreateTestManifestAsync(_tempDirectory.FullName);
+        var inputFolder = _tempDirectory.CreateSubdirectory("empty-input");
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [inputFolder.FullName, "--no-launch"]);
+
+        Assert.AreEqual(0, exitCode, "The manifest from the current directory should be used");
+        Assert.AreEqual(1, _fakeMsixService.AddLooseLayoutCalls.Count, "Identity should be created using the cwd manifest");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_MultipleUnrecognizedPreDashTokens_WithJson_EmitsPluralError()
+    {
+        // Two or more unrecognized pre-'--' tokens produce a pluralized structured error in JSON mode.
+        TestAnsiConsole.Profile.Width = 1000;
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--json", "--unknown-a", "--unknown-b"]);
+
+        Assert.AreEqual(1, exitCode);
+        var json = ParseJsonOutput();
+        Assert.IsTrue(json.TryGetProperty("Error", out var error));
+        StringAssert.Contains(error.GetString(), "Unrecognized arguments:", "Multiple bad tokens should use the plural form");
+    }
+
+    #endregion
+
+    #region Alias-launch test helpers
+
+    private const string AliasManifestTemplate = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                 xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+                 xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+                 xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+                 IgnorableNamespaces="uap uap5 rescap">
+          <Identity Name="TestPackage" Publisher="CN=TestPublisher" Version="1.0.0.0" />
+          <Properties>
+            <DisplayName>Test Package</DisplayName>
+            <PublisherDisplayName>Test Publisher</PublisherDisplayName>
+            <Description>Test package</Description>
+            <Logo>Assets\Logo.png</Logo>
+          </Properties>
+          <Dependencies>
+            <TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.18362.0" MaxVersionTested="10.0.26100.0" />
+          </Dependencies>
+          <Applications>
+            <Application Id="TestApp" Executable="TestApp.exe" EntryPoint="TestApp.App">
+              <uap:VisualElements DisplayName="Test App" Description="Test application"
+                                  BackgroundColor="#777777" Square150x150Logo="Assets\Logo.png" Square44x44Logo="Assets\Logo.png" />
+              <Extensions>
+                <uap5:Extension Category="windows.appExecutionAlias">
+                  <uap5:AppExecutionAlias>
+                    <uap5:ExecutionAlias Alias="__ALIAS__" />
+                  </uap5:AppExecutionAlias>
+                </uap5:Extension>
+              </Extensions>
+            </Application>
+          </Applications>
+          <Capabilities>
+            <rescap:Capability Name="runFullTrust" />
+          </Capabilities>
+        </Package>
+        """;
+
+    /// <summary>
+    /// Creates an AppX output directory containing a "processed" appxmanifest.xml. When
+    /// <paramref name="alias"/> is null the manifest has no ExecutionAlias entry; otherwise it
+    /// embeds the given alias so the --with-alias path can extract and validate it.
+    /// </summary>
+    private async Task<DirectoryInfo> CreateProcessedManifestAsync(string subdirName, string? alias)
+    {
+        var dir = _tempDirectory.CreateSubdirectory(subdirName);
+        var content = alias is null
+            ? TestManifestContent
+            : AliasManifestTemplate.Replace("__ALIAS__", alias);
+        await File.WriteAllTextAsync(Path.Combine(dir.FullName, "appxmanifest.xml"), content, TestContext.CancellationToken);
+        return dir;
+    }
+
+    /// <summary>
+    /// Creates a real, existing file inside the temp directory and returns a <see cref="FileInfo"/>
+    /// for it. Used to stand in for a resolved Windows App Execution Alias proxy so the
+    /// <c>aliasFile.Exists</c> check passes without registering a real proxy.
+    /// </summary>
+    private FileInfo CreateExistingFile(string name)
+    {
+        var path = Path.Combine(_tempDirectory.FullName, name);
+        File.WriteAllText(path, string.Empty);
+        return new FileInfo(path);
+    }
+
+    /// <summary>
+    /// Starts a short-lived real cmd.exe process for exercising the process-wait path.
+    /// </summary>
+    private static Process StartHelperProcess(string arguments)
+    {
+        var psi = new ProcessStartInfo
+        {
+            // Use the fixed, fully-qualified System32 cmd.exe rather than the ComSpec
+            // environment variable so the helper cannot be redirected via a hijacked
+            // environment/PATH entry.
+            FileName = Path.Combine(Environment.SystemDirectory, "cmd.exe"),
+            Arguments = arguments,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        return Process.Start(psi)!;
+    }
+
+    /// <summary>Best-effort termination of a helper process handle owned by the test.</summary>
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+            // The process may have already exited or been disposed — nothing to clean up.
+        }
+    }
+
+    /// <summary>Best-effort termination of a helper process by PID (used when the product code owns the Process object).</summary>
+    private static void TryKillByPid(int pid)
+    {
+        if (pid == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            process.Kill(entireProcessTree: true);
+        }
+        catch
+        {
+            // The process may have already exited — nothing to clean up.
+        }
+    }
+
+    #endregion
+
+    #region Project-mode option parsing
+
+    [TestMethod]
+    public void ParseOptions_Configuration_DefaultsToDebug()
+    {
+        var command = GetRequiredService<RunCommand>();
+
+        var parseResult = command.Parse([_tempDirectory.FullName]);
+
+        Assert.IsEmpty(parseResult.Errors);
+        Assert.AreEqual("Debug", parseResult.GetValue(RunCommand.ConfigurationOption));
+    }
+
+    [TestMethod]
+    public void ParseOptions_ConfigurationShortAlias_IsParsed()
+    {
+        var command = GetRequiredService<RunCommand>();
+
+        var parseResult = command.Parse([_tempDirectory.FullName, "-c", "Release"]);
+
+        Assert.IsEmpty(parseResult.Errors);
+        Assert.AreEqual("Release", parseResult.GetValue(RunCommand.ConfigurationOption));
+    }
+
+    [TestMethod]
+    public void ParseOptions_ArchAndRuntime_AreParsed()
+    {
+        var command = GetRequiredService<RunCommand>();
+
+        var parseResult = command.Parse([_tempDirectory.FullName, "--arch", "arm64", "-r", "win-x64"]);
+
+        Assert.IsEmpty(parseResult.Errors);
+        Assert.AreEqual("arm64", parseResult.GetValue(RunCommand.ArchOption));
+        Assert.AreEqual("win-x64", parseResult.GetValue(RunCommand.RuntimeOption));
+    }
+
+    [TestMethod]
+    public void ParseOptions_FrameworkShortAlias_IsParsed()
+    {
+        var command = GetRequiredService<RunCommand>();
+
+        var parseResult = command.Parse([_tempDirectory.FullName, "-f", "net10.0-windows10.0.26100.0"]);
+
+        Assert.IsEmpty(parseResult.Errors);
+        Assert.AreEqual("net10.0-windows10.0.26100.0", parseResult.GetValue(RunCommand.FrameworkOption));
+    }
+
+    [TestMethod]
+    public void ParseOptions_NoBuildAndNoRestore_AreParsed()
+    {
+        var command = GetRequiredService<RunCommand>();
+
+        var parseResult = command.Parse([_tempDirectory.FullName, "--no-build", "--no-restore"]);
+
+        Assert.IsEmpty(parseResult.Errors);
+        Assert.IsTrue(parseResult.GetValue(RunCommand.NoBuildOption));
+        Assert.IsTrue(parseResult.GetValue(RunCommand.NoRestoreOption));
+    }
+
+    [TestMethod]
+    public void ParseOptions_RepeatableProperty_CollectsDotnetStyleTokens()
+    {
+        var command = GetRequiredService<RunCommand>();
+
+        // System.CommandLine splits -p:Name=Value on the first ':' so dotnet-style tokens work.
+        var parseResult = command.Parse(
+            [_tempDirectory.FullName, "-p", "WindowsPackageType=None", "-p", "Foo=Bar"]);
+
+        Assert.IsEmpty(parseResult.Errors);
+        var properties = parseResult.GetValue(RunCommand.PropertyOption);
+        Assert.IsNotNull(properties);
+        CollectionAssert.AreEquivalent(ForcedUnpackagedProperties, properties);
+    }
+
+    #endregion
+
+    #region TryResolveArchitecture
+
+    [TestMethod]
+    public void TryResolveArchitecture_NoOptions_UsesProcessDefault()
+    {
+        var ok = RunCommand.Handler.TryResolveArchitecture(null, null, out var arch, out var error);
+
+        Assert.IsTrue(ok);
+        Assert.IsNull(error);
+        CollectionAssert.Contains(SupportedArchitectures, arch);
+    }
+
+    [TestMethod]
+    public void TryResolveArchitecture_ArchOption_IsNormalized()
+    {
+        var ok = RunCommand.Handler.TryResolveArchitecture("ARM64", null, out var arch, out var error);
+
+        Assert.IsTrue(ok);
+        Assert.IsNull(error);
+        Assert.AreEqual("arm64", arch);
+    }
+
+    [TestMethod]
+    [DataRow("win-x64", "x64")]
+    [DataRow("win-arm64", "arm64")]
+    [DataRow("win-x86", "x86")]
+    [DataRow("x64", "x64")]
+    [DataRow("arm64", "arm64")]
+    [DataRow("x86", "x86")]
+    public void TryResolveArchitecture_RuntimeAlone_ResolvesArchFromRid(string runtime, string expected)
+    {
+        // M6: with only --runtime (no --arch), the architecture is derived from the RID. A bare arch
+        // (no win- prefix, e.g. `--runtime x64`) is also accepted and used directly.
+        var ok = RunCommand.Handler.TryResolveArchitecture(null, runtime, out var arch, out var error);
+
+        Assert.IsTrue(ok);
+        Assert.IsNull(error);
+        Assert.AreEqual(expected, arch);
+    }
+
+    [TestMethod]
+    public void TryResolveArchitecture_RuntimeArchBeatsArch()
+    {
+        // --runtime is more specific (a RID) so its architecture wins over --arch.
+        var ok = RunCommand.Handler.TryResolveArchitecture("x64", "win-arm64", out var arch, out var error);
+
+        Assert.IsTrue(ok);
+        Assert.IsNull(error);
+        Assert.AreEqual("arm64", arch);
+    }
+
+    [TestMethod]
+    public void TryResolveArchitecture_InvalidArch_ReturnsError()
+    {
+        var ok = RunCommand.Handler.TryResolveArchitecture("sparc", null, out _, out var error);
+
+        Assert.IsFalse(ok);
+        Assert.IsNotNull(error);
+        StringAssert.Contains(error, "sparc");
+    }
+
+    [TestMethod]
+    public void TryResolveArchitecture_InvalidRuntime_ReturnsError()
+    {
+        var ok = RunCommand.Handler.TryResolveArchitecture(null, "win-loongarch64", out _, out var error);
+
+        Assert.IsFalse(ok);
+        Assert.IsNotNull(error);
+        StringAssert.Contains(error, "win-loongarch64");
+    }
+
+    [TestMethod]
+    [DataRow("linux-x64")]
+    [DataRow("osx-arm64")]
+    public void TryResolveArchitecture_NonWindowsRuntime_ReturnsError(string runtime)
+    {
+        // A non-Windows RID must not be silently reduced to win-<arch>; the user asked for a runtime
+        // target project mode can't produce, so surface an error instead of building something else.
+        var ok = RunCommand.Handler.TryResolveArchitecture(null, runtime, out _, out var error);
+
+        Assert.IsFalse(ok);
+        Assert.IsNotNull(error);
+        StringAssert.Contains(error, runtime);
+    }
+
+    #endregion
+
+    #region CombineLaunchArguments (non-apphost RunCommand arg ordering)
+
+    [TestMethod]
+    public void CombineLaunchArguments_PrependsRunArgumentsBeforeAppArgs()
+    {
+        var combined = RunCommand.Handler.CombineLaunchArguments("exec \"App.dll\"", "--flag value");
+
+        Assert.AreEqual("exec \"App.dll\" --flag value", combined);
+    }
+
+    [TestMethod]
+    [DataRow(null, "--flag", "--flag")]
+    [DataRow("exec App.dll", null, "exec App.dll")]
+    [DataRow("exec App.dll", "", "exec App.dll")]
+    [DataRow(null, null, null)]
+    public void CombineLaunchArguments_HandlesMissingSides(string? runArguments, string? appArgs, string? expected)
+    {
+        Assert.AreEqual(expected, RunCommand.Handler.CombineLaunchArguments(runArguments, appArgs));
+    }
+
+    #endregion
+
+    #region F2 cross-arch launch diagnostics
+
+    // The reviewer's F2 repro (arm64 target on an x64 host) can't be reproduced on an arm64 machine,
+    // because arm64 Windows executes arm64 AND x64 AND x86. These assert the decision table in a
+    // host-agnostic way so the behavior is pinned on whichever machine runs the suite.
+
+    [TestMethod]
+    public void CanCurrentOsRunArchitecture_HostOwnArchitecture_IsAlwaysRunnable()
+    {
+        var hostArch = RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant();
+
+        Assert.IsTrue(RunCommand.Handler.CanCurrentOsRunArchitecture(hostArch),
+            $"the host's own architecture ('{hostArch}') must always be considered runnable");
+    }
+
+    [TestMethod]
+    public void CanCurrentOsRunArchitecture_Arm64_RunnableOnlyOnArm64Host()
+    {
+        var expected = RuntimeInformation.OSArchitecture == Architecture.Arm64;
+
+        Assert.AreEqual(expected, RunCommand.Handler.CanCurrentOsRunArchitecture("arm64"),
+            "arm64 binaries run only on an arm64 host — this is the case that triggers the F2 hint on x64");
+    }
+
+    [TestMethod]
+    public void CanCurrentOsRunArchitecture_X86_RunnableOnEveryWindowsHostArch()
+    {
+        // x86 is emulated on x64 and arm64, and native on x86.
+        Assert.IsTrue(RunCommand.Handler.CanCurrentOsRunArchitecture("x86"));
+    }
+
+    [TestMethod]
+    public void CanCurrentOsRunArchitecture_UnknownMoniker_TreatedAsRunnable()
+    {
+        // Never mask a genuine launch failure behind a bogus "wrong architecture" message.
+        Assert.IsTrue(RunCommand.Handler.CanCurrentOsRunArchitecture("sparc"));
+    }
+
+    [TestMethod]
+    public void CanCurrentOsRunArchitecture_IsCaseInsensitive()
+    {
+        Assert.AreEqual(
+            RunCommand.Handler.CanCurrentOsRunArchitecture("arm64"),
+            RunCommand.Handler.CanCurrentOsRunArchitecture("ARM64"));
     }
 
     #endregion

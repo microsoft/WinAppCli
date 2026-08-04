@@ -412,4 +412,202 @@ public class InitCommandTests : BaseCommandTests
         Assert.IsTrue(File.Exists(configPath),
             "winapp.yaml should be created in cwd when non-interactive");
     }
+
+    // ── Interactive selection / confirmation prompts (no --use-defaults) ──
+
+    [TestMethod]
+    public async Task InitCommand_NoArgs_MultipleProjects_Interactive_SelectsFirstProject()
+    {
+        // Arrange — two nested projects, cwd itself has no project. With no --use-defaults
+        // and an interactive console, the multi-project SelectionPrompt is shown.
+        var subDir1 = _tempDirectory.CreateSubdirectory("app1");
+        File.WriteAllText(Path.Combine(subDir1.FullName, "Cargo.toml"), "[package]\nname = \"app1\"");
+        var subDir2 = _tempDirectory.CreateSubdirectory("app2");
+        File.WriteAllText(Path.Combine(subDir2.FullName, "Cargo.toml"), "[package]\nname = \"app2\"");
+
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--config-only" };
+
+        // Select the first offered project (Enter confirms the default highlighted choice).
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — succeeds and places the config in one of the selected project directories,
+        // not in the current directory (proving the selection was routed to a project).
+        Assert.AreEqual(0, exitCode, "Init should succeed after selecting a project from the list");
+        var cwdConfig = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+        Assert.IsFalse(File.Exists(cwdConfig), "Config should not be placed in cwd when a project was selected");
+        var projectConfigCount =
+            (File.Exists(Path.Combine(subDir1.FullName, "winapp.yaml")) ? 1 : 0) +
+            (File.Exists(Path.Combine(subDir2.FullName, "winapp.yaml")) ? 1 : 0);
+        Assert.AreEqual(1, projectConfigCount, "winapp.yaml should be created in exactly one selected project directory");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_NoArgs_MultipleProjects_Interactive_SelectsCurrentDirectoryFallback()
+    {
+        // Arrange — two nested projects; the appended "Current directory (./)" fallback is the
+        // last choice because the cwd itself has no detected project.
+        var subDir1 = _tempDirectory.CreateSubdirectory("app1");
+        File.WriteAllText(Path.Combine(subDir1.FullName, "Cargo.toml"), "[package]\nname = \"app1\"");
+        var subDir2 = _tempDirectory.CreateSubdirectory("app2");
+        File.WriteAllText(Path.Combine(subDir2.FullName, "Cargo.toml"), "[package]\nname = \"app2\"");
+
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--config-only" };
+
+        // Move past the two project choices to the appended current-directory fallback, then select it.
+        TestAnsiConsole.Input.PushKey(ConsoleKey.DownArrow);
+        TestAnsiConsole.Input.PushKey(ConsoleKey.DownArrow);
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — the current-directory fallback routes the config to the search root (cwd).
+        Assert.AreEqual(0, exitCode, "Init should succeed after selecting the current-directory fallback");
+        var cwdConfig = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+        Assert.IsTrue(File.Exists(cwdConfig), "winapp.yaml should be created in the current directory (fallback choice)");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_NoArgs_NoProjects_Interactive_UserAccepts_InitsInCwd()
+    {
+        // Arrange — an empty directory (no detectable project). With an interactive console the
+        // "No known project types were found. Initialize with winapp.yaml here?" prompt is shown.
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--config-only" };
+
+        // Accept the confirmation (DefaultValue is false, so push 'y' + Enter).
+        PushConfirmYes();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — accepting initializes in the current directory.
+        Assert.AreEqual(0, exitCode, "Init should succeed when the user accepts the no-project prompt");
+        var cwdConfig = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+        Assert.IsTrue(File.Exists(cwdConfig), "winapp.yaml should be created in cwd after accepting");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_NoArgs_NoProjects_Interactive_UserDeclines_Returns1()
+    {
+        // Arrange — empty directory, interactive console, user declines the no-project prompt.
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--config-only" };
+
+        // Decline the confirmation (the default).
+        PushConfirmNo();
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — declining cancels init with a non-zero exit code and writes no config.
+        Assert.AreEqual(1, exitCode, "Init should return 1 when the user declines the no-project prompt");
+        var cwdConfig = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+        Assert.IsFalse(File.Exists(cwdConfig), "winapp.yaml should not be created when the user declines");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_NoArgs_SingleProjectInCwd_Interactive_InitsDirectlyWithoutPrompt()
+    {
+        // Arrange — a single project located at the search root itself (not nested). Detection
+        // reports it with DisplayPath ".", so init proceeds directly without any prompt.
+        File.WriteAllText(Path.Combine(_tempDirectory.FullName, "Cargo.toml"), "[package]\nname = \"root-app\"");
+
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--config-only" };
+
+        // Push no keys — a prompt here would throw (no input available), proving none is shown.
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — the root project is used directly and the config lands in the current directory.
+        Assert.AreEqual(0, exitCode, "Init should succeed directly when a single project sits at the search root");
+        var cwdConfig = Path.Combine(_tempDirectory.FullName, "winapp.yaml");
+        Assert.IsTrue(File.Exists(cwdConfig), "winapp.yaml should be created in the current directory for a root project");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_NoArgs_SearchLimitReached_Interactive_ShowsHintAndSelects()
+    {
+        // Arrange — create more nested projects than the internal detection cap (10) so the
+        // selection prompt reports that the search limit was reached (adds the "run winapp
+        // init <path>" hint to the title).
+        for (var i = 0; i < 12; i++)
+        {
+            var sub = _tempDirectory.CreateSubdirectory($"app{i:D2}");
+            File.WriteAllText(Path.Combine(sub.FullName, "Cargo.toml"), $"[package]\nname = \"app{i}\"");
+        }
+
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--config-only" };
+
+        // Select the first offered project.
+        TestAnsiConsole.Input.PushKey(ConsoleKey.Enter);
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert — selection still succeeds when the search cap is hit, and the prompt surfaces the
+        // "run winapp init <path>" hint so the user knows how to reach a project the capped search
+        // may have missed.
+        Assert.AreEqual(0, exitCode, "Init should succeed after selecting a project when the search limit is reached");
+        StringAssert.Contains(TestAnsiConsole.Output, "path-to-project",
+            "The search-limit hint pointing at 'winapp init <path-to-project>' should be shown");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_Sparse_WithConfigOnly_ReturnsErrorAndDoesNotInit()
+    {
+        // Arrange — --config-only belongs to the full-init flow; combining it with --sparse
+        // should be rejected rather than silently ignored.
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--sparse", "--config-only" };
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Sparse init should reject --config-only");
+        StringAssert.Contains(ConsoleStdErr.ToString(), "--config-only",
+            "Error should name the rejected option");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_Sparse_WithSetupSdks_ReturnsError()
+    {
+        // Arrange — --setup-sdks does nothing for identity packaging, so it must be rejected.
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--sparse", "--setup-sdks", "none" };
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Sparse init should reject --setup-sdks");
+        StringAssert.Contains(ConsoleStdErr.ToString(), "--setup-sdks",
+            "Error should name the rejected option");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_Sparse_WithPositionalDirectory_ReturnsError()
+    {
+        // Arrange — a positional base directory configures the normal flow only; --sparse uses
+        // --output-dir instead, so a positional argument should be rejected.
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { _tempDirectory.FullName, "--sparse" };
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Sparse init should reject a positional directory");
+        StringAssert.Contains(ConsoleStdErr.ToString(), "--output-dir",
+            "Error should point users at --output-dir");
+    }
 }

@@ -121,7 +121,7 @@ internal partial class ManifestTemplateService : IManifestTemplateService
             .Replace("{PublisherDN}", PublisherDnHelper.XmlEscape(publisherDN))
             .Replace("{PublisherName}", PublisherDnHelper.XmlEscape(publisherName))
             .Replace("Version=\"1.0.0.0\"", $"Version=\"{version}\"")
-            .Replace("{Description}", description);
+            .Replace("{Description}", PublisherDnHelper.XmlEscape(description));
 
         return result;
     }
@@ -171,6 +171,13 @@ internal partial class ManifestTemplateService : IManifestTemplateService
 
         // Reassemble
         var result = string.Join(".", fixedSegments);
+
+        // If the input was made up entirely of separators (e.g. "..."), every segment
+        // was empty and reassembly yields "", which is not a valid Windows id. Fall back.
+        if (string.IsNullOrEmpty(result))
+        {
+            return "Default";
+        }
 
         // Enforce max length
         if (result.Length > 255)
@@ -228,6 +235,8 @@ internal partial class ManifestTemplateService : IManifestTemplateService
         ManifestTemplates manifestTemplate,
         string description,
         TaskContext taskContext,
+        string manifestFileName = "Package.appxmanifest",
+        string? executableName = null,
         CancellationToken cancellationToken = default)
     {
         // Normalize publisher to a valid distinguished name
@@ -255,8 +264,26 @@ internal partial class ManifestTemplateService : IManifestTemplateService
             version,
             description);
 
-        // Write manifest file
-        var manifestPath = Path.Combine(outputDirectory.FullName, "Package.appxmanifest");
+        // When a concrete executable name is provided (e.g. sparse identity packages
+        // that reference an external exe), replace the $targetnametoken$ build token so
+        // the manifest is self-contained and can be packed without --executable.
+        if (!string.IsNullOrWhiteSpace(executableName))
+        {
+            content = content.Replace("$targetnametoken$.exe", PublisherDnHelper.XmlEscape(executableName));
+        }
+
+        // Write manifest file. manifestFileName must be a bare file name; a rooted or nested value
+        // would make Path.Combine silently drop outputDirectory and write outside the intended folder.
+        if (Path.IsPathRooted(manifestFileName) || manifestFileName != Path.GetFileName(manifestFileName))
+        {
+            throw new ArgumentException(
+                $"manifestFileName must be a bare file name, not a path: '{manifestFileName}'.", nameof(manifestFileName));
+        }
+
+        // Validated above to be a bare file name; use the sanitized local so the combine is
+        // unambiguously within outputDirectory.
+        var safeManifestFileName = Path.GetFileName(manifestFileName);
+        var manifestPath = Path.Join(outputDirectory.FullName, safeManifestFileName);
         await File.WriteAllTextAsync(manifestPath, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
 
         // Generate default assets

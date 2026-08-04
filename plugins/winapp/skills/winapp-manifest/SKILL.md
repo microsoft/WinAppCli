@@ -1,7 +1,7 @@
 ---
 name: winapp-manifest
 description: Create and edit Windows app manifest files (Package.appxmanifest or appxmanifest.xml) that define app identity, capabilities, and visual assets, or generate new assets from existing images. Use when creating a Windows app manifest for any app type (GUI, console, CLI tool, service), adding Windows capabilities, generating new app icons and assets, or adding execution aliases, file associations, protocol handlers, or other app extensions.
-version: 0.4.1
+version: 0.5.1
 ---
 ## When to use
 
@@ -142,7 +142,7 @@ Key fields to edit:
 ## Tips
 
 - Always ensure `Identity.Publisher` matches your signing certificate — use `winapp cert generate --manifest` to auto-match
-- The `sparse` template adds `uap10:AllowExternalContent="true"` for apps that need identity but run outside the MSIX container
+- The `sparse` template adds a `<uap10:AllowExternalContent>true</uap10:AllowExternalContent>` element (under `<Properties>`) for apps that need identity but run outside the MSIX container
 - You can manually edit `Package.appxmanifest` after generation — it's a standard XML file
 - Image assets must match the paths referenced in the manifest — `update-assets` handles this automatically
 - For logos, transparent PNGs or SVGs work best. SVG source images are rendered as vectors directly at each target size, producing pixel-perfect results. Use a square image for best results across all sizes.

@@ -14,7 +14,7 @@ internal class UpdateNotificationService(
     IWinappDirectoryService winappDirectoryService,
     ILogger<UpdateNotificationService> logger) : IUpdateNotificationService
 {
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
+    private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromSeconds(10) };
     private static int _refreshScheduled;  // guarded by Interlocked; see NotScheduled/Scheduled constants
     private const int NotScheduled = 0;
     private const int Scheduled = 1;
@@ -27,6 +27,13 @@ internal class UpdateNotificationService(
     // For testing only — when true, skips the fire-and-forget background network refresh
     internal bool SkipBackgroundRefreshForTesting;
     internal Func<string> CurrentVersionProvider { get; set; } = VersionHelper.GetVersionString;
+
+    // Network boundary seam: defaults to the shared production client; tests inject a fake handler.
+    internal HttpClient Http { get; set; } = SharedHttp;
+
+    // OS boundary seam: defaults to the real process path; tests override to exercise
+    // the install-channel path heuristics without controlling the host process.
+    internal Func<string?> ProcessPathProvider { get; set; } = () => Environment.ProcessPath;
 
     // The console used for upgrade notices. Defaults to stderr so scripted commands
     // (e.g. get-winapp-path, --version) are never corrupted. Tests can override to capture output.
@@ -312,7 +319,7 @@ internal class UpdateNotificationService(
         return aIds.Length.CompareTo(bIds.Length);
     }
 
-    private static InstallChannel DetectInstallChannel()
+    internal InstallChannel DetectInstallChannel()
     {
         // Check caller env var (set by wrapper scripts via --caller option)
         var caller = Environment.GetEnvironmentVariable("WINAPP_CLI_CALLER");
@@ -327,7 +334,7 @@ internal class UpdateNotificationService(
         }
 
         // Check exe path heuristics
-        var exePath = Environment.ProcessPath;
+        var exePath = ProcessPathProvider();
         if (!string.IsNullOrEmpty(exePath))
         {
             if (exePath.Contains("node_modules", StringComparison.OrdinalIgnoreCase))

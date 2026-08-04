@@ -38,12 +38,21 @@ Does the project already have an appxmanifest.xml?
    │  └─ winapp package <build-output-dir>
    │     (add --cert ./devcert.pfx to sign in one step)
    ├─ Need package identity for debugging Windows APIs?
+   │  ├─ Have a .NET/WinUI .csproj or .sln/.slnx (or a folder with one)? (build + run in one step)
+   │  │  └─ winapp run <project-or-solution>  (dotnet build + provision runtime + launch)
+   │  │     (packaged apps launch with identity; unpackaged apps launch the .exe directly, no identity)
    │  ├─ Is the exe in the same folder as your build output? (most frameworks)
    │  │  └─ winapp run <build-output-dir>  (registers loose layout + launches)
    │  └─ Is the exe separate from your app code? (Electron, sparse package testing)
    │     └─ winapp create-debug-identity <exe-path>  (registers sparse package)
+   ├─ Need production sparse packaging (ship identity for an unpackaged app)?
+   │  └─ winapp init --exe <exe> --sparse   →   winapp pack <manifest> --cert <pfx>   →   winapp embed-identity <exe>
+   │     (build a signed identity-only .msix your installer registers with Add-AppxPackage -ExternalLocation)
    ├─ Need to sign an existing MSIX or exe?
-   │  └─ winapp sign <file> <cert>
+   │  ├─ With a local dev/CA certificate (PFX)?
+   │  │  └─ winapp sign <file> <cert>
+   │  └─ With Azure Trusted Signing (cloud-managed identity, no local PFX)?
+   │     └─ winapp az-sign <file>
    └─ Need to run a Windows SDK tool directly (makeappx, signtool, makepri)?
       └─ winapp tool <toolname> <args>
 
@@ -53,9 +62,12 @@ Want to inspect or interact with a running app's UI?
 ├─ Find specific elements → winapp ui search <selector> -a <appname>
 ├─ Click/activate an element → winapp ui invoke <selector> -a <appname>
 ├─ Take a screenshot → winapp ui screenshot -a <appname>
+├─ Record a window to video (MP4) → winapp ui record -a <appname> --duration-sec <n>
 ├─ Read element properties → winapp ui get-property <selector> -a <appname>
 ├─ Set a value on an element → winapp ui set-value <selector> "value" -a <appname>
 ├─ Wait for UI state → winapp ui wait-for <selector> -a <appname> --timeout 5000
+├─ Inject touch gestures (tap/swipe/pinch/long-press) → winapp ui touch <selector> -a <appname> --gesture swipe --direction right --distance 200
+├─ Inject pen/stylus ink stroke or tap → winapp ui pen <selector> -a <appname> --path "10,10 200,200"
 └─ List app windows → winapp ui list-windows -a <appname> [--show-hidden]
 ```
 
@@ -89,6 +101,7 @@ Want to inspect or interact with a running app's UI?
 - `--config-dir` — directory for `winapp.yaml` (default: the selected project directory)
 - `--config-only` — only create `winapp.yaml`, skip package installation
 - `--no-gitignore` — don't update `.gitignore`
+**Sparse mode (`--exe <exe> --sparse`):** generates an identity-only sparse `appxmanifest.xml` (with `AllowExternalContent`) plus placeholder assets for an existing executable, inferring name/publisher/version/description from the exe. Skips all SDK/package installation. `--exe` requires `--sparse`. Additional options: `--name`, `--publisher`, `--output-dir` (default: a `sparse/` folder in the current directory). This is **step 1** of the production sparse packaging workflow.
 **Creates:** `winapp.yaml`, `appxmanifest.xml`, `Assets/` folder, `.winapp/` (if SDKs installed)
 
 ### `winapp restore [base-directory]`
@@ -128,18 +141,35 @@ Want to inspect or interact with a running app's UI?
 - `--no-install` — create but don't register the package
 **Requires:** `appxmanifest.xml` + path to your built `.exe`
 
-### `winapp run <input-folder>`
-**Purpose:** Create a loose layout package from a build output folder, register it with Windows via `Add-AppxPackage`, and launch the app — simulating a full MSIX install for debugging.
-**When to use:** The **preferred command** for iterative development and debugging with package identity. Use this whenever your exe lives inside the build output folder (most .NET, C++, Rust, Flutter, Tauri projects).
+### `winapp embed-identity <target>`
+**Purpose:** Connect a desktop `.exe` to its sparse identity package by embedding the `<msix>` element into the target's side-by-side (fusion) manifest. This is **step 3** of the production sparse packaging workflow (after `winapp init --exe --sparse` and `winapp pack`).
+**When to use:** After building a signed identity-only `.msix` for an unpackaged app, to make Windows associate the exe with that package at runtime.
+**Modes:** `.exe` target → embeds via `mt.exe`; `.xml`/`.manifest` target → inserts/replaces the `<msix>` element in an external side-by-side manifest (rebuild the app afterward).
 **Key options:**
-- `--manifest <path>` — path to `appxmanifest.xml` (default: auto-detect)
-- `--args <string>` — command-line arguments to pass to the app
-- `--no-launch` — register the package without launching
+- `--manifest <path>` — sparse `appxmanifest.xml` to read identity from (defaults to a `sparse/` folder beside the target first, then in the current directory — where `winapp init --exe --sparse` writes it — then beside the target and in the current directory)
+**Requires:** a sparse `appxmanifest.xml` + the target `.exe` or `.xml`/`.manifest`
+
+### `winapp run [<input>]`
+**Purpose:** Build and/or package a Windows app and launch it — for **packaged** apps this simulates a full MSIX install with package identity; for **unpackaged** apps it launches the built `.exe` directly (no package identity). Returns the launched process ID for debugger attachment. Operates in one of two modes, auto-selected from the input:
+- **Folder mode** — input is a build-output folder (contains `Package.appxmanifest`/`AppxManifest.xml`). Creates a loose-layout package, registers it with Windows, and launches it. Original behavior, unchanged.
+- **Project mode** — input is a `.csproj`, a `.sln`/`.slnx` solution, or a directory containing one (including `.`). Builds the project with `dotnet build`, installs the matching-architecture Windows App Runtime if the app uses the Windows App SDK, then launches it. Supports both **packaged** (`WindowsPackageType=MSIX` → loose-layout + AUMID) and **unpackaged** (`WindowsPackageType=None` → launch the built `.exe` directly) WinUI apps, detected from the effective `WindowsPackageType` MSBuild property. Input defaults to the current directory when omitted (like `dotnet run`). Requires .NET SDK 8.0.100+.
+**When to use:** The **preferred command** for iterative development and debugging with package identity (.NET, C++, Rust, Flutter, Tauri). Point it at a project/solution to build-and-run in one step, or at a build-output folder to package-and-run existing output.
+**Key options:**
+- `--manifest <path>` — path to `appxmanifest.xml` (folder mode and packaged project mode; default: auto-detect)
+- `--args <string>` — command-line arguments to pass to the app. Alternatively pass app args after `--` (e.g., `winapp run . -- --flag value`)
+- `--no-launch` — register/prepare without launching
 - `--with-alias` — launch via execution alias (console apps run in current terminal)
+- `-c, --configuration <name>` — (project mode) build configuration; default `Debug`
+- `--arch <x64|arm64|x86>` — (project mode) target architecture; default: current process arch. Sets both the build RID and the Windows App Runtime arch
+- `-r, --runtime <rid>` — (project mode) target .NET RID (e.g. `win-x64`); **only the RID's architecture is used** — project mode reduces it and always builds the canonical `win-<arch>` RID, so a version-specific or non-Windows RID is not forwarded (a non-Windows RID like `linux-x64` is rejected). Overrides `--arch`.
+- `-f, --framework <tfm>` — (project mode) target framework for multi-targeted projects
+- `--project <name-or-path>` — (project mode) select which project to launch when a solution/directory has multiple runnable app projects (errors listing candidates if ambiguous)
+- `--no-build` / `--no-restore` — (project mode) skip build / restore
+- `-p, --property <Name=Value>` — (project mode) MSBuild property forwarded to build + evaluation; repeatable (e.g. `-p WindowsPackageType=None`)
 - `--debug-output` — capture `OutputDebugString` messages and first-chance exceptions (prevents other debuggers like VS/VS Code from attaching). For WinUI apps it also auto-runs a stowed-exception (`0xC000027B`) triage pass (`!xamlstowed`/`!xamltriage`) that recovers the originating HRESULT and native XAML dispatch stack. The first triage run downloads debugger components (engine bits from NuGet + `JsProvider.dll` from the WinDbg CDN) and caches them under `~\.winapp\dbgtools\`; if downloads are blocked, install Debugging Tools for Windows or point `WINAPP_DBGTOOLS_DIR` at a debugger directory containing `dbgeng.dll` and `JsProvider.dll`.
 - `--symbols` — with `--debug-output`, download Microsoft public symbols for richer native crash stacks (first run downloads and caches them)
-- `--output-appx-directory <path>` — custom output directory for loose layout
-**Requires:** Built app output directory + `appxmanifest.xml`
+- `--output-appx-directory <path>` — custom output directory for the loose layout
+**Requires:** Folder mode — built app output directory + `appxmanifest.xml`. Project mode — a `.csproj`/`.sln`/`.slnx` (or directory containing one) + .NET SDK 8.0.100+.
 
 ### `winapp cert generate`
 **Purpose:** Create a self-signed PFX certificate for local testing.
@@ -166,6 +196,18 @@ Want to inspect or interact with a running app's UI?
 **Key options:**
 - `--password <pwd>` — certificate password
 - `--timestamp <url>` — timestamp server URL (recommended for production to stay valid after cert expires)
+
+### `winapp az-sign <file-path>`
+**Purpose:** Code-sign an exe, MSIX, or MSIX bundle using Azure Trusted Signing (a cloud-managed signing identity — no local PFX).
+**When to use:** For production signing when the certificate is managed in Azure rather than as a local PFX file. Works in CI/CD and interactively.
+**Key options:**
+- `--subscription <id>` (`-s`) — Azure subscription ID (prompts if omitted and multiple exist)
+- `--resource-group <rg>` (`-r`) — resource group to narrow down signing accounts
+- `--account <name>` — signing account name (requires `--resource-group`)
+- `--profile <name>` (`-p`) — certificate profile name (requires `--account`)
+- `--metadata-file <path>` (`-m`) — reuse an existing `metadata.json`, skipping resource discovery and identity selection (authentication may still prompt for a tenant or `az login`)
+**Auth:** Uses `DefaultAzureCredential`. For CI/CD set `AZURE_TENANT_ID`/`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET` (or OIDC/managed identity); interactively falls back to `az login`.
+**Requires:** An Azure Code Signing account + certificate profile, and the Code Signing Certificate Profile Signer role. Also needs two machine-wide x64 runtimes that winapp does not auto-install (it downloads the raw NuGet package, not the client-tools installer): the x64 .NET 8+ runtime (the signing library is a managed assembly loaded by `signtool.exe`) and the x64 Visual C++ Redistributable. Plus SignTool 10.0.22621.755+. A dlib load failure (e.g. `0xc000007b`) usually means a missing runtime — most often the VC++ Redistributable.
 
 ### `winapp manifest generate [directory]`
 **Purpose:** Create an `appxmanifest.xml` without full project setup.
@@ -211,14 +253,17 @@ Want to inspect or interact with a running app's UI?
 - `ui search <selector> -a <app> [--max N]` — find elements; output shows semantic slugs. Surfaces invokable ancestor for all non-invokable results
 - `ui get-property <selector> -a <app> [-p <prop>]` — read UIA properties (including ToggleState, Value, IsSelected, ExpandCollapseState)
 - `ui screenshot -a <app> [--output file.png] [--json] [--focus] [--capture-screen]` — capture window as PNG. Default uses Windows.Graphics.Capture (composited surface — preserves rounded corners and works while occluded), with PrintWindow as fallback. Use `--focus` to bring the window to the foreground first; use `--capture-screen` for popup overlays not owned by the target window.
+- `ui record -a <app> [--output file.mp4] [--duration-sec <n>] [--fps <n>] [--max-edge <px>] [--frames] [--capture-screen] [--json]` — record window or element region to an H.264 MP4 using Windows Graphics Capture + Media Foundation. Default is 0 — records until stopped (Ctrl+C interactively, or a newline/EOF on stdin for programmatic callers); use `--duration-sec N` for a timed run. Add `--frames` to retain timestamped JPEGs, `frames.ndjson`, and `manifest.json` under `<output-name>.frames`. JSON results include `elapsedMs`, `achievedFps`, `cadenceRatio`, `stopReason`, optional `frameArtifacts`, and the capture `mode` (`"wgc"`, `"screen"`, or `"printwindow"`).
 - `ui invoke <selector> -a <app>` — activate element by slug or text search. Auto-walks to invokable ancestor for non-invokable elements.
 - `ui hover <selector> -a <app> [--dwell-time <ms>]` — move mouse to element center to trigger tooltips, flyouts, and hover states. Use with `ui screenshot --capture-screen` to capture the result.
-- `ui drag <from> <to> -a <app> [--right]` — press the mouse button at one point, move to another, and release (reorder, resize, sliders, drag-and-drop). Each of `<from>`/`<to>` is an element selector (drags from/to its center) or app coordinates `x,y` as reported by `ui inspect`.
-- `ui send-keys "<keys>" -a <app> [--target <selector>] [--via post-message|send-input] [--verbatim]` — send synthetic keyboard input: named keys (`enter`, `down`), combos (`ctrl+shift+t`), raw virtual keys (`vk=0xNN`), or literal text. Use `--verbatim` to type the whole argument literally (no key/combo parsing), or `--via send-input` for per-keystroke KeyDown on typed text (e.g. a WinUI 3/WPF TextBox).
+- `ui drag <from> <to> -a <app> [--right]` — press the mouse button at one point, move to another, and release (reorder, resize, sliders, drag-and-drop). Each of `<from>`/`<to>` is an element selector (drags from/to its center) or screen coordinates `x,y` as reported by `ui inspect`.
+- `ui send-keys "<keys>" -a <app> [--target <selector>] [--via post-message|send-input] [--verbatim] [--allow-system-keys]` — send synthetic keyboard input: named keys (`enter`, `down`), combos (`ctrl+shift+t`), raw virtual keys (`vk=0xNN`), or literal text. Use `--verbatim` to type the whole argument literally (no key/combo parsing). The default `post-message` transport auto-targets the window's focused child control (works for classic Win32/WinForms), but **windowless WinUI 3 / UWP / XAML controls ignore posted messages** — neither keys nor text reach them (it warns and still exits 0 when a XAML target is detected), so use **`--via send-input`** for WinUI 3 / UWP / WPF apps (also required for per-keystroke KeyDown on typed text, e.g. a WinUI 3/WPF TextBox). Pass `--allow-system-keys` with `--via send-input` to opt in to OS/shell hotkeys (e.g. `win+r`, `win+shift+v`); **`win+l` and `ctrl+alt+del` stay blocked even with this flag** (`win+l` locks the workstation — unrecoverable from automation; `ctrl+alt+del` is a Secure Attention Sequence Windows drops from injected input, so it errors instead of falsely reporting success).
 - `ui set-value <selector> "value" -a <app>` — set text or slider value programmatically (ValuePattern → RangeValuePattern → LegacyIAccessible `put_accValue` fallback for TextPattern-only rich-edit/compose boxes). WinUI 3 `RichEditBox` / WPF `RichTextBox` don't support programmatic value-setting (read-only to UIA value APIs) — use `send-keys` for those.
 - `ui focus <selector> -a <app>` — move keyboard focus
 - `ui scroll-into-view <selector> -a <app>` — scroll element visible
 - `ui scroll <selector> -a <app> --direction down` — scroll a container (up/down/left/right, --to top/bottom)
+- `ui touch <selector> -a <app> [--gesture tap|double-tap|long-press|swipe|pinch|stretch] [--at x,y] [--to-point x,y] [--direction right|left|up|down] [--distance px] [--duration-ms ms] [--hold-ms ms] [--fingers N]` — inject synthetic touch gestures (tap, swipe, pinch, stretch, long-press). Swipe direction defaults to right; long-press defaults to 500 ms hold if --hold-ms not set. Requires an unlocked interactive desktop.
+- `ui pen <selector> -a <app> [--at x,y] [--path "x1,y1 x2,y2 ..."] [--pressure 0.5] [--tilt-x N] [--tilt-y N] [--eraser] [--duration-ms ms]` — inject synthetic pen/stylus input: a tap at element center/--at, or an ink stroke along --path. --duration-ms distributes glide time across stroke segments. Requires Windows 10 1809+ and an unlocked interactive desktop.
 - `ui wait-for <selector> -a <app> --timeout <ms> [--gone] [--value Y] [--property X --value Y]` — wait for element value or property match
 - `ui list-windows -a <app> [--show-hidden]` — list windows, popups, and dialogs with HWNDs (untitled zero-size windows hidden by default)
 - `ui get-focused -a <app>` — show the element with keyboard focus
@@ -294,6 +339,15 @@ winapp init .                              # If not already set up
 # ... build your app ...
 winapp create-debug-identity ./myapp.exe   # Register sparse package for exe
 # Launch your exe normally — it now has package identity
+```
+
+### Ship production sparse identity (unpackaged app + installer)
+```bash
+winapp init --exe ./bin/MyApp.exe --sparse         # Step 1: generate identity-only manifest + assets into ./sparse/
+winapp cert generate                               # dev/test cert (use a trusted cert for production)
+winapp pack ./sparse/appxmanifest.xml --cert devcert.pfx  # Step 2: build + sign the identity .msix
+winapp embed-identity ./bin/MyApp.exe             # Step 3: embed <msix> into the exe fusion manifest
+# Your installer registers it: Add-AppxPackage -Path MyApp.identity.msix -ExternalLocation <install-dir>
 ```
 
 ### Clone and build existing project

@@ -205,9 +205,14 @@ try
         exit 1
     }
 
-    # Step 3: Build test project (CLI is already built from publish, this mainly compiles tests)
-    Write-Host "[BUILD] Building CLI solution..." -ForegroundColor Blue
-    dotnet build $CliSolutionPath -c Release
+    # Step 3: Build the solution in Debug to compile the tests. Coverage is collected on
+    # this Debug build (Step 5) -- optimized Release builds under-count line coverage (many
+    # block-brace lines report hits=0). The shipped CLI artifact is the Release `dotnet publish`
+    # above; this Debug build exists only to run the test suite. See issue #630.
+    # TreatWarningsAsErrors is Release-only (Directory.Build.props), so pass it explicitly here
+    # to keep the warning-as-error quality gate the previous Release test build provided.
+    Write-Host "[BUILD] Building CLI solution (Debug, for tests + coverage)..." -ForegroundColor Blue
+    dotnet build $CliSolutionPath -c Debug -p:TreatWarningsAsErrors=true
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to build CLI solution"
         exit 1
@@ -257,7 +262,14 @@ try
     # Step 5: Run tests (unless skipped)
     if (-not $SkipTests) {
         Write-Host "[TEST] Running tests..." -ForegroundColor Blue
-        dotnet run --project $CliTestsProjectPath -c Release --no-build --results-directory $CliSolutionDir\TestResults --report-trx --coverage --coverage-output-format cobertura
+        # Measure coverage honestly. Two things distort the raw number: (1) auto-generated
+        # interop (CsWin32/COM/Regex generators in obj\**) inflates the denominator -- excluded
+        # via coverage.runsettings; (2) optimized Release builds report many block-brace lines as
+        # hits=0, so line coverage is under-counted -- so we collect on the Debug build from
+        # Step 3. Hand-written services (incl. the hardware/COM/GPU interop) are NOT excluded;
+        # they are covered by real tests. See issue #630.
+        $CoverageSettings = (Resolve-Path "$CliSolutionDir\coverage.runsettings").Path
+        dotnet run --project $CliTestsProjectPath -c Debug --no-build --results-directory $CliSolutionDir\TestResults --report-trx --coverage --coverage-settings $CoverageSettings --coverage-output-format cobertura
         $TestExitCode = $LASTEXITCODE
     
         # Copy test results to artifacts BEFORE checking for failure - find all TRX files
@@ -401,6 +413,39 @@ try
     } else {
         Write-Host ""
         Write-Host "[NUGET] Skipping NuGet packages creation (use -SkipNuGet:`$false to enable)" -ForegroundColor Gray
+    }
+
+    # Run MS Learn docs tooling Pester tests (validator + shared front-matter lib).
+    # These gate the release doc-porting job, so keep them green. Skipped with -SkipTests.
+    if (-not $SkipTests) {
+        $MsLearnTestsPath = Join-Path $ProjectRoot "scripts\tests\validate-mslearn-docs.Tests.ps1"
+        if (Test-Path $MsLearnTestsPath) {
+            $pesterMod = Get-Module -Name Pester -ListAvailable | Where-Object { $_.Version.Major -ge 5 } | Select-Object -First 1
+            if ($pesterMod) {
+                Write-Host "[TEST] Running MS Learn docs tooling Pester tests..." -ForegroundColor Blue
+                # Import the selected v5+ module explicitly so the v5 config APIs
+                # don't bind to a different Pester version already in the session.
+                Import-Module $pesterMod -Force
+                $pesterConfig = New-PesterConfiguration
+                $pesterConfig.Run.Path = $MsLearnTestsPath
+                $pesterConfig.Run.Exit = $false
+                $pesterConfig.Run.PassThru = $true
+                $pesterConfig.Output.Verbosity = 'Normal'
+                $pesterResult = Invoke-Pester -Configuration $pesterConfig
+                if (($pesterResult.FailedCount + $pesterResult.FailedBlocksCount + $pesterResult.FailedContainersCount) -gt 0) {
+                    if ($FailOnTestFailure) {
+                        Write-Error "Stopping build due to MS Learn docs tooling Pester test failures (FailOnTestFailure flag set): $($pesterResult.FailedCount) failed test(s), $($pesterResult.FailedBlocksCount) failed block(s), $($pesterResult.FailedContainersCount) failed container(s)"
+                        exit 1
+                    } else {
+                        Write-Warning "MS Learn docs tooling Pester tests had $($pesterResult.FailedCount) failed test(s), $($pesterResult.FailedBlocksCount) failed block(s), $($pesterResult.FailedContainersCount) failed container(s) — continuing"
+                    }
+                } else {
+                    Write-Host "[TEST] MS Learn docs tooling Pester tests passed: $($pesterResult.PassedCount) passed, $($pesterResult.SkippedCount) skipped" -ForegroundColor Green
+                }
+            } else {
+                Write-Warning "Pester 5.x not installed — skipping MS Learn docs tooling Pester tests. Install with: Install-Module Pester -Force -MinimumVersion 5.0"
+            }
+        }
     }
 
     # Step 9: Create MSIX packages (optional)

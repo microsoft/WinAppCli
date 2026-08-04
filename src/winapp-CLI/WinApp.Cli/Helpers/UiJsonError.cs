@@ -23,10 +23,24 @@ internal static class UiJsonError
     public const string CodeForegroundNotTarget = "foreground_not_target";
     public const string CodeNoInteractiveDesktop = "no_interactive_desktop";
     public const string CodeTargetMoved = "target_moved";
+    public const string CodeNoTarget = "no_target";
+    public const string CodeInjectionUnsupported = "injection_unsupported";
+    public const string CodeAmbiguousSelector = "ambiguous_selector";
+    public const string CodeOutputExists = "output_exists";
+    public const string CodeFrameOutputFailed = "frame_output_failed";
+    public const string CodePartialOutput = "partial_output";
 
     /// <summary>Write a JSON error envelope to stderr. No-op when <paramref name="json"/> is false.</summary>
+    /// <param name="errorOut">
+    /// Optional error writer; defaults to <see cref="Console.Error"/>. Pass
+    /// <c>parseResult.InvocationConfiguration.Error</c> from a command handler so test harnesses
+    /// that set <c>InvocationConfiguration.Error</c> to a capturing writer can inspect the output.
+    /// </param>
     public static void Emit(bool json, string code, string message,
-                            string? selector = null, string? details = null)
+                            string? selector = null, string? details = null,
+                            TextWriter? errorOut = null,
+                            string? recoveryHint = null,
+                            UiPartialOutputInfo? partialOutput = null)
     {
         if (!json) { return; }
 
@@ -38,10 +52,12 @@ internal static class UiJsonError
                 Message = message,
                 Selector = selector,
                 Details = details,
+                RecoveryHint = recoveryHint,
+                PartialOutput = partialOutput,
             },
         };
-        var payload = JsonSerializer.Serialize(result, UiJsonContext.Default.UiErrorResult);
+        var payload = JsonSerializer.Serialize(result, UiJsonLineContext.Default.UiErrorResult);
         // Errors go to stderr so consumers can separate them from successful stdout payloads.
-        Console.Error.WriteLine(payload);
+        (errorOut ?? Console.Error).WriteLine(payload);
     }
 }

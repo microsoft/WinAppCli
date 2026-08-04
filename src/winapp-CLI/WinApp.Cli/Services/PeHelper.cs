@@ -36,38 +36,55 @@ internal static class PeHelper
 
             ushort machine = (ushort)coff.Machine;
 
-            // Native or mixed-mode case: use the PE machine directly.
-            if (cor is null)
-            {
-                return MapNativeMachine(machine);
-            }
-
-            CorFlags flags = cor.Flags;
-            bool isIlOnly = (flags & CorFlags.ILOnly) != 0;
-            bool requires32Bit = (flags & CorFlags.Requires32Bit) != 0;
-
-            // Managed IL-only assemblies need special handling.
-            // In particular, IL-only I386 without Requires32Bit is effectively AnyCPU/neutral.
-            if (isIlOnly)
-            {
-                return machine switch
-                {
-                    0x014C => requires32Bit ? "x86" : "neutral", // I386
-                    0x8664 => "x64",   // unusual for pure IL-only, but valid to preserve
-                    0x01C0 => "arm",   // ARM
-                    0x01C4 => "arm",   // ARMNT
-                    0xAA64 => "arm64", // ARM64
-                    _ => null
-                };
-            }
-
-            // Mixed-mode / native-entry managed image: machine matters.
-            return MapNativeMachine(machine);
+            return ClassifyArchitecture(machine, cor?.Flags);
         }
         catch
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Maps a COFF machine value and optional COR flags to an MSIX-style architecture string.
+    /// Extracted as a pure function (no file I/O) so every native/managed/mixed-mode branch can be
+    /// unit tested directly.
+    /// <list type="bullet">
+    /// <item>When <paramref name="corFlags"/> is <c>null</c> the image is native/mixed-mode and is
+    /// classified from <paramref name="machine"/>.</item>
+    /// <item>Managed IL-only images use the COR flags: I386 + Requires32Bit =&gt; x86, otherwise
+    /// I386 =&gt; neutral (AnyCPU).</item>
+    /// </list>
+    /// Returns <c>null</c> for unsupported architectures.
+    /// </summary>
+    internal static string? ClassifyArchitecture(ushort machine, CorFlags? corFlags)
+    {
+        // Native or mixed-mode case: use the PE machine directly.
+        if (corFlags is null)
+        {
+            return MapNativeMachine(machine);
+        }
+
+        CorFlags flags = corFlags.Value;
+        bool isIlOnly = (flags & CorFlags.ILOnly) != 0;
+        bool requires32Bit = (flags & CorFlags.Requires32Bit) != 0;
+
+        // Managed IL-only assemblies need special handling.
+        // In particular, IL-only I386 without Requires32Bit is effectively AnyCPU/neutral.
+        if (isIlOnly)
+        {
+            return machine switch
+            {
+                0x014C => requires32Bit ? "x86" : "neutral", // I386
+                0x8664 => "x64",   // unusual for pure IL-only, but valid to preserve
+                0x01C0 => "arm",   // ARM
+                0x01C4 => "arm",   // ARMNT
+                0xAA64 => "arm64", // ARM64
+                _ => null
+            };
+        }
+
+        // Mixed-mode / native-entry managed image: machine matters.
+        return MapNativeMachine(machine);
     }
 
     private static string? MapNativeMachine(ushort machine) => machine switch

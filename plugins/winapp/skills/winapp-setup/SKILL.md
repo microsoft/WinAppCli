@@ -1,7 +1,7 @@
 ---
 name: winapp-setup
 description: Set up a Windows app project for MSIX packaging, Windows SDK access, or Windows API usage. Use when adding Windows support to an Electron, .NET, C++, Rust, Flutter, or Tauri project, or restoring SDK packages after cloning.
-version: 0.4.1
+version: 0.5.1
 ---
 ## When to use
 
@@ -67,6 +67,31 @@ When JS bindings are enabled (via `--add-js-bindings` or by answering yes in int
 - `.winapp/bindings/` — generated JS bindings for Windows App SDK APIs (npm-only, Node / Electron)
 - `package.json` update — adds the `winapp.jsBindings` namespace and `@microsoft/dynwinrt` dependency (npm-only)
 
+### Initialize a sparse identity package (existing exe)
+
+Use `--sparse` when you have an **already-built desktop exe** (WPF, WinForms, Win32, Electron, etc.) and only want to give it **package identity** — without repackaging the whole app into the MSIX. The app's files stay where they are and are resolved from an *external content location* at runtime.
+
+```powershell
+# Generate an identity-only sparse manifest for an existing exe
+winapp init --exe ./bin/Release/MyApp.exe --sparse
+
+# Non-interactive, with explicit identity values
+winapp init --exe ./bin/Release/MyApp.exe --sparse --name MyApp --publisher "CN=Contoso" --use-defaults
+```
+
+`--sparse` requires `--exe`. It skips all SDK/package installation (sparse identity packages have no SDK dependencies) and, by default, writes to a dedicated `sparse/` folder in the current directory (override with `--output-dir`) so the manifest and its `Assets/` stay out of a build-output folder that a rebuild would wipe:
+- `appxmanifest.xml` — identity-only sparse manifest (declares `uap10:AllowExternalContent`)
+- `Assets/` — placeholder visual assets (extracted from the exe's icon when possible), resolved from the **external location** at runtime — **not** bundled into the `.msix`
+
+If an `appxmanifest.xml` already exists in the target directory, init fails instead of overwriting it; re-run with `--force` to regenerate.
+
+This is step 1 of the sparse packaging workflow. Continue with:
+1. `winapp pack ./sparse/appxmanifest.xml --cert ./devcert.pfx` — build the signed identity `.msix`
+2. `winapp embed-identity ./bin/Release/MyApp.exe` — connect the exe to the identity package (re-sign the exe afterward)
+3. Register in your installer with `Add-AppxPackage -Path <msix> -ExternalLocation <install-dir>`
+
+For the full walkthrough, see the [Sparse packaging guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/sparse.md).
+
 ### Restore after cloning
 
 ```powershell
@@ -113,6 +138,29 @@ winapp run ./bin/Debug --debug-output
 
 Use `winapp run` during iterative development — it creates a loose layout package, registers a debug identity, and launches the app in one step. For identity-only registration without loose layout, use `winapp create-debug-identity` instead.
 
+#### Project mode: `winapp run` on a `.csproj` (.NET / WinUI)
+
+For .NET SDK projects you can point `winapp run` **at the project instead of the build output** — it builds the `.csproj` and launches it in one step, so there's no separate `dotnet build` and no need to know the output path:
+
+```powershell
+# Build and run the project in the current directory (input defaults to ".")
+winapp run
+
+# Run a specific project, configuration, and architecture
+winapp run ./src/MyApp/MyApp.csproj -c Release --arch arm64
+
+# Force an unpackaged run of a packaged project
+winapp run . -p WindowsPackageType=None
+
+# Show winapp's build decision traces (dotnet build stays at minimal verbosity)
+winapp run . --verbose
+```
+
+Project mode supports both **packaged** and **unpackaged** WinUI apps, detected from the project's effective `WindowsPackageType` (`MSIX` ⇒ loose-layout register + AUMID launch; `None` ⇒ launch the built `.exe`), and installs the matching-architecture Windows App Runtime before launching. Requires .NET SDK 8.0.100+.
+
+- **Build inputs:** `-c/--configuration`, `--arch`, `-r/--runtime`, `-f/--framework`, `--no-build`, `--no-restore`, `-p/--property` (repeatable).
+- **Packaged-only options:** `--manifest`, `--no-launch`, `--with-alias`, `--clean`, `--unregister-on-exit`, `--output-appx-directory`, `--executable` — rejected for unpackaged apps.
+- **Output:** winapp prints the exact `dotnet build …` invocation, then streams build output live (warnings included on success). Under `--json`/`--quiet` both go to **stderr** so stdout stays clean.
 
 #### Choosing between `run` and `create-debug-identity`
 
@@ -180,10 +228,16 @@ Start here for initializing a Windows app with required setup. Sets up everythin
 |--------|-------------|---------|
 | `--config-dir` | Directory to read/store configuration (default: the selected project directory, or current directory if no project is detected) | (none) |
 | `--config-only` | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. | (none) |
+| `--exe` | Path to the application executable. Requires --sparse. Generates an identity-only sparse manifest for the exe instead of a full package/SDK setup. | (none) |
+| `--force` | Overwrite an existing appxmanifest.xml in the target directory (sparse only). Without this, init fails instead of replacing existing manifest/asset files. | (none) |
 | `--ignore-config` | Don't use configuration file for version management | (none) |
+| `--name` | Override the package name (sparse only; default: inferred from the exe) | (none) |
 | `--no-gitignore` | Don't update .gitignore file | (none) |
+| `--output-dir` | Directory to write the sparse manifest and Assets/ (sparse only; default: a 'sparse/' folder in the current directory) | (none) |
+| `--publisher` | Override the publisher CN (sparse only; default: inferred from the exe's company name). Bare names are auto-wrapped as CN=<name>. | (none) |
 | `--setup-sdks` | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) | (none) |
-| `--use-defaults` | Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults) | (none) |
+| `--sparse` | Generate a sparse identity manifest (appxmanifest.xml) for an existing desktop exe instead of a full package manifest. Use with --exe. Skips SDK/package installation. | (none) |
+| `--use-defaults` | Skip interactive prompts and use default answers. Normal init targets the positional project directory if given, otherwise the current directory (e.g., winapp init . --use-defaults). Sparse init (--exe --sparse) ignores the positional directory and writes to --output-dir instead. | (none) |
 
 ### `winapp restore`
 
@@ -213,28 +267,35 @@ Check for and install newer SDK versions. Updates winapp.yaml with latest versio
 
 ### `winapp run`
 
-Creates packaged layout, registers the Application, and launches the packaged application.
+Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.
 
 #### Arguments
 <!-- auto-generated from cli-schema.json -->
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `<input-folder>` | Yes | Input folder containing the app to run |
-| `<app-args>` | No | Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). |
+| `<input>` | No | Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory). |
 
 #### Options
 <!-- auto-generated from cli-schema.json -->
 | Option | Description | Default |
 |--------|-------------|---------|
+| `--arch` | Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Default: the current process architecture. | (none) |
 | `--args` | Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). | (none) |
 | `--clean` | Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. | (none) |
+| `--configuration` | Project mode: build configuration (e.g., Debug, Release). Ignored in folder mode. Default: Debug. | `Debug` |
 | `--debug-output` | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. For WinUI apps, a crash also triggers a stowed-exception triage pass; the first run downloads debugger components (cached under the winapp global directory) and can be pointed at an existing debugger install via the WINAPP_DBGTOOLS_DIR environment variable. Cannot be combined with --no-launch or --json. | (none) |
 | `--detach` | Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). | (none) |
 | `--executable` | Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. | (none) |
+| `--framework` | Project mode: target framework moniker for multi-targeted projects (e.g. net10.0-windows10.0.26100.0). Ignored in folder mode. | (none) |
 | `--json` | Format output as JSON | (none) |
 | `--manifest` | Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) | (none) |
+| `--no-build` | Project mode: skip building and run the existing build output (still evaluates output properties). Ignored in folder mode. | (none) |
 | `--no-launch` | Only create the debug identity and register the package without launching the application | (none) |
-| `--output-appx-directory` | Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used. | (none) |
+| `--no-restore` | Project mode: skip restoring the project before building. Ignored in folder mode. | (none) |
+| `--output-appx-directory` | Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory will be used. | (none) |
+| `--project` | Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode. | (none) |
+| `--property` | Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. | (none) |
+| `--runtime` | Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode. | (none) |
 | `--symbols` | Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. | (none) |
 | `--unregister-on-exit` | Unregister the development package after the application exits. Only removes packages registered in development mode. | (none) |
 | `--with-alias` | Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. | (none) |

@@ -27,6 +27,17 @@ internal class FakeDotNetService : IDotNetService
     public DotNetPackageListJson? PackageListResult { get; set; }
 
     /// <summary>
+    /// When true, <see cref="GetPackageListAsync"/> throws, simulating a failure of
+    /// <c>dotnet list package --format json</c> (e.g. a project that fails to restore).
+    /// </summary>
+    public bool ThrowOnGetPackageList { get; set; }
+
+    /// <summary>
+    /// Number of times <see cref="GetPackageListAsync"/> has been invoked.
+    /// </summary>
+    public int GetPackageListCallCount { get; private set; }
+
+    /// <summary>
     /// Packages listed here will cause <see cref="AddOrUpdatePackageReferenceAsync"/> to throw,
     /// simulating failures from <c>dotnet add package</c>.
     /// </summary>
@@ -70,11 +81,73 @@ internal class FakeDotNetService : IDotNetService
 
     public Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(DirectoryInfo workingDirectory, string arguments, CancellationToken cancellationToken = default)
     {
+        if (RunDotnetCommandHandler is not null)
+        {
+            return Task.FromResult(RunDotnetCommandHandler(arguments));
+        }
         return Task.FromResult((0, "Fake dotnet command executed successfully.", string.Empty));
     }
 
-    public Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// When set, <see cref="RunDotnetStreamingAsync"/> invokes this handler (given the argument
+    /// string plus the stdout/stderr line callbacks) instead of the default no-op success. Lets a
+    /// test simulate streamed build output and control the exit code.
+    /// </summary>
+    public Func<string, Action<string>?, Action<string>?, int>? RunDotnetStreamingHandler { get; set; }
+
+    /// <summary>Records the argument strings passed to <see cref="RunDotnetStreamingAsync"/> (build passes).</summary>
+    public List<string> StreamingCalls { get; } = [];
+
+    public Task<int> RunDotnetStreamingAsync(DirectoryInfo workingDirectory, string arguments, Action<string>? onOutputLine, Action<string>? onErrorLine, CancellationToken cancellationToken = default)
     {
+        StreamingCalls.Add(arguments);
+        if (RunDotnetStreamingHandler is not null)
+        {
+            return Task.FromResult(RunDotnetStreamingHandler(arguments, onOutputLine, onErrorLine));
+        }
+        return Task.FromResult(0);
+    }
+
+    /// <summary>
+    /// When set, <see cref="RunDotnetInheritedAsync"/> returns this handler's result (keyed on the
+    /// argument string) instead of the default success. Lets a test control the exit code of the
+    /// inherited-stdio (native terminal logger) build path.
+    /// </summary>
+    public Func<string, int>? RunDotnetInheritedHandler { get; set; }
+
+    /// <summary>Records the argument strings passed to <see cref="RunDotnetInheritedAsync"/> (native-terminal build passes).</summary>
+    public List<string> InheritedCalls { get; } = [];
+
+    public Task<int> RunDotnetInheritedAsync(DirectoryInfo workingDirectory, string arguments, CancellationToken cancellationToken = default)
+    {
+        InheritedCalls.Add(arguments);
+        if (RunDotnetInheritedHandler is not null)
+        {
+            return Task.FromResult(RunDotnetInheritedHandler(arguments));
+        }
+        return Task.FromResult(0);
+    }
+
+    /// <summary>
+    /// When set, <see cref="RunDotnetCommandAsync"/> returns this handler's result (keyed on the
+    /// argument string) instead of the fixed success tuple. Lets a test feed canned
+    /// <c>--getProperty</c> JSON for build/resolve scenarios.
+    /// </summary>
+    public Func<string, (int ExitCode, string Output, string Error)>? RunDotnetCommandHandler { get; set; }
+
+    /// <summary>Records the <c>noRestore</c> flag from the most recent <see cref="GetPackageListAsync"/> call.</summary>
+    public bool? LastGetPackageListNoRestore { get; private set; }
+
+    public Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, bool noRestore = false, CancellationToken cancellationToken = default)
+    {
+        GetPackageListCallCount++;
+        LastGetPackageListNoRestore = noRestore;
+
+        if (ThrowOnGetPackageList)
+        {
+            throw new InvalidOperationException("Simulated dotnet list package failure.");
+        }
+
         return Task.FromResult(PackageListResult);
     }
 
