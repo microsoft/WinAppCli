@@ -1,7 +1,6 @@
 ---
 name: winapp-manifest
 description: Create and edit Windows app manifest files (Package.appxmanifest or appxmanifest.xml) that define app identity, capabilities, and visual assets, or generate new assets from existing images. Use when creating a Windows app manifest for any app type (GUI, console, CLI tool, service), adding Windows capabilities, generating new app icons and assets, or adding execution aliases, file associations, protocol handlers, or other app extensions.
-version: 0.5.1
 ---
 ## When to use
 
@@ -160,57 +159,6 @@ Key fields to edit:
 | "Invalid source image" | Image too small or wrong format | Use PNG or SVG, at least 400x400 pixels |
 | "Publisher mismatch" during packaging | Manifest publisher ≠ cert publisher | Edit `Identity.Publisher` in manifest, or regenerate cert with `--manifest` |
 
+## CLI reference
 
-## Command Reference
-
-### `winapp manifest generate`
-
-Create Package.appxmanifest without full project setup. Use when you only need a manifest and image assets (no SDKs, no certificate). For full setup, use 'init' instead. Templates: 'packaged' (full MSIX), 'sparse' (desktop app needing Windows APIs).
-
-#### Arguments
-<!-- auto-generated from cli-schema.json -->
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `<directory>` | No | Directory to generate manifest in |
-
-#### Options
-<!-- auto-generated from cli-schema.json -->
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--description` | Human-readable app description shown during installation and in Windows Settings | `My Application` |
-| `--executable` | Path to the application's executable. Default: <package-name>.exe | (none) |
-| `--if-exists` | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) | `Error` |
-| `--logo-path` | Path to logo image file | (none) |
-| `--package-name` | Package name (default: folder name) | (none) |
-| `--publisher-name` | Publisher distinguished name (DN) (default: CN=<current user>). Accepts any valid X.500 DN; bare names are auto-wrapped as CN=<name>. | (none) |
-| `--template` | Manifest template type: 'packaged' (full MSIX app, default) or 'sparse' (desktop app with package identity for Windows APIs) | `Packaged` |
-| `--version` | App version in Major.Minor.Build.Revision format (e.g., 1.0.0.0). | `1.0.0.0` |
-
-### `winapp manifest update-assets`
-
-Generate new assets for images referenced in a Package.appxmanifest from a single source image. Source image should be at least 400x400 pixels.
-
-#### Arguments
-<!-- auto-generated from cli-schema.json -->
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `<image-path>` | Yes | Path to source image file (SVG, PNG, ICO, JPG, BMP, GIF) |
-
-#### Options
-<!-- auto-generated from cli-schema.json -->
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--light-image` | Path to source image for light theme variants (SVG, PNG, ICO, JPG, BMP, GIF) | (none) |
-| `--manifest` | Path to Package.appxmanifest or appxmanifest.xml file (default: search current directory) | (none) |
-
-### `winapp manifest add-alias`
-
-Add an execution alias (uap5:AppExecutionAlias) to a Package.appxmanifest. This allows launching the packaged app from the command line by typing the alias name. By default, the alias is inferred from the Executable attribute (e.g. $targetnametoken$.exe becomes $targetnametoken$.exe alias).
-
-#### Options
-<!-- auto-generated from cli-schema.json -->
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--app-id` | Application Id to add the alias to (default: first Application element) | (none) |
-| `--manifest` | Path to Package.appxmanifest or appxmanifest.xml file (default: search current directory) | (none) |
-| `--name` | Alias name (e.g. 'myapp.exe'). Default: inferred from the Executable attribute in the manifest. | (none) |
+Run `winapp <command> --help` for current command options, or `winapp --cli-schema` for the complete machine-readable command schema.

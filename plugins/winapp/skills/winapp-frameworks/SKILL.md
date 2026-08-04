@@ -1,7 +1,6 @@
 ---
 name: winapp-frameworks
 description: Framework-specific Windows development guidance for Electron, .NET (WPF, WinForms), C++, Rust, Flutter, and Tauri. Use when packaging or adding Windows features to an Electron app, .NET desktop app, Flutter app, Tauri app, Rust app, or C++ app.
-version: 0.5.1
 ---
 ## When to use
 
@@ -125,3 +124,7 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 - **Packaging**: `winapp-package` — creating MSIX installers from build output
 - **Identity**: `winapp-identity` — enabling package identity for Windows APIs during development
 - Not sure which command to use? See `winapp-troubleshoot` for a command selection flowchart
+
+## CLI reference
+
+Run `winapp <command> --help` for current command options, or `winapp --cli-schema` for the complete machine-readable command schema.

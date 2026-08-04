@@ -1,7 +1,6 @@
 ---
 name: winapp-setup
 description: Set up a Windows app project for MSIX packaging, Windows SDK access, or Windows API usage. Use when adding Windows support to an Electron, .NET, C++, Rust, Flutter, or Tauri project, or restoring SDK packages after cloning.
-version: 0.5.1
 ---
 ## When to use
 
@@ -209,93 +208,6 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 | SDK download fails | Network issue or firewall | Ensure internet access; check proxy settings |
 | `init` prompts unexpectedly in CI | Missing `--use-defaults` flag | Add `--use-defaults` to skip all prompts (note: non-interactive shells are now auto-detected) |
 
+## CLI reference
 
-## Command Reference
-
-### `winapp init`
-
-Start here for initializing a Windows app with required setup. Sets up everything needed for Windows app development: creates Package.appxmanifest with default assets, downloads Windows SDK and Windows App SDK packages, and generates projections. When SDK packages are managed (--setup-sdks stable/preview/experimental), also creates winapp.yaml to pin versions for 'restore'/'update'; with --setup-sdks none (e.g., for Rust/Tauri projects that bring their own SDK bindings), no winapp.yaml is created. Interactive by default; automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Use 'restore' instead if you cloned a repo that already has winapp.yaml. Use 'manifest generate' if you only need a manifest, or 'cert generate' if you need a development certificate for code signing.
-
-#### Arguments
-<!-- auto-generated from cli-schema.json -->
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `<base-directory>` | No | Base/root directory for the winapp workspace, for consumption or installation. |
-
-#### Options
-<!-- auto-generated from cli-schema.json -->
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--config-dir` | Directory to read/store configuration (default: the selected project directory, or current directory if no project is detected) | (none) |
-| `--config-only` | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. | (none) |
-| `--exe` | Path to the application executable. Requires --sparse. Generates an identity-only sparse manifest for the exe instead of a full package/SDK setup. | (none) |
-| `--force` | Overwrite an existing appxmanifest.xml in the target directory (sparse only). Without this, init fails instead of replacing existing manifest/asset files. | (none) |
-| `--ignore-config` | Don't use configuration file for version management | (none) |
-| `--name` | Override the package name (sparse only; default: inferred from the exe) | (none) |
-| `--no-gitignore` | Don't update .gitignore file | (none) |
-| `--output-dir` | Directory to write the sparse manifest and Assets/ (sparse only; default: a 'sparse/' folder in the current directory) | (none) |
-| `--publisher` | Override the publisher CN (sparse only; default: inferred from the exe's company name). Bare names are auto-wrapped as CN=<name>. | (none) |
-| `--setup-sdks` | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) | (none) |
-| `--sparse` | Generate a sparse identity manifest (appxmanifest.xml) for an existing desktop exe instead of a full package manifest. Use with --exe. Skips SDK/package installation. | (none) |
-| `--use-defaults` | Skip interactive prompts and use default answers. Normal init targets the positional project directory if given, otherwise the current directory (e.g., winapp init . --use-defaults). Sparse init (--exe --sparse) ignores the positional directory and writes to --output-dir instead. | (none) |
-
-### `winapp restore`
-
-Use after cloning a repo or when .winapp/ folder is missing. Reinstalls SDK packages from existing winapp.yaml without changing versions. Requires winapp.yaml (created by 'init'). To check for newer SDK versions, use 'update' instead.
-
-#### Arguments
-<!-- auto-generated from cli-schema.json -->
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `<base-directory>` | No | Base/root directory for the winapp workspace |
-
-#### Options
-<!-- auto-generated from cli-schema.json -->
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--config-dir` | Directory to read configuration from (default: current directory) | (none) |
-
-### `winapp update`
-
-Check for and install newer SDK versions. Updates winapp.yaml with latest versions and reinstalls packages. Requires existing winapp.yaml (created by 'init'). Use --setup-sdks preview for preview SDKs. To reinstall current versions without updating, use 'restore' instead.
-
-#### Options
-<!-- auto-generated from cli-schema.json -->
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--setup-sdks` | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) | (none) |
-
-### `winapp run`
-
-Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.
-
-#### Arguments
-<!-- auto-generated from cli-schema.json -->
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `<input>` | No | Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory). |
-
-#### Options
-<!-- auto-generated from cli-schema.json -->
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--arch` | Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Default: the current process architecture. | (none) |
-| `--args` | Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). | (none) |
-| `--clean` | Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. | (none) |
-| `--configuration` | Project mode: build configuration (e.g., Debug, Release). Ignored in folder mode. Default: Debug. | `Debug` |
-| `--debug-output` | Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. For WinUI apps, a crash also triggers a stowed-exception triage pass; the first run downloads debugger components (cached under the winapp global directory) and can be pointed at an existing debugger install via the WINAPP_DBGTOOLS_DIR environment variable. Cannot be combined with --no-launch or --json. | (none) |
-| `--detach` | Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). | (none) |
-| `--executable` | Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. | (none) |
-| `--framework` | Project mode: target framework moniker for multi-targeted projects (e.g. net10.0-windows10.0.26100.0). Ignored in folder mode. | (none) |
-| `--json` | Format output as JSON | (none) |
-| `--manifest` | Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) | (none) |
-| `--no-build` | Project mode: skip building and run the existing build output (still evaluates output properties). Ignored in folder mode. | (none) |
-| `--no-launch` | Only create the debug identity and register the package without launching the application | (none) |
-| `--no-restore` | Project mode: skip restoring the project before building. Ignored in folder mode. | (none) |
-| `--output-appx-directory` | Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory will be used. | (none) |
-| `--project` | Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode. | (none) |
-| `--property` | Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. | (none) |
-| `--runtime` | Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode. | (none) |
-| `--symbols` | Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. | (none) |
-| `--unregister-on-exit` | Unregister the development package after the application exits. Only removes packages registered in development mode. | (none) |
-| `--with-alias` | Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. | (none) |
+Run `winapp <command> --help` for current command options, or `winapp --cli-schema` for the complete machine-readable command schema.

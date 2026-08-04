@@ -1,7 +1,6 @@
 ---
 name: winapp-package
 description: Package a Windows app as an MSIX installer for distribution or testing. Use when creating a Windows installer, packaging an Electron/Flutter/.NET/Rust/C++/Tauri app for Windows, building an MSIX, distributing a desktop app, packaging a console app or CLI tool, or adding MSIX packaging to a build script or CI/CD pipeline.
-version: 0.5.1
 ---
 ## When to use
 
@@ -203,53 +202,6 @@ The `.msix` contains only the manifest — binaries and assets are resolved from
 | "Package installation failed" | Cert not trusted or stale package | Run `winapp cert install ./devcert.pfx` (admin), then `Get-AppxPackage <name> \| Remove-AppxPackage` |
 | "makeappx not found" | Build tools not downloaded | Run `winapp update` or `winapp tool makeappx --help` to trigger download |
 
+## CLI reference
 
-## Command Reference
-
-### `winapp package`
-
-Create MSIX installer from your built app. Run after building your app. A manifest (Package.appxmanifest or appxmanifest.xml) is required for packaging - it must be in current working directory, passed as --manifest or be in the input folder. Use --cert devcert.pfx to sign for testing. Example: winapp package ./dist --manifest Package.appxmanifest --cert ./devcert.pfx
-
-**Aliases:** `pack`
-
-#### Arguments
-<!-- auto-generated from cli-schema.json -->
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `<input-folder>` | Yes | One or more input folders with package layout, or a single sparse appxmanifest.xml file (an identity-only package with AllowExternalContent). Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64). |
-
-#### Options
-<!-- auto-generated from cli-schema.json -->
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--cert` | Path to signing certificate (will auto-sign if provided) | (none) |
-| `--cert-password` | Certificate password (default: password) | `password` |
-| `--executable` | Path to the executable relative to the input folder. | (none) |
-| `--generate-cert` | Generate a new development certificate | (none) |
-| `--install-cert` | Install certificate to machine | (none) |
-| `--manifest` | Path to AppX manifest file (default: auto-detect from input folder or current directory) | (none) |
-| `--name` | Package name (default: from manifest) | (none) |
-| `--output` | Output file name for the generated package (.msix) or bundle (.msixbundle). Defaults to <name>_<version>_<arch>.msix for single packages, or <name>_<version>_<arch1>_<arch2>.msixbundle for bundles. | (none) |
-| `--publisher` | Publisher distinguished name (DN) for certificate generation (e.g., CN=MyCompany). Bare names are auto-wrapped as CN=<name>. | (none) |
-| `--self-contained` | Bundle Windows App SDK runtime for self-contained deployment | (none) |
-| `--skip-pri` | Skip PRI file generation | (none) |
-
-### `winapp create-external-catalog`
-
-Generates a CodeIntegrityExternal.cat catalog file with hashes of executable files from specified directories. Used with the TrustedLaunch flag in MSIX sparse package manifests (AllowExternalContent) to allow execution of external files not included in the package.
-
-#### Arguments
-<!-- auto-generated from cli-schema.json -->
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `<input-folder>` | Yes | List of input folders with executable files to process (separated by semicolons) |
-
-#### Options
-<!-- auto-generated from cli-schema.json -->
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--compute-flat-hashes` | Include flat hashes when generating the catalog | (none) |
-| `--if-exists` | Behavior when output file already exists | `Error` |
-| `--output` | Output catalog file path. If not specified, the default CodeIntegrityExternal.cat name is used. | (none) |
-| `--recursive` | Include files from subdirectories | (none) |
-| `--use-page-hashes` | Include page hashes when generating the catalog | (none) |
+Run `winapp <command> --help` for current command options, or `winapp --cli-schema` for the complete machine-readable command schema.

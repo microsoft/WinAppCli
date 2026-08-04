@@ -1,7 +1,6 @@
 ---
 name: winapp-troubleshoot
 description: Diagnose and fix common Windows app packaging, signing, identity, and SDK errors. Use when encountering errors with MSIX packaging, certificate signing, Windows SDK setup, or app installation.
-version: 0.5.1
 ---
 ## When to use
 
@@ -128,25 +127,6 @@ For full details, see the [Debugging Guide](https://github.com/microsoft/WinAppC
 - **Identity**: `winapp-identity` — enabling package identity for Windows APIs
 - **Frameworks**: `winapp-frameworks` — framework-specific guidance (Electron, .NET, C++, Rust, Flutter, Tauri)
 
+## CLI reference
 
-## Command Reference
-
-### `winapp get-winapp-path`
-
-Print the path to the .winapp directory. Use --global for the shared cache location, or omit for the project-local .winapp folder. Useful for build scripts that need to reference installed packages.
-
-#### Options
-<!-- auto-generated from cli-schema.json -->
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--global` | Get the global .winapp directory instead of local | (none) |
-
-### `winapp tool`
-
-Run Windows SDK tools directly (makeappx, signtool, makepri, etc.). Auto-downloads Build Tools if needed. For most tasks, prefer higher-level commands like 'package' or 'sign'. Example: winapp tool makeappx pack /d ./folder /p ./out.msix
-
-**Aliases:** `run-buildtool`
-
-### `winapp store`
-
-Run a Microsoft Store Developer CLI command. This command will download the Microsoft Store Developer CLI if not already downloaded. Learn more about the Microsoft Store Developer CLI here: https://aka.ms/msstoredevcli
+Run `winapp <command> --help` for current command options, or `winapp --cli-schema` for the complete machine-readable command schema.

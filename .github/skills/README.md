@@ -6,9 +6,8 @@ repo-specific developer tasks like reviewing a PR before push.
 
 > **Not the same as `plugins/winapp/skills/`.** That directory contains the
 > *shipped* `winapp` plugin skills, which help end users of the `winapp`
-> CLI tool. Those are auto-generated from `docs/fragments/skills/` via
-> `scripts/generate-llm-docs.ps1`. Skills under `.github/skills/` are
-> hand-written and not shipped to end users.
+> CLI tool. Both sets are hand-written, but skills under `.github/skills/`
+> are repository-specific and are not shipped to end users.
 
 ## Available skills
 

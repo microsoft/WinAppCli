@@ -1,7 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
-# Generated files - always use LF to match what generate-llm-docs.ps1 writes
+# Cross-platform artifacts and generated files use LF
 docs/cli-schema.json text eol=lf
 /plugin.json text eol=lf
 plugins/winapp/** text eol=lf

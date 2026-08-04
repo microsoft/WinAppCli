@@ -1,7 +1,6 @@
 ---
 name: winapp-identity
 description: Enable Windows package identity for desktop apps to access Windows APIs like push notifications, background tasks, share target, and startup tasks. Use when adding Windows notifications, background tasks, or other identity-requiring Windows features to a desktop app.
-version: 0.5.1
 ---
 ## When to use
 
@@ -165,39 +164,6 @@ Assets are resolved from the external (install) location at runtime, **not** bun
 | "Access denied" | Cert not trusted or permission issue | Run `winapp cert install ./devcert.pfx` as admin |
 | APIs still fail after registration | App launched before registration completed | Close app, re-run `create-debug-identity`, then relaunch |
 
+## CLI reference
 
-## Command Reference
-
-### `winapp create-debug-identity`
-
-Enable package identity for debugging without creating full MSIX. Required for testing Windows APIs (push notifications, share target, etc.) during development. Example: winapp create-debug-identity ./myapp.exe. Requires Package.appxmanifest or appxmanifest.xml in current directory or passed via --manifest. Re-run after changing the manifest or Assets/.
-
-#### Arguments
-<!-- auto-generated from cli-schema.json -->
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `<entrypoint>` | No | Path to the .exe that will need to run with identity, or entrypoint script. |
-
-#### Options
-<!-- auto-generated from cli-schema.json -->
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--keep-identity` | Keep the package identity from the manifest as-is, without appending '.debug' to the package name and application ID. | (none) |
-| `--manifest` | Path to the Package.appxmanifest or appxmanifest.xml | (none) |
-| `--no-install` | Do not install the package after creation. | (none) |
-
-### `winapp embed-identity`
-
-Connect a desktop exe to its sparse identity package by embedding the <msix> element. Reads identity (packageName, publisher, applicationId) from a sparse appxmanifest.xml and writes it into the target's side-by-side (fusion) manifest. EXE targets are updated with mt.exe; .xml/.manifest targets are edited directly. Example: winapp embed-identity ./bin/MyApp.exe. This is step 3 of the sparse packaging workflow (after 'winapp init --exe --sparse' and 'winapp pack').
-
-#### Arguments
-<!-- auto-generated from cli-schema.json -->
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `<target>` | Yes | Path to the .exe (embeds identity into its side-by-side manifest via mt.exe) or an .xml/.manifest side-by-side manifest file (inserts/replaces the <msix> element; created if it doesn't exist). |
-
-#### Options
-<!-- auto-generated from cli-schema.json -->
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--manifest` | Path to the sparse appxmanifest.xml to read identity from. When omitted, searched in a 'sparse/' folder (where 'winapp init --exe --sparse' writes it by default) beside the target first, then in the current directory, then beside the target and in the current directory. | (none) |
+Run `winapp <command> --help` for current command options, or `winapp --cli-schema` for the complete machine-readable command schema.

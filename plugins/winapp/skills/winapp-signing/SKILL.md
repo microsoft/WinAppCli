@@ -1,7 +1,6 @@
 ---
 name: winapp-signing
 description: Create and manage code signing certificates for Windows apps and MSIX packages. Use when generating a certificate, signing a Windows app or installer, or fixing certificate trust issues.
-version: 0.5.1
 ---
 ## When to use
 
@@ -133,95 +132,6 @@ winapp az-sign ./app.msix --metadata-file ./metadata.json
 | `az-sign` fails with "No credentials found" | No Azure auth in environment | Run `az login`, or set `AZURE_TENANT_ID`/`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET` for CI/CD |
 | `az-sign` "No Trusted Signing accounts found" | No account in the subscription/resource group | Create a Trusted Signing account and certificate profile in the Azure portal |
 
+## CLI reference
 
-## Command Reference
-
-### `winapp cert generate`
-
-Create a self-signed certificate for local testing only. Publisher must match the manifest (auto-inferred if --manifest provided or Package.appxmanifest is in working directory). Output: devcert.pfx (default password: 'password'). For production, obtain a certificate from a trusted CA. Use 'cert install' to trust on this machine.
-
-#### Options
-<!-- auto-generated from cli-schema.json -->
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--export-cer` | Export a .cer file (public key only) alongside the .pfx | (none) |
-| `--if-exists` | Behavior when output file exists: 'error' (fail, default), 'skip' (keep existing), or 'overwrite' (replace) | `Error` |
-| `--install` | Install the certificate to the local machine store after generation | (none) |
-| `--json` | Format output as JSON | (none) |
-| `--manifest` | Path to Package.appxmanifest or appxmanifest.xml file to extract publisher information from | (none) |
-| `--output` | Output path for the generated PFX file | (none) |
-| `--password` | Password for the generated PFX file | `password` |
-| `--publisher` | Publisher distinguished name (DN) for the generated certificate (e.g., CN=MyCompany or OU=Team, O=Corp, C=US). If not specified, will be inferred from manifest. Bare names are auto-wrapped as CN=<name>. | (none) |
-| `--valid-days` | Number of days the certificate is valid | `365` |
-
-### `winapp cert install`
-
-Trust a certificate on this machine (requires admin). Run before installing MSIX packages signed with dev certificates. Example: winapp cert install ./devcert.pfx. Only needed once per certificate.
-
-#### Arguments
-<!-- auto-generated from cli-schema.json -->
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `<cert-path>` | Yes | Path to the certificate file (PFX or CER) |
-
-#### Options
-<!-- auto-generated from cli-schema.json -->
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--force` | Force installation even if the certificate already exists | (none) |
-| `--password` | Password for the PFX file | `password` |
-
-### `winapp cert info`
-
-Display certificate details (subject, thumbprint, expiry). Useful for verifying a certificate matches your manifest before signing.
-
-#### Arguments
-<!-- auto-generated from cli-schema.json -->
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `<cert-path>` | Yes | Path to the certificate file (PFX) |
-
-#### Options
-<!-- auto-generated from cli-schema.json -->
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--json` | Format output as JSON | (none) |
-| `--password` | Password for the PFX file | `password` |
-
-### `winapp sign`
-
-Code-sign an MSIX package or executable. Example: winapp sign ./app.msix ./devcert.pfx. Use --timestamp for production builds to remain valid after cert expires. The 'package' command can sign automatically with --cert.
-
-#### Arguments
-<!-- auto-generated from cli-schema.json -->
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `<file-path>` | Yes | Path to the file/package to sign |
-| `<cert-path>` | Yes | Path to the certificate file (PFX format) |
-
-#### Options
-<!-- auto-generated from cli-schema.json -->
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--password` | Certificate password | `password` |
-| `--timestamp` | Timestamp server URL | (none) |
-
-### `winapp az-sign`
-
-Code-sign a file using Azure Trusted Signing. Signs executables, MSIX packages, or MSIX bundles using a cloud-managed signing identity. Example: winapp az-sign ./app.msix
-
-#### Arguments
-<!-- auto-generated from cli-schema.json -->
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `<file-path>` | Yes | Path to the file to sign (exe, msix, or msixbundle) |
-
-#### Options
-<!-- auto-generated from cli-schema.json -->
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--account` | Signing account name. Must be used with --resource-group | (none) |
-| `--metadata-file` | Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. A non-interactive Azure credential should already be available; the CLI can otherwise fall back to an interactive tenant prompt or 'az login', but the npm programmatic API is always non-interactive and fails instead of prompting. | (none) |
-| `--profile` | Certificate profile name. Must be used with --account | (none) |
-| `--resource-group` | Resource group to narrow down signing accounts | (none) |
-| `--subscription` | Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted. | (none) |
+Run `winapp <command> --help` for current command options, or `winapp --cli-schema` for the complete machine-readable command schema.
