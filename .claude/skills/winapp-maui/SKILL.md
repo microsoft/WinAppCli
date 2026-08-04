@@ -196,7 +196,7 @@ The repository also includes a concrete MAUI sample project under `samples\maui-
 - If the manifest path doesn't exist, you almost always **forgot to publish the Windows head for that RID** (or targeted a non-Windows TFM). Publish first.
 - Package **each architecture separately** from its own per-RID publish folder and manifest, or pass both folders to `winapp package` to build an `.msixbundle` (see `winapp-package`).
 - For MSIX that shouldn't require the user to install the Windows App SDK runtime, add `--self-contained` to `winapp package` (or publish with `-p:WindowsAppSDKSelfContained=true` for unpackaged).
-- To launch the unpackaged app locally, use `dotnet run` (ordinary .NET launch). `winapp run` requires a manifest in the input directory; since the `WindowsPackageType=None` publish folder does **not** contain one, pass `--manifest <resolved-manifest> --executable <exe>` explicitly if you use `winapp run`.
+- To launch the unpackaged app locally, run the published executable directly (for example, `.\publish\win-x64\MyApp.exe`). `winapp run` requires a manifest in the input directory; since the `WindowsPackageType=None` publish folder does **not** contain one, pass `--manifest <resolved-manifest> --executable <exe>` explicitly if you use `winapp run`.
 
 ## Related skills
 
