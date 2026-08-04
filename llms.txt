@@ -6,22 +6,23 @@ winapp helps developers add Windows-specific features (MSIX packaging, push noti
 
 ## AI Coding Agents
 
-- **Copilot CLI Plugin:** `copilot plugin install microsoft/WinAppCli`
+- **GitHub Copilot CLI:** `copilot plugin install microsoft/WinAppCli`
+- **Claude Code:** `claude plugin marketplace add microsoft/WinAppCli` then `claude plugin install winappcli@winappcli`
 
-### Copilot Plugin Structure
+### Plugin Structure
 
-The plugin is at `.github/plugin/` and includes:
+A single shared plugin at `plugins/winapp/` serves both GitHub Copilot and Claude Code. It includes:
 
-- **Agent:** [winapp.agent.md](https://github.com/microsoft/WinAppCli/blob/main/.github/plugin/agents/winapp.agent.md) — full system prompt with command reference, decision trees, framework-specific guidance, error diagnosis, and critical rules
-- **Skills** (auto-generated, in `.github/plugin/skills/winapp-cli/`):
-  - `setup/SKILL.md` — project init, restore, update
-  - `package/SKILL.md` — MSIX packaging
-  - `identity/SKILL.md` — debug identity and sparse packages
-  - `signing/SKILL.md` — certificates and code signing
-  - `manifest/SKILL.md` — appxmanifest.xml generation
-  - `troubleshoot/SKILL.md` — error diagnosis and SDK tools
-  - `frameworks/SKILL.md` — Electron, .NET, C++, Rust, Flutter, Tauri guidance
-  - `ui-automation/SKILL.md` — inspect, interact with, and screenshot running Windows app UIs
+- **Agent:** [winapp.agent.md](https://github.com/microsoft/WinAppCli/blob/main/plugins/winapp/agents/winapp.agent.md) — full system prompt with command reference, decision trees, framework-specific guidance, error diagnosis, and critical rules
+- **Skills** (auto-generated, in `plugins/winapp/skills/`):
+  - `winapp-setup/SKILL.md` — project init, restore, update
+  - `winapp-package/SKILL.md` — MSIX packaging
+  - `winapp-identity/SKILL.md` — debug identity and sparse packages
+  - `winapp-signing/SKILL.md` — certificates and code signing
+  - `winapp-manifest/SKILL.md` — appxmanifest.xml generation
+  - `winapp-troubleshoot/SKILL.md` — error diagnosis and SDK tools
+  - `winapp-frameworks/SKILL.md` — Electron, .NET, C++, Rust, Flutter, Tauri guidance
+  - `winapp-ui-automation/SKILL.md` — inspect, interact with, and screenshot running Windows app UIs
 
 ## Docs
 

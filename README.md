@@ -276,14 +276,18 @@ Install it from the [Visual Studio Marketplace](https://marketplace.visualstudio
 
 ## 🤖 Using with AI Coding Agents
 
-AI coding agents (GitHub Copilot, Claude Code, etc.) auto-discover skill files in your project.
+winapp ships a single plugin (at [`plugins/winapp/`](./plugins/winapp/)) — an agent plus skills — distributed to GitHub Copilot and Claude Code through their respective plugin marketplaces.
 
-**GitHub Copilot CLI Plugin** (global — works across all projects)
+**GitHub Copilot CLI** (global — works across all projects)
 ```bash
 copilot plugin install microsoft/WinAppCli
 ```
 
-**Claude Code** — Claude Code auto-discovers skills and agents from the in-repo [`.claude/`](./.claude/) directory shipped in this repository. No install step required; just open the repo in Claude Code.
+**Claude Code**
+```bash
+claude plugin marketplace add microsoft/WinAppCli
+claude plugin install winappcli@winappcli
+```
 
 This gives agents full understanding of winapp commands, workflows, and troubleshooting.
 
