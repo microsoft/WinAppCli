@@ -260,6 +260,7 @@ This repository includes samples demonstrating how to use the CLI with various f
 | [WinUI Solution](/samples/winui-solution/README.md) | Multi-project `.sln` (app + test project) demonstrating `winapp run` solution-mode auto-selection |
 | [Electron](/samples/electron/README.md) | Electron Forge app with appxmanifest, assets, native C++ addon, and C# addon |
 | [Electron WinML](/samples/electron-winml/README.md) | Electron app using Windows ML for image classification |
+| [Node.js WinUI 3](/samples/node-winui/README.md) | Native WinUI 3 controls created directly from JavaScript |
 | [Rust App](/samples/rust-app/README.md) | Rust application using Windows APIs |
 | [Tauri App](/samples/tauri-app/README.md) | Tauri cross-platform app with Rust backend |
 | [Flutter App](/samples/flutter-app/README.md) | Flutter desktop app with package identity and Windows App SDK |
