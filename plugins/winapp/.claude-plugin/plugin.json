@@ -6,6 +6,8 @@
     "name": "Microsoft",
     "url": "https://github.com/microsoft/WinAppCli"
   },
+  "homepage": "https://github.com/microsoft/WinAppCli",
+  "repository": "https://github.com/microsoft/WinAppCli",
   "license": "MIT",
   "keywords": [
     "windows",
@@ -48,20 +50,5 @@
     "uwp",
     "desktop app",
     "win32"
-  ],
-  "category": "windows-development",
-  "tags": [
-    "windows",
-    "msix",
-    "packaging",
-    "installer",
-    "desktop",
-    "notifications",
-    "sdk",
-    "signing",
-    "certificate",
-    "distribution"
-  ],
-  "agents": "plugins/winapp/agents/",
-  "skills": "plugins/winapp/skills/"
+  ]
 }
