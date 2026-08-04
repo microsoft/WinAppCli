@@ -71,7 +71,9 @@ dotnet publish .\MyApp\MyApp.csproj `
 
 > Multi-targeted MAUI projects (`net10.0-android;net10.0-ios;net10.0-windows10.0.19041.0`) build the Windows head only when you pass the Windows `-f`/`-r`. The winapp MSBuild targets are inert for non-Windows TFMs.
 
-### 2. Package a signed MSIX — point `--manifest` at the resolved manifest
+### 2. Publisher must match the certificate
+
+The resolved manifest's `Identity.Publisher` comes from MSBuild (`$(ApplicationPublisher)`, defaulting to something like `CN=User Name`). Your signing certificate subject **must equal** that value exactly, or signing fails with a publisher mismatch.
 
 ```powershell
 $manifest = ".\MyApp\obj\Release\net10.0-windows10.0.19041.0\win-x64\resizetizer\m\Package.appxmanifest"
@@ -81,11 +83,21 @@ if (-not (Test-Path $manifest)) {
     throw "Resolved manifest not found — publish the Windows head first."
 }
 
+# Generate a matching dev cert from the resolved manifest
+# The default password is 'password' — use the same for --cert-password below
+winapp cert generate --manifest $manifest --if-exists skip
+```
+
+Set `<ApplicationPublisher>CN=Your Company</ApplicationPublisher>` (or the `ApplicationPublisher` MSBuild property) in the `.csproj` to control it, then regenerate the cert to match.
+
+### 3. Package a signed MSIX — point `--manifest` at the resolved manifest
+
+```powershell
 winapp package .\publish\win-x64 `
   --manifest $manifest `
   --executable MyApp.exe `
   --cert .\devcert.pfx `
-  --cert-password $env:SIGN_PFX_PASSWORD `
+  --cert-password password `
   --output .\artifacts\MyApp-win-x64.msix
 ```
 
@@ -93,24 +105,15 @@ winapp package .\publish\win-x64 `
 
 > **Always use the explicit `--manifest` path** for `WindowsPackageType=None` workflows — manifest auto-detection from the publish folder does not apply because no `AppxManifest.xml` is generated in that output.
 
-### 3. Sign the unpackaged build
+### 4. Sign the unpackaged build
 
 For the loose/unpackaged (`WindowsPackageType=None`) build, sign the executables in place:
 
 ```powershell
-winapp sign .\publish\win-x64\MyApp.exe .\devcert.pfx --password $env:SIGN_PFX_PASSWORD
+winapp sign .\publish\win-x64\MyApp.exe .\devcert.pfx --password password
 ```
 
 > `winapp sign` uses a **positional** certificate path + `--password`. `winapp package` uses `--cert` / `--cert-password`. Mixing them is a common mistake.
-
-### 4. Publisher must match the certificate
-
-The resolved manifest's `Identity.Publisher` comes from MSBuild (`$(ApplicationPublisher)`, defaulting to something like `CN=User Name`). Your signing certificate subject **must equal** that value exactly, or signing fails with a publisher mismatch.
-
-```powershell
-# Read the publisher the resizetizer actually wrote, then generate a matching dev cert
-winapp cert generate --manifest $manifest
-```
 
 Set `<ApplicationPublisher>CN=Your Company</ApplicationPublisher>` (or the `ApplicationPublisher` MSBuild property) in the `.csproj` to control it, then regenerate the cert to match.
 
