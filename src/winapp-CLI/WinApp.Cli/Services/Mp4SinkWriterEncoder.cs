@@ -50,6 +50,7 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IVideoEncoder
     private readonly uint _frameBytes;
     private readonly string _path;
     private readonly string _tempPath;
+    private readonly bool _overwriteExisting;
     private bool _mfStarted;
     private bool _finalized;   // writer.Finalize() completed
     private bool _fileMoved;   // temp → final move succeeded
@@ -65,11 +66,12 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IVideoEncoder
     /// sink-writer/media-type native initialization and native failure cleanup arms that require
     /// faulting COM objects after creation.
     /// </remarks>
-    public Mp4SinkWriterEncoder(string path, int width, int height, int fps, uint bitrate)
+    public Mp4SinkWriterEncoder(string path, int width, int height, int fps, uint bitrate, bool overwriteExisting = true)
     {
         Width = width;
         Height = height;
         _path = path;
+        _overwriteExisting = overwriteExisting;
         _frameBytes = checked((uint)(width * height * 4));
 
         // Write to a temp sibling so that a pre-existing file at _path is never corrupted
@@ -178,6 +180,10 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IVideoEncoder
     internal static Func<string, int, int, int, uint, IVideoEncoder> s_create =
         (path, width, height, fps, bitrate) => new Mp4SinkWriterEncoder(path, width, height, fps, bitrate);
 
+    internal static Func<string, int, int, int, uint, IVideoEncoder> s_createNoClobber =
+        (path, width, height, fps, bitrate) => new Mp4SinkWriterEncoder(
+            path, width, height, fps, bitrate, overwriteExisting: false);
+
     /// <remarks>
     /// Coverage ceiling (issue #630): descriptor mapping is unit-tested for ordinary HRESULTs; the
     /// remaining line is the native Media Foundation codec-missing HRESULT arm, which only occurs on
@@ -262,7 +268,14 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IVideoEncoder
         // The temp file is now owned by _path.
         // _fileMoved is set ONLY after the move succeeds so that Dispose() can still
         // clean up the temp if the move throws (e.g., destination path locked).
-        PublishAtomicWithTestSeam(_tempPath, _path);
+        if (_overwriteExisting)
+        {
+            PublishAtomicWithTestSeam(_tempPath, _path);
+        }
+        else
+        {
+            File.Move(_tempPath, _path, overwrite: false);
+        }
         _fileMoved = true;
     }
 

@@ -351,6 +351,9 @@ public class UiAutomationServicePureTests
         var scaled = UiAutomationService.ProcessFrame(source, 2, 2, -5, -5, 50, 50, 64, 64, 32, 32);
         Assert.AreEqual(64 * 64 * 4, scaled.Length);
         Assert.IsTrue(scaled.Any(b => b != 0), "scaled frame must contain source pixels, not just a black letterbox");
+        Assert.AreEqual(
+            (25, 0, 25, 100),
+            UiAutomationService.ClampCropRect(25, 0, 100, 100, 50, 100));
     }
 
     [TestMethod]
