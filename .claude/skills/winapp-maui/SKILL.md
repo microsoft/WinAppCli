@@ -119,6 +119,13 @@ Set `<ApplicationPublisher>CN=Your Company</ApplicationPublisher>` (or the `Appl
 Example for x64 — pack the resolved manifest and sign. Store a self-signed (or CA-issued) PFX as a base64 secret. For arm64, add a second set of publish/sign/pack steps with `-r win-arm64` and the corresponding manifest path.
 
 ```yaml
+- uses: actions/setup-dotnet@v4
+  with:
+    dotnet-version: '10.0.x'
+
+- name: Install MAUI Windows workload
+  run: dotnet workload install maui-windows
+
 - uses: microsoft/setup-winapp@v1
 
 - name: Restore signing cert
