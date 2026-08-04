@@ -36,6 +36,12 @@ public class MsixServiceIdentityTests : BaseCommandTests
     private static readonly MethodInfo EmbedManifestFileToExeMethod =
         typeof(MsixService).GetMethod("EmbedManifestFileToExeAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
+    private static readonly string[] LegacyTempManifestNames =
+        ["temp_extracted.manifest", "merged.manifest", "msix_identity_temp.manifest"];
+
+    private static readonly MethodInfo RemoveMsixElementsMethod =
+        typeof(MsixService).GetMethod("RemoveMsixElements", BindingFlags.NonPublic | BindingFlags.Static)!;
+
     private static readonly MethodInfo EnsureWindowsAppRuntimeInstalledMethod =
         typeof(MsixService).GetMethod("EnsureWindowsAppRuntimeInstalledAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
@@ -754,13 +760,66 @@ public class MsixServiceIdentityTests : BaseCommandTests
         _fakeBuildTools.ThrowWhen = (tool, args) =>
             tool.Contains("mt", StringComparison.OrdinalIgnoreCase) &&
             args.Contains("-outputresource", StringComparison.OrdinalIgnoreCase);
-        var exe = new FileInfo(Path.Combine(_tempDirectory.FullName, "app.exe"));
+        var exe = new FileInfo(Path.Join(_tempDirectory.FullName, "app.exe"));
         await File.WriteAllTextAsync(exe.FullName, "pe", TestContext.CancellationToken);
-        var manifest = new FileInfo(Path.Combine(_tempDirectory.FullName, "new.manifest"));
+        var manifest = new FileInfo(Path.Join(_tempDirectory.FullName, "new.manifest"));
         await File.WriteAllTextAsync(manifest.FullName, "<assembly/>", TestContext.CancellationToken);
 
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(
             () => InvokeEmbedManifestFileToExeAsync(exe, manifest));
+    }
+
+    [TestMethod]
+    public async Task EmbedManifestFileToExeAsync_DoesNotDeleteUserFilesNamedLikeTempManifests()
+    {
+        // Regression: the manifest temp files used while embedding must live under the system
+        // temp directory, not next to the exe, so they never silently clobber a user's own files
+        // that happen to share those legacy names.
+        _fakeBuildTools.SimulateExistingExeManifest = true;
+        var (_, exePath) = ArrangeSparseInputs();
+        var exe = new FileInfo(exePath);
+        var manifest = new FileInfo(Path.Join(_tempDirectory.FullName, "new.manifest"));
+        await File.WriteAllTextAsync(
+            manifest.FullName,
+            "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\"/>",
+            TestContext.CancellationToken);
+
+        var planted = LegacyTempManifestNames
+            .Select(n => new FileInfo(Path.Join(exe.DirectoryName!, n)))
+            .ToArray();
+        foreach (var file in planted)
+        {
+            await File.WriteAllTextAsync(file.FullName, "user-content", TestContext.CancellationToken);
+        }
+
+        await InvokeEmbedManifestFileToExeAsync(exe, manifest);
+
+        foreach (var file in planted)
+        {
+            file.Refresh();
+            Assert.IsTrue(file.Exists, $"User file '{file.Name}' next to the exe must survive manifest embedding");
+            Assert.AreEqual("user-content", await File.ReadAllTextAsync(file.FullName, TestContext.CancellationToken));
+        }
+    }
+
+    [TestMethod]
+    public void RemoveMsixElements_StripsExistingMsixIdentity()
+    {
+        // Regression: re-branding an exe must be idempotent. Any <msix> already present in the
+        // extracted manifest has to be removed before the mt.exe merge, otherwise mt.exe fails
+        // with c1010001 ("Values of attribute ... not equal") when the identity differs.
+        var manifestFile = new FileInfo(Path.Join(_tempDirectory.FullName, "sxs.manifest"));
+        File.WriteAllText(
+            manifestFile.FullName,
+            "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">" +
+            "<msix xmlns=\"urn:schemas-microsoft-com:msix.v1\" publisher=\"CN=Old\" packageName=\"Old.App\" applicationId=\"App\"/>" +
+            "<assemblyIdentity version=\"1.0.0.0\" name=\"Some.App\" type=\"win32\"/></assembly>");
+
+        RemoveMsixElementsMethod.Invoke(null, [manifestFile, TestTaskContext]);
+
+        var content = File.ReadAllText(manifestFile.FullName);
+        StringAssert.DoesNotMatch(content, new Regex("<msix", RegexOptions.IgnoreCase), "the stale <msix> identity should be removed");
+        StringAssert.Contains(content, "assemblyIdentity", StringComparison.Ordinal);
     }
 
     // ---- PRI generation failure paths --------------------------------------------

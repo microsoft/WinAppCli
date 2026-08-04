@@ -45,6 +45,9 @@ Does the project already have an appxmanifest.xml?
    │  │  └─ winapp run <build-output-dir>  (registers loose layout + launches)
    │  └─ Is the exe separate from your app code? (Electron, sparse package testing)
    │     └─ winapp create-debug-identity <exe-path>  (registers sparse package)
+   ├─ Need production sparse packaging (ship identity for an unpackaged app)?
+   │  └─ winapp init --exe <exe> --sparse   →   winapp pack <manifest> --cert <pfx>   →   winapp embed-identity <exe>
+   │     (build a signed identity-only .msix your installer registers with Add-AppxPackage -ExternalLocation)
    ├─ Need to sign an existing MSIX or exe?
    │  ├─ With a local dev/CA certificate (PFX)?
    │  │  └─ winapp sign <file> <cert>
@@ -98,6 +101,7 @@ Want to inspect or interact with a running app's UI?
 - `--config-dir` — directory for `winapp.yaml` (default: the selected project directory)
 - `--config-only` — only create `winapp.yaml`, skip package installation
 - `--no-gitignore` — don't update `.gitignore`
+**Sparse mode (`--exe <exe> --sparse`):** generates an identity-only sparse `appxmanifest.xml` (with `AllowExternalContent`) plus placeholder assets for an existing executable, inferring name/publisher/version/description from the exe. Skips all SDK/package installation. `--exe` requires `--sparse`. Additional options: `--name`, `--publisher`, `--output-dir` (default: a `sparse/` folder in the current directory). This is **step 1** of the production sparse packaging workflow.
 **Creates:** `winapp.yaml`, `appxmanifest.xml`, `Assets/` folder, `.winapp/` (if SDKs installed)
 
 ### `winapp restore [base-directory]`
@@ -136,6 +140,14 @@ Want to inspect or interact with a running app's UI?
 - `--keep-identity` — don't append `.debug` to package name
 - `--no-install` — create but don't register the package
 **Requires:** `appxmanifest.xml` + path to your built `.exe`
+
+### `winapp embed-identity <target>`
+**Purpose:** Connect a desktop `.exe` to its sparse identity package by embedding the `<msix>` element into the target's side-by-side (fusion) manifest. This is **step 3** of the production sparse packaging workflow (after `winapp init --exe --sparse` and `winapp pack`).
+**When to use:** After building a signed identity-only `.msix` for an unpackaged app, to make Windows associate the exe with that package at runtime.
+**Modes:** `.exe` target → embeds via `mt.exe`; `.xml`/`.manifest` target → inserts/replaces the `<msix>` element in an external side-by-side manifest (rebuild the app afterward).
+**Key options:**
+- `--manifest <path>` — sparse `appxmanifest.xml` to read identity from (defaults to a `sparse/` folder beside the target first, then in the current directory — where `winapp init --exe --sparse` writes it — then beside the target and in the current directory)
+**Requires:** a sparse `appxmanifest.xml` + the target `.exe` or `.xml`/`.manifest`
 
 ### `winapp run [<input>]`
 **Purpose:** Build and/or package a Windows app and launch it — for **packaged** apps this simulates a full MSIX install with package identity; for **unpackaged** apps it launches the built `.exe` directly (no package identity). Returns the launched process ID for debugger attachment. Operates in one of two modes, auto-selected from the input:
@@ -327,6 +339,15 @@ winapp init .                              # If not already set up
 # ... build your app ...
 winapp create-debug-identity ./myapp.exe   # Register sparse package for exe
 # Launch your exe normally — it now has package identity
+```
+
+### Ship production sparse identity (unpackaged app + installer)
+```bash
+winapp init --exe ./bin/MyApp.exe --sparse         # Step 1: generate identity-only manifest + assets into ./sparse/
+winapp cert generate                               # dev/test cert (use a trusted cert for production)
+winapp pack ./sparse/appxmanifest.xml --cert devcert.pfx  # Step 2: build + sign the identity .msix
+winapp embed-identity ./bin/MyApp.exe             # Step 3: embed <msix> into the exe fusion manifest
+# Your installer registers it: Add-AppxPackage -Path MyApp.identity.msix -ExternalLocation <install-dir>
 ```
 
 ### Clone and build existing project

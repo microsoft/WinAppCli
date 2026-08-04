@@ -131,6 +131,26 @@ winapp create-debug-identity .\bin\Debug\myapp.exe
 
 For full details including IDE setup examples, see the [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md).
 
+## Production sparse packaging (`init --sparse` / `pack` / `embed-identity`)
+
+`create-debug-identity` is for **developer-time debugging** (requires Developer Mode, registers a raw manifest). For **production** — shipping identity to an app distributed by an existing installer (Inno Setup, WiX, NSIS) — use the sparse packaging workflow, which produces a signed identity-only `.msix`:
+
+```powershell
+# 1. Create the sparse identity manifest for your exe (skips SDK install)
+winapp init --exe ./bin/Release/MyApp.exe --sparse --use-defaults
+
+# 2. Build and sign the identity-only .msix (just the manifest, no binaries)
+winapp pack ./sparse/appxmanifest.xml --cert ./devcert.pfx
+
+# 3. Embed the <msix> identity element into the exe's fusion manifest
+winapp embed-identity ./bin/Release/MyApp.exe
+```
+
+Then your installer registers the package against the install directory:
+`Add-AppxPackage -Path MyApp.identity.msix -ExternalLocation <install-dir>`.
+
+Assets are resolved from the external (install) location at runtime, **not** bundled into the `.msix`. `winapp embed-identity` also supports an XML mode (`winapp embed-identity ./app.manifest`) for updating a checked-in side-by-side manifest. See the [Sparse Packaging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/sparse.md) and the [sparse-app sample](https://github.com/microsoft/WinAppCli/tree/main/samples/sparse-app).
+
 ## Related skills
 - Need a manifest? See `winapp-manifest` to generate `Package.appxmanifest`
 - Need a certificate? See `winapp-signing` — a trusted cert is required for identity registration
@@ -165,3 +185,19 @@ Enable package identity for debugging without creating full MSIX. Required for t
 | `--keep-identity` | Keep the package identity from the manifest as-is, without appending '.debug' to the package name and application ID. | (none) |
 | `--manifest` | Path to the Package.appxmanifest or appxmanifest.xml | (none) |
 | `--no-install` | Do not install the package after creation. | (none) |
+
+### `winapp embed-identity`
+
+Connect a desktop exe to its sparse identity package by embedding the <msix> element. Reads identity (packageName, publisher, applicationId) from a sparse appxmanifest.xml and writes it into the target's side-by-side (fusion) manifest. EXE targets are updated with mt.exe; .xml/.manifest targets are edited directly. Example: winapp embed-identity ./bin/MyApp.exe. This is step 3 of the sparse packaging workflow (after 'winapp init --exe --sparse' and 'winapp pack').
+
+#### Arguments
+<!-- auto-generated from cli-schema.json -->
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<target>` | Yes | Path to the .exe (embeds identity into its side-by-side manifest via mt.exe) or an .xml/.manifest side-by-side manifest file (inserts/replaces the <msix> element; created if it doesn't exist). |
+
+#### Options
+<!-- auto-generated from cli-schema.json -->
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--manifest` | Path to the sparse appxmanifest.xml to read identity from. When omitted, searched in a 'sparse/' folder (where 'winapp init --exe --sparse' writes it by default) beside the target first, then in the current directory, then beside the target and in the current directory. | (none) |

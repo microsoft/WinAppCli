@@ -35,6 +35,12 @@ winapp init [base-directory] [options]
 - `--no-gitignore` - Don't update .gitignore file
 - `--use-defaults`, `--no-prompt` - Do not prompt, and use default of all prompts
 - `--config-only` - Only handle configuration file operations, skip package installation
+- `--exe <path>` - Path to the application executable. **Requires `--sparse`.** Generates an identity-only sparse manifest for the exe instead of a full package/SDK setup.
+- `--sparse` - Generate a sparse identity manifest (`appxmanifest.xml`) for an existing desktop exe. Skips SDK/package installation. Use with `--exe`.
+- `--name <name>` - Override the package name (sparse only; default: inferred from the exe)
+- `--publisher <CN>` - Override the publisher CN (sparse only; default: inferred from the exe's company name)
+- `--output-dir <path>` - Directory to write the sparse manifest and `Assets/` (sparse only; default: a `sparse/` folder in the current directory)
+- `--force` - Overwrite an existing `appxmanifest.xml` in the target directory (sparse only). Without it, init fails instead of replacing an existing manifest/assets.
 - `--add-js-bindings` *(npm only)* - Add `winapp.jsBindings` to package.json and generate JS/TypeScript bindings, without prompting (incompatible with `--setup-sdks none`)
 
 **What it does:**
@@ -79,6 +85,20 @@ When a `.csproj` file is found in the target directory, `init` uses a streamline
 - Generates `Package.appxmanifest`, assets, and a development certificate
 - Does **not** create a `winapp.yaml` or download C++ projections (use `dotnet restore` for NuGet packages)
 
+**Sparse identity mode (`--exe` + `--sparse`):**
+
+Generates an identity-only [sparse package](guides/sparse.md) manifest for an existing desktop executable — the first step of the [sparse packaging workflow](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/grant-identity-to-nonpackaged-apps). Unlike the full `init` flow, this **skips all SDK/package installation** (sparse identity packages have no SDK dependencies) and only generates a manifest and placeholder assets.
+
+- Infers the package name, publisher, description, and version from the exe via `FileVersionInfo` (override with `--name`, `--publisher`, or interactively)
+- Writes `appxmanifest.xml` (with the exe name substituted into `Executable`) plus an `Assets/` folder to a `sparse/` folder in the current directory (or `--output-dir`)
+- Uses `--use-defaults`/`--no-prompt` to skip the interactive override prompts (CI-friendly)
+- `--exe` without `--sparse` is an error
+
+> **Assets are external.** The sparse `.msix` is identity-only: the generated `Assets/` are resolved from the app's install directory (the external content location) at runtime, **not** bundled into the `.msix`. Deploy them alongside your application.
+
+Next steps after `winapp init --exe <exe> --sparse`: [`winapp pack <appxmanifest.xml>`](#pack) to build the identity `.msix`, then [`winapp embed-identity <exe>`](#embed-identity). See the [Sparse Packaging Guide](guides/sparse.md) for the full walkthrough.
+
+
 **Examples:**
 
 ```bash
@@ -94,6 +114,9 @@ winapp init ./my-project --use-defaults
 # Initialize a .NET project (auto-detected from .csproj)
 cd my-dotnet-app
 winapp init
+
+# Generate a sparse identity manifest for an existing exe (no SDK install)
+winapp init --exe ./bin/Release/net8.0-windows/MyApp.exe --sparse --use-defaults
 ```
 
 **Tip: Install SDKs after initial setup**
@@ -183,7 +206,7 @@ winapp pack <input-folder> [input-folder...] [options]
 
 **Arguments:**
 
-- `input-folder` - One or more directories containing the application files to package. Pass multiple folders (e.g., `./publish/x64 ./publish/arm64`) to create an MSIX bundle.
+- `input-folder` - One or more directories containing the application files to package. Pass multiple folders (e.g., `./publish/x64 ./publish/arm64`) to create an MSIX bundle. For **sparse identity packages**, pass a sparse `appxmanifest.xml` file directly instead of a folder (see [Sparse identity packages](#sparse-identity-packages) below).
 
 **Options:**
 
@@ -209,6 +232,22 @@ winapp pack <input-folder> [input-folder...] [options]
 - Automatically discovers third-party WinRT components and registers their activatable classes (see [WinRT component discovery](#winrt-component-discovery) below)
 - Handles self-contained WinAppSDK deployment
 - Signs package if certificate provided
+
+#### Sparse identity packages
+
+When the input is a **sparse `appxmanifest.xml` file** (one declaring `<uap10:AllowExternalContent>true</uap10:AllowExternalContent>` under `<Properties>`) rather than a folder, `winapp pack` builds an **identity-only** `.msix` — it packages just the manifest, with no application binaries or assets. This is step 2 of the [sparse packaging workflow](guides/sparse.md).
+
+```bash
+# Build a signed identity package from a sparse manifest
+winapp pack ./sparse/appxmanifest.xml --cert ./devcert.pfx
+```
+
+- Output defaults to `<PackageName>.identity.msix` in the current directory (override with `--output`).
+- Signing happens only when `--cert` (or `--generate-cert`) is provided.
+- If you instead pass a **folder** whose manifest declares `AllowExternalContent`, the existing folder-packaging behavior applies, but `winapp pack` warns if it finds assets (`.png`/`.jpg`/`.ico`) or binaries (`.exe`/`.dll`/`.so`) — for sparse packages these belong at the external location, not inside the `.msix`.
+
+After packing, run [`winapp embed-identity <exe>`](#embed-identity) and register the package in your installer with `Add-AppxPackage -Path <msix> -ExternalLocation <install-dir>`. See the [Sparse Packaging Guide](guides/sparse.md).
+
 
 #### WinRT component discovery
 
@@ -323,6 +362,38 @@ winapp create-debug-identity ./dist/app.exe --manifest ./custom-manifest.xml
 # Create identity for hosted app script
 winapp create-debug-identity app.py
 ```
+
+---
+
+### embed-identity
+
+Connect a desktop application to its **sparse identity package** by embedding the `<msix>` element into the app's side-by-side (fusion) manifest. This is step 3 of the [sparse packaging workflow](guides/sparse.md) — it tells Windows which identity package the running exe belongs to.
+
+```bash
+winapp embed-identity <target> [options]
+```
+
+**Arguments:**
+
+- `target` - The file to update. Auto-detected by extension:
+  - **`.exe`** (EXE mode) — embeds the `<msix>` element directly into the exe's side-by-side manifest using `mt.exe`.
+  - **`.xml` / `.manifest`** (XML mode) — inserts or replaces the `<msix>` element in an external SxS manifest file (created if it doesn't exist). Rebuild your app afterward so the updated manifest is embedded in the binary.
+
+**Options:**
+
+- `--manifest <path>` - Path to the sparse `appxmanifest.xml` to read identity (packageName, publisher, applicationId) from. When omitted, the command searches a `sparse/` folder beside the target first, then in the current directory, then the target's directory and the current directory, for `appxmanifest.xml`.
+
+**Examples:**
+
+```bash
+# EXE mode — embed identity straight into the built exe
+winapp embed-identity ./bin/Release/net8.0-windows/MyApp.exe
+
+# XML mode — update a checked-in side-by-side manifest, then rebuild
+winapp embed-identity ./app.manifest --manifest ./appxmanifest.xml
+```
+
+> This command is idempotent: re-running it replaces any existing `<msix>` element rather than duplicating it.
 
 ---
 

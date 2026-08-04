@@ -160,6 +160,25 @@ internal class AppxManifestDocument
     public XElement? GetCapabilitiesElement() =>
         _document.Root?.Element(DefaultNs + "Capabilities");
 
+    /// <summary>
+    /// Gets the Properties element.
+    /// </summary>
+    public XElement? GetPropertiesElement() =>
+        _document.Root?.Element(DefaultNs + "Properties");
+
+    /// <summary>
+    /// True when the manifest declares <c>uap10:AllowExternalContent=true</c>, which marks it
+    /// as a sparse identity package whose binaries/assets are resolved from an external location.
+    /// </summary>
+    public bool AllowsExternalContent
+    {
+        get
+        {
+            var el = GetPropertiesElement()?.Element(Uap10Ns + "AllowExternalContent");
+            return el != null && string.Equals(el.Value.Trim(), "true", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
     #endregion
 
     #region Identity Properties

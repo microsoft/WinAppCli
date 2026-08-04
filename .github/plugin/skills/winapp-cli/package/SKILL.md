@@ -175,6 +175,21 @@ Use the `microsoft/setup-winapp` action to install winapp on GitHub-hosted runne
 - The `--executable` flag overrides the entry point in the manifest — useful when your exe name differs from what's in `Package.appxmanifest`
 - For production distribution, use a certificate from a trusted CA and add `--timestamp` when signing with `winapp sign`
 
+## Sparse identity packages
+
+To grant identity to an app distributed by an existing installer (not as MSIX), build an **identity-only** sparse package: pass a sparse `appxmanifest.xml` (one declaring `<uap10:AllowExternalContent>true</uap10:AllowExternalContent>` under `<Properties>`) to `winapp pack` instead of a folder.
+
+```powershell
+# 1. Generate the sparse manifest for your exe (skips SDK install)
+winapp init --exe ./bin/Release/MyApp.exe --sparse --use-defaults
+# 2. Build & sign the identity-only .msix (just the manifest)
+winapp pack ./sparse/appxmanifest.xml --cert ./devcert.pfx
+# 3. Embed identity into the exe, then register in your installer
+winapp embed-identity ./bin/Release/MyApp.exe
+```
+
+The `.msix` contains only the manifest — binaries and assets are resolved from the external content location at runtime via `Add-AppxPackage -ExternalLocation`. If you pack a folder whose manifest declares `AllowExternalContent`, `winapp pack` warns about any assets/binaries found. See the [Sparse Packaging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/sparse.md).
+
 ## Related skills
 - Need a manifest first? See `winapp-manifest` to generate `Package.appxmanifest`
 - Need a certificate? See `winapp-signing` for certificate generation and management
@@ -201,7 +216,7 @@ Create MSIX installer from your built app. Run after building your app. A manife
 <!-- auto-generated from cli-schema.json -->
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `<input-folder>` | Yes | One or more input folders with package layout. Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64). |
+| `<input-folder>` | Yes | One or more input folders with package layout, or a single sparse appxmanifest.xml file (an identity-only package with AllowExternalContent). Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64). |
 
 #### Options
 <!-- auto-generated from cli-schema.json -->

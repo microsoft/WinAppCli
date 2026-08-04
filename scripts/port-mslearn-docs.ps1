@@ -556,6 +556,7 @@ $TocLabels = [ordered]@{
     "guides/tauri.md"                            = "Tauri"
     "guides/flutter.md"                          = "Flutter"
     "guides/packaging-cli.md"                    = "Package an EXE or CLI"
+    "guides/sparse.md"                           = "Sparse packaging"
     "guides/shell-completion.md"                 = "Shell completion"
     "guides/electron-index.md"                   = "Electron"
     "guides/electron-setup.md"                   = "Set up the environment"
@@ -652,6 +653,7 @@ $tocTree = @(
         (New-TocNode "guides/tauri.md")
         (New-TocNode "guides/flutter.md")
         (New-TocNode "guides/packaging-cli.md")
+        (New-TocNode "guides/sparse.md")
         (New-TocNode "guides/shell-completion.md")
     ))
 )

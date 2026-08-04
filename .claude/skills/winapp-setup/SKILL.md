@@ -67,6 +67,31 @@ When JS bindings are enabled (via `--add-js-bindings` or by answering yes in int
 - `.winapp/bindings/` — generated JS bindings for Windows App SDK APIs (npm-only, Node / Electron)
 - `package.json` update — adds the `winapp.jsBindings` namespace and `@microsoft/dynwinrt` dependency (npm-only)
 
+### Initialize a sparse identity package (existing exe)
+
+Use `--sparse` when you have an **already-built desktop exe** (WPF, WinForms, Win32, Electron, etc.) and only want to give it **package identity** — without repackaging the whole app into the MSIX. The app's files stay where they are and are resolved from an *external content location* at runtime.
+
+```powershell
+# Generate an identity-only sparse manifest for an existing exe
+winapp init --exe ./bin/Release/MyApp.exe --sparse
+
+# Non-interactive, with explicit identity values
+winapp init --exe ./bin/Release/MyApp.exe --sparse --name MyApp --publisher "CN=Contoso" --use-defaults
+```
+
+`--sparse` requires `--exe`. It skips all SDK/package installation (sparse identity packages have no SDK dependencies) and, by default, writes to a dedicated `sparse/` folder in the current directory (override with `--output-dir`) so the manifest and its `Assets/` stay out of a build-output folder that a rebuild would wipe:
+- `appxmanifest.xml` — identity-only sparse manifest (declares `uap10:AllowExternalContent`)
+- `Assets/` — placeholder visual assets (extracted from the exe's icon when possible), resolved from the **external location** at runtime — **not** bundled into the `.msix`
+
+If an `appxmanifest.xml` already exists in the target directory, init fails instead of overwriting it; re-run with `--force` to regenerate.
+
+This is step 1 of the sparse packaging workflow. Continue with:
+1. `winapp pack ./sparse/appxmanifest.xml --cert ./devcert.pfx` — build the signed identity `.msix`
+2. `winapp embed-identity ./bin/Release/MyApp.exe` — connect the exe to the identity package (re-sign the exe afterward)
+3. Register in your installer with `Add-AppxPackage -Path <msix> -ExternalLocation <install-dir>`
+
+For the full walkthrough, see the [Sparse packaging guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/sparse.md).
+
 ### Restore after cloning
 
 ```powershell
@@ -203,10 +228,16 @@ Start here for initializing a Windows app with required setup. Sets up everythin
 |--------|-------------|---------|
 | `--config-dir` | Directory to read/store configuration (default: the selected project directory, or current directory if no project is detected) | (none) |
 | `--config-only` | Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. | (none) |
+| `--exe` | Path to the application executable. Requires --sparse. Generates an identity-only sparse manifest for the exe instead of a full package/SDK setup. | (none) |
+| `--force` | Overwrite an existing appxmanifest.xml in the target directory (sparse only). Without this, init fails instead of replacing existing manifest/asset files. | (none) |
 | `--ignore-config` | Don't use configuration file for version management | (none) |
+| `--name` | Override the package name (sparse only; default: inferred from the exe) | (none) |
 | `--no-gitignore` | Don't update .gitignore file | (none) |
+| `--output-dir` | Directory to write the sparse manifest and Assets/ (sparse only; default: a 'sparse/' folder in the current directory) | (none) |
+| `--publisher` | Override the publisher CN (sparse only; default: inferred from the exe's company name). Bare names are auto-wrapped as CN=<name>. | (none) |
 | `--setup-sdks` | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) | (none) |
-| `--use-defaults` | Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults) | (none) |
+| `--sparse` | Generate a sparse identity manifest (appxmanifest.xml) for an existing desktop exe instead of a full package manifest. Use with --exe. Skips SDK/package installation. | (none) |
+| `--use-defaults` | Skip interactive prompts and use default answers. Normal init targets the positional project directory if given, otherwise the current directory (e.g., winapp init . --use-defaults). Sparse init (--exe --sparse) ignores the positional directory and writes to --output-dir instead. | (none) |
 
 ### `winapp restore`
 

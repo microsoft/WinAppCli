@@ -2,10 +2,8 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.Logging;
-using System.IO.Compression;
 using System.Security;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
 using WinApp.Cli.ConsoleTasks;
@@ -340,10 +338,14 @@ internal partial class MsixService(
         // Fetch dotnet package list once for all downstream operations
         var dotNetPackageList = await FetchDotNetPackageListAsync(cancellationToken);
 
-        // Determine executable path for ProcessorArchitecture auto-detection
+        // Determine executable path for ProcessorArchitecture auto-detection, and detect whether
+        // this is a sparse (AllowExternalContent) manifest so the rewrite applies sparse
+        // corrections (win32App/mediumIL, capabilities, AppListEntry) to folder inputs too.
         string? resolvedExePath = null;
+        bool isSparseManifest;
         {
             var tempDoc = AppxManifestDocument.Parse(manifestContent);
+            isSparseManifest = tempDoc.AllowsExternalContent;
             var appExe = tempDoc.ApplicationExecutable;
             if (appExe != null)
             {
@@ -351,10 +353,17 @@ internal partial class MsixService(
             }
         }
 
-        (manifestContent, var packageArch) = await UpdateAppxManifestContentAsync(manifestContent, null, null, resolvedExePath, sparse: false, selfContained: selfContained, dotNetPackageList, taskContext, cancellationToken);
+        (manifestContent, var packageArch) = await UpdateAppxManifestContentAsync(manifestContent, null, null, resolvedExePath, sparse: isSparseManifest, selfContained: selfContained, dotNetPackageList, taskContext, cancellationToken);
 
         // Parse the manifest to extract identity, executable, and architecture info
         var manifestDoc = AppxManifestDocument.Parse(manifestContent);
+
+        // When packaging a FOLDER for a sparse (AllowExternalContent) package, warn about
+        // content that should live at the external location instead of inside the .msix.
+        foreach (var warning in GetSparseFolderContentWarnings(inputFolder, manifestContent))
+        {
+            taskContext.AddStatusMessage(warning);
+        }
 
         try
         {
@@ -899,7 +908,11 @@ internal partial class MsixService(
             doc.ApplicationExecutable = relativeExecutablePath;
         }
 
-        bool isExe = Path.HasExtension(entryPointPath) && string.Equals(Path.GetExtension(entryPointPath), ".exe", StringComparison.OrdinalIgnoreCase);
+        // Determine whether the app entry point is an .exe. For folder packing no explicit
+        // entryPointPath is supplied, so fall back to the manifest's own <Application Executable>
+        // — otherwise sparse corrections (win32App/mediumIL) would never apply to folder inputs.
+        var executableForKind = entryPointPath ?? doc.ApplicationExecutable;
+        bool isExe = Path.HasExtension(executableForKind) && string.Equals(Path.GetExtension(executableForKind), ".exe", StringComparison.OrdinalIgnoreCase);
 
         if (sparse)
         {
@@ -915,12 +928,15 @@ internal partial class MsixService(
                 properties.Add(new XElement(AppxManifestDocument.Desktop6Ns + "RegistryWriteVirtualization", "disabled"));
             }
 
-            // Ensure Application has sparse packaging attributes
+            // Ensure Application has sparse packaging attributes. For an EXE we always force
+            // TrustLevel=mediumIL and RuntimeBehavior=win32App: a pre-existing (and for sparse
+            // Win32 apps, incorrect) value such as RuntimeBehavior="packagedClassicApp" must be
+            // corrected, so we set both unconditionally rather than only when TrustLevel is absent.
             var app = doc.GetFirstApplicationElement();
-            if (app != null && isExe && app.Attribute(AppxManifestDocument.Uap10Ns + "TrustLevel") == null)
+            if (app != null && isExe)
             {
                 app.SetAttributeValue(AppxManifestDocument.Uap10Ns + "TrustLevel", "mediumIL");
-                app.SetAttributeValue(AppxManifestDocument.Uap10Ns + "RuntimeBehavior", "packagedClassicApp");
+                app.SetAttributeValue(AppxManifestDocument.Uap10Ns + "RuntimeBehavior", "win32App");
             }
 
             // Remove EntryPoint if present (not needed for sparse packages)
@@ -941,6 +957,15 @@ internal partial class MsixService(
             {
                 doc.EnsureCapability("unvirtualizedResources", AppxManifestDocument.RescapNs);
                 doc.EnsureCapability("allowElevation", AppxManifestDocument.RescapNs);
+            }
+
+            // Raise any TargetDeviceFamily MinVersion below the AllowExternalContent floor
+            // (10.0.19041.0). A folder created from an older sparse template keeps 10.0.18362.0;
+            // MakeAppx /nv would pack (and sign) it, but deployment rejects a sparse package below
+            // 19041. Apply the same floor the manifest-file path enforces.
+            foreach (var correction in RaiseSparseTargetDeviceFamilyMinVersion(doc))
+            {
+                taskContext.AddStatusMessage($"{UiSymbols.Info} Normalized sparse manifest: {correction}");
             }
         }
 
