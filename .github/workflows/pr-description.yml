@@ -17,7 +17,7 @@ jobs:
     # No checkout step — all data is read via the GitHub API.
     steps:
       - name: Generate AI description
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           GH_MODELS_TOKEN: ${{ secrets.GH_MODELS_TOKEN }}
         with:
