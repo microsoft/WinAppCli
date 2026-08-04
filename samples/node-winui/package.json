@@ -1,0 +1,79 @@
+{
+  "name": "winapp-node-winui-sample",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Create a WinUI 3 Application and Window directly from Node.js.",
+  "type": "commonjs",
+  "main": "main.js",
+  "scripts": {
+    "restore": "winapp restore",
+    "generate": "winapp node generate-bindings",
+    "start": "node main.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "imports": {
+    "#winapp/bindings": {
+      "types": "./.winapp/bindings/index.d.ts",
+      "import": "./.winapp/bindings/index.mjs",
+      "require": "./.winapp/bindings/index.js",
+      "default": "./.winapp/bindings/index.js"
+    },
+    "#winapp/bindings/*": {
+      "types": "./.winapp/bindings/*.d.ts",
+      "default": "./.winapp/bindings/*.js"
+    }
+  },
+  "dependencies": {
+    "@microsoft/dynwinrt": "0.1.0-preview.15"
+  },
+  "devDependencies": {
+    "@microsoft/dynwinrt-codegen": "0.1.0-preview.15",
+    "@microsoft/winappcli": "^1.0.0"
+  },
+  "winapp": {
+    "jsBindings": {
+      "additionalWinmds": [
+        {
+          "namespace": "Windows.Foundation",
+          "classes": [
+            "PropertyValue"
+          ]
+        },
+        {
+          "namespace": "Microsoft.UI.Windowing",
+          "classes": [
+            "AppWindow"
+          ]
+        },
+        {
+          "namespace": "Microsoft.UI.Xaml",
+          "classes": [
+            "Application",
+            "Window"
+          ]
+        },
+        {
+          "namespace": "Microsoft.UI.Xaml.Controls",
+          "classes": [
+            "Border",
+            "Button",
+            "ComboBox",
+            "Grid",
+            "ScrollViewer",
+            "StackPanel",
+            "TextBlock"
+          ]
+        },
+        {
+          "namespace": "Microsoft.UI.Xaml.Media",
+          "classes": [
+            "MicaBackdrop",
+            "SolidColorBrush"
+          ]
+        }
+      ]
+    }
+  }
+}
