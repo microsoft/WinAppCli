@@ -34,21 +34,21 @@ jobs:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     steps:
-    - uses: actions/checkout@v5
-    - uses: actions/setup-dotnet@v5
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+    - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
       with:
         dotnet-version: '10.0.x'
-    - uses: actions/setup-node@v5
+    - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
       with:
         node-version: '22'
     - name: Build npm package
       shell: pwsh
       run: .\scripts\build-cli.ps1 -SkipTests -SkipMsix
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: npm-package
         path: artifacts/*.tgz
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: nuget-package
         path: artifacts/nuget/*.nupkg
@@ -78,12 +78,12 @@ jobs:
 
     - name: Checkout
       if: steps.check.outputs.skip != 'true'
-      uses: actions/checkout@v5
+      uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
     # Download the npm package artifact built by the `build` job above
     - name: Download npm package
       if: steps.check.outputs.skip != 'true'
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
       with:
         name: npm-package
         path: artifacts/npm
@@ -93,7 +93,7 @@ jobs:
       if: >-
         steps.check.outputs.skip != 'true' &&
         contains(fromJson('["dotnet-app", "wpf-app"]'), matrix.sample)
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
       with:
         name: nuget-package
         path: artifacts/nuget
@@ -120,7 +120,7 @@ jobs:
       if: >-
         steps.check.outputs.skip != 'true' &&
         contains(fromJson('["dotnet-app", "wpf-app", "packaging-cli", "electron", "winui-app", "winui-solution", "winui-unpackaged-app"]'), matrix.sample)
-      uses: actions/setup-dotnet@v5
+      uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
       with:
         dotnet-version: '10.0.x'
 
@@ -128,7 +128,7 @@ jobs:
       if: >-
         steps.check.outputs.skip != 'true' &&
         contains(fromJson('["electron", "tauri-app", "cpp-app", "dotnet-app", "wpf-app", "rust-app", "flutter-app", "packaging-cli", "winui-app", "winui-solution", "winui-unpackaged-app"]'), matrix.sample)
-      uses: actions/setup-node@v5
+      uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
       with:
         node-version: '22'
 
@@ -136,7 +136,7 @@ jobs:
       if: >-
         steps.check.outputs.skip != 'true' &&
         matrix.sample == 'flutter-app'
-      uses: subosito/flutter-action@v2
+      uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
       with:
         channel: stable
 
@@ -205,7 +205,7 @@ jobs:
 
     - name: Upload test results
       if: always() && steps.check.outputs.skip != 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: test-results-${{ matrix.sample }}
         path: test-results-${{ matrix.sample }}.xml

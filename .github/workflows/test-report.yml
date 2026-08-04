@@ -14,7 +14,7 @@ jobs:
     runs-on: windows-latest
     steps:
     - name: Display test results
-      uses: dorny/test-reporter@v2
+      uses: dorny/test-reporter@df6247429542221bc30d46a036ee47af1102c451 # v2.7.0
       with:
         artifact: test-results
         name: Test - Results
