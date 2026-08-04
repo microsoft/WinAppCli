@@ -1,4 +1,5 @@
 <!-- mslearn: true -->
+<!-- description: Build a native Node addon for your Electron app that runs machine learning inference with Windows ML through the Windows App SDK from JavaScript. -->
 # Creating a WinML Addon
 
 This guide shows you how to create a C# native addon that uses Windows Machine Learning (WinML) in your Electron app. WinML allows you to run machine learning models (ONNX format) locally on Windows devices for tasks like image classification, object detection, and more.

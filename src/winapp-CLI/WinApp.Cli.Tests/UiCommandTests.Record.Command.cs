@@ -12,6 +12,13 @@ namespace WinApp.Cli.Tests;
 public partial class UiCommandTests
 {
     [TestMethod]
+    public void Record_ShortDescription_IsUserFacing()
+    {
+        var command = GetRequiredService<UiRecordCommand>();
+        StringAssert.Contains(command.ShortDescription, "MP4");
+    }
+
+    [TestMethod]
     public async Task Record_MissingApp_ReturnsError()
     {
         var command = GetRequiredService<UiRecordCommand>();
@@ -142,23 +149,11 @@ public partial class UiCommandTests
         var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(stdout);
         Assert.AreEqual("h264", result.GetProperty("codec").GetString());
 
-        // Stderr (ConsoleStdErr) must contain EXACTLY ONE valid UiRecordStartedEvent.
-        // UiJsonContext uses WriteIndented=true so each event spans multiple lines; we count
-        // occurrences of the event discriminator and then locate + parse the object boundaries.
-        var stderrText = ConsoleStdErr.ToString();
-        Assert.IsTrue(stderrText.Contains("\"recording-started\""),
-            "recording-started event must appear on stderr");
-        var matches = System.Text.RegularExpressions.Regex.Matches(
-            stderrText, "\"event\"\\s*:\\s*\"recording-started\"");
-        Assert.AreEqual(1, matches.Count, "exactly one recording-started JSON event must appear on stderr");
-
-        // Extract the surrounding JSON object for field validation.
-        var matchIndex = matches[0].Index;
-        var start = stderrText.LastIndexOf('{', matchIndex);
-        var end = stderrText.IndexOf('}', matchIndex) + 1;
-        Assert.IsTrue(start >= 0 && end > start, "liveness event JSON object must be parseable");
+        var stderrLines = ConsoleStdErr.ToString()
+            .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+        Assert.HasCount(1, stderrLines, "stderr events must be one JSON object per line");
         var liveness = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
-            stderrText[start..end]);
+            stderrLines[0]);
         Assert.AreEqual("recording-started", liveness.GetProperty("event").GetString(), "event field must be 'recording-started'");
         Assert.AreEqual(outputPath, liveness.GetProperty("path").GetString(), "event path must match output path");
     }
@@ -250,5 +245,21 @@ public partial class UiCommandTests
         Assert.AreEqual(1, exitCode);
         Assert.IsTrue(File.Exists(outputPath), "pre-existing output file should survive a recording failure");
         Assert.AreEqual("sentinel content", File.ReadAllText(outputPath), "pre-existing file content should be unchanged");
+    }
+
+    [TestMethod]
+    public async Task Record_ComFailure_ReturnsStructuredError()
+    {
+        _fakeUia.RecordException = new System.Runtime.InteropServices.COMException(
+            "simulated UIA COM failure", unchecked((int)0x80004005));
+
+        var outputPath = Path.Combine(_tempDirectory.FullName, "com-fail.mp4");
+        var command = GetRequiredService<UiRecordCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["-a", "TestApp", "-o", outputPath, "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "simulated UIA COM failure");
+        Assert.IsFalse(File.Exists(outputPath));
     }
 }

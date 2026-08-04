@@ -1,6 +1,6 @@
 <!-- mslearn: true -->
 <!-- ms.topic: reference -->
-<!-- description: Complete command reference for the Windows App Development CLI (winapp CLI) including setup, packaging, identity, certificates, signing, and utility commands. -->
+<!-- description: Complete command reference for the winapp CLI covering setup, packaging, identity, certificates, signing, and other utility commands. -->
 # CLI Documentation and Usage
 
 ## Shell Completion
@@ -138,33 +138,6 @@ winapp restore [options]
 winapp restore
 ```
 
-**Custom and private NuGet feeds:**
-
-`winapp init`, `restore`, and `update` download the Windows SDK and Windows App SDK packages through NuGet, honoring your standard [`nuget.config`](https://learn.microsoft.com/nuget/reference/nuget-config-file) hierarchy (project, user, and machine level). This lets you:
-
-- **Use a private feed or mirror** — add it under `<packageSources>` (for example, an internal Azure Artifacts feed that mirrors the SDK packages). winapp queries every enabled source — over HTTPS, or a local folder path — and, for `init`/`update`, selects the highest listed version across all of them. A plain-**HTTP** feed is refused unless it explicitly opts in with `allowInsecureConnections="true"` on the `<add>` entry, because the SDK packages are executables and an unencrypted feed is a code-substitution vector; switch the mirror to HTTPS or set that attribute. If your `nuget.config` defines a [`<packageSourceMapping>`](https://learn.microsoft.com/nuget/consume-packages/package-source-mapping), only the sources mapped to a given package are queried for it — an enabled feed that the mapping excludes is intentionally skipped, so a package that is not mapped to any source fails to resolve rather than falling back to an unmapped feed. To make winapp use *only* your feed (e.g., an air-gapped mirror), `<clear />` the inherited sources and add just yours.
-- **Authenticate to private feeds** — credentials stored in `nuget.config` (`<packageSourceCredentials>`), environment-based credentials, and NuGet credential-provider plugins (such as the Azure Artifacts provider) are all used automatically. Interactive prompts appear only on interactive terminals; CI and other non-interactive runs rely on pre-configured or environment credentials.
-- **Control the package cache location** — the global packages folder is resolved from the `NUGET_PACKAGES` environment variable or the `globalPackagesFolder` setting in `nuget.config`, falling back to `~/.nuget/packages`.
-
-Example `nuget.config` that restores the SDK packages exclusively from a private mirror:
-
-```xml
-<?xml version="1.0" encoding="utf-8"?>
-<configuration>
-  <packageSources>
-    <clear />
-    <add key="contoso" value="https://pkgs.dev.azure.com/contoso/_packaging/winsdk-mirror/nuget/v3/index.json" />
-  </packageSources>
-</configuration>
-```
-
-> **Security note:** winapp honors the `nuget.config` in the selected project/config directory — the working directory by default, or the directory you pass to `winapp init <dir>` / `restore --config-dir <dir>` — so it restores SDK packages from whatever feeds, and into whatever `globalPackagesFolder`, that config specifies. Only run `winapp init`/`restore`/`update` against directories you trust, the same caution that applies to `dotnet restore`/`dotnet build`. When more than one source is configured, use [Package Source Mapping](https://learn.microsoft.com/nuget/consume-packages/package-source-mapping) (`<packageSourceMapping>`) to pin each package to a specific feed and mitigate dependency-confusion attacks. Note that mapping governs where a package is *downloaded from*, not one already present in the global packages folder: NuGet — and winapp's cache check that reuses a completed package — restores an already-cached package regardless of which feed first populated it. If you rely on mapping for source *trust*, restore into a clean or repository-scoped global packages folder (set `NUGET_PACKAGES` or `globalPackagesFolder`) so a package can't be reused from a copy a different feed populated earlier.
-
-> **Resolution limitations:** winapp targets the curated Windows App SDK dependency graphs and resolves them as it installs, so it does **not** implement NuGet's full graph unification. Two consequences to be aware of when pointing it at arbitrary private feeds:
->
-> - **Diamond dependencies keep the first-selected version.** When two branches of the graph require the same package at *different lower bounds* (for example `[1.0,)` on one path and `[2.0,)` on another), winapp keeps the version chosen by the first branch it resolved rather than upgrading to a version that satisfies both. A graph whose ranges are genuinely *incompatible* (for example `[1.0,2.0)` and `[2.0,3.0)`, which no single version can satisfy) still fails the restore.
-> - **Flat-container-only feeds can't hide unlisted versions.** A v3 feed that exposes only a `PackageBaseAddress` (flat container) resource with **no** registration resource carries no listed/unlisted flag, so `init`/`update` may select an unlisted version as "latest". Registration-backed feeds — nuget.org and most Azure Artifacts feeds — are unaffected.
-
 ---
 
 ### update
@@ -295,6 +268,7 @@ Each slice in the bundle needs a manifest. The command resolves manifests in thi
 3. **Current directory fallback** — If a folder has no manifest, the command looks for `Package.appxmanifest` in the current working directory and uses it (with architecture auto-stamped).
 
 In all cases, the manifest is automatically updated: placeholders are resolved, dependencies are injected, and the `ProcessorArchitecture` is force-set to the detected architecture. After resolution, a cross-slice validation ensures that Identity (Name, Version, Publisher), Capabilities, and Dependencies are consistent across all slices — only `ProcessorArchitecture` may differ.
+The package version defined in the slices is atributed to the MSIX bundle version, except if it's `0.0.0.0`, in which case a timestamp-based version is automatically generated.
 
 ```bash
 # Option 1: Single shared manifest (simplest for most projects)
@@ -514,15 +488,20 @@ winapp manifest update-assets mylogo.png --verbose
 
 Create a loose layout package from a build output folder, register it with Windows using the `Windows.Management.Deployment.PackageManager` API, and launch the application — simulating a full MSIX install for debugging. Returns the process ID for debugger attachment.
 
+`winapp run` operates in one of two modes, chosen automatically from the input:
+
+- **Folder mode** — the input is a build-output folder (contains a `Package.appxmanifest`/`AppxManifest.xml`).
+- **Project mode** — the input is a `.csproj`, a `.sln`/`.slnx` solution, or a directory containing one. `winapp run` builds the project and launches it, supporting both **packaged** and **unpackaged** WinUI apps. See [Project mode](#project-mode-net-sdk-projects) below.
+
 > **This is the preferred command for debugging with package identity** for most frameworks (.NET, C++, Rust, Flutter, Tauri). Unlike [`create-debug-identity`](#create-debug-identity) which registers a sparse package for a single exe, `winapp run` registers the entire folder as a loose layout package, just like a real MSIX install. See the [Debugging Guide](debugging.md) for common debugging workflows.
 
 ```bash
-winapp run <input-folder> [options]
+winapp run [<input>] [options]
 ```
 
 **Arguments:**
 
-- `input-folder` - Directory containing the app to run (required)
+- `input` - The app to run: a build-output folder (folder mode), a `.csproj` project, a `.sln`/`.slnx` solution, or a directory containing one of those at its top level (project mode; the directory is not searched recursively). Use `.` to build/run the project in the current directory. **Optional — defaults to the current directory when omitted** (matches `dotnet run`).
 
 **Options:**
 
@@ -593,6 +572,77 @@ winapp run ./bin/Debug --detach --json
 
 # Wipe application data (LocalState, settings) and start fresh
 winapp run ./bin/Debug --clean
+```
+
+#### Project mode (.NET SDK projects)
+
+When the input is a `.csproj`, a `.sln`/`.slnx` solution, or a directory containing one (including `.`), `winapp run` **builds the project** with `dotnet build` and then launches it. It supports both packaged and unpackaged WinUI apps, and installs the matching-architecture Windows App Runtime the app needs before launching.
+
+**Solution input:** point `winapp run` at a `.sln`/`.slnx` (or a directory containing one — a solution is preferred over loose `.csproj` files) and it resolves the runnable app project, then builds it with `$(SolutionDir)` and the sibling `Solution*` properties defined, so projects that depend on them build as they do in Visual Studio. Resolution rules:
+
+- **Test projects are skipped** when auto-selecting, so a solution containing an app plus its tests resolves to the app with no `--project` needed. (A WinUI test project is itself a packaged app, so output type alone can't distinguish it.)
+- **If the only runnable project is a test project**, it runs.
+- **If more than one runnable app project exists**, `winapp run` does not guess a startup project — it errors listing the candidates. Use `--project <name>` to choose, which is always honored, including to select a test project.
+
+Packaged vs. unpackaged is detected automatically from the project's effective `WindowsPackageType` MSBuild property (never from manifest presence):
+
+- **Packaged** (`WindowsPackageType=MSIX`, the WinUI packaged default) — builds, then registers the build output as a loose-layout package and launches via AUMID (the same pipeline as folder mode).
+- **Unpackaged** (`WindowsPackageType=None`) — builds, ensures the framework-dependent Windows App Runtime is installed, then launches the built `.exe` directly. Force this for a packaged project with `-p WindowsPackageType=None`.
+
+Project mode requires the **.NET SDK 8.0.100 or newer** (for MSBuild `--getProperty`).
+
+**Project-mode options** (ignored in folder mode):
+
+- `-c, --configuration <name>` - Build configuration. Default: `Debug`.
+- `--arch <x64|arm64|x86>` - Target architecture. Default: the current process architecture. Determines both the build RID and the architecture of the Windows App Runtime that gets installed.
+- `-r, --runtime <rid>` - Target .NET runtime identifier (e.g. `win-x64`). Project mode uses only the RID's architecture, always builds the canonical `win-<arch>`, and rejects non-Windows RIDs (e.g. `linux-x64`). Its architecture overrides `--arch`.
+- `-f, --framework <tfm>` - Target framework moniker for multi-targeted projects (e.g. `net10.0-windows10.0.26100.0`).
+- `--project <name-or-path>` - When the input is a solution (`.sln`/`.slnx`) or a directory with multiple runnable app projects, selects which project to launch (by project name or path).
+- `--no-build` - Skip building and run the existing build output (still evaluates output properties).
+- `--no-restore` - Skip restoring the project before building.
+- `-p, --property <Name=Value>` - MSBuild property, forwarded to both the build and the property evaluation. Repeatable (e.g. `-p WindowsPackageType=None`).
+
+**Build output & verbosity:** the project is built in two steps — a `dotnet build` whose output **streams live** to your console, followed by a fast property-evaluation pass. winapp prints the exact `dotnet build …` invocation before the output, and streams warnings even on a successful build. Verbosity:
+
+| Flag | dotnet verbosity | Adds |
+|------|------------------|------|
+| *(default)* | `minimal` | — |
+| `--verbose` | `minimal` | winapp's build decision traces |
+| `--quiet` | `quiet` | — |
+
+Under `--json` or `--quiet` the invocation and build output go to stderr so stdout stays pure JSON / clean.
+
+**Option applicability:** the identity/loose-layout options (`--manifest`, `--output-appx-directory`, `--no-launch`, `--with-alias`, `--unregister-on-exit`, `--clean`, `--executable`) apply to packaged apps only. They are rejected with a clear error for unpackaged apps (which have no MSIX package). Launch/debug options (`--args`/`--`, `--detach`, `--debug-output`, `--symbols`, `--json`) work in both.
+
+**Project-mode examples:**
+
+```bash
+# Build and run the project in the current directory (input defaults to ".")
+winapp run
+
+# Run a specific project
+winapp run ./src/MyApp/MyApp.csproj
+
+# Build and run from a solution (resolves the runnable app project, defines $(SolutionDir))
+winapp run ./MyApp.sln
+
+# Pick a startup project when the solution has more than one runnable app
+winapp run ./MyApp.sln --project MyApp
+
+# Release build for arm64
+winapp run . -c Release --arch arm64
+
+# Force an unpackaged run of a packaged project
+winapp run . -p WindowsPackageType=None
+
+# Run the existing build output without rebuilding, and capture crash diagnostics
+winapp run . --no-build --debug-output
+
+# Show winapp's build decision traces (dotnet build stays at minimal verbosity)
+winapp run . --verbose
+
+# Launch and detach (prints PID), forwarding args to the app
+winapp run . --detach -- --my-flag value
 ```
 
 **MSBuild properties (NuGet package):**
@@ -758,6 +808,53 @@ winapp sign MyApp.msix --cert ./mycert.pfx
 
 # Sign executable
 winapp sign ./bin/MyApp.exe --cert ./mycert.pfx --cert-password mypassword
+```
+
+---
+
+### az-sign
+
+Code-sign a file (exe, MSIX, or MSIX bundle) using [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/) — a cloud-managed signing identity, so no private key (PFX) ever lives on the local machine.
+
+```bash
+winapp az-sign <file-path> [options]
+```
+
+**Arguments:**
+
+- `file-path` - Path to the file to sign (exe, msix, or msixbundle)
+
+**Options:**
+
+- `--subscription`, `-s` - Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted
+- `--resource-group`, `-r` - Resource group to narrow down signing accounts
+- `--account` - Signing account name. Must be used with `--resource-group`
+- `--profile`, `-p` - Certificate profile name. Must be used with `--account`
+- `--metadata-file`, `-m` - Path to an existing `metadata.json`. Skips resource discovery and account/profile selection prompts and signs directly. A non-interactive Azure credential should already be available; the CLI can otherwise fall back to an interactive tenant prompt or `az login`, but the npm programmatic API is always non-interactive and fails instead of prompting
+
+**Authentication:**
+
+`az-sign` uses Azure's standard credential chain (`DefaultAzureCredential`). For CI/CD, set `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_CLIENT_SECRET` (or use GitHub Actions OIDC / managed identity). An existing Azure CLI session (`az login`, including the `azure/login` GitHub Action) is also honored in any environment. Only when no credentials are found *and* the session is interactive will `az-sign` launch `az login` for you.
+
+**Prerequisites:**
+
+- An Azure Code Signing account and a certificate profile (created in the Azure portal after identity validation), plus the **Code Signing Certificate Profile Signer** role assigned to your identity. For more guidance, visit [Azure Artifact Signing quickstart docs.](https://learn.microsoft.com/azure/artifact-signing/quickstart)
+- A machine-wide **x64 .NET 8 (or later) runtime** installed. The Azure signing client library is a managed assembly that `signtool.exe` loads in a separate process; winapp's own self-contained runtime does not satisfy it. Install it from https://dotnet.microsoft.com/download if signing fails with a runtime-load error.
+- The **Microsoft Visual C++ Redistributable (x64)**. The Azure signing client library depends on the VC++ runtime, and because winapp downloads the raw NuGet package rather than the official client-tools installer, this dependency is **not** installed automatically. A clean machine can load-fail even with .NET and SignTool present. Install the latest x64 redistributable from https://aka.ms/vs/17/release/vc_redist.x64.exe if signing fails with a `0xc000007b`, "The application was unable to start correctly", or missing-DLL error from the dlib.
+
+> **Least-privilege CI:** Auto-discovery (listing subscriptions, resource groups, accounts, and profiles) needs read access at a parent scope. To avoid *every* collection-listing call, pass all four of `--subscription`, `--resource-group`, `--account`, and `--profile`: `az-sign` then validates the account and profile with direct resource reads (a GET on each named resource) instead of enumerating the parent collection, so a principal scoped to just that account and profile is sufficient. Omitting any one of them re-introduces a listing call — for example, leaving out `--subscription` makes `az-sign` list the subscriptions your identity can access — which a narrowly-scoped principal may not be permitted to do. A principal scoped only to a single certificate profile can skip validation entirely by passing a pre-generated `--metadata-file` (which specifies the account endpoint and profile directly).
+
+**Examples:**
+
+```bash
+# Interactive — discover/select subscription, account, and profile
+winapp az-sign ./app.msix
+
+# Fully specified — no prompting (ideal for CI/CD)
+winapp az-sign ./app.msix --subscription <sub-id> --resource-group <rg> --account <account> --profile <profile>
+
+# Reuse an existing metadata.json (skips resource discovery and selection; authentication may still prompt)
+winapp az-sign ./app.msix --metadata-file ./metadata.json
 ```
 
 ---
@@ -1111,8 +1208,8 @@ winapp ui [command] [options]
 - `invoke` - Activate element (click, toggle, expand)
 - `click` - Click element via mouse simulation (for controls that don't support invoke)
 - `hover` - Move mouse to element to trigger tooltips, flyouts, and hover states (default dwell: 800ms)
-- `drag` - Drag the mouse from one point to another, by element selector or app `x,y` coordinates (reorder, resize, sliders, drag-and-drop)
-- `touch` - Inject synthetic touch gestures (tap, double-tap, long-press, swipe, pinch, stretch) at an element center or app `x,y` coordinates
+- `drag` - Drag the mouse from one point to another, by element selector or screen `x,y` coordinates (reorder, resize, sliders, drag-and-drop)
+- `touch` - Inject synthetic touch gestures (tap, double-tap, long-press, swipe, pinch, stretch) at an element center or screen `x,y` coordinates
 - `pen` - Inject synthetic pen/stylus input — taps and ink strokes with configurable pressure, tilt, and eraser mode
 - `send-keys` - Send synthetic keyboard input (named keys, combos, raw vk=0xNN, or literal text) to a window
 - `set-value` - Set value on editable element (text, number); falls back to LegacyIAccessible `put_accValue` for TextPattern-only rich-edit controls
@@ -1128,9 +1225,7 @@ winapp ui [command] [options]
 
 #### ui record
 
-Record the target window — or a single element's region — to an H.264 MP4 video. Frames are
-captured via Windows Graphics Capture (with a PrintWindow fallback) and encoded incrementally with
-Media Foundation, so long recordings never buffer in memory.
+Record a window or element region to an H.264 MP4.
 
 ```bash
 # Record a window for 10 seconds at 15 fps
@@ -1141,6 +1236,9 @@ winapp ui record -a "My App" --duration-sec 0 --max-edge 1280 -o capture.mp4
 
 # Record just one element's region
 winapp ui record -a "My App" btn-save-1234 -o button.mp4
+
+# Keep an agent-readable timeline alongside the MP4
+winapp ui record -a Calculator --frames --duration-sec 10 --fps 10 -o demo.mp4
 ```
 
 **Record options:**
@@ -1149,10 +1247,10 @@ winapp ui record -a "My App" btn-save-1234 -o button.mp4
 - `--max-edge <px>` - Downscale so the longest edge is at most this many pixels (`0` = no downscale).
 - `--capture-screen` - Capture from the screen so overlays/popups are included (may capture occluding windows).
 - `-o, --output <path>` - Output `.mp4` path (defaults to `recording-<timestamp>-<guid>.mp4`).
+- `--frames` - Write timestamped JPEGs, `frames.ndjson`, and `manifest.json` to `<output-name>.frames`. Supports 1-30 fps and `--max-edge` 64-4096 (default 1280), with a 1 GiB frame-data cap.
 
-With `--json`, emits a `UiRecordResult` envelope including the output `path`, `frames`, `width`,
-`height`, `fileSize`, `codec` (`"h264"`), and `mode` — the capture path actually used
-(`wgc`, `printwindow`, or `screen`).
+With `--json`, the final result includes the output path, dimensions, codec, capture mode, cadence,
+stop reason, optional `frameArtifacts`, and warnings.
 
 > **Known limitation:** recording a *specific element* inside a popup that renders in its own
 > top-level window (WinUI/XAML flyout, teaching tip, tooltip) may capture the underlying main

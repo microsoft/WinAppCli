@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using Spectre.Console;
+using Spectre.Console.Testing;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
@@ -11,7 +13,7 @@ public partial class UiCommandTests
 {
     // ---------------------------------------------------------------------
     // touch — synthetic touch gestures (tap/swipe/pinch/…) at a selector
-    // center or explicit app x,y coordinates. Exercised via FakePointerInput
+    // center or explicit screen x,y coordinates. Exercised via FakePointerInput
     // (records contacts), FakeForegroundGuard (proceeds) and
     // FakeUiAutomationService (supplies the bounds rect via TryGetWindowRect).
     // ---------------------------------------------------------------------
@@ -340,19 +342,119 @@ public partial class UiCommandTests
     }
 
     [TestMethod]
-    public async Task Touch_ExplicitPointOutsideWindow_Rejected_NoInjection()
+    public async Task Touch_ExplicitPointOutsideWindow_WarnsAndInjects()
     {
+        // #661: an out-of-window point is a non-fatal advisory, not a hard failure. Touch injects
+        // anyway (consistent with click/drag/hover/scroll, which already inject at out-of-window
+        // coordinates) and surfaces a warning, rather than rejecting with invalid_arguments.
         _fakeSession.SessionResult.WindowHandle = 7000;
         _fakeUia.WindowRect = new PointerRect(0, 0, 800, 600);
 
         var command = GetRequiredService<UiTouchCommand>();
         var exitCode = await ParseAndInvokeWithCaptureAsync(command,
             ["-a", "TestApp", "--at", "5000,5000", "--json"]);
-        Assert.AreEqual(1, exitCode);
-        Assert.AreEqual(0, _fakePointer.TouchCalls.Count);
-        // The window rect WAS consulted (bounds check ran) but the foreground gate never fired.
+
+        Assert.AreEqual(0, exitCode, "Out-of-window point is advisory, not fatal — injection proceeds");
+        Assert.AreEqual(1, _fakePointer.TouchCalls.Count, "Injection must still happen");
+        // The bounds check ran (rect consulted) AND the foreground gate was reached (no early reject).
         Assert.IsTrue(_fakeUia.WindowRectCalls.Count >= 1);
-        Assert.AreEqual(0, _fakeForeground.Calls.Count);
+        Assert.IsTrue(_fakeForeground.Calls.Count >= 1);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.IsTrue(result.TryGetProperty("warnings", out var warnings),
+            "Out-of-window injection must surface a warnings[] advisory");
+        Assert.AreEqual(1, warnings.GetArrayLength());
+        StringAssert.Contains(warnings[0].GetString(), "outside the target window",
+            "Warning must name the out-of-window condition");
+    }
+
+    [TestMethod]
+    public async Task Touch_OutsideWindowAndRemoteSession_EmitsBothWarnings()
+    {
+        // The out-of-window advisory (#661) and the remote-session delivery advisory (id27/id28) are
+        // independent; when both apply they must both appear in warnings[].
+        _fakeSession.SessionResult.WindowHandle = 7050;
+        _fakeUia.WindowRect = new PointerRect(0, 0, 800, 600);
+        _fakeForeground.IsRemoteSessionResult = true;
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "5000,5000", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakePointer.TouchCalls.Count);
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.IsTrue(result.TryGetProperty("warnings", out var warnings));
+        Assert.AreEqual(2, warnings.GetArrayLength(),
+            "Both the out-of-window and remote-delivery advisories must be present");
+        var joined = warnings[0].GetString() + " | " + warnings[1].GetString();
+        StringAssert.Contains(joined, "outside the target window");
+        StringAssert.Contains(joined, "remote");
+    }
+
+    [TestMethod]
+    public async Task Touch_GestureWaypointOutsideWindow_WarnsAndInjects()
+    {
+        // #661: FirstOutOfBounds walks EVERY planned point, including gesture-generated waypoints — not
+        // just the explicit --at/--path anchor. A swipe whose START is in-bounds but whose generated END
+        // waypoint lands outside the window must still warn (and inject), proving the bounds check covers
+        // the whole gesture path rather than only the anchor.
+        _fakeSession.SessionResult.WindowHandle = 7100;
+        _fakeUia.WindowRect = new PointerRect(0, 0, 800, 600);
+
+        var command = GetRequiredService<UiTouchCommand>();
+        // Start (400,300) is inside the window; a 5000px rightward swipe generates an end waypoint at
+        // (5400,300), which is outside it.
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--gesture", "swipe", "--at", "400,300", "--distance", "5000", "--json"]);
+
+        Assert.AreEqual(0, exitCode, "Out-of-window waypoint is advisory, not fatal — injection proceeds");
+        Assert.AreEqual(1, _fakePointer.TouchCalls.Count, "Injection must still happen");
+
+        var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(TestAnsiConsole.Output);
+        Assert.IsTrue(result.TryGetProperty("warnings", out var warnings),
+            "A gesture waypoint outside the window must surface a warnings[] advisory");
+        Assert.AreEqual(1, warnings.GetArrayLength());
+        // The advisory must name the out-of-bounds WAYPOINT (5400,300), not the in-bounds start (400,300),
+        // proving FirstOutOfBounds walked past the anchor into the generated path.
+        StringAssert.Contains(warnings[0].GetString(), "(5400,300)",
+            "Warning must name the out-of-bounds waypoint, not the in-bounds start");
+        StringAssert.Contains(warnings[0].GetString(), "outside the target window");
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // temporarily swaps the process-wide ambient AnsiConsole to capture logger warnings
+    public async Task Touch_ExplicitPointOutsideWindow_TextMode_LogsWarning()
+    {
+        // Coverage for the text-mode (non-json) branch: every other out-of-window test passes --json, so
+        // the logger.LogWarning foreach path is otherwise unexercised. Non-error logger output routes
+        // through the static ambient AnsiConsole (TextWriterLogger), so we swap it to a capturing console
+        // for the invoke; [DoNotParallelize] keeps that global swap isolated. The advisory must land on
+        // that (stdout) console and NOT on stderr, proving it is a non-fatal warning.
+        _fakeSession.SessionResult.WindowHandle = 7200;
+        _fakeUia.WindowRect = new PointerRect(0, 0, 800, 600);
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var previousAmbient = AnsiConsole.Console;
+        var ambient = new TestConsole();
+        AnsiConsole.Console = ambient;
+        int exitCode;
+        try
+        {
+            exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--at", "5000,5000"]);
+        }
+        finally
+        {
+            AnsiConsole.Console = previousAmbient;
+        }
+
+        Assert.AreEqual(0, exitCode, "Out-of-window point is advisory, not fatal — injection proceeds");
+        Assert.AreEqual(1, _fakePointer.TouchCalls.Count, "Injection must still happen");
+        StringAssert.Contains(ambient.Output, "outside the target window",
+            "Text mode must log the out-of-window advisory, not only emit it in the --json warnings[] envelope");
+        Assert.IsFalse(ConsoleStdErr.ToString().Contains("outside the target window"),
+            "The advisory is a non-error warning — it must route to stdout, not stderr");
     }
 
     [TestMethod]
@@ -551,5 +653,254 @@ public partial class UiCommandTests
         Assert.IsNotNull(msg);
         StringAssert.Contains(msg, "touch", "Warning must name the input kind");
         StringAssert.Contains(msg, "remote", "Warning must name the remote caveat");
+    }
+
+    // -------------------------------------------------------------------------
+    // Bucket 3 (issue #630) — coverage top-up: the remaining argument-validation
+    // branches, selector-resolution failures (via PointerCommandSupport), the
+    // non-JSON success/warning render path, and the COM / generic catch arms.
+    // All driven through the command handler with the existing fakes — no live
+    // injection. LogError output routes to the captured stderr; non-error logger
+    // output (Info/Warning) routes through the static ambient console, so those
+    // tests swap it to capture and are marked [DoNotParallelize].
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public void Touch_ShortDescription_NamesTouchGestures()
+    {
+        var description = GetRequiredService<UiTouchCommand>().ShortDescription;
+        Assert.IsFalse(string.IsNullOrWhiteSpace(description));
+        StringAssert.Contains(description, "touch");
+    }
+
+    [TestMethod]
+    public async Task Touch_FingersZero_RejectedWithInvalidArguments_NoInjection()
+    {
+        // --fingers 0 trips the `fingers < 1` lower-bound guard (distinct from the >MaxContacts
+        // upper-bound already covered). Rejected up front, before any window resolution.
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "100,100", "--fingers", "0", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.TouchCalls.Count);
+        Assert.AreEqual(0, _fakeUia.WindowRectCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "--fingers");
+    }
+
+    [TestMethod]
+    public async Task Touch_InvalidDirectionValue_RejectedWithInvalidArguments()
+    {
+        // A --direction value outside {right,left,up,down} is rejected by the up-front value check.
+        // Using a swipe means the ONLY reason to reject is the invalid direction value itself.
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "100,100", "--gesture", "swipe", "--direction", "diagonal", "--distance", "50", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.TouchCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "--direction");
+    }
+
+    [TestMethod]
+    public async Task Touch_MalformedAtPoint_RejectedWithInvalidArguments()
+    {
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "not-a-point", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.TouchCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "--at");
+    }
+
+    [TestMethod]
+    public async Task Touch_MalformedToPoint_OnSwipe_RejectedWithInvalidArguments()
+    {
+        // --to-point is only parsed on a swipe (the non-swipe guard fires earlier otherwise), so a
+        // malformed value must reach the point-parse failure branch.
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--gesture", "swipe", "--to-point", "junk", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.TouchCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "--to-point");
+    }
+
+    [TestMethod]
+    public async Task Touch_NoTarget_NoSelectorNoAt_RejectedWithInvalidArguments()
+    {
+        // Neither a selector nor --at: the command cannot resolve a point to touch.
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.TouchCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "Provide a target");
+    }
+
+    [TestMethod]
+    public async Task Touch_Pinch_WithoutDistance_RejectedWithInvalidArguments()
+    {
+        // Pinch/stretch require an explicit --distance (finger spread). Without it, distance defaults
+        // to 0 and the gesture is rejected before injection.
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "100,100", "--gesture", "pinch", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.TouchCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "distance");
+    }
+
+    [TestMethod]
+    public async Task Touch_Swipe_WithoutToPointOrDistance_RejectedWithInvalidArguments()
+    {
+        // A swipe needs either --to-point or --distance to compute an end point; with neither it is
+        // rejected rather than degenerating into a zero-length swipe.
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            ["-a", "TestApp", "--at", "100,100", "--gesture", "swipe", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.TouchCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "swipe requires");
+    }
+
+    [TestMethod]
+    public async Task Touch_MissingApp_NoAppNoWindow_ReturnsMissingApp()
+    {
+        // With valid arguments but no --app/--window, the missing-app guard fires AFTER all argument
+        // validation (so a valid selector + no app yields missing_app, not invalid_arguments).
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["btn-ok", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.TouchCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "Target app required");
+    }
+
+    [TestMethod]
+    public async Task Touch_SelectorNotFound_ReturnsElementNotFound_NoInjection()
+    {
+        // A bare selector that resolves to no element: ResolvePointAsync reports element_not_found and
+        // returns not-Ok, so the command aborts before injection (covers the null-element branch of
+        // PointerCommandSupport and the !target.Ok guard). FindSingleResult stays null by default.
+        _fakeSession.SessionResult.WindowHandle = 6100;
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["ghost-element", "-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.TouchCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "No element found");
+    }
+
+    [TestMethod]
+    public async Task Touch_SelectorZeroSizeElement_ReturnsZeroSize_NoInjection()
+    {
+        // A resolved element with zero width/height cannot supply a usable center point.
+        _fakeUia.FindSingleResult = new UiElement
+        {
+            Id = "e0", Type = "Button", Selector = "flat-btn",
+            X = 100, Y = 100, Width = 0, Height = 20, WindowHandle = 6200
+        };
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["flat-btn", "-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.TouchCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "zero size");
+    }
+
+    [TestMethod]
+    public async Task Touch_SelectorTargetVanishesBeforeInjection_ReturnsTargetMoved_NoInjection()
+    {
+        // The selector resolves initially, but the pre-injection stable re-resolve finds it gone — the
+        // command refuses rather than injecting at a stale coordinate (covers the TryReport-false arm of
+        // PointerCommandSupport.ResolvePointAsync).
+        const string sel = "vanishing-btn";
+        var seq = new Queue<UiElement?>();
+        seq.Enqueue(new UiElement { Id = "e0", Type = "Button", Selector = sel, X = 100, Y = 100, Width = 40, Height = 20, WindowHandle = 6300 });
+        seq.Enqueue(null); // gone on the stability re-read
+        _fakeUia.MovingResults[sel] = seq;
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [sel, "-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.TouchCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "could not be re-resolved");
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // swaps the process-wide ambient AnsiConsole to capture non-error logger output
+    public async Task Touch_NonJson_LocalSession_LogsSuccessWithoutWarning()
+    {
+        // The non-JSON render path logs a human success line and, for a local session, no delivery
+        // warning. Info/Warning route through the static ambient console, so we swap it to capture.
+        _fakeSession.SessionResult.WindowHandle = 8300;
+        _fakeForeground.IsRemoteSessionResult = false;
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var (exitCode, ambientOutput) = await InvokeWithAmbientConsoleCaptureAsync(command, ["-a", "TestApp", "--at", "150,160"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakePointer.TouchCalls.Count);
+        Assert.IsFalse(TestAnsiConsole.Output.Contains('{'), "Non-JSON path must not emit a JSON envelope");
+        StringAssert.Contains(ambientOutput, "tap", "Success line must name the gesture");
+        Assert.IsFalse(ambientOutput.Contains("remote", StringComparison.OrdinalIgnoreCase),
+            "A local session must not emit the remote-delivery warning");
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // swaps the process-wide ambient AnsiConsole to capture non-error logger output
+    public async Task Touch_NonJson_RemoteSession_LogsSuccessAndDeliveryWarning()
+    {
+        // Remote (RDP) session: the non-JSON path still injects (exit 0) but appends an advisory
+        // delivery-uncertainty warning to the human output.
+        _fakeSession.SessionResult.WindowHandle = 8301;
+        _fakeForeground.IsRemoteSessionResult = true;
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var (exitCode, ambientOutput) = await InvokeWithAmbientConsoleCaptureAsync(command, ["-a", "TestApp", "--at", "150,160"]);
+
+        Assert.AreEqual(0, exitCode, "The remote warning is advisory; injection still succeeds");
+        Assert.AreEqual(1, _fakePointer.TouchCalls.Count);
+        StringAssert.Contains(ambientOutput, "remote", "Remote session must surface the delivery-uncertainty warning");
+    }
+
+    [TestMethod]
+    public async Task Touch_ComException_ReturnsStaleElement_NoInjection()
+    {
+        // A COMException surfacing during resolution is a stale-element signal (the element vanished
+        // mid-flight); the command maps it to the stale envelope and never injects.
+        _fakeUia.FindSingleElementThrowException = new System.Runtime.InteropServices.COMException("UIA stale (test)");
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["btn-ok", "-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.TouchCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "no longer accessible");
+        AssertJsonErrorCode(UiJsonError.CodeStaleElement);
+    }
+
+    [TestMethod]
+    public async Task Touch_GenericException_ReturnsInternalError_NoInjection()
+    {
+        // A non-COM, non-app-not-found, non-IOE exception during session resolution falls through to
+        // the catch-all generic handler and is reported (not swallowed or crashed).
+        _fakeSession.ResolveThrow = new TimeoutException("boom (test)");
+
+        var command = GetRequiredService<UiTouchCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["btn-ok", "-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakePointer.TouchCalls.Count);
+        StringAssert.Contains(ConsoleStdErr.ToString(), "boom (test)");
+        AssertJsonErrorCode(UiJsonError.CodeInternalError);
     }
 }

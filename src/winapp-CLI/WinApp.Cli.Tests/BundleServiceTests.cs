@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Spectre.Console.Testing;
 using WinApp.Cli.ConsoleTasks;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
 using WinApp.Cli.Tools;
 
@@ -84,6 +85,40 @@ public class BundleServiceTests
 
         // Assert
         Assert.IsTrue(Directory.Exists(outputDir));
+    }
+
+    [TestMethod]
+    public async Task CreateBundleAsync_WithBundleVersion_PassesBvArgumentToMakeappx()
+    {
+        // Arrange
+        var file1 = CreateFakeMsix("app_x64.msix");
+        var output = new FileInfo(Path.Combine(_tempDir.FullName, "versioned.msixbundle"));
+
+        // Act
+        await _service.CreateBundleAsync([file1], output, _taskContext, bundleVersion: new MsixVersion(1, 2, 3, 4));
+
+        // Assert - the makeappx invocation must include /bv "1.2.3.4" so the resulting
+        // Bundle.Identity/@Version matches the source manifest's Identity/@Version.
+        Assert.AreEqual(1, _buildToolsService.Invocations.Count);
+        var (_, args) = _buildToolsService.Invocations[0];
+        StringAssert.Contains(args, "/bv \"1.2.3.4\"");
+    }
+
+    [TestMethod]
+    public async Task CreateBundleAsync_WithoutBundleVersion_OmitsBvArgument()
+    {
+        // Arrange
+        var file1 = CreateFakeMsix("app_x64.msix");
+        var output = new FileInfo(Path.Combine(_tempDir.FullName, "unversioned.msixbundle"));
+
+        // Act - no bundleVersion supplied (default null), preserving existing makeappx default
+        // (timestamp-derived) bundle version behavior when the manifest version is unavailable.
+        await _service.CreateBundleAsync([file1], output, _taskContext);
+
+        // Assert
+        Assert.AreEqual(1, _buildToolsService.Invocations.Count);
+        var (_, args) = _buildToolsService.Invocations[0];
+        Assert.IsFalse(args.Contains("/bv", StringComparison.Ordinal), $"Expected no /bv argument when bundleVersion is null. Args: {args}");
     }
 
     private FileInfo CreateFakeMsix(string name)

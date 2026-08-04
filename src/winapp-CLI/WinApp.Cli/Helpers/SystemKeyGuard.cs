@@ -11,6 +11,21 @@ namespace WinApp.Cli.Helpers;
 /// </summary>
 internal static class SystemKeyGuard
 {
+    /// <summary>
+    /// A key combo that must NEVER be synthesized via send-input, paired with the reason it stays
+    /// blocked even when the caller passes <c>--allow-system-keys</c>. Different combos are blocked
+    /// for different reasons (<c>win+l</c> locks the session; <c>ctrl+alt+del</c> is a Secure
+    /// Attention Sequence Windows drops from injected input), so the reason travels with the name.
+    /// </summary>
+    public readonly record struct HardBlockedCombo(string Name, string Reason);
+
+    // Reasons are phrased as predicates ("<name> <reason>") so callers can compose a message.
+    private const string WinLReason =
+        "locks the workstation (LockWorkStation() via the shell hook), which is unrecoverable from automation";
+    private const string CtrlAltDelReason =
+        "is a Secure Attention Sequence (SAS) that Windows blocks from injected input regardless of privileges, " +
+        "so it can never be synthesized from automation";
+
     private const ushort VkShift = 0x10;
     private const ushort VkControl = 0x11;
     private const ushort VkAlt = 0x12;
@@ -24,18 +39,23 @@ internal static class SystemKeyGuard
     private const ushort VkL = 0x4C; // 'L' — win+l triggers LockWorkStation() via the shell hook
 
     /// <summary>
-    /// Returns the friendly names of any combos that must NEVER be synthesized via send-input, even when
-    /// the caller opts in with <c>--allow-system-keys</c>. Currently scoped to <c>win+l</c> only:
-    /// when VK_LWIN/VK_RWIN + VK_L (0x4C) is injected OS-wide the shell hook fires
-    /// <c>LockWorkStation()</c>, locking the interactive session immediately with no recovery path from
-    /// automation. Unlike soft-blocked combos (<c>alt+f4</c>, <c>ctrl+shift+esc</c>, <c>win+r</c>, …)
-    /// that can be opted into for driving global hotkeys, a session lock is unrecoverable from code and
-    /// breaks CI and remote-desktop sessions irreversibly. (alt+f4, ctrl+shift+esc, win+r, etc. are
-    /// intentionally left as "soft" blocks — callers may legitimately need them for global hotkey testing.)
+    /// Returns the combos that must NEVER be synthesized via send-input, even when the caller opts in
+    /// with <c>--allow-system-keys</c>, each paired with the reason it stays blocked. Two combos qualify:
+    /// <list type="bullet">
+    /// <item><c>win+l</c> — VK_LWIN/VK_RWIN + VK_L (0x4C) fires <c>LockWorkStation()</c> via the shell
+    /// hook when injected OS-wide, locking the interactive session with no recovery path from automation.</item>
+    /// <item><c>ctrl+alt+del</c> — VK_CONTROL + VK_MENU + VK_DELETE (0x2E) is the Secure Attention
+    /// Sequence; Windows discards synthesized SAS input at the OS level regardless of privilege or flag,
+    /// so it can never take effect and reporting success for it is misleading.</item>
+    /// </list>
+    /// Unlike soft-blocked combos (<c>alt+f4</c>, <c>ctrl+shift+esc</c>, <c>win+r</c>, …) that can be
+    /// opted into for driving global hotkeys, these two can never be usefully or safely driven from
+    /// automation. (Extra modifiers alongside the combo — e.g. <c>win+shift+l</c>,
+    /// <c>ctrl+alt+shift+del</c> — do not defeat the block.)
     /// </summary>
-    public static IReadOnlyList<string> FindNeverBypassableCombos(IEnumerable<KeyAction> actions)
+    public static IReadOnlyList<HardBlockedCombo> FindNeverBypassableCombos(IEnumerable<KeyAction> actions)
     {
-        var hits = new List<string>();
+        var hits = new List<HardBlockedCombo>();
         foreach (var action in actions)
         {
             if (action is not KeyChord chord)
@@ -44,17 +64,28 @@ internal static class SystemKeyGuard
             }
 
             bool win = chord.Modifiers.Contains(VkLWin) || chord.Modifiers.Contains(VkRWin);
+            bool ctrl = chord.Modifiers.Contains(VkControl);
+            bool alt = chord.Modifiers.Contains(VkAlt);
+
             if (win && chord.Vk == VkL)
             {
-                const string name = "win+l";
-                if (!hits.Contains(name))
-                {
-                    hits.Add(name);
-                }
+                AddUnique(hits, new HardBlockedCombo("win+l", WinLReason));
+            }
+            else if (ctrl && alt && chord.Vk == VkDelete)
+            {
+                AddUnique(hits, new HardBlockedCombo("ctrl+alt+del", CtrlAltDelReason));
             }
         }
 
         return hits;
+    }
+
+    private static void AddUnique(List<HardBlockedCombo> hits, HardBlockedCombo combo)
+    {
+        if (!hits.Any(h => h.Name == combo.Name))
+        {
+            hits.Add(combo);
+        }
     }
 
     /// <summary>

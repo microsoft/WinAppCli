@@ -6,316 +6,254 @@ using WinApp.Cli.Commands;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
-using WinApp.Cli.Tools;
 
 namespace WinApp.Cli.Tests;
 
 /// <summary>
-/// Tests for <see cref="UpdateCommand"/>. All external effects (NuGet queries, package
-/// installation, build-tool acquisition, runtime install) are faked so the command's control
-/// flow — config handling, per-package update decisions, build-tools gating, and the runtime
-/// step — is exercised deterministically without network or machine state.
-///
-/// The version-decision gate (<c>CompareVersions(latest, current) &gt; 0</c>) is pinned down
-/// explicitly: only a strictly-greater "latest" rewrites winapp.yaml and triggers a reinstall,
-/// while a normalized-equal or lower "latest" leaves both the persisted version and the installed
-/// set untouched. The failure paths are pinned too: a latest-version lookup that throws must exit
-/// non-zero and preserve the pin rather than report a false "up to date", and a cancellation
-/// (Ctrl+C) mid-lookup must abort the whole command instead of being recorded as an ordinary
-/// lookup failure that lets the loop keep running.
+/// Behavior tests for the <c>winapp update</c> command (<see cref="UpdateCommand.Handler"/>).
+/// The real <see cref="IStatusService"/> executes the handler body, while NuGet, package
+/// installation, build tools, and workspace setup are replaced with controllable fakes so the
+/// version-check / save / install / build-tools / runtime paths run without any network or disk SDK.
 /// </summary>
 [TestClass]
-public class UpdateCommandTests : BaseCommandTests
+public sealed class UpdateCommandTests : BaseCommandTests
 {
-    private FakeNugetService _fakeNuget = null!;
-    private FakePackageInstallationService _fakeInstall = null!;
-    private FakeWorkspaceSetupService _fakeWorkspace = null!;
-    private FakeUpdateBuildToolsService _fakeBuildTools = null!;
+    private ControllableNugetService _nuget = null!;
+    private FakePackageInstallationService _pkg = null!;
+    private FakeBuildToolsService _buildTools = null!;
+    private UpdateWorkspaceFake _workspace = null!;
+
+    private static readonly string[] PkgAB = ["Pkg.A", "Pkg.B"];
 
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
     {
-        _fakeNuget = new FakeNugetService();
-        _fakeInstall = new FakePackageInstallationService();
-        _fakeWorkspace = new FakeWorkspaceSetupService();
-        _fakeBuildTools = new FakeUpdateBuildToolsService { BuildToolsDirectory = _ => CreateBuildToolsDir() };
-
+        _nuget = new ControllableNugetService(new DirectoryInfo(Path.GetTempPath()));
+        _pkg = new FakePackageInstallationService();
+        _buildTools = new FakeBuildToolsService();
+        _workspace = new UpdateWorkspaceFake();
         return services
-            .AddSingleton<INugetService>(_fakeNuget)
-            .AddSingleton<IPackageInstallationService>(_fakeInstall)
-            .AddSingleton<IWorkspaceSetupService>(_fakeWorkspace)
-            .AddSingleton<IBuildToolsService>(_fakeBuildTools);
+            .AddSingleton<INugetService>(_nuget)
+            .AddSingleton<IPackageInstallationService>(_pkg)
+            .AddSingleton<IBuildToolsService>(_buildTools)
+            .AddSingleton<IWindowsAppRuntimeService>(_workspace);
     }
 
-    private const string PackageName = "Test.Pkg";
-
-    private DirectoryInfo CreateBuildToolsDir()
-        => _tempDirectory.CreateSubdirectory("buildtools");
-
-    private void WriteConfig(params (string Name, string Version)[] packages)
+    [TestInitialize]
+    public void Setup()
     {
-        var config = new WinappConfig();
-        foreach (var (name, version) in packages)
+        // Default to the happy path: build tools resolve successfully and no runtime MSIX is found.
+        _buildTools.BuildToolsResult = _tempDirectory;
+        _workspace.MsixDirectory = null;
+    }
+
+    private void SaveConfig(params (string name, string version)[] pins)
+    {
+        var cfg = new WinappConfig();
+        foreach (var (name, version) in pins)
         {
-            config.SetVersion(name, version);
+            cfg.SetVersion(name, version);
         }
-        _configService.Save(config);
+        _configService.Save(cfg);
     }
 
-    private void SaveConfigWith(string pinnedVersion)
-        => WriteConfig((PackageName, pinnedVersion));
+    private UpdateCommand GetCommand() => GetRequiredService<UpdateCommand>();
 
-    private async Task<int> RunUpdateAsync()
-    {
-        var command = GetRequiredService<UpdateCommand>();
-        return await ParseAndInvokeWithCaptureAsync(command, []);
-    }
-
-    // ── No / empty config ───────────────────────────────────────────────
+    // ───────────────────────────── command metadata ─────────────────────────────
 
     [TestMethod]
-    public async Task Update_NoWinappYaml_InstallsBuildToolsOnly()
+    public void UpdateCommand_ExposesNameShortDescriptionAndSetupSdksOption()
     {
-        var command = GetRequiredService<UpdateCommand>();
+        var command = GetCommand();
 
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, []);
-
-        Assert.AreEqual(0, exitCode);
-        Assert.IsEmpty(_fakeInstall.InstallPackagesCalls, "No config means no package install");
-        Assert.HasCount(1, _fakeBuildTools.EnsureCalls);
-        Assert.IsTrue(_fakeBuildTools.EnsureCalls[0], "Update forces the latest build tools");
+        Assert.AreEqual("update", command.Name);
+        Assert.AreEqual("Update packages in winapp.yaml", command.ShortDescription);
+        Assert.Contains(InitCommand.SetupSdksOption, command.Options, "update must expose the --setup-sdks option.");
     }
 
-    [TestMethod]
-    public async Task Update_ConfigWithNoPackages_SkipsPackageUpdate()
-    {
-        WriteConfig(); // empty packages list
-        var command = GetRequiredService<UpdateCommand>();
-
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, []);
-
-        Assert.AreEqual(0, exitCode);
-        Assert.IsEmpty(_fakeInstall.InstallPackagesCalls);
-        Assert.IsEmpty(_fakeNuget.QueriedPackages);
-    }
-
-    // ── Package update decisions ────────────────────────────────────────
+    // ───────────────────────────── config discovery ─────────────────────────────
 
     [TestMethod]
-    public async Task Update_AllPackagesUpToDate_DoesNotReinstall()
+    public async Task Update_NoConfig_SkipsPackageWork_ButEnsuresBuildTools()
     {
-        _fakeNuget.DefaultVersion = "1.6.0";
-        WriteConfig(("Microsoft.WindowsAppSDK", "1.6.0")); // already latest
-        var command = GetRequiredService<UpdateCommand>();
+        var exit = await ParseAndInvokeWithCaptureAsync(GetCommand(), []);
 
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, []);
-
-        Assert.AreEqual(0, exitCode);
-        Assert.HasCount(1, _fakeNuget.QueriedPackages);
-        Assert.IsEmpty(_fakeInstall.InstallPackagesCalls, "Up-to-date packages are not reinstalled");
+        Assert.AreEqual(0, exit);
+        Assert.IsEmpty(_pkg.InstallPackagesCalls, "No winapp.yaml means no package installation.");
+        Assert.IsEmpty(_nuget.LatestQueries, "No config means no version checks.");
+        Assert.HasCount(1, _buildTools.EnsureBuildToolsForceLatest);
+        Assert.IsTrue(_buildTools.EnsureBuildToolsForceLatest[0], "update must force-latest build tools.");
     }
 
     [TestMethod]
-    public async Task Update_OutOfDatePackages_SavesConfigAndReinstalls()
+    public async Task Update_ConfigWithNoPackages_SkipsPackageWork()
     {
-        _fakeNuget.DefaultVersion = "1.6.0";
-        WriteConfig(("Microsoft.WindowsAppSDK", "1.0.0")); // stale
-        var command = GetRequiredService<UpdateCommand>();
+        SaveConfig(); // writes an empty "packages:" section
 
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, []);
+        var exit = await ParseAndInvokeWithCaptureAsync(GetCommand(), []);
 
-        Assert.AreEqual(0, exitCode);
-        Assert.HasCount(1, _fakeInstall.InstallPackagesCalls);
-        var call = _fakeInstall.InstallPackagesCalls[0];
-        CollectionAssert.Contains(call.Packages, "Microsoft.WindowsAppSDK");
-        Assert.IsFalse(call.IgnoreConfig, "Update installs using the updated config");
+        Assert.AreEqual(0, exit);
+        Assert.IsEmpty(_pkg.InstallPackagesCalls);
+        Assert.IsEmpty(_nuget.LatestQueries, "An empty package list must not trigger version checks.");
+    }
 
-        // winapp.yaml was rewritten with the new version
+    // ───────────────────────────── version check / update ─────────────────────────────
+
+    [TestMethod]
+    public async Task Update_AllPackagesUpToDate_DoesNotSaveOrInstall()
+    {
+        SaveConfig(("Pkg.A", "1.0.0"), ("Pkg.B", "2.0.0"));
+        _nuget.LatestVersions["Pkg.A"] = "1.0.0";
+        _nuget.LatestVersions["Pkg.B"] = "2.0.0";
+
+        var exit = await ParseAndInvokeWithCaptureAsync(GetCommand(), []);
+
+        Assert.AreEqual(0, exit);
+        Assert.IsEmpty(_pkg.InstallPackagesCalls, "Nothing to install when everything is current.");
+        CollectionAssert.AreEquivalent(PkgAB, _nuget.LatestQueries, "Both packages must be checked.");
+
+        // The on-disk config must be unchanged.
         var reloaded = _configService.Load();
-        Assert.AreEqual("1.6.0", reloaded.GetVersion("Microsoft.WindowsAppSDK"));
-    }
-
-    // ── Version-decision gate: CompareVersions(latest, current) > 0 ──────
-
-    [TestMethod]
-    public async Task Update_LatestIsHigher_RewritesYamlAndReinstalls()
-    {
-        // Pinned 1.0.0, feed reports 2.0.0 → strictly greater → the persisted version advances and the
-        // updated package is reinstalled.
-        SaveConfigWith("1.0.0");
-        _fakeNuget.DefaultVersion = "2.0.0";
-
-        var exitCode = await RunUpdateAsync();
-
-        Assert.AreEqual(0, exitCode);
-        var persisted = _configService.Load().Packages.Single(p => p.Name == PackageName).Version;
-        Assert.AreEqual("2.0.0", persisted, "A strictly-greater latest version must be written to winapp.yaml.");
-        CollectionAssert.Contains(_fakeInstall.InstalledPackages, PackageName, "An update must reinstall the updated package.");
+        Assert.AreEqual("1.0.0", reloaded.GetVersion("Pkg.A"));
+        Assert.AreEqual("2.0.0", reloaded.GetVersion("Pkg.B"));
     }
 
     [TestMethod]
-    public async Task Update_LatestIsNormalizedEqual_LeavesYamlAndSkipsInstall()
+    public async Task Update_NewerVersionAvailable_SavesYamlAndInstalls()
     {
-        // Pinned 1.0.0, feed reports the normalized-equal "1.0" → CompareVersions == 0 → no update. The
-        // persisted version stays exactly as written and nothing is reinstalled.
-        SaveConfigWith("1.0.0");
-        _fakeNuget.DefaultVersion = "1.0";
+        SaveConfig(("Pkg.A", "1.0.0"), ("Pkg.B", "2.0.0"));
+        _nuget.LatestVersions["Pkg.A"] = "1.5.0"; // newer
+        _nuget.LatestVersions["Pkg.B"] = "2.0.0"; // same
 
-        var exitCode = await RunUpdateAsync();
+        var exit = await ParseAndInvokeWithCaptureAsync(GetCommand(), []);
 
-        Assert.AreEqual(0, exitCode);
-        var persisted = _configService.Load().Packages.Single(p => p.Name == PackageName).Version;
-        Assert.AreEqual("1.0.0", persisted, "A normalized-equal latest version must not rewrite the pinned version.");
-        Assert.IsEmpty(_fakeInstall.InstalledPackages, "A no-op update must not reinstall packages.");
+        Assert.AreEqual(0, exit);
+
+        // winapp.yaml must be rewritten with the upgraded version.
+        var reloaded = _configService.Load();
+        Assert.AreEqual("1.5.0", reloaded.GetVersion("Pkg.A"), "The upgraded version must be persisted.");
+        Assert.AreEqual("2.0.0", reloaded.GetVersion("Pkg.B"));
+
+        // The updated set of packages must be installed with ignoreConfig=false.
+        Assert.HasCount(1, _pkg.InstallPackagesCalls);
+        var call = _pkg.InstallPackagesCalls[0];
+        CollectionAssert.AreEquivalent(PkgAB, call.Packages);
+        Assert.IsFalse(call.IgnoreConfig, "update installs against the freshly-written config, so ignoreConfig must be false.");
     }
 
     [TestMethod]
-    public async Task Update_LatestIsLower_LeavesYamlAndSkipsInstall()
+    public async Task Update_VersionCheckThrowsForOnePackage_KeepsItsCurrentVersion_AndUpgradesOthers()
     {
-        // Pinned 2.0.0, feed reports a lower 1.5.0 → CompareVersions < 0 → no update, no silent downgrade.
-        SaveConfigWith("2.0.0");
-        _fakeNuget.DefaultVersion = "1.5.0";
+        SaveConfig(("Pkg.A", "1.0.0"), ("Pkg.B", "2.0.0"));
+        _nuget.ThrowLatestFor.Add("Pkg.A");        // transient failure for A -> keep current
+        _nuget.LatestVersions["Pkg.B"] = "2.5.0";  // B upgrades -> triggers save+install
 
-        var exitCode = await RunUpdateAsync();
+        var exit = await ParseAndInvokeWithCaptureAsync(GetCommand(), []);
 
-        Assert.AreEqual(0, exitCode);
-        var persisted = _configService.Load().Packages.Single(p => p.Name == PackageName).Version;
-        Assert.AreEqual("2.0.0", persisted, "A lower latest version must never downgrade the pinned version.");
-        Assert.IsEmpty(_fakeInstall.InstalledPackages, "A lower latest version must not trigger a reinstall.");
+        Assert.AreEqual(0, exit);
+
+        var reloaded = _configService.Load();
+        Assert.AreEqual("1.0.0", reloaded.GetVersion("Pkg.A"), "A failed check must retain the current pinned version.");
+        Assert.AreEqual("2.5.0", reloaded.GetVersion("Pkg.B"), "B must be upgraded despite A's failure.");
+        Assert.HasCount(1, _pkg.InstallPackagesCalls, "The upgrade to B must still drive an install.");
     }
 
     [TestMethod]
-    public async Task Update_PreviewSdks_ReinstallsWithPreviewMode()
+    public async Task Update_SetupSdksPreview_PropagatesPreviewModeToVersionChecks()
     {
-        _fakeNuget.DefaultVersion = "2.0.0-preview";
-        WriteConfig(("Microsoft.WindowsAppSDK", "1.0.0"));
-        var command = GetRequiredService<UpdateCommand>();
+        SaveConfig(("Pkg.A", "1.0.0"));
+        _nuget.LatestVersions["Pkg.A"] = "1.6.0-preview1";
 
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--setup-sdks", "preview"]);
+        var exit = await ParseAndInvokeWithCaptureAsync(GetCommand(), ["--setup-sdks", "preview"]);
 
-        Assert.AreEqual(0, exitCode);
-        Assert.HasCount(1, _fakeInstall.InstallPackagesCalls);
+        Assert.AreEqual(0, exit);
+        Assert.IsNotEmpty(_nuget.LatestModes);
+        Assert.IsTrue(_nuget.LatestModes.TrueForAll(m => m == SdkInstallMode.Preview),
+            "The --setup-sdks preview option must flow through to the version lookup mode.");
     }
 
-    // ── Lookup / cancellation failure paths ─────────────────────────────
+    // ───────────────────────────── build tools ─────────────────────────────
 
     [TestMethod]
-    public async Task Update_LatestVersionLookupFails_ExitsNonZeroAndPreservesPin()
+    public async Task Update_BuildToolsFail_ReturnsOneAndSkipsRuntime()
     {
-        // A latest-version lookup that fails closed (a feed outage or auth failure) must NOT be reported as an
-        // authoritative "up to date" result. GetLatestVersionAsync throws; the handler must keep the pinned
-        // version in winapp.yaml untouched, skip the reinstall, and exit non-zero so callers (and CI) surface
-        // the failure instead of a false success that silently freezes the pin.
-        SaveConfigWith("1.0.0");
-        _fakeNuget.PackagesToThrow.Add(PackageName);
+        _buildTools.BuildToolsResult = null; // EnsureBuildToolsAsync returns null => failure
 
-        var exitCode = await RunUpdateAsync();
+        var exit = await ParseAndInvokeWithCaptureAsync(GetCommand(), []);
 
-        Assert.AreEqual(1, exitCode, "A failed latest-version lookup must fail the command, not report success.");
-        var persisted = _configService.Load().Packages.Single(p => p.Name == PackageName).Version;
-        Assert.AreEqual("1.0.0", persisted, "A failed lookup must leave the pinned version unchanged.");
-        Assert.IsEmpty(_fakeInstall.InstalledPackages, "A failed lookup must not trigger a reinstall.");
+        Assert.AreEqual(1, exit, "A build-tools failure must surface as a non-zero exit code.");
+        Assert.IsEmpty(_workspace.InstallRuntimeCalls, "Runtime installation must be skipped when build tools fail.");
+        StringAssert.Contains(ConsoleStdErr.ToString(), "build tools", StringComparison.OrdinalIgnoreCase);
     }
 
-    [TestMethod]
-    public async Task Update_CancelledDuringLookup_AbortsWithoutCheckingRemainingPackages()
-    {
-        // Ctrl+C during a latest-version lookup must abort the whole command — cancellation must NOT be
-        // swallowed by the ordinary lookup-failure handler, which would let the loop keep checking the
-        // remaining packages and then proceed to install / build-tool work. The fake cancels the flow token
-        // while checking the first package and throws; the handler must rethrow that cancellation, so the
-        // second package is never queried and nothing is installed. Contrast with the fail-closed test above,
-        // where an ordinary lookup failure lets the loop continue.
-        WriteConfig(("First.Pkg", "1.0.0"), ("Second.Pkg", "1.0.0"));
-
-        using var cts = new CancellationTokenSource();
-        _fakeNuget.CancelOnQuery = cts;
-        _fakeNuget.CancelOnQueryPackage = "First.Pkg";
-
-        var command = GetRequiredService<UpdateCommand>();
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [], cts.Token);
-
-        Assert.AreNotEqual(0, exitCode, "A cancelled update must not report success.");
-        CollectionAssert.Contains(_fakeNuget.QueriedPackages, "First.Pkg", "The first package triggers the cancellation.");
-        CollectionAssert.DoesNotContain(_fakeNuget.QueriedPackages, "Second.Pkg",
-            "Cancellation must abort the loop, so the second package is never queried.");
-        Assert.IsEmpty(_fakeInstall.InstalledPackages, "A cancelled update must not reinstall packages.");
-    }
-
-    // ── Build tools gating ──────────────────────────────────────────────
+    // ───────────────────────────── runtime install ─────────────────────────────
 
     [TestMethod]
-    public async Task Update_BuildToolsInstallFails_ReturnsError()
+    public async Task Update_RuntimeMsixFound_InstallsWindowsAppRuntime()
     {
-        _fakeBuildTools.BuildToolsDirectory = _ => null; // acquisition failed
-        var command = GetRequiredService<UpdateCommand>();
+        var msixDir = _tempDirectory.CreateSubdirectory("msix");
+        _workspace.MsixDirectory = msixDir;
+        _workspace.InstallRuntimeResult = (2, 0);
 
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, []);
+        var exit = await ParseAndInvokeWithCaptureAsync(GetCommand(), []);
 
-        Assert.AreEqual(1, exitCode);
-        StringAssert.Contains(ConsoleStdErr.ToString(), "Failed to install/update build tools");
-    }
-
-    // ── Runtime install step ────────────────────────────────────────────
-
-    [TestMethod]
-    public async Task Update_MsixDirectoryFound_InstallsRuntime()
-    {
-        _fakeWorkspace.MsixDirectory = _tempDirectory.CreateSubdirectory("msix");
-        var command = GetRequiredService<UpdateCommand>();
-
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, []);
-
-        Assert.AreEqual(0, exitCode);
-        Assert.HasCount(1, _fakeWorkspace.InstallRuntimeCalls);
+        Assert.AreEqual(0, exit);
+        Assert.HasCount(1, _workspace.InstallRuntimeCalls, "A discovered MSIX directory must trigger a runtime install.");
+        Assert.AreEqual(msixDir.FullName, _workspace.InstallRuntimeCalls[0].FullName);
     }
 
     [TestMethod]
-    public async Task Update_NoMsixDirectory_SkipsRuntimeInstall()
+    public async Task Update_NoRuntimeMsix_SkipsRuntimeInstall()
     {
-        _fakeWorkspace.MsixDirectory = null;
-        var command = GetRequiredService<UpdateCommand>();
+        _workspace.MsixDirectory = null;
 
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, []);
+        var exit = await ParseAndInvokeWithCaptureAsync(GetCommand(), []);
 
-        Assert.AreEqual(0, exitCode);
-        Assert.IsEmpty(_fakeWorkspace.InstallRuntimeCalls);
+        Assert.AreEqual(0, exit);
+        Assert.IsEmpty(_workspace.InstallRuntimeCalls, "No MSIX directory means the runtime install is skipped.");
     }
 
-    // ── Failure / options ───────────────────────────────────────────────
+    // ───────────────────────────── exception path ─────────────────────────────
 
     [TestMethod]
-    public async Task Update_UnexpectedException_ReturnsError()
+    public async Task Update_UnexpectedException_IsCaughtAndReturnsOne()
     {
-        _fakeBuildTools.BuildToolsDirectory = _ => throw new InvalidOperationException("boom");
-        var command = GetRequiredService<UpdateCommand>();
+        var msixDir = _tempDirectory.CreateSubdirectory("msix-throw");
+        _workspace.MsixDirectory = msixDir;
+        _workspace.InstallRuntimeException = new InvalidOperationException("boom during runtime install");
 
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, []);
+        var exit = await ParseAndInvokeWithCaptureAsync(GetCommand(), []);
 
-        Assert.AreEqual(1, exitCode);
-        StringAssert.Contains(ConsoleStdErr.ToString(), "Update command failed");
+        Assert.AreEqual(1, exit, "An unexpected exception must be caught and reported as exit code 1.");
+        StringAssert.Contains(ConsoleStdErr.ToString(), "boom during runtime install", StringComparison.Ordinal);
     }
+}
 
-    /// <summary>
-    /// Configurable build-tools fake. Only <see cref="EnsureBuildToolsAsync"/> is used by the
-    /// update flow; the factory lets each test return a directory, null, or throw.
-    /// </summary>
-    private sealed class FakeUpdateBuildToolsService : IBuildToolsService
+/// <summary>
+/// Test-local <see cref="IWindowsAppRuntimeService"/> that records runtime-install calls and can be
+/// told to throw, so the update command's runtime-install and top-level catch paths are reachable
+/// deterministically.
+/// </summary>
+internal sealed class UpdateWorkspaceFake : IWindowsAppRuntimeService
+{
+    public DirectoryInfo? MsixDirectory { get; set; }
+    public List<DirectoryInfo> InstallRuntimeCalls { get; } = [];
+    public (int InstalledCount, int ErrorCount) InstallRuntimeResult { get; set; } = (1, 0);
+    public Exception? InstallRuntimeException { get; set; }
+
+    public DirectoryInfo? FindWindowsAppSdkMsixDirectory(Dictionary<string, string>? usedVersions = null, bool requireExactVersion = false) => MsixDirectory;
+
+    public bool IsRuntimeRegisteredResult { get; set; } = true;
+
+    public Task<(int InstalledCount, int ErrorCount, IReadOnlyList<(string Name, string Version)> RuntimePackages)> InstallWindowsAppRuntimeAsync(DirectoryInfo msixDir, TaskContext taskContext, CancellationToken cancellationToken, string? architecture = null)
     {
-        public List<bool> EnsureCalls { get; } = [];
-        public Func<TaskContext, DirectoryInfo?> BuildToolsDirectory { get; set; } = _ => null;
-
-        public Task<DirectoryInfo?> EnsureBuildToolsAsync(TaskContext taskContext, bool forceLatest = false, CancellationToken cancellationToken = default)
+        InstallRuntimeCalls.Add(msixDir);
+        if (InstallRuntimeException != null)
         {
-            EnsureCalls.Add(forceLatest);
-            return Task.FromResult(BuildToolsDirectory(taskContext));
+            throw InstallRuntimeException;
         }
-
-        public FileInfo? GetBuildToolPath(string toolName) => throw new NotSupportedException();
-
-        public Task<FileInfo> EnsureBuildToolAvailableAsync(string toolName, TaskContext taskContext, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task<(string stdout, string stderr)> RunBuildToolAsync(Tool tool, string arguments, TaskContext taskContext, bool printErrors = true, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
+        return Task.FromResult((InstallRuntimeResult.InstalledCount, InstallRuntimeResult.ErrorCount, (IReadOnlyList<(string Name, string Version)>)[]));
     }
+
+    public bool IsWindowsAppRuntimeRegistered(string? architecture, IReadOnlyList<(string Name, string Version)>? expectedRuntimePackages = null)
+        => IsRuntimeRegisteredResult;
 }

@@ -5,6 +5,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 
+    <!-- WinForms is used only by the real-UIA test fixture (UiaTestFixture) to host a
+         live in-process window that the real UiAutomationService can inspect and drive. -->
+    <UseWindowsForms>true</UseWindowsForms>
+
     <!-- Enable Code Analysis -->
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisMode>Recommended</AnalysisMode>
@@ -31,20 +35,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Azure.Identity" />
     <PackageReference Include="Spectre.Console.Testing" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\WinApp.Cli\WinApp.Cli.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- Exercise the same System.Text.Json NuGet deserialization path the published CLI uses (see the matching
-         option in WinApp.Cli.csproj), so the NuGet integration tests cover the AOT/STJ code path this migration
-         depends on instead of the default Newtonsoft.Json reflection path the test host would otherwise use. -->
-    <RuntimeHostConfigurationOption Include="NuGet.UseSystemTextJsonDeserialization"
-                                    Value="true"
-                                    Trim="true" />
   </ItemGroup>
 
 </Project>

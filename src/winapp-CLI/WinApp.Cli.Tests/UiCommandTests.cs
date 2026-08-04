@@ -23,8 +23,10 @@ public partial class UiCommandTests : BaseCommandTests
     private FakePollDelay _fakePollDelay = null!;
 
     private void AssertJsonErrorCode(string expectedCode)
+        => AssertJsonErrorCodeIn(ConsoleStdErr.ToString(), expectedCode);
+
+    private static void AssertJsonErrorCodeIn(string stderr, string expectedCode)
     {
-        var stderr = ConsoleStdErr.ToString();
         int jsonStart = stderr.IndexOf('{');
         Assert.IsTrue(jsonStart >= 0, $"stderr must contain a JSON error object; got: {stderr}");
         var error = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(

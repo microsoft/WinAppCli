@@ -27,7 +27,18 @@ namespace WinApp.Cli.Services;
 /// a constructor or capture failure never leaves a corrupt file at the final path.
 /// </para>
 /// </remarks>
-internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
+internal interface IVideoEncoder : IDisposable
+{
+    int Width { get; }
+
+    int Height { get; }
+
+    void WriteFrame(ReadOnlySpan<byte> bgra, long sampleTimeHns, long sampleDurationHns);
+
+    void Complete();
+}
+
+internal sealed unsafe class Mp4SinkWriterEncoder : IVideoEncoder
 {
     // MF_VERSION for Windows 7+ (MF_SDK_VERSION 0x0002, MF_API_VERSION 0x0070).
     private const uint MF_VERSION = 0x00020070;
@@ -39,6 +50,7 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
     private readonly uint _frameBytes;
     private readonly string _path;
     private readonly string _tempPath;
+    private readonly bool _overwriteExisting;
     private bool _mfStarted;
     private bool _finalized;   // writer.Finalize() completed
     private bool _fileMoved;   // temp → final move succeeded
@@ -48,11 +60,18 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
 
     public int Height { get; }
 
-    public Mp4SinkWriterEncoder(string path, int width, int height, int fps, uint bitrate)
+    /// <remarks>
+    /// Coverage ceiling (issue #630): tests cover successful one-frame encoding on hosts with Media
+    /// Foundation and constructor cleanup via seams. Remaining uncovered lines are MFStartup/
+    /// sink-writer/media-type native initialization and native failure cleanup arms that require
+    /// faulting COM objects after creation.
+    /// </remarks>
+    public Mp4SinkWriterEncoder(string path, int width, int height, int fps, uint bitrate, bool overwriteExisting = true)
     {
         Width = width;
         Height = height;
         _path = path;
+        _overwriteExisting = overwriteExisting;
         _frameBytes = checked((uint)(width * height * 4));
 
         // Write to a temp sibling so that a pre-existing file at _path is never corrupted
@@ -158,6 +177,18 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
 
     internal static volatile Action<string, string>? s_testPublishAtomic;
 
+    internal static Func<string, int, int, int, uint, IVideoEncoder> s_create =
+        (path, width, height, fps, bitrate) => new Mp4SinkWriterEncoder(path, width, height, fps, bitrate);
+
+    internal static Func<string, int, int, int, uint, IVideoEncoder> s_createNoClobber =
+        (path, width, height, fps, bitrate) => new Mp4SinkWriterEncoder(
+            path, width, height, fps, bitrate, overwriteExisting: false);
+
+    /// <remarks>
+    /// Coverage ceiling (issue #630): descriptor mapping is unit-tested for ordinary HRESULTs; the
+    /// remaining line is the native Media Foundation codec-missing HRESULT arm, which only occurs on
+    /// Windows N/KN or hosts without the H.264 encoder.
+    /// </remarks>
     internal static bool TryDescribeEncoderInitFailure(Exception ex, out string message)
     {
         var hr = ex.HResult;
@@ -176,6 +207,11 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
     /// Writes a single top-down BGRA frame. <paramref name="bgra"/> must contain
     /// exactly Width*Height*4 bytes.
     /// </summary>
+    /// <remarks>
+    /// Coverage ceiling (issue #630): the validation and successful one-frame path are tested, but
+    /// the per-frame Media Foundation buffer/sample COM error cleanup arms require faulting native MF
+    /// objects after creation and cannot be triggered safely with managed fakes.
+    /// </remarks>
     public void WriteFrame(ReadOnlySpan<byte> bgra, long sampleTimeHns, long sampleDurationHns)
     {
         if (bgra.Length < _frameBytes)
@@ -232,10 +268,21 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
         // The temp file is now owned by _path.
         // _fileMoved is set ONLY after the move succeeds so that Dispose() can still
         // clean up the temp if the move throws (e.g., destination path locked).
-        PublishAtomicWithTestSeam(_tempPath, _path);
+        if (_overwriteExisting)
+        {
+            PublishAtomicWithTestSeam(_tempPath, _path);
+        }
+        else
+        {
+            File.Move(_tempPath, _path, overwrite: false);
+        }
         _fileMoved = true;
     }
 
+    /// <remarks>
+    /// Coverage ceiling (issue #630): production atomic publish is covered; the remaining branch is a
+    /// test seam used only for injected file-move faults and is reset after each test.
+    /// </remarks>
     private static void PublishAtomicWithTestSeam(string tempPath, string destPath)
     {
         if (s_testPublishAtomic is { } testPublish)
@@ -263,6 +310,10 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
     private static ulong PackU64(uint high, uint low) => ((ulong)high << 32) | low;
 
     /// <summary>Deterministically releases a source-generated COM RCW (ComWrappers-based).</summary>
+    /// <remarks>
+    /// Coverage ceiling (issue #630): this releases source-generated Media Foundation COM wrappers.
+    /// The null/non-disposable arms are defensive COM cleanup paths not produced by the real MF APIs.
+    /// </remarks>
     private static void ReleaseCom(object? comObject)
     {
         if (comObject is IDisposable disposable)
@@ -271,6 +322,11 @@ internal sealed unsafe class Mp4SinkWriterEncoder : IDisposable
         }
     }
 
+    /// <remarks>
+    /// Coverage ceiling (issue #630): tests cover successful completion/disposal and constructor
+    /// failure cleanup. Remaining lines are best-effort temp-file/MFShutdown exception arms that
+    /// require native Media Foundation or filesystem fault injection after COM allocation.
+    /// </remarks>
     public void Dispose()
     {
         if (_disposed)

@@ -390,7 +390,104 @@ public class PackageRegistrationServiceTests
         Assert.IsNull(svc.GetInstalledVersion("Contoso.App"));
     }
 
-    // ---- FindDevPackages ----------------------------------------------------
+    [TestMethod]
+    public void GetInstalledVersion_MultipleVersions_ReturnsHighest()
+    {
+        // Multiple servicing versions of the same package can be registered at once and enumeration
+        // order is not newest-first. GetInstalledVersion must return the HIGHEST so the runtime gate
+        // doesn't reinstall/fail when a newer sufficient version is already present (Copilot review C2).
+        var (svc, _) = NewService();
+        svc.EnumerateUserPackagesImpl = () =>
+        [
+            View("Contoso.App", maj: 1, min: 2, bld: 0, rev: 5),
+            View("Contoso.App", maj: 1, min: 10, bld: 0, rev: 0),  // highest — but not last
+            View("Contoso.App", maj: 1, min: 2, bld: 9, rev: 9),
+        ];
+
+        Assert.AreEqual("1.10.0.0", svc.GetInstalledVersion("Contoso.App"));
+    }
+
+    [TestMethod]
+    public void GetInstalledVersion_WrongArchitecture_ReturnsNull()
+    {
+        // The package IS installed, but only for x64. A run targeting arm64 must NOT treat the
+        // x64 package as satisfying the gate — otherwise the arch-specific Framework/DDLM for
+        // arm64 is never installed and the app fails to bootstrap. The arch filter (C35) is the
+        // only thing preventing this false positive.
+        var (svc, _) = NewService();
+        svc.EnumerateUserPackagesImpl = () =>
+        [
+            View("Contoso.App", maj: 5, min: 0, bld: 0, rev: 0, arch: Windows.System.ProcessorArchitecture.X64),
+        ];
+
+        Assert.IsNull(svc.GetInstalledVersion("Contoso.App", "arm64"));
+    }
+
+    [TestMethod]
+    public void GetInstalledVersion_MixedArchitectures_ReturnsHighestWithinRequestedArch()
+    {
+        // Same package name registered for multiple arches. The absolute highest version is x64,
+        // but a request for arm64 must return the highest version WITHIN arm64 — never the higher
+        // x64 build. This proves the filter runs before the max-version selection, not after.
+        var (svc, _) = NewService();
+        svc.EnumerateUserPackagesImpl = () =>
+        [
+            View("Contoso.App", maj: 9, min: 9, bld: 9, rev: 9, arch: Windows.System.ProcessorArchitecture.X64),
+            View("Contoso.App", maj: 1, min: 2, bld: 0, rev: 0, arch: Windows.System.ProcessorArchitecture.Arm64),
+            View("Contoso.App", maj: 1, min: 5, bld: 0, rev: 0, arch: Windows.System.ProcessorArchitecture.Arm64),
+            View("Contoso.App", maj: 1, min: 3, bld: 0, rev: 0, arch: Windows.System.ProcessorArchitecture.Arm64),
+        ];
+
+        Assert.AreEqual("1.5.0.0", svc.GetInstalledVersion("Contoso.App", "arm64"));
+    }
+
+    // ---- IsPackageInstalled (separate filtering loop) ----------------------
+
+    [TestMethod]
+    public void IsPackageInstalled_MatchingArchitecture_ReturnsTrue()
+    {
+        var (svc, _) = NewService();
+        svc.EnumerateUserPackagesImpl = () =>
+        [
+            View("Contoso.Runtime.1.0", arch: Windows.System.ProcessorArchitecture.Arm64),
+        ];
+
+        Assert.IsTrue(svc.IsPackageInstalled("Contoso.Runtime", "arm64"));
+    }
+
+    [TestMethod]
+    public void IsPackageInstalled_WrongArchitecture_ReturnsFalse()
+    {
+        // Only an x64 build is present; an arm64 request must report "not installed" so the caller
+        // installs the arm64 runtime. IsPackageInstalled has its own filtering loop, distinct from
+        // GetInstalledVersion, so it needs its own arch-gate coverage (C35).
+        var (svc, _) = NewService();
+        svc.EnumerateUserPackagesImpl = () =>
+        [
+            View("Contoso.Runtime.1.0", arch: Windows.System.ProcessorArchitecture.X64),
+        ];
+
+        Assert.IsFalse(svc.IsPackageInstalled("Contoso.Runtime", "arm64"));
+    }
+
+    [TestMethod]
+    public void IsPackageInstalled_MixedArchitectures_MatchesOnlyRequestedArch()
+    {
+        // Both arches present. A request for arm64 must find the arm64 one and ignore the x64 one;
+        // a request for x86 (absent) must return false even though the same-named package exists.
+        var (svc, _) = NewService();
+        svc.EnumerateUserPackagesImpl = () =>
+        [
+            View("Contoso.Runtime.1.0", arch: Windows.System.ProcessorArchitecture.X64),
+            View("Contoso.Runtime.1.0", arch: Windows.System.ProcessorArchitecture.Arm64),
+        ];
+
+        Assert.IsTrue(svc.IsPackageInstalled("Contoso.Runtime", "arm64"));
+        Assert.IsTrue(svc.IsPackageInstalled("Contoso.Runtime", "x64"));
+        Assert.IsFalse(svc.IsPackageInstalled("Contoso.Runtime", "x86"));
+    }
+
+
 
     [TestMethod]
     public void FindDevPackages_MapsMatchingPackages()
@@ -531,8 +628,9 @@ public class PackageRegistrationServiceTests
         ushort bld = 0,
         ushort rev = 0,
         bool dev = true,
-        Func<string?>? loc = null)
-        => new(name, fullName, maj, min, bld, rev, dev, loc ?? (() => null));
+        Func<string?>? loc = null,
+        Windows.System.ProcessorArchitecture arch = Windows.System.ProcessorArchitecture.Unknown)
+        => new(name, fullName, maj, min, bld, rev, dev, loc ?? (() => null), arch);
 
     private static string CreateTempManifest(string identityName)
     {
@@ -561,5 +659,38 @@ public class PackageRegistrationServiceTests
         {
             // Best-effort cleanup.
         }
+    }
+
+    // --- MapArchitecture: the kernel that decides whether GetInstalledVersion/IsPackageInstalled
+    // apply an arch filter. null => no filtering (folder-mode / L2 behavior); a concrete value =>
+    // only matching-arch packages count as installed (project-mode arch-correctness).
+
+    [TestMethod]
+    [DataRow("x64", Windows.System.ProcessorArchitecture.X64)]
+    [DataRow("X64", Windows.System.ProcessorArchitecture.X64)]
+    [DataRow(" arm64 ", Windows.System.ProcessorArchitecture.Arm64)]
+    [DataRow("x86", Windows.System.ProcessorArchitecture.X86)]
+    public void MapArchitecture_KnownArch_MapsToWinRtArchitecture(string arch, Windows.System.ProcessorArchitecture expected)
+    {
+        Assert.AreEqual(expected, PackageRegistrationService.MapArchitecture(arch));
+    }
+
+    [TestMethod]
+    [DataRow(null)]
+    [DataRow("")]
+    [DataRow("   ")]
+    public void MapArchitecture_NullOrEmpty_ReturnsNull_SoNoArchFilterIsApplied(string? arch)
+    {
+        // Folder-mode run passes architecture == null. MapArchitecture must return null so the
+        // filter `wantedArch is not null && ...` is skipped and any installed package (including
+        // a Neutral-arch one) still counts as installed — byte-for-byte the pre-project-mode
+        // behavior required by the #1 hard constraint.
+        Assert.IsNull(PackageRegistrationService.MapArchitecture(arch));
+    }
+
+    [TestMethod]
+    public void MapArchitecture_UnrecognizedArch_ReturnsNull()
+    {
+        Assert.IsNull(PackageRegistrationService.MapArchitecture("sparc"));
     }
 }

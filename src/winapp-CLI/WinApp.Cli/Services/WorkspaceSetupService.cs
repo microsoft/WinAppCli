@@ -3,7 +3,6 @@
 
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
-using System.Runtime.InteropServices;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
@@ -37,7 +36,7 @@ internal class WorkspaceSetupService(
     ICppWinrtService cppWinrtService,
     IPackageLayoutService packageLayoutService,
     IWinmdsLockfileService winmdsLockfileService,
-    IPackageRegistrationService packageRegistrationService,
+    IWindowsAppRuntimeService windowsAppRuntimeService,
     INugetService nugetService,
     IManifestService manifestService,
     IDevModeService devModeService,
@@ -46,19 +45,12 @@ internal class WorkspaceSetupService(
     IDotNetService dotNetService,
     IStatusService statusService,
     ICurrentDirectoryProvider currentDirectoryProvider,
-    NugetSourceProvider nugetSourceProvider,
     IAnsiConsole ansiConsole,
     ILogger<WorkspaceSetupService> logger) : IWorkspaceSetupService
 {
     public async Task<int> SetupWorkspaceAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken = default)
     {
         configService.ConfigPath = new FileInfo(Path.Combine(options.ConfigDir.FullName, "winapp.yaml"));
-
-        // Resolve the user's nuget.config hierarchy from the selected project/config directory, which can
-        // differ from the process working directory when `init <dir>` / `restore --config-dir <dir>` is
-        // used. Without this, a project-level private feed, credentials or globalPackagesFolder would be
-        // ignored unless the user first changed into that directory.
-        nugetSourceProvider.SetConfigRoot(options.ConfigDir);
 
         // Detect .NET project (.csproj) in the base directory
         FileInfo? csprojFile = null;
@@ -368,7 +360,7 @@ internal class WorkspaceSetupService(
                         var existingVersions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                         try
                         {
-                            var packageList = await dotNetService.GetPackageListAsync(csprojFile, includeTransitive: false, cancellationToken);
+                            var packageList = await dotNetService.GetPackageListAsync(csprojFile, includeTransitive: false, cancellationToken: cancellationToken);
                             var project = packageList?.Projects?.FirstOrDefault();
                             if (project is not null)
                             {
@@ -645,12 +637,12 @@ internal class WorkspaceSetupService(
                     {
                         try
                         {
-                            var msixDir = FindWindowsAppSdkMsixDirectory(usedVersions);
+                            var msixDir = windowsAppRuntimeService.FindWindowsAppSdkMsixDirectory(usedVersions);
 
                             if (msixDir != null)
                             {
                                 // Install Windows App SDK runtime packages
-                                (int installedCount, int errorCount) = await InstallWindowsAppRuntimeAsync(msixDir, taskContext, cancellationToken);
+                                (int installedCount, int errorCount, _) = await windowsAppRuntimeService.InstallWindowsAppRuntimeAsync(msixDir, taskContext, cancellationToken);
 
                                 string? version = null;
                                 if (usedVersions != null)
@@ -1168,296 +1160,12 @@ internal class WorkspaceSetupService(
     }
 
     /// <summary>
-    /// Package entry information from MSIX inventory
-    /// </summary>
-    public class MsixPackageEntry
-    {
-        public required string FileName { get; set; }
-        public required string PackageIdentity { get; set; }
-    }
-
-    /// <summary>
-    /// Parses the MSIX inventory file and returns package entries (shared implementation)
-    /// </summary>
-    /// <param name="msixDir">Directory containing the MSIX packages</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>List of package entries, or null if not found</returns>
-    public static async Task<List<MsixPackageEntry>?> ParseMsixInventoryAsync(TaskContext taskContext, DirectoryInfo msixDir, CancellationToken cancellationToken)
-    {
-        var architecture = GetSystemArchitecture();
-
-        taskContext.AddDebugMessage($"{UiSymbols.Note} Detected system architecture: {architecture}");
-
-        // Look for MSIX packages for the current architecture
-        var msixArchDir = Path.Combine(msixDir.FullName, $"win10-{architecture}");
-        if (!Directory.Exists(msixArchDir))
-        {
-            taskContext.AddDebugMessage($"{UiSymbols.Note} No MSIX packages found for architecture {architecture}");
-            taskContext.AddDebugMessage($"{UiSymbols.Note} Available directories: {string.Join(", ", msixDir.GetDirectories().Select(d => d.Name))}");
-            return null;
-        }
-
-        // Read the MSIX inventory file
-        var inventoryPath = Path.Combine(msixArchDir, "msix.inventory");
-        if (!File.Exists(inventoryPath))
-        {
-            taskContext.AddDebugMessage($"{UiSymbols.Note} No msix.inventory file found in {msixArchDir}");
-            return null;
-        }
-
-        var inventoryLines = await File.ReadAllLinesAsync(inventoryPath, cancellationToken);
-        var packageEntries = inventoryLines
-            .Where(line => !string.IsNullOrWhiteSpace(line) && line.Contains('='))
-            .Select(line => line.Split('=', 2))
-            .Where(parts => parts.Length == 2)
-            .Select(parts => new MsixPackageEntry { FileName = parts[0].Trim(), PackageIdentity = parts[1].Trim() })
-            .ToList();
-
-        if (packageEntries.Count == 0)
-        {
-            taskContext.AddDebugMessage($"{UiSymbols.Note} No valid package entries found in msix.inventory");
-            return null;
-        }
-
-        taskContext.AddDebugMessage($"{UiSymbols.Package} Found {packageEntries.Count} MSIX packages in inventory");
-
-        return packageEntries;
-    }
-
-    /// <summary>
-    /// Reads the actual package Name and Version from the AppxManifest.xml inside an MSIX file.
-    /// The MSIX inventory file can have incorrect package names (e.g., the DDLM), so we read
-    /// the real identity directly from the package to ensure correct installation checks.
-    /// </summary>
-    private static (string? Name, string? Version) ReadMsixIdentity(string msixFilePath, TaskContext taskContext)
-    {
-        try
-        {
-            using var zip = System.IO.Compression.ZipFile.OpenRead(msixFilePath);
-            var manifestEntry = zip.GetEntry("AppxManifest.xml");
-            if (manifestEntry == null)
-            {
-                return (null, null);
-            }
-
-            using var stream = manifestEntry.Open();
-            var doc = System.Xml.Linq.XDocument.Load(stream);
-            var identityElement = doc.Root?.Elements()
-                .FirstOrDefault(e => e.Name.LocalName == "Identity");
-
-            var name = identityElement?.Attribute("Name")?.Value;
-            var version = identityElement?.Attribute("Version")?.Value;
-            return (name, version);
-        }
-        catch (Exception ex)
-        {
-            taskContext.AddDebugMessage($"{UiSymbols.Note} Could not read identity from {Path.GetFileName(msixFilePath)}: {ex.Message}");
-            return (null, null);
-        }
-    }
-
-    /// <summary>
-    /// Installs Windows App SDK runtime MSIX packages for the current system architecture
-    /// </summary>
-    /// <param name="msixDir">Directory containing the MSIX packages</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    public async Task<(int InstalledCount, int ErrorCount)> InstallWindowsAppRuntimeAsync(DirectoryInfo msixDir, TaskContext taskContext, CancellationToken cancellationToken)
-    {
-        var architecture = GetSystemArchitecture();
-
-        // Get package entries from MSIX inventory
-        var packageEntries = await ParseMsixInventoryAsync(taskContext, msixDir, cancellationToken);
-        if (packageEntries == null || packageEntries.Count == 0)
-        {
-            return (0, 0);
-        }
-
-        var msixArchDir = Path.Combine(msixDir.FullName, $"win10-{architecture}");
-
-        // Build list of packages to evaluate
-        var packagesToCheck = new List<(string FilePath, string PackageName, string NewVersion, string FileName)>();
-        foreach (var entry in packageEntries)
-        {
-            var msixFilePath = Path.Combine(msixArchDir, entry.FileName);
-            if (!File.Exists(msixFilePath))
-            {
-                taskContext.AddDebugMessage($"{UiSymbols.Note} MSIX file not found: {msixFilePath}");
-                continue;
-            }
-
-            // Read the actual package identity from the MSIX's AppxManifest.xml.
-            // The inventory file's PackageIdentity can differ from the real installed name.
-            var (packageName, newVersionString) = ReadMsixIdentity(msixFilePath, taskContext);
-            if (packageName == null)
-            {
-                // Fallback: parse from inventory identity string
-                var identityParts = entry.PackageIdentity.Split('_');
-                packageName = identityParts[0];
-                newVersionString = identityParts.Length >= 2 ? identityParts[1] : "";
-            }
-
-            packagesToCheck.Add((msixFilePath, packageName, newVersionString ?? "", entry.FileName));
-        }
-
-        if (packagesToCheck.Count == 0)
-        {
-            return (0, 0);
-        }
-
-        taskContext.AddDebugMessage($"{UiSymbols.Info} Checking and installing {packagesToCheck.Count} MSIX packages");
-
-        var installedCount = 0;
-        var errorCount = 0;
-
-        foreach (var (filePath, packageName, newVersion, fileName) in packagesToCheck)
-        {
-            // Check if already installed with same or newer version
-            var installedVersion = packageRegistrationService.GetInstalledVersion(packageName);
-            if (installedVersion != null)
-            {
-                if (Version.TryParse(installedVersion, out var existing) &&
-                    Version.TryParse(newVersion, out var incoming) &&
-                    existing >= incoming)
-                {
-                    taskContext.AddDebugMessage($"{UiSymbols.Check} {fileName}: Already installed or newer version exists");
-                    continue;
-                }
-            }
-
-            taskContext.AddDebugMessage($"{UiSymbols.Info} {fileName}: Will install");
-
-            try
-            {
-                await packageRegistrationService.InstallPackageAsync(filePath, cancellationToken);
-                installedCount++;
-                taskContext.AddDebugMessage($"{UiSymbols.Check} {fileName}: Installation successful");
-            }
-            catch (Exception ex)
-            {
-                errorCount++;
-                taskContext.AddDebugMessage($"{UiSymbols.Note} {fileName}: {ex.Message}");
-            }
-        }
-
-        // Provide summary feedback
-        if (installedCount > 0)
-        {
-            taskContext.AddDebugMessage($"{UiSymbols.Check} Installed {installedCount} MSIX packages");
-        }
-        if (errorCount > 0)
-        {
-            taskContext.AddDebugMessage($"{UiSymbols.Note} {errorCount} packages failed to install");
-        }
-
-        return (installedCount, errorCount);
-    }
-
-    /// <summary>
-    /// Gets the current system architecture string for package selection
+    /// Gets the current system architecture string for package selection. Thin delegator to
+    /// <see cref="RunArchHelper.DefaultArchitecture"/>, which owns the process-arch mapping; kept for
+    /// the many existing callers that reference this name.
     /// </summary>
     /// <returns>Architecture string (x64, arm64, x86)</returns>
-    public static string GetSystemArchitecture()
-    {
-        var arch = RuntimeInformation.ProcessArchitecture;
-        return arch switch
-        {
-            Architecture.X64 => "x64",
-            Architecture.Arm64 => "arm64",
-            Architecture.X86 => "x86",
-            _ => "x64" // Default fallback
-        };
-    }
-
-    /// <summary>
-    /// Finds the MSIX directory for Windows App SDK runtime packages
-    /// </summary>
-    /// <param name="usedVersions">Optional dictionary of package versions to look for specific installed packages</param>
-    /// <returns>The path to the MSIX directory, or null if not found</returns>
-    public DirectoryInfo? FindWindowsAppSdkMsixDirectory(Dictionary<string, string>? usedVersions = null)
-    {
-        var nugetCacheDir = nugetService.GetNuGetGlobalPackagesDir();
-        return FindMsixDirectoryInNuGetCache(nugetCacheDir, usedVersions);
-    }
-
-    /// <summary>
-    /// Searches the NuGet global packages cache (lowercase id/version folder convention).
-    /// </summary>
-    private static DirectoryInfo? FindMsixDirectoryInNuGetCache(DirectoryInfo nugetCacheDir, Dictionary<string, string>? usedVersions)
-    {
-        if (usedVersions != null)
-        {
-            // Try runtime package first (Windows App SDK 1.8+)
-            if (usedVersions.TryGetValue(BuildToolsService.WINAPP_SDK_RUNTIME_PACKAGE, out var runtimeVersion))
-            {
-                var msixDir = TryGetMsixDirectoryFromNuGetCache(nugetCacheDir, BuildToolsService.WINAPP_SDK_RUNTIME_PACKAGE, runtimeVersion);
-                if (msixDir != null)
-                {
-                    return msixDir;
-                }
-            }
-
-            // Fallback to main package
-            if (usedVersions.TryGetValue(BuildToolsService.WINAPP_SDK_PACKAGE, out var mainVersion))
-            {
-                var msixDir = TryGetMsixDirectoryFromNuGetCache(nugetCacheDir, BuildToolsService.WINAPP_SDK_PACKAGE, mainVersion);
-                if (msixDir != null)
-                {
-                    return msixDir;
-                }
-            }
-        }
-
-        // General scan: look for any runtime package directories
-        var runtimeDir = new DirectoryInfo(Path.Combine(nugetCacheDir.FullName, BuildToolsService.WINAPP_SDK_RUNTIME_PACKAGE.ToLowerInvariant()));
-        if (runtimeDir.Exists)
-        {
-            foreach (var versionDir in runtimeDir.GetDirectories().OrderByDescending(d => d.Name, new VersionStringComparer()))
-            {
-                var msixDir = TryGetMsixDirectoryFromPath(versionDir);
-                if (msixDir != null)
-                {
-                    return msixDir;
-                }
-            }
-        }
-
-        // Fallback: main package
-        var mainDir = new DirectoryInfo(Path.Combine(nugetCacheDir.FullName, BuildToolsService.WINAPP_SDK_PACKAGE.ToLowerInvariant()));
-        if (mainDir.Exists)
-        {
-            foreach (var versionDir in mainDir.GetDirectories().OrderByDescending(d => d.Name, new VersionStringComparer()))
-            {
-                var msixDir = TryGetMsixDirectoryFromPath(versionDir);
-                if (msixDir != null)
-                {
-                    return msixDir;
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Checks the NuGet cache for a specific package/version (lowercase ID/version layout).
-    /// </summary>
-    private static DirectoryInfo? TryGetMsixDirectoryFromNuGetCache(DirectoryInfo nugetCacheDir, string packageId, string version)
-    {
-        // NuGet global cache uses lowercase package IDs
-        var pkgVersionDir = new DirectoryInfo(Path.Combine(nugetCacheDir.FullName, packageId.ToLowerInvariant(), version));
-        return TryGetMsixDirectoryFromPath(pkgVersionDir);
-    }
-
-    /// <summary>
-    /// Helper method to check if an MSIX directory exists for a given package path
-    /// </summary>
-    /// <param name="packagePath">The full path to the package directory</param>
-    /// <returns>The MSIX directory path if it exists, null otherwise</returns>
-    private static DirectoryInfo? TryGetMsixDirectoryFromPath(DirectoryInfo packagePath)
-    {
-        var msixDir = new DirectoryInfo(Path.Combine(packagePath.FullName, "tools", "MSIX"));
-        return msixDir.Exists ? msixDir : null;
-    }
+    public static string GetSystemArchitecture() => RunArchHelper.DefaultArchitecture();
 
     /// <summary>
     /// Runs <paramref name="work"/> while showing a Spectre.Console spinner with <paramref name="message"/>.
@@ -1483,30 +1191,5 @@ internal class WorkspaceSetupService(
 
         logger.LogInformation("{Message}", message);
         return await work(cancellationToken);
-    }
-
-    /// <summary>
-    /// Comparer for sorting version strings, including prerelease support
-    /// </summary>
-    private class VersionStringComparer : IComparer<string>
-    {
-        public int Compare(string? x, string? y)
-        {
-            if (x == null && y == null)
-            {
-                return 0;
-            }
-            if (x == null)
-            {
-                return -1;
-            }
-            if (y == null)
-            {
-                return 1;
-            }
-
-            // Use the same comparison logic as NugetService.CompareVersions
-            return NugetService.CompareVersions(x, y);
-        }
     }
 }

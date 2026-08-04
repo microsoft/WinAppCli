@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Linq;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.UI.Input.KeyboardAndMouse;
@@ -59,7 +60,39 @@ internal static class KeyboardInput
     /// </remarks>
     internal static Func<bool> s_foregroundWindowIsNull = DefaultForegroundWindowIsNull;
 
+    /// <remarks>
+    /// Native adapter seam for issue #657 (follow-up H1): re-verifies before each throttled SendInput
+    /// burst that the injection target still owns the foreground (its GA_ROOT is the foreground window).
+    /// A long payload is paced over many SendInput calls spanning seconds, so a focus change mid-injection
+    /// would otherwise spray the remaining keystrokes into whatever window is now foreground. Defaults to the
+    /// shared <see cref="ForegroundGuard.ForegroundBelongsTo"/> ancestry check; tests inject a predicate to
+    /// drive the drift-abort branch deterministically.
+    /// </remarks>
+    internal static Func<long, bool> s_foregroundBelongsToTarget = ForegroundGuard.ForegroundBelongsTo;
+
     internal static Action<int> s_sleep = Thread.Sleep;
+
+    /// <summary>
+    /// Number of characters injected per <c>SendInput</c> call for literal typed text. Long text sent as
+    /// one unbroken burst overruns the target thread's input queue, which silently drops characters even
+    /// though <c>SendInput</c> reports success (issue #657). Splitting the text into small chunks paced by
+    /// <see cref="s_chunkDelayMs"/> lets the target drain its queue between bursts so every character lands.
+    /// </summary>
+    internal const int DefaultTextChunkChars = 16;
+
+    /// <summary>
+    /// Pause (ms) between injected chunks, giving the target time to pump its input queue. Chosen so the
+    /// injection rate (<see cref="DefaultTextChunkChars"/> chars per delay) stays comfortably below the
+    /// rate a target drains its input queue, with margin at both the coarse (~15.6&#160;ms) and fine
+    /// (~1&#160;ms) Windows timer resolutions <c>Thread.Sleep</c> may run at.
+    /// </summary>
+    internal const int DefaultChunkDelayMs = 15;
+
+    /// <remarks>Overridable seam so tests can drive the chunking branches deterministically.</remarks>
+    internal static int s_textChunkChars = DefaultTextChunkChars;
+
+    /// <remarks>Overridable seam so tests can drive the throttle branches deterministically.</remarks>
+    internal static int s_chunkDelayMs = DefaultChunkDelayMs;
 
     private static unsafe uint DefaultSendInput(INPUT[] inputs)
     {
@@ -88,7 +121,10 @@ internal static class KeyboardInput
         s_vkKeyScan = PInvoke.VkKeyScan;
         s_mapVirtualKey = DefaultMapVirtualKey;
         s_foregroundWindowIsNull = DefaultForegroundWindowIsNull;
+        s_foregroundBelongsToTarget = ForegroundGuard.ForegroundBelongsTo;
         s_sleep = Thread.Sleep;
+        s_textChunkChars = DefaultTextChunkChars;
+        s_chunkDelayMs = DefaultChunkDelayMs;
     }
 
     public static void Send(long hwnd, IReadOnlyList<KeyAction> actions, KeyTransport transport)
@@ -99,7 +135,7 @@ internal static class KeyboardInput
                 SendViaPostMessage(new HWND((nint)hwnd), actions);
                 break;
             case KeyTransport.SendInput:
-                SendViaSendInput(actions);
+                SendViaSendInput(hwnd, actions);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(transport), transport, "Unknown key transport.");
@@ -137,7 +173,7 @@ internal static class KeyboardInput
                     break;
 
                 case TextInput text:
-                    foreach (var ch in text.Text)
+                    foreach (var ch in NormalizeNewlines(text.Text))
                     {
                         s_postMessage(hwnd, PInvoke.WM_CHAR, new WPARAM(ch), new LPARAM(1));
                     }
@@ -174,68 +210,206 @@ internal static class KeyboardInput
         return lParam;
     }
 
-    private static void SendViaSendInput(IReadOnlyList<KeyAction> actions)
+    private static void SendViaSendInput(long hwnd, IReadOnlyList<KeyAction> actions)
     {
-        var array = BuildSendInputBatch(actions, s_vkKeyScan);
-        if (array.Length == 0)
-        {
-            return;
-        }
+        // A single SendInput call carrying the whole payload overruns the target thread's input queue,
+        // which silently drops characters even though SendInput returns success (issue #657). Split the
+        // work into small self-contained segments (each chord, and literal text in chunks of
+        // s_textChunkChars) and pace only the *continuation* chunks of a split text run — the sole place the
+        // #657 overrun happens — so short text and chord sequences (e.g. "ctrl+a delete") add no latency.
+        var segments = BuildSendInputSegments(actions, s_vkKeyScan);
 
-        var sent = s_sendInput(array);
-        if (sent != (uint)array.Length)
-        {
-            // A zero or short write can strand a key/modifier in the down state (e.g. a Ctrl-down
-            // whose matching up never fired), which corrupts the whole session. Best-effort release
-            // everything we pressed before surfacing the failure.
-            ReleaseHeldKeys(array);
+        // Track whether any earlier segment already landed. If a later segment then fails, the caller must be
+        // warned that a naive retry would re-type the text that already went in (issue #657 follow-up).
+        bool anyDelivered = false;
 
-            throw new InvalidOperationException(sent == 0
-                ? (s_foregroundWindowIsNull()
-                    // No foreground window → the session is locked or on a secure desktop, where a
-                    // user-session process can't inject. That's not an elevation/UIPI problem.
-                    ? "SendInput failed — no interactive desktop is available (the session is locked " +
-                      "or on a secure desktop). Unlock the session and retry."
-                    : "SendInput failed — the target window may be running at a higher integrity level (elevated) " +
-                      "or be an AppContainer/AppX app blocked by UIPI. Try --via post-message, or run this CLI as administrator.")
-                : $"SendInput delivered only {sent} of {array.Length} key events — input was partially applied. " +
-                  "Held keys were released; retry the gesture.");
+        foreach (var segment in segments)
+        {
+            var events = segment.Events;
+            if (events.Length == 0)
+            {
+                continue;
+            }
+
+            if (segment.ThrottleBefore)
+            {
+                // This is a 2nd-or-later chunk of one long literal-text run. Pace it so the target can drain
+                // its input queue between bursts (issue #657).
+                s_sleep(s_chunkDelayMs);
+
+                // That pause widens the interval since the command's one-time pre-send foreground check, and
+                // SendInput is OS-wide — it lands on whatever window holds the foreground. If focus left the
+                // target during the pause (a popup stole it, the user clicked away), the rest of the literal
+                // text would be typed into the wrong window and could leak secrets (issue #657 follow-up H1).
+                // Re-verify the target still owns the foreground before each paced chunk and abort on drift.
+                // The guard is scoped to literal-text continuation chunks on purpose: a chord may legitimately
+                // move the foreground (alt+tab, win+d) and must not be treated as drift. We deliberately inject
+                // no releases here — every completed segment is self-balanced (nothing is held), and any
+                // SendInput now would go to the window that stole focus, the exact misdirection we're
+                // preventing. (hwnd == 0 means there is no target to verify against; direct callers passing 0
+                // opt out.)
+                if (hwnd != 0 && !s_foregroundBelongsToTarget(hwnd))
+                {
+                    throw BuildForegroundLostFailure();
+                }
+            }
+
+            var sent = s_sendInput(events);
+            if (sent != (uint)events.Length)
+            {
+                // A zero or short write can strand a key/modifier in the down state (e.g. a Shift-down
+                // whose matching up never fired), which corrupts the whole session. Every already-sent
+                // segment is balanced (its downs and ups are contained within it), so only this failing
+                // segment can leave a key held — best-effort release it before surfacing the failure.
+                ReleaseHeldKeys(events);
+                throw BuildSendInputFailure(sent, events.Length, anyDelivered);
+            }
+
+            anyDelivered = true;
         }
     }
 
-    internal static INPUT[] BuildSendInputBatch(IReadOnlyList<KeyAction> actions, Func<char, short>? vkKeyScan = null)
+    /// <summary>
+    /// Builds the failure thrown when the foreground window drifts away from the injection target partway
+    /// through a throttled send-input sequence (issue #657 follow-up H1). Surfaced as a
+    /// <see cref="ForegroundLostException"/> so the command maps it to the same foreground_not_target
+    /// contract as the pre-send foreground check, rather than a generic error.
+    /// </summary>
+    private static ForegroundLostException BuildForegroundLostFailure() =>
+        new("SendInput aborted — the target window lost the foreground partway through sending, so the " +
+            "remaining keystrokes were withheld to avoid injecting them into whatever window took focus.");
+
+    /// <summary>
+    /// Builds the SendInput failure surfaced when a chunk is only partially injected. A zero write means
+    /// the injection was refused outright (no interactive desktop, or UIPI/integrity mismatch); a short
+    /// write means input was partially applied and the held keys were already released. When
+    /// <paramref name="priorInputDelivered"/> is <see langword="true"/> an earlier segment of a split payload
+    /// already landed, so the message leads with a caveat: the base text would otherwise imply nothing was
+    /// typed (zero write) or invite a literal retry (short write) that duplicates the text already applied
+    /// — e.g. retyping a password as "passpass…word" (issue #657 follow-up).
+    /// </summary>
+    private static InvalidOperationException BuildSendInputFailure(uint sent, int expected, bool priorInputDelivered)
+    {
+        string prefix = priorInputDelivered
+            ? "SendInput stopped partway through — earlier keystrokes already landed in the target window, so " +
+              "verify or clear it before retrying to avoid duplicated text. "
+            : string.Empty;
+
+        if (sent == 0)
+        {
+            return new(prefix + (s_foregroundWindowIsNull()
+                // No foreground window → the session is locked or on a secure desktop, where a
+                // user-session process can't inject. That's not an elevation/UIPI problem.
+                ? "SendInput failed — no interactive desktop is available (the session is locked " +
+                  "or on a secure desktop). Unlock the session and retry."
+                : "SendInput failed — the target window may be running at a higher integrity level (elevated) " +
+                  "or be an AppContainer/AppX app blocked by UIPI. Try --via post-message, or run this CLI as administrator."));
+        }
+
+        // Short write: this chunk's held keys were already released so the keyboard state is clean. Only offer
+        // the bare "retry the gesture" hint when nothing landed before this chunk — once earlier input has
+        // applied, the caveat above owns the retry guidance so a literal retry doesn't duplicate text.
+        string retryHint = priorInputDelivered ? " Held keys were released." : " Held keys were released; retry the gesture.";
+        return new(prefix + $"SendInput delivered only {sent} of {expected} key events — input was partially applied." + retryHint);
+    }
+
+    /// <summary>
+    /// One self-contained SendInput burst plus whether it must be paced before injection.
+    /// <see cref="ThrottleBefore"/> is set only on the 2nd..Nth chunk of a single split literal-text run —
+    /// the sole place the #657 queue overrun occurs — so a pacing delay and a foreground re-check run before
+    /// it. Chords and the first chunk of any text run carry <see langword="false"/>: they inject immediately
+    /// with no added latency, and a focus-changing chord (alt+tab, win+d) is never mistaken for drift.
+    /// </summary>
+    internal readonly record struct SendInputSegment(INPUT[] Events, bool ThrottleBefore);
+
+    /// <summary>
+    /// Flattens key actions into ordered, self-contained SendInput segments for throttled delivery: one
+    /// segment per chord, and literal text split into chunks of <see cref="s_textChunkChars"/> characters.
+    /// Each segment carries balanced key-down/key-up pairs so pacing (or a failure) between segments can
+    /// never strand a modifier, and each is tagged (<see cref="SendInputSegment.ThrottleBefore"/>) with
+    /// whether it is a continuation chunk of a split text run that must be paced and foreground-rechecked.
+    /// This is the single owner of the action→INPUT encoding; <see cref="BuildSendInputBatch"/> is the
+    /// flattened (un-chunked) view over it.
+    /// </summary>
+    internal static List<SendInputSegment> BuildSendInputSegments(IReadOnlyList<KeyAction> actions, Func<char, short>? vkKeyScan = null)
     {
         vkKeyScan ??= s_vkKeyScan;
-        var inputs = new List<INPUT>();
+        int chunkChars = Math.Max(1, s_textChunkChars);
+        var segments = new List<SendInputSegment>();
+
         foreach (var action in actions)
         {
             switch (action)
             {
                 case KeyChord chord:
-                    foreach (var mod in chord.Modifiers)
+                    var chordEvents = new List<INPUT>();
+                    AppendChordEvents(chordEvents, chord);
+                    if (chordEvents.Count > 0)
                     {
-                        inputs.Add(KeyEvent(mod, IsExtended(mod), keyUp: false));
-                    }
-
-                    inputs.Add(KeyEvent(chord.Vk, chord.Extended, keyUp: false));
-                    inputs.Add(KeyEvent(chord.Vk, chord.Extended, keyUp: true));
-
-                    for (int i = chord.Modifiers.Count - 1; i >= 0; i--)
-                    {
-                        inputs.Add(KeyEvent(chord.Modifiers[i], IsExtended(chord.Modifiers[i]), keyUp: true));
+                        // A chord is atomic and small; it never overruns the queue, and it may intentionally
+                        // change the foreground (alt+tab, win+d), so it is never paced or drift-checked.
+                        segments.Add(new SendInputSegment(chordEvents.ToArray(), ThrottleBefore: false));
                     }
                     break;
 
                 case TextInput text:
-                    foreach (var ch in text.Text)
+                    // Normalize newlines (\n and \r\n → \r) so a line break actually inserts instead of being
+                    // silently dropped (issue #658), then split the normalized run into chunks for throttled
+                    // delivery (issue #657). Normalizing before chunking keeps the newline handling identical
+                    // regardless of where a chunk boundary falls.
+                    var normalized = NormalizeNewlines(text.Text);
+                    for (int start = 0; start < normalized.Length; start += chunkChars)
                     {
-                        AppendCharEvents(inputs, ch, vkKeyScan);
+                        int end = Math.Min(start + chunkChars, normalized.Length);
+                        var chunk = new List<INPUT>();
+                        for (int j = start; j < end; j++)
+                        {
+                            AppendCharEvents(chunk, normalized[j], vkKeyScan);
+                        }
+
+                        if (chunk.Count > 0)
+                        {
+                            // Pace + foreground-recheck only the continuation chunks (start > 0). The first
+                            // chunk of a run injects immediately under the command's one-time pre-send
+                            // foreground gate, so short text and the leading burst add no latency.
+                            segments.Add(new SendInputSegment(chunk.ToArray(), ThrottleBefore: start > 0));
+                        }
                     }
                     break;
             }
         }
 
-        return inputs.ToArray();
+        return segments;
+    }
+
+    /// <summary>
+    /// Flattens key actions into a single un-chunked SendInput batch — the flat view over
+    /// <see cref="BuildSendInputSegments"/> (the single owner of the action→INPUT encoding), so callers and
+    /// tests that need the whole ordered event sequence share exactly the same per-action encoding as
+    /// throttled delivery. Chunk size only groups the events into segments; flattening yields the same
+    /// sequence regardless of <see cref="s_textChunkChars"/>.
+    /// </summary>
+    internal static INPUT[] BuildSendInputBatch(IReadOnlyList<KeyAction> actions, Func<char, short>? vkKeyScan = null) =>
+        BuildSendInputSegments(actions, vkKeyScan).SelectMany(segment => segment.Events).ToArray();
+
+    /// <summary>
+    /// Appends a chord's events in order: each modifier down, the main key down then up, then each
+    /// modifier up in reverse — so the modifiers wrap the key press symmetrically.
+    /// </summary>
+    private static void AppendChordEvents(List<INPUT> inputs, KeyChord chord)
+    {
+        foreach (var mod in chord.Modifiers)
+        {
+            inputs.Add(KeyEvent(mod, IsExtended(mod), keyUp: false));
+        }
+
+        inputs.Add(KeyEvent(chord.Vk, chord.Extended, keyUp: false));
+        inputs.Add(KeyEvent(chord.Vk, chord.Extended, keyUp: true));
+
+        for (int i = chord.Modifiers.Count - 1; i >= 0; i--)
+        {
+            inputs.Add(KeyEvent(chord.Modifiers[i], IsExtended(chord.Modifiers[i]), keyUp: true));
+        }
     }
 
     /// <summary>
@@ -302,6 +476,27 @@ internal static class KeyboardInput
             type = INPUT_TYPE.INPUT_KEYBOARD,
             Anonymous = { ki = new KEYBDINPUT { wVk = 0, wScan = ch, dwFlags = flags } }
         };
+    }
+
+    /// <summary>
+    /// Normalizes newline characters in synthesized text to a carriage return (<c>\r</c>, 0x0D) so a
+    /// line break is actually inserted. Windows edit controls create a new line only on a carriage
+    /// return: it maps to <c>VK_RETURN</c> (a real Enter key for SendInput) and is honored as
+    /// <c>WM_CHAR 0x0D</c> for PostMessage. A bare line feed (<c>\n</c>, 0x0A) does not map to a plain
+    /// Enter — on a US layout <c>VkKeyScan('\n')</c> returns 0x020D (VK_RETURN + Ctrl), so SendInput takes
+    /// the Ctrl/Alt Unicode-packet fallback and PostMessage sends <c>WM_CHAR 0x0A</c>; either way edit
+    /// controls silently ignore the raw 0x0A, so the newline would otherwise vanish (issue #658). Collapsing
+    /// <c>\r\n</c> to a single <c>\r</c> keeps a CRLF as one newline rather than two.
+    /// </summary>
+    internal static string NormalizeNewlines(string text)
+    {
+        // No line feed → nothing to normalize (a lone \r already inserts a newline correctly).
+        if (text.IndexOf('\n') < 0)
+        {
+            return text;
+        }
+
+        return text.Replace("\r\n", "\r").Replace('\n', '\r');
     }
 
     /// <summary>

@@ -107,7 +107,7 @@ internal static class SharedUiOptions
 
         DurationSecOption = new Option<int>("--duration-sec")
         {
-            Description = "Recording duration in seconds. Default 0 records until stopped — Ctrl+C, or (for programmatic callers) a newline or EOF on stdin. A valid MP4 is always finalized on graceful stop.",
+            Description = "Recording duration in seconds. 0 records until Ctrl+C or redirected-stdin newline/EOF.",
             DefaultValueFactory = _ => 0
         };
 

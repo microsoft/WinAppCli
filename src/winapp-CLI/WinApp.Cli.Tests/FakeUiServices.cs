@@ -182,35 +182,66 @@ internal class FakeUiAutomationService : IUiAutomationService
         return Task.FromResult(ScreenshotResult);
     }
 
-    /// <summary>Configurable result for <see cref="RecordAsync"/>. The fake writes a tiny placeholder file to the output path.</summary>
     public RecordCaptureResult RecordResult { get; set; } = new() { Frames = 3, Width = 2, Height = 2, FileSize = 0, Mode = "wgc" };
 
-    /// <summary>When non-null, <see cref="RecordAsync"/> throws this exception instead of writing a file.</summary>
+    public RecordOptions? LastRecordOptions { get; private set; }
+
     public Exception? RecordException { get; set; }
 
-    /// <summary>
-    /// When <see langword="true"/>, <see cref="RecordAsync"/> signals readiness (calls onRecordingStarted)
-    /// then blocks on the cancellation token rather than returning immediately. This lets tests verify that
-    /// a stop signal (stdin EOF, Ctrl+C) cancels an in-progress recording and produces a graceful result.
-    /// </summary>
+    public Exception? RecordExceptionAfterStarted { get; set; }
+
     public bool RecordShouldWaitForCancellation { get; set; }
 
-    public async Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action? onRecordingStarted = null)
+    public bool? RecordingStartedFrameArtifactsActiveOverride { get; set; }
+
+    public async Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action<bool>? onRecordingStarted = null)
     {
+        LastRecordOptions = options;
         if (RecordException is not null)
         {
             throw RecordException;
         }
         await File.WriteAllBytesAsync(options.OutputPath, new byte[16], CancellationToken.None);
-        // Signal readiness before returning — mirrors the real service behavior (encoder is
-        // initialized and the first frame has been captured at this point).
-        onRecordingStarted?.Invoke();
+        RecordFrameArtifactResult? frameArtifacts = RecordResult.FrameArtifacts;
+        if (options.FramesDirectory is not null)
+        {
+            Directory.CreateDirectory(Path.Join(options.FramesDirectory, "frames"));
+            await File.WriteAllTextAsync(
+                Path.Join(options.FramesDirectory, "frames.ndjson"),
+                "{\"sampleIndex\":0}\n",
+                CancellationToken.None);
+            await File.WriteAllTextAsync(
+                Path.Join(options.FramesDirectory, "manifest.json"),
+                "{\"schemaVersion\":1,\"status\":\"complete\"}",
+                CancellationToken.None);
+            frameArtifacts = new RecordFrameArtifactResult
+            {
+                Directory = options.FramesDirectory,
+                Manifest = Path.Join(options.FramesDirectory, "manifest.json"),
+                Index = Path.Join(options.FramesDirectory, "frames.ndjson"),
+                Samples = RecordResult.Frames,
+                Images = 1,
+                RepeatedSamples = Math.Max(0, RecordResult.Frames - 1),
+                TotalBytes = 64,
+            };
+        }
+        onRecordingStarted?.Invoke(
+            RecordingStartedFrameArtifactsActiveOverride
+            ?? (options.FramesDirectory is not null));
+        if (RecordExceptionAfterStarted is not null)
+        {
+            throw RecordExceptionAfterStarted;
+        }
         if (RecordShouldWaitForCancellation)
         {
-            // Block until cancelled — simulates a long recording that is stopped early
-            // by a stdin EOF, Ctrl+C, or a duration-expiry. The real RecordAsync returns
-            // normally (not via exception) when cancelled inside the frame loop.
-            try { await Task.Delay(Timeout.Infinite, ct); } catch (OperationCanceledException) { /* graceful stop */ }
+            try
+            {
+                await Task.Delay(Timeout.Infinite, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Cancellation is the expected stop signal.
+            }
         }
         var size = new FileInfo(options.OutputPath).Length;
         return new RecordCaptureResult
@@ -220,6 +251,12 @@ internal class FakeUiAutomationService : IUiAutomationService
             Height = RecordResult.Height,
             FileSize = size,
             Mode = RecordResult.Mode,
+            ElapsedMs = RecordResult.ElapsedMs,
+            AchievedFps = RecordResult.AchievedFps,
+            CadenceRatio = RecordResult.CadenceRatio,
+            StopReason = RecordResult.StopReason,
+            FrameArtifacts = frameArtifacts,
+            Warnings = RecordResult.Warnings,
         };
     }
 
@@ -387,8 +424,18 @@ internal class FakeKeyboardInput : WinApp.Cli.Helpers.IKeyboardInput
 
     public List<SendCall> SendCalls { get; } = [];
 
+    /// <summary>When set, <see cref="Send"/> records the call then throws this — lets a test drive the
+    /// command's exception mapping (e.g. a mid-injection <c>ForegroundLostException</c> → foreground_not_target).</summary>
+    public Exception? SendException { get; set; }
+
     public void Send(long hwnd, IReadOnlyList<WinApp.Cli.Helpers.KeyAction> actions, WinApp.Cli.Helpers.KeyTransport transport)
-        => SendCalls.Add(new(hwnd, actions, transport));
+    {
+        SendCalls.Add(new(hwnd, actions, transport));
+        if (SendException is not null)
+        {
+            throw SendException;
+        }
+    }
 }
 
 /// <summary>
@@ -488,6 +535,15 @@ internal sealed class FakeSystemUiQuery : ISystemUiQuery
     /// <summary>Per-HWND owner handles for <see cref="GetWindowOwner"/>. Unmapped handles report 0 (no owner).</summary>
     public Dictionary<long, nint> WindowOwnerByHwnd { get; } = [];
 
+    /// <summary>Per-HWND focused child handles for <see cref="GetFocusedWindow"/>. Unmapped handles report 0
+    /// (no resolvable focus → the command keeps the passed target HWND).</summary>
+    public Dictionary<long, long> FocusedWindowByHwnd { get; } = [];
+
+    /// <summary>Per-HWND top-level root handles for <see cref="GetRootWindow"/>. Unmapped handles report the
+    /// handle itself (a top-level window is its own root); map a child to its top-level window to model
+    /// <c>GetAncestor(GA_ROOT)</c>.</summary>
+    public Dictionary<long, long> RootWindowByHwnd { get; } = [];
+
     public UiProcessInfo? GetProcessById(int pid)
     {
         if (ProcessesById.TryGetValue(pid, out var info)) { return info; }
@@ -513,6 +569,12 @@ internal sealed class FakeSystemUiQuery : ISystemUiQuery
 
     public nint GetWindowOwner(long hwnd)
         => WindowOwnerByHwnd.TryGetValue(hwnd, out var owner) ? owner : 0;
+
+    public long GetFocusedWindow(long hwnd)
+        => FocusedWindowByHwnd.TryGetValue(hwnd, out var focused) ? focused : 0;
+
+    public long GetRootWindow(long hwnd)
+        => RootWindowByHwnd.TryGetValue(hwnd, out var root) ? root : hwnd;
 }
 
 /// <summary>
@@ -531,5 +593,3 @@ internal sealed class FakePollDelay : WinApp.Cli.Helpers.IPollDelay
         return Task.Delay(1, ct);
     }
 }
-
-

@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.4.1
+ * Source schema version: 0.5.1
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -52,8 +52,15 @@ export interface WinappResult {
 // ---------------------------------------------------------------------------
 
 function pushCommon(args: string[], opts: CommonOptions): void {
-  if (opts.quiet) args.push('--quiet');
-  if (opts.verbose) args.push('--verbose');
+  // Insert global flags before any "--" passthrough separator so winapp consumes them rather
+  // than forwarding them to the launched app/tool (e.g. run ... -- appArgs).
+  const flags: string[] = [];
+  if (opts.quiet) flags.push('--quiet');
+  if (opts.verbose) flags.push('--verbose');
+  if (flags.length === 0) return;
+  const sep = args.indexOf('--');
+  if (sep === -1) args.push(...flags);
+  else args.splice(sep, 0, ...flags);
 }
 
 function captureOpts(opts: CommonOptions): CallWinappCliCaptureOptions {
@@ -64,6 +71,39 @@ async function execCommand(args: string[], opts: CommonOptions): Promise<WinappR
   pushCommon(args, opts);
   const result: CallWinappCliCaptureResult = await callWinappCliCapture(args, captureOpts(opts));
   return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+}
+
+// ---------------------------------------------------------------------------
+// az-sign
+// ---------------------------------------------------------------------------
+
+export interface AzSignOptions extends CommonOptions {
+  /** Path to the file to sign (exe, msix, or msixbundle) */
+  filePath: string;
+  /** Signing account name. Must be used with --resource-group */
+  account?: string;
+  /** Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. A non-interactive Azure credential should already be available; the CLI can otherwise fall back to an interactive tenant prompt or 'az login', but the npm programmatic API is always non-interactive and fails instead of prompting. */
+  metadataFile?: string;
+  /** Certificate profile name. Must be used with --account */
+  profile?: string;
+  /** Resource group to narrow down signing accounts */
+  resourceGroup?: string;
+  /** Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted. */
+  subscription?: string;
+}
+
+/**
+ * Code-sign a file using Azure Trusted Signing. Signs executables, MSIX packages, or MSIX bundles using a cloud-managed signing identity. Example: winapp az-sign ./app.msix
+ */
+export async function azSign(options: AzSignOptions): Promise<WinappResult> {
+  const args: string[] = ['az-sign'];
+  args.push(options.filePath);
+  if (options.account) args.push('--account', options.account);
+  if (options.metadataFile) args.push('--metadata-file', options.metadataFile);
+  if (options.profile) args.push('--profile', options.profile);
+  if (options.resourceGroup) args.push('--resource-group', options.resourceGroup);
+  if (options.subscription) args.push('--subscription', options.subscription);
+  return execCommand(args, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -438,58 +478,90 @@ export async function restore(options: RestoreOptions = {}): Promise<WinappResul
 // ---------------------------------------------------------------------------
 
 export interface RunOptions extends CommonOptions {
-  /** Input folder containing the app to run */
-  inputFolder: string;
-  /** Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). */
-  appArgs?: string | string[];
+  /** Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory). */
+  input?: string;
+  /** @deprecated Use `input` instead. Retained for backward compatibility. */
+  inputFolder?: string;
+  /** Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Default: the current process architecture. */
+  arch?: string;
   /** Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). */
   args?: string;
   /** Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. */
   clean?: boolean;
+  /** Project mode: build configuration (e.g., Debug, Release). Ignored in folder mode. Default: Debug. */
+  configuration?: string;
   /** Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. For WinUI apps, a crash also triggers a stowed-exception triage pass; the first run downloads debugger components (cached under the winapp global directory) and can be pointed at an existing debugger install via the WINAPP_DBGTOOLS_DIR environment variable. Cannot be combined with --no-launch or --json. */
   debugOutput?: boolean;
   /** Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). */
   detach?: boolean;
   /** Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. */
   executable?: string;
+  /** Project mode: target framework moniker for multi-targeted projects (e.g. net10.0-windows10.0.26100.0). Ignored in folder mode. */
+  framework?: string;
   /** Format output as JSON */
   json?: boolean;
   /** Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) */
   manifest?: string;
+  /** Project mode: skip building and run the existing build output (still evaluates output properties). Ignored in folder mode. */
+  noBuild?: boolean;
   /** Only create the debug identity and register the package without launching the application */
   noLaunch?: boolean;
-  /** Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used. */
+  /** Project mode: skip restoring the project before building. Ignored in folder mode. */
+  noRestore?: boolean;
+  /** Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory will be used. */
   outputAppxDirectory?: string;
+  /** Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode. */
+  project?: string;
+  /** Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. */
+  property?: string | string[];
+  /** Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode. */
+  runtime?: string;
   /** Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. */
   symbols?: boolean;
   /** Unregister the development package after the application exits. Only removes packages registered in development mode. */
   unregisterOnExit?: boolean;
   /** Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. */
   withAlias?: boolean;
+  /** Arguments to pass to the launched application (forwarded after --). */
+  appArgs?: string | string[];
 }
 
 /**
- * Creates packaged layout, registers the Application, and launches the packaged application.
+ * Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.
  */
-export async function run(options: RunOptions): Promise<WinappResult> {
+export async function run(options: RunOptions = {}): Promise<WinappResult> {
   const args: string[] = ['run'];
-  args.push(options.inputFolder);
-  if (options.appArgs) {
-    const appArgsArr = Array.isArray(options.appArgs) ? options.appArgs : [options.appArgs];
-    args.push(...appArgsArr);
-  }
+  const inputValue = options.input ?? options.inputFolder;
+  if (inputValue) args.push(inputValue);
+  if (options.arch) args.push('--arch', options.arch);
   if (options.args) args.push('--args', options.args);
   if (options.clean) args.push('--clean');
+  if (options.configuration) args.push('--configuration', options.configuration);
   if (options.debugOutput) args.push('--debug-output');
   if (options.detach) args.push('--detach');
   if (options.executable) args.push('--executable', options.executable);
+  if (options.framework) args.push('--framework', options.framework);
   if (options.json) args.push('--json');
   if (options.manifest) args.push('--manifest', options.manifest);
+  if (options.noBuild) args.push('--no-build');
   if (options.noLaunch) args.push('--no-launch');
+  if (options.noRestore) args.push('--no-restore');
   if (options.outputAppxDirectory) args.push('--output-appx-directory', options.outputAppxDirectory);
+  if (options.project) args.push('--project', options.project);
+  if (options.property) {
+    const propertyArr = Array.isArray(options.property) ? options.property : [options.property];
+    for (const v of propertyArr) args.push('--property', v);
+  }
+  if (options.runtime) args.push('--runtime', options.runtime);
   if (options.symbols) args.push('--symbols');
   if (options.unregisterOnExit) args.push('--unregister-on-exit');
   if (options.withAlias) args.push('--with-alias');
+  if (options.appArgs !== undefined) {
+    const appArgsArr = Array.isArray(options.appArgs) ? options.appArgs : [options.appArgs];
+    if (appArgsArr.length > 0) {
+      args.push('--', ...appArgsArr);
+    }
+  }
   return execCommand(args, options);
 }
 
@@ -526,7 +598,7 @@ export async function sign(options: SignOptions): Promise<WinappResult> {
 
 export interface StoreOptions extends CommonOptions {
   /** Arguments to pass through to the Microsoft Store Developer CLI. */
-  storeArgs?: string[];
+  storeArgs?: string | string[];
 }
 
 /**
@@ -534,7 +606,10 @@ export interface StoreOptions extends CommonOptions {
  */
 export async function store(options: StoreOptions = {}): Promise<WinappResult> {
   const args: string[] = ['store'];
-  if (options.storeArgs) args.push(...options.storeArgs);
+  if (options.storeArgs !== undefined) {
+    const storeArgsArr = Array.isArray(options.storeArgs) ? options.storeArgs : [options.storeArgs];
+    args.push(...storeArgsArr);
+  }
   return execCommand(args, options);
 }
 
@@ -544,7 +619,7 @@ export async function store(options: StoreOptions = {}): Promise<WinappResult> {
 
 export interface ToolOptions extends CommonOptions {
   /** Arguments to pass to the SDK tool, e.g. ['makeappx', 'pack', '/d', './folder', '/p', './out.msix']. */
-  toolArgs?: string[];
+  toolArgs?: string | string[];
 }
 
 /**
@@ -552,8 +627,11 @@ export interface ToolOptions extends CommonOptions {
  */
 export async function tool(options: ToolOptions = {}): Promise<WinappResult> {
   const args: string[] = ['tool'];
-  if (options.toolArgs && options.toolArgs.length > 0) {
-    args.push('--', ...options.toolArgs);
+  if (options.toolArgs !== undefined) {
+    const toolArgsArr = Array.isArray(options.toolArgs) ? options.toolArgs : [options.toolArgs];
+    if (toolArgsArr.length > 0) {
+      args.push('--', ...toolArgsArr);
+    }
   }
   return execCommand(args, options);
 }
@@ -596,9 +674,9 @@ export async function uiClick(options: UiClickOptions = {}): Promise<WinappResul
 // ---------------------------------------------------------------------------
 
 export interface UiDragOptions extends CommonOptions {
-  /** Start point — an element selector (drags from its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200). */
+  /** Start point — an element selector (drags from its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200). */
   from?: string;
-  /** End point — an element selector (drops at its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400). */
+  /** End point — an element selector (drops at its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400). */
   to?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
@@ -615,7 +693,7 @@ export interface UiDragOptions extends CommonOptions {
 }
 
 /**
- * Press the mouse button at one point, move to another, then release. 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or app-relative x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.
+ * Press the mouse button at one point, move to another, then release. 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or screen x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.
  */
 export async function uiDrag(options: UiDragOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'drag'];
@@ -870,7 +948,7 @@ export interface UiPenOptions extends CommonOptions {
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
-  /** Pen contact point as app coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. Ignored when --path is given. */
+  /** Pen contact point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. Ignored when --path is given. */
   at?: string;
   /** Total glide time in milliseconds distributed across the stroke path segments (default: ~10 ms per segment). */
   durationMs?: number;
@@ -891,7 +969,7 @@ export interface UiPenOptions extends CommonOptions {
 }
 
 /**
- * Inject synthetic pen/stylus input using the Windows synthetic-pointer API. Taps or draws ink strokes with configurable pressure, tilt and eraser mode, at an element's center or explicit app x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable (Windows 10 1809+).
+ * Inject synthetic pen/stylus input using the Windows synthetic-pointer API. Taps or draws ink strokes with configurable pressure, tilt and eraser mode, at an element's center or explicit screen x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable (Windows 10 1809+).
  */
 export async function uiPen(options: UiPenOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'pen'];
@@ -920,10 +998,12 @@ export interface UiRecordOptions extends CommonOptions {
   app?: string;
   /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). */
   captureScreen?: boolean;
-  /** Recording duration in seconds. Default 0 records until stopped — Ctrl+C, or (for programmatic callers) a newline or EOF on stdin. A valid MP4 is always finalized on graceful stop. */
+  /** Recording duration in seconds. 0 records until Ctrl+C or redirected-stdin newline/EOF. */
   durationSec?: number;
   /** Frames per second to capture */
   fps?: number;
+  /** Write timestamped JPEGs, frames.ndjson, and manifest.json to <output-name>.frames. Supports 1-30 fps and max-edge 64-4096 (default 1280), with a 1 GiB frame-data cap. */
+  frames?: boolean;
   /** Format output as JSON */
   json?: boolean;
   /** Downscale so the longest edge is at most this many pixels (0 = no downscale) */
@@ -1073,7 +1153,7 @@ export async function uiSearch(options: UiSearchOptions = {}): Promise<WinappRes
 export interface UiSendKeysOptions extends CommonOptions {
   /** Keys to send. Whitespace-separated tokens: named keys (down, enter, tab, esc, f5), modifier combos (ctrl+shift+t, alt+f4), raw virtual keys (vk=0x42), or literal text (hello). Use text=<literal> to type a single value verbatim when it would otherwise be read as a key name or combo (text=enter types "enter"; text=ctrl+a types "ctrl+a"); backslash escapes \s \t \n \r \\ are supported (text=a\s\sb types "a b"). To type the whole argument literally without escaping each token, pass --verbatim instead. Quote multi-token strings, e.g. "ctrl+a delete". */
   keys?: string;
-  /** Allow synthesizing system-/shell-reserved combos (win+<key>, alt+f4, alt+tab, ctrl+esc, …) via --via send-input, which are refused by default because they act on the OS/shell beyond the target app. Opt in to drive global hotkeys (e.g. PowerToys' win+shift+v, win+r). No effect on --via post-message (already window-scoped; a warning is emitted if set without send-input). Note: win+l stays blocked even with this flag — it locks the workstation (LockWorkStation() via the shell hook), which is unrecoverable from automation. Windows still blocks secure sequences such as ctrl+alt+del (SAS) from injected input regardless of this flag. */
+  /** Allow synthesizing system-/shell-reserved combos (win+<key>, alt+f4, alt+tab, ctrl+esc, …) via --via send-input, which are refused by default because they act on the OS/shell beyond the target app. Opt in to drive global hotkeys (e.g. PowerToys' win+shift+v, win+r). No effect on --via post-message (already window-scoped; a warning is emitted if set without send-input). Note: win+l and ctrl+alt+del stay blocked even with this flag — win+l locks the workstation (LockWorkStation() via the shell hook), which is unrecoverable from automation, and ctrl+alt+del is a Secure Attention Sequence (SAS) that Windows drops from injected input regardless of this flag, so it can never take effect. */
   allowSystemKeys?: boolean;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
@@ -1083,7 +1163,7 @@ export interface UiSendKeysOptions extends CommonOptions {
   target?: string;
   /** Type the entire keys argument as literal text — no named-key, combo, or vk= interpretation, and exact whitespace preserved. The whole-argument form of the per-token text= escape: --verbatim "down down enter" types the words instead of pressing Down, Down, Enter. */
   verbatim?: boolean;
-  /** Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character KeyDown + TextChanged). Named keys and combos raise KeyDown on both, but keyboard accelerators/shortcuts (KeyboardAccelerator, e.g. ctrl+t) only fire via send-input. */
+  /** Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character KeyDown + TextChanged). Named keys and combos raise KeyDown on both, but keyboard accelerators/shortcuts (KeyboardAccelerator, e.g. ctrl+t) only fire via send-input. post-message targets the focused child control and works for classic Win32/WinForms controls, but WinUI 3 / UWP / XAML controls are windowless and ignore posted messages — use send-input for those (a warning is emitted when the target looks like a XAML app). */
   via?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
@@ -1168,7 +1248,7 @@ export interface UiTouchOptions extends CommonOptions {
   selector?: string;
   /** Target app (process name, window title, or PID). Lists windows if ambiguous. */
   app?: string;
-  /** Explicit start point as app coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. */
+  /** Explicit start point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. */
   at?: string;
   /** Swipe direction: right (default), left, up, or down. Combined with --distance to compute the end point when --to-point is not given. */
   direction?: string;
@@ -1184,14 +1264,14 @@ export interface UiTouchOptions extends CommonOptions {
   holdMs?: number;
   /** Format output as JSON */
   json?: boolean;
-  /** End point x,y for a swipe (app coordinates). Takes precedence over --direction. */
+  /** End point x,y for a swipe (screen coordinates). Takes precedence over --direction. */
   toPoint?: string;
   /** Target window by HWND (stable handle from list output). Takes precedence over --app. */
   window?: number;
 }
 
 /**
- * Inject synthetic touch input using the Windows touch-injection API. Supports tap, double-tap, long-press, swipe, pinch and stretch gestures at an element's center or explicit app x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable.
+ * Inject synthetic touch input using the Windows touch-injection API. Supports tap, double-tap, long-press, swipe, pinch and stretch gestures at an element's center or explicit screen x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable.
  */
 export async function uiTouch(options: UiTouchOptions = {}): Promise<WinappResult> {
   const args: string[] = ['ui', 'touch'];

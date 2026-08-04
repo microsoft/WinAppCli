@@ -93,7 +93,7 @@ When starting the app with `npm start`, the app will have identity and you can t
 The sample contains an example of packaging and signing an MSIX with `winapp`. The `package-msix` script in `package.json` demonstrates how to package and sign the app:
 
 ```json
-"package-msix": "npm run build-addon && npm run package & winapp package ./out/sample-electron-app-win32-arm64/ --output-folder ./out --cert ./devcert.pfx"
+"package-msix": "npm run build-all && npm run package & winapp package ./out/sample-electron-app-win32-arm64/ --output ./out --cert ./devcert.pfx --manifest appxmanifest.xml"
 ```
 
-> **Note:** The output folder path is currently hardcoded. You may need to modify this script based on your architecture and output configuration.
+> **Note:** The input folder path is architecture-specific and hardcoded. The sample also ships a `package-msix:x64` variant; adjust the path to match your own output configuration.

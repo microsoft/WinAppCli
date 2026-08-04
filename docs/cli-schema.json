@@ -1,6 +1,6 @@
 {
   "name": "winapp",
-  "version": "0.4.1",
+  "version": "0.5.1",
   "schemaVersion": "1.0",
   "description": "CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows",
   "hidden": false,
@@ -50,6 +50,129 @@
     }
   },
   "subcommands": {
+    "az-sign": {
+      "description": "Code-sign a file using Azure Trusted Signing. Signs executables, MSIX packages, or MSIX bundles using a cloud-managed signing identity. Example: winapp az-sign ./app.msix",
+      "hidden": false,
+      "arguments": {
+        "file-path": {
+          "description": "Path to the file to sign (exe, msix, or msixbundle)",
+          "order": 0,
+          "hidden": false,
+          "valueType": "System.IO.FileInfo",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          }
+        }
+      },
+      "options": {
+        "--account": {
+          "description": "Signing account name. Must be used with --resource-group",
+          "hidden": false,
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--metadata-file": {
+          "description": "Path to an existing metadata.json file. Skips resource discovery and account/profile selection prompts and signs using this file directly. A non-interactive Azure credential should already be available; the CLI can otherwise fall back to an interactive tenant prompt or 'az login', but the npm programmatic API is always non-interactive and fails instead of prompting.",
+          "hidden": false,
+          "aliases": [
+            "-m"
+          ],
+          "valueType": "System.IO.FileInfo",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--profile": {
+          "description": "Certificate profile name. Must be used with --account",
+          "hidden": false,
+          "aliases": [
+            "-p"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--quiet": {
+          "description": "Suppress progress messages",
+          "hidden": false,
+          "aliases": [
+            "-q"
+          ],
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--resource-group": {
+          "description": "Resource group to narrow down signing accounts",
+          "hidden": false,
+          "aliases": [
+            "-r"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--subscription": {
+          "description": "Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted.",
+          "hidden": false,
+          "aliases": [
+            "-s"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--verbose": {
+          "description": "Enable verbose output",
+          "hidden": false,
+          "aliases": [
+            "-v"
+          ],
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        }
+      }
+    },
     "cert": {
       "description": "Manage development certificates for code signing. Use 'cert generate' to create a self-signed certificate for testing, or 'cert install' (requires elevation) to trust an existing certificate on this machine.",
       "hidden": false,
@@ -1327,17 +1450,17 @@
       }
     },
     "run": {
-      "description": "Creates packaged layout, registers the Application, and launches the packaged application.",
+      "description": "Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.",
       "hidden": false,
       "arguments": {
-        "input-folder": {
-          "description": "Input folder containing the app to run",
+        "input": {
+          "description": "Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory).",
           "order": 0,
           "hidden": false,
-          "valueType": "System.IO.DirectoryInfo",
+          "valueType": "System.IO.FileSystemInfo",
           "hasDefaultValue": false,
           "arity": {
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 1
           }
         },
@@ -1353,6 +1476,18 @@
         }
       },
       "options": {
+        "--arch": {
+          "description": "Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Default: the current process architecture.",
+          "hidden": false,
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--args": {
           "description": "Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value).",
           "hidden": false,
@@ -1373,6 +1508,22 @@
           "defaultValue": false,
           "arity": {
             "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--configuration": {
+          "description": "Project mode: build configuration (e.g., Debug, Release). Ignored in folder mode. Default: Debug.",
+          "hidden": false,
+          "aliases": [
+            "-c"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": true,
+          "defaultValue": "Debug",
+          "arity": {
+            "minimum": 1,
             "maximum": 1
           },
           "required": false,
@@ -1419,6 +1570,21 @@
           "required": false,
           "recursive": false
         },
+        "--framework": {
+          "description": "Project mode: target framework moniker for multi-targeted projects (e.g. net10.0-windows10.0.26100.0). Ignored in folder mode.",
+          "hidden": false,
+          "aliases": [
+            "-f"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--json": {
           "description": "Format output as JSON",
           "hidden": false,
@@ -1444,6 +1610,19 @@
           "required": false,
           "recursive": false
         },
+        "--no-build": {
+          "description": "Project mode: skip building and run the existing build output (still evaluates output properties). Ignored in folder mode.",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--no-launch": {
           "description": "Only create the debug identity and register the package without launching the application",
           "hidden": false,
@@ -1457,14 +1636,53 @@
           "required": false,
           "recursive": false
         },
+        "--no-restore": {
+          "description": "Project mode: skip restoring the project before building. Ignored in folder mode.",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--output-appx-directory": {
-          "description": "Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used.",
+          "description": "Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory will be used.",
           "hidden": false,
           "valueType": "System.IO.DirectoryInfo",
           "hasDefaultValue": false,
           "arity": {
             "minimum": 1,
             "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--project": {
+          "description": "Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode.",
+          "hidden": false,
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--property": {
+          "description": "Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode.",
+          "hidden": false,
+          "aliases": [
+            "-p"
+          ],
+          "valueType": "System.String[]",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 0
           },
           "required": false,
           "recursive": false
@@ -1480,6 +1698,21 @@
           "defaultValue": false,
           "arity": {
             "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--runtime": {
+          "description": "Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode.",
+          "hidden": false,
+          "aliases": [
+            "-r"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
             "maximum": 1
           },
           "required": false,
@@ -1799,11 +2032,11 @@
           }
         },
         "drag": {
-          "description": "Press the mouse button at one point, move to another, then release. 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or app-relative x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.",
+          "description": "Press the mouse button at one point, move to another, then release. 'drag <from> <to>', where <from>/<to> are each an element selector (uses the element's center) or screen x,y coordinates as reported by 'ui inspect'. Useful for reorder/resize/slider gestures and drag-and-drop. Use --right for a right-button drag, --hold-ms for press-and-hold/long-press, and --dwell-ms to settle on a drop target before releasing.",
           "hidden": false,
           "arguments": {
             "from": {
-              "description": "Start point — an element selector (drags from its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200).",
+              "description": "Start point — an element selector (drags from its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200).",
               "order": 0,
               "hidden": false,
               "valueType": "System.String",
@@ -1814,7 +2047,7 @@
               }
             },
             "to": {
-              "description": "End point — an element selector (drops at its center) or app coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400).",
+              "description": "End point — an element selector (drops at its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400).",
               "order": 1,
               "hidden": false,
               "valueType": "System.String",
@@ -2766,7 +2999,7 @@
           }
         },
         "pen": {
-          "description": "Inject synthetic pen/stylus input using the Windows synthetic-pointer API. Taps or draws ink strokes with configurable pressure, tilt and eraser mode, at an element's center or explicit app x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable (Windows 10 1809+).",
+          "description": "Inject synthetic pen/stylus input using the Windows synthetic-pointer API. Taps or draws ink strokes with configurable pressure, tilt and eraser mode, at an element's center or explicit screen x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable (Windows 10 1809+).",
           "hidden": false,
           "arguments": {
             "selector": {
@@ -2798,7 +3031,7 @@
               "recursive": false
             },
             "--at": {
-              "description": "Pen contact point as app coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. Ignored when --path is given.",
+              "description": "Pen contact point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. Ignored when --path is given.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,
@@ -2949,7 +3182,7 @@
           }
         },
         "record": {
-          "description": "Record the target window (or an element's region) to an H.264 MP4 video. Captures frames via Windows Graphics Capture and encodes with Media Foundation. By default records until stopped (Ctrl+C, or a newline/EOF on stdin for programmatic callers). Use --duration-sec N for a timed run. A valid MP4 is always finalized on graceful stop. Use --capture-screen to include overlays/popups.",
+          "description": "Record the target window (or an element's region) to an H.264 MP4 video. By default records until Ctrl+C or redirected-stdin newline/EOF. Use --duration-sec for a timed run, --frames for timestamped JPEG evidence, and --capture-screen for overlays and popups.",
           "hidden": false,
           "arguments": {
             "selector": {
@@ -2994,7 +3227,7 @@
               "recursive": false
             },
             "--duration-sec": {
-              "description": "Recording duration in seconds. Default 0 records until stopped — Ctrl+C, or (for programmatic callers) a newline or EOF on stdin. A valid MP4 is always finalized on graceful stop.",
+              "description": "Recording duration in seconds. 0 records until Ctrl+C or redirected-stdin newline/EOF.",
               "hidden": false,
               "valueType": "System.Int32",
               "hasDefaultValue": true,
@@ -3014,6 +3247,19 @@
               "defaultValue": 15,
               "arity": {
                 "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--frames": {
+              "description": "Write timestamped JPEGs, frames.ndjson, and manifest.json to <output-name>.frames. Supports 1-30 fps and max-edge 64-4096 (default 1280), with a 1 GiB frame-data cap.",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
                 "maximum": 1
               },
               "required": false,
@@ -3593,7 +3839,7 @@
           },
           "options": {
             "--allow-system-keys": {
-              "description": "Allow synthesizing system-/shell-reserved combos (win+<key>, alt+f4, alt+tab, ctrl+esc, …) via --via send-input, which are refused by default because they act on the OS/shell beyond the target app. Opt in to drive global hotkeys (e.g. PowerToys' win+shift+v, win+r). No effect on --via post-message (already window-scoped; a warning is emitted if set without send-input). Note: win+l stays blocked even with this flag — it locks the workstation (LockWorkStation() via the shell hook), which is unrecoverable from automation. Windows still blocks secure sequences such as ctrl+alt+del (SAS) from injected input regardless of this flag.",
+              "description": "Allow synthesizing system-/shell-reserved combos (win+<key>, alt+f4, alt+tab, ctrl+esc, …) via --via send-input, which are refused by default because they act on the OS/shell beyond the target app. Opt in to drive global hotkeys (e.g. PowerToys' win+shift+v, win+r). No effect on --via post-message (already window-scoped; a warning is emitted if set without send-input). Note: win+l and ctrl+alt+del stay blocked even with this flag — win+l locks the workstation (LockWorkStation() via the shell hook), which is unrecoverable from automation, and ctrl+alt+del is a Secure Attention Sequence (SAS) that Windows drops from injected input regardless of this flag, so it can never take effect.",
               "hidden": false,
               "valueType": "System.Boolean",
               "hasDefaultValue": true,
@@ -3691,7 +3937,7 @@
               "recursive": false
             },
             "--via": {
-              "description": "Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character KeyDown + TextChanged). Named keys and combos raise KeyDown on both, but keyboard accelerators/shortcuts (KeyboardAccelerator, e.g. ctrl+t) only fire via send-input.",
+              "description": "Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character KeyDown + TextChanged). Named keys and combos raise KeyDown on both, but keyboard accelerators/shortcuts (KeyboardAccelerator, e.g. ctrl+t) only fire via send-input. post-message targets the focused child control and works for classic Win32/WinForms controls, but WinUI 3 / UWP / XAML controls are windowless and ignore posted messages — use send-input for those (a warning is emitted when the target looks like a XAML app).",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": true,
@@ -3907,7 +4153,7 @@
           }
         },
         "touch": {
-          "description": "Inject synthetic touch input using the Windows touch-injection API. Supports tap, double-tap, long-press, swipe, pinch and stretch gestures at an element's center or explicit app x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable.",
+          "description": "Inject synthetic touch input using the Windows touch-injection API. Supports tap, double-tap, long-press, swipe, pinch and stretch gestures at an element's center or explicit screen x,y coordinates. Requires an unlocked, interactive desktop with the target window foregroundable.",
           "hidden": false,
           "arguments": {
             "selector": {
@@ -3939,7 +4185,7 @@
               "recursive": false
             },
             "--at": {
-              "description": "Explicit start point as app coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center.",
+              "description": "Explicit start point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,
@@ -4061,7 +4307,7 @@
               "recursive": false
             },
             "--to-point": {
-              "description": "End point x,y for a swipe (app coordinates). Takes precedence over --direction.",
+              "description": "End point x,y for a swipe (screen coordinates). Takes precedence over --direction.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,

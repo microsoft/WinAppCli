@@ -100,7 +100,7 @@ $SkillCommandMap = @{
     "setup"        = @("init", "restore", "update", "run")
     "package"      = @("package", "create-external-catalog")
     "identity"     = @("create-debug-identity")
-    "signing"      = @("cert generate", "cert install", "cert info", "sign")
+    "signing"      = @("cert generate", "cert install", "cert info", "sign", "az-sign")
     "manifest"     = @("manifest generate", "manifest update-assets", "manifest add-alias")
     "troubleshoot"    = @("get-winapp-path", "tool", "store")
     "frameworks"      = @()       # No auto-generated command sections — links to guides
@@ -149,12 +149,19 @@ function Format-ArgumentsTable {
     param([PSObject]$Command)
     
     if (-not $Command.arguments) { return "" }
-    
+
+    # Skip hidden arguments (e.g. the '--'-passthrough absorber) so the table doesn't imply a
+    # hidden positional is a valid direct invocation. Mirrors the hidden filter on the options table.
+    $sortedArgs = $Command.arguments.PSObject.Properties |
+        Where-Object { -not $_.Value.hidden } |
+        Sort-Object { $_.Value.order }
+
+    if (-not $sortedArgs) { return "" }
+
     $output = @()
     $output += "| Argument | Required | Description |"
     $output += "|----------|----------|-------------|"
-    
-    $sortedArgs = $Command.arguments.PSObject.Properties | Sort-Object { $_.Value.order }
+
     foreach ($arg in $sortedArgs) {
         $required = if ($arg.Value.arity.minimum -gt 0) { "Yes" } else { "No" }
         $output += "| ``<$($arg.Name)>`` | $required | $($arg.Value.description) |"

@@ -21,7 +21,7 @@ internal class UiPenCommand : Command, IShortDescription
 
     public static Option<string?> AtOption { get; } = new("--at")
     {
-        Description = "Pen contact point as app coordinates x,y (as reported by 'ui inspect'). " +
+        Description = "Pen contact point as screen coordinates x,y (as reported by 'ui inspect'). " +
                       "Defaults to the selector's element center. Ignored when --path is given."
     };
 
@@ -62,7 +62,7 @@ internal class UiPenCommand : Command, IShortDescription
     public UiPenCommand()
         : base("pen", "Inject synthetic pen/stylus input using the Windows synthetic-pointer API. " +
                "Taps or draws ink strokes with configurable pressure, tilt and eraser mode, at an element's " +
-               "center or explicit app x,y coordinates. Requires an unlocked, interactive desktop with the " +
+               "center or explicit screen x,y coordinates. Requires an unlocked, interactive desktop with the " +
                "target window foregroundable (Windows 10 1809+).")
     {
         Arguments.Add(SharedUiOptions.SelectorArgument);
@@ -221,8 +221,9 @@ internal class UiPenCommand : Command, IShortDescription
                     await PointerCommandSupport.SetForegroundAsync(targetHwnd, cancellationToken);
                 }
 
-                if (!PointerCommandSupport.TryPrepareInjection(
-                    uiAutomation, foregroundGuard, targetHwnd, path, "pen", "pen input", logger, json))
+                var prep = PointerCommandSupport.TryPrepareInjection(
+                    uiAutomation, foregroundGuard, targetHwnd, path, "pen", "pen input", logger, json);
+                if (!prep.Ok)
                 {
                     return 1;
                 }
@@ -245,6 +246,18 @@ internal class UiPenCommand : Command, IShortDescription
                 // mistaken for confirmed delivery.
                 var deliveryWarning = PointerCommandSupport.RemoteInjectionWarning(foregroundGuard, "pen");
 
+                // #661: out-of-window point (prep.OutOfWindowWarning) is a non-fatal advisory; surface it
+                // alongside any delivery-uncertainty warning rather than failing the command.
+                var warnings = new List<string>();
+                if (prep.OutOfWindowWarning is not null)
+                {
+                    warnings.Add(prep.OutOfWindowWarning);
+                }
+                if (deliveryWarning is not null)
+                {
+                    warnings.Add(deliveryWarning);
+                }
+
                 if (json)
                 {
                     var result = new UiPenResult
@@ -258,7 +271,7 @@ internal class UiPenCommand : Command, IShortDescription
                         Eraser = eraser,
                         DurationMs = durationMs,
                         Hwnd = targetHwnd,
-                        Warnings = deliveryWarning is null ? null : [deliveryWarning]
+                        Warnings = warnings.Count == 0 ? null : warnings.ToArray()
                     };
                     ansiConsole.Profile.Out.Writer.WriteLine(
                         JsonSerializer.Serialize(result, UiJsonContext.Default.UiPenResult));
@@ -267,9 +280,9 @@ internal class UiPenCommand : Command, IShortDescription
                 {
                     logger.LogInformation("{Symbol} pen {Action} with {Count} point(s), pressure {Pressure:0.00}",
                         UiSymbols.Check, action, path.Count, pressure);
-                    if (deliveryWarning is not null)
+                    foreach (var warning in warnings)
                     {
-                        logger.LogWarning("{Symbol} {Warning}", UiSymbols.Warning, deliveryWarning);
+                        logger.LogWarning("{Symbol} {Warning}", UiSymbols.Warning, warning);
                     }
                 }
 
@@ -278,7 +291,7 @@ internal class UiPenCommand : Command, IShortDescription
             catch (System.Runtime.InteropServices.COMException comEx)
             {
                 logger.LogDebug("COM error: {HResult} {StackTrace}", comEx.HResult, comEx.StackTrace);
-                UiErrors.StaleElement(logger, json);
+                UiErrors.StaleElement(logger, json, parseResult.InvocationConfiguration.Error);
                 return 1;
             }
             catch (AppNotFoundException ioEx)
@@ -304,7 +317,7 @@ internal class UiPenCommand : Command, IShortDescription
             }
             catch (Exception ex)
             {
-                UiErrors.GenericError(logger, ex, json);
+                UiErrors.GenericError(logger, ex, json, parseResult.InvocationConfiguration.Error);
                 return 1;
             }
 
