@@ -17,6 +17,7 @@ Each framework has a detailed guide — refer to the links below rather than try
 |-----------|---------------|-------|
 | **Electron** | `npm install --save-dev @microsoft/winappcli` | [Electron setup guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/setup.md) |
 | **.NET** (WPF, WinForms, Console) | `winget install Microsoft.winappcli` | [.NET guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/dotnet.md) |
+| **.NET MAUI** | `winget install Microsoft.winappcli` | [MAUI guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/maui.md) + `winapp-maui` skill |
 | **C++** (CMake, MSBuild) | `winget install Microsoft.winappcli` | [C++ guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/cpp.md) |
 | **Rust** | `winget install Microsoft.winappcli` | [Rust guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/rust.md) |
 | **Flutter** | `winget install Microsoft.winappcli` | [Flutter guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/flutter.md) |
@@ -76,6 +77,13 @@ winapp run bin\x64\Debug\<tfm>\win-x64\
 
 Replace `<tfm>` with your target framework (e.g., `net10.0-windows10.0.26100.0`), and adjust `x64` to match your target architecture.
 
+### .NET MAUI
+MAUI has one important quirk: its checked-in `Platforms/Windows/Package.appxmanifest` is full of `$placeholder$` tokens that **`winapp package` does not resolve**. MAUI's **resizetizer** fills them at build/publish time into a generated manifest:
+- Resizetizer manifest: `obj\<Config>\<TFM>\<RID>\resizetizer\m\Package.appxmanifest`
+- Fully-resolved output manifest: `bin\<Config>\<TFM>\<RID>\AppxManifest.xml`
+
+Publish the Windows head first, then point `winapp package --manifest` at the **generated** manifest — never the source one. See the dedicated **`winapp-maui`** skill for the full workflow, CI examples, and troubleshooting.
+
 ### C++ (CMake, MSBuild)
 C++ projects use winapp primarily for SDK projections (CppWinRT headers) and packaging:
 - `winapp init --setup-sdks stable` downloads Windows SDK + App SDK and generates CppWinRT headers
@@ -123,6 +131,7 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 - **Signing**: `winapp-signing` — certificate generation and management
 - **Packaging**: `winapp-package` — creating MSIX installers from build output
 - **Identity**: `winapp-identity` — enabling package identity for Windows APIs during development
+- **MAUI**: `winapp-maui` — packaging/signing .NET MAUI Windows apps and resolving the resizetizer manifest
 - Not sure which command to use? See `winapp-troubleshoot` for a command selection flowchart
 
 ## CLI reference

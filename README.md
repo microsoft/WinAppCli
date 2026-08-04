@@ -125,10 +125,15 @@ Checkout our getting started guides for step by step instructions of how to setu
   <a href="./docs/guides/flutter.md">
     <img src="https://img.shields.io/badge/Flutter-Get%20Started-02569B?style=for-the-badge&logo=flutter&logoColor=white" alt="Get Started with Flutter">
   </a>
+    <br />
+  <a href="./docs/guides/maui.md">
+    <img src="https://img.shields.io/badge/.NET%20MAUI-Get%20Started-512BD4?style=for-the-badge&logo=dotnet&logoColor=white" alt="Get Started with .NET MAUI">
+  </a>
 </p>
 
 Additional guides:
 - [Packaging an EXE/CLI](/docs/guides/packaging-cli.md): step by step guide of packaging an existing exe/cli as MSIX
+- [MAUI (Windows)](./docs/guides/maui.md): package and sign .NET MAUI Windows outputs with the generated resizetizer manifest
 - **Electron JS/TypeScript bindings** *(npm only)*: opt into auto-generated WinRT bindings via `winapp init --add-js-bindings`. See task-focused guides:
   - [File picker](/docs/guides/electron/js-file-picker.md) — open native Windows file/folder pickers from the renderer
   - [Toast notifications](/docs/guides/electron/js-notification.md) — show Windows toasts with actions

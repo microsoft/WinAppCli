@@ -126,6 +126,7 @@ For full details, see the [Debugging Guide](https://github.com/microsoft/WinAppC
 - **Packaging**: `winapp-package` — creating MSIX installers
 - **Identity**: `winapp-identity` — enabling package identity for Windows APIs
 - **Frameworks**: `winapp-frameworks` — framework-specific guidance (Electron, .NET, C++, Rust, Flutter, Tauri)
+- **MAUI**: `winapp-maui` — packaging/signing .NET MAUI Windows apps and resolving the resizetizer manifest
 
 ## CLI reference
 

@@ -1,0 +1,6 @@
+bin/
+obj/
+publish/
+*.msix
+*.msixbundle
+devcert.pfx
