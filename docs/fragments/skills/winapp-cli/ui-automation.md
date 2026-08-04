@@ -100,18 +100,13 @@ winapp ui screenshot -a myapp --focus --output focused.png
 ```
 
 ### Record video (H.264 MP4)
-Record the window — or a single element's region — to an MP4. Frames are captured via Windows
-Graphics Capture (PrintWindow/screen-DC fallback) and encoded incrementally with Media Foundation, so long
-captures never buffer in memory. By default records until stopped; use `--duration-sec N` for a timed run.
+Record a window or element region to MP4. By default recording continues until stopped; use `--duration-sec N` for a timed run.
 ```powershell
 # Record a window for 10s at 15 fps
 winapp ui record -a myapp --duration-sec 10 --fps 15 --output demo.mp4
 
-# Record until Ctrl+C (default — duration 0), downscaled so the longest edge is 1280px
-winapp ui record -a myapp --max-edge 1280 --output capture.mp4
-
-# Record a single element's region (fails with element_not_found if selector doesn't match)
-winapp ui record itm-chart-9f8e -a myapp --output chart.mp4
+# Recommended agent evidence: MP4 plus timestamped JPEGs and an NDJSON index
+winapp ui record -a myapp --frames --duration-sec 10 --fps 10 --output demo.mp4 --json
 
 # Include overlays/popups (captures from screen DC; may include occluding windows)
 winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups.mp4
@@ -119,10 +114,12 @@ winapp ui record -a myapp --capture-screen --duration-sec 5 --output with-popups
 # Programmatic stop: pipe a newline to stop and finalize the MP4 (for agent/script callers)
 "" | winapp ui record -a myapp --json --output capture.mp4
 ```
-- Default `--duration-sec 0` records until stopped — **Ctrl+C** for interactive use, or a **newline / EOF on stdin** for programmatic callers (pipe `""` or close stdin to stop). A valid MP4 is always finalized on any graceful stop.
+- Default `--duration-sec 0` records until Ctrl+C, a newline, or EOF on redirected stdin.
+- `--frames` writes `<output-name>.frames` with a manifest, NDJSON index, and changed JPEGs. It supports 1-30 fps and `--max-edge` 64-4096 (default 1280), with a 1 GiB cap. Use `elapsedMs` to bound transitions.
+- With `--frames`, existing MP4 and frame paths are not replaced. On partial failure, use the reported preserved path and `recoveryHint`.
 - `--capture-screen` captures from the screen DC so overlays and popups are included; the window is brought to the foreground first. When WGC is unavailable and `--capture-screen` is not passed, the CLI returns an error — re-run with `--capture-screen` to consent to screen-DC capture.
 - Providing a selector that doesn't match any element fails immediately with `element_not_found` (rather than silently recording the whole window).
-- `--json` stdout result: `path`, `frames`, `width`, `height`, `fileSize`, `codec` (`"h264"`), `mode` (`wgc`, `printwindow`, or `screen`). A `{"event":"recording-started","path":"…","fps":N,"durationSec":N}` liveness event is emitted to **stderr** as soon as capture begins, before the final result.
+- `--json` writes the final result to stdout and one JSON event per line to stderr.
 
 ### Hover (for tooltips, flyouts, hover states)
 `--dwell-time <ms>` sets how long to wait after hovering (default: 800, range: 0–10000).
