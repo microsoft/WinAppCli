@@ -23,7 +23,7 @@ A .NET MAUI project has a **source** manifest at `Platforms/Windows/Package.appx
 <uap:VisualElements DisplayName="$placeholder$" ... Square150x150Logo="$placeholder$.png" Square44x44Logo="$placeholder$.png">
 ```
 
-These are resolved at **build/publish time** by **`Microsoft.Maui.Resizetizer`** (bundled with the MAUI workload), which reads MSBuild properties (`ApplicationTitle`, `ApplicationId`, `ApplicationDisplayVersion`, `ApplicationPublisher`, the `MauiIcon`/`MauiSplashScreen` items, etc.), generates the app icon/tile/splash assets, and writes a **resolved** manifest into the intermediate output.
+These are resolved at **build/publish time** by **`Microsoft.Maui.Resizetizer`** (bundled with the MAUI workload), which reads MSBuild properties (`ApplicationTitle`, `ApplicationId`, `ApplicationDisplayVersion`, the `MauiIcon`/`MauiSplashScreen` items, etc.), generates the app icon/tile/splash assets, and writes a **resolved** manifest into the intermediate output.
 
 **Why winapp trips on this:** `winapp package` only auto-resolves its own entry-point tokens — `$targetnametoken$` and `$targetentrypoint$` (via `--executable`). It does **not** understand MAUI's `$placeholder$` tokens. If you point winapp at the raw `Platforms/Windows/Package.appxmanifest`, packaging fails because those placeholders are still literal `$placeholder$` strings.
 
@@ -68,7 +68,7 @@ dotnet publish .\MyApp\MyApp.csproj `
 
 ### 2. Publisher must match the certificate
 
-The resolved manifest's `Identity.Publisher` comes from MSBuild (`$(ApplicationPublisher)`, defaulting to something like `CN=User Name`). Your signing certificate subject **must equal** that value exactly, or signing fails with a publisher mismatch.
+The resolved manifest preserves `Identity.Publisher` from `Platforms\Windows\Package.appxmanifest`. Your signing certificate subject **must equal** that value exactly, or signing fails with a publisher mismatch. To use a different publisher, edit the source manifest's `Identity Publisher="CN=..."` value and publish again before generating the certificate.
 
 ```powershell
 $manifest = ".\MyApp\obj\Release\net10.0-windows10.0.19041.0\win-x64\resizetizer\m\Package.appxmanifest"
@@ -78,12 +78,10 @@ if (-not (Test-Path $manifest)) {
     throw "Resolved manifest not found — publish the Windows head first."
 }
 
-# Generate a matching dev cert from the resolved manifest
+# Generate or replace a matching dev cert from the resolved manifest
 # The default password is 'password' — use the same for --cert-password below
-winapp cert generate --manifest $manifest --if-exists skip
+winapp cert generate --manifest $manifest --if-exists overwrite
 ```
-
-Set `<ApplicationPublisher>CN=Your Company</ApplicationPublisher>` (or the `ApplicationPublisher` MSBuild property) in the `.csproj` to control it, then regenerate the cert to match.
 
 ### 3. Package a signed MSIX — point `--manifest` at the resolved manifest
 
@@ -109,8 +107,6 @@ winapp sign .\publish\win-x64\MyApp.exe .\devcert.pfx --password password
 ```
 
 > `winapp sign` uses a **positional** certificate path + `--password`. `winapp package` uses `--cert` / `--cert-password`. Mixing them is a common mistake.
-
-Set `<ApplicationPublisher>CN=Your Company</ApplicationPublisher>` (or the `ApplicationPublisher` MSBuild property) in the `.csproj` to control it, then regenerate the cert to match.
 
 ## CI/CD (GitHub Actions)
 
@@ -208,5 +204,5 @@ The repository also includes a concrete MAUI sample project under `samples\maui-
 | "manifest contains unresolved placeholders: `$placeholder$`" | Pointed winapp at the **source** `Platforms/Windows/Package.appxmanifest` | Point `--manifest` at the resolved manifest (`obj\...\resizetizer\m\Package.appxmanifest` or `bin\...\<RID>\AppxManifest.xml`) |
 | "manifest not found" at the resizetizer path | Windows head not published for that RID | Run `dotnet publish -f <windows-tfm> -r <rid>` **before** packing |
 | "unresolved `$targetnametoken$` / `$targetentrypoint$`" | Packed the resizetizer manifest without an entry point | Add `--executable MyApp.exe`, or pack the fully-resolved `bin\...\AppxManifest.xml` instead |
-| "Publisher mismatch" during signing | Cert subject ≠ resolved manifest `Identity.Publisher` | `winapp cert generate --manifest <resolved-manifest>`, or set `$(ApplicationPublisher)` in the `.csproj` and regenerate the cert |
+| "Publisher mismatch" during signing | Cert subject ≠ resolved manifest `Identity.Publisher` | Set `Identity Publisher="CN=..."` in `Platforms\Windows\Package.appxmanifest`, publish again, then run `winapp cert generate --manifest <resolved-manifest> --if-exists overwrite` |
 | Placeholders reappear after editing the source manifest | Resizetizer overwrites its generated copy each build | Don't hand-edit the source manifest — change the MSBuild properties / `MauiIcon` instead |

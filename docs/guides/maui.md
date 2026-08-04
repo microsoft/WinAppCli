@@ -20,8 +20,19 @@ A concrete MAUI sample project is available at [`samples/maui-app`](../../sample
 ## 1. Create a MAUI app and publish the Windows head
 
 ```powershell
-dotnet new maui -n mymauiapp
+dotnet new maui -n mymauiapp --no-restore
 cd mymauiapp
+
+# The stock template targets every MAUI platform. Keep only Windows when
+# maui-windows is the only installed workload.
+[xml]$project = Get-Content .\mymauiapp.csproj
+$propertyGroup = $project.Project.PropertyGroup[0]
+$propertyGroup.SelectNodes("*[local-name()='TargetFrameworks']") |
+  ForEach-Object { $propertyGroup.RemoveChild($_) | Out-Null }
+$windowsTfm = $project.CreateElement("TargetFrameworks", $project.Project.NamespaceURI)
+$windowsTfm.InnerText = "net10.0-windows10.0.19041.0"
+$propertyGroup.PrependChild($windowsTfm) | Out-Null
+$project.Save((Resolve-Path .\mymauiapp.csproj).Path)
 
 dotnet publish .\mymauiapp.csproj `
   -c Release `
@@ -39,7 +50,7 @@ dotnet publish .\mymauiapp.csproj `
 $manifest = ".\obj\Release\net10.0-windows10.0.19041.0\win-x64\resizetizer\m\Package.appxmanifest"
 if (-not (Test-Path $manifest)) { throw "Resolved manifest not found: $manifest" }
 
-winapp cert generate --manifest $manifest --if-exists skip
+winapp cert generate --manifest $manifest --if-exists overwrite
 
 winapp package .\publish\win-x64 `
   --manifest $manifest `
