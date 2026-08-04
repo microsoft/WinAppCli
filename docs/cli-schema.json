@@ -3308,7 +3308,7 @@
           }
         },
         "record": {
-          "description": "Record the target window (or an element's region) to an H.264 MP4 video. Captures frames via Windows Graphics Capture and encodes with Media Foundation. By default records until stopped (Ctrl+C, or a newline/EOF on stdin for programmatic callers). Use --duration-sec N for a timed run. A valid MP4 is always finalized on graceful stop. Use --capture-screen to include overlays/popups.",
+          "description": "Record the target window (or an element's region) to an H.264 MP4 video. By default records until Ctrl+C or redirected-stdin newline/EOF. Use --duration-sec for a timed run, --frames for timestamped JPEG evidence, and --capture-screen for overlays and popups.",
           "hidden": false,
           "arguments": {
             "selector": {
@@ -3353,7 +3353,7 @@
               "recursive": false
             },
             "--duration-sec": {
-              "description": "Recording duration in seconds. Default 0 records until stopped — Ctrl+C, or (for programmatic callers) a newline or EOF on stdin. A valid MP4 is always finalized on graceful stop.",
+              "description": "Recording duration in seconds. 0 records until Ctrl+C or redirected-stdin newline/EOF.",
               "hidden": false,
               "valueType": "System.Int32",
               "hasDefaultValue": true,
@@ -3373,6 +3373,19 @@
               "defaultValue": 15,
               "arity": {
                 "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--frames": {
+              "description": "Write timestamped JPEGs, frames.ndjson, and manifest.json to <output-name>.frames. Supports 1-30 fps and max-edge 64-4096 (default 1280), with a 1 GiB frame-data cap.",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
                 "maximum": 1
               },
               "required": false,

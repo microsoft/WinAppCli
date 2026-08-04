@@ -55,6 +55,9 @@ public partial class RealUiAutomationTests
         WgcCapture.s_isSupported = Windows.Graphics.Capture.GraphicsCaptureSession.IsSupported;
         WgcCapture.s_startGrabber = (hwnd, logger, fps) => WgcCapture.StartGrabber(hwnd, logger, fps);
         Mp4SinkWriterEncoder.s_create = (path, width, height, fps, bitrate) => new Mp4SinkWriterEncoder(path, width, height, fps, bitrate);
+        Mp4SinkWriterEncoder.s_createNoClobber = (path, width, height, fps, bitrate) =>
+            new Mp4SinkWriterEncoder(path, width, height, fps, bitrate, overwriteExisting: false);
+        RecordFrameBundleWriter.ResetTestSeams();
     }
 
     private static UiAutomationService NewService()

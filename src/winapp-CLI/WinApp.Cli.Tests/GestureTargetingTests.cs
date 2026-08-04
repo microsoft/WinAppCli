@@ -163,7 +163,7 @@ public class GestureTargetingTests
         public Task<UiElement[]> SearchAsync(UiSessionInfo session, SelectorExpression selector, int maxResults, CancellationToken ct) => throw new NotImplementedException();
         public Task<Dictionary<string, object?>> GetPropertiesAsync(UiSessionInfo session, UiElement element, string? propertyName, CancellationToken ct) => throw new NotImplementedException();
         public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, CancellationToken ct) => throw new NotImplementedException();
-        public Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action? onRecordingStarted = null) => throw new NotImplementedException();
+        public Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action<bool>? onRecordingStarted = null) => throw new NotImplementedException();
         public Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct) => throw new NotImplementedException();
         public Task SetValueAsync(UiSessionInfo session, UiElement element, string text, CancellationToken ct) => throw new NotImplementedException();
         public Task FocusAsync(UiSessionInfo session, UiElement element, CancellationToken ct) => throw new NotImplementedException();
@@ -178,6 +178,5 @@ public class GestureTargetingTests
         }
     }
 }
-
 
 
