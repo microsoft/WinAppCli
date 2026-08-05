@@ -76,9 +76,11 @@ extends:
           - script: move /Y $(Build.SourcesDirectory)\.pipelines\release-nuget.config $(Build.SourcesDirectory)\nuget.config
             displayName: Add release package source
           - task: NuGetAuthenticate@1
+          - script: move /Y $(Build.SourcesDirectory)\.pipelines\release-npmrc $(Build.SourcesDirectory)\.npmrc
+            displayName: Add release npm source
           - task: npmAuthenticate@0
             inputs:
-              workingFile: $(Build.SourcesDirectory)\.pipelines\internal-npmrc
+              workingFile: $(Build.SourcesDirectory)\.npmrc
           - task: PowerShell@2
             displayName: Replace Stubbed Files
             inputs:
@@ -89,7 +91,6 @@ extends:
               stable: 'true'
               DoEsrp: ${{ parameters.DoEsrp }}
               signingIdentity: ${{ parameters.signingIdentity }}
-              npmConfigFile: $(Build.SourcesDirectory)\.pipelines\internal-npmrc
           - task: PowerShell@2
             name: SetMeta
             displayName: Export version
