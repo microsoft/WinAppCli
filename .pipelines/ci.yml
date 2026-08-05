@@ -49,8 +49,12 @@ extends:
           - script: move /Y $(Build.SourcesDirectory)\.pipelines\release-nuget.config $(Build.SourcesDirectory)\nuget.config
             displayName: Add release package source
           - task: NuGetAuthenticate@1
+          - task: npmAuthenticate@0
+            inputs:
+              workingFile: $(Build.SourcesDirectory)\.pipelines\internal-npmrc
           - template: ./.pipelines/templates/build.yaml@self
             parameters:
               stable: 'false'
               DoEsrp: false
               signingIdentity: {}
+              npmConfigFile: $(Build.SourcesDirectory)\.pipelines\internal-npmrc

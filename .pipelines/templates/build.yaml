@@ -8,10 +8,13 @@ parameters:
     akvName: ''
     authCertName: ''
     signCertName: ''
+  npmConfigFile: ''
 
 steps:
 - task: PowerShell@2
   displayName: Build CLI
+  env:
+    NPM_CONFIG_USERCONFIG: ${{ parameters.npmConfigFile }}
   inputs:
     pwsh: true
     filePath: $(System.DefaultWorkingDirectory)\scripts\build-cli.ps1
@@ -57,6 +60,8 @@ steps:
         ]
 - task: PowerShell@2
   displayName: Package NPM
+  env:
+    NPM_CONFIG_USERCONFIG: ${{ parameters.npmConfigFile }}
   inputs:
     pwsh: true
     filePath: $(System.DefaultWorkingDirectory)\scripts\package-npm.ps1
