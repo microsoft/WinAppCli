@@ -328,11 +328,13 @@ public class ProgramJsonBridgeTests : BaseCommandTests
     [TestMethod]
     public async Task JsonBridge_NewCommand_ParseError_EmitsNewCommandResultJson()
     {
-        // `new --json --template bogus` fails at parse time. Without the bridge, System.CommandLine
-        // prints human help/error text and JSON callers (agents) get no machine-readable result. The
-        // bridge must emit a flat NewCommandResult on stdout (where `new`'s success JSON also goes).
+        // `--template` is free-form (validated at runtime), so a bad value no longer fails at parse
+        // time. A trailing `--template` with no value is a genuine System.CommandLine parse error.
+        // Without the bridge, System.CommandLine prints human help/error text and JSON callers (agents)
+        // get no machine-readable result. The bridge must emit a flat NewCommandResult on stdout (where
+        // `new`'s success JSON also goes).
         var (stdout, _, exitCode) = await InvokeProgramAsync(
-            ["new", "--json", "--template", "bogus"]);
+            ["new", "--json", "--template"]);
 
         Assert.AreEqual(NewCommand.ExitInvalidArgs, exitCode,
             "A `new` parse error must return the same ExitInvalidArgs (2) the handler uses for invalid names/versions.");

@@ -38,14 +38,20 @@ You need an **existing app project** — `winapp init` does **not** create new p
 
 ### Create a new WinUI app
 
-To start a brand-new **WinUI** app (rather than adding Windows support to an existing project), use `winapp new`. It verifies the .NET SDK, installs the official WinUI `dotnet new` template pack on demand, and scaffolds the app against your installed SDK's target framework. Most WinUI templates already include packaging/identity, so **no `winapp init` step is needed** afterward — follow the template-specific next step `winapp new` prints when it finishes. App templates go straight to `dotnet run` (which builds and launches the freshly-scaffolded source); the `lib` (class library) and `unittest` templates differ (reference the library from an app project, or `dotnet run` the packaged test app to run its tests).
+To start a brand-new **WinUI** app (rather than adding Windows support to an existing project), use `winapp new`. It verifies the .NET SDK, installs the official WinUI `dotnet new` template pack on demand (grabbing the latest, or offering to update a stale one), and scaffolds the app against your installed SDK's target framework. Most WinUI templates already include packaging/identity, so **no `winapp init` step is needed** afterward — follow the template-specific next step `winapp new` prints when it finishes. App templates go straight to `dotnet run` (which builds and launches the freshly-scaffolded source); the `winui-lib` (class library) and `winui-unittest` templates differ (reference the library from an app project, or `dotnet run` the packaged test app to run its tests). The template list is read live from the installed pack — run `winapp new --list` to see the current set.
 
 ```powershell
-# Interactive — pick a template (blank, navview, tabview, mvvm, lib, unittest), then name/output
+# Interactive — pick a template, then name/output
 winapp new
 
-# One-shot with a specific template
-winapp new --name MyApp --template navview
+# See the available templates without scaffolding
+winapp new --list
+
+# One-shot with a specific template (short names come from `winapp new --list`)
+winapp new --name MyApp --template winui-navview
+
+# Always use the newest template pack without prompting
+winapp new --name MyApp --template-version latest
 
 # Non-interactive (agent) with machine-readable output
 winapp new --use-defaults --name MyApp --json
@@ -202,7 +208,7 @@ Start here for initializing a Windows app with required setup. Sets up everythin
 
 ### `winapp new`
 
-Create a new WinUI app from an official Windows App SDK template. Interactive by default: pick a template (blank, navigation view, tab view, MVVM, class library, or unit test), then a name (the output directory defaults to ./<name>). Automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Requires the .NET SDK; installs the WinUI template pack on demand and delegates scaffolding to 'dotnet new'. Scaffolds against the installed SDK's target framework and prints a template-specific next step when done (e.g. 'dotnet run' for app templates).
+Create a new WinUI app from an official Windows App SDK template. Interactive by default: pick a template, then a name (the output directory defaults to ./<name>). Automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Requires the .NET SDK; installs the WinUI template pack on demand (grabbing the latest, or offering to update a stale one) and delegates scaffolding to 'dotnet new'. Use --list to see the available templates. Scaffolds against the installed SDK's target framework and prints a template-specific next step when done (e.g. 'dotnet run' for app templates).
 
 #### Options
 <!-- auto-generated from cli-schema.json -->
@@ -210,11 +216,12 @@ Create a new WinUI app from an official Windows App SDK template. Interactive by
 |--------|-------------|---------|
 | `--force` | Scaffold even if the output directory already contains files. | (none) |
 | `--json` | Format output as JSON | (none) |
+| `--list` | List the available WinUI templates and exit (installs the latest template pack if none is installed). | (none) |
 | `--name` | Name for the new app/project (default: derived from --output, else 'WinUIApp'). | (none) |
 | `--output` | Directory to create the app in (default: ./<name>). Created if it doesn't exist. | (none) |
-| `--template` | WinUI template: blank (default), navview, tabview, mvvm, lib, or unittest. | (none) |
-| `--template-version` | Version of the WinUI template pack to use (default: 0.0.6-alpha). | (none) |
-| `--use-defaults` | Do not prompt; use defaults (blank template, name from --output/--name). | (none) |
+| `--template` | Template short name (e.g. winui, winui-navview, winui-mvvm, winui-lib, winui-unittest). Run 'winapp new --list' to see all. | (none) |
+| `--template-version` | WinUI template pack version: 'latest' (install newest), 'installed' (keep what's installed), or an explicit version. Default: install latest if none, else prompt to update a stale pack. | (none) |
+| `--use-defaults` | Do not prompt; use defaults (blank template, name from --output/--name, keep installed templates). | (none) |
 
 ### `winapp restore`
 

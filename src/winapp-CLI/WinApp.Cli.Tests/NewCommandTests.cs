@@ -35,47 +35,56 @@ public class NewCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    [DataRow("blank", nameof(WinUiTemplate.Blank))]
-    [DataRow("navview", nameof(WinUiTemplate.NavView))]
-    [DataRow("tabview", nameof(WinUiTemplate.TabView))]
-    [DataRow("mvvm", nameof(WinUiTemplate.Mvvm))]
-    [DataRow("lib", nameof(WinUiTemplate.Lib))]
-    [DataRow("unittest", nameof(WinUiTemplate.UnitTest))]
-    public void Parse_TemplateAlias_ParsesCaseInsensitively(string alias, string expectedName)
+    [DataRow("winui")]
+    [DataRow("winui-navview")]
+    [DataRow("winui-lib")]
+    public void Parse_TemplateOption_BindsShortName(string shortName)
     {
         var command = GetRequiredService<NewCommand>();
-        var expected = Enum.Parse<WinUiTemplate>(expectedName);
 
-        var parseResult = command.Parse(["--template", alias]);
+        var parseResult = command.Parse(["--template", shortName]);
 
         Assert.IsEmpty(parseResult.Errors,
-            $"Template alias '{alias}' should parse. Errors: {string.Join("; ", parseResult.Errors)}");
-        Assert.AreEqual(expected, parseResult.GetValue(NewCommand.TemplateOption));
+            $"Template '{shortName}' should parse. Errors: {string.Join("; ", parseResult.Errors)}");
+        Assert.AreEqual(shortName, parseResult.GetValue(NewCommand.TemplateOption));
     }
 
     [TestMethod]
-    public void Parse_UnknownTemplate_ReportsError()
+    public void Parse_TemplateOption_AcceptsArbitraryValueAtParseTime()
     {
+        // Templates are now dynamic (enumerated from the installed pack), so --template is validated
+        // against the live list at run time, not parse time. The parser therefore accepts any string.
         var command = GetRequiredService<NewCommand>();
 
         var parseResult = command.Parse(["--template", "bogus"]);
 
-        Assert.IsNotEmpty(parseResult.Errors, "Unknown template value should produce a parse error.");
+        Assert.IsEmpty(parseResult.Errors, "An unknown --template is validated at run time, not parse time.");
+        Assert.AreEqual("bogus", parseResult.GetValue(NewCommand.TemplateOption));
     }
 
     [TestMethod]
-    [DataRow("99")]   // undefined enum value
-    [DataRow("2")]    // numeric alias that would otherwise coerce to TabView
-    [DataRow("-1")]
-    public void Parse_NumericTemplate_ReportsError(string value)
+    public void Parse_ListOption_BindsTrue()
     {
-        // The default enum binder accepts numeric values, silently scaffolding the wrong/blank
-        // template. The custom parser must reject anything that isn't one of the six named aliases.
         var command = GetRequiredService<NewCommand>();
 
-        var parseResult = command.Parse(["--template", value]);
+        var parseResult = command.Parse(["--list"]);
 
-        Assert.IsNotEmpty(parseResult.Errors, $"Numeric template '{value}' should produce a parse error, not silently bind an enum.");
+        Assert.IsEmpty(parseResult.Errors);
+        Assert.IsTrue(parseResult.GetValue(NewCommand.ListOption));
+    }
+
+    [TestMethod]
+    [DataRow("latest")]
+    [DataRow("installed")]
+    [DataRow("1.2.3")]
+    public void Parse_TemplateVersionOption_BindsKeywordOrVersion(string value)
+    {
+        var command = GetRequiredService<NewCommand>();
+
+        var parseResult = command.Parse(["--template-version", value]);
+
+        Assert.IsEmpty(parseResult.Errors);
+        Assert.AreEqual(value, parseResult.GetValue(NewCommand.TemplateVersionOption));
     }
 
     [TestMethod]
@@ -88,35 +97,6 @@ public class NewCommandTests : BaseCommandTests
         Assert.IsEmpty(parseResult.Errors);
         Assert.IsTrue(parseResult.GetValue(NewCommand.UseDefaultsOption),
             "--no-prompt should map to the --use-defaults option.");
-    }
-
-    [TestMethod]
-    [DataRow(nameof(WinUiTemplate.Blank), "winui")]
-    [DataRow(nameof(WinUiTemplate.NavView), "winui-navview")]
-    [DataRow(nameof(WinUiTemplate.TabView), "winui-tabview")]
-    [DataRow(nameof(WinUiTemplate.Mvvm), "winui-mvvm")]
-    [DataRow(nameof(WinUiTemplate.Lib), "winui-lib")]
-    [DataRow(nameof(WinUiTemplate.UnitTest), "winui-unittest")]
-    public void TemplateInfo_MapsToOfficialShortName(string templateName, string expectedShortName)
-    {
-        var template = Enum.Parse<WinUiTemplate>(templateName);
-
-        var (shortName, label) = NewCommand.TemplateInfo(template);
-
-        Assert.AreEqual(expectedShortName, shortName);
-        Assert.IsFalse(string.IsNullOrWhiteSpace(label), "Each template should have a friendly picker label.");
-    }
-
-    [TestMethod]
-    [DataRow(nameof(WinUiTemplate.Blank), "app")]
-    [DataRow(nameof(WinUiTemplate.NavView), "app")]
-    [DataRow(nameof(WinUiTemplate.Lib), "class library")]
-    [DataRow(nameof(WinUiTemplate.UnitTest), "unit test project")]
-    public void ProjectKind_DescribesTheArtifact(string templateName, string expectedKind)
-    {
-        var template = Enum.Parse<WinUiTemplate>(templateName);
-
-        Assert.AreEqual(expectedKind, NewCommand.ProjectKind(template));
     }
 
     [TestMethod]

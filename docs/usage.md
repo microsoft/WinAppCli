@@ -119,32 +119,41 @@ winapp new [options]
 
 **Options:**
 
-- `-t, --template <blank|navview|tabview|mvvm|lib|unittest>` - WinUI template to use (default: `blank`)
+- `-t, --template <short-name>` - Template short name (e.g. `winui`, `winui-navview`, `winui-mvvm`, `winui-lib`, `winui-unittest`). Validated against the installed pack at run time; run `winapp new --list` to see all. Default: `winui` (blank app).
 - `-n, --name <name>` - Name for the new app/project (default: derived from `--output`, else `WinUIApp`)
 - `-o, --output <path>` - Directory to create the app in (default: `./<name>`)
-- `--use-defaults`, `--no-prompt` - Do not prompt; use defaults
+- `--use-defaults`, `--no-prompt` - Do not prompt; use defaults (blank template, name from `--output`/`--name`, and keep the installed template pack rather than updating it)
 - `--force` - Scaffold even if the output directory already contains files
-- `--template-version <version>` - Version of the WinUI template pack to use (pinned by default)
+- `--template-version <latest|installed|version>` - WinUI template pack version: `latest` installs the newest published pack, `installed` keeps whatever is already downloaded (no network), or pin an explicit version such as `1.2.3`. Default: install the latest when no pack is present, otherwise prompt to update a stale pack (kept as-is under `--use-defaults`).
+- `--list` - List the available WinUI templates and exit (installs the latest pack first if none is installed)
 - `--json` - Format output as JSON
 
 **Templates:**
 
-| Alias | `dotnet new` template | Description |
-|-------|-----------------------|-------------|
-| `blank` | `winui` | Minimal blank WinUI 3 app (MSIX packaging) |
-| `navview` | `winui-navview` | NavigationView starter app |
-| `tabview` | `winui-tabview` | TabView starter app |
-| `mvvm` | `winui-mvvm` | MVVM app (CommunityToolkit.Mvvm) |
-| `lib` | `winui-lib` | WinUI 3 class library |
-| `unittest` | `winui-unittest` | Packaged MSTest app; tests run when it's launched |
+The template list is read live from the installed pack, so it always reflects the version you have — run `winapp new --list` to see the current set. Common templates:
+
+| Short name | Description |
+|------------|-------------|
+| `winui` | Minimal blank WinUI 3 app (MSIX packaging) |
+| `winui-navview` | NavigationView starter app |
+| `winui-tabview` | TabView starter app |
+| `winui-mvvm` | MVVM app (CommunityToolkit.Mvvm) |
+| `winui-lib` | WinUI 3 class library |
+| `winui-unittest` | Packaged MSTest app; tests run when it's launched |
+
+Each template's canonical short name is the first alias `dotnet new` lists for it; any listed alias (e.g. `winui3`, `wasdk-single`) is also accepted. When run inside an existing WinUI project, `dotnet new` also surfaces **item** templates (e.g. a blank page), which `winapp new` adds into the current project rather than creating a new one.
+
+**Template pack versioning:**
+
+`winapp new` no longer pins a specific template pack version. If no pack is installed it installs the **latest**. If an older pack is already installed it checks the feed and, when a newer one exists, **prompts** whether to update — except in non-interactive/`--use-defaults` runs, which keep the installed pack. Use `--template-version latest` to always take the newest without prompting, or `--template-version installed` to always use the downloaded pack without a network check.
 
 **What it does:**
 
 - Verifies the .NET SDK is installed (fails fast with guidance if missing — `winapp` does not install toolchains)
-- Installs the official WinUI template pack (`Microsoft.WindowsAppSDK.WinUI.CSharp.Templates`) on demand
-- Delegates scaffolding to `dotnet new <template>`
+- Installs or updates the official WinUI template pack (`Microsoft.WindowsAppSDK.WinUI.CSharp.Templates`) on demand
+- Enumerates the available templates from the installed pack and delegates scaffolding to `dotnet new <short-name>`
 
-WinUI templates already include Windows packaging and identity (`Package.appxmanifest`) — except the `lib` class-library template, which has no app manifest — so no separate `winapp init` step is required. For app templates (`blank`, `navview`, `tabview`, `mvvm`), use `dotnet run` to build and launch the app. The `lib` template produces a class library to reference from an app project. The `unittest` template is a **packaged MSTest app whose tests run when the app is launched** (`dotnet run`) — not via `dotnet test`. `winapp new` scaffolds against your installed .NET SDK's target framework and prints the appropriate next step for the template you choose.
+WinUI app templates already include Windows packaging and identity (`Package.appxmanifest`), so no separate `winapp init` step is required. For app templates, use `winapp run` (or `dotnet run`) to build and launch the app. The `winui-lib` template produces a class library to reference from an app project (it has no app manifest). The `winui-unittest` template is a **packaged MSTest app whose tests run when the app is launched** (`winapp run .` or `dotnet run`) — not via `dotnet test`. `winapp new` scaffolds against your installed .NET SDK's target framework and prints the appropriate next step for the template you choose.
 
 **Examples:**
 
@@ -152,8 +161,14 @@ WinUI templates already include Windows packaging and identity (`Package.appxman
 # Interactive: pick a template, then a name (output defaults to ./<name>)
 winapp new
 
+# List the available templates without scaffolding
+winapp new --list
+
 # One-shot with a specific template
-winapp new --name MyApp --template navview
+winapp new --name MyApp --template winui-navview
+
+# Always use the newest template pack, no prompts
+winapp new --name MyApp --template-version latest
 
 # Non-interactive (agent) with machine-readable output
 winapp new --use-defaults --name MyApp --json

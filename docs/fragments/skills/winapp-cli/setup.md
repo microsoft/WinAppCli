@@ -33,14 +33,20 @@ You need an **existing app project** — `winapp init` does **not** create new p
 
 ### Create a new WinUI app
 
-To start a brand-new **WinUI** app (rather than adding Windows support to an existing project), use `winapp new`. It verifies the .NET SDK, installs the official WinUI `dotnet new` template pack on demand, and scaffolds the app against your installed SDK's target framework. Most WinUI templates already include packaging/identity, so **no `winapp init` step is needed** afterward — follow the template-specific next step `winapp new` prints when it finishes. App templates go straight to `dotnet run` (which builds and launches the freshly-scaffolded source); the `lib` (class library) and `unittest` templates differ (reference the library from an app project, or `dotnet run` the packaged test app to run its tests).
+To start a brand-new **WinUI** app (rather than adding Windows support to an existing project), use `winapp new`. It verifies the .NET SDK, installs the official WinUI `dotnet new` template pack on demand (grabbing the latest, or offering to update a stale one), and scaffolds the app against your installed SDK's target framework. Most WinUI templates already include packaging/identity, so **no `winapp init` step is needed** afterward — follow the template-specific next step `winapp new` prints when it finishes. App templates go straight to `dotnet run` (which builds and launches the freshly-scaffolded source); the `winui-lib` (class library) and `winui-unittest` templates differ (reference the library from an app project, or `dotnet run` the packaged test app to run its tests). The template list is read live from the installed pack — run `winapp new --list` to see the current set.
 
 ```powershell
-# Interactive — pick a template (blank, navview, tabview, mvvm, lib, unittest), then name/output
+# Interactive — pick a template, then name/output
 winapp new
 
-# One-shot with a specific template
-winapp new --name MyApp --template navview
+# See the available templates without scaffolding
+winapp new --list
+
+# One-shot with a specific template (short names come from `winapp new --list`)
+winapp new --name MyApp --template winui-navview
+
+# Always use the newest template pack without prompting
+winapp new --name MyApp --template-version latest
 
 # Non-interactive (agent) with machine-readable output
 winapp new --use-defaults --name MyApp --json

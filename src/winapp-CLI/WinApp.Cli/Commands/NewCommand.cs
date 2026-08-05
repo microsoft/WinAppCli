@@ -3,7 +3,6 @@
 
 using System.CommandLine;
 using System.CommandLine.Invocation;
-using System.CommandLine.Parsing;
 using System.ComponentModel;
 using System.Linq;
 using System.Text.Json;
@@ -15,21 +14,6 @@ using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
-/// <summary>
-/// The WinUI template to scaffold. Each value maps to a friendly CLI alias and an official
-/// <c>dotnet new</c> short name from the WindowsAppSDK WinUI template pack. Parsed case-insensitively,
-/// so <c>--template navview</c> resolves to <see cref="NavView"/>.
-/// </summary>
-internal enum WinUiTemplate
-{
-    Blank,
-    NavView,
-    TabView,
-    Mvvm,
-    Lib,
-    UnitTest
-}
-
 internal class NewCommand : Command, IShortDescription
 {
     public string ShortDescription => "Create a new WinUI app";
@@ -38,10 +22,17 @@ internal class NewCommand : Command, IShortDescription
     internal const string TemplatePackageId = "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates";
 
     /// <summary>
-    /// Pinned template-pack version (the pack is preview + externally owned; pinning avoids silent
-    /// breakage). Override with <c>--template-version</c>.
+    /// Short name of the default template (the blank app) used when the caller doesn't pick one and
+    /// no prompt is shown. Resolved against the live template list, so if the pack ever renames it we
+    /// fall back to the first project template rather than failing.
     /// </summary>
-    internal const string DefaultTemplateVersion = "0.0.6-alpha";
+    internal const string DefaultTemplateShortName = "winui";
+
+    /// <summary><c>--template-version latest</c>: install the newest published pack, skip the update prompt.</summary>
+    internal const string LatestVersionKeyword = "latest";
+
+    /// <summary><c>--template-version installed</c>: keep whatever pack is installed, skip the feed check and prompt.</summary>
+    internal const string InstalledVersionKeyword = "installed";
 
     /// <summary>Minimum .NET SDK version, matching <c>winapp run</c>'s project mode.</summary>
     internal static readonly Version MinimumSdkVersion = new(8, 0, 100);
@@ -54,10 +45,16 @@ internal class NewCommand : Command, IShortDescription
     // Fixed dotnet argument lists, hoisted to static readonly fields to satisfy CA1861.
     private static readonly string[] VersionArgs = ["--version"];
     private static readonly string[] ListTemplatePacksArgs = ["new", "uninstall"];
+    private static readonly string[] UpdateCheckArgs = ["new", "update", "--check-only"];
 
-    // Force English CLI output for the pack-list subprocess. `dotnet new uninstall` localizes its
-    // "Version:" label per DOTNET_CLI_UI_LANGUAGE (e.g. "Versión:", "バージョン:"), which would break
-    // the locale-dependent parse in IsTemplatePackInstalled and make every run re-install the pack.
+    // `dotnet new list winui --columns-all`: enumerate the installed WinUI templates with the Type and
+    // Tags columns we classify on. `list` is context-aware — run from inside a WinUI project it also
+    // includes item templates (Type=item); elsewhere it lists only project templates.
+    private static readonly string[] ListTemplatesArgs = ["new", "list", "winui", "--columns-all"];
+
+    // Force English CLI output for the template subprocesses we parse. `dotnet new uninstall`,
+    // `list`, and `update` all localize their labels/headers per DOTNET_CLI_UI_LANGUAGE, which would
+    // break the locale-dependent parsing (installed-version detection, column headers, update rows).
     private static readonly Dictionary<string, string> EnglishUiEnvironment = new()
     {
         ["DOTNET_CLI_UI_LANGUAGE"] = "en",
@@ -75,24 +72,22 @@ internal class NewCommand : Command, IShortDescription
     // failing fast on the invalid argument.
     internal const int MaxProjectNameLength = 255 - 7; // ".csproj".Length == 7
 
-    public static Option<WinUiTemplate?> TemplateOption { get; }
+    public static Option<string?> TemplateOption { get; }
     public static Option<string?> NameOption { get; }
     public static Option<DirectoryInfo?> OutputOption { get; }
     public static Option<bool> UseDefaultsOption { get; }
     public static Option<bool> ForceOption { get; }
     public static Option<string?> TemplateVersionOption { get; }
+    public static Option<bool> ListOption { get; }
 
     static NewCommand()
     {
-        TemplateOption = new Option<WinUiTemplate?>("--template", "-t")
+        TemplateOption = new Option<string?>("--template", "-t")
         {
-            Description = "WinUI template: blank (default), navview, tabview, mvvm, lib, or unittest.",
-            HelpName = "blank|navview|tabview|mvvm|lib|unittest",
-            // Restrict to the six named aliases (case-insensitive). The default enum binder also accepts
-            // numeric values (e.g. `--template 99` → an undefined enum, `--template 2` → TabView), which
-            // would silently scaffold the wrong/blank template. A custom parser rejects anything that
-            // isn't one of the exact names with a clean parse error.
-            CustomParser = ParseTemplate
+            // Dynamic: the accepted values come from the installed pack, not a fixed enum, so the CLI
+            // picks up new templates automatically. Validated against the live list at run time.
+            Description = "Template short name (e.g. winui, winui-navview, winui-mvvm, winui-lib, winui-unittest). Run 'winapp new --list' to see all.",
+            HelpName = "short-name"
         };
         NameOption = new Option<string?>("--name", "-n")
         {
@@ -104,7 +99,7 @@ internal class NewCommand : Command, IShortDescription
         };
         UseDefaultsOption = new Option<bool>("--use-defaults", "--no-prompt")
         {
-            Description = "Do not prompt; use defaults (blank template, name from --output/--name)."
+            Description = "Do not prompt; use defaults (blank template, name from --output/--name, keep installed templates)."
         };
         ForceOption = new Option<bool>("--force")
         {
@@ -112,11 +107,15 @@ internal class NewCommand : Command, IShortDescription
         };
         TemplateVersionOption = new Option<string?>("--template-version")
         {
-            Description = $"Version of the WinUI template pack to use (default: {DefaultTemplateVersion})."
+            Description = $"WinUI template pack version: '{LatestVersionKeyword}' (install newest), '{InstalledVersionKeyword}' (keep what's installed), or an explicit version. Default: install latest if none, else prompt to update a stale pack."
+        };
+        ListOption = new Option<bool>("--list")
+        {
+            Description = "List the available WinUI templates and exit (installs the latest template pack if none is installed)."
         };
     }
 
-    public NewCommand() : base("new", "Create a new WinUI app from an official Windows App SDK template. Interactive by default: pick a template (blank, navigation view, tab view, MVVM, class library, or unit test), then a name (the output directory defaults to ./<name>). Automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Requires the .NET SDK; installs the WinUI template pack on demand and delegates scaffolding to 'dotnet new'. Scaffolds against the installed SDK's target framework and prints a template-specific next step when done (e.g. 'dotnet run' for app templates).")
+    public NewCommand() : base("new", "Create a new WinUI app from an official Windows App SDK template. Interactive by default: pick a template, then a name (the output directory defaults to ./<name>). Automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Requires the .NET SDK; installs the WinUI template pack on demand (grabbing the latest, or offering to update a stale one) and delegates scaffolding to 'dotnet new'. Use --list to see the available templates. Scaffolds against the installed SDK's target framework and prints a template-specific next step when done (e.g. 'dotnet run' for app templates).")
     {
         Options.Add(TemplateOption);
         Options.Add(NameOption);
@@ -124,44 +123,15 @@ internal class NewCommand : Command, IShortDescription
         Options.Add(UseDefaultsOption);
         Options.Add(ForceOption);
         Options.Add(TemplateVersionOption);
+        Options.Add(ListOption);
         Options.Add(WinAppRootCommand.JsonOption);
-    }
-
-    /// <summary>Friendly label and official <c>dotnet new</c> short name for a template.</summary>
-    internal static (string ShortName, string Label) TemplateInfo(WinUiTemplate template) => template switch
-    {
-        WinUiTemplate.Blank => ("winui", "Blank app"),
-        WinUiTemplate.NavView => ("winui-navview", "Navigation view app"),
-        WinUiTemplate.TabView => ("winui-tabview", "Tab view app"),
-        WinUiTemplate.Mvvm => ("winui-mvvm", "MVVM app"),
-        WinUiTemplate.Lib => ("winui-lib", "Class library"),
-        WinUiTemplate.UnitTest => ("winui-unittest", "Unit test project"),
-        _ => ("winui", "Blank app")
-    };
-
-    /// <summary>
-    /// Parses <c>--template</c> as one of the six named aliases (case-insensitive), rejecting numeric
-    /// and unknown values with a parse error instead of letting the default enum binder coerce them.
-    /// </summary>
-    internal static WinUiTemplate? ParseTemplate(ArgumentResult result)
-    {
-        var token = result.Tokens.Count > 0 ? result.Tokens[0].Value : string.Empty;
-        var match = Enum.GetNames<WinUiTemplate>()
-            .FirstOrDefault(name => string.Equals(name, token, StringComparison.OrdinalIgnoreCase));
-        if (match is not null)
-        {
-            return Enum.Parse<WinUiTemplate>(match);
-        }
-
-        result.AddError($"Invalid template '{token}'. Valid templates: blank, navview, tabview, mvvm, lib, unittest.");
-        return null;
     }
 
     /// <summary>
     /// Emits the <see cref="NewCommandResult"/> JSON shape for a parse-time failure (e.g. an invalid
-    /// <c>--template</c> value) so <c>winapp new --json</c> callers still get machine-readable output
-    /// instead of System.CommandLine's help/error text. Invoked from the Program-level parse-error
-    /// bridge before the handler would otherwise run.
+    /// boolean value or a single-dash typo) so <c>winapp new --json</c> callers still get
+    /// machine-readable output instead of System.CommandLine's help/error text. Invoked from the
+    /// Program-level parse-error bridge before the handler would otherwise run.
     /// </summary>
     internal static void EmitParseErrorJson(string error, TextWriter? output = null)
     {
@@ -173,14 +143,6 @@ internal class NewCommand : Command, IShortDescription
         var json = JsonSerializer.Serialize(result, NewCommandJsonContext.Default.NewCommandResult);
         (output ?? Console.Out).WriteLine(json);
     }
-
-    /// <summary>Human-facing noun for the created artifact, used in the success message.</summary>
-    internal static string ProjectKind(WinUiTemplate template) => template switch
-    {
-        WinUiTemplate.Lib => "class library",
-        WinUiTemplate.UnitTest => "unit test project",
-        _ => "app"
-    };
 
     /// <summary>
     /// Returns true only when <paramref name="name"/> is a safe single path segment. The resolved
@@ -238,7 +200,7 @@ internal class NewCommand : Command, IShortDescription
     /// Returns true only when the <paramref name="requestedVersion"/> of the template pack is already
     /// installed. Parses the <c>dotnet new uninstall</c> listing (a package-id line followed by an
     /// indented "Version: x" line) so an older/different installed version is not mistaken for the
-    /// requested one — otherwise an explicit <c>--template-version</c> would silently be ignored.
+    /// requested one.
     /// </summary>
     internal static bool IsTemplatePackInstalled(string uninstallListOutput, string requestedVersion)
         => TryGetInstalledPackVersion(uninstallListOutput, out var installed)
@@ -248,7 +210,7 @@ internal class NewCommand : Command, IShortDescription
     /// <summary>
     /// Extracts the installed version of the WinUI template pack from a <c>dotnet new uninstall</c>
     /// listing (the "Version: x" line nested under the package-id header). Returns false when the pack
-    /// is not present. Used to distinguish an older installed version (which should be upgraded) from a
+    /// is not present. Used to distinguish an older installed version (which may be upgraded) from a
     /// newer one (which must not be silently downgraded, since template packs are global).
     /// </summary>
     internal static bool TryGetInstalledPackVersion(string uninstallListOutput, out string? installedVersion)
@@ -321,14 +283,28 @@ internal class NewCommand : Command, IShortDescription
         IAnsiConsole ansiConsole,
         ILogger<Handler> logger) : AsynchronousCommandLineAction
     {
+        /// <summary>How the caller asked us to resolve the template-pack version.</summary>
+        private enum VersionMode
+        {
+            /// <summary>No <c>--template-version</c>: install latest if none, else prompt to update a stale pack.</summary>
+            Default,
+            /// <summary><c>latest</c>: install the newest pack, no prompt.</summary>
+            Latest,
+            /// <summary><c>installed</c>: keep the installed pack, no feed check or prompt.</summary>
+            Installed,
+            /// <summary>An explicit version was requested.</summary>
+            Explicit,
+        }
+
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
-            var template = parseResult.GetValue(TemplateOption);
+            var templateArg = parseResult.GetValue(TemplateOption);
             var nameFromOption = parseResult.GetValue(NameOption);
             var output = parseResult.GetValue(OutputOption);
             var useDefaults = parseResult.GetValue(UseDefaultsOption);
             var force = parseResult.GetValue(ForceOption);
-            var templateVersion = parseResult.GetValue(TemplateVersionOption) ?? DefaultTemplateVersion;
+            var versionRaw = parseResult.GetValue(TemplateVersionOption);
+            var list = parseResult.GetValue(ListOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var quiet = parseResult.GetValue(WinAppRootCommand.QuietOption);
 
@@ -347,10 +323,160 @@ internal class NewCommand : Command, IShortDescription
                 useDefaults = true;
             }
 
-            // 1. Resolve template
-            if (template is null)
+            // Classify --template-version. Keywords (latest/installed) are matched case-insensitively
+            // and bypass the numeric-version grammar; only an explicit version is shape-validated.
+            var (mode, explicitVersion) = ClassifyVersion(versionRaw);
+            if (mode == VersionMode.Explicit && !NuGetVersionHelper.IsPlausibleVersion(explicitVersion!))
             {
-                template = useDefaults ? WinUiTemplate.Blank : await PromptTemplateAsync(cancellationToken);
+                var versionError = $"Invalid --template-version '{versionRaw}'. Use '{LatestVersionKeyword}', '{InstalledVersionKeyword}', or a NuGet version such as 1.2.3.";
+                if (list && isJson)
+                {
+                    PrintListJson(null, null, versionError);
+                }
+                else if (isJson)
+                {
+                    PrintJson(false, templateArg, name ?? string.Empty, (output ?? currentDirectoryProvider.GetCurrentDirectoryInfo()).FullName, versionError);
+                }
+                else
+                {
+                    logger.LogError("{Error} {Detail}", UiSymbols.Error, versionError);
+                }
+                return ExitInvalidArgs;
+            }
+
+            // Fail fast on an explicitly supplied invalid --name before running any dotnet subprocess.
+            // An option-shaped or path-bearing name (e.g. "-o", "..\Escaped") is an injection/traversal
+            // risk, so reject it up front rather than after the SDK probe and pack enumeration. A name
+            // derived later from --output or a prompt is validated at its own resolution point.
+            if (nameFromOption is not null && !IsValidProjectName(nameFromOption))
+            {
+                var nameError = $"Invalid name '{nameFromOption}'. Use a simple name without path separators or invalid filename characters.";
+                if (list && isJson)
+                {
+                    PrintListJson(null, null, nameError);
+                }
+                else if (isJson)
+                {
+                    PrintJson(false, templateArg, nameFromOption, (output ?? currentDirectoryProvider.GetCurrentDirectoryInfo()).FullName, nameError);
+                }
+                else
+                {
+                    logger.LogError("{Error} {Detail}", UiSymbols.Error, nameError);
+                }
+                return ExitInvalidArgs;
+            }
+
+            var currentDir = currentDirectoryProvider.GetCurrentDirectoryInfo();
+
+            // Resolve the directory whose global.json chain governs both the template-pack SDK and the
+            // scaffolded project's target framework. Project output defaults to ./<name> (whose nearest
+            // existing ancestor is the current directory); an explicit --output may live under a
+            // different global.json, so probe from its nearest existing ancestor — the same chain
+            // `dotnet build` will later use. All dotnet subprocesses (SDK probe, pack install,
+            // enumeration, scaffold) run here so the pinned TFM matches the resolved SDK, and item
+            // templates surface only when this location is inside a WinUI project.
+            var workingDir = NearestExistingAncestor(output ?? currentDir) ?? currentDir;
+
+            // Prerequisite: .NET SDK. The pack install's `dotnet new install` separator depends on the
+            // SDK band, and the scaffold pins the project's TFM to the SDK major, so probe it up front.
+            var (sdkVersion, sdkError) = await CheckDotnetSdkAsync(workingDir, isJson, cancellationToken);
+            if (sdkVersion is null)
+            {
+                var detail = sdkError ?? "The .NET SDK is required to create a WinUI app. Install it from https://dotnet.microsoft.com/download, then re-run 'winapp new'.";
+                if (list && isJson)
+                {
+                    PrintListJson(null, null, detail);
+                }
+                else if (isJson)
+                {
+                    PrintJson(false, templateArg, name ?? string.Empty, (output ?? currentDir).FullName, detail);
+                }
+                return ExitSdkMissing;
+            }
+
+            // Resolve and ensure the template pack (install latest / keep installed / explicit /
+            // prompt-to-update), returning the version now in use. --list keeps an installed pack as-is
+            // (no update prompt) but installs the latest when none is present.
+            var (packOk, packVersion, packError) = await ResolveTemplatePackAsync(
+                workingDir, mode, explicitVersion, useDefaults, forListing: list, sdkVersion, isJson, quiet, cancellationToken);
+            if (!packOk)
+            {
+                var detail = packError ?? $"Failed to prepare the WinUI template pack '{TemplatePackageId}'.";
+                if (list && isJson)
+                {
+                    PrintListJson(null, null, detail);
+                }
+                else if (isJson)
+                {
+                    PrintJson(false, templateArg, name ?? string.Empty, (output ?? currentDir).FullName, detail);
+                }
+                return ExitTemplatePackFailed;
+            }
+
+            // Enumerate templates from the installed pack, in the working directory's context (so item
+            // templates surface only when that location is inside a WinUI project).
+            var templates = await EnumerateTemplatesAsync(workingDir, cancellationToken);
+            if (templates.Count == 0)
+            {
+                var enumError = $"Could not enumerate WinUI templates from the installed pack '{TemplatePackageId}'.";
+                if (list && isJson)
+                {
+                    PrintListJson(packVersion, null, enumError);
+                }
+                else if (isJson)
+                {
+                    PrintJson(false, templateArg, name ?? string.Empty, (output ?? currentDir).FullName, enumError);
+                }
+                else
+                {
+                    logger.LogError("{Error} {Detail}", UiSymbols.Error, enumError);
+                }
+                return ExitTemplatePackFailed;
+            }
+
+            // --list: print the catalog and exit without scaffolding.
+            if (list)
+            {
+                if (isJson)
+                {
+                    PrintListJson(packVersion, templates, null);
+                }
+                else if (!quiet)
+                {
+                    WriteTemplateList(templates, packVersion);
+                }
+                return ExitSuccess;
+            }
+
+            // 1. Resolve the template entry (validate --template against the live catalog).
+            WinUiTemplateEntry? entry;
+            if (templateArg is not null)
+            {
+                entry = templates.FirstOrDefault(t => t.MatchesShortName(templateArg));
+                if (entry is null)
+                {
+                    var valid = string.Join(", ", templates.Select(t => t.ShortName));
+                    var templateError = $"Invalid template '{templateArg}'. Valid templates: {valid}. Run 'winapp new --list' to see details.";
+                    if (isJson)
+                    {
+                        PrintJson(false, templateArg, name ?? string.Empty, (output ?? currentDir).FullName, templateError);
+                    }
+                    else
+                    {
+                        logger.LogError("{Error} {Detail}", UiSymbols.Error, templateError);
+                    }
+                    return ExitInvalidArgs;
+                }
+            }
+            else if (useDefaults)
+            {
+                entry = templates.FirstOrDefault(t => t.MatchesShortName(DefaultTemplateShortName))
+                    ?? templates.FirstOrDefault(t => t.IsProject)
+                    ?? templates[0];
+            }
+            else
+            {
+                entry = await PromptTemplateAsync(templates, cancellationToken);
             }
 
             // 2. Resolve name. Only a genuinely absent --name enters the defaulting path; an explicitly
@@ -372,52 +498,34 @@ internal class NewCommand : Command, IShortDescription
                 }
             }
 
-            // 3. Resolve output directory (default ./<name>)
-            var currentDir = currentDirectoryProvider.GetCurrentDirectoryInfo();
-
-            // 3a. Validate the resolved name is a safe single path segment before it is used to build
+            // 2a. Validate the resolved name is a safe single path segment before it is used to build
             // the default output path or passed to dotnet new. This fails fast (exit code 2) on names
             // that would escape the current directory (e.g. "..\Escaped") or are otherwise invalid.
             if (!IsValidProjectName(name))
             {
+                var nameError = $"Invalid name '{name}'. Use a simple name without path separators or invalid filename characters.";
                 if (isJson)
                 {
-                    PrintJson(false, template.Value, name ?? string.Empty, (output ?? currentDir).FullName,
-                        $"Invalid name '{name}'. Use a simple name without path separators or invalid filename characters.");
+                    PrintJson(false, entry.ShortName, name ?? string.Empty, (output ?? currentDir).FullName, nameError);
                 }
                 else
                 {
-                    logger.LogError("{Error} Invalid name '{Name}'. Use a simple name without path separators or invalid filename characters.",
-                        UiSymbols.Error, name);
+                    logger.LogError("{Error} {Detail}", UiSymbols.Error, nameError);
                 }
                 return ExitInvalidArgs;
             }
 
-            var outputDir = output ?? new DirectoryInfo(Path.Join(currentDir.FullName, name!));
+            // 3. Resolve the output directory. Project templates default to ./<name>; item templates are
+            // added into the existing project, so they default to the current directory.
+            var outputDir = output ?? (entry.IsItem
+                ? currentDir
+                : new DirectoryInfo(Path.Join(currentDir.FullName, name!)));
 
-            // 3b. Validate the template-pack version (a NuGet version starts with a digit and contains
-            // only version characters). This fails fast on clearly invalid input with exit code 2.
-            if (!NuGetVersionHelper.IsPlausibleVersion(templateVersion))
-            {
-                if (isJson)
-                {
-                    PrintJson(false, template.Value, name!, outputDir.FullName,
-                        $"Invalid --template-version '{templateVersion}'. Expected a NuGet version such as {DefaultTemplateVersion}.");
-                }
-                else
-                {
-                    logger.LogError("{Error} Invalid --template-version '{Version}'. Expected a NuGet version such as {Default}.",
-                        UiSymbols.Error, templateVersion, DefaultTemplateVersion);
-                }
-                return ExitInvalidArgs;
-            }
-
-            // 3c. Preflight the output directory. dotnet new --force only overwrites files the template
-            // would otherwise conflict on; it never refuses a merely non-empty directory. To honour the
-            // documented --force contract ("Scaffold even if the output directory already contains
-            // files"), reject a non-empty output directory unless --force was passed, so the scaffold is
-            // not silently mixed into unrelated existing files.
-            if (!force)
+            // 3a. Preflight a non-empty output directory for project templates only (item templates are
+            // intentionally created into an existing, non-empty project). dotnet new --force only
+            // overwrites files the template conflicts on; it never refuses a merely non-empty directory,
+            // so honour the documented --force contract here.
+            if (!force && entry.IsProject)
             {
                 bool outputIsNonEmpty;
                 try
@@ -433,7 +541,7 @@ internal class NewCommand : Command, IShortDescription
                     var accessError = $"Could not inspect output directory '{outputDir.FullName}': {ex.Message}";
                     if (isJson)
                     {
-                        PrintJson(false, template.Value, name!, outputDir.FullName, accessError);
+                        PrintJson(false, entry.ShortName, name!, outputDir.FullName, accessError);
                     }
                     else
                     {
@@ -447,7 +555,7 @@ internal class NewCommand : Command, IShortDescription
                     var dirError = $"Output directory '{outputDir.FullName}' is not empty. Use --force to scaffold into it anyway.";
                     if (isJson)
                     {
-                        PrintJson(false, template.Value, name!, outputDir.FullName, dirError);
+                        PrintJson(false, entry.ShortName, name!, outputDir.FullName, dirError);
                     }
                     else
                     {
@@ -457,52 +565,22 @@ internal class NewCommand : Command, IShortDescription
                 }
             }
 
-            // 4. Prerequisite: .NET SDK (fail fast, do not install anything). Resolve it from the output
-            // location, not the caller's cwd: `global.json` is discovered by walking up from where the
-            // project lives, so an SDK pinned above --output (or above the default ./<name>) is what
-            // `dotnet build` will later use. Probing from the caller's directory could pick a different
-            // SDK and pin an unbuildable TFM (NETSDK1045). The output dir may not exist yet, so probe
-            // from its nearest existing ancestor — the same chain the built project resolves.
-            var sdkProbeDir = NearestExistingAncestor(outputDir) ?? currentDir;
-            var (sdkVersion, sdkError) = await CheckDotnetSdkAsync(sdkProbeDir, isJson, cancellationToken);
-            if (sdkVersion is null)
-            {
-                if (isJson)
-                {
-                    PrintJson(false, template.Value, name!, outputDir.FullName,
-                        sdkError ?? "The .NET SDK is required to create a WinUI app. Install it from https://dotnet.microsoft.com/download, then re-run 'winapp new'.");
-                }
-                return ExitSdkMissing;
-            }
-
-            // 5. Ensure the WinUI template pack is installed (idempotent)
-            var (packOk, packError) = await EnsureTemplatePackAsync(currentDir, templateVersion, sdkVersion, isJson, quiet, cancellationToken);
-            if (!packOk)
-            {
-                if (isJson)
-                {
-                    PrintJson(false, template.Value, name!, outputDir.FullName,
-                        packError ?? $"Failed to install the WinUI template pack '{TemplatePackageId}' version {templateVersion}.");
-                }
-                return ExitTemplatePackFailed;
-            }
-
-            // 6. Scaffold via dotnet new
-            var (shortName, _) = TemplateInfo(template.Value);
+            // 4. Scaffold via dotnet new from the working directory (whose global.json chain governs the
+            // SDK the scaffold and later `dotnet build` resolve), pinning the TFM to that SDK.
             if (!useDefaults && !isJson && !quiet)
             {
-                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Creating [green]{name}[/] from [blue]{shortName}[/]...");
+                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Creating [green]{name}[/] from [blue]{entry.ShortName}[/]...");
             }
 
             // Pass each token via ArgumentList (injection-safe) so a crafted --name or --output cannot
             // inject additional dotnet new options.
-            var args = new List<string> { "new", shortName, "-n", name!, "-o", outputDir.FullName };
+            var args = new List<string> { "new", entry.ShortName, "-n", name!, "-o", outputDir.FullName };
 
-            // Pin the target framework to the installed SDK. The WinUI templates default to net10.0, so
-            // without this an accepted .NET 8/9 SDK would scaffold a project it cannot build. The
-            // templates only offer net8.0/net9.0/net10.0; for a newer SDK, omit the flag and let the
-            // template auto-detect the framework from the running dotnet CLI.
-            if (sdkVersion.Major is >= 8 and <= 10)
+            // Pin the target framework to the resolved SDK for project templates. The WinUI project
+            // templates default to net10.0, so without this an accepted .NET 8/9 SDK would scaffold a
+            // project it cannot build. Item templates don't accept --dotnet-version. For a newer SDK,
+            // omit the flag and let the template auto-detect the framework from the running dotnet CLI.
+            if (entry.IsProject && sdkVersion.Major is >= 8 and <= 10)
             {
                 args.Add("--dotnet-version");
                 args.Add($"net{sdkVersion.Major}.0");
@@ -513,62 +591,252 @@ internal class NewCommand : Command, IShortDescription
                 args.Add("--force");
             }
 
-            // Run scaffolding in the same directory context used for SDK detection so the TFM we pinned
-            // above matches the SDK `dotnet new` (and the eventual `dotnet build`) resolves via global.json.
-            var (exitCode, stdout, stderr) = await dotNetService.RunDotnetCommandAsync(sdkProbeDir, args, cancellationToken: cancellationToken);
+            var (exitCode, stdout, stderr) = await dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken: cancellationToken);
             if (exitCode != 0)
             {
                 var detail = !string.IsNullOrWhiteSpace(stderr) ? stderr.Trim() : stdout.Trim();
                 if (isJson)
                 {
-                    PrintJson(false, template.Value, name!, outputDir.FullName,
+                    PrintJson(false, entry.ShortName, name!, outputDir.FullName,
                         $"dotnet new failed (exit code {exitCode}): {detail}");
                 }
                 else
                 {
-                    logger.LogError("{Error} Failed to scaffold WinUI {Kind}: {Detail}", UiSymbols.Error, ProjectKind(template.Value), detail);
+                    logger.LogError("{Error} Failed to scaffold WinUI {Kind}: {Detail}", UiSymbols.Error, ProjectKind(entry), detail);
                 }
                 return ExitScaffoldFailed;
             }
 
             if (isJson)
             {
-                PrintJson(true, template.Value, name!, outputDir.FullName, null);
+                PrintJson(true, entry.ShortName, name!, outputDir.FullName, null, packVersion);
             }
             else if (!quiet)
             {
-                var relative = Path.GetRelativePath(currentDir.FullName, outputDir.FullName);
-                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Check} Created WinUI {ProjectKind(template.Value)} [green]{name}[/] at [blue]{outputDir.FullName}[/].");
-                switch (template.Value)
-                {
-                    case WinUiTemplate.Lib:
-                        ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: from your app project, run [blue]dotnet add reference \"{Path.Join(outputDir.FullName, Path.GetFileName(name!) + ".csproj")}\"[/].");
-                        break;
-                    case WinUiTemplate.UnitTest:
-                        ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: [blue]cd \"{relative}\"[/] then [blue]dotnet run[/] — this packaged MSTest app runs its tests when launched (not via [blue]dotnet test[/]).");
-                        break;
-                    default:
-                        ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: [blue]cd \"{relative}\"[/] then [blue]dotnet run[/].");
-                        break;
-                }
+                WriteSuccess(entry, name!, outputDir, currentDir);
             }
 
             return ExitSuccess;
         }
 
-        private async Task<WinUiTemplate> PromptTemplateAsync(CancellationToken cancellationToken)
+        /// <summary>Classifies the raw <c>--template-version</c> value into a mode plus explicit version.</summary>
+        private static (VersionMode Mode, string? ExplicitVersion) ClassifyVersion(string? raw)
         {
-            var templates = Enum.GetValues<WinUiTemplate>();
-            var labels = templates.Select(t => TemplateInfo(t).Label).ToList();
+            if (raw is null)
+            {
+                return (VersionMode.Default, null);
+            }
+
+            var trimmed = raw.Trim();
+            if (trimmed.Equals(LatestVersionKeyword, StringComparison.OrdinalIgnoreCase))
+            {
+                return (VersionMode.Latest, null);
+            }
+
+            if (trimmed.Equals(InstalledVersionKeyword, StringComparison.OrdinalIgnoreCase))
+            {
+                return (VersionMode.Installed, null);
+            }
+
+            return (VersionMode.Explicit, trimmed);
+        }
+
+        /// <summary>
+        /// Resolves and installs the template pack according to <paramref name="mode"/>, returning the
+        /// version now in use. See <see cref="VersionMode"/> for the per-mode behaviour. In
+        /// non-interactive contexts (<paramref name="useDefaults"/>) or when only listing
+        /// (<paramref name="forListing"/>) a stale installed pack is kept rather than prompting.
+        /// </summary>
+        private async Task<(bool Ok, string? Version, string? Error)> ResolveTemplatePackAsync(
+            DirectoryInfo cwd, VersionMode mode, string? explicitVersion, bool useDefaults, bool forListing,
+            Version sdkVersion, bool isJson, bool quiet, CancellationToken cancellationToken)
+        {
+            var installed = await QueryInstalledPackVersionAsync(cwd, cancellationToken);
+
+            switch (mode)
+            {
+                case VersionMode.Installed:
+                    if (installed is null)
+                    {
+                        return (false, null,
+                            $"No WinUI template pack is installed to use with '--template-version {InstalledVersionKeyword}'. Re-run without it (or with '--template-version {LatestVersionKeyword}') to install the latest pack.");
+                    }
+                    return (true, installed, null);
+
+                case VersionMode.Explicit:
+                {
+                    if (installed is not null)
+                    {
+                        var cmp = NuGetVersionHelper.Compare(installed, explicitVersion!);
+                        if (cmp is int c && c >= 0)
+                        {
+                            // Installed version is equal to or newer than requested: reuse it rather than
+                            // reinstalling (equal) or downgrading the shared global pack (newer).
+                            if (c > 0 && !isJson && !quiet)
+                            {
+                                logger.LogInformation(
+                                    "{Info}  Using already-installed WinUI template pack {Pack} version {Installed} (newer than requested {Requested}).",
+                                    UiSymbols.Info, TemplatePackageId, installed, explicitVersion);
+                            }
+                            return (true, installed, null);
+                        }
+                    }
+
+                    var (ok, err) = await InstallPackAsync(cwd, explicitVersion, sdkVersion, isJson, quiet, cancellationToken);
+                    return ok ? (true, explicitVersion, null) : (false, null, err);
+                }
+
+                case VersionMode.Latest:
+                {
+                    var (ok, err) = await InstallPackAsync(cwd, version: null, sdkVersion, isJson, quiet, cancellationToken);
+                    if (!ok)
+                    {
+                        return (false, null, err);
+                    }
+                    return (true, await QueryInstalledPackVersionAsync(cwd, cancellationToken) ?? installed, null);
+                }
+
+                case VersionMode.Default:
+                default:
+                {
+                    if (installed is null)
+                    {
+                        // Nothing installed: always grab the latest.
+                        var (ok, err) = await InstallPackAsync(cwd, version: null, sdkVersion, isJson, quiet, cancellationToken);
+                        if (!ok)
+                        {
+                            return (false, null, err);
+                        }
+                        return (true, await QueryInstalledPackVersionAsync(cwd, cancellationToken), null);
+                    }
+
+                    // Installed: only offer an update when the pack is actually behind the feed.
+                    var latest = await GetLatestAvailableVersionAsync(cwd, installed, cancellationToken);
+                    var isStale = latest is not null
+                        && NuGetVersionHelper.Compare(installed, latest) is int cmp && cmp < 0;
+
+                    if (!isStale)
+                    {
+                        return (true, installed, null);
+                    }
+
+                    // In non-interactive contexts (or when merely listing) keep the installed pack:
+                    // updating it is a global, machine-wide side effect the caller didn't opt into.
+                    if (useDefaults || forListing)
+                    {
+                        return (true, installed, null);
+                    }
+
+                    var update = await PromptUpdateAsync(installed!, latest!, cancellationToken);
+                    if (!update)
+                    {
+                        return (true, installed, null);
+                    }
+
+                    var (updated, updateErr) = await InstallPackAsync(cwd, latest, sdkVersion, isJson, quiet, cancellationToken);
+                    return updated ? (true, latest, null) : (false, null, updateErr);
+                }
+            }
+        }
+
+        /// <summary>Returns the installed WinUI pack version, or <c>null</c> when the pack isn't installed.</summary>
+        private async Task<string?> QueryInstalledPackVersionAsync(DirectoryInfo cwd, CancellationToken cancellationToken)
+        {
+            var (exit, output, _) = await dotNetService.RunDotnetCommandAsync(cwd, ListTemplatePacksArgs, EnglishUiEnvironment, cancellationToken);
+            return exit == 0 && TryGetInstalledPackVersion(output, out var version) ? version : null;
+        }
+
+        /// <summary>
+        /// Returns the newest available WinUI pack version reported by <c>dotnet new update
+        /// --check-only</c> (which resolves through the caller's configured NuGet feeds and surfaces
+        /// prerelease updates), or <c>null</c> when the pack is already up-to-date or the check fails.
+        /// Falls back to <paramref name="installed"/>'s value semantics via a null return.
+        /// </summary>
+        private async Task<string?> GetLatestAvailableVersionAsync(DirectoryInfo cwd, string installed, CancellationToken cancellationToken)
+        {
+            var (exit, output, _) = await dotNetService.RunDotnetCommandAsync(cwd, UpdateCheckArgs, EnglishUiEnvironment, cancellationToken);
+            if (exit != 0)
+            {
+                return null;
+            }
+
+            var (_, latest) = WinUiTemplateCatalog.ParseUpdateCheck(output, TemplatePackageId);
+            return latest;
+        }
+
+        /// <summary>
+        /// Installs the WinUI template pack. A <c>null</c> <paramref name="version"/> installs the latest
+        /// published version (floating to newest stable-or-prerelease); an explicit version pins it. The
+        /// <c>dotnet new install</c> separator is chosen from the detected SDK band.
+        /// </summary>
+        private async Task<(bool Ok, string? Error)> InstallPackAsync(
+            DirectoryInfo cwd, string? version, Version sdkVersion, bool isJson, bool quiet, CancellationToken cancellationToken)
+        {
+            if (!isJson && !quiet)
+            {
+                logger.LogInformation("{Info}  Installing WinUI template pack {Pack}...", UiSymbols.Info, TemplatePackageId);
+            }
+
+            string packageArg;
+            if (version is null)
+            {
+                packageArg = TemplatePackageId;
+            }
+            else
+            {
+                var separator = sdkVersion >= FirstAtSeparatorSdkVersion ? "@" : "::";
+                packageArg = $"{TemplatePackageId}{separator}{version}";
+            }
+
+            var (installExit, installOut, installErr) = await dotNetService.RunDotnetCommandAsync(
+                cwd, new[] { "new", "install", packageArg }, cancellationToken: cancellationToken);
+
+            if (installExit != 0)
+            {
+                var detail = !string.IsNullOrWhiteSpace(installErr) ? installErr.Trim() : installOut.Trim();
+                if (!isJson)
+                {
+                    logger.LogError("{Error} Failed to install the WinUI template pack: {Detail}", UiSymbols.Error, detail);
+                }
+
+                var error = $"Failed to install the WinUI template pack '{packageArg}' (dotnet new install exit code {installExit})";
+                if (!string.IsNullOrWhiteSpace(detail))
+                {
+                    error += $": {detail}";
+                }
+
+                return (false, error);
+            }
+
+            return (true, null);
+        }
+
+        /// <summary>Runs <c>dotnet new list</c> in <paramref name="contextDir"/> and parses the WinUI templates.</summary>
+        private async Task<IReadOnlyList<WinUiTemplateEntry>> EnumerateTemplatesAsync(DirectoryInfo contextDir, CancellationToken cancellationToken)
+        {
+            var (exit, output, _) = await dotNetService.RunDotnetCommandAsync(contextDir, ListTemplatesArgs, EnglishUiEnvironment, cancellationToken);
+            return exit == 0 ? WinUiTemplateCatalog.ParseList(output) : [];
+        }
+
+        private async Task<WinUiTemplateEntry> PromptTemplateAsync(IReadOnlyList<WinUiTemplateEntry> templates, CancellationToken cancellationToken)
+        {
+            var labels = templates.Select(FormatChoice).ToList();
 
             var prompt = new SelectionPrompt<string>()
-                .Title("Which WinUI app would you like to create?")
+                .Title("Which WinUI template would you like to use?")
                 .AddChoices(labels);
 
             var selected = await ansiConsole.PromptAsync(prompt, cancellationToken);
-            ansiConsole.MarkupLineInterpolated($"Which WinUI app would you like to create? [underline]{selected}[/]");
+            ansiConsole.MarkupLineInterpolated($"Which WinUI template would you like to use? [underline]{selected}[/]");
             var index = labels.IndexOf(selected);
             return templates[index];
+        }
+
+        /// <summary>Human-friendly choice label combining the display name and canonical short name.</summary>
+        private static string FormatChoice(WinUiTemplateEntry entry)
+        {
+            var name = string.IsNullOrEmpty(entry.DisplayName) ? entry.ShortName : entry.DisplayName;
+            return entry.IsItem ? $"{name} (item — {entry.ShortName})" : $"{name} ({entry.ShortName})";
         }
 
         private async Task<string> PromptNameAsync(CancellationToken cancellationToken)
@@ -583,6 +851,68 @@ internal class NewCommand : Command, IShortDescription
                     : ValidationResult.Error("Use a simple name without path separators or invalid filename characters."));
 
             return await ansiConsole.PromptAsync(prompt, cancellationToken);
+        }
+
+        /// <summary>
+        /// Prompts whether to update a stale template pack. Deliberately has <b>no default</b>: updating
+        /// the pack is a global, machine-wide side effect, so the caller must answer explicitly.
+        /// </summary>
+        private async Task<bool> PromptUpdateAsync(string installed, string latest, CancellationToken cancellationToken)
+        {
+            var prompt = new TextPrompt<bool>($"A newer WinUI template pack is available ({installed} \u2192 {latest}). Update?")
+                .AddChoice(true)
+                .AddChoice(false)
+                .WithConverter(value => value ? "y" : "n");
+
+            return await ansiConsole.PromptAsync(prompt, cancellationToken);
+        }
+
+        /// <summary>Writes the success message and a template-specific next step.</summary>
+        private void WriteSuccess(WinUiTemplateEntry entry, string name, DirectoryInfo outputDir, DirectoryInfo currentDir)
+        {
+            if (entry.IsItem)
+            {
+                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Check} Added [green]{name}[/] to the project in [blue]{outputDir.FullName}[/].");
+                return;
+            }
+
+            var relative = Path.GetRelativePath(currentDir.FullName, outputDir.FullName);
+            ansiConsole.MarkupLineInterpolated($"{UiSymbols.Check} Created WinUI {ProjectKind(entry)} [green]{name}[/] at [blue]{outputDir.FullName}[/].");
+
+            if (TagsContain(entry.Tags, "Library"))
+            {
+                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: from your app project, run [blue]dotnet add reference \"{Path.Join(outputDir.FullName, name + ".csproj")}\"[/].");
+            }
+            else if (TagsContain(entry.Tags, "Test"))
+            {
+                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: [blue]cd \"{relative}\"[/] then [blue]dotnet run[/] — this packaged MSTest app runs its tests when launched (not via [blue]dotnet test[/]).");
+            }
+            else
+            {
+                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: [blue]cd \"{relative}\"[/] then [blue]dotnet run[/].");
+            }
+        }
+
+        /// <summary>Writes the human-readable template list for <c>--list</c>.</summary>
+        private void WriteTemplateList(IReadOnlyList<WinUiTemplateEntry> templates, string? packVersion)
+        {
+            var versionSuffix = string.IsNullOrEmpty(packVersion) ? string.Empty : $" (pack {packVersion})";
+            ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Available WinUI templates{versionSuffix}:");
+
+            var table = new Table().Border(TableBorder.Rounded);
+            table.AddColumn("Template");
+            table.AddColumn("Short name");
+            table.AddColumn("Type");
+
+            foreach (var entry in templates)
+            {
+                table.AddRow(
+                    Markup.Escape(string.IsNullOrEmpty(entry.DisplayName) ? entry.ShortName : entry.DisplayName),
+                    Markup.Escape(entry.ShortName),
+                    Markup.Escape(entry.Type));
+            }
+
+            ansiConsole.Write(table);
         }
 
         /// <summary>
@@ -604,14 +934,37 @@ internal class NewCommand : Command, IShortDescription
             return null;
         }
 
+        /// <summary>True when any '/'-separated segment of <paramref name="tags"/> equals <paramref name="segment"/>.</summary>
+        private static bool TagsContain(string tags, string segment)
+            => tags.Split('/').Any(s => s.Trim().Equals(segment, StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>Human-facing noun for the created artifact, derived from the template's tags.</summary>
+        private static string ProjectKind(WinUiTemplateEntry entry)
+        {
+            if (entry.IsItem)
+            {
+                return "item";
+            }
+
+            if (TagsContain(entry.Tags, "Library"))
+            {
+                return "class library";
+            }
+
+            if (TagsContain(entry.Tags, "Test"))
+            {
+                return "unit test project";
+            }
+
+            return "app";
+        }
+
         /// <summary>
         /// Verifies the .NET SDK is installed and meets the minimum version. Returns the detected SDK
         /// version, or <c>null</c> (without installing anything) with a specific failure reason if the
-        /// SDK is missing, too old, or its version can't be determined. The caller uses the returned
-        /// major version to pin the scaffolded project's target framework, and surfaces the reason in
-        /// the JSON result so agent callers are told exactly what to fix (install vs update).
-        /// Runs <c>dotnet --version</c> in <paramref name="probeDir"/> so <c>global.json</c> is resolved
-        /// from the project's own directory chain rather than the caller's working directory.
+        /// SDK is missing, too old, or its version can't be determined. Runs <c>dotnet --version</c> in
+        /// <paramref name="probeDir"/> so <c>global.json</c> is resolved from the project's own
+        /// directory chain rather than the caller's working directory.
         /// </summary>
         private async Task<(Version? Version, string? Error)> CheckDotnetSdkAsync(DirectoryInfo probeDir, bool isJson, CancellationToken cancellationToken)
         {
@@ -671,87 +1024,42 @@ internal class NewCommand : Command, IShortDescription
             return (null, unparseable);
         }
 
-        /// <summary>
-        /// Ensures the WinUI template pack is installed. Checks the currently installed packs first so
-        /// repeated runs don't hit the network; installs the pinned version only when missing or older.
-        /// A newer already-installed pack is left in place (template packs are global, so downgrading
-        /// one would disrupt other projects). The <c>dotnet new install</c> separator is chosen from the
-        /// detected <paramref name="sdkVersion"/>. On failure returns the specific <c>dotnet new
-        /// install</c> exit code and stderr/stdout so JSON callers can distinguish an unavailable
-        /// version from a feed/network/configuration failure.
-        /// </summary>
-        private async Task<(bool Ok, string? Error)> EnsureTemplatePackAsync(DirectoryInfo cwd, string version, Version sdkVersion, bool isJson, bool quiet, CancellationToken cancellationToken)
+        private void PrintJson(bool created, string? templateShortName, string name, string path, string? error, string? templateVersion = null)
         {
-            // `dotnet new uninstall` with no args lists installed template packages (and versions).
-            // Force English output so the "Version:" label we parse is locale-independent.
-            var (listExit, listOut, _) = await dotNetService.RunDotnetCommandAsync(
-                cwd, ListTemplatePacksArgs, EnglishUiEnvironment, cancellationToken);
-            if (listExit == 0 && TryGetInstalledPackVersion(listOut, out var installedVersion) && installedVersion is not null)
-            {
-                var comparison = NuGetVersionHelper.Compare(installedVersion, version);
-                if (comparison >= 0)
-                {
-                    // Installed version is equal to or newer than the requested one. Reuse it rather
-                    // than reinstalling (equal) or downgrading the shared global pack (newer).
-                    if (comparison > 0 && !isJson && !quiet)
-                    {
-                        logger.LogInformation(
-                            "{Info}  Using already-installed WinUI template pack {Pack} version {Installed} (newer than requested {Requested}).",
-                            UiSymbols.Info, TemplatePackageId, installedVersion, version);
-                    }
-                    return (true, null);
-                }
-                // comparison < 0 (older) or null (unparseable) → fall through and (re)install the
-                // requested version so an explicit --template-version is honoured.
-            }
-
-            // Suppress the informational progress line under --json (structured output) and --quiet
-            // (minimal output), but always surface install failures below.
-            if (!isJson && !quiet)
-            {
-                logger.LogInformation("{Info}  Installing WinUI template pack {Pack}...", UiSymbols.Info, TemplatePackageId);
-            }
-
-            var separator = sdkVersion >= FirstAtSeparatorSdkVersion ? "@" : "::";
-            var packageArg = $"{TemplatePackageId}{separator}{version}";
-            var (installExit, installOut, installErr) = await dotNetService.RunDotnetCommandAsync(
-                cwd, new[] { "new", "install", packageArg }, cancellationToken: cancellationToken);
-
-            if (installExit != 0)
-            {
-                var detail = !string.IsNullOrWhiteSpace(installErr) ? installErr.Trim() : installOut.Trim();
-                if (!isJson)
-                {
-                    logger.LogError("{Error} Failed to install the WinUI template pack: {Detail}", UiSymbols.Error, detail);
-                }
-
-                var error = $"Failed to install the WinUI template pack '{packageArg}' (dotnet new install exit code {installExit})";
-                if (!string.IsNullOrWhiteSpace(detail))
-                {
-                    error += $": {detail}";
-                }
-
-                return (false, error);
-            }
-
-            return (true, null);
-        }
-
-        private void PrintJson(bool created, WinUiTemplate template, string name, string path, string? error)
-        {
-            var (shortName, _) = TemplateInfo(template);
             var result = new NewCommandResult
             {
                 Created = created,
-                Template = shortName,
+                Template = templateShortName,
                 Name = name,
                 Path = path,
+                TemplateVersion = templateVersion,
                 Error = error
             };
 
             var json = JsonSerializer.Serialize(result, NewCommandJsonContext.Default.NewCommandResult);
             // Write via the raw output writer (not ansiConsole.WriteLine) so Spectre does not
             // word-wrap the JSON to the console width and corrupt it on narrow terminals.
+            ansiConsole.Profile.Out.Writer.WriteLine(json);
+        }
+
+        private void PrintListJson(string? templateVersion, IReadOnlyList<WinUiTemplateEntry>? templates, string? error)
+        {
+            var result = new NewListResult
+            {
+                Listed = error is null,
+                TemplateVersion = templateVersion,
+                Templates = templates?.Select(t => new NewTemplateInfo
+                {
+                    ShortName = t.ShortName,
+                    Aliases = t.ShortNames.ToArray(),
+                    DisplayName = t.DisplayName,
+                    Type = t.Type,
+                    Tags = t.Tags,
+                }).ToList(),
+                Error = error,
+            };
+
+            var json = JsonSerializer.Serialize(result, NewCommandJsonContext.Default.NewListResult);
             ansiConsole.Profile.Out.Writer.WriteLine(json);
         }
     }
@@ -763,10 +1071,29 @@ internal sealed class NewCommandResult
     public string? Template { get; set; }
     public string? Name { get; set; }
     public string? Path { get; set; }
+    public string? TemplateVersion { get; set; }
+    public string? Error { get; set; }
+}
+
+internal sealed class NewTemplateInfo
+{
+    public string? ShortName { get; set; }
+    public string[]? Aliases { get; set; }
+    public string? DisplayName { get; set; }
+    public string? Type { get; set; }
+    public string? Tags { get; set; }
+}
+
+internal sealed class NewListResult
+{
+    public bool Listed { get; set; }
+    public string? TemplateVersion { get; set; }
+    public List<NewTemplateInfo>? Templates { get; set; }
     public string? Error { get; set; }
 }
 
 [JsonSerializable(typeof(NewCommandResult))]
+[JsonSerializable(typeof(NewListResult))]
 [JsonSourceGenerationOptions(
     WriteIndented = true,
     NewLine = "\n",

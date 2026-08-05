@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.ComponentModel;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using WinApp.Cli.Commands;
@@ -23,6 +24,49 @@ public class NewCommandHandlerTests : BaseCommandTests
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
         => services.AddSingleton<IDotNetService>(_dotnet);
 
+    /// <summary>
+    /// A realistic <c>dotnet new list winui --columns-all</c> table used to script the enumeration
+    /// step. Built with <see cref="BuildListTable"/> so column widths (and therefore the fixed-width
+    /// parse boundaries) stay self-consistent as rows change.
+    /// </summary>
+    private static readonly string SampleListOutput = BuildListTable(
+    [
+        ("WinUI Blank App", "winui,winui3,wasdk-single", "[C#]", "project", "Microsoft", "Windows/WinUI/Desktop/XAML"),
+        ("WinUI Class Library", "winui-lib,winui3-lib,wasdk-classlib", "[C#]", "project", "Microsoft", "Windows/WinUI/Library"),
+        ("WinUI MVVM App", "winui-mvvm,winui3-mvvm", "[C#]", "project", "Microsoft", "Windows/WinUI/Desktop/MVVM"),
+        ("WinUI NavigationView App", "winui-navview,winui3-navview", "[C#]", "project", "Microsoft", "Windows/WinUI/Desktop/XAML"),
+        ("WinUI TabView App", "winui-tabview,winui3-tabview", "[C#]", "project", "Microsoft", "Windows/WinUI/Desktop/XAML"),
+        ("WinUI Unit Test App", "winui-unittest,winui3-unittest,wasdk-unittest", "[C#]", "project", "Microsoft", "Windows/WinUI/Test"),
+    ]);
+
+    /// <summary>Renders a fixed-width dotnet-new-list table (header + dashes row + data) with aligned columns.</summary>
+    private static string BuildListTable((string Name, string Short, string Lang, string Type, string Author, string Tags)[] rows)
+    {
+        string[] headers = ["Template Name", "Short Name", "Language", "Type", "Author", "Tags"];
+        var table = new List<string[]> { headers };
+        table.AddRange(rows.Select(r => new[] { r.Name, r.Short, r.Lang, r.Type, r.Author, r.Tags }));
+
+        var widths = new int[headers.Length];
+        for (var c = 0; c < headers.Length; c++)
+        {
+            widths[c] = table.Max(r => r[c].Length);
+        }
+
+        string Format(string[] r) => string.Join("  ", r.Select((v, c) => v.PadRight(widths[c]))).TrimEnd();
+
+        var sb = new StringBuilder();
+        sb.AppendLine("These templates matched your input: 'winui'.");
+        sb.AppendLine();
+        sb.AppendLine(Format(headers));
+        sb.AppendLine(string.Join("  ", widths.Select(w => new string('-', w))));
+        foreach (var r in table.Skip(1))
+        {
+            sb.AppendLine(Format(r));
+        }
+
+        return sb.ToString();
+    }
+
     /// <summary>Default happy-path responder: SDK present, pack absent-then-installed, scaffold ok.</summary>
     private void ScriptHappyPath(string sdkVersion = "9.0.100")
     {
@@ -40,13 +84,22 @@ public class NewCommandHandlerTests : BaseCommandTests
             {
                 return (0, "Success: installed.", string.Empty);
             }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, SampleListOutput, string.Empty); // template enumeration
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "update")
+            {
+                return (0, "All template packages are up-to-date.", string.Empty); // staleness check
+            }
             return (0, "The template was created successfully.", string.Empty); // scaffold
         };
     }
 
     private IReadOnlyList<string>? ScaffoldInvocation()
         => _dotnet.ArgumentListInvocations
-            .FirstOrDefault(a => a.Count >= 2 && a[0] == "new" && a[1] != "install" && a[1] != "uninstall");
+            .FirstOrDefault(a => a.Count >= 2 && a[0] == "new"
+                && a[1] is not ("install" or "uninstall" or "list" or "update"));
 
     private static JsonElement ParseJson(string output)
     {
@@ -340,6 +393,10 @@ public class NewCommandHandlerTests : BaseCommandTests
             {
                 return (0, "Success", string.Empty);
             }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, SampleListOutput, string.Empty);
+            }
             return (1, string.Empty, "template error"); // scaffold fails
         };
         var command = GetRequiredService<NewCommand>();
@@ -361,6 +418,14 @@ public class NewCommandHandlerTests : BaseCommandTests
             if (args.Count >= 2 && args[0] == "new" && args[1] == "uninstall")
             {
                 return (0, "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n   Version: 0.0.6-alpha\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "update")
+            {
+                return (0, "All template packages are up-to-date.", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, SampleListOutput, string.Empty);
             }
             return (0, "created", string.Empty); // scaffold
         };
@@ -490,7 +555,8 @@ public class NewCommandHandlerTests : BaseCommandTests
 
         var scaffoldIndex = _dotnet.ArgumentListInvocations
             .Select((args, i) => (args, i))
-            .First(x => x.args.Count >= 2 && x.args[0] == "new" && x.args[1] != "install" && x.args[1] != "uninstall").i;
+            .First(x => x.args.Count >= 2 && x.args[0] == "new"
+                && x.args[1] is not ("install" or "uninstall" or "list" or "update")).i;
         Assert.AreEqual(nested.FullName, _dotnet.ArgumentListWorkingDirectories[scaffoldIndex].FullName,
             "Scaffolding must run in the same directory context used for SDK detection.");
     }
@@ -516,7 +582,7 @@ public class NewCommandHandlerTests : BaseCommandTests
         ScriptHappyPath();
         var command = GetRequiredService<NewCommand>();
 
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--template", "lib", "--name", "MyLib"]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--template", "winui-lib", "--name", "MyLib"]);
 
         Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
         Assert.IsTrue(TestAnsiConsole.Output.Contains("reference", StringComparison.OrdinalIgnoreCase),
@@ -533,7 +599,7 @@ public class NewCommandHandlerTests : BaseCommandTests
         TestAnsiConsole.Profile.Width = 500;
         var command = GetRequiredService<NewCommand>();
 
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--template", "lib", "--name", "MyLib"]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--template", "winui-lib", "--name", "MyLib"]);
 
         Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
         var expectedPath = Path.Join(_tempDirectory.FullName, "MyLib", "MyLib.csproj");
@@ -547,7 +613,7 @@ public class NewCommandHandlerTests : BaseCommandTests
         ScriptHappyPath();
         var command = GetRequiredService<NewCommand>();
 
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--template", "unittest", "--name", "MyTests"]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--template", "winui-unittest", "--name", "MyTests"]);
 
         Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
         Assert.IsTrue(TestAnsiConsole.Output.Contains("dotnet run", StringComparison.Ordinal),
@@ -608,6 +674,10 @@ public class NewCommandHandlerTests : BaseCommandTests
             if (args.Count >= 2 && args[0] == "new" && args[1] == "install")
             {
                 return (0, "Success", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, SampleListOutput, string.Empty);
             }
             return (0, "created", string.Empty); // scaffold
         };
@@ -692,5 +762,205 @@ public class NewCommandHandlerTests : BaseCommandTests
         Assert.IsTrue(nameIdx >= 0 && nameIdx + 1 < tokens.Length);
         Assert.AreEqual("ValidApp", tokens[nameIdx + 1],
             "Only the corrected, valid name should reach dotnet new — the invalid entries must be re-prompted.");
+    }
+
+    [TestMethod]
+    public async Task Handler_List_Json_ReturnsTemplatesWithoutScaffolding()
+    {
+        ScriptHappyPath();
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--list", "--json"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        Assert.IsNull(ScaffoldInvocation(), "--list must not scaffold a project.");
+        var json = ParseJson(TestAnsiConsole.Output);
+        Assert.IsTrue(json.GetProperty("Listed").GetBoolean());
+        var shortNames = json.GetProperty("Templates").EnumerateArray()
+            .Select(t => t.GetProperty("ShortName").GetString())
+            .ToArray();
+        CollectionAssert.Contains(shortNames, "winui", "The listed catalog must include the default template.");
+        CollectionAssert.Contains(shortNames, "winui-lib");
+    }
+
+    [TestMethod]
+    public async Task Handler_List_Human_PrintsShortNames()
+    {
+        ScriptHappyPath();
+        var command = GetRequiredService<NewCommand>();
+        TestAnsiConsole.Profile.Width = 500;
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--list"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        Assert.IsNull(ScaffoldInvocation());
+        Assert.IsTrue(TestAnsiConsole.Output.Contains("winui-mvvm", StringComparison.Ordinal),
+            $"The human-readable list must show template short names. Output:\n{TestAnsiConsole.Output}");
+    }
+
+    [TestMethod]
+    public async Task Handler_InvalidTemplate_ReturnsInvalidArgsWithValidList()
+    {
+        ScriptHappyPath();
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["--use-defaults", "--json", "--template", "does-not-exist"]);
+
+        Assert.AreEqual(NewCommand.ExitInvalidArgs, exitCode,
+            "An unknown --template must be rejected at runtime against the live catalog.");
+        Assert.IsNull(ScaffoldInvocation(), "An invalid template must not scaffold.");
+        var json = ParseJson(TestAnsiConsole.Output);
+        var error = json.GetProperty("Error").GetString();
+        Assert.IsTrue(error is not null && error.Contains("winui", StringComparison.Ordinal),
+            $"The rejection must list the valid template short names. Got: {error}");
+    }
+
+    [TestMethod]
+    public async Task Handler_TemplateVersionLatest_InstallsFloatingLatest()
+    {
+        ScriptHappyPath();
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["--use-defaults", "--json", "--template-version", "latest"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        var install = _dotnet.ArgumentListInvocations
+            .FirstOrDefault(a => a.Count >= 3 && a[0] == "new" && a[1] == "install");
+        Assert.IsNotNull(install, "'--template-version latest' must (re)install the pack.");
+        Assert.AreEqual(NewCommand.TemplatePackageId, install[2],
+            "'latest' must install the bare package id (no version pin) so it floats to the newest published version.");
+    }
+
+    [TestMethod]
+    public async Task Handler_TemplateVersionInstalled_ReusesInstalledPackWithoutInstalling()
+    {
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "uninstall")
+            {
+                return (0, "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n   Version: 0.0.5-alpha\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, SampleListOutput, string.Empty);
+            }
+            return (0, "created", string.Empty);
+        };
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["--use-defaults", "--json", "--template-version", "installed"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        Assert.IsFalse(
+            _dotnet.ArgumentListInvocations.Any(a => a.Count >= 2 && a[0] == "new" && a[1] == "install"),
+            "'--template-version installed' must use the already-downloaded pack without any install or network call.");
+        Assert.IsFalse(
+            _dotnet.ArgumentListInvocations.Any(a => a.Count >= 2 && a[0] == "new" && a[1] == "update"),
+            "'--template-version installed' must not run a staleness check.");
+    }
+
+    [TestMethod]
+    public async Task Handler_TemplateVersionInstalled_NothingInstalled_ReturnsTemplatePackFailed()
+    {
+        ScriptHappyPath(); // uninstall reports nothing installed
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["--use-defaults", "--json", "--template-version", "installed"]);
+
+        Assert.AreEqual(NewCommand.ExitTemplatePackFailed, exitCode,
+            "'--template-version installed' with no pack present must fail rather than silently installing.");
+        Assert.IsFalse(
+            _dotnet.ArgumentListInvocations.Any(a => a.Count >= 2 && a[0] == "new" && a[1] == "install"),
+            "The 'installed' keyword must never trigger a network install.");
+    }
+
+    [TestMethod]
+    public async Task Handler_StalePackInteractive_AcceptsUpdatePrompt_InstallsLatest()
+    {
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "uninstall")
+            {
+                return (0, "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n   Version: 0.0.5-alpha\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "update")
+            {
+                return (0,
+                    "Package                                          Current      Latest\n" +
+                    "-----------------------------------------------  -----------  -----------\n" +
+                    "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates   0.0.5-alpha  0.0.6-alpha\n",
+                    string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "install")
+            {
+                return (0, "Success", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, SampleListOutput, string.Empty);
+            }
+            return (0, "created", string.Empty);
+        };
+        // Interactive host, no --use-defaults: the stale pack must trigger the update prompt. Answer yes.
+        TestAnsiConsole.Input.PushTextWithEnter("y"); // update prompt
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--template", "winui", "--name", "MyApp"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        var install = _dotnet.ArgumentListInvocations
+            .FirstOrDefault(a => a.Count >= 3 && a[0] == "new" && a[1] == "install");
+        Assert.IsNotNull(install, "Accepting the update prompt must install the newer pack.");
+        Assert.AreEqual($"{NewCommand.TemplatePackageId}::0.0.6-alpha", install[2],
+            "The update must install the latest version reported by the staleness check.");
+    }
+
+    [TestMethod]
+    public async Task Handler_StalePackWithUseDefaults_KeepsInstalledPackWithoutPrompting()
+    {
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "uninstall")
+            {
+                return (0, "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n   Version: 0.0.5-alpha\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "update")
+            {
+                return (0,
+                    "Package                                          Current      Latest\n" +
+                    "-----------------------------------------------  -----------  -----------\n" +
+                    "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates   0.0.5-alpha  0.0.6-alpha\n",
+                    string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, SampleListOutput, string.Empty);
+            }
+            return (0, "created", string.Empty);
+        };
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json", "--name", "MyApp"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        Assert.IsFalse(
+            _dotnet.ArgumentListInvocations.Any(a => a.Count >= 2 && a[0] == "new" && a[1] == "install"),
+            "A non-interactive (--use-defaults) run must keep the installed pack rather than performing a machine-wide update.");
     }
 }

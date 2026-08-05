@@ -1194,7 +1194,7 @@
       }
     },
     "new": {
-      "description": "Create a new WinUI app from an official Windows App SDK template. Interactive by default: pick a template (blank, navigation view, tab view, MVVM, class library, or unit test), then a name (the output directory defaults to ./<name>). Automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Requires the .NET SDK; installs the WinUI template pack on demand and delegates scaffolding to 'dotnet new'. Scaffolds against the installed SDK's target framework and prints a template-specific next step when done (e.g. 'dotnet run' for app templates).",
+      "description": "Create a new WinUI app from an official Windows App SDK template. Interactive by default: pick a template, then a name (the output directory defaults to ./<name>). Automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Requires the .NET SDK; installs the WinUI template pack on demand (grabbing the latest, or offering to update a stale one) and delegates scaffolding to 'dotnet new'. Use --list to see the available templates. Scaffolds against the installed SDK's target framework and prints a template-specific next step when done (e.g. 'dotnet run' for app templates).",
       "hidden": false,
       "options": {
         "--force": {
@@ -1212,6 +1212,19 @@
         },
         "--json": {
           "description": "Format output as JSON",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--list": {
+          "description": "List the available WinUI templates and exit (installs the latest template pack if none is installed).",
           "hidden": false,
           "valueType": "System.Boolean",
           "hasDefaultValue": true,
@@ -1270,13 +1283,13 @@
           "recursive": false
         },
         "--template": {
-          "description": "WinUI template: blank (default), navview, tabview, mvvm, lib, or unittest.",
+          "description": "Template short name (e.g. winui, winui-navview, winui-mvvm, winui-lib, winui-unittest). Run 'winapp new --list' to see all.",
           "hidden": false,
           "aliases": [
             "-t"
           ],
-          "helpName": "blank|navview|tabview|mvvm|lib|unittest",
-          "valueType": "System.Nullable<WinApp.Cli.Commands.WinUiTemplate>",
+          "helpName": "short-name",
+          "valueType": "System.String",
           "hasDefaultValue": false,
           "arity": {
             "minimum": 1,
@@ -1286,7 +1299,7 @@
           "recursive": false
         },
         "--template-version": {
-          "description": "Version of the WinUI template pack to use (default: 0.0.6-alpha).",
+          "description": "WinUI template pack version: 'latest' (install newest), 'installed' (keep what's installed), or an explicit version. Default: install latest if none, else prompt to update a stale pack.",
           "hidden": false,
           "valueType": "System.String",
           "hasDefaultValue": false,
@@ -1298,7 +1311,7 @@
           "recursive": false
         },
         "--use-defaults": {
-          "description": "Do not prompt; use defaults (blank template, name from --output/--name).",
+          "description": "Do not prompt; use defaults (blank template, name from --output/--name, keep installed templates).",
           "hidden": false,
           "aliases": [
             "--no-prompt"

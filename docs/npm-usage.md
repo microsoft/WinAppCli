@@ -302,7 +302,7 @@ function manifestUpdateAssets(options: ManifestUpdateAssetsOptions): Promise<Win
 
 ### `newCommand()`
 
-Create a new WinUI app from an official Windows App SDK template. Interactive by default: pick a template (blank, navigation view, tab view, MVVM, class library, or unit test), then a name (the output directory defaults to ./<name>). Automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Requires the .NET SDK; installs the WinUI template pack on demand and delegates scaffolding to 'dotnet new'. Scaffolds against the installed SDK's target framework and prints a template-specific next step when done (e.g. 'dotnet run' for app templates).
+Create a new WinUI app from an official Windows App SDK template. Interactive by default: pick a template, then a name (the output directory defaults to ./<name>). Automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Requires the .NET SDK; installs the WinUI template pack on demand (grabbing the latest, or offering to update a stale one) and delegates scaffolding to 'dotnet new'. Use --list to see the available templates. Scaffolds against the installed SDK's target framework and prints a template-specific next step when done (e.g. 'dotnet run' for app templates).
 
 ```typescript
 function newCommand(options?: NewOptions): Promise<WinappResult>
@@ -314,11 +314,12 @@ function newCommand(options?: NewOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `force` | `boolean \| undefined` | No | Scaffold even if the output directory already contains files. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
+| `list` | `boolean \| undefined` | No | List the available WinUI templates and exit (installs the latest template pack if none is installed). |
 | `name` | `string \| undefined` | No | Name for the new app/project (default: derived from --output, else 'WinUIApp'). |
 | `output` | `string \| undefined` | No | Directory to create the app in (default: ./<name>). Created if it doesn't exist. |
-| `template` | `WinUiTemplate \| undefined` | No | WinUI template: blank (default), navview, tabview, mvvm, lib, or unittest. |
-| `templateVersion` | `string \| undefined` | No | Version of the WinUI template pack to use (default: 0.0.6-alpha). |
-| `useDefaults` | `boolean \| undefined` | No | Do not prompt; use defaults (blank template, name from --output/--name). |
+| `template` | `string \| undefined` | No | Template short name (e.g. winui, winui-navview, winui-mvvm, winui-lib, winui-unittest). Run 'winapp new --list' to see all. |
+| `templateVersion` | `string \| undefined` | No | WinUI template pack version: 'latest' (install newest), 'installed' (keep what's installed), or an explicit version. Default: install latest if none, else prompt to update a stale pack. |
+| `useDefaults` | `boolean \| undefined` | No | Do not prompt; use defaults (blank template, name from --output/--name, keep installed templates). |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -1294,14 +1295,6 @@ ManifestTemplates values.
 type ManifestTemplates = "packaged" | "sparse"
 ```
 
-### `WinUiTemplate`
-
-WinUiTemplate values.
-
-```typescript
-type WinUiTemplate = "blank" | "navview" | "tabview" | "mvvm" | "lib" | "unittest"
-```
-
 ### `AzSignOptions`
 
 | Property | Type | Required | Description |
@@ -1450,11 +1443,12 @@ type WinUiTemplate = "blank" | "navview" | "tabview" | "mvvm" | "lib" | "unittes
 |----------|------|----------|-------------|
 | `force` | `boolean \| undefined` | No | Scaffold even if the output directory already contains files. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
+| `list` | `boolean \| undefined` | No | List the available WinUI templates and exit (installs the latest template pack if none is installed). |
 | `name` | `string \| undefined` | No | Name for the new app/project (default: derived from --output, else 'WinUIApp'). |
 | `output` | `string \| undefined` | No | Directory to create the app in (default: ./<name>). Created if it doesn't exist. |
-| `template` | `WinUiTemplate \| undefined` | No | WinUI template: blank (default), navview, tabview, mvvm, lib, or unittest. |
-| `templateVersion` | `string \| undefined` | No | Version of the WinUI template pack to use (default: 0.0.6-alpha). |
-| `useDefaults` | `boolean \| undefined` | No | Do not prompt; use defaults (blank template, name from --output/--name). |
+| `template` | `string \| undefined` | No | Template short name (e.g. winui, winui-navview, winui-mvvm, winui-lib, winui-unittest). Run 'winapp new --list' to see all. |
+| `templateVersion` | `string \| undefined` | No | WinUI template pack version: 'latest' (install newest), 'installed' (keep what's installed), or an explicit version. Default: install latest if none, else prompt to update a stale pack. |
+| `useDefaults` | `boolean \| undefined` | No | Do not prompt; use defaults (blank template, name from --output/--name, keep installed templates). |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

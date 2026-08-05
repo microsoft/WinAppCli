@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 1.0.0
+ * Source schema version: 0.5.1
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -26,9 +26,6 @@ export type SdkInstallMode = 'stable' | 'preview' | 'experimental' | 'none';
 
 /** ManifestTemplates values. */
 export type ManifestTemplates = 'packaged' | 'sparse';
-
-/** WinUiTemplate values. */
-export type WinUiTemplate = 'blank' | 'navview' | 'tabview' | 'mvvm' | 'lib' | 'unittest';
 
 /** Base options shared by most commands. */
 export interface CommonOptions {
@@ -405,25 +402,28 @@ export interface NewOptions extends CommonOptions {
   force?: boolean;
   /** Format output as JSON */
   json?: boolean;
+  /** List the available WinUI templates and exit (installs the latest template pack if none is installed). */
+  list?: boolean;
   /** Name for the new app/project (default: derived from --output, else 'WinUIApp'). */
   name?: string;
   /** Directory to create the app in (default: ./<name>). Created if it doesn't exist. */
   output?: string;
-  /** WinUI template: blank (default), navview, tabview, mvvm, lib, or unittest. */
-  template?: WinUiTemplate;
-  /** Version of the WinUI template pack to use (default: 0.0.6-alpha). */
+  /** Template short name (e.g. winui, winui-navview, winui-mvvm, winui-lib, winui-unittest). Run 'winapp new --list' to see all. */
+  template?: string;
+  /** WinUI template pack version: 'latest' (install newest), 'installed' (keep what's installed), or an explicit version. Default: install latest if none, else prompt to update a stale pack. */
   templateVersion?: string;
-  /** Do not prompt; use defaults (blank template, name from --output/--name). */
+  /** Do not prompt; use defaults (blank template, name from --output/--name, keep installed templates). */
   useDefaults?: boolean;
 }
 
 /**
- * Create a new WinUI app from an official Windows App SDK template. Interactive by default: pick a template (blank, navigation view, tab view, MVVM, class library, or unit test), then a name (the output directory defaults to ./<name>). Automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Requires the .NET SDK; installs the WinUI template pack on demand and delegates scaffolding to 'dotnet new'. Scaffolds against the installed SDK's target framework and prints a template-specific next step when done (e.g. 'dotnet run' for app templates).
+ * Create a new WinUI app from an official Windows App SDK template. Interactive by default: pick a template, then a name (the output directory defaults to ./<name>). Automatically uses defaults in non-interactive environments (use --use-defaults to skip prompts explicitly). Requires the .NET SDK; installs the WinUI template pack on demand (grabbing the latest, or offering to update a stale one) and delegates scaffolding to 'dotnet new'. Use --list to see the available templates. Scaffolds against the installed SDK's target framework and prints a template-specific next step when done (e.g. 'dotnet run' for app templates).
  */
 export async function newCommand(options: NewOptions = {}): Promise<WinappResult> {
   const args: string[] = ['new'];
   if (options.force) args.push('--force');
   if (options.json) args.push('--json');
+  if (options.list) args.push('--list');
   if (options.name) args.push('--name', options.name);
   if (options.output) args.push('--output', options.output);
   if (options.template) args.push('--template', options.template);
