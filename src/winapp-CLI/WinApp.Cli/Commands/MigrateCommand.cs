@@ -900,7 +900,7 @@ internal partial class MigrateCommand : Command, IShortDescription
                 Category = "display-information",
                 Priority = "required",
                 Summary = "Replace DisplayInformation.GetForCurrentView with the API-specific WinUI desktop equivalent",
-                Reason = "Do not invent IDisplayInformationStaticsInterop. For DPI, use XamlRoot.RasterizationScale and XamlRoot.Changed. For CurrentOrientation or OrientationChanged, derive the app HWND's monitor orientation with MonitorFromWindow and EnumDisplaySettings, then refresh it from AppWindow.Changed.",
+                Reason = "Do not invent IDisplayInformationStaticsInterop. For DPI, use XamlRoot.RasterizationScale and XamlRoot.Changed. For CurrentOrientation or OrientationChanged, use MonitorFromWindow, GetMonitorInfo, and EnumDisplaySettings for the app HWND's current monitor, then refresh when AppWindow.Changed reports a position or size change.",
                 Locations = locations
             });
         }

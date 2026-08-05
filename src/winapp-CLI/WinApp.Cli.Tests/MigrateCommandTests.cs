@@ -243,6 +243,8 @@ public class MigrateCommandTests : MigrateCommandTestBase
             .Single(item => item.GetProperty("category").GetString() == "display-information");
         StringAssert.Contains(todo.GetProperty("reason").GetString(), "Do not invent IDisplayInformationStaticsInterop");
         StringAssert.Contains(todo.GetProperty("reason").GetString(), "MonitorFromWindow");
+        StringAssert.Contains(todo.GetProperty("reason").GetString(), "GetMonitorInfo");
+        StringAssert.Contains(todo.GetProperty("reason").GetString(), "EnumDisplaySettings");
     }
 
     [TestMethod]
