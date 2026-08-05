@@ -304,6 +304,7 @@ internal partial class MigrateCommand : Command, IShortDescription
             });
             AddDispatcherResidualTodo(targetRoot, report);
             AddWindowingResidualTodo(targetRoot, report);
+            AddDisplayInformationResidualTodo(targetRoot, report);
 
             // ── 4. Neutralize content-filter-prone helper classes ───────────────
             var helperFiles = NeutralizeFilterProneClasses(targetRoot, copied);
@@ -850,7 +851,44 @@ internal partial class MigrateCommand : Command, IShortDescription
 
         private static void AddWindowingResidualTodo(string targetRoot, MigrationReport report)
         {
-            var locations = FindSourceLocations(targetRoot, line => WindowCurrent().IsMatch(line));
+            var sizingLocations = FindSourceLocations(
+                targetRoot,
+                line => WindowCurrentBounds().IsMatch(line));
+            if (sizingLocations.Count > 0)
+            {
+                report.Todos.Add(new MigrationTodo
+                {
+                    Id = "UWMIG008",
+                    Category = "window-sizing",
+                    Priority = "required",
+                    Summary = "Replace Window.Current.Bounds without reading a newly activated Window.Bounds during initial navigation",
+                    Reason = "For XAML layout decisions, wait until Loaded and use the page or root element's XamlRoot.Size. A WinUI Window.Bounds value can still be zero during initial navigation. Use AppWindow or Win32 bounds only when physical window coordinates are actually required.",
+                    Locations = sizingLocations
+                });
+            }
+
+            var otherLocations = FindSourceLocations(
+                targetRoot,
+                line => WindowCurrent().IsMatch(line) && !WindowCurrentBounds().IsMatch(line));
+            if (otherLocations.Count > 0)
+            {
+                report.Todos.Add(new MigrationTodo
+                {
+                    Id = "UWMIG007",
+                    Category = "windowing",
+                    Priority = "required",
+                    Summary = "Replace remaining Window.Current usage with an explicit WinUI Window or AppWindow reference",
+                    Reason = "WinUI 3 desktop has no Window.Current singleton, and the correct replacement depends on how each call uses the window.",
+                    Locations = otherLocations
+                });
+            }
+        }
+
+        private static void AddDisplayInformationResidualTodo(string targetRoot, MigrationReport report)
+        {
+            var locations = FindSourceLocations(
+                targetRoot,
+                line => DisplayInformationGetForCurrentView().IsMatch(line));
             if (locations.Count == 0)
             {
                 return;
@@ -858,11 +896,11 @@ internal partial class MigrateCommand : Command, IShortDescription
 
             report.Todos.Add(new MigrationTodo
             {
-                Id = "UWMIG007",
-                Category = "windowing",
+                Id = "UWMIG009",
+                Category = "display-information",
                 Priority = "required",
-                Summary = "Replace remaining Window.Current usage with an explicit WinUI Window or AppWindow reference",
-                Reason = "WinUI 3 desktop has no Window.Current singleton, and the correct replacement depends on how each call uses the window.",
+                Summary = "Replace DisplayInformation.GetForCurrentView with the API-specific WinUI desktop equivalent",
+                Reason = "Do not invent IDisplayInformationStaticsInterop. For DPI, use XamlRoot.RasterizationScale and XamlRoot.Changed. For CurrentOrientation or OrientationChanged, derive the app HWND's monitor orientation with MonitorFromWindow and EnumDisplaySettings, then refresh it from AppWindow.Changed.",
                 Locations = locations
             });
         }
@@ -875,7 +913,8 @@ internal partial class MigrateCommand : Command, IShortDescription
             foreach (var file in EnumerateFiles(targetRoot).Where(path =>
                 path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)))
             {
-                var lines = File.ReadAllLines(file);
+                var lines = MaskCSharpNonCode(File.ReadAllText(file))
+                    .Split(["\r\n", "\n"], StringSplitOptions.None);
                 for (var index = 0; index < lines.Length; index++)
                 {
                     if (!matches(lines[index]))
@@ -1480,6 +1519,12 @@ internal partial class MigrateCommand : Command, IShortDescription
 
     [GeneratedRegex(@"\bWindow\s*\.\s*Current\b")]
     private static partial Regex WindowCurrent();
+
+    [GeneratedRegex(@"\bWindow\s*\.\s*Current\s*\.\s*Bounds\b")]
+    private static partial Regex WindowCurrentBounds();
+
+    [GeneratedRegex(@"\bDisplayInformation\s*\.\s*GetForCurrentView\s*\(")]
+    private static partial Regex DisplayInformationGetForCurrentView();
 
     [GeneratedRegex(@"[^A-Za-z0-9_.-]+")]
     private static partial Regex InvalidProjectNameCharacter();

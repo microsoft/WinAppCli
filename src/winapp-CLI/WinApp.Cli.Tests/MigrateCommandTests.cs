@@ -164,7 +164,7 @@ public class MigrateCommandTests : MigrateCommandTestBase
     }
 
     [TestMethod]
-    public async Task Migrate_ReportsWindowCurrentAsKnownResidual()
+    public async Task Migrate_ReportsWindowCurrentBoundsAsWindowSizingResidual()
     {
         var source = await CreateUwpSourceAsync("WindowApp");
         await WriteAsync(source, "MainPage.xaml", "<Page x:Class=\"SDKTemplate.MainPage\" />");
@@ -183,10 +183,66 @@ public class MigrateCommandTests : MigrateCommandTestBase
         Assert.AreEqual(0, exit, output);
         using var report = JsonDocument.Parse(await File.ReadAllTextAsync(
             Path.Combine(target.FullName, "migration-report.json"), TestContext.CancellationToken));
-        var windowingTodo = report.RootElement.GetProperty("todos").EnumerateArray()
-            .Single(todo => todo.GetProperty("category").GetString() == "windowing");
-        Assert.AreEqual("required", windowingTodo.GetProperty("priority").GetString());
-        Assert.AreEqual(4, windowingTodo.GetProperty("locations")[0].GetProperty("line").GetInt32());
+        var windowSizingTodo = report.RootElement.GetProperty("todos").EnumerateArray()
+            .Single(todo => todo.GetProperty("category").GetString() == "window-sizing");
+        Assert.AreEqual("required", windowSizingTodo.GetProperty("priority").GetString());
+        Assert.AreEqual(4, windowSizingTodo.GetProperty("locations")[0].GetProperty("line").GetInt32());
+        StringAssert.Contains(windowSizingTodo.GetProperty("reason").GetString(), "XamlRoot.Size");
+        Assert.IsFalse(report.RootElement.GetProperty("todos").EnumerateArray()
+            .Any(todo => todo.GetProperty("category").GetString() == "windowing"));
+    }
+
+    [TestMethod]
+    public async Task Migrate_ReportsOtherWindowCurrentAsWindowingResidual()
+    {
+        var source = await CreateUwpSourceAsync("WindowContentApp");
+        await WriteAsync(source, "MainPage.xaml", "<Page x:Class=\"SDKTemplate.MainPage\" />");
+        await WriteAsync(source, "MainPage.xaml.cs", """
+            namespace SDKTemplate;
+            public partial class MainPage
+            {
+                object? Content() => Window.Current.Content;
+            }
+            """);
+        var target = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "window-content-output"));
+        ArrangeTemplateCreation(target, "WindowContentApp");
+
+        var (exit, output) = await InvokeAsync(source, target);
+
+        Assert.AreEqual(0, exit, output);
+        using var report = JsonDocument.Parse(await File.ReadAllTextAsync(
+            Path.Combine(target.FullName, "migration-report.json"), TestContext.CancellationToken));
+        Assert.IsTrue(report.RootElement.GetProperty("todos").EnumerateArray()
+            .Any(todo => todo.GetProperty("category").GetString() == "windowing"));
+        Assert.IsFalse(report.RootElement.GetProperty("todos").EnumerateArray()
+            .Any(todo => todo.GetProperty("category").GetString() == "window-sizing"));
+    }
+
+    [TestMethod]
+    public async Task Migrate_ReportsDisplayInformationWithApiSpecificGuidance()
+    {
+        var source = await CreateUwpSourceAsync("DisplayInformationApp");
+        await WriteAsync(source, "MainPage.xaml", "<Page x:Class=\"SDKTemplate.MainPage\" />");
+        await WriteAsync(source, "MainPage.xaml.cs", """
+            using Windows.Graphics.Display;
+            namespace SDKTemplate;
+            public partial class MainPage
+            {
+                DisplayInformation Current() => DisplayInformation.GetForCurrentView();
+            }
+            """);
+        var target = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "display-information-output"));
+        ArrangeTemplateCreation(target, "DisplayInformationApp");
+
+        var (exit, output) = await InvokeAsync(source, target);
+
+        Assert.AreEqual(0, exit, output);
+        using var report = JsonDocument.Parse(await File.ReadAllTextAsync(
+            Path.Combine(target.FullName, "migration-report.json"), TestContext.CancellationToken));
+        var todo = report.RootElement.GetProperty("todos").EnumerateArray()
+            .Single(item => item.GetProperty("category").GetString() == "display-information");
+        StringAssert.Contains(todo.GetProperty("reason").GetString(), "Do not invent IDisplayInformationStaticsInterop");
+        StringAssert.Contains(todo.GetProperty("reason").GetString(), "MonitorFromWindow");
     }
 
     [TestMethod]
