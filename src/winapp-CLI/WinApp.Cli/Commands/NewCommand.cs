@@ -592,6 +592,7 @@ internal class NewCommand : Command, IShortDescription
             }
 
             var (exitCode, stdout, stderr) = await dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken: cancellationToken);
+            LogDotnetOutput(args, exitCode, stdout, stderr);
             if (exitCode != 0)
             {
                 var detail = !string.IsNullOrWhiteSpace(stderr) ? stderr.Trim() : stdout.Trim();
@@ -739,10 +740,38 @@ internal class NewCommand : Command, IShortDescription
             }
         }
 
+        /// <summary>
+        /// Echoes a dotnet invocation and its captured output under <c>--verbose</c> (Debug). No-op at
+        /// higher log levels, so default/quiet/json runs stay clean. Keeps the buffered call sites (which
+        /// still parse stdout) unchanged while making the underlying dotnet commands visible for diagnostics.
+        /// </summary>
+        private void LogDotnetOutput(IReadOnlyList<string> args, int exitCode, string stdout, string stderr)
+        {
+            if (!logger.IsEnabled(LogLevel.Debug))
+            {
+                return;
+            }
+
+            logger.LogDebug("dotnet {Args} (exit {ExitCode})", string.Join(' ', args), exitCode);
+
+            var stdoutTrimmed = stdout?.TrimEnd();
+            if (!string.IsNullOrEmpty(stdoutTrimmed))
+            {
+                logger.LogDebug("{Output}", stdoutTrimmed);
+            }
+
+            var stderrTrimmed = stderr?.TrimEnd();
+            if (!string.IsNullOrEmpty(stderrTrimmed))
+            {
+                logger.LogDebug("{Output}", stderrTrimmed);
+            }
+        }
+
         /// <summary>Returns the installed WinUI pack version, or <c>null</c> when the pack isn't installed.</summary>
         private async Task<string?> QueryInstalledPackVersionAsync(DirectoryInfo cwd, CancellationToken cancellationToken)
         {
-            var (exit, output, _) = await dotNetService.RunDotnetCommandAsync(cwd, ListTemplatePacksArgs, EnglishUiEnvironment, cancellationToken);
+            var (exit, output, stderr) = await dotNetService.RunDotnetCommandAsync(cwd, ListTemplatePacksArgs, EnglishUiEnvironment, cancellationToken);
+            LogDotnetOutput(ListTemplatePacksArgs, exit, output, stderr);
             return exit == 0 && TryGetInstalledPackVersion(output, out var version) ? version : null;
         }
 
@@ -754,7 +783,8 @@ internal class NewCommand : Command, IShortDescription
         /// </summary>
         private async Task<string?> GetLatestAvailableVersionAsync(DirectoryInfo cwd, string installed, CancellationToken cancellationToken)
         {
-            var (exit, output, _) = await dotNetService.RunDotnetCommandAsync(cwd, UpdateCheckArgs, EnglishUiEnvironment, cancellationToken);
+            var (exit, output, stderr) = await dotNetService.RunDotnetCommandAsync(cwd, UpdateCheckArgs, EnglishUiEnvironment, cancellationToken);
+            LogDotnetOutput(UpdateCheckArgs, exit, output, stderr);
             if (exit != 0)
             {
                 return null;
@@ -790,7 +820,7 @@ internal class NewCommand : Command, IShortDescription
 
             var (installExit, installOut, installErr) = await dotNetService.RunDotnetCommandAsync(
                 cwd, new[] { "new", "install", packageArg }, cancellationToken: cancellationToken);
-
+            LogDotnetOutput(new[] { "new", "install", packageArg }, installExit, installOut, installErr);
             if (installExit != 0)
             {
                 var detail = !string.IsNullOrWhiteSpace(installErr) ? installErr.Trim() : installOut.Trim();
@@ -814,7 +844,8 @@ internal class NewCommand : Command, IShortDescription
         /// <summary>Runs <c>dotnet new list</c> in <paramref name="contextDir"/> and parses the WinUI templates.</summary>
         private async Task<IReadOnlyList<WinUiTemplateEntry>> EnumerateTemplatesAsync(DirectoryInfo contextDir, CancellationToken cancellationToken)
         {
-            var (exit, output, _) = await dotNetService.RunDotnetCommandAsync(contextDir, ListTemplatesArgs, EnglishUiEnvironment, cancellationToken);
+            var (exit, output, stderr) = await dotNetService.RunDotnetCommandAsync(contextDir, ListTemplatesArgs, EnglishUiEnvironment, cancellationToken);
+            LogDotnetOutput(ListTemplatesArgs, exit, output, stderr);
             return exit == 0 ? WinUiTemplateCatalog.ParseList(output) : [];
         }
 
@@ -970,9 +1001,10 @@ internal class NewCommand : Command, IShortDescription
         {
             int exitCode;
             string stdout;
+            string stderr = string.Empty;
             try
             {
-                (exitCode, stdout, _) = await dotNetService.RunDotnetCommandAsync(probeDir, VersionArgs, cancellationToken: cancellationToken);
+                (exitCode, stdout, stderr) = await dotNetService.RunDotnetCommandAsync(probeDir, VersionArgs, cancellationToken: cancellationToken);
             }
             catch (Win32Exception)
             {
@@ -980,6 +1012,8 @@ internal class NewCommand : Command, IShortDescription
                 exitCode = -1;
                 stdout = string.Empty;
             }
+
+            LogDotnetOutput(VersionArgs, exitCode, stdout, stderr);
 
             if (exitCode != 0)
             {

@@ -178,6 +178,8 @@ Each template's canonical short name is the first alias `dotnet new` lists for i
 
 WinUI app templates already include Windows packaging and identity (`Package.appxmanifest`), so no separate `winapp init` step is required. For app templates, use `winapp run` (or `dotnet run`) to build and launch the app. The `winui-lib` template produces a class library to reference from an app project (it has no app manifest). The `winui-unittest` template is a **packaged MSTest app whose tests run when the app is launched** (`winapp run .` or `dotnet run`) — not via `dotnet test`. `winapp new` scaffolds against your installed .NET SDK's target framework and prints the appropriate next step for the template you choose.
 
+Pass the global `--verbose` (`-v`) flag to echo every underlying `dotnet` invocation (pack query, update check, install, `dotnet new list`, scaffold) along with its full output — useful for diagnosing template-pack or scaffolding issues.
+
 **Examples:**
 
 ```bash
@@ -192,6 +194,9 @@ winapp new --name MyApp --template winui-navview
 
 # Always use the newest template pack, no prompts
 winapp new --name MyApp --template-version latest
+
+# Show the underlying dotnet commands and their output
+winapp new --name MyApp --verbose
 
 # Non-interactive (agent) with machine-readable output
 winapp new --use-defaults --name MyApp --json
