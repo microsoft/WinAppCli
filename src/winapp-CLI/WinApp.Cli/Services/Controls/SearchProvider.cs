@@ -302,7 +302,8 @@ internal static class ProviderRegistry
     public static bool IsReactorScenarioId(string scenarioId) =>
         string.Equals(ForScenarioId(scenarioId)?.Id, ReactorSourceId, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Descriptor whose <c>{Id}-</c> prefix matches <paramref name="scenarioId"/>, if any.</summary>
+    /// <summary>Descriptor whose <c>{Id}-</c> prefix matches <paramref name="scenarioId"/>, if any.
+    /// Case-insensitive so a hand-copied id like <c>REACTOR-FLEX-1</c> still routes to its provider.</summary>
     public static ProviderDescriptor? ForScenarioId(string scenarioId) =>
-        Descriptors.FirstOrDefault(d => scenarioId.StartsWith($"{d.Id}-", StringComparison.Ordinal));
+        Descriptors.FirstOrDefault(d => scenarioId.StartsWith($"{d.Id}-", StringComparison.OrdinalIgnoreCase));
 }

@@ -101,13 +101,17 @@ winapp find-ui "color picker" --json
   the cache (refreshed at most every 7 days, or on demand with `--refresh`). If the
   very first Gallery/Toolkit/Reactor run is offline you'll get a clear "connect and
   run once" message.
-- **Scenario ids** are stable within a cached corpus. Gallery/Toolkit/Reactor ids
+- **Scenario ids** are stable within a cached corpus and **case-insensitive** —
+  `GALLERY-TABVIEW-1` resolves the same as `gallery-tabview-1`. Gallery/Toolkit/Reactor ids
   look like `gallery-<control>-<n>` / `toolkit-<control>-<n>` /
   `reactor-<control>-<n>`; the `<source>-` prefix disambiguates controls that
   exist in more than one gallery (e.g. `ColorPicker`). Curated **core** patterns
   use a plain descriptive id with **no** `<source>-<control>-<n>` shape (e.g.
   `file-picker-desktop`, `live-charts`); fetch them the same way with `--id`, and
   browse them with `--source core`.
+- **`--json` is always JSON.** With `--json`, every failure — including argument/parser
+  errors such as a non-integer `--max` — is emitted as a flat `{"error": "..."}` object
+  on stdout with a non-zero exit code, so an agent can parse the result on every path.
 - **Exit codes** are script-friendly: `0` on a hit, `1` on no match / error.
 - Keep queries **focused** (one feature per query) — the lexical ranker rewards
   specific phrasing. Batch multiple focused queries rather than one broad one.

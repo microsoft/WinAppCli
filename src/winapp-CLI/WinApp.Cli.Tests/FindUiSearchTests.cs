@@ -191,6 +191,28 @@ public class FindUiSearchTests
     }
 
     [TestMethod]
+    public void GetPattern_IsCaseInsensitive_ForPrefixExactAndBareIds()
+    {
+        // #718: ids are copied by humans and agents, so casing must not matter. An
+        // uppercase id resolves to the same scenario and reports the canonical (lowercase)
+        // id — for exact ids, source-prefixed bare ids, and reactor (opt-in) ids alike.
+        var engine = BuildEngine();
+
+        var (upper, upperFound, upperId) = engine.GetPattern("GALLERY-TABVIEW-1");
+        Assert.IsTrue(upperFound, "an uppercase exact id must resolve");
+        StringAssert.Contains(upper, "TabView");
+        Assert.AreEqual("gallery-tabview-1", upperId, "canonical id must be the lowercase form, not the caller's casing");
+
+        var (_, bareFound, bareId) = engine.GetPattern("Gallery-TabView");
+        Assert.IsTrue(bareFound, "a mixed-case bare control id must resolve via the fallback");
+        Assert.AreEqual("gallery-tabview-1", bareId);
+
+        var (_, reactorFound, reactorId) = engine.GetPattern("REACTOR-FLEX-1");
+        Assert.IsTrue(reactorFound, "an uppercase reactor id must resolve");
+        Assert.AreEqual("reactor-flex-1", reactorId);
+    }
+
+    [TestMethod]
     public void GetPattern_UnknownId_ReturnsNotFound()
     {
         var engine = BuildEngine();
@@ -238,6 +260,18 @@ public class FindUiSearchTests
         Assert.AreEqual("toolkit", ProviderRegistry.ForScenarioId("toolkit-datagrid-1")?.Id);
         Assert.AreEqual("reactor", ProviderRegistry.ForScenarioId("reactor-flex-1")?.Id);
         Assert.IsNull(ProviderRegistry.ForScenarioId("core-navview"));
+    }
+
+    [TestMethod]
+    public void ProviderRegistry_ForScenarioId_IsCaseInsensitive()
+    {
+        // #718: source routing (which provider to load, incl. opt-in reactor) must not
+        // depend on the casing of a hand-copied id, or "REACTOR-FLEX-1" would resolve as
+        // a scenario yet skip loading the reactor provider.
+        Assert.AreEqual("gallery", ProviderRegistry.ForScenarioId("GALLERY-TABVIEW-1")?.Id);
+        Assert.AreEqual("reactor", ProviderRegistry.ForScenarioId("Reactor-Flex-1")?.Id);
+        Assert.IsTrue(ProviderRegistry.IsReactorScenarioId("REACTOR-FLEX-1"),
+            "an uppercase reactor id must still be recognized as reactor so the provider loads");
     }
 
     /// <summary>

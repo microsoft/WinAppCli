@@ -623,8 +623,9 @@ internal sealed class SearchEngine
 
     public (string formatted, bool found, string? canonicalId) GetPattern(string id)
     {
-        // Check core patterns
-        var core = _corePatterns.FirstOrDefault(p => p.Id == id);
+        // Check core patterns (ids are case-insensitive — humans and agents copy them
+        // by hand, so "File-Picker-Desktop" must resolve the same as "file-picker-desktop").
+        var core = _corePatterns.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
         if (core != null) return (FormatCorePattern(core), true, core.Id);
 
         // Strip a known "{source}-" prefix and remember which source the caller asked
@@ -635,7 +636,7 @@ internal sealed class SearchEngine
         foreach (var src in _knownSources)
         {
             var p = src + "-";
-            if (id.StartsWith(p, StringComparison.Ordinal))
+            if (id.StartsWith(p, StringComparison.OrdinalIgnoreCase))
             {
                 expectedSource = src;
                 bareId = id[p.Length..];
@@ -645,8 +646,8 @@ internal sealed class SearchEngine
 
         bool MatchesSource(Scenario s) => expectedSource == null || s.Source == expectedSource;
 
-        // Exact match on the new {controlId}-{N} scheme.
-        var scenario = _scenarios.FirstOrDefault(s => s.Id == bareId && MatchesSource(s));
+        // Exact match on the new {controlId}-{N} scheme (case-insensitive).
+        var scenario = _scenarios.FirstOrDefault(s => string.Equals(s.Id, bareId, StringComparison.OrdinalIgnoreCase) && MatchesSource(s));
 
         // Fallback: caller passed a bare control id (e.g. "gallery-gridview")
         // → return the lowest-numbered scenario for that control. Parses the
@@ -656,7 +657,7 @@ internal sealed class SearchEngine
         if (scenario == null)
         {
             scenario = _scenarios
-                .Where(s => s.ControlId == bareId && MatchesSource(s))
+                .Where(s => string.Equals(s.ControlId, bareId, StringComparison.OrdinalIgnoreCase) && MatchesSource(s))
                 .OrderBy(s => ParseTrailingNumber(s.Id))
                 .ThenBy(s => s.Id, StringComparer.OrdinalIgnoreCase)
                 .FirstOrDefault();

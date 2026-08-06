@@ -1079,12 +1079,12 @@ The corpus is fetched from GitHub on first use and cached per-user under `<globa
 
 **Options:**
 
-- `--id <id>` - Fetch the code (Gallery/Toolkit return XAML and/or C#; Reactor is C#-only) plus prerequisite notes for one or more scenario ids from a prior search (e.g. `gallery-tabview-1`). Repeatable.
+- `--id <id>` - Fetch the code (Gallery/Toolkit return XAML and/or C#; Reactor is C#-only) plus prerequisite notes for one or more scenario ids from a prior search (e.g. `gallery-tabview-1`). Repeatable. **Ids are case-insensitive** — `GALLERY-TABVIEW-1` resolves the same as `gallery-tabview-1`.
 - `--list` - List every discoverable control/sample id instead of searching (Gallery + Toolkit + core; the opt-in Reactor source is excluded).
 - `--source <gallery|toolkit|reactor|core>` - Restrict search results to a single source. (Search only — not valid with `--list`/`--id`.) **Reactor is opt-in** — it is excluded from a normal search, so `--source reactor` is the only way to search it.
 - `--max <N>` - Maximum number of matched controls to return (default: 3). Applies to search only; ignored with `--list`/`--id`.
 - `--refresh` - Bypass the local cache and re-fetch the WinUI corpus from GitHub.
-- `--json` - Emit structured JSON (agent-friendly). For search, each match carries `source`, `control`, `score`, `description`, and a `scenarios` array whose entries hold the per-scenario `id` and `header`; for `--id`, full code.
+- `--json` - Emit structured JSON (agent-friendly). For search, each match carries `source`, `control`, `score`, `description`, and a `scenarios` array whose entries hold the per-scenario `id` and `header`; for `--id`, full code. Under `--json` **every** failure — including argument/parser errors such as a non-integer `--max` — is emitted as a flat `{"error": "..."}` object on stdout with a non-zero exit code, so output stays machine-readable.
 
 **Workflow:** search compactly to find the right control and its scenario ids, then fetch the full code for the best match with `--id`.
 
