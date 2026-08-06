@@ -125,10 +125,15 @@ Checkout our getting started guides for step by step instructions of how to setu
   <a href="./docs/guides/flutter.md">
     <img src="https://img.shields.io/badge/Flutter-Get%20Started-02569B?style=for-the-badge&logo=flutter&logoColor=white" alt="Get Started with Flutter">
   </a>
+    <br />
+  <a href="./docs/guides/maui.md">
+    <img src="https://img.shields.io/badge/.NET%20MAUI-Get%20Started-512BD4?style=for-the-badge&logo=dotnet&logoColor=white" alt="Get Started with .NET MAUI">
+  </a>
 </p>
 
 Additional guides:
 - [Packaging an EXE/CLI](/docs/guides/packaging-cli.md): step by step guide of packaging an existing exe/cli as MSIX
+- [MAUI (Windows)](./docs/guides/maui.md): package and sign .NET MAUI Windows outputs with the generated resizetizer manifest
 - **Electron JS/TypeScript bindings** *(npm only)*: opt into auto-generated WinRT bindings via `winapp init --add-js-bindings`. See task-focused guides:
   - [File picker](/docs/guides/electron/js-file-picker.md) — open native Windows file/folder pickers from the renderer
   - [Toast notifications](/docs/guides/electron/js-notification.md) — show Windows toasts with actions
@@ -215,6 +220,7 @@ npx winapp --help
 - [`pack`](./docs/usage.md#pack) - Create MSIX packages from directories
 - [`run`](./docs/usage.md#run) - Run app as a packaged application for debugging (loose layout registration)
 - [`create-debug-identity`](./docs/usage.md#create-debug-identity) - Add sparse package identity to an existing exe
+- [`embed-identity`](./docs/usage.md#embed-identity) - Connect an exe to its sparse identity package by embedding the `<msix>` element
 - [`unregister`](./docs/usage.md#unregister) - Remove sideloaded dev packages registered by `run` or `create-debug-identity`
 - [`manifest`](./docs/usage.md#manifest) - Generate and manage AppxManifest.xml files
 
@@ -264,6 +270,7 @@ This repository includes samples demonstrating how to use the CLI with various f
 | [Rust App](/samples/rust-app/README.md) | Rust application using Windows APIs |
 | [Tauri App](/samples/tauri-app/README.md) | Tauri cross-platform app with Rust backend |
 | [Flutter App](/samples/flutter-app/README.md) | Flutter desktop app with package identity and Windows App SDK |
+| [Sparse App](/samples/sparse-app/README.md) | WPF app with production sparse packaging (identity-only MSIX) and an Inno Setup installer |
 
 ## 🧩 VS Code Extension
 
@@ -273,14 +280,18 @@ Install it from the [Visual Studio Marketplace](https://marketplace.visualstudio
 
 ## 🤖 Using with AI Coding Agents
 
-AI coding agents (GitHub Copilot, Claude Code, etc.) auto-discover skill files in your project.
+winapp ships a single plugin (at [`plugins/winapp/`](./plugins/winapp/)) — an agent plus skills — distributed to GitHub Copilot and Claude Code through their respective plugin marketplaces.
 
-**GitHub Copilot CLI Plugin** (global — works across all projects)
+**GitHub Copilot CLI** (global — works across all projects)
 ```bash
 copilot plugin install microsoft/WinAppCli
 ```
 
-**Claude Code** — Claude Code auto-discovers skills and agents from the in-repo [`.claude/`](./.claude/) directory shipped in this repository. No install step required; just open the repo in Claude Code.
+**Claude Code**
+```bash
+claude plugin marketplace add microsoft/WinAppCli
+claude plugin install winappcli@winappcli
+```
 
 This gives agents full understanding of winapp commands, workflows, and troubleshooting.
 

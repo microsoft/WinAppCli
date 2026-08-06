@@ -18,7 +18,7 @@
 .PARAMETER SkipMsix
     Skip MSIX packages creation
 .PARAMETER SkipDocs
-    Skip CLI schema and agent skills generation (useful in CI where docs are validated separately)
+    Skip CLI schema generation and plugin manifest version synchronization
 .PARAMETER SkipAll
     Skip NuGet, MSIX, npm, tests, and docs (only builds the CLI)
 .PARAMETER OnlyDocs
@@ -314,10 +314,10 @@ try
         Write-Host "[TEST] Skipping tests (SkipTests flag set)" -ForegroundColor Yellow
     }
 
-    # Step 6: Generate CLI schema and agent skills (optional)
+    # Step 6: Generate CLI schema and synchronize plugin versions (optional)
     if (-not $SkipDocs) {
         Write-Host ""
-        Write-Host "[DOCS] Generating CLI schema and agent skills..." -ForegroundColor Blue
+        Write-Host "[DOCS] Generating CLI schema and synchronizing plugin versions..." -ForegroundColor Blue
         
         $GenerateLlmDocsScript = Join-Path $PSScriptRoot "generate-llm-docs.ps1"
         $CliExePath = Join-Path $ProjectRoot "$ArtifactsPath\cli\win-x64\winapp.exe"
@@ -325,13 +325,13 @@ try
         & $GenerateLlmDocsScript -CliPath $CliExePath -CalledFromBuildScript
         
         if ($LASTEXITCODE -ne 0) {
-            Write-Warning "CLI schema and agent skills generation failed, but continuing..."
+            Write-Warning "CLI schema generation failed, but continuing..."
         } else {
-            Write-Host "[DOCS] CLI schema and agent skills generated successfully!" -ForegroundColor Green
+            Write-Host "[DOCS] CLI schema generated successfully!" -ForegroundColor Green
         }
     } else {
         Write-Host ""
-        Write-Host "[DOCS] Skipping CLI schema and agent skills generation (-SkipDocs)" -ForegroundColor Yellow
+        Write-Host "[DOCS] Skipping CLI schema generation (-SkipDocs)" -ForegroundColor Yellow
     }
 
     # Step 7: Create npm package (optional)

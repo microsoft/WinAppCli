@@ -30,7 +30,7 @@ jobs:
     - name: Build and publish CLI (x64 only)
       run: dotnet publish src/winapp-CLI/WinApp.Cli/WinApp.Cli.csproj -c Release -r win-x64 --self-contained -o artifacts/cli/win-x64
 
-    - name: Validate CLI schema and agent skills
+    - name: Validate CLI schema and plugin manifests
       run: .\scripts\validate-llm-docs.ps1 -FailOnDrift
 
   build-and-package:
@@ -72,8 +72,8 @@ jobs:
         echo "base_version=$baseVersion" >> $env:GITHUB_OUTPUT
         echo "build_number=$buildNumber" >> $env:GITHUB_OUTPUT
     
-    # Validate CLI schema and agent skills on push to main (warning only, not blocking)
-    - name: Validate CLI schema and agent skills
+    # Validate CLI schema and plugin manifests on push to main (warning only, not blocking)
+    - name: Validate CLI schema and plugin manifests
       if: github.event_name != 'pull_request'
       run: .\scripts\validate-llm-docs.ps1 -FailOnDrift:$false
     

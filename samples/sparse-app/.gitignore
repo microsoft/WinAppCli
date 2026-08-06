@@ -1,0 +1,17 @@
+
+# Development certificate
+devcert.pfx
+*.pfx
+
+# Generated sparse identity package
+*.msix
+
+# Build output
+bin/
+obj/
+
+# Installer output
+installer/Output/
+
+# Windows SDK packages and generated files
+.winapp

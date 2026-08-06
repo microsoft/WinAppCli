@@ -3,6 +3,7 @@
 
 using System.Security;
 using System.Text;
+using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
@@ -13,6 +14,16 @@ namespace WinApp.Cli.Services;
 
 internal partial class MsixService
 {
+    /// <summary>
+    /// Namespace of the SxS assembly manifest root element.
+    /// </summary>
+    private static readonly XNamespace AsmV1Ns = "urn:schemas-microsoft-com:asm.v1";
+
+    /// <summary>
+    /// Namespace of the &lt;msix&gt; package-identity element embedded in a fusion manifest.
+    /// </summary>
+    private static readonly XNamespace MsixV1Ns = "urn:schemas-microsoft-com:msix.v1";
+
     public async Task<MsixIdentityResult> AddSparseIdentityAsync(string? entryPointPath, FileInfo appxManifestPath, bool noInstall, bool keepIdentity, TaskContext taskContext, CancellationToken cancellationToken = default)
     {
         // Validate inputs
@@ -594,26 +605,34 @@ internal partial class MsixService
     private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityResult identityInfo, TaskContext taskContext, CancellationToken cancellationToken)
     {
         // Create the MSIX element for the win32 manifest
-        string assemblyIdentity = $@"<assemblyIdentity version=""1.0.0.0"" name=""{SecurityElement.Escape(identityInfo.PackageName)}"" type=""win32""/>;";
-        var existingManifestPath = new FileInfo(Path.Combine(exePath.DirectoryName!, "temp_extracted.manifest"));
+        string assemblyIdentity = $@"<assemblyIdentity version=""1.0.0.0"" name=""{SecurityElement.Escape(identityInfo.PackageName)}"" type=""win32""/>";
+        var existingManifestPath = CreateTempManifestFile("extracted");
 
         try
         {
             bool hasExistingManifest = await TryExtractManifestFromExeAsync(exePath, existingManifestPath, taskContext, cancellationToken);
-            if (!hasExistingManifest)
+            if (hasExistingManifest)
             {
-                assemblyIdentity = string.Empty;
+                taskContext.AddDebugMessage("Existing manifest found in executable, checking for a top-level AssemblyIdentity...");
+                var existingManifestContent = await File.ReadAllTextAsync(existingManifestPath.FullName, Encoding.UTF8, cancellationToken);
+                if (HasTopLevelAssemblyIdentity(existingManifestContent))
+                {
+                    taskContext.AddDebugMessage("Top-level AssemblyIdentity already present in manifest, will not add a new one.");
+                    assemblyIdentity = string.Empty;
+                }
+                else
+                {
+                    // A manifest with only a nested/dependency <assemblyIdentity> (e.g.
+                    // Microsoft.Windows.Common-Controls) does not give the assembly its own
+                    // identity, so we still add a top-level one alongside the <msix> element.
+                    taskContext.AddDebugMessage("No top-level AssemblyIdentity found, adding one so identity can be granted.");
+                }
             }
             else
             {
-                taskContext.AddDebugMessage("Existing manifest found in executable, checking for AssemblyIdentity...");
-                var existingManifestContent = await File.ReadAllTextAsync(existingManifestPath.FullName, Encoding.UTF8, cancellationToken);
-                var assemblyIdentityMatch = AssemblyIdentityNameRegex().Match(existingManifestContent);
-                if (assemblyIdentityMatch.Success)
-                {
-                    taskContext.AddDebugMessage("Existing AssemblyIdentity found in manifest, will not add a new one.");
-                    assemblyIdentity = string.Empty;
-                }
+                // A bare exe (Rust / C++ / trimmed .NET) has no embedded manifest; mt.exe will
+                // create one from ours, so it must carry the top-level <assemblyIdentity>.
+                taskContext.AddDebugMessage("No embedded manifest in executable, adding a top-level AssemblyIdentity.");
             }
         }
         finally
@@ -623,16 +642,16 @@ internal partial class MsixService
 
         var manifestContent = $@"<?xml version=""1.0"" encoding=""UTF-8""?>
 <assembly xmlns=""urn:schemas-microsoft-com:asm.v1"" manifestVersion=""1.0"">
+    {assemblyIdentity}
   <msix xmlns=""urn:schemas-microsoft-com:msix.v1""
             publisher=""{SecurityElement.Escape(identityInfo.Publisher)}""
             packageName=""{SecurityElement.Escape(identityInfo.PackageName)}""
             applicationId=""{SecurityElement.Escape(identityInfo.ApplicationId)}""
         />
-    {assemblyIdentity}
 </assembly>";
 
         // Create a temporary manifest file
-        var tempManifestPath = new FileInfo(Path.Combine(exePath.DirectoryName!, "msix_identity_temp.manifest"));
+        var tempManifestPath = CreateTempManifestFile("identity");
 
         try
         {
@@ -644,6 +663,65 @@ internal partial class MsixService
         finally
         {
             TryDeleteFile(tempManifestPath);
+        }
+    }
+
+    /// <summary>
+    /// Returns true if the side-by-side manifest XML has a top-level (root-child)
+    /// asm.v1 &lt;assemblyIdentity&gt; element. Unlike a whole-file scan, this ignores nested
+    /// &lt;assemblyIdentity&gt; elements (e.g. a &lt;dependency&gt; on
+    /// Microsoft.Windows.Common-Controls) and any identically named element from a different
+    /// namespace (e.g. asm.v3), which do not grant the assembly its own SxS identity.
+    /// Returns false if the content cannot be parsed as XML.
+    /// </summary>
+    private static bool HasTopLevelAssemblyIdentity(string manifestContent)
+    {
+        try
+        {
+            var root = XDocument.Parse(manifestContent).Root;
+            return root is not null && root.Elements(AsmV1Ns + "assemblyIdentity").Any();
+        }
+        catch (System.Xml.XmlException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Creates a uniquely named temp manifest file path under the system temp directory. Callers own
+    /// deletion. Using the temp directory rather than the executable's own directory avoids silently
+    /// clobbering any same-named files a user keeps next to their exe.
+    /// </summary>
+    private static FileInfo CreateTempManifestFile(string label)
+        => new(Path.Join(Path.GetTempPath(), $"winapp_{label}_{Guid.NewGuid():N}.manifest"));
+
+    /// <summary>
+    /// Removes any &lt;msix&gt; identity element(s) from a side-by-side manifest file on disk so a
+    /// subsequent mt.exe merge can insert a fresh identity without colliding with a stale one.
+    /// No-ops if the file cannot be parsed as XML.
+    /// </summary>
+    private static void RemoveMsixElements(FileInfo manifestPath, TaskContext taskContext)
+    {
+        try
+        {
+            var xdoc = XDocument.Load(manifestPath.FullName);
+            var msixElements = xdoc.Descendants(MsixV1Ns + "msix").ToList();
+            if (msixElements.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var element in msixElements)
+            {
+                element.Remove();
+            }
+
+            xdoc.Save(manifestPath.FullName);
+            taskContext.AddDebugMessage("Removed existing <msix> identity from embedded manifest before merge.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException or System.Xml.XmlException)
+        {
+            taskContext.AddDebugMessage($"Could not strip existing <msix> identity (continuing): {ex.Message}");
         }
     }
 
@@ -673,9 +751,8 @@ internal partial class MsixService
         taskContext.AddDebugMessage($"Processing executable: {exePath}");
         taskContext.AddDebugMessage($"Embedding manifest: {manifestPath}");
 
-        var exeDir = exePath.DirectoryName!;
-        var tempManifestPath = new FileInfo(Path.Combine(exeDir, "temp_extracted.manifest"));
-        var mergedManifestPath = new FileInfo(Path.Combine(exeDir, "merged.manifest"));
+        var tempManifestPath = CreateTempManifestFile("extracted");
+        var mergedManifestPath = CreateTempManifestFile("merged");
 
         try
         {
@@ -683,6 +760,12 @@ internal partial class MsixService
 
             if (hasExistingManifest)
             {
+                // Drop any <msix> identity already embedded in the exe. Otherwise mt.exe refuses to
+                // merge when the new identity differs from the old one (error c1010001: "Values of
+                // attribute ... not equal in different manifest snippets"), which would make
+                // re-branding an exe a hard failure instead of an idempotent update.
+                RemoveMsixElements(tempManifestPath, taskContext);
+
                 taskContext.AddDebugMessage("Merging with existing manifest using mt.exe...");
 
                 // Use mt.exe to merge existing manifest with new manifest

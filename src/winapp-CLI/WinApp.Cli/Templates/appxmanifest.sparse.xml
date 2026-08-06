@@ -14,7 +14,8 @@
   <Identity
     Name="{PackageName}"
     Publisher="{PublisherDN}"
-    Version="1.0.0.0" />
+    Version="1.0.0.0"
+    ProcessorArchitecture="neutral" />
 
   <Properties>
     <DisplayName>{PackageName}</DisplayName>
@@ -28,7 +29,7 @@
   </Properties>
 
   <Dependencies>
-    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.18362.0" MaxVersionTested="10.0.26200.0" />
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26200.0" />
   </Dependencies>
 
   <Resources>
@@ -38,7 +39,8 @@
   <Applications>
     <Application Id="{ApplicationId}"
       Executable="$targetnametoken$.exe"
-      EntryPoint="Windows.FullTrustApplication">
+      uap10:RuntimeBehavior="win32App"
+      uap10:TrustLevel="mediumIL">
       <uap:VisualElements
         AppListEntry="none"
         DisplayName="{PackageName}"

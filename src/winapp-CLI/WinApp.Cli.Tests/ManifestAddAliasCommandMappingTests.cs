@@ -89,5 +89,11 @@ public class ManifestAddAliasCommandMappingTests : BaseCommandTests
 
         public Task UpdateManifestAssetsAsync(FileInfo manifestPath, FileInfo imagePath, TaskContext taskContext, FileInfo? lightImagePath = null, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
+
+        public Task<ManifestGenerationInfo> PrepareSparseManifestInfoAsync(DirectoryInfo outputDirectory, FileInfo executable, string? packageName, string? publisherName, bool useDefaults, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task<SparseInitResult> GenerateSparseIdentityManifestAsync(DirectoryInfo outputDirectory, FileInfo executable, ManifestGenerationInfo info, TaskContext taskContext, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
     }
 }

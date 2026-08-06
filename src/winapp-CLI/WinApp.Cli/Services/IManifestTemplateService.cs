@@ -16,5 +16,7 @@ internal interface IManifestTemplateService
         ManifestTemplates manifestTemplate,
         string description,
         TaskContext taskContext,
+        string manifestFileName = "Package.appxmanifest",
+        string? executableName = null,
         CancellationToken cancellationToken = default);
 }

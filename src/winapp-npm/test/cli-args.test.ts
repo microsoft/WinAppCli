@@ -13,6 +13,7 @@ import {
   hasConfigOnly,
   hasAddJsBindings,
   hasUseDefaults,
+  parseSparseFlag,
   resolveYamlPath,
   stripWrapperOnlyFlags,
 } from '../src/cli-args';
@@ -71,6 +72,35 @@ test('hasUseDefaults recognises every accepted spelling', () => {
 
 test('stripWrapperOnlyFlags removes wrapper-only init flags', () => {
   assert.deepEqual(stripWrapperOnlyFlags(['.', '--add-js-bindings']), ['.']);
+});
+
+test('parseSparseFlag mirrors native --sparse boolean parsing', () => {
+  // Bare flag and absence.
+  assert.equal(parseSparseFlag(['init', '--sparse', '--exe', 'a.exe']), true);
+  assert.equal(parseSparseFlag(['init', '--exe', 'a.exe']), false);
+
+  // Space form: `--sparse true` / `--sparse false`.
+  assert.equal(parseSparseFlag(['init', '--sparse', 'true']), true);
+  assert.equal(parseSparseFlag(['init', '--sparse', 'false']), false);
+  assert.equal(parseSparseFlag(['init', '--sparse', 'False']), false);
+
+  // Inline form: `--sparse=true` / `--sparse:false`.
+  assert.equal(parseSparseFlag(['init', '--sparse=true']), true);
+  assert.equal(parseSparseFlag(['init', '--sparse=false']), false);
+  assert.equal(parseSparseFlag(['init', '--sparse:false']), false);
+  assert.equal(parseSparseFlag(['init', '--sparse=TRUE']), true);
+
+  // A `--sparse` followed by a non-boolean token is a bare true (0..1 arity).
+  assert.equal(parseSparseFlag(['init', '--sparse', '--exe', 'a.exe']), true);
+});
+
+test('parseSparseFlag resolves repeated occurrences from the last (like System.CommandLine)', () => {
+  // A repeated scalar boolean resolves from its final occurrence, so the wrapper must
+  // agree with the native parser rather than returning on the first match.
+  assert.equal(parseSparseFlag(['init', '--sparse=false', '--sparse', '--exe', 'a.exe']), true);
+  assert.equal(parseSparseFlag(['init', '--sparse', '--sparse=false']), false);
+  assert.equal(parseSparseFlag(['init', '--sparse', 'false', '--sparse']), true);
+  assert.equal(parseSparseFlag(['init', '--sparse=true', '--sparse:false']), false);
 });
 
 test('resolveYamlPath honours --config-dir (space and = forms)', () => {

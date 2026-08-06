@@ -16,7 +16,7 @@ One or more sample names to test. Defaults to all samples that have a test.Tests
 Path to the winapp npm package (.tgz or directory) passed to each test.
 
 .PARAMETER SkipCleanup
-Passed through to each test — keep build artifacts for debugging.
+Passed through to each test - keep build artifacts for debugging.
 
 .EXAMPLE
 .\scripts\test-samples.ps1
@@ -56,7 +56,7 @@ if ($Samples) {
     $Samples = @($Samples | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     foreach ($s in $Samples) {
         if ($s -notin $allTests) {
-            Write-Warning "Sample '$s' does not have a test.Tests.ps1 — skipping"
+            Write-Warning "Sample '$s' does not have a test.Tests.ps1 - skipping"
         }
     }
     $testList = @($Samples | Where-Object { $_ -in $allTests })
@@ -79,7 +79,7 @@ if ($WinappPath) {
 # Build Pester containers for each sample
 $containers = @()
 foreach ($sample in $testList) {
-    $testFile = Join-Path $samplesRoot $sample "test.Tests.ps1"
+    $testFile = Join-Path (Join-Path $samplesRoot $sample) "test.Tests.ps1"
     $data = @{}
     if ($WinappPath)  { $data['WinappPath']  = $WinappPath }
     if ($SkipCleanup) { $data['SkipCleanup'] = $true }
