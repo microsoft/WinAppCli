@@ -99,6 +99,55 @@ public class FindUiCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task Id_CodeLineWiderThanConsole_IsNotWordWrapped_Exit0()
+    {
+        // Code bodies must reach the terminal verbatim. Routing them through IAnsiConsole
+        // renders each line as a Spectre `Text`, which word-wraps to the console width; with
+        // no wide TTY (piping to a file, CI logs, a narrow window) a wrap can land mid-token
+        // — e.g. "</DataTemplate>" split into "</DataT" + "emplate>" — yielding invalid XAML.
+        // A single line wider than the console must survive on one line.
+        var longXaml =
+            "<TextBlock Foreground=\"{ThemeResource SystemControlPageTextBaseMediumBrush}\" Text=\""
+            + new string('A', 80) + "\" />";
+        var engine = new SearchEngine(
+            [
+                new Scenario
+                {
+                    Id = "wideline-1",
+                    ControlId = "widelineprobe",
+                    ControlName = "WideLineProbe",
+                    HeaderText = "Wide line",
+                    Source = "gallery",
+                    Xaml = longXaml,
+                },
+            ],
+            corePatterns: [],
+            enrichmentTags: new(),
+            curatedKeywords: new());
+        _fakeService = FakeControlsSearchService.WithEngine(engine);
+
+        // Pin a narrow width with no interactive TTY — the exact condition that reflows output.
+        TestAnsiConsole.Profile.Width = 80;
+
+        var exit = await ParseAndInvokeWithCaptureAsync(Command(), ["--id", "gallery-wideline-1"]);
+
+        Assert.AreEqual(0, exit);
+
+        // Direct proof: the full wide line appears intact, never split across a wrap.
+        StringAssert.Contains(TestAnsiConsole.Output, longXaml,
+            "a code line wider than the console must not be word-wrapped");
+
+        // Width-independent invariant (Nikola's suggestion): the plain render has exactly the
+        // line count of the canonical --json content. Wrapping would inflate it. The probe
+        // control carries no curated notes, so every structural line is short — the wide code
+        // line is the only wrap candidate.
+        var (content, _, _) = engine.GetPattern("gallery-wideline-1");
+        static int LineCount(string s) => s.Replace("\r\n", "\n").TrimEnd('\n').Split('\n').Length;
+        Assert.AreEqual(LineCount(content), LineCount(TestAnsiConsole.Output),
+            "plain render line count must match the canonical --json content — extra lines mean a snippet was word-wrapped");
+    }
+
+    [TestMethod]
     public async Task Search_NonJson_PassesFetchNoticeCallback()
     {
         var fake = FakeControlsSearchService.WithEngine(BuildEngine());

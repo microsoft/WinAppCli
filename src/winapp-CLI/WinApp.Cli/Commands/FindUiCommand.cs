@@ -315,10 +315,11 @@ internal sealed class FindUiCommand : Command, IShortDescription
         /// wall of code (headings, metadata labels, and code-fence markers), while
         /// keeping code bodies byte-for-byte verbatim. Structural lines go through
         /// <see cref="IAnsiConsole"/> markup (escaped, so brackets in headers are safe);
-        /// code and free text are written literally with <c>WriteLine</c> so markup is
-        /// never interpreted and snippets stay copy-pasteable. When output is redirected
-        /// or color is unavailable, Spectre strips the styling and the plain markdown is
-        /// reproduced unchanged. The JSON <c>content</c> field is never touched.
+        /// code and free text are written straight to the underlying output writer so
+        /// they are neither markup-parsed nor word-wrapped to the console width — a
+        /// snippet must survive intact even when output is redirected or the terminal is
+        /// narrow. When color is available the structural styling still applies; the JSON
+        /// <c>content</c> field shares the same verbatim sink and is never touched.
         /// </summary>
         private void WriteScenarioContent(string content)
         {
@@ -343,9 +344,14 @@ internal sealed class FindUiCommand : Command, IShortDescription
                 }
                 else
                 {
-                    // Code and free text: write literally (no markup parsing) so brackets
-                    // and other markup-significant characters survive untouched.
-                    console.WriteLine(line);
+                    // Code and free text: write straight to the underlying writer so the
+                    // line is emitted verbatim. Routing through IAnsiConsole (WriteLine/
+                    // Write) renders the string as a Spectre `Text`, which word-wraps to
+                    // the console width — with no wide TTY (piping, CI, a narrow terminal)
+                    // that reflows a snippet and can split a break mid-token (e.g.
+                    // `</DataT` + `emplate>`), producing invalid XAML. The raw writer is the
+                    // same sink the `--json` path uses, so both stay byte-for-byte faithful.
+                    console.Profile.Out.Writer.WriteLine(line);
                 }
             }
         }
