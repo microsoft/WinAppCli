@@ -1,104 +1,82 @@
 # Shared output contract
 
-Every dimension sub-agent must follow this output contract.
+## Output
 
-## Header line
+Start with one line: `# <dimension>: <N> findings`
 
-Start with exactly one line:
-
-```
-# <dimension name>: <N> findings
-```
-
-Where `<dimension name>` is one of: `security`, `correctness`, `cli-ux`,
-`alternative-solution`, `necessity-and-simplicity`, `test-coverage`,
-`docs-and-samples`, `packaging`, `multi-model`.
-
-## Per-finding block
-
-Each finding is a level-2 heading followed by labeled bullets:
+Then one block per finding:
 
 ```markdown
-## <relative file path>:<start_line>-<end_line>
+## <path>:<start_line>-<end_line>
 - **Severity**: critical | high | medium | low
 - **Confidence**: high | medium | low
-- **Validation**: static-only (needs runtime confirmation) | validated
-- **Domain**: <dimension name>
-- **Finding**: <one-line statement of what is wrong>
-- **Evidence**: <specific code evidence — quote 1-3 lines, cite line refs in the diff>
-- **Recommendation**: <concrete actionable next step>
+- **Validation**: static-only (needs runtime confirmation)
+- **Domain**: <dimension>
+- **Finding**: <what is wrong, one line>
+- **Evidence**: <quote 1-3 lines from the diff, cite line refs>
+- **Recommendation**: <smallest concrete fix>
 ```
 
-Notes:
+Paths are repo-relative; line numbers refer to the post-change file. Always emit
+`Validation: static-only` — the orchestrator promotes findings to `validated`
+after actually running the code.
 
-- File paths are relative to the repo root (no leading `./`).
-- Line numbers refer to the **post-change** file (the right side of the diff).
-  For `working` / `staged` / `all` scopes this means the working-tree or staged
-  state, not a committed version.
-- For findings that span discontiguous regions, emit them as separate findings.
-- **Validation** starts as `static-only (needs runtime confirmation)` for every
-  finding you emit — you are reading the diff, not running it. The orchestrator
-  flips it to `validated` in the Validate phase when a runtime check confirms
-  the finding, and drops the finding if a runtime check refutes it.
+End with a `## What I checked` section, one bullet per area inspected. This is
+how the developer sees scope, not just verdict.
 
-## Trailing "what I checked" note
+## The bar
 
-After the findings (or in place of them when there are zero), include:
+Before emitting anything, ask:
 
-```markdown
-## What I checked
-- <one bullet per area inspected, e.g., "All new methods in MsixService.cs">
-- <e.g., "Process.Start call sites added in CertCommand.cs">
-- <e.g., "appxmanifest.xml writes via XDocument vs regex">
-```
+> Would a busy maintainer, looking at a PR that is otherwise ready to ship,
+> genuinely want this changed — or is this merely a true statement about the
+> code?
 
-This appears in the orchestrator's `Coverage notes` section so the developer
-can see scope, not just verdict.
+Emit it only if you can finish the sentence **"a user doing X will hit Y."**
 
-## The Team Lead Test (mandatory signal-to-noise gate)
+Drop it if:
 
-Before emitting a finding, ask: *"Would a senior maintainer of this repo keep
-this comment in a PR review, or delete it as noise?"* If you would delete it,
-do not emit it.
+- The code works and you are describing a tidier alternative.
+- The fix adds more complexity than the problem costs users.
+- It guards against something that cannot happen here — input the CLI controls,
+  a state the caller guarantees, a config the repo does not support.
+- It is a "for completeness" / "for consistency" item with no user-visible
+  effect.
+- The compiler, the analyzers, or `EnforceCodeStyleInBuild` already catch it.
+  Style, naming, and formatting are never findings.
 
-Specifically, **drop**:
+**Never drop** a security issue, data loss, a crash, wrong output, or a broken
+install. This bar removes polish and speculation, not defects.
 
-- Style, formatting, brace placement, naming preferences (analyzers cover these).
-- Suggestions to "consider adding a comment" without a substantive reason.
-- Speculative hypotheticals not grounded in the diff.
-- Restatements of what the code does.
-- Anything the C# compiler, `EnforceCodeStyleInBuild`, or repo analyzers
-  already flag (this repo treats warnings as errors in Release).
+**There is no quota, and zero findings is a good result.** Two precise findings
+beat eight thorough ones. Never invent one to avoid an empty report.
 
-**Keep**:
+## Recommendations
 
-- Bugs, logic errors, race conditions, missed edge cases.
-- Security issues (never suppressed, even at low confidence).
-- API/UX inconsistencies users will notice.
-- Coverage gaps with concrete impact.
-- Doc/sample/packaging drift caused by this change.
+Write the **smallest** fix that resolves the finding, not the most thorough.
 
-## No quotas — a clean result is a valid result
+Try the subtractive fix first: delete the branch, drop the option, reject the
+input, collapse the second code path, or document the limitation. If your fix
+adds a new command / flag / service / abstraction, say in one clause why a
+smaller one will not do — if you cannot, propose the smaller one instead. Never
+recommend speculative generality.
 
-No dimension is required to produce a finding. Zero findings is a legitimate,
-valuable outcome that tells the developer this area is solid. **Never invent,
-inflate, or lower the bar on a finding just to avoid an empty report** — a
-manufactured finding fails the Team Lead Test by definition. When you have
-nothing to flag, say so and record what you checked in `## What I checked`.
+## Severity
 
-## Severity guide
+| | |
+|---|---|
+| critical | Breaks users, corrupts data, leaks secrets, or blocks release |
+| high | Real bug, real security or UX issue, real coverage gap |
+| medium | Worth fixing, not a blocker |
+| low | Only if the improvement is concrete and actionable |
 
-| Severity | Meaning |
-|----------|---------|
-| critical | Will break users, corrupt data, leak secrets, or block release. Must fix before merge. |
-| high     | Real bug, real security/UX issue, or real coverage gap. Should fix before merge. |
-| medium   | Worth fixing but not a blocker; may be deferred with a note. |
-| low      | Minor improvement; only emit if the improvement is concrete and actionable. |
+Confidence is **high** when cause and effect are both visible in the diff,
+**medium** when one half is inferred from repo context you read, **low** when the
+pattern matches a known issue but key elements are unverifiable. Security
+findings are never suppressed for low confidence.
 
-## Confidence guide
+## Re-reviews
 
-- **high**: Full chain visible in the diff (cause + effect both present).
-- **medium**: One half visible; the other half inferred from repo context you read.
-- **low**: Pattern resembles a known issue but key elements not verifiable.
-
-Security findings are **never** suppressed by low confidence — emit them anyway.
+If told this branch was already reviewed: emit critical and high only, and treat
+code added in response to earlier review comments as **re-openable — not settled
+design**.

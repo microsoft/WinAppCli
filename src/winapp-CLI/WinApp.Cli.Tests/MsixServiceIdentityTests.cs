@@ -24,7 +24,8 @@ public class MsixServiceIdentityTests : BaseCommandTests
     private FakePackageRegistrationService _fakeRegistration = null!;
     private FakeDevModeService _fakeDevMode = null!;
     private ScriptedMtBuildToolsService _fakeBuildTools = null!;
-    private FakeWorkspaceSetupService _fakeWorkspaceSetup = null!;
+    private FakeWindowsAppRuntimeService _fakeWindowsAppRuntime = null!;
+    private FakeDotNetService _fakeDotNet = null!;
 
     private static readonly MethodInfo CopyFilesFromRecipeMethod =
         typeof(MsixService).GetMethod("CopyFilesFromRecipeAsync", BindingFlags.NonPublic | BindingFlags.Static)!;
@@ -35,6 +36,12 @@ public class MsixServiceIdentityTests : BaseCommandTests
     private static readonly MethodInfo EmbedManifestFileToExeMethod =
         typeof(MsixService).GetMethod("EmbedManifestFileToExeAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
+    private static readonly string[] LegacyTempManifestNames =
+        ["temp_extracted.manifest", "merged.manifest", "msix_identity_temp.manifest"];
+
+    private static readonly MethodInfo RemoveMsixElementsMethod =
+        typeof(MsixService).GetMethod("RemoveMsixElements", BindingFlags.NonPublic | BindingFlags.Static)!;
+
     private static readonly MethodInfo EnsureWindowsAppRuntimeInstalledMethod =
         typeof(MsixService).GetMethod("EnsureWindowsAppRuntimeInstalledAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
 
@@ -43,13 +50,15 @@ public class MsixServiceIdentityTests : BaseCommandTests
         _fakeRegistration = new FakePackageRegistrationService();
         _fakeDevMode = new FakeDevModeService();
         _fakeBuildTools = new ScriptedMtBuildToolsService();
-        _fakeWorkspaceSetup = new FakeWorkspaceSetupService();
+        _fakeWindowsAppRuntime = new FakeWindowsAppRuntimeService();
+        _fakeDotNet = new FakeDotNetService();
 
         return services
             .AddSingleton<IPackageRegistrationService>(_fakeRegistration)
             .AddSingleton<IDevModeService>(_fakeDevMode)
             .AddSingleton<IBuildToolsService>(_fakeBuildTools)
-            .AddSingleton<IWorkspaceSetupService>(_fakeWorkspaceSetup)
+            .AddSingleton<IWindowsAppRuntimeService>(_fakeWindowsAppRuntime)
+            .AddSingleton<IDotNetService>(_fakeDotNet)
             .AddSingleton<INugetService, FakeNugetService>();
     }
 
@@ -751,13 +760,66 @@ public class MsixServiceIdentityTests : BaseCommandTests
         _fakeBuildTools.ThrowWhen = (tool, args) =>
             tool.Contains("mt", StringComparison.OrdinalIgnoreCase) &&
             args.Contains("-outputresource", StringComparison.OrdinalIgnoreCase);
-        var exe = new FileInfo(Path.Combine(_tempDirectory.FullName, "app.exe"));
+        var exe = new FileInfo(Path.Join(_tempDirectory.FullName, "app.exe"));
         await File.WriteAllTextAsync(exe.FullName, "pe", TestContext.CancellationToken);
-        var manifest = new FileInfo(Path.Combine(_tempDirectory.FullName, "new.manifest"));
+        var manifest = new FileInfo(Path.Join(_tempDirectory.FullName, "new.manifest"));
         await File.WriteAllTextAsync(manifest.FullName, "<assembly/>", TestContext.CancellationToken);
 
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(
             () => InvokeEmbedManifestFileToExeAsync(exe, manifest));
+    }
+
+    [TestMethod]
+    public async Task EmbedManifestFileToExeAsync_DoesNotDeleteUserFilesNamedLikeTempManifests()
+    {
+        // Regression: the manifest temp files used while embedding must live under the system
+        // temp directory, not next to the exe, so they never silently clobber a user's own files
+        // that happen to share those legacy names.
+        _fakeBuildTools.SimulateExistingExeManifest = true;
+        var (_, exePath) = ArrangeSparseInputs();
+        var exe = new FileInfo(exePath);
+        var manifest = new FileInfo(Path.Join(_tempDirectory.FullName, "new.manifest"));
+        await File.WriteAllTextAsync(
+            manifest.FullName,
+            "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\"/>",
+            TestContext.CancellationToken);
+
+        var planted = LegacyTempManifestNames
+            .Select(n => new FileInfo(Path.Join(exe.DirectoryName!, n)))
+            .ToArray();
+        foreach (var file in planted)
+        {
+            await File.WriteAllTextAsync(file.FullName, "user-content", TestContext.CancellationToken);
+        }
+
+        await InvokeEmbedManifestFileToExeAsync(exe, manifest);
+
+        foreach (var file in planted)
+        {
+            file.Refresh();
+            Assert.IsTrue(file.Exists, $"User file '{file.Name}' next to the exe must survive manifest embedding");
+            Assert.AreEqual("user-content", await File.ReadAllTextAsync(file.FullName, TestContext.CancellationToken));
+        }
+    }
+
+    [TestMethod]
+    public void RemoveMsixElements_StripsExistingMsixIdentity()
+    {
+        // Regression: re-branding an exe must be idempotent. Any <msix> already present in the
+        // extracted manifest has to be removed before the mt.exe merge, otherwise mt.exe fails
+        // with c1010001 ("Values of attribute ... not equal") when the identity differs.
+        var manifestFile = new FileInfo(Path.Join(_tempDirectory.FullName, "sxs.manifest"));
+        File.WriteAllText(
+            manifestFile.FullName,
+            "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">" +
+            "<msix xmlns=\"urn:schemas-microsoft-com:msix.v1\" publisher=\"CN=Old\" packageName=\"Old.App\" applicationId=\"App\"/>" +
+            "<assemblyIdentity version=\"1.0.0.0\" name=\"Some.App\" type=\"win32\"/></assembly>");
+
+        RemoveMsixElementsMethod.Invoke(null, [manifestFile, TestTaskContext]);
+
+        var content = File.ReadAllText(manifestFile.FullName);
+        StringAssert.DoesNotMatch(content, new Regex("<msix", RegexOptions.IgnoreCase), "the stale <msix> identity should be removed");
+        StringAssert.Contains(content, "assemblyIdentity", StringComparison.Ordinal);
     }
 
     // ---- PRI generation failure paths --------------------------------------------
@@ -829,17 +891,17 @@ public class MsixServiceIdentityTests : BaseCommandTests
 
     private Task InvokeEnsureWindowsAppRuntimeInstalledAsync(DotNetPackageListJson? list) =>
         (Task)EnsureWindowsAppRuntimeInstalledMethod.Invoke(
-            _msixService, [list, TestTaskContext, TestContext.CancellationToken])!;
+            _msixService, [list, null, TestTaskContext, TestContext.CancellationToken, false])!;
 
     [TestMethod]
     public async Task EnsureWindowsAppRuntimeInstalledAsync_InstallsMissingPackages()
     {
-        _fakeWorkspaceSetup.MsixDirectory = _tempDirectory.CreateSubdirectory("runtime-msix");
-        _fakeWorkspaceSetup.InstallRuntimeResult = (InstalledCount: 3, ErrorCount: 0);
+        _fakeWindowsAppRuntime.MsixDirectory = _tempDirectory.CreateSubdirectory("runtime-msix");
+        _fakeWindowsAppRuntime.InstallRuntimeResult = (InstalledCount: 3, ErrorCount: 0);
 
         await InvokeEnsureWindowsAppRuntimeInstalledAsync(WinAppSdkPackageList());
 
-        Assert.HasCount(1, _fakeWorkspaceSetup.InstallRuntimeCalls);
+        Assert.HasCount(1, _fakeWindowsAppRuntime.InstallRuntimeCalls);
         var messages = TestTask.SubTasks.OfType<StatusMessageTask>().Select(t => t.CompletedMessage ?? string.Empty).ToList();
         Assert.IsTrue(
             messages.Any(m => m.Contains("Installed 3 Windows App Runtime package(s)", StringComparison.OrdinalIgnoreCase)),
@@ -849,12 +911,12 @@ public class MsixServiceIdentityTests : BaseCommandTests
     [TestMethod]
     public async Task EnsureWindowsAppRuntimeInstalledAsync_ReportsInstallErrors()
     {
-        _fakeWorkspaceSetup.MsixDirectory = _tempDirectory.CreateSubdirectory("runtime-msix");
-        _fakeWorkspaceSetup.InstallRuntimeResult = (InstalledCount: 0, ErrorCount: 2);
+        _fakeWindowsAppRuntime.MsixDirectory = _tempDirectory.CreateSubdirectory("runtime-msix");
+        _fakeWindowsAppRuntime.InstallRuntimeResult = (InstalledCount: 0, ErrorCount: 2);
 
         await InvokeEnsureWindowsAppRuntimeInstalledAsync(WinAppSdkPackageList());
 
-        Assert.HasCount(1, _fakeWorkspaceSetup.InstallRuntimeCalls);
+        Assert.HasCount(1, _fakeWindowsAppRuntime.InstallRuntimeCalls);
         var messages = TestTask.SubTasks.OfType<StatusMessageTask>().Select(t => t.CompletedMessage ?? string.Empty).ToList();
         Assert.IsTrue(
             messages.Any(m => m.Contains("2 runtime package(s) failed to install", StringComparison.OrdinalIgnoreCase)),
@@ -865,11 +927,215 @@ public class MsixServiceIdentityTests : BaseCommandTests
     public async Task EnsureWindowsAppRuntimeInstalledAsync_RuntimeDirNotFound_SkipsInstall()
     {
         // FindWindowsAppSdkMsixDirectory returns null -> nothing to install.
-        _fakeWorkspaceSetup.MsixDirectory = null;
+        _fakeWindowsAppRuntime.MsixDirectory = null;
 
         await InvokeEnsureWindowsAppRuntimeInstalledAsync(WinAppSdkPackageList());
 
-        Assert.IsEmpty(_fakeWorkspaceSetup.InstallRuntimeCalls);
+        Assert.IsEmpty(_fakeWindowsAppRuntime.InstallRuntimeCalls);
+    }
+
+    [TestMethod]
+    public async Task EnsureWindowsAppRuntimeInstalledAsync_ProjectMode_ForwardsNoRestoreToPackageList()
+    {
+        // C43: `dotnet list package` performs an implicit restore on current SDKs, so a run that
+        // requested --no-restore must forward it to runtime discovery too. A package list without a
+        // Windows App SDK reference makes the public entry return right after the discovery pass —
+        // enough to prove the flag is threaded into GetPackageListAsync.
+        _fakeDotNet.PackageListResult = new DotNetPackageListJson(
+        [
+            new DotNetProject(
+            [
+                new DotNetFramework(
+                    "net10.0-windows10.0.19041.0",
+                    [new DotNetPackage("SomeOther.Package", "1.0.0", "1.0.0")],
+                    [])
+            ])
+        ]);
+
+        var csproj = new FileInfo(Path.Combine(_tempDirectory.FullName, "App.csproj"));
+
+        await _msixService.EnsureWindowsAppRuntimeInstalledAsync(
+            csproj, "x64", framework: null, noRestore: true, TestTaskContext, TestContext.CancellationToken);
+        Assert.AreEqual(true, _fakeDotNet.LastGetPackageListNoRestore,
+            "--no-restore must be forwarded to dotnet list package during runtime discovery");
+
+        await _msixService.EnsureWindowsAppRuntimeInstalledAsync(
+            csproj, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken);
+        Assert.AreEqual(false, _fakeDotNet.LastGetPackageListNoRestore,
+            "runtime discovery must restore normally when --no-restore was not requested");
+    }
+
+    [TestMethod]
+    public async Task EnsureWindowsAppRuntimeInstalledAsync_RefsSdkButExactRuntimeMissing_FailsClosed()
+    {
+        // M4 (gate 1, Identity.cs:454-466): the app positively references the Windows App SDK, but the
+        // exact runtime it was built against can't be located (empty expected-packages), so the runtime
+        // can't be version-verified. Falling open would risk launching against an unrelated registered
+        // runtime, so it must fail closed with an actionable error instead of silently continuing.
+        _fakeDotNet.PackageListResult = WinAppSdkPackageList();
+        _fakeWindowsAppRuntime.MsixDirectory = null; // exact runtime unavailable -> empty expected list
+        var csproj = new FileInfo(Path.Combine(_tempDirectory.FullName, "App.csproj"));
+
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+            _msixService.EnsureWindowsAppRuntimeInstalledAsync(
+                csproj, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken));
+
+        StringAssert.Contains(ex.Message, "could not be located");
+    }
+
+    [TestMethod]
+    public async Task EnsureWindowsAppRuntimeInstalledAsync_RuntimeNotRegisteredAfterInstall_FailsClosed()
+    {
+        // M4 (gate 2, Identity.cs:483-490): the exact runtime packages ARE resolved (non-empty expected
+        // list, so gate 1 is skipped), but after the install attempt the Framework + DDLM still isn't
+        // registered for the target arch. A missing runtime must abort the launch with an actionable error
+        // rather than being treated as success.
+        _fakeDotNet.PackageListResult = WinAppSdkPackageList();
+        _fakeWindowsAppRuntime.MsixDirectory = _tempDirectory.CreateSubdirectory("runtime-msix");
+        _fakeWindowsAppRuntime.InstallRuntimePackages =
+            [("Microsoft.WindowsAppRuntime.1.6", "1.6.240701"), ("Microsoft.WinAppRuntime.DDLM", "1.6.240701")];
+        _fakeWindowsAppRuntime.IsRuntimeRegisteredResult = false;
+        var csproj = new FileInfo(Path.Combine(_tempDirectory.FullName, "App.csproj"));
+
+        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+            _msixService.EnsureWindowsAppRuntimeInstalledAsync(
+                csproj, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken));
+
+        StringAssert.Contains(ex.Message, "not registered");
+    }
+
+    [TestMethod]
+    public async Task EnsureWindowsAppRuntimeInstalledAsync_RuntimeResolvedAndRegistered_Succeeds()
+    {
+        // Complement to the fail-closed gates: when the exact runtime resolves AND is registered for the
+        // target arch, the method completes without throwing (the happy path the gates guard).
+        _fakeDotNet.PackageListResult = WinAppSdkPackageList();
+        _fakeWindowsAppRuntime.MsixDirectory = _tempDirectory.CreateSubdirectory("runtime-msix");
+        _fakeWindowsAppRuntime.InstallRuntimePackages =
+            [("Microsoft.WindowsAppRuntime.1.6", "1.6.240701"), ("Microsoft.WinAppRuntime.DDLM", "1.6.240701")];
+        _fakeWindowsAppRuntime.IsRuntimeRegisteredResult = true;
+        var csproj = new FileInfo(Path.Combine(_tempDirectory.FullName, "App.csproj"));
+
+        await _msixService.EnsureWindowsAppRuntimeInstalledAsync(
+            csproj, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken);
+
+        Assert.HasCount(1, _fakeWindowsAppRuntime.InstallRuntimeCalls);
+    }
+
+    [TestMethod]
+    public async Task EnsureWindowsAppRuntimeInstalledAsync_UnresolvedList_FailsOpenWithWarning()
+    {
+        // M4 (tolerant branch, Identity.cs:468-473): when the package list can't be resolved we cannot
+        // positively confirm the SDK reference, so an empty expected list must NOT fail closed — it warns
+        // and proceeds (fail-open) rather than blocking a launch we can't reason about.
+        _fakeDotNet.PackageListResult = null; // unresolved -> referencesWindowsAppSdk == false
+        _fakeWindowsAppRuntime.MsixDirectory = null;
+        _fakeWindowsAppRuntime.IsRuntimeRegisteredResult = true;
+        var csproj = new FileInfo(Path.Combine(_tempDirectory.FullName, "App.csproj"));
+
+        await _msixService.EnsureWindowsAppRuntimeInstalledAsync(
+            csproj, "x64", framework: null, noRestore: false, TestTaskContext, TestContext.CancellationToken);
+
+        var messages = TestTask.SubTasks.OfType<StatusMessageTask>().Select(t => t.CompletedMessage ?? string.Empty).ToList();
+        Assert.IsTrue(
+            messages.Any(m => m.Contains("Could not determine the exact Windows App Runtime", StringComparison.OrdinalIgnoreCase)),
+            $"Expected a fail-open warning when the package list is unresolved. Messages:\n{string.Join("\n", messages)}");
+    }
+
+    // ---- FilterPackageListToFramework (C2: TFM-aware runtime resolution) ----------
+
+    private static DotNetPackageListJson MultiTargetedWinAppSdkList() =>
+        new([
+            new DotNetProject([
+                new DotNetFramework(
+                    "net8.0-windows10.0.19041.0",
+                    [new DotNetPackage("Microsoft.WindowsAppSDK", "1.5.240311", "1.5.240311")],
+                    []),
+                new DotNetFramework(
+                    "net10.0-windows10.0.26100.0",
+                    [new DotNetPackage("Microsoft.WindowsAppSDK", "1.7.250101", "1.7.250101")],
+                    [])
+            ])
+        ]);
+
+    [TestMethod]
+    public void FilterPackageListToFramework_MultiTargeted_NarrowsToSelectedTfm()
+    {
+        var filtered = MsixService.FilterPackageListToFramework(MultiTargetedWinAppSdkList(), "net10.0-windows10.0.26100.0");
+
+        var frameworks = filtered!.Projects[0].Frameworks;
+        Assert.HasCount(1, frameworks);
+        Assert.AreEqual("net10.0-windows10.0.26100.0", frameworks[0].Framework);
+        Assert.AreEqual("1.7.250101", frameworks[0].TopLevelPackages[0].ResolvedVersion,
+            "the retained framework must carry the SDK version for the built TFM, not the sibling's");
+    }
+
+    [TestMethod]
+    public void FilterPackageListToFramework_NullFramework_ReturnsListUnchanged()
+    {
+        var list = MultiTargetedWinAppSdkList();
+
+        var filtered = MsixService.FilterPackageListToFramework(list, null);
+
+        Assert.AreSame(list, filtered, "a null TFM must not narrow the list (fail-open for single-target/folder mode)");
+    }
+
+    [TestMethod]
+    public void FilterPackageListToFramework_TfmNotPresent_KeepsAllFrameworks()
+    {
+        // An unexpected moniker mismatch must not blank out the SDK reference — keep every framework.
+        var filtered = MsixService.FilterPackageListToFramework(MultiTargetedWinAppSdkList(), "net9.0-windows10.0.22621.0");
+
+        Assert.HasCount(2, filtered!.Projects[0].Frameworks);
+    }
+
+    // ---- ReferencesWindowsAppSdk (runtime-prep skip gate, review NOTE) ------------
+
+    [TestMethod]
+    public void ReferencesWindowsAppSdk_WinAppSdkTopLevel_ReturnsTrue()
+    {
+        Assert.IsTrue(MsixService.ReferencesWindowsAppSdk(WinAppSdkPackageList()));
+    }
+
+    [TestMethod]
+    public void ReferencesWindowsAppSdk_WinAppSdkTransitive_ReturnsTrue()
+    {
+        var list = new DotNetPackageListJson([
+            new DotNetProject([
+                new DotNetFramework(
+                    "net8.0-windows10.0.19041.0",
+                    [new DotNetPackage("Contoso.Ui", "1.0.0", "1.0.0")],
+                    [new DotNetPackage("Microsoft.WindowsAppSDK", "1.6.240701", "1.6.240701")])
+            ])
+        ]);
+
+        Assert.IsTrue(MsixService.ReferencesWindowsAppSdk(list));
+    }
+
+    [TestMethod]
+    public void ReferencesWindowsAppSdk_NoWinAppSdk_ReturnsFalse()
+    {
+        // A plain console/desktop Exe that does not reference the Windows App SDK: runtime prep is
+        // wasted work and the public entry point skips it based on this classification.
+        var list = new DotNetPackageListJson([
+            new DotNetProject([
+                new DotNetFramework(
+                    "net8.0-windows10.0.19041.0",
+                    [new DotNetPackage("Newtonsoft.Json", "13.0.3", "13.0.3")],
+                    [new DotNetPackage("System.Text.Json", "8.0.0", "8.0.0")])
+            ])
+        ]);
+
+        Assert.IsFalse(MsixService.ReferencesWindowsAppSdk(list));
+    }
+
+    [TestMethod]
+    public void ReferencesWindowsAppSdk_NoProjectsOrPackages_ReturnsFalse()
+    {
+        Assert.IsFalse(MsixService.ReferencesWindowsAppSdk(new DotNetPackageListJson([])));
+        Assert.IsFalse(MsixService.ReferencesWindowsAppSdk(new DotNetPackageListJson([
+            new DotNetProject([new DotNetFramework("net8.0", [], [])])
+        ])));
     }
 
     // ---- UnregisterExistingPackageAsync error handling ---------------------------
@@ -954,3 +1220,4 @@ internal sealed class ScriptedMtBuildToolsService : IBuildToolsService
         return _inner.RunBuildToolAsync(tool, arguments, taskContext, printErrors, toolPathOverride, environment, workingDirectory, cancellationToken);
     }
 }
+

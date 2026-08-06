@@ -258,7 +258,7 @@ internal class ImageAssetService : IImageAssetService
             return;
         }
 
-        taskContext.AddStatusMessage($"{UiSymbols.Info} Generating MSIX image assets from: {sourceImagePath.FullName}");
+        taskContext.AddDebugMessage($"Generating MSIX image assets from: {sourceImagePath.FullName}");
 
         ImageSource source;
         try
@@ -383,7 +383,7 @@ internal class ImageAssetService : IImageAssetService
 
             if (successCount == totalCount)
             {
-                taskContext.AddStatusMessage($"{UiSymbols.Info} Successfully generated {totalCount} image assets");
+                taskContext.AddDebugMessage($"Successfully generated {totalCount} image assets");
             }
             else
             {
@@ -399,7 +399,7 @@ internal class ImageAssetService : IImageAssetService
             throw new FileNotFoundException($"Source image not found: {sourceImagePath.FullName}");
         }
 
-        taskContext.AddStatusMessage($"{UiSymbols.Info} Generating ICO file: {outputPath}");
+        taskContext.AddDebugMessage($"Generating ICO file: {outputPath}");
 
         ImageSource source;
         try
@@ -433,7 +433,7 @@ internal class ImageAssetService : IImageAssetService
             }, cancellationToken);
         }
 
-        taskContext.AddStatusMessage($"{UiSymbols.Info} Generated ICO file with {IcoSizes.Length} sizes");
+        taskContext.AddDebugMessage($"Generated ICO file with {IcoSizes.Length} sizes");
     }
 
     private static int GetScalePercentage(float scale)

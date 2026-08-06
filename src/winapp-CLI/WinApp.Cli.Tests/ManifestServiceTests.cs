@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Spectre.Console;
 using Spectre.Console.Testing;
 using WinApp.Cli.ConsoleTasks;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
@@ -95,9 +96,23 @@ public class ManifestServiceTests
     }
 
     [TestMethod]
+    public async Task PromptForManifestInfo_EmptyDescription_FallsBackToDefault()
+    {
+        // An empty/whitespace description (e.g. an exe with no Comments/FileDescription) must be
+        // normalized to the default rather than emitting Description="" — the ??= path alone would
+        // keep the empty string.
+        var info = await NewService().PromptForManifestInfoAsync(
+            _tempDir, packageName: "MyApp", publisherName: "CN=Me", version: "1.0.0.0",
+            description: "   ", executable: null, useDefaults: true);
+
+        Assert.IsFalse(string.IsNullOrWhiteSpace(info.Description), "whitespace description is replaced with a default");
+        Assert.AreEqual(SystemDefaultsHelper.GetDefaultDescription(), info.Description);
+    }
+
+    [TestMethod]
     public async Task PromptForManifestInfo_Interactive_UsesPromptedValues()
     {
-        var console = new TestConsole();
+        using var console = new TestConsole();
         console.Profile.Capabilities.Interactive = true;
         console.Input.PushTextWithEnter("MyPkg");
         console.Input.PushTextWithEnter("CN=Me");
@@ -112,6 +127,25 @@ public class ManifestServiceTests
         Assert.AreEqual("CN=Me", info.PublisherName);
         Assert.AreEqual("9.9.9.9", info.Version);
         Assert.AreEqual("My description", info.Description);
+    }
+
+    [TestMethod]
+    public async Task PromptForManifestInfo_Interactive_CleansOverriddenName()
+    {
+        // A raw interactive override with invalid Identity characters must be re-cleaned so it
+        // cannot produce malformed XML or an unpackable Identity name.
+        using var console = new TestConsole();
+        console.Profile.Capabilities.Interactive = true;
+        console.Input.PushTextWithEnter("A&B App");
+        console.Input.PushTextWithEnter("CN=Me");
+        console.Input.PushTextWithEnter("1.0.0.0");
+        console.Input.PushTextWithEnter("desc");
+
+        var info = await NewService(console).PromptForManifestInfoAsync(
+            _tempDir, packageName: "seed", publisherName: "seedPub", version: "1.0.0.0",
+            description: "seedDesc", executable: null, useDefaults: false);
+
+        Assert.AreEqual("ABApp", info.PackageName, "overridden name should be sanitized to the Identity schema");
     }
 
     #endregion

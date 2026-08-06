@@ -29,7 +29,7 @@ internal class PackageCommand : Command, IShortDescription
     {
         InputFolderArgument = new Argument<DirectoryInfo[]>("input-folder")
         {
-            Description = "One or more input folders with package layout. Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64).",
+            Description = "One or more input folders with package layout, or a single sparse appxmanifest.xml file (an identity-only package with AllowExternalContent). Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64).",
             Arity = ArgumentArity.OneOrMore
         };
         OutputOption = new Option<FileInfo>("--output")
@@ -103,6 +103,53 @@ internal class PackageCommand : Command, IShortDescription
 
     public class Handler(IMsixService msixService, IStatusService statusService) : AsynchronousCommandLineAction
     {
+        /// <summary>
+        /// Heuristic for whether a non-existent input path was intended as a manifest file
+        /// (rather than an input folder), so a missing path can be reported with the right error.
+        /// </summary>
+        private static bool LooksLikeManifestPath(string name)
+            => name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)
+                || name.EndsWith(".appxmanifest", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Classifies a manifest-file input into sparse / non-sparse / unreadable so the caller can
+        /// report a malformed or inaccessible manifest distinctly from a valid non-sparse one
+        /// (rather than mislabelling a parse failure as "missing AllowExternalContent").
+        /// </summary>
+        private enum ManifestInputKind { NotManifestName, Sparse, NotSparse, Unreadable }
+
+        private static async Task<(ManifestInputKind Kind, string? Error)> ClassifyManifestInputAsync(FileInfo file, CancellationToken cancellationToken)
+        {
+            var name = file.Name;
+            var isManifestName = name.EndsWith(".appxmanifest", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("appxmanifest.xml", StringComparison.OrdinalIgnoreCase);
+            if (!isManifestName)
+            {
+                return (ManifestInputKind.NotManifestName, null);
+            }
+
+            string content;
+            try
+            {
+                content = await File.ReadAllTextAsync(file.FullName, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return (ManifestInputKind.Unreadable, ex.Message);
+            }
+
+            return MsixService.ClassifySparseManifest(content, out var parseError) switch
+            {
+                MsixService.SparseManifestKind.Sparse => (ManifestInputKind.Sparse, null),
+                MsixService.SparseManifestKind.ParseError => (ManifestInputKind.Unreadable, parseError),
+                _ => (ManifestInputKind.NotSparse, null),
+            };
+        }
+
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var inputFolders = parseResult.GetRequiredValue(InputFolderArgument);
@@ -117,6 +164,100 @@ internal class PackageCommand : Command, IShortDescription
             var manifestPath = parseResult.GetValue(ManifestOption);
             var selfContained = parseResult.GetValue(SelfContainedOption);
             var executable = parseResult.GetValue(ExecutableOption);
+
+            // Sparse identity packaging: when a single manifest FILE is passed (instead of a
+            // folder) and it declares AllowExternalContent, build an identity-only .msix from
+            // just the manifest — no input folder or app binaries required.
+            if (inputFolders.Length == 1 && File.Exists(inputFolders[0].FullName))
+            {
+                var candidateManifest = new FileInfo(inputFolders[0].FullName);
+                var (manifestKind, manifestError) = await ClassifyManifestInputAsync(candidateManifest, cancellationToken);
+                if (manifestKind == ManifestInputKind.Sparse)
+                {
+                    // Identity-only packaging builds the .msix from just the manifest, so options that
+                    // describe an app payload have no effect here. Reject them rather than silently
+                    // discarding a scripted override.
+                    var inapplicable = new[]
+                    {
+                        (parseResult.GetResult(NameOption), "--name"),
+                        (parseResult.GetResult(ManifestOption), "--manifest"),
+                        (parseResult.GetResult(SkipPriOption), "--skip-pri"),
+                        (parseResult.GetResult(SelfContainedOption), "--self-contained"),
+                        (parseResult.GetResult(ExecutableOption), "--executable"),
+                    }
+                    .Where(o => o.Item1 is { Implicit: false })
+                    .Select(o => o.Item2)
+                    .ToList();
+
+                    if (inapplicable.Count > 0)
+                    {
+                        var optionList = string.Join(", ", inapplicable);
+                        return await statusService.ExecuteWithStatusAsync("Validating input...", (taskContext, _) =>
+                        {
+                            return Task.FromResult((1, $"{UiSymbols.Error} The following option(s) do not apply to sparse identity packaging (manifest-file input): {optionList}. Remove them, or pass an input folder to build a full MSIX."));
+                        }, cancellationToken);
+                    }
+
+                    return await statusService.ExecuteWithStatusAsync("Creating sparse identity package...", async (taskContext, ct) =>
+                    {
+                        try
+                        {
+                            var autoSign = certPath != null || generateCert;
+                            var result = await msixService.CreateSparseIdentityPackageAsync(candidateManifest, output, taskContext, autoSign, certPath, certPassword, generateCert, installCert, publisher, ct);
+
+                            taskContext.AddStatusMessage($"{UiSymbols.Package} Identity package: {result.MsixPath}");
+                            if (result.Signed)
+                            {
+                                taskContext.AddStatusMessage($"{UiSymbols.Lock} Package has been signed");
+                            }
+                            else
+                            {
+                                taskContext.AddStatusMessage($"{UiSymbols.Warning} Package is unsigned. Windows requires sparse identity packages to be signed before they can be registered — sign it (e.g. pass --generate-cert or --cert <pfx>) and trust the certificate first, otherwise Add-AppxPackage will fail.");
+                            }
+                            taskContext.AddStatusMessage($"{UiSymbols.Info} Next: winapp embed-identity <exe> — then register in your installer with Add-AppxPackage -Path <msix> -ExternalLocation <install-dir>");
+
+                            return (0, "Sparse identity package creation completed.");
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            taskContext.AddDebugMessage($"Stack Trace: {ex.StackTrace}");
+                            return (1, $"{UiSymbols.Error} Failed to create sparse identity package: {ex.GetBaseException().Message}");
+                        }
+                    }, cancellationToken);
+                }
+
+                if (manifestKind == ManifestInputKind.Unreadable)
+                {
+                    return await statusService.ExecuteWithStatusAsync("Validating input...", (taskContext, _) =>
+                    {
+                        return Task.FromResult((1, $"{UiSymbols.Error} Manifest file could not be read as valid XML: {manifestError} Fix the manifest, or regenerate it with 'winapp init --exe <exe> --sparse'."));
+                    }, cancellationToken);
+                }
+
+                return await statusService.ExecuteWithStatusAsync("Validating input...", (taskContext, _) =>
+                {
+                    return Task.FromResult((1, $"{UiSymbols.Error} Input is a file but not a sparse manifest (missing uap10:AllowExternalContent). Pass an input folder, or generate a sparse manifest with 'winapp init --exe <exe> --sparse'."));
+                }, cancellationToken);
+            }
+
+            // A path that looks like a manifest file (ends in .xml/.appxmanifest) but doesn't
+            // exist should be reported as a missing manifest file — not a missing input folder —
+            // since it can never enter the sparse-manifest branch above. Include the init hint.
+            var missingManifestFiles = inputFolders
+                .Where(d => !d.Exists && LooksLikeManifestPath(d.Name))
+                .ToList();
+            if (missingManifestFiles.Count > 0)
+            {
+                var manifestPaths = string.Join(Environment.NewLine, missingManifestFiles.Select(d => $"  {d.FullName}"));
+                return await statusService.ExecuteWithStatusAsync("Validating input...", (taskContext, _) =>
+                {
+                    return Task.FromResult((1, $"{UiSymbols.Error} Manifest file not found:{Environment.NewLine}{manifestPaths}{Environment.NewLine}Generate a sparse manifest with 'winapp init --exe <exe> --sparse'."));
+                }, cancellationToken);
+            }
 
             // Validate all input folders exist (report all missing at once)
             var missingDirs = inputFolders.Where(d => !d.Exists).ToList();

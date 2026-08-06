@@ -560,4 +560,54 @@ public class InitCommandTests : BaseCommandTests
         StringAssert.Contains(TestAnsiConsole.Output, "path-to-project",
             "The search-limit hint pointing at 'winapp init <path-to-project>' should be shown");
     }
+
+    [TestMethod]
+    public async Task InitCommand_Sparse_WithConfigOnly_ReturnsErrorAndDoesNotInit()
+    {
+        // Arrange — --config-only belongs to the full-init flow; combining it with --sparse
+        // should be rejected rather than silently ignored.
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--sparse", "--config-only" };
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Sparse init should reject --config-only");
+        StringAssert.Contains(ConsoleStdErr.ToString(), "--config-only",
+            "Error should name the rejected option");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_Sparse_WithSetupSdks_ReturnsError()
+    {
+        // Arrange — --setup-sdks does nothing for identity packaging, so it must be rejected.
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { "--sparse", "--setup-sdks", "none" };
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Sparse init should reject --setup-sdks");
+        StringAssert.Contains(ConsoleStdErr.ToString(), "--setup-sdks",
+            "Error should name the rejected option");
+    }
+
+    [TestMethod]
+    public async Task InitCommand_Sparse_WithPositionalDirectory_ReturnsError()
+    {
+        // Arrange — a positional base directory configures the normal flow only; --sparse uses
+        // --output-dir instead, so a positional argument should be rejected.
+        var initCommand = GetRequiredService<InitCommand>();
+        var args = new[] { _tempDirectory.FullName, "--sparse" };
+
+        // Act
+        var exitCode = await ParseAndInvokeWithCaptureAsync(initCommand, args);
+
+        // Assert
+        Assert.AreEqual(1, exitCode, "Sparse init should reject a positional directory");
+        StringAssert.Contains(ConsoleStdErr.ToString(), "--output-dir",
+            "Error should point users at --output-dir");
+    }
 }

@@ -11,14 +11,33 @@ namespace WinApp.Cli.Tests;
 internal class FakeAppLauncherService : IAppLauncherService
 {
     public List<(string Aumid, string? Arguments)> LaunchCalls { get; } = [];
+    public List<(string ExePath, string? Arguments, string? WorkingDirectory)> LaunchExecutableCalls { get; } = [];
+
+    /// <summary>The stdio mode passed to the most recent <see cref="LaunchExecutable"/> call.</summary>
+    public LaunchStdioMode? LastLaunchStdioMode { get; private set; }
     public List<(string? PackageFullName, uint ProcessId)> TerminateCalls { get; } = [];
     public uint FakeProcessId { get; set; } = 12345;
+
+    /// <summary>Exit code the fake launched process reports from <c>WaitForExitAsync</c>.</summary>
+    public int FakeExitCode { get; set; }
+
+    /// <summary>The most recent handle returned from <see cref="LaunchExecutable"/> (for assertions).</summary>
+    public FakeLaunchedProcess? LastLaunchedProcess { get; private set; }
+
     public string? FakePackageFullName { get; set; } = "FakePackage_1.0.0.0_x64__fakefamily";
 
     public uint LaunchByAumid(string aumid, string? arguments = null)
     {
         LaunchCalls.Add((aumid, arguments));
         return FakeProcessId;
+    }
+
+    public ILaunchedProcess LaunchExecutable(string exePath, string? arguments = null, string? workingDirectory = null, LaunchStdioMode stdioMode = LaunchStdioMode.Inherit)
+    {
+        LaunchExecutableCalls.Add((exePath, arguments, workingDirectory));
+        LastLaunchStdioMode = stdioMode;
+        LastLaunchedProcess = new FakeLaunchedProcess(FakeProcessId, FakeExitCode);
+        return LastLaunchedProcess;
     }
 
     public string ComputePackageFamilyName(string packageName, string publisher)
@@ -35,4 +54,24 @@ internal class FakeAppLauncherService : IAppLauncherService
     {
         TerminateCalls.Add((packageFullName, processId));
     }
+}
+
+/// <summary>
+/// Fake <see cref="ILaunchedProcess"/> that reports a fixed PID/exit code and exits immediately,
+/// so command tests can exercise the unpackaged wait/exit-code path without a real process.
+/// </summary>
+internal sealed class FakeLaunchedProcess(uint processId, int exitCode) : ILaunchedProcess
+{
+    public bool Disposed { get; private set; }
+    public bool Killed { get; private set; }
+
+    public uint ProcessId => processId;
+
+    public int ExitCode => exitCode;
+
+    public Task WaitForExitAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public void Kill() => Killed = true;
+
+    public void Dispose() => Disposed = true;
 }

@@ -44,6 +44,7 @@ public static class GlobalTestSetup
 
         // Clean up any temporary files that might have been left behind
         CleanupTempDirectories();
+        CleanupCoverageScratch();
     }
 
     /// <summary>
@@ -76,6 +77,24 @@ public static class GlobalTestSetup
         catch
         {
             // Ignore global cleanup failures
+        }
+    }
+
+    private static void CleanupCoverageScratch()
+    {
+        var scratchPath = Path.Join(AppContext.BaseDirectory, "coverage-scratch");
+        try
+        {
+            if (Directory.Exists(scratchPath))
+            {
+                Directory.Delete(scratchPath, recursive: true);
+            }
+        }
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or System.Security.SecurityException)
+        {
+            Console.Error.WriteLine($"Could not clean coverage scratch: {ex.Message}");
         }
     }
 }

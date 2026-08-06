@@ -43,8 +43,25 @@ internal class FakeNugetService : INugetService
         return Task.FromResult(new Dictionary<string, string> { [package] = version });
     }
 
+    /// <summary>
+    /// When true, <see cref="GetPackageDependenciesAsync"/> throws, simulating an offline/blocked
+    /// NuGet source. Used to prove the runtime package is resolved from the restored package list
+    /// without a network round-trip.
+    /// </summary>
+    public bool ThrowOnGetPackageDependencies { get; set; }
+
+    /// <summary>
+    /// Number of times <see cref="GetPackageDependenciesAsync"/> was invoked (network probe counter).
+    /// </summary>
+    public int GetPackageDependenciesCallCount { get; private set; }
+
     public Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, CancellationToken cancellationToken = default)
     {
+        GetPackageDependenciesCallCount++;
+        if (ThrowOnGetPackageDependencies)
+        {
+            throw new InvalidOperationException($"Simulated offline NuGet source for {packageName} v{version}");
+        }
         return Task.FromResult(new Dictionary<string, string>());
     }
 

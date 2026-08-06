@@ -149,23 +149,11 @@ public partial class UiCommandTests
         var result = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(stdout);
         Assert.AreEqual("h264", result.GetProperty("codec").GetString());
 
-        // Stderr (ConsoleStdErr) must contain EXACTLY ONE valid UiRecordStartedEvent.
-        // UiJsonContext uses WriteIndented=true so each event spans multiple lines; we count
-        // occurrences of the event discriminator and then locate + parse the object boundaries.
-        var stderrText = ConsoleStdErr.ToString();
-        Assert.IsTrue(stderrText.Contains("\"recording-started\""),
-            "recording-started event must appear on stderr");
-        var matches = System.Text.RegularExpressions.Regex.Matches(
-            stderrText, "\"event\"\\s*:\\s*\"recording-started\"");
-        Assert.AreEqual(1, matches.Count, "exactly one recording-started JSON event must appear on stderr");
-
-        // Extract the surrounding JSON object for field validation.
-        var matchIndex = matches[0].Index;
-        var start = stderrText.LastIndexOf('{', matchIndex);
-        var end = stderrText.IndexOf('}', matchIndex) + 1;
-        Assert.IsTrue(start >= 0 && end > start, "liveness event JSON object must be parseable");
+        var stderrLines = ConsoleStdErr.ToString()
+            .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+        Assert.HasCount(1, stderrLines, "stderr events must be one JSON object per line");
         var liveness = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(
-            stderrText[start..end]);
+            stderrLines[0]);
         Assert.AreEqual("recording-started", liveness.GetProperty("event").GetString(), "event field must be 'recording-started'");
         Assert.AreEqual(outputPath, liveness.GetProperty("path").GetString(), "event path must match output path");
     }

@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.5.1
+ * Source schema version: 1.0.0
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -52,8 +52,15 @@ export interface WinappResult {
 // ---------------------------------------------------------------------------
 
 function pushCommon(args: string[], opts: CommonOptions): void {
-  if (opts.quiet) args.push('--quiet');
-  if (opts.verbose) args.push('--verbose');
+  // Insert global flags before any "--" passthrough separator so winapp consumes them rather
+  // than forwarding them to the launched app/tool (e.g. run ... -- appArgs).
+  const flags: string[] = [];
+  if (opts.quiet) flags.push('--quiet');
+  if (opts.verbose) flags.push('--verbose');
+  if (flags.length === 0) return;
+  const sep = args.indexOf('--');
+  if (sep === -1) args.push(...flags);
+  else args.splice(sep, 0, ...flags);
 }
 
 function captureOpts(opts: CommonOptions): CallWinappCliCaptureOptions {
@@ -246,6 +253,27 @@ export async function createExternalCatalog(options: CreateExternalCatalogOption
   if (options.output) args.push('--output', options.output);
   if (options.recursive) args.push('--recursive');
   if (options.usePageHashes) args.push('--use-page-hashes');
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// embed-identity
+// ---------------------------------------------------------------------------
+
+export interface EmbedIdentityOptions extends CommonOptions {
+  /** Path to the .exe (embeds identity into its side-by-side manifest via mt.exe) or an .xml/.manifest side-by-side manifest file (inserts/replaces the <msix> element; created if it doesn't exist). */
+  target: string;
+  /** Path to the sparse appxmanifest.xml to read identity from. When omitted, searched in a 'sparse/' folder (where 'winapp init --exe --sparse' writes it by default) beside the target first, then in the current directory, then beside the target and in the current directory. */
+  manifest?: string;
+}
+
+/**
+ * Connect a desktop exe to its sparse identity package by embedding the <msix> element. Reads identity (packageName, publisher, applicationId) from a sparse appxmanifest.xml and writes it into the target's side-by-side (fusion) manifest. EXE targets are updated with mt.exe; .xml/.manifest targets are edited directly. Example: winapp embed-identity ./bin/MyApp.exe. This is step 3 of the sparse packaging workflow (after 'winapp init --exe --sparse' and 'winapp pack').
+ */
+export async function embedIdentity(options: EmbedIdentityOptions): Promise<WinappResult> {
+  const args: string[] = ['embed-identity'];
+  args.push(options.target);
+  if (options.manifest) args.push('--manifest', options.manifest);
   return execCommand(args, options);
 }
 
@@ -539,13 +567,25 @@ export interface InitOptions extends CommonOptions {
   configDir?: string;
   /** Only handle configuration file operations (create if missing, validate if exists). Skip package installation and other workspace setup steps. */
   configOnly?: boolean;
+  /** Path to the application executable. Requires --sparse. Generates an identity-only sparse manifest for the exe instead of a full package/SDK setup. */
+  exe?: string;
+  /** Overwrite an existing appxmanifest.xml in the target directory (sparse only). Without this, init fails instead of replacing existing manifest/asset files. */
+  force?: boolean;
   /** Don't use configuration file for version management */
   ignoreConfig?: boolean;
+  /** Override the package name (sparse only; default: inferred from the exe) */
+  name?: string;
   /** Don't update .gitignore file */
   noGitignore?: boolean;
+  /** Directory to write the sparse manifest and Assets/ (sparse only; default: a 'sparse/' folder in the current directory) */
+  outputDir?: string;
+  /** Override the publisher CN (sparse only; default: inferred from the exe's company name). Bare names are auto-wrapped as CN=<name>. */
+  publisher?: string;
   /** SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) */
   setupSdks?: SdkInstallMode;
-  /** Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults) */
+  /** Generate a sparse identity manifest (appxmanifest.xml) for an existing desktop exe instead of a full package manifest. Use with --exe. Skips SDK/package installation. */
+  sparse?: boolean;
+  /** Skip interactive prompts and use default answers. Normal init targets the positional project directory if given, otherwise the current directory (e.g., winapp init . --use-defaults). Sparse init (--exe --sparse) ignores the positional directory and writes to --output-dir instead. */
   useDefaults?: boolean;
 }
 
@@ -557,9 +597,15 @@ export async function init(options: InitOptions = {}): Promise<WinappResult> {
   if (options.baseDirectory) args.push(options.baseDirectory);
   if (options.configDir) args.push('--config-dir', options.configDir);
   if (options.configOnly) args.push('--config-only');
+  if (options.exe) args.push('--exe', options.exe);
+  if (options.force) args.push('--force');
   if (options.ignoreConfig) args.push('--ignore-config');
+  if (options.name) args.push('--name', options.name);
   if (options.noGitignore) args.push('--no-gitignore');
+  if (options.outputDir) args.push('--output-dir', options.outputDir);
+  if (options.publisher) args.push('--publisher', options.publisher);
   if (options.setupSdks) args.push('--setup-sdks', options.setupSdks);
+  if (options.sparse) args.push('--sparse');
   if (options.useDefaults) args.push('--use-defaults');
   return execCommand(args, options);
 }
@@ -659,7 +705,7 @@ export async function manifestUpdateAssets(options: ManifestUpdateAssetsOptions)
 // ---------------------------------------------------------------------------
 
 export interface PackageOptions extends CommonOptions {
-  /** One or more input folders with package layout. Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64). */
+  /** One or more input folders with package layout, or a single sparse appxmanifest.xml file (an identity-only package with AllowExternalContent). Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64). */
   inputFolder: string | string[];
   /** Path to signing certificate (will auto-sign if provided) */
   cert?: string;
@@ -732,58 +778,90 @@ export async function restore(options: RestoreOptions = {}): Promise<WinappResul
 // ---------------------------------------------------------------------------
 
 export interface RunOptions extends CommonOptions {
-  /** Input folder containing the app to run */
-  inputFolder: string;
-  /** Arguments to pass to the launched application. Provide after -- (e.g., winapp run . -- --flag value). */
-  appArgs?: string | string[];
+  /** Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory). */
+  input?: string;
+  /** @deprecated Use `input` instead. Retained for backward compatibility. */
+  inputFolder?: string;
+  /** Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Default: the current process architecture. */
+  arch?: string;
   /** Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). */
   args?: string;
   /** Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments. */
   clean?: boolean;
+  /** Project mode: build configuration (e.g., Debug, Release). Ignored in folder mode. Default: Debug. */
+  configuration?: string;
   /** Capture OutputDebugString messages and first-chance exceptions from the launched application. Only one debugger can attach to a process at a time, so other debuggers (Visual Studio, VS Code) cannot be used simultaneously. Use --no-launch instead if you need to attach a different debugger. For WinUI apps, a crash also triggers a stowed-exception triage pass; the first run downloads debugger components (cached under the winapp global directory) and can be pointed at an existing debugger install via the WINAPP_DBGTOOLS_DIR environment variable. Cannot be combined with --no-launch or --json. */
   debugOutput?: boolean;
   /** Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with --json). */
   detach?: boolean;
   /** Path to the executable relative to the input folder. Use to disambiguate when the manifest contains a $targetnametoken$ placeholder and multiple .exe files are present in the input folder. */
   executable?: string;
+  /** Project mode: target framework moniker for multi-targeted projects (e.g. net10.0-windows10.0.26100.0). Ignored in folder mode. */
+  framework?: string;
   /** Format output as JSON */
   json?: boolean;
   /** Path to the Package.appxmanifest (default: auto-detect from input folder or current directory) */
   manifest?: string;
+  /** Project mode: skip building and run the existing build output (still evaluates output properties). Ignored in folder mode. */
+  noBuild?: boolean;
   /** Only create the debug identity and register the package without launching the application */
   noLaunch?: boolean;
-  /** Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used. */
+  /** Project mode: skip restoring the project before building. Ignored in folder mode. */
+  noRestore?: boolean;
+  /** Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory will be used. */
   outputAppxDirectory?: string;
+  /** Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode. */
+  project?: string;
+  /** Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. */
+  property?: string | string[];
+  /** Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode. */
+  runtime?: string;
   /** Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. */
   symbols?: boolean;
   /** Unregister the development package after the application exits. Only removes packages registered in development mode. */
   unregisterOnExit?: boolean;
   /** Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. */
   withAlias?: boolean;
+  /** Arguments to pass to the launched application (forwarded after --). */
+  appArgs?: string | string[];
 }
 
 /**
- * Creates packaged layout, registers the Application, and launches the packaged application.
+ * Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.
  */
-export async function run(options: RunOptions): Promise<WinappResult> {
+export async function run(options: RunOptions = {}): Promise<WinappResult> {
   const args: string[] = ['run'];
-  args.push(options.inputFolder);
-  if (options.appArgs) {
-    const appArgsArr = Array.isArray(options.appArgs) ? options.appArgs : [options.appArgs];
-    args.push(...appArgsArr);
-  }
+  const inputValue = options.input ?? options.inputFolder;
+  if (inputValue) args.push(inputValue);
+  if (options.arch) args.push('--arch', options.arch);
   if (options.args) args.push('--args', options.args);
   if (options.clean) args.push('--clean');
+  if (options.configuration) args.push('--configuration', options.configuration);
   if (options.debugOutput) args.push('--debug-output');
   if (options.detach) args.push('--detach');
   if (options.executable) args.push('--executable', options.executable);
+  if (options.framework) args.push('--framework', options.framework);
   if (options.json) args.push('--json');
   if (options.manifest) args.push('--manifest', options.manifest);
+  if (options.noBuild) args.push('--no-build');
   if (options.noLaunch) args.push('--no-launch');
+  if (options.noRestore) args.push('--no-restore');
   if (options.outputAppxDirectory) args.push('--output-appx-directory', options.outputAppxDirectory);
+  if (options.project) args.push('--project', options.project);
+  if (options.property) {
+    const propertyArr = Array.isArray(options.property) ? options.property : [options.property];
+    for (const v of propertyArr) args.push('--property', v);
+  }
+  if (options.runtime) args.push('--runtime', options.runtime);
   if (options.symbols) args.push('--symbols');
   if (options.unregisterOnExit) args.push('--unregister-on-exit');
   if (options.withAlias) args.push('--with-alias');
+  if (options.appArgs !== undefined) {
+    const appArgsArr = Array.isArray(options.appArgs) ? options.appArgs : [options.appArgs];
+    if (appArgsArr.length > 0) {
+      args.push('--', ...appArgsArr);
+    }
+  }
   return execCommand(args, options);
 }
 
@@ -820,7 +898,7 @@ export async function sign(options: SignOptions): Promise<WinappResult> {
 
 export interface StoreOptions extends CommonOptions {
   /** Arguments to pass through to the Microsoft Store Developer CLI. */
-  storeArgs?: string[];
+  storeArgs?: string | string[];
 }
 
 /**
@@ -828,7 +906,10 @@ export interface StoreOptions extends CommonOptions {
  */
 export async function store(options: StoreOptions = {}): Promise<WinappResult> {
   const args: string[] = ['store'];
-  if (options.storeArgs) args.push(...options.storeArgs);
+  if (options.storeArgs !== undefined) {
+    const storeArgsArr = Array.isArray(options.storeArgs) ? options.storeArgs : [options.storeArgs];
+    args.push(...storeArgsArr);
+  }
   return execCommand(args, options);
 }
 
@@ -838,7 +919,7 @@ export async function store(options: StoreOptions = {}): Promise<WinappResult> {
 
 export interface ToolOptions extends CommonOptions {
   /** Arguments to pass to the SDK tool, e.g. ['makeappx', 'pack', '/d', './folder', '/p', './out.msix']. */
-  toolArgs?: string[];
+  toolArgs?: string | string[];
 }
 
 /**
@@ -846,8 +927,11 @@ export interface ToolOptions extends CommonOptions {
  */
 export async function tool(options: ToolOptions = {}): Promise<WinappResult> {
   const args: string[] = ['tool'];
-  if (options.toolArgs && options.toolArgs.length > 0) {
-    args.push('--', ...options.toolArgs);
+  if (options.toolArgs !== undefined) {
+    const toolArgsArr = Array.isArray(options.toolArgs) ? options.toolArgs : [options.toolArgs];
+    if (toolArgsArr.length > 0) {
+      args.push('--', ...toolArgsArr);
+    }
   }
   return execCommand(args, options);
 }
@@ -1214,10 +1298,12 @@ export interface UiRecordOptions extends CommonOptions {
   app?: string;
   /** Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). */
   captureScreen?: boolean;
-  /** Recording duration in seconds. Default 0 records until stopped — Ctrl+C, or (for programmatic callers) a newline or EOF on stdin. A valid MP4 is always finalized on graceful stop. */
+  /** Recording duration in seconds. 0 records until Ctrl+C or redirected-stdin newline/EOF. */
   durationSec?: number;
   /** Frames per second to capture */
   fps?: number;
+  /** Write timestamped JPEGs, frames.ndjson, and manifest.json to <output-name>.frames. Supports 1-30 fps and max-edge 64-4096 (default 1280), with a 1 GiB frame-data cap. */
+  frames?: boolean;
   /** Format output as JSON */
   json?: boolean;
   /** Downscale so the longest edge is at most this many pixels (0 = no downscale) */

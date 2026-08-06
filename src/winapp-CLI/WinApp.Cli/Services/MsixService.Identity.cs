@@ -3,6 +3,7 @@
 
 using System.Security;
 using System.Text;
+using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
@@ -13,6 +14,16 @@ namespace WinApp.Cli.Services;
 
 internal partial class MsixService
 {
+    /// <summary>
+    /// Namespace of the SxS assembly manifest root element.
+    /// </summary>
+    private static readonly XNamespace AsmV1Ns = "urn:schemas-microsoft-com:asm.v1";
+
+    /// <summary>
+    /// Namespace of the &lt;msix&gt; package-identity element embedded in a fusion manifest.
+    /// </summary>
+    private static readonly XNamespace MsixV1Ns = "urn:schemas-microsoft-com:msix.v1";
+
     public async Task<MsixIdentityResult> AddSparseIdentityAsync(string? entryPointPath, FileInfo appxManifestPath, bool noInstall, bool keepIdentity, TaskContext taskContext, CancellationToken cancellationToken = default)
     {
         // Validate inputs
@@ -99,7 +110,7 @@ internal partial class MsixService
         return new MsixIdentityResult(debugIdentity.PackageName, debugIdentity.Publisher, debugIdentity.ApplicationId);
     }
 
-    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, string? executable = null, CancellationToken cancellationToken = default)
+    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, string? executable = null, string? runtimeArch = null, FileInfo? projectFile = null, string? framework = null, bool noRestore = false, CancellationToken cancellationToken = default)
     {
         // Validate inputs
         if (!appxManifestPath.Exists)
@@ -150,9 +161,13 @@ internal partial class MsixService
 
             var identity = ParseAppxManifestAsync(manifestContent);
 
-            // Install the Windows App Runtime framework packages if not already present
-            var msbuildPackageList = await FetchDotNetPackageListAsync(cancellationToken);
-            await EnsureWindowsAppRuntimeInstalledAsync(msbuildPackageList, taskContext, cancellationToken);
+            // Install the Windows App Runtime framework packages if not already present. Pin the package
+            // list to the effective built TFM so a multi-targeted app doesn't pick a sibling framework's
+            // divergent Windows App SDK version (M2). This loose-layout pipeline is shared with folder mode
+            // (which always restores) and packaged project mode (which honors the run's --no-restore), so
+            // thread the caller's setting through instead of forcing a restore during discovery.
+            var msbuildPackageList = await ResolveDotNetPackageListAsync(projectFile, framework, noRestore, cancellationToken);
+            await EnsureWindowsAppRuntimeInstalledAsync(msbuildPackageList, runtimeArch, taskContext, cancellationToken);
 
             // Resolve the manifest that would be registered (issue #537 / TrySkipRegistration).
             // ManifestHelper.FindManifest already probes both canonical filenames; if it
@@ -217,8 +232,10 @@ internal partial class MsixService
                 "Ensure the build output contains the exe, or pass --executable with the correct relative path.");
         }
 
-        // Fetch dotnet package list once for all downstream operations
-        var dotNetPackageList = await FetchDotNetPackageListAsync(cancellationToken);
+        // Fetch dotnet package list once for all downstream operations. Pin to the effective built TFM
+        // (M2) so a multi-targeted app resolves the runtime for the framework it was actually built for.
+        // Shared loose-layout pipeline (folder + packaged project mode); discovery restores as before.
+        var dotNetPackageList = await ResolveDotNetPackageListAsync(projectFile, framework, noRestore: false, cancellationToken);
 
         // If there is a pri file named after the executable, rename it to resources.pri
         var priFilePath = Path.Combine(outputAppXDirectory.FullName, Path.GetFileNameWithoutExtension(executableMatch.Name) + ".pri");
@@ -286,7 +303,7 @@ internal partial class MsixService
             var identity = ParseAppxManifestAsync(manifestContent);
 
             // Install the Windows App Runtime framework packages if not already present
-            await EnsureWindowsAppRuntimeInstalledAsync(dotNetPackageList, taskContext, cancellationToken);
+            await EnsureWindowsAppRuntimeInstalledAsync(dotNetPackageList, runtimeArch, taskContext, cancellationToken);
 
             // See MSBuild branch above for the rationale (issue #537).
             var skipResult = TrySkipRegistration(
@@ -413,20 +430,165 @@ internal partial class MsixService
     }
 
     /// <summary>
+    /// Public entry point for the project-mode <b>unpackaged</b> path: resolves the project's package
+    /// list (or falls back to a cwd glob) and installs the Windows App Runtime framework packages for
+    /// the given architecture. Callers gate on <c>WindowsAppSDKSelfContained</c> before calling.
+    /// </summary>
+    public async Task<bool> EnsureWindowsAppRuntimeInstalledAsync(FileInfo? projectFile, string? architecture, string? framework, bool noRestore, TaskContext taskContext, CancellationToken cancellationToken = default)
+    {
+        var packageList = await ResolveDotNetPackageListAsync(projectFile, framework, noRestore, cancellationToken);
+
+        // A framework-dependent app needs the Windows App Runtime only if it actually uses the Windows
+        // App SDK. A plain console/desktop Exe doesn't — preparing the runtime for it is wasted work and
+        // prints a noisy "could not determine runtime" warning. Skip only on a positive no-reference
+        // result; an unresolved list falls through to prep so a real WinUI app keeps its runtime.
+        //
+        // Known limitation: `dotnet list package` rejects -c/-r/-p, so it evaluates the default
+        // Configuration/RID. A Windows App SDK reference conditioned on a non-default Configuration
+        // would be missed here and runtime prep wrongly skipped. Resolving that needs a full package-graph
+        // evaluation under the effective inputs, which isn't worth it while the skip only fires on a
+        // positive result and conditional SDK references remain unseen in practice.
+        var referencesWindowsAppSdk = packageList is not null && ReferencesWindowsAppSdk(packageList);
+        if (packageList is not null && !referencesWindowsAppSdk)
+        {
+            taskContext.AddDebugMessage(
+                $"{UiSymbols.Note} No Windows App SDK reference found; skipping Windows App Runtime preparation.");
+            return false;
+        }
+
+        // requireExactVersion:true — this unpackaged path must resolve the runtime the app was actually
+        // built against, never an unrelated cached WinAppSDK version, or the presence gate below could
+        // pass against the wrong runtime family.
+        var expectedRuntimePackages = await EnsureWindowsAppRuntimeInstalledAsync(packageList, architecture, taskContext, cancellationToken, requireExactVersion: true);
+
+        // Callers gate on WindowsAppSDKSelfContained, so a framework-dependent app here always needs a
+        // Framework + DDLM. An empty list means the exact runtime packages couldn't be located, so the
+        // version-specific identities can't be derived and the gate below would fall open to a generic
+        // prefix check that could accept an unrelated registered version.
+        if (expectedRuntimePackages.Count == 0)
+        {
+            if (referencesWindowsAppSdk)
+            {
+                // The app references the Windows App SDK but we couldn't locate the exact runtime it
+                // needs. Falling open risks launching against an unrelated registered runtime, so fail
+                // closed with an actionable error.
+                var arch = architecture ?? WorkspaceSetupService.GetSystemArchitecture();
+                throw new InvalidOperationException(
+                    $"The exact Windows App Runtime the app requires for architecture '{arch}' could not be located, so it can't be " +
+                    "installed or version-verified and the app would fail to start. Restore the project so the matching Windows App SDK " +
+                    "runtime is available for that architecture, install it manually, or build a self-contained app (WindowsAppSDKSelfContained=true).");
+            }
+
+            // Package list was unresolved (couldn't positively confirm the reference): keep the tolerant
+            // behavior and surface the risk loudly rather than blocking a launch we can't reason about.
+            taskContext.AddStatusMessage(
+                $"{UiSymbols.Warning} Could not determine the exact Windows App Runtime the app requires, so its " +
+                "presence can't be version-verified. If the app fails to start, restore the project or install the " +
+                "matching Windows App SDK runtime manually.");
+        }
+
+        // Presence gate: after the install attempt, verify the framework-dependent runtime (Framework +
+        // matching-arch DDLM) is actually registered for the target arch, so a failed or skipped install
+        // can't reach the launch. The expected identities pin the check to the specific version the app
+        // needs, so a different (or older-patch) registered version can't mask the failure.
+        if (!windowsAppRuntimeService.IsWindowsAppRuntimeRegistered(architecture, expectedRuntimePackages))
+        {
+            var arch = architecture ?? WorkspaceSetupService.GetSystemArchitecture();
+            throw new InvalidOperationException(
+                $"The Windows App Runtime (Framework + DDLM) for architecture '{arch}' is not registered and could not be installed, " +
+                "so the app would fail to start. Restore the project so the matching Windows App SDK runtime is available for that " +
+                "architecture, install it manually, or build a self-contained app (WindowsAppSDKSelfContained=true).");
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Resolves the .NET package list from an explicit project file when available (project mode),
+    /// otherwise falls back to the current-directory glob used by folder mode. When an effective
+    /// <paramref name="framework"/> is supplied, the list is narrowed to that TFM so a multi-targeted
+    /// project's other frameworks (which may reference a different Windows App SDK version) don't drive
+    /// the runtime version resolution for the framework we actually built. <paramref name="noRestore"/>
+    /// forwards <c>--no-restore</c> to <c>dotnet list package</c> so a no-restore run can't trigger an
+    /// implicit restore during runtime discovery.
+    /// </summary>
+    private async Task<DotNetPackageListJson?> ResolveDotNetPackageListAsync(FileInfo? projectFile, string? framework, bool noRestore, CancellationToken cancellationToken)
+    {
+        var packageList = projectFile is not null
+            ? await dotNetService.GetPackageListAsync(projectFile, noRestore: noRestore, cancellationToken: cancellationToken)
+            : await FetchDotNetPackageListAsync(cancellationToken);
+
+        return FilterPackageListToFramework(packageList, framework);
+    }
+
+    /// <summary>
+    /// Restricts each project's <see cref="DotNetProject.Frameworks"/> to the one matching the built
+    /// TFM. <c>dotnet list package</c> has no <c>--framework</c> filter, so a multi-targeted project
+    /// returns every TFM; without this a sibling framework's Windows App SDK version could be picked.
+    /// A null/empty <paramref name="framework"/>, or a project that doesn't list the TFM, is left as-is
+    /// (fail-open) so single-targeted and folder-mode flows are unchanged.
+    /// </summary>
+    internal static DotNetPackageListJson? FilterPackageListToFramework(DotNetPackageListJson? packageList, string? framework)
+    {
+        if (packageList?.Projects is null || string.IsNullOrEmpty(framework))
+        {
+            return packageList;
+        }
+
+        var filteredProjects = packageList.Projects
+            .Select(project =>
+            {
+                var frameworks = project.Frameworks;
+                if (frameworks is null || frameworks.Count <= 1)
+                {
+                    return project;
+                }
+
+                var matched = frameworks
+                    .Where(f => string.Equals(f.Framework, framework, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                // Only narrow when the TFM is actually present; otherwise keep all frameworks so an
+                // unexpected moniker mismatch doesn't blank out the SDK reference entirely.
+                return matched.Count > 0 ? project with { Frameworks = matched } : project;
+            })
+            .ToList();
+
+        return packageList with { Projects = filteredProjects };
+    }
+
+    /// <summary>
+    /// True when the resolved package list references the Windows App SDK (top-level or transitive).
+    /// Used to skip Windows App Runtime preparation for apps that don't use the SDK.
+    /// </summary>
+    internal static bool ReferencesWindowsAppSdk(DotNetPackageListJson packageList)
+    {
+        if (packageList.Projects is null)
+        {
+            return false;
+        }
+
+        return packageList.Projects
+            .SelectMany(p => p.Frameworks ?? [])
+            .SelectMany(f => (f.TopLevelPackages ?? []).Concat(f.TransitivePackages ?? []))
+            .Any(pkg => pkg.Id.StartsWith("Microsoft.WindowsAppSDK", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
     /// Ensures that the Windows App Runtime framework MSIX packages are installed on the machine.
     /// Locates the runtime MSIX directory from the NuGet package cache and installs any
     /// missing or outdated packages (Framework, DDLM, Singleton, Main) via Add-AppxPackage.
     /// </summary>
-    private async Task EnsureWindowsAppRuntimeInstalledAsync(DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<(string Name, string Version)>> EnsureWindowsAppRuntimeInstalledAsync(DotNetPackageListJson? dotNetPackageList, string? architecture, TaskContext taskContext, CancellationToken cancellationToken, bool requireExactVersion = false)
     {
-        var msixDir = await GetRuntimeMsixDirAsync(dotNetPackageList, taskContext, cancellationToken);
+        var msixDir = await GetRuntimeMsixDirAsync(dotNetPackageList, taskContext, cancellationToken, requireExactVersion);
         if (msixDir == null)
         {
             taskContext.AddDebugMessage($"{UiSymbols.Warning} Could not locate Windows App Runtime MSIX packages. The runtime may need to be installed manually.");
-            return;
+            return Array.Empty<(string, string)>();
         }
 
-        var (installedCount, errorCount) = await workspaceSetupService.InstallWindowsAppRuntimeAsync(msixDir, taskContext, cancellationToken);
+        var (installedCount, errorCount, runtimePackages) = await windowsAppRuntimeService.InstallWindowsAppRuntimeAsync(msixDir, taskContext, cancellationToken, architecture);
 
         if (errorCount > 0)
         {
@@ -436,31 +598,41 @@ internal partial class MsixService
         {
             taskContext.AddDebugMessage($"{UiSymbols.Check} Installed {installedCount} Windows App Runtime package(s)");
         }
+
+        return runtimePackages;
     }
 
     private async Task EmbedMsixIdentityToExeAsync(FileInfo exePath, MsixIdentityResult identityInfo, TaskContext taskContext, CancellationToken cancellationToken)
     {
         // Create the MSIX element for the win32 manifest
-        string assemblyIdentity = $@"<assemblyIdentity version=""1.0.0.0"" name=""{SecurityElement.Escape(identityInfo.PackageName)}"" type=""win32""/>;";
-        var existingManifestPath = new FileInfo(Path.Combine(exePath.DirectoryName!, "temp_extracted.manifest"));
+        string assemblyIdentity = $@"<assemblyIdentity version=""1.0.0.0"" name=""{SecurityElement.Escape(identityInfo.PackageName)}"" type=""win32""/>";
+        var existingManifestPath = CreateTempManifestFile("extracted");
 
         try
         {
             bool hasExistingManifest = await TryExtractManifestFromExeAsync(exePath, existingManifestPath, taskContext, cancellationToken);
-            if (!hasExistingManifest)
+            if (hasExistingManifest)
             {
-                assemblyIdentity = string.Empty;
+                taskContext.AddDebugMessage("Existing manifest found in executable, checking for a top-level AssemblyIdentity...");
+                var existingManifestContent = await File.ReadAllTextAsync(existingManifestPath.FullName, Encoding.UTF8, cancellationToken);
+                if (HasTopLevelAssemblyIdentity(existingManifestContent))
+                {
+                    taskContext.AddDebugMessage("Top-level AssemblyIdentity already present in manifest, will not add a new one.");
+                    assemblyIdentity = string.Empty;
+                }
+                else
+                {
+                    // A manifest with only a nested/dependency <assemblyIdentity> (e.g.
+                    // Microsoft.Windows.Common-Controls) does not give the assembly its own
+                    // identity, so we still add a top-level one alongside the <msix> element.
+                    taskContext.AddDebugMessage("No top-level AssemblyIdentity found, adding one so identity can be granted.");
+                }
             }
             else
             {
-                taskContext.AddDebugMessage("Existing manifest found in executable, checking for AssemblyIdentity...");
-                var existingManifestContent = await File.ReadAllTextAsync(existingManifestPath.FullName, Encoding.UTF8, cancellationToken);
-                var assemblyIdentityMatch = AssemblyIdentityNameRegex().Match(existingManifestContent);
-                if (assemblyIdentityMatch.Success)
-                {
-                    taskContext.AddDebugMessage("Existing AssemblyIdentity found in manifest, will not add a new one.");
-                    assemblyIdentity = string.Empty;
-                }
+                // A bare exe (Rust / C++ / trimmed .NET) has no embedded manifest; mt.exe will
+                // create one from ours, so it must carry the top-level <assemblyIdentity>.
+                taskContext.AddDebugMessage("No embedded manifest in executable, adding a top-level AssemblyIdentity.");
             }
         }
         finally
@@ -470,16 +642,16 @@ internal partial class MsixService
 
         var manifestContent = $@"<?xml version=""1.0"" encoding=""UTF-8""?>
 <assembly xmlns=""urn:schemas-microsoft-com:asm.v1"" manifestVersion=""1.0"">
+    {assemblyIdentity}
   <msix xmlns=""urn:schemas-microsoft-com:msix.v1""
             publisher=""{SecurityElement.Escape(identityInfo.Publisher)}""
             packageName=""{SecurityElement.Escape(identityInfo.PackageName)}""
             applicationId=""{SecurityElement.Escape(identityInfo.ApplicationId)}""
         />
-    {assemblyIdentity}
 </assembly>";
 
         // Create a temporary manifest file
-        var tempManifestPath = new FileInfo(Path.Combine(exePath.DirectoryName!, "msix_identity_temp.manifest"));
+        var tempManifestPath = CreateTempManifestFile("identity");
 
         try
         {
@@ -491,6 +663,65 @@ internal partial class MsixService
         finally
         {
             TryDeleteFile(tempManifestPath);
+        }
+    }
+
+    /// <summary>
+    /// Returns true if the side-by-side manifest XML has a top-level (root-child)
+    /// asm.v1 &lt;assemblyIdentity&gt; element. Unlike a whole-file scan, this ignores nested
+    /// &lt;assemblyIdentity&gt; elements (e.g. a &lt;dependency&gt; on
+    /// Microsoft.Windows.Common-Controls) and any identically named element from a different
+    /// namespace (e.g. asm.v3), which do not grant the assembly its own SxS identity.
+    /// Returns false if the content cannot be parsed as XML.
+    /// </summary>
+    private static bool HasTopLevelAssemblyIdentity(string manifestContent)
+    {
+        try
+        {
+            var root = XDocument.Parse(manifestContent).Root;
+            return root is not null && root.Elements(AsmV1Ns + "assemblyIdentity").Any();
+        }
+        catch (System.Xml.XmlException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Creates a uniquely named temp manifest file path under the system temp directory. Callers own
+    /// deletion. Using the temp directory rather than the executable's own directory avoids silently
+    /// clobbering any same-named files a user keeps next to their exe.
+    /// </summary>
+    private static FileInfo CreateTempManifestFile(string label)
+        => new(Path.Join(Path.GetTempPath(), $"winapp_{label}_{Guid.NewGuid():N}.manifest"));
+
+    /// <summary>
+    /// Removes any &lt;msix&gt; identity element(s) from a side-by-side manifest file on disk so a
+    /// subsequent mt.exe merge can insert a fresh identity without colliding with a stale one.
+    /// No-ops if the file cannot be parsed as XML.
+    /// </summary>
+    private static void RemoveMsixElements(FileInfo manifestPath, TaskContext taskContext)
+    {
+        try
+        {
+            var xdoc = XDocument.Load(manifestPath.FullName);
+            var msixElements = xdoc.Descendants(MsixV1Ns + "msix").ToList();
+            if (msixElements.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var element in msixElements)
+            {
+                element.Remove();
+            }
+
+            xdoc.Save(manifestPath.FullName);
+            taskContext.AddDebugMessage("Removed existing <msix> identity from embedded manifest before merge.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException or System.Xml.XmlException)
+        {
+            taskContext.AddDebugMessage($"Could not strip existing <msix> identity (continuing): {ex.Message}");
         }
     }
 
@@ -520,9 +751,8 @@ internal partial class MsixService
         taskContext.AddDebugMessage($"Processing executable: {exePath}");
         taskContext.AddDebugMessage($"Embedding manifest: {manifestPath}");
 
-        var exeDir = exePath.DirectoryName!;
-        var tempManifestPath = new FileInfo(Path.Combine(exeDir, "temp_extracted.manifest"));
-        var mergedManifestPath = new FileInfo(Path.Combine(exeDir, "merged.manifest"));
+        var tempManifestPath = CreateTempManifestFile("extracted");
+        var mergedManifestPath = CreateTempManifestFile("merged");
 
         try
         {
@@ -530,6 +760,12 @@ internal partial class MsixService
 
             if (hasExistingManifest)
             {
+                // Drop any <msix> identity already embedded in the exe. Otherwise mt.exe refuses to
+                // merge when the new identity differs from the old one (error c1010001: "Values of
+                // attribute ... not equal in different manifest snippets"), which would make
+                // re-branding an exe a hard failure instead of an idempotent update.
+                RemoveMsixElements(tempManifestPath, taskContext);
+
                 taskContext.AddDebugMessage("Merging with existing manifest using mt.exe...");
 
                 // Use mt.exe to merge existing manifest with new manifest
