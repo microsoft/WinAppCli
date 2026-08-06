@@ -50,13 +50,13 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
     internal const string AzureArtifactsTokenEnvironmentVariable = "VSS_NUGET_ACCESSTOKEN";
     private static readonly ConcurrentDictionary<string, Dictionary<string, string>> DependencyCache = new(StringComparer.OrdinalIgnoreCase);
 
-    private static string FlatIndex => GetFeedEndpoint(FlatContainerEnvironmentVariable, DefaultFlatIndex);
-    private static string RegistrationIndex => GetFeedEndpoint(RegistrationEnvironmentVariable, DefaultRegistrationIndex);
+    internal static string FlatIndex => GetFeedEndpoint(FlatContainerEnvironmentVariable, DefaultFlatIndex);
+    internal static string RegistrationIndex => GetFeedEndpoint(RegistrationEnvironmentVariable, DefaultRegistrationIndex);
 
     private static string GetFeedEndpoint(string environmentVariable, string defaultEndpoint)
         => (Environment.GetEnvironmentVariable(environmentVariable) ?? defaultEndpoint).TrimEnd('/');
 
-    private static async Task<HttpResponseMessage> SendHttpGetAsync(string url, CancellationToken cancellationToken)
+    internal static async Task<HttpResponseMessage> SendHttpGetAsync(string url, CancellationToken cancellationToken)
     {
         using var request = CreateHttpRequest(url);
         return await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
