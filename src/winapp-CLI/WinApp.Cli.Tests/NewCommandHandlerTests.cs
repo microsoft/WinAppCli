@@ -377,6 +377,43 @@ public class NewCommandHandlerTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task Handler_TemplateListFails_SurfacesDotnetDetail()
+    {
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "uninstall")
+            {
+                return (0, "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n   Version: 1.7.0\n", string.Empty); // already installed
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (1, string.Empty, "Error: NuGet feed unreachable"); // enumeration fails
+            }
+            return (0, string.Empty, string.Empty);
+        };
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json"]);
+
+        Assert.AreEqual(NewCommand.ExitTemplatePackFailed, exitCode);
+        Assert.IsNull(ScaffoldInvocation(), "Scaffold must not run when template enumeration fails.");
+
+        // The dotnet detail (exit code + stderr) must reach the user rather than a generic
+        // "could not enumerate" message, so a feed/network failure is distinguishable.
+        var json = ParseJson(TestAnsiConsole.Output);
+        var error = json.GetProperty("Error").GetString();
+        Assert.IsNotNull(error, "The enumeration failure must populate the JSON Error field.");
+        Assert.IsTrue(error.Contains("NuGet feed unreachable", StringComparison.Ordinal),
+            $"The dotnet new list stderr must be surfaced in the JSON Error. Got: {error}");
+        Assert.IsTrue(error.Contains("exit code 1", StringComparison.Ordinal),
+            $"The dotnet new list exit code must be preserved in the JSON Error. Got: {error}");
+    }
+
+    [TestMethod]
     public async Task Handler_ScaffoldFails_ReturnsScaffoldFailed()
     {
         _dotnet.RunDotnetArgumentListHandler = args =>

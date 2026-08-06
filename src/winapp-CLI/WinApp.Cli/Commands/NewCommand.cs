@@ -415,10 +415,12 @@ internal class NewCommand : Command, IShortDescription
 
             // Enumerate templates from the installed pack, in the working directory's context (so item
             // templates surface only when that location is inside a WinUI project).
-            var templates = await EnumerateTemplatesAsync(workingDir, cancellationToken);
+            var (templates, listFailure) = await EnumerateTemplatesAsync(workingDir, cancellationToken);
             if (templates.Count == 0)
             {
-                var enumError = $"Could not enumerate WinUI templates from the installed pack '{TemplatePackageId}'.";
+                var enumError = listFailure is not null
+                    ? $"Could not enumerate WinUI templates from the installed pack '{TemplatePackageId}': {listFailure}"
+                    : $"Could not enumerate WinUI templates from the installed pack '{TemplatePackageId}'.";
                 if (list && isJson)
                 {
                     PrintListJson(packVersion, null, enumError);
@@ -841,12 +843,28 @@ internal class NewCommand : Command, IShortDescription
             return (true, null);
         }
 
-        /// <summary>Runs <c>dotnet new list</c> in <paramref name="contextDir"/> and parses the WinUI templates.</summary>
-        private async Task<IReadOnlyList<WinUiTemplateEntry>> EnumerateTemplatesAsync(DirectoryInfo contextDir, CancellationToken cancellationToken)
+        /// <summary>
+        /// Runs <c>dotnet new list</c> in <paramref name="contextDir"/> and parses the WinUI templates.
+        /// On a non-zero exit, returns an empty list plus a <c>FailureDetail</c> carrying the dotnet
+        /// diagnostic (stderr/stdout + exit code) so the caller can surface it instead of a generic message.
+        /// </summary>
+        private async Task<(IReadOnlyList<WinUiTemplateEntry> Templates, string? FailureDetail)> EnumerateTemplatesAsync(DirectoryInfo contextDir, CancellationToken cancellationToken)
         {
             var (exit, output, stderr) = await dotNetService.RunDotnetCommandAsync(contextDir, ListTemplatesArgs, EnglishUiEnvironment, cancellationToken);
             LogDotnetOutput(ListTemplatesArgs, exit, output, stderr);
-            return exit == 0 ? WinUiTemplateCatalog.ParseList(output) : [];
+            if (exit != 0)
+            {
+                var detail = !string.IsNullOrWhiteSpace(stderr) ? stderr.Trim() : output.Trim();
+                var failure = $"dotnet new list failed (exit code {exit})";
+                if (!string.IsNullOrWhiteSpace(detail))
+                {
+                    failure += $": {detail}";
+                }
+
+                return ([], failure);
+            }
+
+            return (WinUiTemplateCatalog.ParseList(output), null);
         }
 
         private async Task<WinUiTemplateEntry> PromptTemplateAsync(IReadOnlyList<WinUiTemplateEntry> templates, CancellationToken cancellationToken)
