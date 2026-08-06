@@ -371,12 +371,11 @@ internal static partial class ToolkitFetcher
                 }
                 xamlOut = ControlSnippetText.TruncateXaml(xamlOut, MaxXamlChars);
 
-                // No code-behind for this scenario → strip dangling event handlers so the
-                // emitted XAML doesn't reference a handler that isn't returned.
-                if (string.IsNullOrEmpty(cs))
-                {
-                    xamlOut = StripDanglingEventHandlers(xamlOut);
-                }
+                // Truncate the C# first, then strip handlers against the FINAL C# we ship —
+                // otherwise a handler defined only in the part truncation removes would be
+                // kept in the XAML but missing from the emitted code-behind (dangling).
+                var csOut = string.IsNullOrEmpty(cs) ? null : ControlSnippetText.TruncateCode(cs, MaxCSharpChars, "// ...truncated");
+                xamlOut = ControlSnippetText.StripUnbackedEventHandlers(xamlOut, csOut);
 
                 scenarios.Add(new Scenario
                 {
@@ -385,7 +384,7 @@ internal static partial class ToolkitFetcher
                     ControlName = controlName,
                     HeaderText = friendly,
                     Xaml = xamlOut,
-                    CSharp = string.IsNullOrEmpty(cs) ? null : ControlSnippetText.TruncateCode(cs, MaxCSharpChars, "// ...truncated"),
+                    CSharp = csOut,
                     Source = "toolkit",
                     NuGetPackage = nuget,
                     XmlnsImports = xmlns,
@@ -528,26 +527,12 @@ internal static partial class ToolkitFetcher
     }
 
     /// <summary>
-    /// Event-handler attributes whose value is a bare method name (e.g.
-    /// <c>Click="OnCardClicked"</c>). Used to strip handlers from a snippet that ships
-    /// with no code-behind, so it doesn't reference a method that was never returned.
-    /// Command bindings (<c>Click="{x:Bind Cmd}"</c>) start with '{' and are left intact.
-    /// </summary>
-    private static readonly Regex DanglingEventHandlerRegex = new(
-        @"\s+(?:Click|Tapped|DoubleTapped|RightTapped|Holding|Checked|Unchecked|Toggled|" +
-        @"SelectionChanged|TextChanged|ValueChanged|Loaded|Unloaded|Loading|SizeChanged|" +
-        @"GotFocus|LostFocus|PointerEntered|PointerExited|PointerPressed|PointerReleased|" +
-        @"ItemClick|ItemInvoked|Expanding|Collapsed|Opened|Closed|QuerySubmitted|" +
-        @"SuggestionChosen|TextSubmitted|DragItemsStarting|DropCompleted)=""[A-Za-z_]\w*""",
-        RegexOptions.Compiled);
-
-    /// <summary>
-    /// Remove bare-method event-handler attributes from a XAML fragment that ships with
-    /// NO code-behind, so the emitted snippet can be pasted without a "handler not found"
-    /// XAML compiler error. A no-op when the fragment only uses command bindings.
+    /// Remove event-handler attributes not backed by code-behind. Delegates to the
+    /// shared <see cref="ControlSnippetText.StripUnbackedEventHandlers"/>; this overload
+    /// (no C#) strips every bare-method handler.
     /// </summary>
     internal static string StripDanglingEventHandlers(string xaml) =>
-        DanglingEventHandlerRegex.Replace(xaml, "");
+        ControlSnippetText.StripUnbackedEventHandlers(xaml, null);
 
     internal static string CleanXaml(string xaml)
     {

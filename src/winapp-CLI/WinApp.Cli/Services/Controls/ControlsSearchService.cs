@@ -28,7 +28,11 @@ internal interface IControlsSearchService
     /// loaded (offline cold cache), a core-only engine is returned instead of
     /// throwing — the embedded core patterns are always available, so
     /// <c>--list</c>, <c>--source core</c>, and <c>--id &lt;core-id&gt;</c> keep
-    /// working offline. <paramref name="includeReactor"/> gates the opt-in Reactor
+    /// working offline. <paramref name="coreOnly"/> goes further: when true the
+    /// request is satisfiable by the embedded core patterns <i>alone</i> (an
+    /// explicit <c>--source core</c> search, or an all-core <c>--id</c> set), so
+    /// the network providers are skipped entirely — no load, no fetch, and the
+    /// <paramref name="onFetchStarting"/> notice never fires. <paramref name="includeReactor"/> gates the opt-in Reactor
     /// source: when false (the default — e.g. a plain search or <c>--list</c>) the
     /// Reactor provider is neither loaded nor fetched, so its C#-only samples never
     /// pollute results for standard XAML apps; the command sets it true only for a
@@ -39,7 +43,7 @@ internal interface IControlsSearchService
     /// so the caller can show a one-time "fetching…" notice; it is never invoked
     /// when everything is served from cache or the memoized engine.
     /// </summary>
-    Task<SearchEngine> GetEngineAsync(bool forceRefresh = false, bool allowCoreOnly = false, bool includeReactor = false, Action<string>? onFetchStarting = null, CancellationToken cancellationToken = default);
+    Task<SearchEngine> GetEngineAsync(bool forceRefresh = false, bool allowCoreOnly = false, bool coreOnly = false, bool includeReactor = false, Action<string>? onFetchStarting = null, CancellationToken cancellationToken = default);
 
     /// <summary>Delete every provider's per-user cache so the next load re-fetches.</summary>
     void ClearCache();
@@ -61,6 +65,10 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
     // with-Reactor engine, so switching between a normal search and a
     // `--source reactor` search within one process doesn't clobber either cache.
     private SearchEngine? _engineWithReactor;
+    // A core-only engine (embedded patterns, no network) for requests satisfiable by
+    // core alone (--source core, all-core --id). Deterministic embedded data, so it's
+    // safe to memoize; kept separate from the network-backed engines above.
+    private SearchEngine? _coreOnlyEngine;
 
     /// <summary>Production constructor: providers are rooted at the managed
     /// global <c>.winapp</c> cache directory so environment/test path overrides
@@ -77,8 +85,31 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
         _providers = providers;
     }
 
-    public async Task<SearchEngine> GetEngineAsync(bool forceRefresh = false, bool allowCoreOnly = false, bool includeReactor = false, Action<string>? onFetchStarting = null, CancellationToken cancellationToken = default)
+    public async Task<SearchEngine> GetEngineAsync(bool forceRefresh = false, bool allowCoreOnly = false, bool coreOnly = false, bool includeReactor = false, Action<string>? onFetchStarting = null, CancellationToken cancellationToken = default)
     {
+        // Core-only requests (--source core, all-core --id) are satisfied entirely by
+        // the embedded patterns — skip every network provider so there is no fetch and
+        // the "fetching…" notice never fires. Returned before any provider is touched.
+        if (coreOnly)
+        {
+            if (_coreOnlyEngine != null)
+            {
+                return _coreOnlyEngine;
+            }
+
+            await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                _coreOnlyEngine ??= new SearchEngine(
+                    Array.Empty<Scenario>(), DataLoader.LoadCorePatterns(), new(), new());
+                return _coreOnlyEngine;
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
         var memoized = includeReactor ? _engineWithReactor : _engine;
         if (memoized != null && !forceRefresh)
         {
@@ -197,6 +228,7 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
     {
         _engine = null;
         _engineWithReactor = null;
+        _coreOnlyEngine = null;
 
         var failures = new List<Exception>();
         foreach (var provider in _providers)

@@ -45,8 +45,14 @@ namespace WinApp.Cli.Services.Controls;
 ///   "18" — Legacy inline a11y samples with no leading comment now fall back to
 ///          the control Subtitle for HeaderText (was empty → "{Control}: "),
 ///          so the embedded gallery snapshot changed.
+///   "19" — Event handlers not backed by emitted code-behind are now stripped from
+///          both Gallery and Toolkit XAML (StripUnbackedEventHandlers): the WinUI
+///          Gallery keeps sample handlers in shared page code-behind we don't fetch,
+///          so ~44 scenarios shipped XAML wired to a missing handler (compile error
+///          on paste). Method-aware: backed handlers (e.g. TabView's) are kept.
+///          Regenerate so old caches drop the dangling handlers.
 /// </summary>
 internal static class CacheVersion
 {
-    public const string Current = "18";
+    public const string Current = "19";
 }

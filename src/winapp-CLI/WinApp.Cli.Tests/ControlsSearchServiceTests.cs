@@ -124,6 +124,44 @@ public class ControlsSearchServiceTests
     }
 
     [TestMethod]
+    public async Task GetEngineAsync_CoreOnly_SkipsAllNetworkProvidersAndNotice()
+    {
+        var gallery = new FakeSearchProvider("gallery", Data("gallery", "tabview"));
+        var toolkit = new FakeSearchProvider("toolkit", Data("toolkit", "datagrid"));
+        var reactor = new FakeSearchProvider("reactor", Data("reactor", "flex"));
+        var sut = new ControlsSearchService([gallery, toolkit, reactor]);
+        var notices = new List<string>();
+
+        var engine = await sut.GetEngineAsync(coreOnly: true, onFetchStarting: notices.Add);
+        var ids = engine.ListAll().Select(x => x.id).ToList();
+
+        Assert.AreEqual(0, gallery.LoadCalls, "core-only must not load the gallery provider");
+        Assert.AreEqual(0, toolkit.LoadCalls, "core-only must not load the toolkit provider");
+        Assert.AreEqual(0, reactor.LoadCalls, "core-only must not load the reactor provider");
+        Assert.AreEqual(0, notices.Count, "core-only touches no network, so the 'fetching…' notice must never fire");
+        Assert.IsTrue(ids.Count > 0, "the embedded core patterns must be available");
+        Assert.IsTrue(ids.All(id => ProviderRegistry.ForScenarioId(id) is null),
+            "a core-only engine exposes only the embedded (non-network) core patterns");
+    }
+
+    [TestMethod]
+    public async Task GetEngineAsync_CoreOnly_MemoizesAndDoesNotClobberFullEngine()
+    {
+        var gallery = new FakeSearchProvider("gallery", Data("gallery", "tabview"));
+        var toolkit = new FakeSearchProvider("toolkit", Data("toolkit", "datagrid"));
+        var sut = new ControlsSearchService([gallery, toolkit]);
+
+        var core1 = await sut.GetEngineAsync(coreOnly: true);
+        var core2 = await sut.GetEngineAsync(coreOnly: true);
+        var full = await sut.GetEngineAsync();
+
+        Assert.AreSame(core1, core2, "the core-only engine is memoized");
+        Assert.AreNotSame(core1, full, "a normal request must not receive the core-only engine");
+        Assert.IsTrue(full.ListAll().Any(x => x.id.Contains("tabview", StringComparison.Ordinal)),
+            "the full engine still loads the network corpus after a prior core-only call");
+    }
+
+    [TestMethod]
     public async Task GetEngineAsync_DefaultExcludesReactor_DoesNotLoadProvider()
     {
         var gallery = new FakeSearchProvider("gallery", Data("gallery", "tabview"));
@@ -220,6 +258,38 @@ public class ControlsSearchServiceTests
         Assert.AreNotSame(def1, def2, "the default engine must be rebuilt after ClearCache");
         Assert.AreNotSame(rea1, rea2, "the with-Reactor engine must be rebuilt after ClearCache");
         Assert.AreEqual(2, reactor.LoadCalls, "ClearCache must reset the with-Reactor memo slot so reactor reloads");
+    }
+
+    [TestMethod]
+    public async Task GetEngineAsync_CoreOnly_ForceRefresh_KeepsMemoizedEngineAndSkipsProviders()
+    {
+        // The core-only engine wraps deterministic embedded data, so forceRefresh
+        // is intentionally a no-op for it: the memoized instance is returned and
+        // no network provider is loaded.
+        var gallery = new FakeSearchProvider("gallery", Data("gallery", "tabview"));
+        var toolkit = new FakeSearchProvider("toolkit", Data("toolkit", "datagrid"));
+        var sut = new ControlsSearchService([gallery, toolkit]);
+
+        var core1 = await sut.GetEngineAsync(coreOnly: true);
+        var core2 = await sut.GetEngineAsync(coreOnly: true, forceRefresh: true);
+
+        Assert.AreSame(core1, core2, "forceRefresh must not rebuild the embedded core-only engine");
+        Assert.AreEqual(0, gallery.LoadCalls, "a forced core-only refresh must still skip the gallery provider");
+        Assert.AreEqual(0, toolkit.LoadCalls, "a forced core-only refresh must still skip the toolkit provider");
+    }
+
+    [TestMethod]
+    public async Task ClearCache_ResetsCoreOnlyEngine()
+    {
+        var gallery = new FakeSearchProvider("gallery", Data("gallery", "tabview"));
+        var toolkit = new FakeSearchProvider("toolkit", Data("toolkit", "datagrid"));
+        var sut = new ControlsSearchService([gallery, toolkit]);
+
+        var core1 = await sut.GetEngineAsync(coreOnly: true);
+        sut.ClearCache();
+        var core2 = await sut.GetEngineAsync(coreOnly: true);
+
+        Assert.AreNotSame(core1, core2, "ClearCache must reset the core-only memo slot so it is rebuilt");
     }
 
     [TestMethod]

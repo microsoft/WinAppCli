@@ -164,6 +164,51 @@ public class FindUiCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task SourceCore_PassesCoreOnly_SkipsNetwork()
+    {
+        var fake = FakeControlsSearchService.WithEngine(BuildEngine());
+        _fakeService = fake;
+        await ParseAndInvokeWithCaptureAsync(Command(), ["file picker", "--source", "core"]);
+        Assert.IsTrue(fake.LastCoreOnly, "--source core is satisfiable by embedded patterns; skip the network providers");
+    }
+
+    [TestMethod]
+    public async Task IdCore_PassesCoreOnly_SkipsNetwork()
+    {
+        var fake = FakeControlsSearchService.WithEngine(BuildEngine());
+        _fakeService = fake;
+        await ParseAndInvokeWithCaptureAsync(Command(), ["--id", "file-picker-desktop"]);
+        Assert.IsTrue(fake.LastCoreOnly, "an all-core --id set needs no network");
+    }
+
+    [TestMethod]
+    public async Task Search_DoesNotPassCoreOnly()
+    {
+        var fake = FakeControlsSearchService.WithEngine(BuildEngine());
+        _fakeService = fake;
+        await ParseAndInvokeWithCaptureAsync(Command(), ["tabview"]);
+        Assert.IsFalse(fake.LastCoreOnly, "a normal search must still load the network corpus");
+    }
+
+    [TestMethod]
+    public async Task List_DoesNotPassCoreOnly()
+    {
+        var fake = FakeControlsSearchService.WithEngine(BuildEngine());
+        _fakeService = fake;
+        await ParseAndInvokeWithCaptureAsync(Command(), ["--list"]);
+        Assert.IsFalse(fake.LastCoreOnly, "--list lists every source, so it still wants the network corpus online");
+    }
+
+    [TestMethod]
+    public async Task IdNetwork_DoesNotPassCoreOnly()
+    {
+        var fake = FakeControlsSearchService.WithEngine(BuildEngine());
+        _fakeService = fake;
+        await ParseAndInvokeWithCaptureAsync(Command(), ["--id", "gallery-tabview-1"]);
+        Assert.IsFalse(fake.LastCoreOnly, "a gallery id needs the network corpus");
+    }
+
+    [TestMethod]
     public async Task Search_DoesNotIncludeReactor()
     {
         var fake = FakeControlsSearchService.WithEngine(BuildEngine());

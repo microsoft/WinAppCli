@@ -262,6 +262,12 @@ internal static partial class GalleryFetcher
                 if (xaml != null) xaml = ControlSnippetText.TruncateXaml(xaml, MaxXamlChars);
                 if (csharp != null) csharp = ControlSnippetText.TruncateCode(csharp, MaxCSharpChars, "// NOTE: snippet truncated — refer to full sample for additional code");
 
+                // Gallery keeps each sample's XAML in its .txt bundle but its event
+                // handlers in the shared page code-behind we don't fetch (see #703/#704).
+                // Strip any handler the emitted C# doesn't define so the snippet compiles
+                // as pasted; handlers that ARE backed (e.g. TabView's) are kept.
+                if (xaml != null) xaml = ControlSnippetText.StripUnbackedEventHandlers(xaml, csharp);
+
                 if (string.IsNullOrWhiteSpace(xaml)) xaml = null;
                 if (string.IsNullOrWhiteSpace(csharp)) csharp = null;
                 if (csharp == null && xaml == null) continue;

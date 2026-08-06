@@ -16,6 +16,53 @@ using System.Text.RegularExpressions;
 /// </summary>
 internal static partial class ControlSnippetText
 {
+    /// <summary>
+    /// Event-handler attributes whose value is a bare method name (e.g.
+    /// <c>Click="OnCardClicked"</c>) — as opposed to a command binding
+    /// (<c>Click="{x:Bind Cmd}"</c>), which starts with '{' and is never matched.
+    /// Group 2 is the referenced method name. The list covers the routed/typed
+    /// events that appear across the Gallery + Toolkit corpora.
+    /// </summary>
+    [GeneratedRegex(
+        @"\s+(?:Click|Tapped|DoubleTapped|RightTapped|Holding|Checked|Unchecked|Indeterminate|Toggled|" +
+        @"SelectionChanged|TextChanged|ValueChanged|Loaded|Unloaded|Loading|SizeChanged|" +
+        @"GotFocus|LostFocus|PointerEntered|PointerExited|PointerPressed|PointerReleased|PointerMoved|" +
+        @"ItemClick|ItemInvoked|Invoked|Expanding|Collapsed|Opened|Closed|Closing|QuerySubmitted|" +
+        @"SuggestionChosen|TextSubmitted|DragItemsStarting|DropCompleted|ContextRequested|Completed)" +
+        @"=""([A-Za-z_]\w*)""")]
+    private static partial Regex EventHandlerAttrRegex();
+
+    /// <summary>
+    /// Remove event-handler attributes from <paramref name="xaml"/> whose referenced
+    /// method is NOT defined in the emitted <paramref name="csharp"/> — so a pasted
+    /// snippet never wires an event to a handler that isn't there (a XAML-compiler
+    /// "handler not found" error). Handlers whose method IS present in the C# are kept
+    /// (e.g. TabView's Add/Close handlers), as are command bindings (<c>{x:Bind}</c>).
+    /// When <paramref name="csharp"/> is null/empty, every bare-method handler is
+    /// stripped. This is the corpus-boundary mitigation for the upstream "handler lives
+    /// in shared page code-behind we don't fetch" gap (see issues #703 / #704).
+    /// </summary>
+    public static string StripUnbackedEventHandlers(string xaml, string? csharp)
+    {
+        if (string.IsNullOrEmpty(xaml))
+        {
+            return xaml;
+        }
+
+        return EventHandlerAttrRegex().Replace(xaml, m =>
+        {
+            var method = m.Groups[1].Value;
+            // Keep the handler only if the emitted C# actually declares the method
+            // (a `void`/`Task` declaration by that name — not merely a call to it).
+            if (!string.IsNullOrWhiteSpace(csharp) &&
+                Regex.IsMatch(csharp, $@"\b(?:void|Task)\s+{Regex.Escape(method)}\s*\("))
+            {
+                return m.Value;
+            }
+            return "";
+        });
+    }
+
     /// <summary>Matches a single XML start/end/self-closing tag: group 1 = leading
     /// <c>/</c> (end tag), group 2 = (possibly prefixed) element name, group 4 =
     /// trailing <c>/</c> (self-closing).</summary>

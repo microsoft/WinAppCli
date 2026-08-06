@@ -17,6 +17,7 @@ internal sealed class FakeControlsSearchService : IControlsSearchService
     public int GetEngineCalls { get; private set; }
     public bool LastForceRefresh { get; private set; }
     public bool LastAllowCoreOnly { get; private set; }
+    public bool LastCoreOnly { get; private set; }
     public bool LastIncludeReactor { get; private set; }
     public Action<string>? LastOnFetchStarting { get; private set; }
     public int ClearCacheCalls { get; private set; }
@@ -33,11 +34,12 @@ internal sealed class FakeControlsSearchService : IControlsSearchService
         new(null, new ControlsDataUnavailableException(
             "No WinUI control data is available. find-ui fetches ... run the command once to populate the local cache."));
 
-    public Task<SearchEngine> GetEngineAsync(bool forceRefresh = false, bool allowCoreOnly = false, bool includeReactor = false, Action<string>? onFetchStarting = null, CancellationToken cancellationToken = default)
+    public Task<SearchEngine> GetEngineAsync(bool forceRefresh = false, bool allowCoreOnly = false, bool coreOnly = false, bool includeReactor = false, Action<string>? onFetchStarting = null, CancellationToken cancellationToken = default)
     {
         GetEngineCalls++;
         LastForceRefresh = forceRefresh;
         LastAllowCoreOnly = allowCoreOnly;
+        LastCoreOnly = coreOnly;
         LastIncludeReactor = includeReactor;
         LastOnFetchStarting = onFetchStarting;
         if (_throw != null) { throw _throw; }

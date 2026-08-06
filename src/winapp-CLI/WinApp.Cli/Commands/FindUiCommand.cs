@@ -69,7 +69,7 @@ internal sealed class FindUiCommand : Command, IShortDescription
     }
 
     public FindUiCommand()
-        : base("find-ui", "Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery and the Windows Community Toolkit by default (plus the microsoft-ui-reactor ReactorGallery as an opt-in source via --source reactor); not WPF/WinForms. The corpus is fetched from GitHub on first use and cached per-user, so the first run requires network access.")
+        : base("find-ui", "Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery and the Windows Community Toolkit by default (plus the microsoft-ui-reactor ReactorGallery as an opt-in source via --source reactor); not WPF/WinForms. The Gallery/Toolkit/Reactor corpus is fetched from GitHub on first use and cached per-user, so the first such run needs network access; --source core searches the built-in patterns and works fully offline.")
     {
         Arguments.Add(QueryArgument);
         Options.Add(IdOption);
@@ -139,6 +139,15 @@ internal sealed class FindUiCommand : Command, IShortDescription
                 || string.Equals(source, "core", StringComparison.OrdinalIgnoreCase)
                 || (ids.Length > 0 && ids.All(id => ProviderRegistry.ForScenarioId(id) is null));
 
+            // A request satisfiable by the embedded core patterns ALONE — an explicit
+            // "--source core" search or an all-core --id set — needs no network at all.
+            // Signal the service to skip the gallery/toolkit/reactor providers entirely
+            // so there's no wasted fetch and no misleading "fetching…" notice. (--list is
+            // deliberately excluded: it lists every source, so it still wants the network
+            // corpus when online and only falls back to core via allowCoreOnly offline.)
+            var coreOnly = string.Equals(source, "core", StringComparison.OrdinalIgnoreCase)
+                || (ids.Length > 0 && ids.All(id => ProviderRegistry.ForScenarioId(id) is null));
+
             // Reactor is opt-in: its C#-only declarative samples can't paste into a
             // standard XAML app, so they must never surface in a default search.
             // Only load/fetch Reactor when the caller explicitly asks for it — a
@@ -147,7 +156,7 @@ internal sealed class FindUiCommand : Command, IShortDescription
                 || ids.Any(ProviderRegistry.IsReactorScenarioId);
             try
             {
-                engine = await searchService.GetEngineAsync(refresh, allowCoreOnly, includeReactor, BuildFetchNotice(json), cancellationToken).ConfigureAwait(false);
+                engine = await searchService.GetEngineAsync(refresh, allowCoreOnly, coreOnly, includeReactor, BuildFetchNotice(json), cancellationToken).ConfigureAwait(false);
             }
             catch (ControlsDataUnavailableException ex)
             {
