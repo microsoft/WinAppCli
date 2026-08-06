@@ -25,7 +25,9 @@ import type { UiRecordOptions as GeneratedUiRecordOptions, WinappResult } from '
  * This type is the public surface of `uiRecord`; the generated type has it optional.
  * Survives regeneration because it is defined here in the hand-written guard module.
  */
-export type UiRecordOptions = Omit<GeneratedUiRecordOptions, 'durationSec'> & { durationSec: number };
+export type UiRecordOptions = Omit<GeneratedUiRecordOptions, 'durationSec'> & {
+  durationSec: number;
+};
 
 type UiRecordArgSpec = {
   property: keyof UiRecordOptions;
@@ -38,6 +40,7 @@ export const UI_RECORD_ARG_SPECS: readonly UiRecordArgSpec[] = [
   { property: 'captureScreen', flag: '--capture-screen', kind: 'boolean' },
   { property: 'durationSec', flag: '--duration-sec', kind: 'value' },
   { property: 'fps', flag: '--fps', kind: 'value' },
+  { property: 'frames', flag: '--frames', kind: 'boolean' },
   { property: 'json', flag: '--json', kind: 'boolean' },
   { property: 'maxEdge', flag: '--max-edge', kind: 'value' },
   { property: 'output', flag: '--output', kind: 'value' },
@@ -79,6 +82,7 @@ export function buildUiRecordArgs(options: UiRecordOptions): string[] {
  * **`durationSec` is required and must be > 0.** Unbounded recording (durationSec == 0) is only
  * supported via the CLI with Ctrl+C or piped stdin. The npm wrapper has no mechanism to stop
  * an unbounded spawn, so passing durationSec == 0 or omitting it will throw a clear error.
+ * Set `frames` to write timestamped JPEG evidence beside the MP4.
  *
  * @throws {Error} if `options.durationSec` is not provided or is ≤ 0.
  */

@@ -35,6 +35,12 @@ winapp init [base-directory] [options]
 - `--no-gitignore` - Don't update .gitignore file
 - `--use-defaults`, `--no-prompt` - Do not prompt, and use default of all prompts
 - `--config-only` - Only handle configuration file operations, skip package installation
+- `--exe <path>` - Path to the application executable. **Requires `--sparse`.** Generates an identity-only sparse manifest for the exe instead of a full package/SDK setup.
+- `--sparse` - Generate a sparse identity manifest (`appxmanifest.xml`) for an existing desktop exe. Skips SDK/package installation. Use with `--exe`.
+- `--name <name>` - Override the package name (sparse only; default: inferred from the exe)
+- `--publisher <CN>` - Override the publisher CN (sparse only; default: inferred from the exe's company name)
+- `--output-dir <path>` - Directory to write the sparse manifest and `Assets/` (sparse only; default: a `sparse/` folder in the current directory)
+- `--force` - Overwrite an existing `appxmanifest.xml` in the target directory (sparse only). Without it, init fails instead of replacing an existing manifest/assets.
 - `--add-js-bindings` *(npm only)* - Add `winapp.jsBindings` to package.json and generate JS/TypeScript bindings, without prompting (incompatible with `--setup-sdks none`)
 
 **What it does:**
@@ -79,6 +85,20 @@ When a `.csproj` file is found in the target directory, `init` uses a streamline
 - Generates `Package.appxmanifest`, assets, and a development certificate
 - Does **not** create a `winapp.yaml` or download C++ projections (use `dotnet restore` for NuGet packages)
 
+**Sparse identity mode (`--exe` + `--sparse`):**
+
+Generates an identity-only [sparse package](guides/sparse.md) manifest for an existing desktop executable — the first step of the [sparse packaging workflow](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/grant-identity-to-nonpackaged-apps). Unlike the full `init` flow, this **skips all SDK/package installation** (sparse identity packages have no SDK dependencies) and only generates a manifest and placeholder assets.
+
+- Infers the package name, publisher, description, and version from the exe via `FileVersionInfo` (override with `--name`, `--publisher`, or interactively)
+- Writes `appxmanifest.xml` (with the exe name substituted into `Executable`) plus an `Assets/` folder to a `sparse/` folder in the current directory (or `--output-dir`)
+- Uses `--use-defaults`/`--no-prompt` to skip the interactive override prompts (CI-friendly)
+- `--exe` without `--sparse` is an error
+
+> **Assets are external.** The sparse `.msix` is identity-only: the generated `Assets/` are resolved from the app's install directory (the external content location) at runtime, **not** bundled into the `.msix`. Deploy them alongside your application.
+
+Next steps after `winapp init --exe <exe> --sparse`: [`winapp pack <appxmanifest.xml>`](#pack) to build the identity `.msix`, then [`winapp embed-identity <exe>`](#embed-identity). See the [Sparse Packaging Guide](guides/sparse.md) for the full walkthrough.
+
+
 **Examples:**
 
 ```bash
@@ -94,6 +114,9 @@ winapp init ./my-project --use-defaults
 # Initialize a .NET project (auto-detected from .csproj)
 cd my-dotnet-app
 winapp init
+
+# Generate a sparse identity manifest for an existing exe (no SDK install)
+winapp init --exe ./bin/Release/net8.0-windows/MyApp.exe --sparse --use-defaults
 ```
 
 **Tip: Install SDKs after initial setup**
@@ -250,7 +273,7 @@ winapp pack <input-folder> [input-folder...] [options]
 
 **Arguments:**
 
-- `input-folder` - One or more directories containing the application files to package. Pass multiple folders (e.g., `./publish/x64 ./publish/arm64`) to create an MSIX bundle.
+- `input-folder` - One or more directories containing the application files to package. Pass multiple folders (e.g., `./publish/x64 ./publish/arm64`) to create an MSIX bundle. For **sparse identity packages**, pass a sparse `appxmanifest.xml` file directly instead of a folder (see [Sparse identity packages](#sparse-identity-packages) below).
 
 **Options:**
 
@@ -276,6 +299,22 @@ winapp pack <input-folder> [input-folder...] [options]
 - Automatically discovers third-party WinRT components and registers their activatable classes (see [WinRT component discovery](#winrt-component-discovery) below)
 - Handles self-contained WinAppSDK deployment
 - Signs package if certificate provided
+
+#### Sparse identity packages
+
+When the input is a **sparse `appxmanifest.xml` file** (one declaring `<uap10:AllowExternalContent>true</uap10:AllowExternalContent>` under `<Properties>`) rather than a folder, `winapp pack` builds an **identity-only** `.msix` — it packages just the manifest, with no application binaries or assets. This is step 2 of the [sparse packaging workflow](guides/sparse.md).
+
+```bash
+# Build a signed identity package from a sparse manifest
+winapp pack ./sparse/appxmanifest.xml --cert ./devcert.pfx
+```
+
+- Output defaults to `<PackageName>.identity.msix` in the current directory (override with `--output`).
+- Signing happens only when `--cert` (or `--generate-cert`) is provided.
+- If you instead pass a **folder** whose manifest declares `AllowExternalContent`, the existing folder-packaging behavior applies, but `winapp pack` warns if it finds assets (`.png`/`.jpg`/`.ico`) or binaries (`.exe`/`.dll`/`.so`) — for sparse packages these belong at the external location, not inside the `.msix`.
+
+After packing, run [`winapp embed-identity <exe>`](#embed-identity) and register the package in your installer with `Add-AppxPackage -Path <msix> -ExternalLocation <install-dir>`. See the [Sparse Packaging Guide](guides/sparse.md).
+
 
 #### WinRT component discovery
 
@@ -390,6 +429,38 @@ winapp create-debug-identity ./dist/app.exe --manifest ./custom-manifest.xml
 # Create identity for hosted app script
 winapp create-debug-identity app.py
 ```
+
+---
+
+### embed-identity
+
+Connect a desktop application to its **sparse identity package** by embedding the `<msix>` element into the app's side-by-side (fusion) manifest. This is step 3 of the [sparse packaging workflow](guides/sparse.md) — it tells Windows which identity package the running exe belongs to.
+
+```bash
+winapp embed-identity <target> [options]
+```
+
+**Arguments:**
+
+- `target` - The file to update. Auto-detected by extension:
+  - **`.exe`** (EXE mode) — embeds the `<msix>` element directly into the exe's side-by-side manifest using `mt.exe`.
+  - **`.xml` / `.manifest`** (XML mode) — inserts or replaces the `<msix>` element in an external SxS manifest file (created if it doesn't exist). Rebuild your app afterward so the updated manifest is embedded in the binary.
+
+**Options:**
+
+- `--manifest <path>` - Path to the sparse `appxmanifest.xml` to read identity (packageName, publisher, applicationId) from. When omitted, the command searches a `sparse/` folder beside the target first, then in the current directory, then the target's directory and the current directory, for `appxmanifest.xml`.
+
+**Examples:**
+
+```bash
+# EXE mode — embed identity straight into the built exe
+winapp embed-identity ./bin/Release/net8.0-windows/MyApp.exe
+
+# XML mode — update a checked-in side-by-side manifest, then rebuild
+winapp embed-identity ./app.manifest --manifest ./appxmanifest.xml
+```
+
+> This command is idempotent: re-running it replaces any existing `<msix>` element rather than duplicating it.
 
 ---
 
@@ -555,15 +626,20 @@ winapp manifest update-assets mylogo.png --verbose
 
 Create a loose layout package from a build output folder, register it with Windows using the `Windows.Management.Deployment.PackageManager` API, and launch the application — simulating a full MSIX install for debugging. Returns the process ID for debugger attachment.
 
+`winapp run` operates in one of two modes, chosen automatically from the input:
+
+- **Folder mode** — the input is a build-output folder (contains a `Package.appxmanifest`/`AppxManifest.xml`).
+- **Project mode** — the input is a `.csproj`, a `.sln`/`.slnx` solution, or a directory containing one. `winapp run` builds the project and launches it, supporting both **packaged** and **unpackaged** WinUI apps. See [Project mode](#project-mode-net-sdk-projects) below.
+
 > **This is the preferred command for debugging with package identity** for most frameworks (.NET, C++, Rust, Flutter, Tauri). Unlike [`create-debug-identity`](#create-debug-identity) which registers a sparse package for a single exe, `winapp run` registers the entire folder as a loose layout package, just like a real MSIX install. See the [Debugging Guide](debugging.md) for common debugging workflows.
 
 ```bash
-winapp run <input-folder> [options]
+winapp run [<input>] [options]
 ```
 
 **Arguments:**
 
-- `input-folder` - Directory containing the app to run (required)
+- `input` - The app to run: a build-output folder (folder mode), a `.csproj` project, a `.sln`/`.slnx` solution, or a directory containing one of those at its top level (project mode; the directory is not searched recursively). Use `.` to build/run the project in the current directory. **Optional — defaults to the current directory when omitted** (matches `dotnet run`).
 
 **Options:**
 
@@ -634,6 +710,77 @@ winapp run ./bin/Debug --detach --json
 
 # Wipe application data (LocalState, settings) and start fresh
 winapp run ./bin/Debug --clean
+```
+
+#### Project mode (.NET SDK projects)
+
+When the input is a `.csproj`, a `.sln`/`.slnx` solution, or a directory containing one (including `.`), `winapp run` **builds the project** with `dotnet build` and then launches it. It supports both packaged and unpackaged WinUI apps, and installs the matching-architecture Windows App Runtime the app needs before launching.
+
+**Solution input:** point `winapp run` at a `.sln`/`.slnx` (or a directory containing one — a solution is preferred over loose `.csproj` files) and it resolves the runnable app project, then builds it with `$(SolutionDir)` and the sibling `Solution*` properties defined, so projects that depend on them build as they do in Visual Studio. Resolution rules:
+
+- **Test projects are skipped** when auto-selecting, so a solution containing an app plus its tests resolves to the app with no `--project` needed. (A WinUI test project is itself a packaged app, so output type alone can't distinguish it.)
+- **If the only runnable project is a test project**, it runs.
+- **If more than one runnable app project exists**, `winapp run` does not guess a startup project — it errors listing the candidates. Use `--project <name>` to choose, which is always honored, including to select a test project.
+
+Packaged vs. unpackaged is detected automatically from the project's effective `WindowsPackageType` MSBuild property (never from manifest presence):
+
+- **Packaged** (`WindowsPackageType=MSIX`, the WinUI packaged default) — builds, then registers the build output as a loose-layout package and launches via AUMID (the same pipeline as folder mode).
+- **Unpackaged** (`WindowsPackageType=None`) — builds, ensures the framework-dependent Windows App Runtime is installed, then launches the built `.exe` directly. Force this for a packaged project with `-p WindowsPackageType=None`.
+
+Project mode requires the **.NET SDK 8.0.100 or newer** (for MSBuild `--getProperty`).
+
+**Project-mode options** (ignored in folder mode):
+
+- `-c, --configuration <name>` - Build configuration. Default: `Debug`.
+- `--arch <x64|arm64|x86>` - Target architecture. Default: the current process architecture. Determines both the build RID and the architecture of the Windows App Runtime that gets installed.
+- `-r, --runtime <rid>` - Target .NET runtime identifier (e.g. `win-x64`). Project mode uses only the RID's architecture, always builds the canonical `win-<arch>`, and rejects non-Windows RIDs (e.g. `linux-x64`). Its architecture overrides `--arch`.
+- `-f, --framework <tfm>` - Target framework moniker for multi-targeted projects (e.g. `net10.0-windows10.0.26100.0`).
+- `--project <name-or-path>` - When the input is a solution (`.sln`/`.slnx`) or a directory with multiple runnable app projects, selects which project to launch (by project name or path).
+- `--no-build` - Skip building and run the existing build output (still evaluates output properties).
+- `--no-restore` - Skip restoring the project before building.
+- `-p, --property <Name=Value>` - MSBuild property, forwarded to both the build and the property evaluation. Repeatable (e.g. `-p WindowsPackageType=None`).
+
+**Build output & verbosity:** the project is built in two steps — a `dotnet build` whose output **streams live** to your console, followed by a fast property-evaluation pass. winapp prints the exact `dotnet build …` invocation before the output, and streams warnings even on a successful build. Verbosity:
+
+| Flag | dotnet verbosity | Adds |
+|------|------------------|------|
+| *(default)* | `minimal` | — |
+| `--verbose` | `minimal` | winapp's build decision traces |
+| `--quiet` | `quiet` | — |
+
+Under `--json` or `--quiet` the invocation and build output go to stderr so stdout stays pure JSON / clean.
+
+**Option applicability:** the identity/loose-layout options (`--manifest`, `--output-appx-directory`, `--no-launch`, `--with-alias`, `--unregister-on-exit`, `--clean`, `--executable`) apply to packaged apps only. They are rejected with a clear error for unpackaged apps (which have no MSIX package). Launch/debug options (`--args`/`--`, `--detach`, `--debug-output`, `--symbols`, `--json`) work in both.
+
+**Project-mode examples:**
+
+```bash
+# Build and run the project in the current directory (input defaults to ".")
+winapp run
+
+# Run a specific project
+winapp run ./src/MyApp/MyApp.csproj
+
+# Build and run from a solution (resolves the runnable app project, defines $(SolutionDir))
+winapp run ./MyApp.sln
+
+# Pick a startup project when the solution has more than one runnable app
+winapp run ./MyApp.sln --project MyApp
+
+# Release build for arm64
+winapp run . -c Release --arch arm64
+
+# Force an unpackaged run of a packaged project
+winapp run . -p WindowsPackageType=None
+
+# Run the existing build output without rebuilding, and capture crash diagnostics
+winapp run . --no-build --debug-output
+
+# Show winapp's build decision traces (dotnet build stays at minimal verbosity)
+winapp run . --verbose
+
+# Launch and detach (prints PID), forwarding args to the app
+winapp run . --detach -- --my-flag value
 ```
 
 **MSBuild properties (NuGet package):**
@@ -1216,9 +1363,7 @@ winapp ui [command] [options]
 
 #### ui record
 
-Record the target window — or a single element's region — to an H.264 MP4 video. Frames are
-captured via Windows Graphics Capture (with a PrintWindow fallback) and encoded incrementally with
-Media Foundation, so long recordings never buffer in memory.
+Record a window or element region to an H.264 MP4.
 
 ```bash
 # Record a window for 10 seconds at 15 fps
@@ -1229,6 +1374,9 @@ winapp ui record -a "My App" --duration-sec 0 --max-edge 1280 -o capture.mp4
 
 # Record just one element's region
 winapp ui record -a "My App" btn-save-1234 -o button.mp4
+
+# Keep an agent-readable timeline alongside the MP4
+winapp ui record -a Calculator --frames --duration-sec 10 --fps 10 -o demo.mp4
 ```
 
 **Record options:**
@@ -1237,10 +1385,10 @@ winapp ui record -a "My App" btn-save-1234 -o button.mp4
 - `--max-edge <px>` - Downscale so the longest edge is at most this many pixels (`0` = no downscale).
 - `--capture-screen` - Capture from the screen so overlays/popups are included (may capture occluding windows).
 - `-o, --output <path>` - Output `.mp4` path (defaults to `recording-<timestamp>-<guid>.mp4`).
+- `--frames` - Write timestamped JPEGs, `frames.ndjson`, and `manifest.json` to `<output-name>.frames`. Supports 1-30 fps and `--max-edge` 64-4096 (default 1280), with a 1 GiB frame-data cap.
 
-With `--json`, emits a `UiRecordResult` envelope including the output `path`, `frames`, `width`,
-`height`, `fileSize`, `codec` (`"h264"`), and `mode` — the capture path actually used
-(`wgc`, `printwindow`, or `screen`).
+With `--json`, the final result includes the output path, dimensions, codec, capture mode, cadence,
+stop reason, optional `frameArtifacts`, and warnings.
 
 > **Known limitation:** recording a *specific element* inside a popup that renders in its own
 > top-level window (WinUI/XAML flyout, teaching tip, tooltip) may capture the underlying main

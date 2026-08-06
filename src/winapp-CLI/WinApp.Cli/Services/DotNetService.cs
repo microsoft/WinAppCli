@@ -370,23 +370,133 @@ internal partial class DotNetService : IDotNetService
     }
 
     /// <inheritdoc />
-    public Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(
+    public async Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(
         DirectoryInfo workingDirectory,
         string arguments,
         CancellationToken cancellationToken = default)
+    {
+        var outputBuilder = new StringBuilder();
+        var errorBuilder = new StringBuilder();
+
+        var exitCode = await RunDotnetCoreAsync(
+            workingDirectory,
+            arguments,
+            line => outputBuilder.AppendLine(line),
+            line => errorBuilder.AppendLine(line),
+            cancellationToken);
+
+        return (exitCode, outputBuilder.ToString(), errorBuilder.ToString());
+    }
+
+    public Task<int> RunDotnetStreamingAsync(
+        DirectoryInfo workingDirectory,
+        string arguments,
+        Action<string>? onOutputLine,
+        Action<string>? onErrorLine,
+        CancellationToken cancellationToken = default)
+        => RunDotnetCoreAsync(workingDirectory, arguments, onOutputLine, onErrorLine, cancellationToken);
+
+    public Task<int> RunDotnetInheritedAsync(
+        DirectoryInfo workingDirectory,
+        string arguments,
+        CancellationToken cancellationToken = default)
+        => RunDotnetCoreAsync(workingDirectory, arguments, onOutputLine: null, onErrorLine: null, cancellationToken, inheritStdio: true);
+
+    /// <summary>
+    /// Shared launch core for the buffered (<see cref="RunDotnetCommandAsync"/>), streaming
+    /// (<see cref="RunDotnetStreamingAsync"/>), and inherited-stdio (<see cref="RunDotnetInheritedAsync"/>)
+    /// dotnet invocations. All three share one <see cref="ProcessStartInfo"/> shape and — critically — a
+    /// single kill-on-cancel policy: on cancellation every caller kills the whole
+    /// <c>dotnet</c>/MSBuild/restore process tree (<c>Process.Kill(entireProcessTree: true)</c>), awaits
+    /// termination, then rethrows, so none of the classification/evaluate/discovery, streaming build, or
+    /// native-terminal build paths can orphan child processes.
+    ///
+    /// When <paramref name="inheritStdio"/> is <see langword="false"/> (buffered/streaming) stdout and
+    /// stderr are redirected and each received line is forwarded to <paramref name="onOutputLine"/>/
+    /// <paramref name="onErrorLine"/>. When <paramref name="inheritStdio"/> is <see langword="true"/> the
+    /// child inherits winapp's console handles (no redirection, no read pumps) so dotnet sees a real TTY
+    /// and its native terminal logger renders live; the callbacks are ignored in that mode.
+    /// </summary>
+    private static async Task<int> RunDotnetCoreAsync(
+        DirectoryInfo workingDirectory,
+        string arguments,
+        Action<string>? onOutputLine,
+        Action<string>? onErrorLine,
+        CancellationToken cancellationToken,
+        bool inheritStdio = false)
     {
         var processStartInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
             Arguments = arguments,
             WorkingDirectory = workingDirectory.FullName,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
+            // inheritStdio: hand winapp's own console handles to dotnet so it sees a real terminal and its
+            // native terminal logger activates (single warnings, live progress). Otherwise redirect+pump.
+            RedirectStandardOutput = !inheritStdio,
+            RedirectStandardError = !inheritStdio,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = !inheritStdio
         };
 
-        return RunDotnetProcessAsync(processStartInfo, cancellationToken);
+        using var process = new Process { StartInfo = processStartInfo };
+
+        if (!inheritStdio)
+        {
+            process.OutputDataReceived += (sender, e) =>
+            {
+                if (e.Data != null)
+                {
+                    onOutputLine?.Invoke(e.Data);
+                }
+            };
+
+            process.ErrorDataReceived += (sender, e) =>
+            {
+                if (e.Data != null)
+                {
+                    onErrorLine?.Invoke(e.Data);
+                }
+            };
+        }
+
+        process.Start();
+
+        if (!inheritStdio)
+        {
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+        }
+
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // Ctrl+C — kill the dotnet/MSBuild/restore process tree so it isn't orphaned. Shared by the
+            // buffered path (classification/evaluate/discovery) and the streaming build path so neither
+            // leaves child builds running.
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+
+                    // Process.Kill only *requests* termination; without awaiting exit the dotnet/MSBuild/
+                    // restore children can still hold file locks after winapp returns. Wait (best-effort,
+                    // uncancellable — we're already cancelling) so the tree is truly gone before we rethrow.
+                    await process.WaitForExitAsync(CancellationToken.None);
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup; the process may have already exited.
+            }
+
+            throw;
+        }
+
+        return process.ExitCode;
     }
 
     /// <inheritdoc />
@@ -509,7 +619,7 @@ internal partial class DotNetService : IDotNetService
             return true;
         }
 
-        var packageList = await GetPackageListAsync(csprojPath, includeTransitive: false, cancellationToken);
+        var packageList = await GetPackageListAsync(csprojPath, includeTransitive: false, cancellationToken: cancellationToken);
         if (packageList?.Projects is null)
         {
             return false;
@@ -556,14 +666,30 @@ internal partial class DotNetService : IDotNetService
     }
 
     /// <inheritdoc />
-    public async Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// <c>dotnet list package</c> evaluates the project with the default Configuration and no RID/Platform,
+    /// and accepts none of <c>-c</c>/<c>-r</c>/<c>-p:</c> — so a Configuration- or RID-conditional
+    /// <c>PackageReference</c> (rare for the Windows App SDK) isn't captured here. The built TFM is scoped
+    /// downstream by <c>FilterPackageListToFramework</c>, and the runtime presence-gate in
+    /// <c>EnsureWindowsAppRuntimeInstalledAsync</c> is the backstop: a genuinely missing runtime fails the
+    /// launch with an actionable error rather than silently under-provisioning.
+    /// </remarks>
+    public async Task<DotNetPackageListJson?> GetPackageListAsync(FileInfo csprojFile, bool includeTransitive = true, bool noRestore = false, CancellationToken cancellationToken = default)
     {
         if (!csprojFile.Exists)
         {
             return null;
         }
 
-        var args = $"list \"{csprojFile.FullName}\" package{(includeTransitive ? " --include-transitive" : "")} --format json";
+        // `--no-restore` on `dotnet list package` is a .NET 10 SDK addition: that SDK made an implicit
+        // restore the default and `--no-restore` opts out. On .NET 9 and earlier the switch is unknown
+        // and the command fails — and those SDKs don't restore here anyway (they read existing assets),
+        // so there's nothing to opt out of. Only forward it on SDK 10+; otherwise omit it so package
+        // discovery keeps working on the SDK 8.0.100+ range project mode supports.
+        var applyNoRestore = noRestore
+            && await GetSdkMajorVersionAsync(csprojFile.Directory!, cancellationToken) is int major
+            && major >= 10;
+        var args = $"list \"{csprojFile.FullName}\" package{(includeTransitive ? " --include-transitive" : "")}{(applyNoRestore ? " --no-restore" : "")} --format json";
         var (exitCode, output, _) = await RunDotnetCommandAsync(csprojFile.Directory!, args, cancellationToken);
 
         if (exitCode != 0 || string.IsNullOrWhiteSpace(output))
@@ -579,6 +705,73 @@ internal partial class DotNetService : IDotNetService
         {
             return null;
         }
+    }
+
+    // Caches the resolved dotnet SDK major version per working directory (global.json can pin different
+    // SDKs per project), so the `--no-restore` capability probe runs `dotnet --version` at most once.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int?> _sdkMajorByDir =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Resolves the major version of the dotnet SDK active in <paramref name="workingDirectory"/> by
+    /// running <c>dotnet --version</c> (respecting any <c>global.json</c>). Returns <c>null</c> when the
+    /// version can't be determined; callers treat unknown conservatively (they skip SDK 10+-only switches).
+    /// </summary>
+    private async Task<int?> GetSdkMajorVersionAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken)
+    {
+        var key = workingDirectory.FullName;
+        if (_sdkMajorByDir.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        int? major = null;
+        try
+        {
+            var (exitCode, output, _) = await RunDotnetCommandAsync(workingDirectory, "--version", cancellationToken);
+            if (exitCode == 0)
+            {
+                major = ParseSdkMajorVersion(output);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            // Leave unknown; the caller falls back to the safe (switch-omitted) behavior.
+        }
+
+        _sdkMajorByDir[key] = major;
+        return major;
+    }
+
+    /// <summary>
+    /// Parses the SDK major version from <c>dotnet --version</c> output such as <c>10.0.302</c> or
+    /// <c>10.0.100-preview.1.24101.2</c>. Returns <c>null</c> for unrecognized output.
+    /// </summary>
+    internal static int? ParseSdkMajorVersion(string? versionOutput)
+    {
+        if (string.IsNullOrWhiteSpace(versionOutput))
+        {
+            return null;
+        }
+
+        var firstLine = versionOutput
+            .Split('\n', '\r')
+            .FirstOrDefault(line => !string.IsNullOrWhiteSpace(line))?
+            .Trim();
+        if (string.IsNullOrWhiteSpace(firstLine))
+        {
+            return null;
+        }
+
+        // Drop any prerelease/build suffix (after '-') before reading the leading major component.
+        var core = firstLine.Split('-', ' ')[0];
+        var dot = core.IndexOf('.');
+        var majorPart = dot >= 0 ? core[..dot] : core;
+        return int.TryParse(majorPart, out var parsed) && parsed > 0 ? parsed : null;
     }
 
     public async Task<bool> EnsureEnableMsixToolingAsync(FileInfo csprojPath, CancellationToken cancellationToken = default)

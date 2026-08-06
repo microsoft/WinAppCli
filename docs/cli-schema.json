@@ -697,6 +697,69 @@
         }
       }
     },
+    "embed-identity": {
+      "description": "Connect a desktop exe to its sparse identity package by embedding the <msix> element. Reads identity (packageName, publisher, applicationId) from a sparse appxmanifest.xml and writes it into the target's side-by-side (fusion) manifest. EXE targets are updated with mt.exe; .xml/.manifest targets are edited directly. Example: winapp embed-identity ./bin/MyApp.exe. This is step 3 of the sparse packaging workflow (after 'winapp init --exe --sparse' and 'winapp pack').",
+      "hidden": false,
+      "arguments": {
+        "target": {
+          "description": "Path to the .exe (embeds identity into its side-by-side manifest via mt.exe) or an .xml/.manifest side-by-side manifest file (inserts/replaces the <msix> element; created if it doesn't exist).",
+          "order": 0,
+          "hidden": false,
+          "valueType": "System.IO.FileInfo",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          }
+        }
+      },
+      "options": {
+        "--manifest": {
+          "description": "Path to the sparse appxmanifest.xml to read identity from. When omitted, searched in a 'sparse/' folder (where 'winapp init --exe --sparse' writes it by default) beside the target first, then in the current directory, then beside the target and in the current directory.",
+          "hidden": false,
+          "valueType": "System.IO.FileInfo",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--quiet": {
+          "description": "Suppress progress messages",
+          "hidden": false,
+          "aliases": [
+            "-q"
+          ],
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--verbose": {
+          "description": "Enable verbose output",
+          "hidden": false,
+          "aliases": [
+            "-v"
+          ],
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        }
+      }
+    },
     "get-winapp-path": {
       "description": "Print the path to the .winapp directory. Use --global for the shared cache location, or omit for the project-local .winapp folder. Useful for build scripts that need to reference installed packages.",
       "hidden": false,
@@ -790,6 +853,31 @@
           "required": false,
           "recursive": false
         },
+        "--exe": {
+          "description": "Path to the application executable. Requires --sparse. Generates an identity-only sparse manifest for the exe instead of a full package/SDK setup.",
+          "hidden": false,
+          "valueType": "System.IO.FileInfo",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--force": {
+          "description": "Overwrite an existing appxmanifest.xml in the target directory (sparse only). Without this, init fails instead of replacing existing manifest/asset files.",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--ignore-config": {
           "description": "Don't use configuration file for version management",
           "hidden": false,
@@ -806,6 +894,18 @@
           "required": false,
           "recursive": false
         },
+        "--name": {
+          "description": "Override the package name (sparse only; default: inferred from the exe)",
+          "hidden": false,
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--no-gitignore": {
           "description": "Don't update .gitignore file",
           "hidden": false,
@@ -814,6 +914,30 @@
           "defaultValue": false,
           "arity": {
             "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--output-dir": {
+          "description": "Directory to write the sparse manifest and Assets/ (sparse only; default: a 'sparse/' folder in the current directory)",
+          "hidden": false,
+          "valueType": "System.IO.DirectoryInfo",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--publisher": {
+          "description": "Override the publisher CN (sparse only; default: inferred from the exe's company name). Bare names are auto-wrapped as CN=<name>.",
+          "hidden": false,
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
             "maximum": 1
           },
           "required": false,
@@ -848,8 +972,21 @@
           "required": false,
           "recursive": false
         },
+        "--sparse": {
+          "description": "Generate a sparse identity manifest (appxmanifest.xml) for an existing desktop exe instead of a full package manifest. Use with --exe. Skips SDK/package installation.",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--use-defaults": {
-          "description": "Do not prompt; requires an explicit project directory (e.g., winapp init . --use-defaults)",
+          "description": "Skip interactive prompts and use default answers. Normal init targets the positional project directory if given, otherwise the current directory (e.g., winapp init . --use-defaults). Sparse init (--exe --sparse) ignores the positional directory and writes to --output-dir instead.",
           "hidden": false,
           "aliases": [
             "--no-prompt"
@@ -1352,7 +1489,7 @@
       ],
       "arguments": {
         "input-folder": {
-          "description": "One or more input folders with package layout. Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64).",
+          "description": "One or more input folders with package layout, or a single sparse appxmanifest.xml file (an identity-only package with AllowExternalContent). Pass multiple folders to create an MSIX bundle (e.g., winapp pack ./publish/x64 ./publish/arm64).",
           "order": 0,
           "hidden": false,
           "valueType": "System.IO.DirectoryInfo[]",
@@ -1601,17 +1738,17 @@
       }
     },
     "run": {
-      "description": "Creates packaged layout, registers the Application, and launches the packaged application.",
+      "description": "Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.",
       "hidden": false,
       "arguments": {
-        "input-folder": {
-          "description": "Input folder containing the app to run",
+        "input": {
+          "description": "Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory).",
           "order": 0,
           "hidden": false,
-          "valueType": "System.IO.DirectoryInfo",
+          "valueType": "System.IO.FileSystemInfo",
           "hasDefaultValue": false,
           "arity": {
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 1
           }
         },
@@ -1627,6 +1764,18 @@
         }
       },
       "options": {
+        "--arch": {
+          "description": "Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Default: the current process architecture.",
+          "hidden": false,
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--args": {
           "description": "Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value).",
           "hidden": false,
@@ -1647,6 +1796,22 @@
           "defaultValue": false,
           "arity": {
             "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--configuration": {
+          "description": "Project mode: build configuration (e.g., Debug, Release). Ignored in folder mode. Default: Debug.",
+          "hidden": false,
+          "aliases": [
+            "-c"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": true,
+          "defaultValue": "Debug",
+          "arity": {
+            "minimum": 1,
             "maximum": 1
           },
           "required": false,
@@ -1693,6 +1858,21 @@
           "required": false,
           "recursive": false
         },
+        "--framework": {
+          "description": "Project mode: target framework moniker for multi-targeted projects (e.g. net10.0-windows10.0.26100.0). Ignored in folder mode.",
+          "hidden": false,
+          "aliases": [
+            "-f"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--json": {
           "description": "Format output as JSON",
           "hidden": false,
@@ -1718,6 +1898,19 @@
           "required": false,
           "recursive": false
         },
+        "--no-build": {
+          "description": "Project mode: skip building and run the existing build output (still evaluates output properties). Ignored in folder mode.",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--no-launch": {
           "description": "Only create the debug identity and register the package without launching the application",
           "hidden": false,
@@ -1731,14 +1924,53 @@
           "required": false,
           "recursive": false
         },
+        "--no-restore": {
+          "description": "Project mode: skip restoring the project before building. Ignored in folder mode.",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
         "--output-appx-directory": {
-          "description": "Output directory for the loose layout package. If not specified, a directory named AppX inside the input-folder directory will be used.",
+          "description": "Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory will be used.",
           "hidden": false,
           "valueType": "System.IO.DirectoryInfo",
           "hasDefaultValue": false,
           "arity": {
             "minimum": 1,
             "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--project": {
+          "description": "Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode.",
+          "hidden": false,
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--property": {
+          "description": "Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode.",
+          "hidden": false,
+          "aliases": [
+            "-p"
+          ],
+          "valueType": "System.String[]",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 0
           },
           "required": false,
           "recursive": false
@@ -1754,6 +1986,21 @@
           "defaultValue": false,
           "arity": {
             "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--runtime": {
+          "description": "Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode.",
+          "hidden": false,
+          "aliases": [
+            "-r"
+          ],
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
             "maximum": 1
           },
           "required": false,
@@ -3223,7 +3470,7 @@
           }
         },
         "record": {
-          "description": "Record the target window (or an element's region) to an H.264 MP4 video. Captures frames via Windows Graphics Capture and encodes with Media Foundation. By default records until stopped (Ctrl+C, or a newline/EOF on stdin for programmatic callers). Use --duration-sec N for a timed run. A valid MP4 is always finalized on graceful stop. Use --capture-screen to include overlays/popups.",
+          "description": "Record the target window (or an element's region) to an H.264 MP4 video. By default records until Ctrl+C or redirected-stdin newline/EOF. Use --duration-sec for a timed run, --frames for timestamped JPEG evidence, and --capture-screen for overlays and popups.",
           "hidden": false,
           "arguments": {
             "selector": {
@@ -3268,7 +3515,7 @@
               "recursive": false
             },
             "--duration-sec": {
-              "description": "Recording duration in seconds. Default 0 records until stopped — Ctrl+C, or (for programmatic callers) a newline or EOF on stdin. A valid MP4 is always finalized on graceful stop.",
+              "description": "Recording duration in seconds. 0 records until Ctrl+C or redirected-stdin newline/EOF.",
               "hidden": false,
               "valueType": "System.Int32",
               "hasDefaultValue": true,
@@ -3288,6 +3535,19 @@
               "defaultValue": 15,
               "arity": {
                 "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--frames": {
+              "description": "Write timestamped JPEGs, frames.ndjson, and manifest.json to <output-name>.frames. Supports 1-30 fps and max-edge 64-4096 (default 1280), with a 1 GiB frame-data cap.",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
                 "maximum": 1
               },
               "required": false,

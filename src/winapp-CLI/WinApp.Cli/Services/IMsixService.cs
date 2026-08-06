@@ -50,6 +50,36 @@ internal interface IMsixService
         TaskContext taskContext,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Builds an identity-only sparse MSIX package from a sparse appxmanifest.xml
+    /// (one that declares uap10:AllowExternalContent). Only the manifest is packaged —
+    /// application binaries and visual assets are resolved from the external content
+    /// location at registration time. Optionally signs the resulting package.
+    /// </summary>
+    public Task<CreateMsixPackageResult> CreateSparseIdentityPackageAsync(
+        FileInfo manifestPath,
+        FileSystemInfo? outputPath,
+        TaskContext taskContext,
+        bool autoSign = false,
+        FileInfo? certificatePath = null,
+        string certificatePassword = "password",
+        bool generateDevCert = false,
+        bool installDevCert = false,
+        string? publisher = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Embeds the <c>&lt;msix&gt;</c> identity element (read from a sparse appxmanifest.xml)
+    /// into a target. When the target is an .exe, the element is embedded into the exe's
+    /// side-by-side (fusion) manifest via mt.exe. When the target is an .xml/.manifest file,
+    /// the element is inserted or replaced in that external SxS manifest.
+    /// </summary>
+    public Task<MsixIdentityResult> EmbedIdentityAsync(
+        FileInfo target,
+        FileInfo manifestPath,
+        TaskContext taskContext,
+        CancellationToken cancellationToken = default);
+
     public Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(
         FileInfo appxManifestPath,
         DirectoryInfo inputDirectory,
@@ -57,5 +87,36 @@ internal interface IMsixService
         TaskContext taskContext,
         bool clean = false,
         string? executable = null,
+        string? runtimeArch = null,
+        FileInfo? projectFile = null,
+        string? framework = null,
+        bool noRestore = false,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Ensures the Windows App Runtime framework packages (Framework / DDLM / Singleton / Main) are
+    /// installed for a project-mode <b>unpackaged</b> app before it is launched. The DDLM this lays down
+    /// is exactly what an unpackaged WinUI app's bootstrapper resolves at startup. Reuses the same install
+    /// path as the packaged flow; callers must gate on <c>WindowsAppSDKSelfContained</c> (skip when true).
+    /// Returns <c>true</c> when a runtime was actually provisioned, or <c>false</c> when the project has no
+    /// Windows App SDK reference and the install was skipped (so callers don't report a runtime as "ready"
+    /// for a plain desktop/console app).
+    /// </summary>
+    /// <param name="projectFile">The project whose package list drives runtime version resolution; <c>null</c> falls back to a cwd glob.</param>
+    /// <param name="architecture">The app's resolved architecture (<c>x64</c> / <c>arm64</c> / <c>x86</c>), so the correct-arch Framework/DDLM is installed.</param>
+    /// <param name="framework">
+    /// The effective target framework moniker the app was built for (e.g. <c>net10.0-windows10.0.26100.0</c>),
+    /// or <c>null</c>. For a multi-targeted project this pins runtime resolution to the built TFM's Windows App
+    /// SDK version, so a sibling TFM referencing a different SDK version can't gate the wrong runtime.
+    /// </param>
+    /// <param name="taskContext">Status/debug sink.</param>
+    /// <param name="noRestore">When true, runtime discovery passes <c>--no-restore</c> to <c>dotnet list package</c> so a no-restore run doesn't trigger an implicit restore.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<bool> EnsureWindowsAppRuntimeInstalledAsync(
+        FileInfo? projectFile,
+        string? architecture,
+        string? framework,
+        bool noRestore,
+        TaskContext taskContext,
         CancellationToken cancellationToken = default);
 }

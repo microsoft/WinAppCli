@@ -2566,7 +2566,7 @@ public class PackageCommandTests : BaseCommandTests
             ManifestTemplates.Packaged,
             "Test",
             TestTaskContext,
-            TestContext.CancellationToken);
+            cancellationToken: TestContext.CancellationToken);
 
         // Generate cert from same publisher input
         await _certificateService.GenerateDevCertificateAsync(

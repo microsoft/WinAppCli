@@ -449,6 +449,41 @@ public class WindowsCommandLineTests
     }
 
     #endregion
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // SplitArguments — inverse of JoinArguments/EscapeArgument
+    // ──────────────────────────────────────────────────────────────────────────
+
+    #region SplitArguments
+
+    [TestMethod]
+    public void SplitArguments_RoundTripsJoinArguments()
+    {
+        string[] tokens =
+        [
+            "build",
+            "App.csproj",
+            "-p:PackageCertificatePassword=ab\"cd\"ef",
+            "-p:Path=C:\\my path\\",
+            "-p:Packed=A=1;secret;B=2",
+            "--",
+            "arg with spaces",
+        ];
+
+        var joined = WindowsCommandLine.JoinArguments(tokens)!;
+        var split = WindowsCommandLine.SplitArguments(joined);
+
+        CollectionAssert.AreEqual(tokens, split.ToList());
+    }
+
+    [TestMethod]
+    public void SplitArguments_EmptyOrWhitespace_ReturnsEmpty()
+    {
+        Assert.AreEqual(0, WindowsCommandLine.SplitArguments("").Count);
+        Assert.AreEqual(0, WindowsCommandLine.SplitArguments("   ").Count);
+    }
+
+    #endregion
 }
 
 // ────────────────────────────────────────────────────────────────────────────

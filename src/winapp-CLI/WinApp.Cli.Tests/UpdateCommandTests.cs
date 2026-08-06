@@ -35,7 +35,7 @@ public sealed class UpdateCommandTests : BaseCommandTests
             .AddSingleton<INugetService>(_nuget)
             .AddSingleton<IPackageInstallationService>(_pkg)
             .AddSingleton<IBuildToolsService>(_buildTools)
-            .AddSingleton<IWorkspaceSetupService>(_workspace);
+            .AddSingleton<IWindowsAppRuntimeService>(_workspace);
     }
 
     [TestInitialize]
@@ -229,29 +229,31 @@ public sealed class UpdateCommandTests : BaseCommandTests
 }
 
 /// <summary>
-/// Test-local <see cref="IWorkspaceSetupService"/> that records runtime-install calls and can be
+/// Test-local <see cref="IWindowsAppRuntimeService"/> that records runtime-install calls and can be
 /// told to throw, so the update command's runtime-install and top-level catch paths are reachable
 /// deterministically.
 /// </summary>
-internal sealed class UpdateWorkspaceFake : IWorkspaceSetupService
+internal sealed class UpdateWorkspaceFake : IWindowsAppRuntimeService
 {
     public DirectoryInfo? MsixDirectory { get; set; }
     public List<DirectoryInfo> InstallRuntimeCalls { get; } = [];
     public (int InstalledCount, int ErrorCount) InstallRuntimeResult { get; set; } = (1, 0);
     public Exception? InstallRuntimeException { get; set; }
 
-    public DirectoryInfo? FindWindowsAppSdkMsixDirectory(Dictionary<string, string>? usedVersions = null) => MsixDirectory;
+    public DirectoryInfo? FindWindowsAppSdkMsixDirectory(Dictionary<string, string>? usedVersions = null, bool requireExactVersion = false) => MsixDirectory;
 
-    public Task<int> SetupWorkspaceAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken = default)
-        => Task.FromResult(0);
+    public bool IsRuntimeRegisteredResult { get; set; } = true;
 
-    public Task<(int InstalledCount, int ErrorCount)> InstallWindowsAppRuntimeAsync(DirectoryInfo msixDir, TaskContext taskContext, CancellationToken cancellationToken)
+    public Task<(int InstalledCount, int ErrorCount, IReadOnlyList<(string Name, string Version)> RuntimePackages)> InstallWindowsAppRuntimeAsync(DirectoryInfo msixDir, TaskContext taskContext, CancellationToken cancellationToken, string? architecture = null)
     {
         InstallRuntimeCalls.Add(msixDir);
         if (InstallRuntimeException != null)
         {
             throw InstallRuntimeException;
         }
-        return Task.FromResult(InstallRuntimeResult);
+        return Task.FromResult((InstallRuntimeResult.InstalledCount, InstallRuntimeResult.ErrorCount, (IReadOnlyList<(string Name, string Version)>)[]));
     }
+
+    public bool IsWindowsAppRuntimeRegistered(string? architecture, IReadOnlyList<(string Name, string Version)>? expectedRuntimePackages = null)
+        => IsRuntimeRegisteredResult;
 }

@@ -94,6 +94,7 @@ test('buildUiRecordArgs: all options produce correct arg list', () => {
     captureScreen: true,
     durationSec: 10,
     fps: 30,
+    frames: true,
     json: true,
     maxEdge: 1080,
     output: 'out.mp4',
@@ -120,6 +121,7 @@ test('buildUiRecordArgs: all options produce correct arg list', () => {
   assert.equal(args[args.indexOf('--duration-sec') + 1], '10');
   assert.ok(args.includes('--fps'));
   assert.equal(args[args.indexOf('--fps') + 1], '30');
+  assert.ok(args.includes('--frames'));
   assert.ok(args.includes('--json'));
   assert.ok(args.includes('--max-edge'));
   assert.equal(args[args.indexOf('--max-edge') + 1], '1080');

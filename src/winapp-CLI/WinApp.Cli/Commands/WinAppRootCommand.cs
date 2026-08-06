@@ -62,6 +62,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         ManifestCommand manifestCommand,
         UpdateCommand updateCommand,
         CreateDebugIdentityCommand createDebugIdentityCommand,
+        EmbedIdentityCommand embedIdentityCommand,
         RunCommand runCommand,
         UnregisterCommand unregisterCommand,
         GetWinappPathCommand getWinappPathCommand,
@@ -82,6 +83,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Subcommands.Add(manifestCommand);
         Subcommands.Add(updateCommand);
         Subcommands.Add(createDebugIdentityCommand);
+        Subcommands.Add(embedIdentityCommand);
         Subcommands.Add(runCommand);
         Subcommands.Add(unregisterCommand);
         Subcommands.Add(getWinappPathCommand);
@@ -104,7 +106,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         var helpOption = Options.OfType<HelpOption>().First();
         helpOption.Action = new CustomHelpAction(this, ansiConsole,
             ("Setup", [typeof(InitCommand), typeof(NewCommand), typeof(RestoreCommand), typeof(UpdateCommand)]),
-            ("Packaging & Signing", [typeof(PackageCommand), typeof(SignCommand), typeof(AzSignCommand), typeof(CertCommand), typeof(ManifestCommand), typeof(CreateExternalCatalogCommand)]),
+            ("Packaging & Signing", [typeof(PackageCommand), typeof(SignCommand), typeof(AzSignCommand), typeof(CertCommand), typeof(ManifestCommand), typeof(EmbedIdentityCommand), typeof(CreateExternalCatalogCommand)]),
             ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand), typeof(RunCommand), typeof(UnregisterCommand)]),
             ("UI Automation", [typeof(UiCommand)])
         );
