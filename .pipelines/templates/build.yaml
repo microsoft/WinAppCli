@@ -70,6 +70,10 @@ steps:
     arguments: "-Stable:$${{ parameters.stable }}"
 - task: PowerShell@2
   displayName: Bundle MSIX Packages
+  env:
+    WINAPP_NUGET_FLAT_CONTAINER: https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/nuget/v3/flat2
+    WINAPP_NUGET_REGISTRATION: https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/nuget/v3/registrations2-semver2
+    WINAPP_NUGET_AUTH_PREFIX: https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/nuget/v3/
   inputs:
     pwsh: true
     filePath: $(System.DefaultWorkingDirectory)\scripts\package-msix.ps1
