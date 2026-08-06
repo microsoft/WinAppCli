@@ -12,6 +12,11 @@ parameters:
 steps:
 - task: PowerShell@2
   displayName: Build CLI
+  env:
+    NPM_CONFIG_USERCONFIG: $(System.DefaultWorkingDirectory)\.npmrc
+    WINAPP_NUGET_FLAT_CONTAINER: https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/nuget/v3/flat2
+    WINAPP_NUGET_REGISTRATION: https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/nuget/v3/registrations2-semver2
+    WINAPP_NUGET_AUTH_PREFIX: https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/nuget/v3/
   inputs:
     pwsh: true
     filePath: $(System.DefaultWorkingDirectory)\scripts\build-cli.ps1
@@ -57,6 +62,8 @@ steps:
         ]
 - task: PowerShell@2
   displayName: Package NPM
+  env:
+    NPM_CONFIG_USERCONFIG: $(System.DefaultWorkingDirectory)\.npmrc
   inputs:
     pwsh: true
     filePath: $(System.DefaultWorkingDirectory)\scripts\package-npm.ps1

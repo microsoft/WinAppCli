@@ -33,6 +33,10 @@ public sealed class NugetServiceOfflineTests : BaseCommandTests
     private Func<string> _originalUserProfile = null!;
     private string? _originalNugetPackages;
     private string? _originalCacheDir;
+    private string? _originalFlatContainer;
+    private string? _originalRegistration;
+    private string? _originalAuthPrefix;
+    private string? _originalAccessToken;
 
     [TestInitialize]
     public void SetupOffline()
@@ -41,6 +45,15 @@ public sealed class NugetServiceOfflineTests : BaseCommandTests
         _originalUserProfile = NugetService.GetUserProfileDirectory;
         _originalNugetPackages = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
         _originalCacheDir = Environment.GetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY");
+        _originalFlatContainer = Environment.GetEnvironmentVariable(NugetService.FlatContainerEnvironmentVariable);
+        _originalRegistration = Environment.GetEnvironmentVariable(NugetService.RegistrationEnvironmentVariable);
+        _originalAuthPrefix = Environment.GetEnvironmentVariable(NugetService.AuthPrefixEnvironmentVariable);
+        _originalAccessToken = Environment.GetEnvironmentVariable(NugetService.AzureArtifactsTokenEnvironmentVariable);
+
+        Environment.SetEnvironmentVariable(NugetService.FlatContainerEnvironmentVariable, null);
+        Environment.SetEnvironmentVariable(NugetService.RegistrationEnvironmentVariable, null);
+        Environment.SetEnvironmentVariable(NugetService.AuthPrefixEnvironmentVariable, null);
+        Environment.SetEnvironmentVariable(NugetService.AzureArtifactsTokenEnvironmentVariable, null);
 
         // A throwaway global dir (not %USERPROFILE%\.winapp) so IsTestOverride() routes the real
         // NugetService cache to <global>\packages, fully isolated from the developer's NuGet cache.
@@ -55,6 +68,10 @@ public sealed class NugetServiceOfflineTests : BaseCommandTests
         NugetService.GetUserProfileDirectory = _originalUserProfile;
         Environment.SetEnvironmentVariable("NUGET_PACKAGES", _originalNugetPackages);
         Environment.SetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY", _originalCacheDir);
+        Environment.SetEnvironmentVariable(NugetService.FlatContainerEnvironmentVariable, _originalFlatContainer);
+        Environment.SetEnvironmentVariable(NugetService.RegistrationEnvironmentVariable, _originalRegistration);
+        Environment.SetEnvironmentVariable(NugetService.AuthPrefixEnvironmentVariable, _originalAuthPrefix);
+        Environment.SetEnvironmentVariable(NugetService.AzureArtifactsTokenEnvironmentVariable, _originalAccessToken);
     }
 
     // ─────────────────────────────── InstallPackageAsync ───────────────────────────────
@@ -546,6 +563,61 @@ public sealed class NugetServiceOfflineTests : BaseCommandTests
         Assert.AreEqual(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             NugetService.GetUserProfileDirectory());
+    }
+
+    [TestMethod]
+    public async Task FeedEndpoints_DefaultToNuGetOrg()
+    {
+        string? downloadUrl = null;
+        NugetService.HttpGetAsync = (url, _) =>
+        {
+            downloadUrl = url;
+            return Task.FromResult(BytesResponse(BuildNupkg("test.pkg", NuspecXml("Test.Pkg"))));
+        };
+
+        await _service.InstallPackageAsync("Test.Pkg", "1.0.0", TestTaskContext, TestContext.CancellationToken);
+
+        StringAssert.StartsWith(downloadUrl, "https://api.nuget.org/v3-flatcontainer/", StringComparison.Ordinal);
+    }
+
+    [TestMethod]
+    public async Task FeedEndpoints_UseConfiguredAzureArtifactsEndpoints()
+    {
+        const string flatContainer = "https://pkgs.example.test/feed/flat2/";
+        const string registration = "https://pkgs.example.test/feed/registrations2-semver2/";
+        Environment.SetEnvironmentVariable(NugetService.FlatContainerEnvironmentVariable, flatContainer);
+        Environment.SetEnvironmentVariable(NugetService.RegistrationEnvironmentVariable, registration);
+        var requestedUrls = new List<string>();
+        NugetService.HttpGetAsync = (url, _) =>
+        {
+            requestedUrls.Add(url);
+            return Task.FromResult(url.Contains("registrations2-semver2", StringComparison.Ordinal)
+                ? JsonResponse("{\"items\":[" + InlinePage(("1.0.0", true)) + "]}")
+                : BytesResponse(BuildNupkg("test.pkg", NuspecXml("Test.Pkg"))));
+        };
+
+        await _service.InstallPackageAsync("Test.Pkg", "1.0.0", TestTaskContext, TestContext.CancellationToken);
+        await _service.GetLatestVersionAsync("Test.Pkg", SdkInstallMode.Stable, TestContext.CancellationToken);
+
+        Assert.IsTrue(requestedUrls.Any(url => url.StartsWith(flatContainer, StringComparison.Ordinal)));
+        Assert.IsTrue(requestedUrls.Any(url => url.StartsWith(registration, StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public void CreateHttpRequest_ScopesAzureArtifactsTokenToConfiguredPrefix()
+    {
+        const string authPrefix = "https://pkgs.example.test/feed/";
+        Environment.SetEnvironmentVariable(NugetService.AuthPrefixEnvironmentVariable, authPrefix);
+        Environment.SetEnvironmentVariable(NugetService.AzureArtifactsTokenEnvironmentVariable, "test-token");
+
+        using var internalRequest = NugetService.CreateHttpRequest(authPrefix + "flat2/test.pkg/index.json");
+        using var publicRequest = NugetService.CreateHttpRequest("https://api.nuget.org/v3-flatcontainer/test.pkg/index.json");
+
+        Assert.AreEqual("Basic", internalRequest.Headers.Authorization?.Scheme);
+        Assert.AreEqual(
+            "VssSessionToken:test-token",
+            Encoding.UTF8.GetString(Convert.FromBase64String(internalRequest.Headers.Authorization!.Parameter!)));
+        Assert.IsNull(publicRequest.Headers.Authorization);
     }
 
     // ───────────────────────────────────── helpers ─────────────────────────────────────

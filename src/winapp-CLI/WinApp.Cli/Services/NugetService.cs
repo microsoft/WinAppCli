@@ -3,6 +3,8 @@
 
 using System.Collections.Concurrent;
 using System.IO.Compression;
+using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml;
@@ -18,8 +20,8 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
     /// <summary>
     /// Seam for the flat-container and registration HTTP GETs used by package download,
     /// version resolution, and dependency parsing. Defaults to the shared <see cref="Http"/>
-    /// client so production behavior is byte-for-byte unchanged; tests replace it with canned
-    /// in-memory responses so those paths run without network I/O.
+    /// client; tests replace it with canned in-memory responses so those paths run without
+    /// network I/O.
     /// </summary>
     /// <remarks>
     /// The default delegate wraps the single real
@@ -28,7 +30,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
     /// issue #630. Only the default delegate performs network I/O.
     /// </remarks>
     internal static Func<string, CancellationToken, Task<HttpResponseMessage>> HttpGetAsync { get; set; }
-        = static (url, cancellationToken) => Http.GetAsync(url, cancellationToken);
+        = SendHttpGetAsync;
 
     /// <summary>
     /// Seam for the current user's profile directory, used to compute the default NuGet
@@ -40,9 +42,42 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
     internal static Func<string> GetUserProfileDirectory { get; set; }
         = static () => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-    private const string FlatIndex = "https://api.nuget.org/v3-flatcontainer";
-    private const string RegistrationIndex = "https://api.nuget.org/v3/registration5-semver1";
+    private const string DefaultFlatIndex = "https://api.nuget.org/v3-flatcontainer";
+    private const string DefaultRegistrationIndex = "https://api.nuget.org/v3/registration5-semver1";
+    internal const string FlatContainerEnvironmentVariable = "WINAPP_NUGET_FLAT_CONTAINER";
+    internal const string RegistrationEnvironmentVariable = "WINAPP_NUGET_REGISTRATION";
+    internal const string AuthPrefixEnvironmentVariable = "WINAPP_NUGET_AUTH_PREFIX";
+    internal const string AzureArtifactsTokenEnvironmentVariable = "VSS_NUGET_ACCESSTOKEN";
     private static readonly ConcurrentDictionary<string, Dictionary<string, string>> DependencyCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private static string FlatIndex => GetFeedEndpoint(FlatContainerEnvironmentVariable, DefaultFlatIndex);
+    private static string RegistrationIndex => GetFeedEndpoint(RegistrationEnvironmentVariable, DefaultRegistrationIndex);
+
+    private static string GetFeedEndpoint(string environmentVariable, string defaultEndpoint)
+        => (Environment.GetEnvironmentVariable(environmentVariable) ?? defaultEndpoint).TrimEnd('/');
+
+    private static async Task<HttpResponseMessage> SendHttpGetAsync(string url, CancellationToken cancellationToken)
+    {
+        using var request = CreateHttpRequest(url);
+        return await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+    }
+
+    internal static HttpRequestMessage CreateHttpRequest(string url)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
+        var authPrefix = Environment.GetEnvironmentVariable(AuthPrefixEnvironmentVariable);
+        var accessToken = Environment.GetEnvironmentVariable(AzureArtifactsTokenEnvironmentVariable);
+
+        if (!string.IsNullOrWhiteSpace(authPrefix)
+            && !string.IsNullOrWhiteSpace(accessToken)
+            && url.StartsWith(authPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            var credential = Convert.ToBase64String(Encoding.UTF8.GetBytes($"VssSessionToken:{accessToken}"));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Basic", credential);
+        }
+
+        return request;
+    }
 
     public DirectoryInfo GetNuGetGlobalPackagesDir()
     {
