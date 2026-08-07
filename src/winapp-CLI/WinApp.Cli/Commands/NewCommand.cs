@@ -477,6 +477,10 @@ internal class NewCommand : Command, IShortDescription
                 {
                     PrintJson(false, templateArg, name ?? string.Empty, (output ?? currentDir).FullName, detail);
                 }
+                else
+                {
+                    logger.LogError("{Error} {Detail}", UiSymbols.Error, detail);
+                }
                 return ExitTemplatePackFailed;
             }
 

@@ -417,6 +417,31 @@ public class NewCommandHandlerTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task Handler_InstalledVersionWithNoPack_LogsErrorOnNonJsonPath()
+    {
+        // Regression: `--template-version installed` with no pack present must not exit 4 silently on
+        // the non-JSON path — the failure reason has to reach the user.
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            // Every pack probe (uninstall/list) reports nothing installed.
+            return (0, string.Empty, string.Empty);
+        };
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--template-version", "installed"]);
+
+        Assert.AreEqual(NewCommand.ExitTemplatePackFailed, exitCode);
+        Assert.IsNull(ScaffoldInvocation(), "Scaffold must not run when the pack can't be prepared.");
+        var output = $"{ConsoleStdOut}{ConsoleStdErr}";
+        Assert.IsTrue(output.Contains("No WinUI template pack is installed", StringComparison.Ordinal),
+            $"A pack-preparation failure on the non-JSON path must surface the reason, not exit silently. Output:\n{output}");
+    }
+
+    [TestMethod]
     public async Task Handler_ScaffoldFails_ReturnsScaffoldFailed()
     {
         _dotnet.RunDotnetArgumentListHandler = args =>
