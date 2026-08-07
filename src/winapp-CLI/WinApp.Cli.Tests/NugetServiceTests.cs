@@ -229,9 +229,8 @@ public partial class NugetServiceTests : BaseCommandTests
     /// </summary>
     private static async Task<bool> IsVersionListedAsync(string packageName, string version, CancellationToken cancellationToken)
     {
-        using var http = new HttpClient();
-        var url = $"https://api.nuget.org/v3/registration5-semver1/{packageName.ToLowerInvariant()}/index.json";
-        using var resp = await http.GetAsync(url, cancellationToken);
+        var url = $"{NugetService.RegistrationIndex}/{packageName.ToLowerInvariant()}/index.json";
+        using var resp = await NugetService.SendHttpGetAsync(url, cancellationToken);
         resp.EnsureSuccessStatusCode();
         using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
@@ -261,7 +260,7 @@ public partial class NugetServiceTests : BaseCommandTests
                     continue;
                 }
 
-                using var pageResp = await http.GetAsync(pageUrl, cancellationToken);
+                using var pageResp = await NugetService.SendHttpGetAsync(pageUrl, cancellationToken);
                 pageResp.EnsureSuccessStatusCode();
                 using var pageStream = await pageResp.Content.ReadAsStreamAsync(cancellationToken);
                 using var pageDoc = await JsonDocument.ParseAsync(pageStream, cancellationToken: cancellationToken);
@@ -303,9 +302,8 @@ public partial class NugetServiceTests : BaseCommandTests
     /// </summary>
     private static async Task<HashSet<string>> GetFlatContainerVersionsAsync(string packageName, CancellationToken cancellationToken)
     {
-        using var http = new HttpClient();
-        var url = $"https://api.nuget.org/v3-flatcontainer/{packageName.ToLowerInvariant()}/index.json";
-        using var resp = await http.GetAsync(url, cancellationToken);
+        var url = $"{NugetService.FlatIndex}/{packageName.ToLowerInvariant()}/index.json";
+        using var resp = await NugetService.SendHttpGetAsync(url, cancellationToken);
         resp.EnsureSuccessStatusCode();
         using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
@@ -331,9 +329,8 @@ public partial class NugetServiceTests : BaseCommandTests
     /// </summary>
     private static async Task<HashSet<string>> GetListedVersionsFromRegistrationAsync(string packageName, CancellationToken cancellationToken)
     {
-        using var http = new HttpClient();
-        var url = $"https://api.nuget.org/v3/registration5-semver1/{packageName.ToLowerInvariant()}/index.json";
-        using var resp = await http.GetAsync(url, cancellationToken);
+        var url = $"{NugetService.RegistrationIndex}/{packageName.ToLowerInvariant()}/index.json";
+        using var resp = await NugetService.SendHttpGetAsync(url, cancellationToken);
         resp.EnsureSuccessStatusCode();
         using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
@@ -364,7 +361,7 @@ public partial class NugetServiceTests : BaseCommandTests
                     continue;
                 }
 
-                using var pageResp = await http.GetAsync(pageUrl, cancellationToken);
+                using var pageResp = await NugetService.SendHttpGetAsync(pageUrl, cancellationToken);
                 pageResp.EnsureSuccessStatusCode();
                 using var pageStream = await pageResp.Content.ReadAsStreamAsync(cancellationToken);
                 using var pageDoc = await JsonDocument.ParseAsync(pageStream, cancellationToken: cancellationToken);
