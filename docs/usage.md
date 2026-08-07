@@ -1067,6 +1067,109 @@ winapp get-winapp-path [options]
 
 ---
 
+### find-ui
+
+Search **WinUI** controls and samples for a working code example. WinUI-only: the corpus is the [WinUI 3 Gallery](https://github.com/microsoft/WinUI-Gallery) and the [Windows Community Toolkit](https://github.com/CommunityToolkit/Windows) (plus a few curated core patterns) — it does **not** cover WPF, WinForms, or other UI frameworks. A third source, the [microsoft-ui-reactor ReactorGallery](https://github.com/microsoft/microsoft-ui-reactor), is **opt-in**: it is excluded from a normal search and only searched when you pass `--source reactor` (its C#-only declarative samples don't paste into a standard XAML app, so reach for it only when building a Reactor/MVU project).
+
+```bash
+winapp find-ui "<query>" [options]
+```
+
+The corpus is fetched from GitHub on first use and cached per-user under `<global .winapp>/cache/find-ui`, so the **first run requires network access**. Subsequent runs are served from the local cache (refreshed at most every 7 days, or on demand with `--refresh`).
+
+**Options:**
+
+- `--id <id>` - Fetch the code (Gallery/Toolkit return XAML and/or C#; Reactor is C#-only) plus prerequisite notes for one or more scenario ids from a prior search (e.g. `gallery-tabview-1`). Repeatable. **Ids are case-insensitive** — `GALLERY-TABVIEW-1` resolves the same as `gallery-tabview-1`.
+- `--list` - List every discoverable control/sample id instead of searching (Gallery + Toolkit + core; the opt-in Reactor source is excluded).
+- `--source <gallery|toolkit|reactor|core>` - Restrict search results to a single source. (Search only — not valid with `--list`/`--id`.) **Reactor is opt-in** — it is excluded from a normal search, so `--source reactor` is the only way to search it.
+- `--max <N>` - Maximum number of matched controls to return (default: 3). Applies to search only; ignored with `--list`/`--id`.
+- `--refresh` - Bypass the local cache and re-fetch the WinUI corpus from GitHub.
+- `--json` - Emit structured JSON (agent-friendly). For search, each match carries `source`, `control`, `score`, `description`, and a `scenarios` array whose entries hold the per-scenario `id` and `header`; for `--id`, full code. Under `--json` **every** failure — including argument/parser errors such as a non-integer `--max` — is emitted as a flat `{"error": "..."}` object on stdout with a non-zero exit code, so output stays machine-readable.
+
+**Workflow:** search compactly to find the right control and its scenario ids, then fetch the full code for the best match with `--id`.
+
+**Examples:**
+
+```bash
+# Find a control by intent (compact results with scenario ids)
+winapp find-ui "tabbed layout"
+
+# Restrict to the Windows Community Toolkit
+winapp find-ui "settings card" --source toolkit
+
+# Restrict to Reactor (opt-in; C#-only declarative WinUI — Reactor projects only)
+winapp find-ui "flex layout" --source reactor
+
+# Fetch the full XAML + C# for a specific scenario
+winapp find-ui --id gallery-tabview-1
+
+# Agent-friendly structured output
+winapp find-ui "color picker" --json
+
+# Browse everything, or force a corpus refresh
+winapp find-ui --list
+winapp find-ui "navigation view" --refresh
+```
+
+**Related:** `find-ui` searches WinUI *samples*; use [`find-api`](#find-api) to search the *API surface* (types, members, enums) a project references, and `winapp ui search` to search a *running app's* UI tree.
+
+---
+
+### find-api
+
+Search and inspect the Windows/WinRT API surface (types, members, enums, namespaces) available to a project, resolved from its referenced `.winmd`/`.dll` metadata. The bare form searches; sub-verbs drill into a specific type, namespace, or the index itself.
+
+```bash
+winapp find-api "<query>" [options]
+winapp find-api [command] [options]
+```
+
+The index is built from the project's restored NuGet/SDK packages (via `project.assets.json`) on first use and refreshed automatically when the project is restored. It lives under the global `.winapp` cache (`cache/find-api/`) and is shared across projects. Restore the project first (`winapp restore` or `dotnet restore`).
+
+**Commands:**
+- *(bare)* `find-api "<query>"` - Lexically search type and member names, grouped by namespace
+- `members <type>` - List a type's properties, events, and methods (with descriptions and inherited members)
+- `check-property <type> <property>` - Validate a property exists on a type (exits non-zero on a miss)
+- `types <namespace>` - List the types declared in a namespace
+- `enums <type>` - List an enum's values (exits non-zero when the type is not an enum)
+- `namespaces [--filter <prefix>]` - List the namespaces available to the project
+- `packages` - List the indexed metadata packages, with per-package type/member counts
+- `stats` - Show aggregate index statistics (packages, namespaces, types, members, `.winmd` files)
+- `projects` - List every project that currently has an API index in the shared cache
+- `refresh [--scan]` - Rebuild the index for a project (`--scan` indexes every project under the directory)
+
+**Options:**
+- `--max <n>` - Maximum number of namespace-grouped search results (default `30`; search only)
+- `--filter <prefix>` - Only list namespaces starting with this prefix (`namespaces` only)
+- `--scan` - Recursively discover and index every project under the directory (`refresh` only)
+- `--project <name>` - Disambiguate when several projects are indexed (matches the `.csproj`/`.vcxproj` name)
+- `--project-dir <path>` - Project directory to query (defaults to the current directory)
+- `--json` - Emit a machine-readable payload on stdout (supported by every verb). Under `--json` **every** failure — including argument/parser errors such as a non-integer `--max` — is emitted as a flat `{"error": "..."}` object on stdout with a non-zero exit code, so output stays machine-readable.
+
+**Examples:**
+```bash
+# Search
+winapp find-api "acrylic brush"
+winapp find-api NavigationView --max 10
+
+# Inspect and validate
+winapp find-api members Microsoft.UI.Xaml.Controls.NavigationView
+winapp find-api check-property Button Background
+winapp find-api enums Symbol
+
+# Explore and manage the index
+winapp find-api namespaces --filter Microsoft.UI.Xaml
+winapp find-api types Microsoft.UI.Xaml.Controls
+winapp find-api projects
+winapp find-api refresh
+```
+
+**Exit codes:** `search` with no hits, `check-property` on a missing property, and `enums` on a non-enum type all exit non-zero — gate code generation and CI checks on them.
+
+**Related:** `find-api` answers "does this API exist and what are its members?"; use [`find-ui`](#find-ui) to find a working WinUI sample for a control.
+
+---
+
 ### node generate-bindings
 
 *(Available in NPM package only)* Generate JS bindings for Windows App SDK APIs. The bindings are declared by a `"winapp": { "jsBindings": {...} }` namespace in **`package.json`** and written to `.winapp/bindings/`.
@@ -1329,54 +1432,3 @@ stop reason, optional `frameArtifacts`, and warnings.
 > stills. Tracked in [#646](https://github.com/microsoft/winappCli/issues/646).
 
 For full documentation, see [docs/ui-automation.md](ui-automation.md).
-
-### find-api
-
-Search and inspect the Windows/WinRT API surface (types, members, enums, namespaces) available to a project, resolved from its referenced `.winmd`/`.dll` metadata. The bare form searches; sub-verbs drill into a specific type, namespace, or the index itself.
-
-```bash
-winapp find-api "<query>" [options]
-winapp find-api [command] [options]
-```
-
-The index is built from the project's restored NuGet/SDK packages (via `project.assets.json`) on first use and refreshed automatically when the project is restored. It lives under the global `.winapp` cache (`cache/find-api/`) and is shared across projects. Restore the project first (`winapp restore` or `dotnet restore`).
-
-**Commands:**
-- *(bare)* `find-api "<query>"` - Lexically search type and member names, grouped by namespace
-- `members <type>` - List a type's properties, events, and methods (with descriptions and inherited members)
-- `check-property <type> <property>` - Validate a property exists on a type (exits non-zero on a miss)
-- `types <namespace>` - List the types declared in a namespace
-- `enums <type>` - List an enum's values (exits non-zero when the type is not an enum)
-- `namespaces [--filter <prefix>]` - List the namespaces available to the project
-- `packages` - List the indexed metadata packages, with per-package type/member counts
-- `stats` - Show aggregate index statistics (packages, namespaces, types, members, `.winmd` files)
-- `projects` - List every project that currently has an API index in the shared cache
-- `refresh [--scan]` - Rebuild the index for a project (`--scan` indexes every project under the directory)
-
-**Options:**
-- `--max <n>` - Maximum number of namespace-grouped search results (default `30`; search only)
-- `--filter <prefix>` - Only list namespaces starting with this prefix (`namespaces` only)
-- `--scan` - Recursively discover and index every project under the directory (`refresh` only)
-- `--project <name>` - Disambiguate when several projects are indexed (matches the `.csproj`/`.vcxproj` name)
-- `--project-dir <path>` - Project directory to query (defaults to the current directory)
-- `--json` - Emit a machine-readable payload on stdout (supported by every verb)
-
-**Examples:**
-```bash
-# Search
-winapp find-api "acrylic brush"
-winapp find-api NavigationView --max 10
-
-# Inspect and validate
-winapp find-api members Microsoft.UI.Xaml.Controls.NavigationView
-winapp find-api check-property Button Background
-winapp find-api enums Symbol
-
-# Explore and manage the index
-winapp find-api namespaces --filter Microsoft.UI.Xaml
-winapp find-api types Microsoft.UI.Xaml.Controls
-winapp find-api projects
-winapp find-api refresh
-```
-
-**Exit codes:** `search` with no hits, `check-property` on a missing property, and `enums` on a non-enum type all exit non-zero — gate code generation and CI checks on them.

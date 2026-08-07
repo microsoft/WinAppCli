@@ -201,4 +201,46 @@ internal static class PathSafety
             throw;
         }
     }
+
+    /// <summary>
+    /// Synchronous counterpart to <see cref="AtomicWriteAllTextAsync"/>: stage to a sibling
+    /// temp file, flush to disk, rename over the destination. Defaults to UTF-8 without a BOM.
+    /// </summary>
+    public static void AtomicWriteAllText(string path, string contents, System.Text.Encoding? encoding = null)
+    {
+        var dir = Path.GetDirectoryName(path);
+        if (string.IsNullOrEmpty(dir))
+        {
+            dir = Directory.GetCurrentDirectory();
+        }
+        var tmp = Path.Combine(dir, Path.GetFileName(path) + ".tmp-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using (var fs = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None, bufferSize: 4096))
+            using (var sw = new StreamWriter(fs, encoding ?? Utf8NoBom))
+            {
+                sw.Write(contents);
+                sw.Flush();
+                fs.Flush(flushToDisk: true);
+            }
+            File.Move(tmp, path, overwrite: true);
+        }
+        catch
+        {
+            try
+            {
+                if (File.Exists(tmp))
+                {
+                    File.Delete(tmp);
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup; surface original error.
+            }
+            throw;
+        }
+    }
+
+    private static readonly System.Text.UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 }

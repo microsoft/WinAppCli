@@ -1602,6 +1602,132 @@
         }
       }
     },
+    "find-ui": {
+      "description": "Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery and the Windows Community Toolkit by default (plus the microsoft-ui-reactor ReactorGallery as an opt-in source via --source reactor); not WPF/WinForms. The Gallery/Toolkit/Reactor corpus is fetched from GitHub on first use and cached per-user, so the first such run needs network access; --source core searches the built-in patterns and works fully offline.",
+      "hidden": false,
+      "arguments": {
+        "query": {
+          "description": "What you're looking for, e.g. \"tabbed layout\" or \"color picker\". Matched lexically against WinUI control names, sample headers, and tags.",
+          "order": 0,
+          "hidden": false,
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      },
+      "options": {
+        "--id": {
+          "description": "Fetch the code (Gallery/Toolkit return XAML and/or C#; Reactor is C#-only) plus prerequisite notes for one or more scenario ids from a prior search (e.g. gallery-tabview-1).",
+          "hidden": false,
+          "valueType": "System.String[]",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--json": {
+          "description": "Format output as JSON",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--list": {
+          "description": "List every discoverable control/sample id instead of searching. Covers Gallery, Toolkit, and core; the opt-in Reactor source is excluded (search it with --source reactor).",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--max": {
+          "description": "Maximum number of matched controls to return. Applies to search only; ignored with --list and --id.",
+          "hidden": false,
+          "valueType": "System.Int32",
+          "hasDefaultValue": true,
+          "defaultValue": 3,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--quiet": {
+          "description": "Suppress progress messages",
+          "hidden": false,
+          "aliases": [
+            "-q"
+          ],
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--refresh": {
+          "description": "Bypass the local cache and re-fetch the WinUI corpus from GitHub.",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--source": {
+          "description": "Restrict results to a single source: gallery (WinUI 3 Gallery), toolkit (Windows Community Toolkit), reactor (microsoft-ui-reactor, C#-only declarative WinUI), or core (curated patterns). Reactor is opt-in — it is excluded from a normal search, so pass --source reactor to search it (only do this for a Reactor/MVU project; its C#-only samples don't paste into a standard XAML app).",
+          "hidden": false,
+          "valueType": "System.String",
+          "hasDefaultValue": false,
+          "arity": {
+            "minimum": 1,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        },
+        "--verbose": {
+          "description": "Enable verbose output",
+          "hidden": false,
+          "aliases": [
+            "-v"
+          ],
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": false
+        }
+      }
+    },
     "get-winapp-path": {
       "description": "Print the path to the .winapp directory. Use --global for the shared cache location, or omit for the project-local .winapp folder. Useful for build scripts that need to reference installed packages.",
       "hidden": false,

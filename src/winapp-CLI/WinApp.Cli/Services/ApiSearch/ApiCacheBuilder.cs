@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Services.ApiSearch;
 
@@ -33,11 +34,32 @@ internal static class ApiCacheBuilder
         int parsed = 0, reused = 0, processed = 0;
         var projectNames = new List<string>();
 
+        // Progress is reported from worker threads during the parallel export
+        // phase, so serialize it — the console sink behind it is not thread-safe.
+        object progressLock = new();
+        Action<string>? report = onProgress is null
+            ? null
+            : msg =>
+            {
+                lock (progressLock)
+                {
+                    onProgress(msg);
+                }
+            };
+
+        // Packages are commonly shared between projects (Windows SDK, WinAppSDK),
+        // so resolve every project first and collect the distinct packages that
+        // still need parsing. They are then exported in parallel below, and each
+        // one is parsed only once per run no matter how many projects use it.
+        var pendingExports = new Dictionary<string, PackageWithWinMd>(StringComparer.OrdinalIgnoreCase);
+        var seenPackageDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pendingManifests = new List<(string Name, ProjectManifest Manifest)>();
+
         foreach (string projectFile in projectFiles)
         {
             string dir = Path.GetDirectoryName(projectFile)!;
             string projectName = Path.GetFileNameWithoutExtension(projectFile);
-            onProgress?.Invoke($"Indexing {projectName}…");
+            report?.Invoke($"Indexing {projectName}…");
 
             List<PackageWithWinMd> packages = NuGetResolver.FindPackagesWithWinMd(dir, projectFile, winAppSdkRuntimePath);
             if (packages.Count == 0)
@@ -54,21 +76,25 @@ internal static class ApiCacheBuilder
                 if (!ApiCachePaths.TryCombineContained(packagesRoot, new[] { package.Id, package.Version }, out string packageCacheDir))
                 {
                     // Untrusted Id/Version would escape the cache dir — skip it.
-                    onProgress?.Invoke($"Skipping package with unsafe path: {package.Id} {package.Version}");
+                    report?.Invoke($"Skipping package with unsafe path: {package.Id} {package.Version}");
                     continue;
                 }
                 // A project reference is exported with version "local" and can change
                 // without a version bump, so its cache is never safe to reuse. An
                 // explicit refresh (force) rebuilds every package.
                 bool mustRebuild = force || string.Equals(package.Version, "local", StringComparison.OrdinalIgnoreCase);
-                if (!mustRebuild && File.Exists(Path.Combine(packageCacheDir, "meta.json")))
+                if (!seenPackageDirs.Add(packageCacheDir))
+                {
+                    // Already resolved for an earlier project in this run.
+                    reused++;
+                }
+                else if (!mustRebuild && File.Exists(Path.Combine(packageCacheDir, "meta.json")))
                 {
                     reused++;
                 }
                 else
                 {
-                    ExportPackageCache(package, packageCacheDir);
-                    parsed++;
+                    pendingExports[packageCacheDir] = package;
                 }
                 packageRefs.Add(new ProjectPackageRef { Id = package.Id, Version = package.Version });
             }
@@ -81,17 +107,37 @@ internal static class ApiCacheBuilder
                 Packages = packageRefs,
                 GeneratedAt = DateTime.UtcNow.ToString("o"),
             };
-            string projectsDir = Path.Combine(cacheDir, "projects");
-            Directory.CreateDirectory(projectsDir);
             string manifestName = projectName;
             if (scan)
             {
                 string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(projectFile))).Substring(0, 8).ToLowerInvariant();
                 manifestName = projectName + "_" + hash;
             }
-            WriteFileAtomic(
-                Path.Combine(projectsDir, manifestName + ".json"),
-                JsonSerializer.Serialize(manifest, ApiSearchJsonContext.Default.ProjectManifest));
+            pendingManifests.Add((manifestName, manifest));
+        }
+
+        if (pendingExports.Count > 0)
+        {
+            report?.Invoke($"Parsing {pendingExports.Count} package(s)…");
+            Parallel.ForEach(pendingExports, entry =>
+            {
+                ExportPackageCache(entry.Value, entry.Key);
+                Interlocked.Increment(ref parsed);
+            });
+        }
+
+        // Manifests are written last so a project is only ever advertised as indexed
+        // once the package caches it points at are actually on disk.
+        string projectsDir = Path.Combine(cacheDir, "projects");
+        if (pendingManifests.Count > 0)
+        {
+            Directory.CreateDirectory(projectsDir);
+            foreach ((string manifestName, ProjectManifest manifest) in pendingManifests)
+            {
+                WriteFileAtomic(
+                    Path.Combine(projectsDir, manifestName + ".json"),
+                    JsonSerializer.Serialize(manifest, ApiSearchJsonContext.Default.ProjectManifest));
+            }
         }
 
         return new ApiRefreshOutput
@@ -109,17 +155,31 @@ internal static class ApiCacheBuilder
         Directory.CreateDirectory(typesDir);
 
         var types = new List<WinMdTypeInfo>();
-        foreach (string winMdFile in package.WinMdFiles)
+        if (package.WinMdFiles.Count == 1)
         {
-            types.AddRange(WinMdParser.ParseFile(winMdFile));
+            types.AddRange(WinMdParser.ParseFile(package.WinMdFiles[0]));
+        }
+        else if (package.WinMdFiles.Count > 1)
+        {
+            // Parsing is CPU-bound and each metadata file is independent, so fan
+            // out and reassemble in file order to keep the output deterministic.
+            var perFile = new List<WinMdTypeInfo>[package.WinMdFiles.Count];
+            Parallel.For(0, package.WinMdFiles.Count, i => perFile[i] = WinMdParser.ParseFile(package.WinMdFiles[i]));
+            foreach (List<WinMdTypeInfo> fileTypes in perFile)
+            {
+                types.AddRange(fileTypes);
+            }
         }
 
         if (package.XmlDocFiles.Count > 0)
         {
+            var perFileDocs = new Dictionary<string, string>[package.XmlDocFiles.Count];
+            Parallel.For(0, package.XmlDocFiles.Count, i => perFileDocs[i] = XmlDocParser.ParseFile(package.XmlDocFiles[i]));
+
             var docs = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (string xmlFile in package.XmlDocFiles)
+            foreach (Dictionary<string, string> fileDocs in perFileDocs)
             {
-                foreach (var kvp in XmlDocParser.ParseFile(xmlFile))
+                foreach (var kvp in fileDocs)
                 {
                     docs.TryAdd(kvp.Key, kvp.Value);
                 }
@@ -152,38 +212,35 @@ internal static class ApiCacheBuilder
             TotalNamespaces = namespaceNames.Count,
             GeneratedAt = DateTime.UtcNow.ToString("o"),
         };
-        WriteFileAtomic(Path.Combine(cacheDir, "meta.json"), JsonSerializer.Serialize(meta, ApiSearchJsonContext.Default.PackageMeta));
         WriteFileAtomic(Path.Combine(cacheDir, "namespaces.json"), JsonSerializer.Serialize(namespaceNames, ApiSearchJsonContext.Default.ListString));
 
-        foreach (string ns in namespaceNames)
+        Parallel.ForEach(namespaceNames, ns =>
         {
             string key = ns == "_GlobalNamespace" ? string.Empty : ns;
             List<WinMdTypeInfo> namespaceTypes = byNamespace[key];
             string fileName = ApiCachePaths.NamespaceFileName(ns);
             WriteFileAtomic(Path.Combine(typesDir, fileName), JsonSerializer.Serialize(namespaceTypes, ApiSearchJsonContext.Default.ListWinMdTypeInfo));
-        }
+        });
+
+        // meta.json is the cache-reuse sentinel, so it is written last — its presence
+        // then means the namespace and type payloads it describes are already on disk.
+        WriteFileAtomic(Path.Combine(cacheDir, "meta.json"), JsonSerializer.Serialize(meta, ApiSearchJsonContext.Default.PackageMeta));
     }
 
-    /// <summary>Writes content atomically (temp file + rename) so readers never see partial writes.</summary>
+    /// <summary>
+    /// Writes content atomically (temp file + rename) so readers never see partial writes,
+    /// falling back to a direct write if the staged rename fails.
+    /// </summary>
     private static void WriteFileAtomic(string path, string content)
     {
         string dir = Path.GetDirectoryName(path)!;
         Directory.CreateDirectory(dir);
-        string tempPath = path + ".tmp." + Environment.ProcessId;
         try
         {
-            File.WriteAllText(tempPath, content);
-            File.Move(tempPath, path, overwrite: true);
+            PathSafety.AtomicWriteAllText(path, content);
         }
         catch
         {
-            try
-            {
-                File.Delete(tempPath);
-            }
-            catch
-            {
-            }
             File.WriteAllText(path, content);
         }
     }

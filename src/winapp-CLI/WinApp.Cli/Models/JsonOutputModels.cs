@@ -42,6 +42,51 @@ internal class JsonErrorOutput
     }
 }
 
+/// <summary>Compact <c>find-ui</c> search result: one entry per matched control,
+/// each carrying its top scenario rows (id + header) but no code — callers fetch
+/// full XAML/C# with <c>find-ui --id &lt;id&gt;</c>.</summary>
+internal sealed class FindUiSearchJsonOutput
+{
+    public required string Query { get; set; }
+    public required int MatchCount { get; set; }
+    public required List<FindUiMatchJson> Matches { get; set; }
+}
+
+internal sealed class FindUiMatchJson
+{
+    public required string Source { get; set; }
+    public required string Control { get; set; }
+    public required double Score { get; set; }
+    public string? Description { get; set; }
+    public required List<FindUiScenarioJson> Scenarios { get; set; }
+}
+
+internal sealed class FindUiScenarioJson
+{
+    public required string Id { get; set; }
+    public required string Header { get; set; }
+}
+
+/// <summary>Output of <c>find-ui --list</c>: every discoverable scenario id + label.</summary>
+internal sealed class FindUiListJsonOutput
+{
+    public required int Count { get; set; }
+    public required List<FindUiScenarioJson> Items { get; set; }
+}
+
+/// <summary>Output of <c>find-ui --id &lt;id&gt;</c>: full formatted code/notes per id.</summary>
+internal sealed class FindUiCodeJsonOutput
+{
+    public required List<FindUiCodeEntryJson> Results { get; set; }
+}
+
+internal sealed class FindUiCodeEntryJson
+{
+    public required string Id { get; set; }
+    public required bool Found { get; set; }
+    public required string Content { get; set; }
+}
+
 /// <summary>
 /// Source-generated JSON serializer context for all CLI JSON output models.
 /// Add new [JsonSerializable(typeof(...))] attributes here when adding --json output to more commands.
@@ -59,6 +104,9 @@ internal class JsonErrorOutput
 [JsonSerializable(typeof(WinApp.Cli.Services.ApiSearch.ApiStatsOutput))]
 [JsonSerializable(typeof(WinApp.Cli.Services.ApiSearch.ApiProjectsOutput))]
 [JsonSerializable(typeof(WinApp.Cli.Services.ApiSearch.ApiRefreshOutput))]
+[JsonSerializable(typeof(FindUiSearchJsonOutput))]
+[JsonSerializable(typeof(FindUiListJsonOutput))]
+[JsonSerializable(typeof(FindUiCodeJsonOutput))]
 [JsonSourceGenerationOptions(
     WriteIndented = true,
     NewLine = "\n",

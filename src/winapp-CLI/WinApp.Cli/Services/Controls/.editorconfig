@@ -1,0 +1,30 @@
+# Ported code from winui-search (microsoft/win-dev-skills). The upstream codebase doesn't
+# enforce winappcli's "braces on every if/while/else" or "GeneratedRegex on every Regex"
+# style rules. Re-shaping the ported engine would create a large, noisy diff that makes
+# future re-syncs from upstream painful. Suppress these style-only rules in the Gallery
+# subtree only, while leaving them on for the rest of winappcli.
+[*.cs]
+
+# Add braces to 'if', 'else', 'while' etc. statements
+dotnet_diagnostic.IDE0011.severity = none
+
+# Use 'GeneratedRegexAttribute' to generate the regular expression implementation at compile-time
+dotnet_diagnostic.SYSLIB1045.severity = none
+
+# Source-file header text mismatch (winappcli's required header differs from upstream)
+dotnet_diagnostic.IDE0073.severity = none
+
+# Use span-based 'string.Concat' and 'AsSpan' instead of 'Substring'
+dotnet_diagnostic.CA1845.severity = none
+
+# Member does not access instance data and can be marked as static
+dotnet_diagnostic.CA1822.severity = none
+
+# Prefer 'static readonly' fields over constant array arguments (perf micro-opt; upstream passes inline arrays)
+dotnet_diagnostic.CA1861.severity = none
+
+# Perf micro-opts left as-is to keep the ported engine close to upstream for easy re-syncs.
+dotnet_diagnostic.CA1854.severity = none   # TryGetValue over ContainsKey+indexer
+dotnet_diagnostic.CA1865.severity = none   # EndsWith(char) over EndsWith(string)
+dotnet_diagnostic.CA1866.severity = none   # StartsWith(char) over StartsWith(string)
+dotnet_diagnostic.CA1870.severity = none   # cached SearchValues instance
