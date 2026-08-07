@@ -444,7 +444,9 @@ internal class NewCommand : Command, IShortDescription
 
             // Prerequisite: .NET SDK. The pack install's `dotnet new install` separator depends on the
             // SDK band, and the scaffold pins the project's TFM to the SDK major, so probe it up front.
-            var (sdkVersion, sdkError) = await CheckDotnetSdkAsync(workingDir, isJson, cancellationToken);
+            var (sdkVersion, sdkError) = await WithSpinnerAsync(
+                "Checking .NET SDK...",
+                () => CheckDotnetSdkAsync(workingDir, isJson, cancellationToken));
             if (sdkVersion is null)
             {
                 var detail = sdkError ?? "The .NET SDK is required to create a WinUI app. Install it from https://dotnet.microsoft.com/download, then re-run 'winapp new'.";
@@ -480,7 +482,9 @@ internal class NewCommand : Command, IShortDescription
 
             // Enumerate templates from the installed pack, in the working directory's context (so item
             // templates surface only when that location is inside a WinUI project).
-            var (templates, listFailure) = await EnumerateTemplatesAsync(workingDir, cancellationToken);
+            var (templates, listFailure) = await WithSpinnerAsync(
+                "Loading WinUI templates...",
+                () => EnumerateTemplatesAsync(workingDir, cancellationToken));
             if (templates.Count == 0)
             {
                 var enumError = listFailure is not null
@@ -551,20 +555,19 @@ internal class NewCommand : Command, IShortDescription
 
             // 2. Resolve name. Only a genuinely absent --name enters the defaulting path; an explicitly
             // supplied but blank value (e.g. --name "   ") is kept so the validation below rejects it
-            // instead of silently scaffolding the default 'WinUIApp'.
+            // instead of silently scaffolding the default. The default is derived from the chosen
+            // template (a project noun like "WinUIApp", or an item noun like "MyPage") and auto-numbered
+            // to the first free variant so a taken default becomes "WinUIApp1", "WinUIApp2", etc.
             if (name is null)
             {
                 if (output is not null)
                 {
                     name = output.Name;
                 }
-                else if (useDefaults)
-                {
-                    name = "WinUIApp";
-                }
                 else
                 {
-                    name = await PromptNameAsync(cancellationToken);
+                    var defaultName = EnsureAvailableName(DefaultNameFor(entry), currentDir, entry);
+                    name = useDefaults ? defaultName : await PromptNameAsync(defaultName, cancellationToken);
                 }
             }
 
@@ -637,10 +640,6 @@ internal class NewCommand : Command, IShortDescription
 
             // 4. Scaffold via dotnet new from the working directory (whose global.json chain governs the
             // SDK the scaffold and later `dotnet build` resolve), pinning the TFM to that SDK.
-            if (!useDefaults && !isJson && !quiet)
-            {
-                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Creating [green]{name}[/] from [blue]{entry.ShortName}[/]...");
-            }
 
             // Pass each token via ArgumentList (injection-safe) so a crafted --name or --output cannot
             // inject additional dotnet new options.
@@ -661,7 +660,12 @@ internal class NewCommand : Command, IShortDescription
                 args.Add("--force");
             }
 
-            var (exitCode, stdout, stderr) = await dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken: cancellationToken);
+            // Show a transient spinner while dotnet new runs (interactive terminals only); it clears
+            // once scaffolding completes and WriteSuccess prints the "Created"/"Added" line in its place.
+            var verb = entry.IsItem ? "Adding" : "Creating";
+            var (exitCode, stdout, stderr) = await WithSpinnerAsync(
+                $"{verb} {name} from {entry.ShortName}...",
+                () => dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken: cancellationToken));
             LogDotnetOutput(args, exitCode, stdout, stderr);
             if (exitCode != 0)
             {
@@ -712,6 +716,12 @@ internal class NewCommand : Command, IShortDescription
             return (VersionMode.Explicit, trimmed);
         }
 
+        private async Task<(bool Ok, string? Error)> InstallPackWithSpinnerAsync(
+            DirectoryInfo cwd, string? version, Version sdkVersion, bool isJson, bool quiet, CancellationToken cancellationToken)
+            => await WithSpinnerAsync(
+                "Installing WinUI template pack...",
+                () => InstallPackAsync(cwd, version, sdkVersion, isJson, quiet, cancellationToken));
+
         /// <summary>
         /// Resolves and installs the template pack according to <paramref name="mode"/>, returning the
         /// version now in use. See <see cref="VersionMode"/> for the per-mode behaviour. In
@@ -747,13 +757,13 @@ internal class NewCommand : Command, IShortDescription
                         return (true, installed, null);
                     }
 
-                    var (ok, err) = await InstallPackAsync(cwd, explicitVersion, sdkVersion, isJson, quiet, cancellationToken);
+                    var (ok, err) = await InstallPackWithSpinnerAsync(cwd, explicitVersion, sdkVersion, isJson, quiet, cancellationToken);
                     return ok ? (true, explicitVersion, null) : (false, null, err);
                 }
 
                 case VersionMode.Latest:
                 {
-                    var (ok, err) = await InstallPackAsync(cwd, version: null, sdkVersion, isJson, quiet, cancellationToken);
+                    var (ok, err) = await InstallPackWithSpinnerAsync(cwd, version: null, sdkVersion, isJson, quiet, cancellationToken);
                     if (!ok)
                     {
                         return (false, null, err);
@@ -767,7 +777,7 @@ internal class NewCommand : Command, IShortDescription
                     if (installed is null)
                     {
                         // Nothing installed: always grab the latest.
-                        var (ok, err) = await InstallPackAsync(cwd, version: null, sdkVersion, isJson, quiet, cancellationToken);
+                        var (ok, err) = await InstallPackWithSpinnerAsync(cwd, version: null, sdkVersion, isJson, quiet, cancellationToken);
                         if (!ok)
                         {
                             return (false, null, err);
@@ -776,7 +786,9 @@ internal class NewCommand : Command, IShortDescription
                     }
 
                     // Installed: only offer an update when the pack is actually behind the feed.
-                    var latest = await GetLatestAvailableVersionAsync(cwd, installed, cancellationToken);
+                    var latest = await WithSpinnerAsync(
+                        "Checking for WinUI template pack updates...",
+                        () => GetLatestAvailableVersionAsync(cwd, installed, cancellationToken));
                     var isStale = latest is not null
                         && NuGetVersionHelper.Compare(installed, latest) is int cmp && cmp < 0;
 
@@ -798,7 +810,7 @@ internal class NewCommand : Command, IShortDescription
                         return (true, installed, null);
                     }
 
-                    var (updated, updateErr) = await InstallPackAsync(cwd, latest, sdkVersion, isJson, quiet, cancellationToken);
+                    var (updated, updateErr) = await InstallPackWithSpinnerAsync(cwd, latest, sdkVersion, isJson, quiet, cancellationToken);
                     return updated ? (true, latest, null) : (false, null, updateErr);
                 }
             }
@@ -829,6 +841,26 @@ internal class NewCommand : Command, IShortDescription
             {
                 logger.LogDebug("{Output}", stderrTrimmed);
             }
+        }
+
+        /// <summary>
+        /// Runs <paramref name="operation"/> under an animated Spectre status spinner in interactive
+        /// terminals, or plainly (no spinner) when a live display would be inappropriate (--quiet,
+        /// --json, CI, AI-agent captures, redirected output). The spinner is transient: it clears once
+        /// the operation completes, so callers print their own result line afterwards.
+        /// </summary>
+        private async Task<T> WithSpinnerAsync<T>(string message, Func<Task<T>> operation)
+        {
+            if (!ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger))
+            {
+                return await operation();
+            }
+
+            return await ansiConsole.Status()
+                .AutoRefresh(true)
+                .Spinner(Spinner.Known.Dots)
+                .SpinnerStyle(Style.Parse("blue"))
+                .StartAsync(message, async _ => await operation());
         }
 
         /// <summary>Returns the installed WinUI pack version, or <c>null</c> when the pack isn't installed.</summary>
@@ -866,7 +898,7 @@ internal class NewCommand : Command, IShortDescription
         private async Task<(bool Ok, string? Error)> InstallPackAsync(
             DirectoryInfo cwd, string? version, Version sdkVersion, bool isJson, bool quiet, CancellationToken cancellationToken)
         {
-            if (!isJson && !quiet)
+            if (!isJson && !quiet && !ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger))
             {
                 logger.LogInformation("{Info}  Installing WinUI template pack {Pack}...", UiSymbols.Info, TemplatePackageId);
             }
@@ -950,13 +982,13 @@ internal class NewCommand : Command, IShortDescription
             return entry.IsItem ? $"{name} (item — {entry.ShortName})" : $"{name} ({entry.ShortName})";
         }
 
-        private async Task<string> PromptNameAsync(CancellationToken cancellationToken)
+        private async Task<string> PromptNameAsync(string defaultName, CancellationToken cancellationToken)
         {
             // Reuse the same validation the handler applies so invalid interactive input (empty,
             // path separators, "..", reserved device names, etc.) is corrected in place instead of
             // being accepted here and then rejected after the wizard completes.
             var prompt = new TextPrompt<string>("What should the app be named?")
-                .DefaultValue("WinUIApp")
+                .DefaultValue(defaultName)
                 .Validate(value => IsValidProjectName(value)
                     ? ValidationResult.Success()
                     : ValidationResult.Error("Use a simple name without path separators or invalid filename characters."));
@@ -992,15 +1024,15 @@ internal class NewCommand : Command, IShortDescription
 
             if (TagsContain(entry.Tags, "Library"))
             {
-                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: from your app project, run [blue]dotnet add reference \"{Path.Join(outputDir.FullName, name + ".csproj")}\"[/].");
+                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Next} Next: from your app project, run [blue]dotnet add reference \"{Path.Join(outputDir.FullName, name + ".csproj")}\"[/].");
             }
             else if (TagsContain(entry.Tags, "Test"))
             {
-                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: [blue]cd \"{relative}\"[/] then [blue]dotnet run[/] — this packaged MSTest app runs its tests when launched (not via [blue]dotnet test[/]).");
+                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Next} Next: [blue]cd \"{relative}\"[/] then [blue]winapp run[/] — this packaged MSTest app runs its tests when launched.");
             }
             else
             {
-                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Info}  Next: [blue]cd \"{relative}\"[/] then [blue]dotnet run[/].");
+                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Next} Next: [blue]cd \"{relative}\"[/] then [blue]winapp run[/].");
             }
         }
 
@@ -1068,6 +1100,82 @@ internal class NewCommand : Command, IShortDescription
             }
 
             return "app";
+        }
+
+        /// <summary>
+        /// The default project/item name for <paramref name="entry"/> before availability numbering.
+        /// Project templates use the friendly "WinUIApp"; item templates derive a noun from the template's
+        /// display name (e.g. "WinUI Blank Page (Item)" → "MyPage", "WinUI Window (Item)" → "MyWindow")
+        /// since "WinUIApp" is nonsensical for a page/window/control added into an existing project.
+        /// </summary>
+        private static string DefaultNameFor(WinUiTemplateEntry entry)
+            => entry.IsItem ? DeriveItemDefaultName(entry.DisplayName) : "WinUIApp";
+
+        /// <summary>
+        /// Derives a friendly item default name ("My" + the last meaningful word of the display name).
+        /// Strips the "(Item)" suffix and the "WinUI" prefix, keeps only alphanumeric words, and falls
+        /// back to "MyItem" when nothing usable remains.
+        /// </summary>
+        private static string DeriveItemDefaultName(string displayName)
+        {
+            var words = (displayName ?? string.Empty)
+                .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+                .Select(w => new string(w.Where(char.IsLetterOrDigit).ToArray()))
+                .Where(w => w.Length > 0
+                    && !w.Equals("WinUI", StringComparison.OrdinalIgnoreCase)
+                    && !w.Equals("Item", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (words.Count == 0)
+            {
+                return "MyItem";
+            }
+
+            var last = words[^1];
+            return "My" + char.ToUpperInvariant(last[0]) + last[1..];
+        }
+
+        /// <summary>
+        /// Returns the first available variant of <paramref name="baseName"/> in <paramref name="parentDir"/>,
+        /// appending an incrementing suffix ("WinUIApp", "WinUIApp1", "WinUIApp2", ...) when a name is
+        /// already taken. For project templates a name is "taken" when a directory of that name exists; for
+        /// item templates when a same-named file (e.g. "MyPage.xaml") already exists in the target folder.
+        /// Only used for defaulted/prompted names — an explicit --name is honoured verbatim.
+        /// </summary>
+        private static string EnsureAvailableName(string baseName, DirectoryInfo parentDir, WinUiTemplateEntry entry)
+        {
+            bool IsTaken(string candidate)
+            {
+                try
+                {
+                    if (entry.IsItem)
+                    {
+                        return parentDir.Exists && parentDir.EnumerateFiles(candidate + ".*").Any();
+                    }
+
+                    return Directory.Exists(Path.Join(parentDir.FullName, candidate));
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // If we can't inspect the directory, don't block on numbering — fall through and let
+                    // the later preflight/scaffold surface any real conflict with a structured error.
+                    return false;
+                }
+            }
+
+            if (!IsTaken(baseName))
+            {
+                return baseName;
+            }
+
+            for (var i = 1; ; i++)
+            {
+                var candidate = baseName + i.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (!IsTaken(candidate))
+                {
+                    return candidate;
+                }
+            }
         }
 
         /// <summary>

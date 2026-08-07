@@ -108,7 +108,7 @@ Want to inspect or interact with a running app's UI?
 - `--force` — scaffold even if the output directory already contains files
 - `--template-version <latest|installed|version>` — WinUI template pack version: `latest` installs the newest published pack, `installed` keeps whatever is already installed, or an explicit version (e.g. `1.2.3`) installs exactly that. Default (no value): install the latest if no pack is present, otherwise check for a newer pack and prompt to update a stale one — not pinned.
 - `--json` — machine-readable output for agents
-**Next step:** `cd <name>` then `dotnet run` to build and launch the freshly-scaffolded source. The `lib` template differs — reference it from an app project. The `unittest` template is a packaged MSTest app whose tests run when it's launched (`dotnet run`), not via `dotnet test`.
+**Next step:** `cd <name>` then `winapp run` to build and launch the freshly-scaffolded app. The `lib` template differs — reference it from an app project. The `unittest` template is a packaged MSTest app whose tests run when it's launched (`winapp run`), not via `dotnet test`.
 
 ### `winapp init [base-directory]`
 **Purpose:** Add Windows platform support to an existing project. Creates `appxmanifest.xml`, default image assets, `winapp.yaml` config, and optionally downloads Windows SDK / Windows App SDK packages. Does **not** create a new project — the user must already have a project with their chosen framework.

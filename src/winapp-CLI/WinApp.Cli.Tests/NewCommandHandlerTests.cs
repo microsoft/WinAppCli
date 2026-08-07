@@ -602,7 +602,68 @@ public class NewCommandHandlerTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task Handler_AppTemplate_PrintsDotnetRunNextStep()
+    public async Task Handler_DefaultNameTaken_IncrementsToNextFreeName()
+    {
+        ScriptHappyPath();
+        // The friendly default 'WinUIApp' directory already exists in the caller's cwd, so the
+        // defaulted name must roll over to the first free variant instead of colliding.
+        _tempDirectory.CreateSubdirectory("WinUIApp");
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        var json = ParseJson(TestAnsiConsole.Output);
+        Assert.AreEqual("WinUIApp1", json.GetProperty("Name").GetString(),
+            "A taken default name must increment to the next free variant (WinUIApp -> WinUIApp1).");
+
+        var scaffold = ScaffoldInvocation();
+        Assert.IsNotNull(scaffold);
+        var tokens = scaffold.ToArray();
+        var nameIdx = Array.IndexOf(tokens, "-n");
+        Assert.AreEqual("WinUIApp1", tokens[nameIdx + 1]);
+    }
+
+    [TestMethod]
+    public async Task Handler_ItemTemplate_UsesDerivedDefaultNameNotWinUIApp()
+    {
+        // A catalog that includes an item template (surfaced when inside a WinUI project). The item
+        // default should be derived from the display name ("WinUI Blank Page (Item)" -> "MyPage"),
+        // never the project-oriented "WinUIApp".
+        var listWithItem = BuildListTable(
+        [
+            ("WinUI Blank App", "winui,winui3", "[C#]", "project", "Microsoft", "Windows/WinUI/Desktop/XAML"),
+            ("WinUI Blank Page", "winui-page,winui3-page", "[C#]", "item", "Microsoft", "Windows/WinUI/Item"),
+        ]);
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, listWithItem, string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && (args[1] == "install" || args[1] == "update" || args[1] == "uninstall"))
+            {
+                return (0, "ok", string.Empty);
+            }
+            return (0, "The template was created successfully.", string.Empty);
+        };
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json", "--template", "winui-page"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        var json = ParseJson(TestAnsiConsole.Output);
+        Assert.AreEqual("MyPage", json.GetProperty("Name").GetString(),
+            "An item template must default to a derived noun (MyPage), not the project default 'WinUIApp'.");
+    }
+
+
+    [TestMethod]
+    public async Task Handler_AppTemplate_PrintsWinappRunNextStep()
     {
         ScriptHappyPath();
         var command = GetRequiredService<NewCommand>();
@@ -610,10 +671,10 @@ public class NewCommandHandlerTests : BaseCommandTests
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--name", "MyApp"]);
 
         Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
-        Assert.IsTrue(TestAnsiConsole.Output.Contains("dotnet run", StringComparison.Ordinal),
-            $"App templates should suggest 'dotnet run' as the next step (it builds and launches the fresh source). Output:\n{TestAnsiConsole.Output}");
-        Assert.IsFalse(TestAnsiConsole.Output.Contains("winapp run", StringComparison.Ordinal),
-            $"App templates must not suggest 'winapp run' — it launches an already-built packaged app, not fresh source. Output:\n{TestAnsiConsole.Output}");
+        Assert.IsTrue(TestAnsiConsole.Output.Contains("winapp run", StringComparison.Ordinal),
+            $"App templates should suggest 'winapp run' as the next step (it builds and launches the project). Output:\n{TestAnsiConsole.Output}");
+        Assert.IsFalse(TestAnsiConsole.Output.Contains("dotnet run", StringComparison.Ordinal),
+            $"App templates must not suggest 'dotnet run' now that 'winapp run' is the documented next step. Output:\n{TestAnsiConsole.Output}");
     }
 
     [TestMethod]
@@ -656,10 +717,11 @@ public class NewCommandHandlerTests : BaseCommandTests
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--template", "winui-unittest", "--name", "MyTests"]);
 
         Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
-        Assert.IsTrue(TestAnsiConsole.Output.Contains("dotnet run", StringComparison.Ordinal),
-            $"The unittest template is a packaged app; its tests run when launched with 'dotnet run'. Output:\n{TestAnsiConsole.Output}");
-        Assert.IsFalse(TestAnsiConsole.Output.Contains("dotnet test", StringComparison.OrdinalIgnoreCase)
-            && !TestAnsiConsole.Output.Contains("not via", StringComparison.OrdinalIgnoreCase),
+        Assert.IsTrue(TestAnsiConsole.Output.Contains("winapp run", StringComparison.Ordinal),
+            $"The unittest template is a packaged app; its tests run when launched with 'winapp run'. Output:\n{TestAnsiConsole.Output}");
+        Assert.IsFalse(TestAnsiConsole.Output.Contains("dotnet run", StringComparison.Ordinal),
+            "The unittest next step must not recommend 'dotnet run' now that 'winapp run' is the documented step.");
+        Assert.IsFalse(TestAnsiConsole.Output.Contains("dotnet test", StringComparison.OrdinalIgnoreCase),
             "The unittest next step must not recommend 'dotnet test' — the packaged MSTest app runs its tests on launch.");
     }
 
