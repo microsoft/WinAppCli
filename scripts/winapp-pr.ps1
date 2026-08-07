@@ -80,6 +80,9 @@ $GhExe = 'gh'
 
 $ToolHome     = Join-Path $env:LOCALAPPDATA 'winapp-dev'
 $CacheRoot    = Join-Path $ToolHome 'cache'
+# Enough to flip between a couple of builds without re-downloading, while staying bounded.
+# Each run folder holds one architecture, around 16 MB.
+$CacheKeep    = 3
 $StateFile    = Join-Path $ToolHome 'current.json'
 $TrustedFile  = Join-Path $ToolHome 'trusted-certs.json'
 $InstallDir   = Join-Path $env:LOCALAPPDATA 'Programs\winapp-dev'
@@ -681,6 +684,9 @@ function Get-CachedMsixPackage {
     }
     if ($cached) {
         Write-Ok "Using cached package: $($cached.Name)"
+        # Mark as most recently used so retention favours the builds you actually switch between.
+        (Get-Item $runCache).LastWriteTime = Get-Date
+        Remove-OldCacheEntries -KeepPath $runCache
         return $cached
     }
 
@@ -705,6 +711,7 @@ function Get-CachedMsixPackage {
 
     Get-ChildItem $runCache -File | ForEach-Object { Unblock-File $_.FullName -ErrorAction SilentlyContinue }
     Write-Ok "Downloaded $($package.Name)"
+    Remove-OldCacheEntries -KeepPath $runCache
     return $package
 }
 
@@ -913,6 +920,34 @@ function Remove-StaleCertificates {
     }
     Set-TrackedCerts -Thumbprints @(Get-TrackedCerts | Where-Object { $_ -eq $KeepThumbprint })
     Write-Ok "Removed $($stale.Count) certificate(s)"
+}
+
+function Remove-OldCacheEntries {
+    <#
+        The cache exists so flipping back to a build you were just testing skips a ~7s download.
+        That only pays off for the last few builds, so retain those and drop the rest -- otherwise
+        every run ever installed is kept forever.
+    #>
+    param([string]$KeepPath)
+
+    if (-not (Test-Path $CacheRoot)) { return }
+
+    $stale = @(Get-ChildItem $CacheRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -ne $KeepPath } |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -Skip ($CacheKeep - 1))
+
+    if (-not $stale) { return }
+
+    $freed = [math]::Round((($stale | ForEach-Object {
+        (Get-ChildItem $_.FullName -Recurse -File -ErrorAction SilentlyContinue |
+            Measure-Object Length -Sum).Sum
+    } | Measure-Object -Sum).Sum / 1MB))
+
+    $stale | ForEach-Object { Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+    if ($freed -gt 0) {
+        Write-Detail "Pruned $($stale.Count) older cached build(s), freeing $freed MB."
+    }
 }
 
 function Get-CacheSize {
