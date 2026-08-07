@@ -100,8 +100,12 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                _coreOnlyEngine ??= new SearchEngine(
-                    Array.Empty<Scenario>(), DataLoader.LoadCorePatterns(), new(), new());
+                if (_coreOnlyEngine == null)
+                {
+                    _coreOnlyEngine = new SearchEngine(
+                        Array.Empty<Scenario>(), DataLoader.LoadCorePatterns(), new(), new());
+                }
+
                 return _coreOnlyEngine;
             }
             finally
