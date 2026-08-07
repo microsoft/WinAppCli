@@ -211,6 +211,30 @@ function embedIdentity(options: EmbedIdentityOptions): Promise<WinappResult>
 
 ---
 
+### `findUi()`
+
+Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery and the Windows Community Toolkit by default (plus the microsoft-ui-reactor ReactorGallery as an opt-in source via --source reactor); not WPF/WinForms. The Gallery/Toolkit/Reactor corpus is fetched from GitHub on first use and cached per-user, so the first such run needs network access; --source core searches the built-in patterns and works fully offline.
+
+```typescript
+function findUi(options?: FindUiOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `query` | `string \| undefined` | No | What you're looking for, e.g. "tabbed layout" or "color picker". Matched lexically against WinUI control names, sample headers, and tags. |
+| `id` | `string \| string[] \| undefined` | No | Fetch the code (Gallery/Toolkit return XAML and/or C#; Reactor is C#-only) plus prerequisite notes for one or more scenario ids from a prior search (e.g. gallery-tabview-1). |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `list` | `boolean \| undefined` | No | List every discoverable control/sample id instead of searching. Covers Gallery, Toolkit, and core; the opt-in Reactor source is excluded (search it with --source reactor). |
+| `max` | `number \| undefined` | No | Maximum number of matched controls to return. Applies to search only; ignored with --list and --id. |
+| `refresh` | `boolean \| undefined` | No | Bypass the local cache and re-fetch the WinUI corpus from GitHub. |
+| `source` | `string \| undefined` | No | Restrict results to a single source: gallery (WinUI 3 Gallery), toolkit (Windows Community Toolkit), reactor (microsoft-ui-reactor, C#-only declarative WinUI), or core (curated patterns). Reactor is opt-in — it is excluded from a normal search, so pass --source reactor to search it (only do this for a Reactor/MVU project; its C#-only samples don't paste into a standard XAML app). |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `getWinappPath()`
 
 Print the path to the .winapp directory. Use --global for the shared cache location, or omit for the project-local .winapp folder. Useful for build scripts that need to reference installed packages.
@@ -1415,6 +1439,21 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `target` | `string` | Yes | Path to the .exe (embeds identity into its side-by-side manifest via mt.exe) or an .xml/.manifest side-by-side manifest file (inserts/replaces the <msix> element; created if it doesn't exist). |
 | `manifest` | `string \| undefined` | No | Path to the sparse appxmanifest.xml to read identity from. When omitted, searched in a 'sparse/' folder (where 'winapp init --exe --sparse' writes it by default) beside the target first, then in the current directory, then beside the target and in the current directory. |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `FindUiOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `query` | `string \| undefined` | No | What you're looking for, e.g. "tabbed layout" or "color picker". Matched lexically against WinUI control names, sample headers, and tags. |
+| `id` | `string \| string[] \| undefined` | No | Fetch the code (Gallery/Toolkit return XAML and/or C#; Reactor is C#-only) plus prerequisite notes for one or more scenario ids from a prior search (e.g. gallery-tabview-1). |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `list` | `boolean \| undefined` | No | List every discoverable control/sample id instead of searching. Covers Gallery, Toolkit, and core; the opt-in Reactor source is excluded (search it with --source reactor). |
+| `max` | `number \| undefined` | No | Maximum number of matched controls to return. Applies to search only; ignored with --list and --id. |
+| `refresh` | `boolean \| undefined` | No | Bypass the local cache and re-fetch the WinUI corpus from GitHub. |
+| `source` | `string \| undefined` | No | Restrict results to a single source: gallery (WinUI 3 Gallery), toolkit (Windows Community Toolkit), reactor (microsoft-ui-reactor, C#-only declarative WinUI), or core (curated patterns). Reactor is opt-in — it is excluded from a normal search, so pass --source reactor to search it (only do this for a Reactor/MVU project; its C#-only samples don't paste into a standard XAML app). |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

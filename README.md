@@ -240,6 +240,10 @@ See also: [Debugging Guide](./docs/debugging.md) — choosing between `winapp ru
 - [`store`](./docs/usage.md#store) - Run Microsoft Store Developer CLI commands
 - [`get-winapp-path`](./docs/usage.md#get-winapp-path) - Get paths to installed SDK components
 
+**Discovery:**
+
+- [`find-ui`](./docs/usage.md#find-ui) - Search WinUI controls & samples (WinUI 3 Gallery + Windows Community Toolkit; Reactor is opt-in via `--source reactor`) for a working code example
+
 **Node.js/Electron Specific:**
 
 - [`node create-addon`](./docs/usage.md#node-create-addon) - Generate native C# or C++ addons

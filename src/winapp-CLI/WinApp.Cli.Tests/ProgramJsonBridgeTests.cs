@@ -200,6 +200,64 @@ public class ProgramJsonBridgeTests : BaseCommandTests
     }
 
     // -------------------------------------------------------------------------
+    // #719 — find-ui parse errors must stay machine-readable under --json.
+    // find-ui emits its JSON (results and errors) as a flat {"error":"..."} object
+    // on STDOUT, so parser-level failures must land there too — not as SCL help text.
+    // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task FindUi_MaxNotAnInteger_Json_EmitsFlatJsonErrorOnStdout()
+    {
+        // The reported repro: `--max abc` fails at SCL parse time (Option<int> can't parse "abc"),
+        // before the handler runs. Without the bridge, SCL prints the command description + usage.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["find-ui", "grid", "--max", "abc", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "A bad --max value must exit 1");
+
+        // stdout must be exactly one valid JSON object with a non-empty error string.
+        int jsonStart = stdout.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stdout must contain a JSON error object; got stdout: {stdout} / stderr: {stderr}");
+        var error = JsonSerializer.Deserialize<JsonElement>(stdout.AsSpan(jsonStart).TrimEnd());
+        var message = error.GetProperty("error").GetString();
+        Assert.IsFalse(string.IsNullOrWhiteSpace(message), "the JSON error payload must carry a message");
+        StringAssert.Contains(message, "--max", "the error should name the offending option");
+
+        // The human help text (description/usage) must NOT leak onto stdout.
+        Assert.IsFalse(stdout.Contains("Usage:", StringComparison.Ordinal),
+            $"stdout must be machine-readable JSON only, not usage help; got: {stdout}");
+    }
+
+    [TestMethod]
+    public async Task FindUi_SingleDashTypo_Json_EmitsFlatJsonErrorOnStdout()
+    {
+        // A single-dash long-option typo (`-max`) is caught by the typo validator, which also
+        // returns before the handler. Under --json it must emit the flat find-ui error, not text.
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["find-ui", "grid", "-max", "3", "--json"]);
+
+        Assert.AreEqual(1, exitCode, "A single-dash option typo must exit 1");
+        int jsonStart = stdout.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0, $"stdout must contain a JSON error object; got stdout: {stdout} / stderr: {stderr}");
+        var error = JsonSerializer.Deserialize<JsonElement>(stdout.AsSpan(jsonStart).TrimEnd());
+        Assert.IsFalse(string.IsNullOrWhiteSpace(error.GetProperty("error").GetString()),
+            "the JSON error payload must carry a message");
+    }
+
+    [TestMethod]
+    public async Task FindUi_MaxNotAnInteger_NoJson_KeepsHumanText()
+    {
+        // Guard: without --json the behavior is unchanged — SCL still surfaces its human
+        // diagnostic and no JSON object is emitted.
+        var (stdout, _, exitCode) = await InvokeProgramAsync(
+            ["find-ui", "grid", "--max", "abc"]);
+
+        Assert.AreEqual(1, exitCode, "A bad --max value must exit 1");
+        Assert.IsFalse(stdout.TrimStart().StartsWith('{'),
+            $"without --json, stdout must not be a JSON error object; got: {stdout}");
+    }
+
+    // -------------------------------------------------------------------------
     // M1 — value-aware pre-scan: --json=true / --json=false spellings
     // -------------------------------------------------------------------------
 

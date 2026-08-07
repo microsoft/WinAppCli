@@ -8,6 +8,7 @@ using System.CommandLine.Invocation;
 using System.Diagnostics.CodeAnalysis;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Services;
+using WinApp.Cli.Services.Controls;
 
 namespace WinApp.Cli.Helpers;
 
@@ -69,7 +70,8 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<ISelectorService, SelectorService>()
             .AddSingleton<ISystemUiQuery, SystemUiQuery>()
             .AddSingleton<IUiSessionService, UiSessionService>()
-            .AddSingleton<IUiAutomationService, UiAutomationService>();
+            .AddSingleton<IUiAutomationService, UiAutomationService>()
+            .AddSingleton<IControlsSearchService, ControlsSearchService>();
     }
 
     public static IServiceCollection ConfigureCommands(this IServiceCollection serviceCollection)
@@ -90,6 +92,7 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<RunCommand, RunCommand.Handler>()
                 .UseCommandHandler<UnregisterCommand, UnregisterCommand.Handler>()
                 .UseCommandHandler<GetWinappPathCommand, GetWinappPathCommand.Handler>()
+                .UseCommandHandler<FindUiCommand, FindUiCommand.Handler>()
                 .ConfigureCommand<CertCommand>()
                 .UseCommandHandler<CertGenerateCommand, CertGenerateCommand.Handler>()
                 .UseCommandHandler<CertInstallCommand, CertInstallCommand.Handler>()

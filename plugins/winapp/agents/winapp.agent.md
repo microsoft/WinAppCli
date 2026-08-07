@@ -74,6 +74,11 @@ Want to inspect or interact with a running app's UI?
 ├─ Inject touch gestures (tap/swipe/pinch/long-press) → winapp ui touch <selector> -a <appname> --gesture swipe --direction right --distance 200
 ├─ Inject pen/stylus ink stroke or tap → winapp ui pen <selector> -a <appname> --path "10,10 200,200"
 └─ List app windows → winapp ui list-windows -a <appname> [--show-hidden]
+
+Building a WinUI 3 UI and need to find the right control or a working sample?
+└─ winapp find-ui "<what you want>"   (search WinUI 3 Gallery + Community Toolkit; Reactor is opt-in via --source reactor)
+   ├─ Then fetch full code for a match → winapp find-ui --id <scenario-id>
+   └─ WinUI-only (not WPF/WinForms); distinct from `ui search`, which inspects a *running* app
 ```
 
 ## Critical rules — always follow these
@@ -257,6 +262,20 @@ Want to inspect or interact with a running app's UI?
 ### `winapp create-external-catalog <input-folder>`
 **Purpose:** Generate a `CodeIntegrityExternal.cat` catalog file for sparse packages with `AllowExternalContent`.
 **When to use:** When your sparse package manifest uses `TrustedLaunch` and you need to catalog external executable files.
+
+### `winapp find-ui "<query>"` — WinUI control & sample search
+**Purpose:** Lexically search **WinUI** controls and samples (WinUI 3 Gallery + Windows Community Toolkit, plus curated core patterns) for a working code example. The microsoft-ui-reactor ReactorGallery is an **opt-in** source, excluded from a normal search and searched only via `--source reactor` (its C#-only declarative samples don't paste into a standard XAML app — Reactor/MVU projects only). WinUI-only — not WPF/WinForms.
+**When to use:** When building a WinUI 3 UI and you need to discover which control fits an intent and get a real code example (XAML and/or C# for Gallery/Toolkit; C#-only for Reactor), without leaving the CLI. Distinct from `winapp ui search`, which searches a *running app's* UI tree.
+**Workflow:** search compactly to find the control and its scenario ids, then fetch full code with `--id`.
+**Key options:**
+- `--id <id>` — fetch the code (XAML and/or C# for Gallery/Toolkit, C#-only for Reactor) for one or more scenario ids (e.g. `gallery-tabview-1`); repeatable
+- `--list` — list all discoverable control/sample ids (Gallery + Toolkit + core; the opt-in Reactor source is excluded)
+- `--source <gallery|toolkit|reactor|core>` — restrict search to one source (search only). Reactor is opt-in — a normal search excludes it, so `--source reactor` is the only way to search it.
+- `--max <N>` — max matched controls (default 3)
+- `--refresh` — re-fetch the corpus from GitHub
+- `--json` — structured, agent-friendly output
+
+**Note:** The corpus is fetched from GitHub on first use and cached per-user, so the **first run requires network access**.
 
 ### `winapp ui` — UI automation commands
 **Purpose:** Inspect and interact with running Windows app UIs using Windows UI Automation (UIA).

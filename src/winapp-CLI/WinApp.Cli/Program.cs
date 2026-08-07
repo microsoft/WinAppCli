@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using System.Text;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Helpers;
+using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 using WinApp.Cli.Telemetry;
 using WinApp.Cli.Telemetry.Events;
@@ -100,6 +101,10 @@ internal static class Program
                 {
                     UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments, message);
                 }
+                else if (ResolveEffectiveJson(parseResult) && IsFindUi(parseResult))
+                {
+                    EmitFindUiJsonError(message);
+                }
                 else
                 {
                     Console.Error.WriteLine(message);
@@ -181,6 +186,20 @@ internal static class Program
                         CommandInvokedEvent.Log(parsedArgs.CommandResult);
                     }
                     UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments, typoMessage);
+                    if (!isCompleteMode)
+                    {
+                        CommandCompletedEvent.Log(parsedArgs.CommandResult, 1);
+                    }
+                }
+                else if (effectiveJson && IsFindUi(parsedArgs))
+                {
+                    // find-ui emits all its JSON (results and errors) on stdout as a flat
+                    // {"error":"..."} object — keep parser-level failures on that same contract.
+                    if (!isCompleteMode)
+                    {
+                        CommandInvokedEvent.Log(parsedArgs.CommandResult);
+                    }
+                    EmitFindUiJsonError($"Unknown option '{typo}'. Did you mean '{suggested}'?");
                     if (!isCompleteMode)
                     {
                         CommandCompletedEvent.Log(parsedArgs.CommandResult, 1);
@@ -286,6 +305,22 @@ internal static class Program
                 return NewCommand.ExitInvalidArgs;
             }
 
+            // find-ui parse-error → JSON bridge. find-ui documents a --json contract
+            // (search/--id/--list results and in-handler validation errors all emit JSON on
+            // stdout), but a type/parser error such as `--max abc` fails before the handler
+            // runs, so System.CommandLine would otherwise print human help text. Emit the same
+            // flat {"error":"..."} object here so every --json path stays machine-readable (#719).
+            if (effectiveJson && parsedArgs.Errors.Count > 0 && IsFindUi(parsedArgs))
+            {
+                var errorMsg = string.Join("; ", parsedArgs.Errors.Select(e => e.Message));
+                EmitFindUiJsonError(errorMsg);
+                if (!isCompleteMode)
+                {
+                    logCommandCompleted(parsedArgs.CommandResult, 1);
+                }
+                return 1;
+            }
+
             var returnCode = await invoke();
 
             if (!isCompleteMode)
@@ -355,6 +390,27 @@ internal static class Program
             cmd = cmd.Parents.OfType<System.CommandLine.Command>().FirstOrDefault();
         }
         return false;
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when the selected command is <c>find-ui</c>. Used to route
+    /// parser-level failures to find-ui's flat <c>{"error":"..."}</c> JSON contract (#719) instead
+    /// of System.CommandLine's human help text, mirroring the ui bridge above.
+    /// </summary>
+    private static bool IsFindUi(System.CommandLine.ParseResult parseResult) =>
+        parseResult.CommandResult.Command.Name == "find-ui";
+
+    /// <summary>
+    /// Writes a flat <c>{"error":"..."}</c> object to stdout — the same schema and sink
+    /// <c>find-ui</c> uses for in-handler errors — so a parse failure under <c>--json</c> stays
+    /// machine-readable. stdout (not stderr) matches where find-ui emits all its other JSON.
+    /// </summary>
+    private static void EmitFindUiJsonError(string message)
+    {
+        var payload = System.Text.Json.JsonSerializer.Serialize(
+            new JsonErrorOutput { Error = message },
+            WinAppJsonContext.Default.JsonErrorOutput);
+        Console.Out.WriteLine(payload);
     }
 
     /// <summary>
