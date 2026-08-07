@@ -101,12 +101,12 @@ Want to inspect or interact with a running app's UI?
 **When to use:** The user has no project yet and wants to start a WinUI app.
 **Behavior:** Interactive by default (pick a template, then a name; output defaults to `./<name>`). Automatically uses defaults in non-interactive environments. Requires the .NET SDK — fails fast with guidance if it's missing (winapp does not install toolchains). Installs the WinUI template pack on demand and delegates scaffolding to `dotnet new`.
 **Key options:**
-- `-t, --template <blank|navview|tabview|mvvm|lib|unittest>` — WinUI template (default: `blank`)
+- `-t, --template <short-name>` — WinUI template short name from the live catalog (e.g. `winui`, `winui-navview`, `winui-tabview`, `winui-mvvm`, `winui-lib`, `winui-unittest`; default: `winui`). Run `winapp new --list` to see the current set.
 - `-n, --name <name>` — app/project name (default: derived from `--output`, else `WinUIApp`)
 - `-o, --output <path>` — directory to create the app in (default: `./<name>`)
 - `--use-defaults` / `--no-prompt` — skip prompts (blank template, default name)
 - `--force` — scaffold even if the output directory already contains files
-- `--template-version <version>` — pin the WinUI template pack version (pinned by default)
+- `--template-version <latest|installed|version>` — WinUI template pack version: `latest` installs the newest published pack, `installed` keeps whatever is already installed, or an explicit version (e.g. `1.2.3`) installs exactly that. Default (no value): install the latest if no pack is present, otherwise check for a newer pack and prompt to update a stale one — not pinned.
 - `--json` — machine-readable output for agents
 **Next step:** `cd <name>` then `dotnet run` to build and launch the freshly-scaffolded source. The `lib` template differs — reference it from an app project. The `unittest` template is a packaged MSTest app whose tests run when it's launched (`dotnet run`), not via `dotnet test`.
 

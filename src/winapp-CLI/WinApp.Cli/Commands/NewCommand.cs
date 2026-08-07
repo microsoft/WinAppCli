@@ -736,21 +736,15 @@ internal class NewCommand : Command, IShortDescription
 
                 case VersionMode.Explicit:
                 {
-                    if (installed is not null)
+                    // An explicit --template-version is a hard request: reuse the installed pack only
+                    // when it is exactly that version. Any other installed version (older OR newer) does
+                    // not satisfy the request, so install exactly what was asked for. This keeps
+                    // scaffolding reproducible across machines even when a newer pack is already present
+                    // (which means downgrading the shared global pack when the caller pinned an older one).
+                    if (installed is not null
+                        && NuGetVersionHelper.Compare(installed, explicitVersion!) is 0)
                     {
-                        var cmp = NuGetVersionHelper.Compare(installed, explicitVersion!);
-                        if (cmp is int c && c >= 0)
-                        {
-                            // Installed version is equal to or newer than requested: reuse it rather than
-                            // reinstalling (equal) or downgrading the shared global pack (newer).
-                            if (c > 0 && !isJson && !quiet)
-                            {
-                                logger.LogInformation(
-                                    "{Info}  Using already-installed WinUI template pack {Pack} version {Installed} (newer than requested {Requested}).",
-                                    UiSymbols.Info, TemplatePackageId, installed, explicitVersion);
-                            }
-                            return (true, installed, null);
-                        }
+                        return (true, installed, null);
                     }
 
                     var (ok, err) = await InstallPackAsync(cwd, explicitVersion, sdkVersion, isJson, quiet, cancellationToken);

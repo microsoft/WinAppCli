@@ -735,6 +735,82 @@ public class NewCommandHandlerTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task Handler_NewerPackInstalled_InstallsRequestedOlderVersion()
+    {
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "uninstall")
+            {
+                // A NEWER version is installed than the one requested below.
+                return (0, "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n   Version: 0.0.6-alpha\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "install")
+            {
+                return (0, "Success", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, SampleListOutput, string.Empty);
+            }
+            return (0, "created", string.Empty); // scaffold
+        };
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["--use-defaults", "--json", "--template-version", "0.0.5-alpha"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+
+        // An explicit version is a hard request: a newer installed pack must not be silently reused.
+        // The exact requested version has to be installed so scaffolding is reproducible across machines.
+        var install = _dotnet.ArgumentListInvocations
+            .FirstOrDefault(a => a.Count >= 3 && a[0] == "new" && a[1] == "install");
+        Assert.IsNotNull(install, "A newer installed pack must still be replaced with the explicitly requested version.");
+        Assert.AreEqual($"{NewCommand.TemplatePackageId}::0.0.5-alpha", install[2],
+            "The exact requested template-pack version must be installed, even when a newer pack is present.");
+
+        // The reported version must be what the caller requested, not the previously installed newer pack.
+        var json = ParseJson(TestAnsiConsole.Output);
+        Assert.AreEqual("0.0.5-alpha", json.GetProperty("TemplateVersion").GetString(),
+            "The JSON must report the requested version, not the newer pack that happened to be installed.");
+    }
+
+    [TestMethod]
+    public async Task Handler_ExactRequestedPackInstalled_SkipsReinstall()
+    {
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "uninstall")
+            {
+                // The EXACT requested version is already installed.
+                return (0, "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n   Version: 0.0.5-alpha\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, SampleListOutput, string.Empty);
+            }
+            return (0, "created", string.Empty); // scaffold
+        };
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["--use-defaults", "--json", "--template-version", "0.0.5-alpha"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        Assert.IsFalse(
+            _dotnet.ArgumentListInvocations.Any(a => a.Count >= 2 && a[0] == "new" && a[1] == "install"),
+            "When the exact requested version is already installed, it must be reused without reinstalling.");
+    }
+
+    [TestMethod]
     public async Task Handler_NonInteractiveWithoutUseDefaults_FallsBackToDefaults()
     {
         ScriptHappyPath();
