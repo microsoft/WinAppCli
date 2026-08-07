@@ -42,6 +42,10 @@ param(
 
     [switch]$PruneCerts,
 
+    [switch]$Uninstall,
+
+    [switch]$All,
+
     [switch]$Update,
 
     [switch]$AddToPath,
@@ -856,12 +860,42 @@ function Grant-CertificateTrust {
     Write-Ok 'Certificate trusted'
 }
 
-function Remove-StaleCertificates {
-    param([string]$KeepThumbprint)
+function Remove-TrustedCerts {
+    <# Removes the given thumbprints from TrustedPeople, elevating once if needed. #>
+    param([string[]]$Thumbprints)
+
+    $targets = @($Thumbprints | Where-Object { Test-Thumbprint -Value $_ })
+    if (-not $targets) { return $true }
 
     $isAdmin = (New-Object Security.Principal.WindowsPrincipal(
         [Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole(
         [Security.Principal.WindowsBuiltInRole]::Administrator)
+
+    if ($isAdmin) {
+        foreach ($thumb in $targets) {
+            Remove-Item "Cert:\LocalMachine\TrustedPeople\$thumb" -Force -ErrorAction SilentlyContinue
+        }
+        return $true
+    }
+
+    $removals = ($targets | ForEach-Object {
+        "Remove-Item 'Cert:\LocalMachine\TrustedPeople\$_' -Force -ErrorAction SilentlyContinue"
+    }) -join '; '
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($removals))
+    $shell = if (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell' }
+
+    try {
+        $proc = Start-Process $shell -Verb RunAs -Wait -PassThru `
+            -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', $encoded)
+    }
+    catch {
+        return $false
+    }
+    return ($proc.ExitCode -eq 0)
+}
+
+function Remove-StaleCertificates {
+    param([string]$KeepThumbprint)
 
     # These certs all share the CI runner's subject, which is what makes them safe to bulk-remove.
     $stale = Get-ChildItem Cert:\LocalMachine\TrustedPeople |
@@ -874,28 +908,88 @@ function Remove-StaleCertificates {
 
     Write-Detail "Found $($stale.Count) stale CI certificate(s)"
 
-    if ($isAdmin) {
-        foreach ($cert in $stale) {
-            Remove-Item "Cert:\LocalMachine\TrustedPeople\$($cert.Thumbprint)" -Force
-        }
-        Set-TrackedCerts -Thumbprints @(Get-TrackedCerts | Where-Object { $_ -eq $KeepThumbprint })
-        Write-Ok "Removed $($stale.Count) certificate(s)"
-        return
-    }
-
-    $removals = ($stale | Where-Object { Test-Thumbprint -Value $_.Thumbprint } | ForEach-Object {
-        "Remove-Item 'Cert:\LocalMachine\TrustedPeople\$($_.Thumbprint)' -Force -ErrorAction SilentlyContinue"
-    }) -join '; '
-    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($removals))
-    $shell = if (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell' }
-
-    $proc = Start-Process $shell -Verb RunAs -Wait -PassThru `
-        -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', $encoded)
-    if ($proc.ExitCode -ne 0) {
-        Fail "Certificate cleanup failed with exit code $($proc.ExitCode)."
+    if (-not (Remove-TrustedCerts -Thumbprints @($stale.Thumbprint))) {
+        Fail 'Certificate cleanup failed or was cancelled.'
     }
     Set-TrackedCerts -Thumbprints @(Get-TrackedCerts | Where-Object { $_ -eq $KeepThumbprint })
     Write-Ok "Removed $($stale.Count) certificate(s)"
+}
+
+function Get-CacheSize {
+    if (-not (Test-Path $CacheRoot)) { return 0 }
+    $bytes = (Get-ChildItem $CacheRoot -Recurse -File -ErrorAction SilentlyContinue |
+        Measure-Object Length -Sum).Sum
+    if (-not $bytes) { return 0 }
+    return [math]::Round($bytes / 1MB)
+}
+
+function Invoke-Uninstall {
+    <#
+        Undo what this tool did: the installed build, the certificates trusted for it, and the
+        downloads and records kept for it. -All also removes winapp-pr itself.
+    #>
+    $package = Get-InstalledWinapp | Select-Object -First 1
+    $tracked = @(Get-TrackedCerts)
+    $cacheMb = Get-CacheSize
+
+    if (-not $package -and -not $tracked -and -not $cacheMb -and -not $All) {
+        Write-Ok 'Nothing to remove.'
+        return
+    }
+
+    Write-Detail 'This will remove:'
+    if ($package) { Write-Detail "  - the installed package ($($package.Name) $($package.Version))" }
+    if ($tracked) { Write-Detail "  - $($tracked.Count) CI certificate(s) trusted for it" }
+    if ($cacheMb) { Write-Detail "  - $cacheMb MB of cached downloads" }
+    if ($All)     { Write-Detail "  - winapp-pr itself, and its entry on your PATH" }
+
+    if (-not $Force -and -not (Confirm-Action '   Continue?')) {
+        Write-Host "`nCancelled." -ForegroundColor Yellow
+        return
+    }
+
+    if ($package) {
+        foreach ($pkg in Get-InstalledWinapp) {
+            Remove-AppxPackage -Package $pkg.PackageFullName -ErrorAction Stop
+            Write-Ok "Removed $($pkg.Name) $($pkg.Version)"
+        }
+    }
+
+    if ($tracked) {
+        if (Remove-TrustedCerts -Thumbprints $tracked) {
+            Write-Ok "Removed $($tracked.Count) trusted certificate(s)"
+        }
+        else {
+            Write-Warn 'Certificates were not removed; run winapp-pr -PruneCerts later.'
+        }
+    }
+
+    $hadState = (Test-Path $ToolHome)
+    foreach ($path in @($CacheRoot, $StateFile, $TrustedFile)) {
+        Remove-Item $path -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Remove-Item $ToolHome -Recurse -Force -ErrorAction SilentlyContinue
+    if ($hadState) { Write-Ok 'Removed cached downloads and install records' }
+
+    if (-not $All) {
+        Write-Host "`nDone. winapp-pr is still installed; run it again to install another build.`n" -ForegroundColor Green
+        return
+    }
+
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $entries = @($userPath -split ';' | Where-Object { $_ -and $_ -ne $InstallDir })
+    [Environment]::SetEnvironmentVariable('Path', ($entries -join ';'), 'User')
+    $env:Path = (@($env:Path -split ';' | Where-Object { $_ -and $_ -ne $InstallDir }) -join ';')
+
+    # A running .ps1 is read into memory rather than locked, so it can delete its own directory.
+    Remove-Item $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path $InstallDir) {
+        Write-Warn "Could not remove $InstallDir; delete it manually."
+    }
+    else {
+        Write-Ok 'Removed winapp-pr and its PATH entry'
+    }
+    Write-Host "`nDone. winapp-pr is fully removed.`n" -ForegroundColor Green
 }
 
 # ── Install ──────────────────────────────────────────────────────────────────
@@ -934,6 +1028,8 @@ COMMANDS
   -Update                   install the newest build of whatever you have
   -Status                   show the installed build and where it came from
   -List                     list recent builds for the target
+  -Uninstall                remove the installed build and everything kept for it
+                            (add -All to remove winapp-pr itself too)
   -PruneCerts               remove trusted CI certificates from past installs
                             (installs retire their own automatically)
   -AddToPath                install winapp-pr itself onto your PATH
@@ -943,7 +1039,8 @@ COMMANDS
 OPTIONS
   -Repo <owner/name>        install from another repo, such as a private fork
   -Arch <x64|arm64>         override the detected architecture
-  -Force                    reinstall even if that build is already installed
+  -Force                    reinstall even if that build is already installed,
+                            or skip the -Uninstall confirmation
   -NonInteractive           skip the picker and use the current git branch
 
 Installing a build replaces any winapp package already installed, and needs the
@@ -1035,6 +1132,12 @@ function Invoke-Main {
     if ($Status) {
         Write-Step 'Installed winapp package'
         Show-Status
+        return
+    }
+
+    if ($Uninstall) {
+        Write-Step 'Uninstalling'
+        Invoke-Uninstall
         return
     }
 
