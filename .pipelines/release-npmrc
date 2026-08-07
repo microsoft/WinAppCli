@@ -1,0 +1,2 @@
+registry=https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/npm/registry/
+always-auth=true

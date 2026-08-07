@@ -37,6 +37,8 @@ parameters:
 extends:
   template: v1/1ES.Official.PipelineTemplate.yml@1esPipelines
   parameters:
+    settings:
+      networkIsolationPolicy: Permissive,CFSClean
     sdl:
       policheck:
         enabled: true
@@ -71,9 +73,17 @@ extends:
             displayName: Setup Node.js 24
             inputs:
               version: '24.x'
-          - script: move /Y $(Build.SourcesDirectory)\.pipelines\release-nuget.config $(Build.SourcesDirectory)\nuget.config
+          - script: |
+              if not exist "%APPDATA%\NuGet" mkdir "%APPDATA%\NuGet"
+              copy /Y $(Build.SourcesDirectory)\.pipelines\release-nuget.config "%APPDATA%\NuGet\NuGet.Config"
+              move /Y $(Build.SourcesDirectory)\.pipelines\release-nuget.config $(Build.SourcesDirectory)\nuget.config
             displayName: Add release package source
           - task: NuGetAuthenticate@1
+          - script: move /Y $(Build.SourcesDirectory)\.pipelines\release-npmrc $(Build.SourcesDirectory)\.npmrc
+            displayName: Add release npm source
+          - task: npmAuthenticate@0
+            inputs:
+              workingFile: $(Build.SourcesDirectory)\.npmrc
           - task: PowerShell@2
             displayName: Replace Stubbed Files
             inputs:
