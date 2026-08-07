@@ -291,6 +291,19 @@ function Set-InstallState {
 
 # ── Self-install ─────────────────────────────────────────────────────────────
 
+function Test-RunningInOwnProcess {
+    <#
+        True when PowerShell was launched specifically to run this script (pwsh -File ...), so
+        our environment dies with it. When we are running inside the caller's session instead,
+        changes to $env:Path reach them directly.
+    #>
+    $cmdArgs = [Environment]::GetCommandLineArgs()
+    for ($i = 0; $i -lt $cmdArgs.Count - 1; $i++) {
+        if ($cmdArgs[$i] -in '-File', '-f') { return $true }
+    }
+    return $false
+}
+
 function Install-ToPath {
     param([string]$Source)
 
@@ -320,13 +333,25 @@ where pwsh >nul 2>nul && (pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0wi
     if ($entries -notcontains $InstallDir) {
         [Environment]::SetEnvironmentVariable('Path', (@($entries + $InstallDir) -join ';'), 'User')
         Write-Ok "Added to user PATH: $InstallDir"
-        Write-Detail 'Open a new terminal for the PATH change to take effect.'
     }
     else {
         Write-Ok "Already on user PATH: $InstallDir"
     }
 
+    # The registry change only reaches new processes, so patch this session's PATH as well.
+    # That reaches the caller whenever we are running inside their session, which covers both
+    # the web one-liner and `& .\winapp-pr.ps1 -AddToPath` from a clone.
+    if (@($env:Path -split ';') -notcontains $InstallDir) {
+        $env:Path = "$env:Path;$InstallDir"
+    }
+
     Write-Detail "Installed: $targetPs1"
+    if (Test-RunningInOwnProcess) {
+        Write-Detail 'Open a new terminal to use winapp-pr in this session.'
+    }
+    else {
+        Write-Ok 'winapp-pr is ready to use in this session.'
+    }
     Write-Host "`nUsage: winapp-pr   |   winapp-pr 690   |   winapp-pr main   |   winapp-pr -Status" -ForegroundColor Cyan
 }
 
@@ -418,7 +443,7 @@ function Get-MenuItems {
 
         [pscustomobject]@{
             Spec   = [string]$pr.number
-            Name   = "#$($pr.number)"
+            Name   = "PR #$($pr.number)"
             Title  = $pr.title
             Meta   = ($meta -join ' - ')
             Marker = Get-Marker -Branch $pr.branch
@@ -974,7 +999,12 @@ function Show-Status {
 
     $state = Get-InstallState
     if (Test-StateMatchesInstall -State $state -Package ($installed | Select-Object -First 1)) {
-        Write-Detail "Source: $($state.Repo)  $($state.Branch)  @ $($state.HeadSha)"
+        # Name the PR as well as the branch: the picker offers builds by PR number, so that is
+        # the identifier you chose it by.
+        $source = @($state.Repo)
+        if ($state.Pr) { $source += "PR #$($state.Pr)" }
+        $source += $state.Branch
+        Write-Detail "Source: $($source -join '  ')  @ $($state.HeadSha)"
         Write-Detail "Run   : $($state.RunId)  installed $($state.InstalledAt)"
     }
     elseif ($state) {
