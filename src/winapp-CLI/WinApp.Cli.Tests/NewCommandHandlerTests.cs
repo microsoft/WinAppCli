@@ -2,11 +2,14 @@
 // Licensed under the MIT License.
 
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Services;
+using WinApp.Cli.Telemetry;
+using WinApp.Cli.Telemetry.Events;
 
 namespace WinApp.Cli.Tests;
 
@@ -999,5 +1002,153 @@ public class NewCommandHandlerTests : BaseCommandTests
         Assert.IsFalse(
             _dotnet.ArgumentListInvocations.Any(a => a.Count >= 2 && a[0] == "new" && a[1] == "install"),
             "A non-interactive (--use-defaults) run must keep the installed pack rather than performing a machine-wide update.");
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // Swaps the process-wide TelemetryFactory override.
+    public async Task Handler_HappyPath_EmitsCorrelatedNewCommandEvent()
+    {
+        ScriptHappyPath();
+        var fake = new CapturingTelemetry();
+        TelemetryFactory.SetOverrideForTesting(fake);
+        var correlationId = TelemetryCorrelation.Begin();
+        try
+        {
+            var command = GetRequiredService<NewCommand>();
+
+            var exitCode = await ParseAndInvokeWithCaptureAsync(
+                command, ["--use-defaults", "--json", "--name", "MyApp", "--template", "winui-navview"]);
+
+            Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+
+            var evt = fake.Events.OfType<NewCommandEvent>().SingleOrDefault();
+            Assert.IsNotNull(evt, "The new command must emit exactly one NewCommandEvent.");
+            Assert.AreEqual("winui-navview", evt.Template);
+            Assert.IsFalse(evt.TemplateIsItem);
+            Assert.AreEqual("Default", evt.VersionMode, "No --template-version resolves to the Default mode.");
+            Assert.IsFalse(evt.Interactive, "--json/--use-defaults is a non-interactive run.");
+            Assert.IsFalse(evt.ListOnly);
+            Assert.AreEqual("created", evt.Outcome);
+            Assert.AreEqual(NewCommand.ExitSuccess, evt.ExitCode);
+
+            var related = fake.RelatedActivityIds.Single(kvp => kvp.Key is NewCommandEvent).Value;
+            Assert.AreEqual(correlationId, related,
+                "The NewCommandEvent must carry the invocation's correlation id so it joins the generic lifecycle events.");
+        }
+        finally
+        {
+            TelemetryFactory.SetOverrideForTesting(null);
+        }
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // Swaps the process-wide TelemetryFactory override.
+    public async Task Handler_List_EmitsListedOutcomeWithoutTemplate()
+    {
+        ScriptHappyPath();
+        var fake = new CapturingTelemetry();
+        TelemetryFactory.SetOverrideForTesting(fake);
+        try
+        {
+            var command = GetRequiredService<NewCommand>();
+
+            var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--list", "--json"]);
+
+            Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+
+            var evt = fake.Events.OfType<NewCommandEvent>().SingleOrDefault();
+            Assert.IsNotNull(evt);
+            Assert.IsTrue(evt.ListOnly);
+            Assert.IsNull(evt.Template, "A --list run never resolves a template.");
+            Assert.AreEqual("listed", evt.Outcome);
+        }
+        finally
+        {
+            TelemetryFactory.SetOverrideForTesting(null);
+        }
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // Swaps the process-wide TelemetryFactory override.
+    public async Task Handler_TemplatePackInstallFails_EmitsPackFailedOutcome()
+    {
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "uninstall")
+            {
+                return (0, string.Empty, string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "install")
+            {
+                return (1, string.Empty, "NU1101: package not found");
+            }
+            return (0, string.Empty, string.Empty);
+        };
+        var fake = new CapturingTelemetry();
+        TelemetryFactory.SetOverrideForTesting(fake);
+        try
+        {
+            var command = GetRequiredService<NewCommand>();
+
+            var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json"]);
+
+            Assert.AreEqual(NewCommand.ExitTemplatePackFailed, exitCode);
+
+            var evt = fake.Events.OfType<NewCommandEvent>().SingleOrDefault();
+            Assert.IsNotNull(evt);
+            Assert.AreEqual("pack-failed", evt.Outcome,
+                "A failed pack install must be reported with the pack-failed outcome derived from the exit code.");
+            Assert.AreEqual(NewCommand.ExitTemplatePackFailed, evt.ExitCode);
+        }
+        finally
+        {
+            TelemetryFactory.SetOverrideForTesting(null);
+        }
+    }
+
+    /// <summary>Test double capturing <see cref="ITelemetry.Log{T}"/> calls (event + relatedActivityId).</summary>
+    private sealed class CapturingTelemetry : ITelemetry
+    {
+        public List<EventBase> Events { get; } = [];
+
+        public List<KeyValuePair<EventBase, Guid>> RelatedActivityIds { get; } = [];
+
+        public bool IsTelemetryOn => false;
+
+        public bool IsDiagnosticTelemetryOn { get; set; }
+
+        public void AddSensitiveString(string name, string replaceWith)
+        {
+        }
+
+        public void LogException(string action, Exception e, Guid? relatedActivityId = null)
+        {
+        }
+
+        public void LogTimeTaken(string eventName, uint timeTakenMilliseconds, Guid? relatedActivityId = null)
+        {
+        }
+
+        public void LogCritical(string eventName, bool isError = false, Guid? relatedActivityId = null)
+        {
+        }
+
+        public void Log<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] T>(string eventName, LogLevel level, T data, Guid? relatedActivityId = null)
+            where T : EventBase
+        {
+            Events.Add(data);
+            RelatedActivityIds.Add(new KeyValuePair<EventBase, Guid>(data, relatedActivityId ?? Guid.Empty));
+        }
+
+        public void LogError<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] T>(string eventName, LogLevel level, T data, Guid? relatedActivityId = null)
+            where T : EventBase
+        {
+            Events.Add(data);
+            RelatedActivityIds.Add(new KeyValuePair<EventBase, Guid>(data, relatedActivityId ?? Guid.Empty));
+        }
     }
 }

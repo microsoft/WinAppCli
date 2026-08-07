@@ -11,6 +11,9 @@ using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
+using WinApp.Cli.Telemetry;
+using WinApp.Cli.Telemetry.Events;
+using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
 namespace WinApp.Cli.Commands;
 
@@ -296,7 +299,64 @@ internal class NewCommand : Command, IShortDescription
             Explicit,
         }
 
+        /// <summary>Mutable accumulator threaded through the invocation so the wrapper can emit one
+        /// correlated <see cref="NewCommandEvent"/> covering every exit path.</summary>
+        private sealed class InvocationTelemetry
+        {
+            public string? Template;
+            public bool TemplateIsItem;
+            public string VersionMode = "Default";
+            public bool Interactive;
+            public bool ListOnly;
+        }
+
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
+        {
+            var tel = new InvocationTelemetry();
+            var correlationId = TelemetryCorrelation.CurrentId;
+            var exitCode = ExitSuccess;
+            string? outcome = null;
+            try
+            {
+                exitCode = await InvokeCoreAsync(parseResult, tel, cancellationToken);
+                return exitCode;
+            }
+            catch (OperationCanceledException)
+            {
+                outcome = "cancelled";
+                throw;
+            }
+            catch
+            {
+                outcome = "error";
+                throw;
+            }
+            finally
+            {
+                NewCommandEvent.Log(
+                    tel.Template,
+                    tel.TemplateIsItem,
+                    tel.VersionMode,
+                    tel.Interactive,
+                    tel.ListOnly,
+                    outcome ?? MapOutcome(exitCode, tel.ListOnly),
+                    exitCode,
+                    correlationId);
+            }
+        }
+
+        /// <summary>Maps a process exit code to a low-cardinality outcome label for telemetry.</summary>
+        private static string MapOutcome(int exitCode, bool listOnly) => exitCode switch
+        {
+            ExitSuccess => listOnly ? "listed" : "created",
+            ExitInvalidArgs => "invalid-args",
+            ExitSdkMissing => "sdk-missing",
+            ExitTemplatePackFailed => "pack-failed",
+            ExitScaffoldFailed => "scaffold-failed",
+            _ => "unknown",
+        };
+
+        private async Task<int> InvokeCoreAsync(ParseResult parseResult, InvocationTelemetry tel, CancellationToken cancellationToken = default)
         {
             var templateArg = parseResult.GetValue(TemplateOption);
             var nameFromOption = parseResult.GetValue(NameOption);
@@ -307,6 +367,8 @@ internal class NewCommand : Command, IShortDescription
             var list = parseResult.GetValue(ListOption);
             var isJson = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var quiet = parseResult.GetValue(WinAppRootCommand.QuietOption);
+
+            tel.ListOnly = list;
 
             var name = nameFromOption;
 
@@ -323,9 +385,12 @@ internal class NewCommand : Command, IShortDescription
                 useDefaults = true;
             }
 
+            tel.Interactive = !useDefaults;
+
             // Classify --template-version. Keywords (latest/installed) are matched case-insensitively
             // and bypass the numeric-version grammar; only an explicit version is shape-validated.
             var (mode, explicitVersion) = ClassifyVersion(versionRaw);
+            tel.VersionMode = mode.ToString();
             if (mode == VersionMode.Explicit && !NuGetVersionHelper.IsPlausibleVersion(explicitVersion!))
             {
                 var versionError = $"Invalid --template-version '{versionRaw}'. Use '{LatestVersionKeyword}', '{InstalledVersionKeyword}', or a NuGet version such as 1.2.3.";
@@ -480,6 +545,9 @@ internal class NewCommand : Command, IShortDescription
             {
                 entry = await PromptTemplateAsync(templates, cancellationToken);
             }
+
+            tel.Template = entry.ShortName;
+            tel.TemplateIsItem = entry.IsItem;
 
             // 2. Resolve name. Only a genuinely absent --name enters the defaulting path; an explicitly
             // supplied but blank value (e.g. --name "   ") is kept so the validation below rejects it

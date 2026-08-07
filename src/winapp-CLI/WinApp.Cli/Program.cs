@@ -241,6 +241,11 @@ internal static class Program
     {
         try
         {
+            // Start a correlation scope so the CommandInvoked/CommandCompleted events and any
+            // command-specific event a handler emits (e.g. NewCommand_Event) share one
+            // relatedActivityId for this invocation.
+            TelemetryCorrelation.Begin();
+
             if (!isCompleteMode)
             {
                 logCommandInvoked(parsedArgs.CommandResult);
