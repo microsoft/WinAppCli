@@ -278,6 +278,45 @@ export async function embedIdentity(options: EmbedIdentityOptions): Promise<Wina
 }
 
 // ---------------------------------------------------------------------------
+// find-ui
+// ---------------------------------------------------------------------------
+
+export interface FindUiOptions extends CommonOptions {
+  /** What you're looking for, e.g. "tabbed layout" or "color picker". Matched lexically against WinUI control names, sample headers, and tags. */
+  query?: string;
+  /** Fetch the code (Gallery/Toolkit return XAML and/or C#; Reactor is C#-only) plus prerequisite notes for one or more scenario ids from a prior search (e.g. gallery-tabview-1). */
+  id?: string | string[];
+  /** Format output as JSON */
+  json?: boolean;
+  /** List every discoverable control/sample id instead of searching. Covers Gallery, Toolkit, and core; the opt-in Reactor source is excluded (search it with --source reactor). */
+  list?: boolean;
+  /** Maximum number of matched controls to return. Applies to search only; ignored with --list and --id. */
+  max?: number;
+  /** Bypass the local cache and re-fetch the WinUI corpus from GitHub. */
+  refresh?: boolean;
+  /** Restrict results to a single source: gallery (WinUI 3 Gallery), toolkit (Windows Community Toolkit), reactor (microsoft-ui-reactor, C#-only declarative WinUI), or core (curated patterns). Reactor is opt-in — it is excluded from a normal search, so pass --source reactor to search it (only do this for a Reactor/MVU project; its C#-only samples don't paste into a standard XAML app). */
+  source?: string;
+}
+
+/**
+ * Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery and the Windows Community Toolkit by default (plus the microsoft-ui-reactor ReactorGallery as an opt-in source via --source reactor); not WPF/WinForms. The Gallery/Toolkit/Reactor corpus is fetched from GitHub on first use and cached per-user, so the first such run needs network access; --source core searches the built-in patterns and works fully offline.
+ */
+export async function findUi(options: FindUiOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['find-ui'];
+  if (options.query) args.push(options.query);
+  if (options.id) {
+    const idArr = Array.isArray(options.id) ? options.id : [options.id];
+    for (const v of idArr) args.push('--id', v);
+  }
+  if (options.json) args.push('--json');
+  if (options.list) args.push('--list');
+  if (options.max !== undefined) args.push('--max', options.max.toString());
+  if (options.refresh) args.push('--refresh');
+  if (options.source) args.push('--source', options.source);
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
 // get-winapp-path
 // ---------------------------------------------------------------------------
 

@@ -25,6 +25,7 @@ Telemetry **is collected** when using any winapp CLI command, including:
 - `winapp cert`
 - `winapp tool`
 - `winapp update`
+- `winapp find-ui`
 
 ## How to opt out
 
@@ -83,6 +84,7 @@ The telemetry feature collects the following data:
 | CLI version | The version of the winapp CLI tool (from assembly version). |
 | CI environment | A boolean flag indicating whether the CLI is running in a Continuous Integration environment. |
 | Caller | The value of the `WINAPP_CLI_CALLER` environment variable, if set. This allows wrapper tools (like the npm package) to identify themselves. |
+| `find-ui` usage | For the `winapp find-ui` command only, an additional usage event with non-personal, bounded values: the mode (`search`, `fetch`, or `list`); the selected `--source` (a fixed value — `gallery`, `toolkit`, `reactor`, or `core`); the catalog scenario IDs fetched (e.g. `gallery-tabview-1`), which identify built-in WinUI sample controls, never your code; whether `--json` was used; and result/ID counts. The free-form search query is **never** collected, and any requested IDs that don't match a real catalog entry are counted but **not** collected as text. |
 
 ### Sanitization of sensitive data
 

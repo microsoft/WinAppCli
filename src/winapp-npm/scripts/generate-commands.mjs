@@ -344,8 +344,7 @@ function generate(schema) {
     }
     // then named options
     for (const opt of opts) {
-      const variadic = isVariadicOption(opt.def);
-      const tp = variadic ? 'string | string[]' : tsType(opt.def.valueType, opt.def.helpName);
+      const tp = isVariadicOption(opt.def) ? 'string | string[]' : tsType(opt.def.valueType, opt.def.helpName);
       L(`  /** ${cleanDesc(opt.def.description)} */`);
       L(`  ${opt.propName}?: ${tp};`);
     }
@@ -414,7 +413,7 @@ function generate(schema) {
       if (isBoolFlag(opt.def)) {
         L(`  if (options.${opt.propName}) args.push('${opt.cliName}');`);
       } else if (isVariadicOption(opt.def)) {
-        // Repeatable option: emit one flag+value pair per element (e.g. --property A=1 --property B=2).
+        // Repeatable option: emit one flag+value pair per element (e.g. --property A=1 --property B=2, or --id x --id y).
         L(`  if (options.${opt.propName}) {`);
         L(`    const ${opt.propName}Arr = Array.isArray(options.${opt.propName}) ? options.${opt.propName} : [options.${opt.propName}];`);
         L(`    for (const v of ${opt.propName}Arr) args.push('${opt.cliName}', v);`);
