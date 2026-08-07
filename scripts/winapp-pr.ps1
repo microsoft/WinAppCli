@@ -65,6 +65,12 @@ $ErrorActionPreference = 'Stop'
 # where there is no file on disk to copy from.
 $SelfSource = $MyInvocation.MyCommand.ScriptBlock.ToString()
 
+# Captured here rather than at the point of use: at script scope the call stack is 1 when this
+# process exists only to run us, and 2+ when the caller's session invoked us. Deeper in the
+# script the depth would vary with nesting. `-File` is optional in PowerShell, so inspecting the
+# command line would miss `pwsh script.ps1`, -Command, dot-sourcing, and the web scriptblock.
+$script:EntryDepth = @(Get-PSCallStack).Count
+
 $WorkflowName = 'Build and Package'
 $ArtifactName = 'msix-packages'
 $PackageNames = @('winapp', 'winapp-dev')
@@ -300,15 +306,14 @@ function Set-InstallState {
 
 function Test-RunningInOwnProcess {
     <#
-        True when PowerShell was launched specifically to run this script (pwsh -File ...), so
-        our environment dies with it. When we are running inside the caller's session instead,
-        changes to $env:Path reach them directly.
+        True when nothing invoked us from within the caller's session, so our environment dies
+        with this process and a $env:Path change cannot reach anyone.
+
+        Measured once at script scope: the depth at any given call site depends on how deeply
+        nested the caller is, but at the top of the script it is simply 1 when we are the
+        entry point and 2+ when something in the caller's session invoked us.
     #>
-    $cmdArgs = [Environment]::GetCommandLineArgs()
-    for ($i = 0; $i -lt $cmdArgs.Count - 1; $i++) {
-        if ($cmdArgs[$i] -in '-File', '-f') { return $true }
-    }
-    return $false
+    return $script:EntryDepth -le 1
 }
 
 function Install-ToPath {
@@ -868,11 +873,16 @@ function Grant-CertificateTrust {
 }
 
 function Remove-TrustedCerts {
-    <# Removes the given thumbprints from TrustedPeople, elevating once if needed. #>
+    <#
+        Removes the given thumbprints from TrustedPeople, elevating once if needed.
+        Returns the thumbprints that are actually gone afterwards: every removal here is
+        best-effort, and an elevated child's exit code says nothing about whether the store
+        operation succeeded, so the store is the only trustworthy answer.
+    #>
     param([string[]]$Thumbprints)
 
     $targets = @($Thumbprints | Where-Object { Test-Thumbprint -Value $_ })
-    if (-not $targets) { return $true }
+    if (-not $targets) { return @() }
 
     $isAdmin = (New-Object Security.Principal.WindowsPrincipal(
         [Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole(
@@ -882,44 +892,57 @@ function Remove-TrustedCerts {
         foreach ($thumb in $targets) {
             Remove-Item "Cert:\LocalMachine\TrustedPeople\$thumb" -Force -ErrorAction SilentlyContinue
         }
-        return $true
+    }
+    else {
+        $removals = ($targets | ForEach-Object {
+            "Remove-Item 'Cert:\LocalMachine\TrustedPeople\$_' -Force -ErrorAction SilentlyContinue"
+        }) -join '; '
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($removals))
+        $shell = if (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell' }
+
+        try {
+            Start-Process $shell -Verb RunAs -Wait `
+                -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', $encoded) | Out-Null
+        }
+        catch {
+            return @()
+        }
     }
 
-    $removals = ($targets | ForEach-Object {
-        "Remove-Item 'Cert:\LocalMachine\TrustedPeople\$_' -Force -ErrorAction SilentlyContinue"
-    }) -join '; '
-    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($removals))
-    $shell = if (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell' }
-
-    try {
-        $proc = Start-Process $shell -Verb RunAs -Wait -PassThru `
-            -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', $encoded)
-    }
-    catch {
-        return $false
-    }
-    return ($proc.ExitCode -eq 0)
+    $remaining = @(Get-ChildItem Cert:\LocalMachine\TrustedPeople |
+        Select-Object -ExpandProperty Thumbprint)
+    return @($targets | Where-Object { $remaining -notcontains $_ })
 }
 
 function Remove-StaleCertificates {
     param([string]$KeepThumbprint)
 
-    # These certs all share the CI runner's subject, which is what makes them safe to bulk-remove.
-    $stale = Get-ChildItem Cert:\LocalMachine\TrustedPeople |
-        Where-Object { $_.Subject -eq 'CN=runneradmin' -and $_.Thumbprint -ne $KeepThumbprint }
+    # Only certificates this tool trusted: TrustedPeople is a shared store, and CN=runneradmin
+    # is produced by anything signed on a GitHub-hosted runner, not just winapp builds.
+    $tracked = @(Get-TrackedCerts | Where-Object { $_ -ne $KeepThumbprint })
+    $present = @(Get-ChildItem Cert:\LocalMachine\TrustedPeople |
+        Select-Object -ExpandProperty Thumbprint)
+    $stale = @($tracked | Where-Object { $present -contains $_ })
 
     if (-not $stale) {
         Write-Ok 'No stale CI certificates to remove'
+        Set-TrackedCerts -Thumbprints @(Get-TrackedCerts | Where-Object { $_ -eq $KeepThumbprint })
         return
     }
 
     Write-Detail "Found $($stale.Count) stale CI certificate(s)"
 
-    if (-not (Remove-TrustedCerts -Thumbprints @($stale.Thumbprint))) {
-        Fail 'Certificate cleanup failed or was cancelled.'
+    $removed = Remove-TrustedCerts -Thumbprints $stale
+    if ($removed.Count -lt $stale.Count) {
+        Write-Warn "Removed $($removed.Count) of $($stale.Count); the rest are still trusted."
     }
-    Set-TrackedCerts -Thumbprints @(Get-TrackedCerts | Where-Object { $_ -eq $KeepThumbprint })
-    Write-Ok "Removed $($stale.Count) certificate(s)"
+    else {
+        Write-Ok "Removed $($removed.Count) certificate(s)"
+    }
+
+    # Keep anything still in the store on the list, so a later run can retry it.
+    $keep = @(Get-TrackedCerts | Where-Object { $removed -notcontains $_ })
+    Set-TrackedCerts -Thumbprints $keep
 }
 
 function Remove-OldCacheEntries {
@@ -966,6 +989,7 @@ function Invoke-Uninstall {
     $package = Get-InstalledWinapp | Select-Object -First 1
     $tracked = @(Get-TrackedCerts)
     $cacheMb = Get-CacheSize
+    $stillTrusted = @()
 
     if (-not $package -and -not $tracked -and -not $cacheMb -and -not $All) {
         Write-Ok 'Nothing to remove.'
@@ -991,12 +1015,14 @@ function Invoke-Uninstall {
     }
 
     if ($tracked) {
-        if (Remove-TrustedCerts -Thumbprints $tracked) {
-            Write-Ok "Removed $($tracked.Count) trusted certificate(s)"
+        $removed = Remove-TrustedCerts -Thumbprints $tracked
+        if ($removed.Count -eq $tracked.Count) {
+            Write-Ok "Removed $($removed.Count) trusted certificate(s)"
         }
         else {
-            Write-Warn 'Certificates were not removed; run winapp-pr -PruneCerts later.'
+            Write-Warn "Removed $($removed.Count) of $($tracked.Count) certificate(s); run winapp-pr -PruneCerts later."
         }
+        $stillTrusted = @($tracked | Where-Object { $removed -notcontains $_ })
     }
 
     $hadState = (Test-Path $ToolHome)
@@ -1005,6 +1031,9 @@ function Invoke-Uninstall {
     }
     Remove-Item $ToolHome -Recurse -Force -ErrorAction SilentlyContinue
     if ($hadState) { Write-Ok 'Removed cached downloads and install records' }
+
+    # Keep a record of anything still trusted, so -PruneCerts can finish the job later.
+    if ($stillTrusted) { Set-TrackedCerts -Thumbprints $stillTrusted }
 
     if (-not $All) {
         Write-Host "`nDone. winapp-pr is still installed; run it again to install another build.`n" -ForegroundColor Green
