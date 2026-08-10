@@ -427,10 +427,8 @@ internal static class WinUiTemplateCatalog
         }
 
         // HostData is stored either as an embedded JSON string or (defensively) as an inline object.
-        JsonDocument? parsed = null;
         try
         {
-            JsonElement host;
             if (hostData.ValueKind == JsonValueKind.String)
             {
                 var raw = hostData.GetString();
@@ -439,36 +437,35 @@ internal static class WinUiTemplateCatalog
                     return symbolName;
                 }
 
-                parsed = JsonDocument.Parse(raw);
-                host = parsed.RootElement;
-            }
-            else if (hostData.ValueKind == JsonValueKind.Object)
-            {
-                host = hostData;
-            }
-            else
-            {
-                return symbolName;
+                using var parsed = JsonDocument.Parse(raw);
+                return ExtractLongName(parsed.RootElement, symbolName);
             }
 
-            if (host.TryGetProperty("symbolInfo", out var symbolInfo)
-                && symbolInfo.ValueKind == JsonValueKind.Object
-                && symbolInfo.TryGetProperty(symbolName, out var info)
-                && info.ValueKind == JsonValueKind.Object
-                && info.TryGetProperty("longName", out var longName)
-                && longName.ValueKind == JsonValueKind.String
-                && !string.IsNullOrEmpty(longName.GetString()))
+            if (hostData.ValueKind == JsonValueKind.Object)
             {
-                return longName.GetString()!;
+                return ExtractLongName(hostData, symbolName);
             }
         }
         catch (JsonException)
         {
             // Malformed host data — fall back to the raw symbol name.
         }
-        finally
+
+        return symbolName;
+    }
+
+    /// <summary>Reads <c>symbolInfo.&lt;symbol&gt;.longName</c> from host data, or returns the raw symbol name.</summary>
+    private static string ExtractLongName(JsonElement host, string symbolName)
+    {
+        if (host.TryGetProperty("symbolInfo", out var symbolInfo)
+            && symbolInfo.ValueKind == JsonValueKind.Object
+            && symbolInfo.TryGetProperty(symbolName, out var info)
+            && info.ValueKind == JsonValueKind.Object
+            && info.TryGetProperty("longName", out var longName)
+            && longName.ValueKind == JsonValueKind.String
+            && !string.IsNullOrEmpty(longName.GetString()))
         {
-            parsed?.Dispose();
+            return longName.GetString()!;
         }
 
         return symbolName;
@@ -488,18 +485,12 @@ internal static class WinUiTemplateCatalog
             return exact;
         }
 
-        string? best = null;
-        var bestMajor = -1;
-        foreach (var c in choices)
-        {
-            if (TryGetNetMajor(c, out var major) && major <= sdkMajor && major > bestMajor)
-            {
-                bestMajor = major;
-                best = c;
-            }
-        }
-
-        return best;
+        return choices
+            .Select(c => (Choice: c, IsValid: TryGetNetMajor(c, out var major), Major: major))
+            .Where(x => x.IsValid && x.Major <= sdkMajor)
+            .OrderByDescending(x => x.Major)
+            .Select(x => x.Choice)
+            .FirstOrDefault();
     }
 
     /// <summary>Parses the major version from a <c>net&lt;major&gt;.&lt;minor&gt;</c> TFM (e.g. <c>net10.0</c> → 10).</summary>
