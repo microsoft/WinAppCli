@@ -374,16 +374,9 @@ internal static class WinUiTemplateCatalog
             return false;
         }
 
-        foreach (var s in shorts.EnumerateArray())
-        {
-            if (s.ValueKind == JsonValueKind.String
-                && string.Equals(s.GetString(), shortName, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return shorts.EnumerateArray()
+            .Where(s => s.ValueKind == JsonValueKind.String)
+            .Any(s => string.Equals(s.GetString(), shortName, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
