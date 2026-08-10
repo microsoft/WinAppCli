@@ -1,6 +1,6 @@
 ---
 name: winapp-find-api
-description: Search and inspect the Windows/WinRT API surface (types, members, enums, namespaces) available to a project, resolved from its referenced .winmd/.dll metadata. Use when an AI agent or developer needs to discover an API, list a type's properties/events/methods, validate that a property exists before writing XAML/code, enumerate an enum's values, or explore the namespaces and packages a project can call. Works with WinUI 3, WinRT/UWP, and any project with .winmd/.dll references. Distinct from 'winapp find-ui', which returns working WinUI control samples.
+description: Search and inspect the Windows/WinRT API surface (types, members, enums, namespaces) available to a project, resolved from its referenced .winmd/.dll metadata — or, outside any project, from the machine-wide Windows SDK. Use when an AI agent or developer needs to discover an API, list a type's properties/events/methods, validate that a property exists before writing XAML/code, enumerate an enum's values, or explore the namespaces and packages a project can call. Works with WinUI 3, WinRT/UWP, and any project with .winmd/.dll references. Distinct from 'winapp find-ui', which returns working WinUI control samples.
 ---
 ## When to use
 - Discovering which Windows/WinRT type or member does what you need ("what's the acrylic brush type?", "which control is a NavigationView?")
@@ -11,8 +11,9 @@ description: Search and inspect the Windows/WinRT API surface (types, members, e
 - AI agents grounding code generation in the *actual* API surface a project references, instead of guessing
 
 ## Prerequisites
-- Run from (or point `--project-dir` at) a project that has been **restored** — the index is built from `project.assets.json` and the restored NuGet/SDK packages. If the project has never been restored, run `winapp restore` (or `dotnet restore`) first.
-- The first query for a project builds the index automatically (this can take a few seconds for a large SDK like WindowsAppSDK); subsequent queries are served from the warm cache. The index refreshes automatically when the project is re-restored.
+- **Querying a project:** run from (or point `--project-dir` at) a project that has been **restored** — the index is built from `project.assets.json` and the restored NuGet/SDK packages. If the project has never been restored, run `winapp restore` (or `dotnet restore`) first.
+- **Querying with no project:** nothing is required. From a directory with no project, `find-api` answers from the machine-wide **SDK scope** (Windows SDK + Windows App SDK), so an agent can explore the API surface *before* scaffolding an app. No network access is needed in either case.
+- The first query builds the index automatically (this can take a few seconds for a large SDK like WindowsAppSDK); subsequent queries are served from the warm cache. The project index refreshes automatically when the project is re-restored.
 - No setup is needed beyond a restored project — the index lives under the global `.winapp` cache (`cache/find-api/`) and is shared across projects.
 
 ## Common patterns
@@ -63,6 +64,17 @@ winapp find-api refresh
 winapp find-api refresh --scan
 ```
 
+### Explore the SDK with no project
+```powershell
+# From a directory with no project, results come from the machine-wide Windows SDK
+# scope (reported as scope: sdk) — useful before an app has been scaffolded
+winapp find-api "acrylic brush"
+winapp find-api members Button --project sdk
+
+# Rebuild the SDK scope after installing a new Windows SDK
+winapp find-api refresh --project sdk
+```
+
 ### Script against it with --json
 ```powershell
 # Every verb supports --json for a clean, machine-readable payload on stdout
@@ -74,16 +86,17 @@ winapp find-api check-property Button Backgruond --json   # exits 1, JSON report
 - **Bare form = search.** `winapp find-api "<query>"` searches; the sub-verbs (`members`, `check-property`, `types`, `enums`, `namespaces`, `packages`, `stats`, `projects`, `refresh`) drill into specifics.
 - **Lexical, not semantic.** Search matches type and member *names* (and signatures), ranked by a scoring heuristic. It does not do embeddings/semantic matching — phrase queries the way the API is named.
 - **Automatic indexing.** The index builds on first query and refreshes when `project.assets.json` changes, so it stays in sync with restores. Use `refresh` only to force a rebuild or index a project for the first time without querying.
-- **Project resolution.** With one indexed project, queries "just work". With several, pass `--project <Name>` (matches the `.csproj`/`.vcxproj` name) or `--project-dir <path>` to disambiguate.
+- **Project resolution and scopes.** Every answer names its scope (`scope` in `--json`, a note in text). A project in the current directory (or `--project` / `--project-dir`) gives `scope: project`, covering the Windows SDK, Windows App SDK, *and* the project's NuGet packages. A directory with **no** project gives `scope: sdk` — the machine-wide Windows SDK + Windows App SDK only, which excludes third-party NuGet packages. A projectless query is *never* answered from some other indexed project, so results don't depend on unrelated global state. Use `--project sdk` to pick the SDK scope explicitly from inside a project.
 - **Exit codes for scripting.** `search` with no hits, `check-property` on a missing property, and `enums` on a non-enum all exit non-zero — gate code generation and CI checks on them.
 - **Ambiguity detection.** When a short type name resolves to multiple namespaces (a CS0104 risk), search surfaces every candidate with its fully-qualified name so you can pick the right one.
 - **Inherited members.** `members` includes inherited properties/events/methods and marks their declaring type, so you see the full usable surface of a control.
 
 ## Troubleshooting
-- **"No indexed API metadata was found for this project."** The project has not been restored (no `project.assets.json`), or you're not in the project directory. Run `winapp restore`, then retry — or pass `--project-dir <path>`.
-- **"Multiple projects are indexed — use --project to choose one."** Several projects share the cache. Pass `--project <Name>` or `--project-dir <path>`.
+- **"No indexed API metadata was found for this project."** You are standing in a real project that hasn't been indexed — usually because it has not been restored (no `project.assets.json`). Run `winapp restore`, then retry. `find-api` deliberately does *not* silently narrow to the SDK scope here, because that would hide the project's own NuGet packages and make its types look nonexistent.
+- **Results say `scope: sdk` but you expected project APIs.** There is no project in the current directory, so the machine-wide SDK scope answered. `cd` into the project (or pass `--project-dir <path>`); third-party NuGet packages such as the Community Toolkit only exist in the `project` scope.
+- **"No project was found here and no Windows SDK metadata is available on this machine."** Neither a project nor an installed Windows SDK / Windows App SDK was found. Run from a project directory, or install the SDK.
 - **"Project '<name>' is not indexed."** The name passed to `--project` doesn't match a cached project. Run `winapp find-api projects` to see the indexed names, or `winapp find-api refresh` in that project's directory.
-- **A type/member you expect is missing.** The owning package may not be restored, or the index is stale. Re-restore the project (auto-refreshes) or run `winapp find-api refresh` to force a rebuild.
+- **A type/member you expect is missing.** The owning package may not be restored, or the index is stale. Re-restore the project (auto-refreshes) or run `winapp find-api refresh` to force a rebuild. After installing a *new Windows SDK*, rebuild the SDK scope with `winapp find-api refresh --project sdk`.
 - **First query is slow.** That's the one-time index build for the project's packages; subsequent queries are fast against the warm cache.
 
 ## Related skills
@@ -102,4 +115,4 @@ winapp find-api check-property Button Backgruond --json   # exits 1, JSON report
 - `winapp find-api projects` — every project indexed in the shared cache.
 - `winapp find-api refresh [--scan]` — force a re-index; `--scan` walks all projects under the directory.
 
-Common options (all verbs): `--json` for machine-readable output, `--project <Name>` / `--project-dir <path>` to disambiguate when several projects are indexed.
+Common options (all verbs): `--json` for machine-readable output (payloads include a `scope` field: `project` or `sdk`), `--project <Name>` / `--project-dir <path>` to select a project, `--project sdk` to query the machine-wide Windows SDK scope.

@@ -49,6 +49,7 @@ internal interface IApiMetadataService
 internal sealed class ApiMetadataService(
     IWinappDirectoryService directoryService,
     ICurrentDirectoryProvider currentDirectory,
+    ISdkPackageSource sdkPackages,
     ILogger<ApiMetadataService> logger) : IApiMetadataService
 {
     private string GetCacheDir() =>
@@ -83,9 +84,26 @@ internal sealed class ApiMetadataService(
     public ApiRefreshOutput Refresh(ApiRequestScope scope, bool scan, Action<string>? onProgress = null, bool force = false)
     {
         string cacheDir = GetCacheDir();
-        string projectDir = ResolveRefreshProjectDir(scope, cacheDir);
         string? runtimePath = ApiCacheBuilder.DetectWinAppSdkRuntime();
-        return ApiCacheBuilder.BuildCache(projectDir, cacheDir, scan, runtimePath, onProgress, force);
+
+        // 'refresh --project sdk' rebuilds the machine-wide scope explicitly (the
+        // only way to pick up a newly installed Windows SDK / WinAppSDK runtime).
+        if (scope.Project is not null && IsSdkScopeName(scope.Project))
+        {
+            return ApiCacheBuilder.BuildSdkCache(cacheDir, sdkPackages.GetSdkPackages(), onProgress, force: true);
+        }
+
+        string projectDir = ResolveRefreshProjectDir(scope, cacheDir);
+        ApiRefreshOutput output = ApiCacheBuilder.BuildCache(projectDir, cacheDir, scan, runtimePath, onProgress, force);
+
+        // Nothing to index here means there is no project in this directory, which is
+        // exactly when queries fall back to the SDK scope — so build that instead of
+        // leaving the user with an index they can't query.
+        if (output.ProjectsProcessed == 0)
+        {
+            return ApiCacheBuilder.BuildSdkCache(cacheDir, sdkPackages.GetSdkPackages(), onProgress, force);
+        }
+        return output;
     }
 
     /// <summary>
@@ -128,12 +146,21 @@ internal sealed class ApiMetadataService(
     {
         string cacheDir = GetCacheDir();
         AutoIndexIfStale(scope, cacheDir);
-        (ProjectManifest? manifest, string? error) = ResolveManifest(scope, cacheDir);
-        if (manifest is null)
+        ResolvedScope resolved = ResolveManifest(scope, cacheDir);
+        if (resolved.Manifest is null)
         {
-            return ApiQueryResult<T>.NoProject(error ?? NoProjectMessage);
+            return ApiQueryResult<T>.NoProject(resolved.Error ?? NoProjectMessage);
         }
-        return query(cacheDir, manifest);
+
+        ApiQueryResult<T> result = query(cacheDir, resolved.Manifest);
+
+        // Stamp the scope centrally so every verb reports it identically and no
+        // payload can silently omit which source answered.
+        if (result.Data is IApiScopedOutput scoped)
+        {
+            scoped.Scope = resolved.IsSdk ? ApiScopeNames.Sdk : ApiScopeNames.Project;
+        }
+        return result;
     }
 
     private string ResolveProjectDir(ApiRequestScope scope) =>
@@ -245,37 +272,39 @@ internal sealed class ApiMetadataService(
     }
 
     /// <summary>
-    /// Resolve the cached <see cref="ProjectManifest"/> for the request, mirroring
-    /// the standalone tool's precedence: explicit <c>--project</c> name, then a
-    /// <c>--project-dir</c> match (by recorded dir, then by discovered project
-    /// name), then a lone cached project, then the project in the current
-    /// directory. Returns a human-readable error when resolution is impossible.
+    /// Resolve the scope for the request: an explicit <c>--project</c> name (or the
+    /// reserved SDK scope name), then a <c>--project-dir</c> match (by recorded dir,
+    /// then by discovered project name), then the project in the current directory.
+    /// When the current directory holds no project at all the machine-wide SDK scope
+    /// answers instead — deliberately regardless of how many projects are cached, so
+    /// the result never depends on unrelated global state. Returns a human-readable
+    /// error when resolution is impossible.
     /// </summary>
-    private (ProjectManifest? Manifest, string? Error) ResolveManifest(ApiRequestScope scope, string cacheDir)
+    private ResolvedScope ResolveManifest(ApiRequestScope scope, string cacheDir)
     {
         string projectsDir = Path.Combine(cacheDir, "projects");
-        if (!Directory.Exists(projectsDir))
-        {
-            return (null, NoProjectMessage);
-        }
-        string[] files = Directory.GetFiles(projectsDir, "*.json");
-        if (files.Length == 0)
-        {
-            return (null, NoProjectMessage);
-        }
+        string[] files = Directory.Exists(projectsDir)
+            ? Directory.GetFiles(projectsDir, "*.json")
+            : [];
 
         if (scope.Project is not null)
         {
+            if (IsSdkScopeName(scope.Project))
+            {
+                return ResolveSdkScope(cacheDir);
+            }
             foreach (string path in files)
             {
                 string name = Path.GetFileNameWithoutExtension(path);
                 if (name.Equals(scope.Project, StringComparison.OrdinalIgnoreCase) ||
                     name.StartsWith(scope.Project + "_", StringComparison.OrdinalIgnoreCase))
                 {
-                    return (DeserializeManifest(path), null);
+                    return ResolvedScope.Project(DeserializeManifest(path));
                 }
             }
-            return (null, $"Project '{scope.Project}' is not indexed. Run 'winapp find-api refresh' in the project directory, or pick from: {AvailableProjects(files)}.");
+            return ResolvedScope.Failed(files.Length == 0
+                ? $"Project '{scope.Project}' is not indexed — no projects are indexed yet. Run 'winapp find-api refresh' in the project directory, or use '--project sdk' for the Windows SDK scope."
+                : $"Project '{scope.Project}' is not indexed. Run 'winapp find-api refresh' in the project directory, or pick from: {AvailableProjects(files)}.");
         }
 
         if (scope.ProjectDir is not null)
@@ -286,36 +315,36 @@ internal sealed class ApiMetadataService(
                 ProjectManifest? manifest = DeserializeManifest(path);
                 if (manifest is not null && manifest.ProjectDir.Equals(fullPath, StringComparison.OrdinalIgnoreCase))
                 {
-                    return (manifest, null);
+                    return ResolvedScope.Project(manifest);
                 }
             }
-            string? projectName = ApiCacheBuilder.FindProjectNameInDir(fullPath);
-            if (projectName is not null)
+            string? dirProjectName = ApiCacheBuilder.FindProjectNameInDir(fullPath);
+            if (dirProjectName is not null)
             {
                 foreach (string path in files)
                 {
                     string name = Path.GetFileNameWithoutExtension(path);
-                    if (name.Equals(projectName, StringComparison.OrdinalIgnoreCase) ||
-                        name.StartsWith(projectName + "_", StringComparison.OrdinalIgnoreCase))
+                    if (name.Equals(dirProjectName, StringComparison.OrdinalIgnoreCase) ||
+                        name.StartsWith(dirProjectName + "_", StringComparison.OrdinalIgnoreCase))
                     {
-                        return (DeserializeManifest(path), null);
+                        return ResolvedScope.Project(DeserializeManifest(path));
                     }
                 }
+
+                // An explicit --project-dir named a real project that isn't indexed.
+                // Do NOT quietly widen to the SDK scope — the caller asked about that
+                // project specifically, and its NuGet packages would be missing.
+                return ResolvedScope.Failed($"No indexed API metadata was found for '{fullPath}'. Restore the project (so 'project.assets.json' exists), " +
+                    $"then run 'winapp find-api refresh' in that directory.{(files.Length == 0 ? "" : $" Indexed projects: {AvailableProjects(files)}.")}");
             }
 
-            // An explicit --project-dir was given but nothing matched. Do NOT fall
-            // back to a lone/current project — that would silently answer for an
-            // unrelated project. Report it as not indexed instead.
-            return (null, $"No indexed API metadata was found for '{fullPath}'. Restore the project (so 'project.assets.json' exists), " +
-                $"then run 'winapp find-api refresh' in that directory. Indexed projects: {AvailableProjects(files)}.");
+            // --project-dir pointed at a directory with no project in it: same
+            // situation as running from a projectless directory, so answer from the
+            // SDK scope rather than erroring.
+            return ResolveSdkScope(cacheDir);
         }
 
-        if (files.Length == 1)
-        {
-            return (DeserializeManifest(files[0]), null);
-        }
-
-        string? currentName = ApiCacheBuilder.FindProjectNameInDir(scope.ProjectDir ?? currentDirectory.GetCurrentDirectory());
+        string? currentName = ApiCacheBuilder.FindProjectNameInDir(currentDirectory.GetCurrentDirectory());
         if (currentName is not null)
         {
             foreach (string path in files)
@@ -324,12 +353,54 @@ internal sealed class ApiMetadataService(
                 if (name.Equals(currentName, StringComparison.OrdinalIgnoreCase) ||
                     name.StartsWith(currentName + "_", StringComparison.OrdinalIgnoreCase))
                 {
-                    return (DeserializeManifest(path), null);
+                    return ResolvedScope.Project(DeserializeManifest(path));
                 }
             }
+            return ResolvedScope.Failed(NoProjectMessage);
         }
 
-        return (null, $"Multiple projects are indexed — use --project to choose one: {AvailableProjects(files)}.");
+        // No project here. Answer from the machine-wide SDK scope. Note this does not
+        // consult the cached project list at all: a query from a projectless directory
+        // must not change meaning just because some unrelated project was indexed.
+        return ResolveSdkScope(cacheDir);
+    }
+
+    private static bool IsSdkScopeName(string name) =>
+        name.Equals(ApiScopeNames.Sdk, StringComparison.OrdinalIgnoreCase) ||
+        name.Equals(ApiCachePaths.SdkScopeName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Loads the SDK-scope manifest, building it on first use. Indexing the Windows
+    /// SDK is the same work a project index does for its SDK packages, so a warm
+    /// project cache usually makes this a no-op reuse.
+    /// </summary>
+    private ResolvedScope ResolveSdkScope(string cacheDir)
+    {
+        string manifestPath = ApiCachePaths.SdkManifestPath(cacheDir);
+        ProjectManifest? manifest = File.Exists(manifestPath) ? DeserializeManifest(manifestPath) : null;
+        if (manifest is not null)
+        {
+            return ResolvedScope.Sdk(manifest);
+        }
+
+        try
+        {
+            List<PackageWithWinMd> packages = sdkPackages.GetSdkPackages();
+            if (packages.Count == 0)
+            {
+                return ResolvedScope.Failed(NoSdkMessage);
+            }
+            logger.LogInformation("No project here — indexing {Scope} metadata…", ApiCachePaths.SdkScopeName);
+            ApiCacheBuilder.BuildSdkCache(cacheDir, packages, onProgress: msg => logger.LogInformation("{Message}", msg));
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to index Windows SDK metadata.");
+            return ResolvedScope.Failed(NoSdkMessage);
+        }
+
+        manifest = File.Exists(manifestPath) ? DeserializeManifest(manifestPath) : null;
+        return manifest is not null ? ResolvedScope.Sdk(manifest) : ResolvedScope.Failed(NoSdkMessage);
     }
 
     private static string AvailableProjects(IEnumerable<string> files) =>
@@ -350,4 +421,24 @@ internal sealed class ApiMetadataService(
     private const string NoProjectMessage =
         "No indexed API metadata was found for this project. Restore the project (so 'project.assets.json' exists), " +
         "then run 'winapp find-api refresh' in the project directory to build the API index.";
+
+    private const string NoSdkMessage =
+        "No project was found here and no Windows SDK metadata is available on this machine. " +
+        "Run 'winapp find-api' from a project directory, or install the Windows SDK / Windows App SDK.";
+
+    /// <summary>
+    /// A resolved query scope: the manifest to read plus whether it came from the
+    /// machine-wide SDK scope (which excludes project NuGet packages) so callers
+    /// can label the answer.
+    /// </summary>
+    private readonly record struct ResolvedScope(ProjectManifest? Manifest, string? Error, bool IsSdk)
+    {
+        public static ResolvedScope Project(ProjectManifest? manifest) => manifest is null
+            ? Failed(NoProjectMessage)
+            : new ResolvedScope(manifest, null, false);
+
+        public static ResolvedScope Sdk(ProjectManifest manifest) => new(manifest, null, true);
+
+        public static ResolvedScope Failed(string error) => new(null, error, false);
+    }
 }

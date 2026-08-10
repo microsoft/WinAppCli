@@ -69,35 +69,8 @@ internal static class ApiCacheBuilder
             processed++;
             projectNames.Add(projectName);
 
-            var packageRefs = new List<ProjectPackageRef>();
-            foreach (PackageWithWinMd package in packages)
-            {
-                string packagesRoot = Path.Combine(cacheDir, "packages");
-                if (!ApiCachePaths.TryCombineContained(packagesRoot, new[] { package.Id, package.Version }, out string packageCacheDir))
-                {
-                    // Untrusted Id/Version would escape the cache dir — skip it.
-                    report?.Invoke($"Skipping package with unsafe path: {package.Id} {package.Version}");
-                    continue;
-                }
-                // A project reference is exported with version "local" and can change
-                // without a version bump, so its cache is never safe to reuse. An
-                // explicit refresh (force) rebuilds every package.
-                bool mustRebuild = force || string.Equals(package.Version, "local", StringComparison.OrdinalIgnoreCase);
-                if (!seenPackageDirs.Add(packageCacheDir))
-                {
-                    // Already resolved for an earlier project in this run.
-                    reused++;
-                }
-                else if (!mustRebuild && File.Exists(Path.Combine(packageCacheDir, "meta.json")))
-                {
-                    reused++;
-                }
-                else
-                {
-                    pendingExports[packageCacheDir] = package;
-                }
-                packageRefs.Add(new ProjectPackageRef { Id = package.Id, Version = package.Version });
-            }
+            List<ProjectPackageRef> packageRefs = ResolvePackageExports(
+                packages, cacheDir, force, pendingExports, seenPackageDirs, ref reused, report);
 
             var manifest = new ProjectManifest
             {
@@ -146,6 +119,128 @@ internal static class ApiCacheBuilder
             PackagesParsed = parsed,
             PackagesReused = reused,
             ProjectNames = projectNames,
+        };
+    }
+
+    /// <summary>
+    /// Decides, for each package, whether its cache can be reused or must be
+    /// exported, accumulating the work into <paramref name="pendingExports"/> so
+    /// every distinct package is parsed at most once per run. Returns the package
+    /// references to record in the owning manifest.
+    /// </summary>
+    private static List<ProjectPackageRef> ResolvePackageExports(
+        List<PackageWithWinMd> packages,
+        string cacheDir,
+        bool force,
+        Dictionary<string, PackageWithWinMd> pendingExports,
+        HashSet<string> seenPackageDirs,
+        ref int reused,
+        Action<string>? report)
+    {
+        var packageRefs = new List<ProjectPackageRef>();
+        foreach (PackageWithWinMd package in packages)
+        {
+            string packagesRoot = Path.Combine(cacheDir, "packages");
+            if (!ApiCachePaths.TryCombineContained(packagesRoot, new[] { package.Id, package.Version }, out string packageCacheDir))
+            {
+                // Untrusted Id/Version would escape the cache dir — skip it.
+                report?.Invoke($"Skipping package with unsafe path: {package.Id} {package.Version}");
+                continue;
+            }
+            // A project reference is exported with version "local" and can change
+            // without a version bump, so its cache is never safe to reuse. An
+            // explicit refresh (force) rebuilds every package.
+            bool mustRebuild = force || string.Equals(package.Version, "local", StringComparison.OrdinalIgnoreCase);
+            if (!seenPackageDirs.Add(packageCacheDir))
+            {
+                // Already resolved for an earlier project in this run.
+                reused++;
+            }
+            else if (!mustRebuild && File.Exists(Path.Combine(packageCacheDir, "meta.json")))
+            {
+                reused++;
+            }
+            else
+            {
+                pendingExports[packageCacheDir] = package;
+            }
+            packageRefs.Add(new ProjectPackageRef { Id = package.Id, Version = package.Version });
+        }
+        return packageRefs;
+    }
+
+    /// <summary>
+    /// Builds the machine-wide SDK scope from <paramref name="sdkPackages"/> (the
+    /// Windows SDK UnionMetadata and the installed WinAppSDK runtime), which need
+    /// no project on disk. The manifest is written to <c>sdk.json</c> alongside —
+    /// never inside — the <c>projects</c> directory, and, as with project
+    /// manifests, only after the package caches it points at are on disk.
+    /// </summary>
+    public static ApiRefreshOutput BuildSdkCache(
+        string cacheDir,
+        List<PackageWithWinMd> sdkPackages,
+        Action<string>? onProgress = null,
+        bool force = false)
+    {
+        if (sdkPackages.Count == 0)
+        {
+            return new ApiRefreshOutput
+            {
+                ProjectsProcessed = 0,
+                PackagesParsed = 0,
+                PackagesReused = 0,
+                ProjectNames = [],
+            };
+        }
+
+        int parsed = 0, reused = 0;
+        object progressLock = new();
+        Action<string>? report = onProgress is null
+            ? null
+            : msg =>
+            {
+                lock (progressLock)
+                {
+                    onProgress(msg);
+                }
+            };
+
+        var pendingExports = new Dictionary<string, PackageWithWinMd>(StringComparer.OrdinalIgnoreCase);
+        var seenPackageDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        report?.Invoke($"Indexing {ApiCachePaths.SdkScopeName}…");
+        List<ProjectPackageRef> packageRefs = ResolvePackageExports(
+            sdkPackages, cacheDir, force, pendingExports, seenPackageDirs, ref reused, report);
+
+        if (pendingExports.Count > 0)
+        {
+            report?.Invoke($"Parsing {pendingExports.Count} package(s)…");
+            Parallel.ForEach(pendingExports, entry =>
+            {
+                ExportPackageCache(entry.Value, entry.Key);
+                Interlocked.Increment(ref parsed);
+            });
+        }
+
+        var manifest = new ProjectManifest
+        {
+            ProjectName = ApiCachePaths.SdkScopeName,
+            ProjectDir = string.Empty,
+            ProjectFile = string.Empty,
+            Packages = packageRefs,
+            GeneratedAt = DateTime.UtcNow.ToString("o"),
+        };
+        Directory.CreateDirectory(cacheDir);
+        WriteFileAtomic(
+            ApiCachePaths.SdkManifestPath(cacheDir),
+            JsonSerializer.Serialize(manifest, ApiSearchJsonContext.Default.ProjectManifest));
+
+        return new ApiRefreshOutput
+        {
+            ProjectsProcessed = 1,
+            PackagesParsed = parsed,
+            PackagesReused = reused,
+            ProjectNames = [ApiCachePaths.SdkScopeName],
         };
     }
 

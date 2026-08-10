@@ -804,7 +804,7 @@
           "recursive": false
         },
         "--project": {
-          "description": "Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name).",
+          "description": "Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project.",
           "hidden": false,
           "valueType": "System.String",
           "hasDefaultValue": false,
@@ -903,7 +903,7 @@
               "recursive": false
             },
             "--project": {
-              "description": "Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name).",
+              "description": "Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,
@@ -991,7 +991,7 @@
               "recursive": false
             },
             "--project": {
-              "description": "Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name).",
+              "description": "Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,
@@ -1079,7 +1079,7 @@
               "recursive": false
             },
             "--project": {
-              "description": "Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name).",
+              "description": "Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,
@@ -1166,7 +1166,7 @@
               "recursive": false
             },
             "--project": {
-              "description": "Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name).",
+              "description": "Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,
@@ -1241,7 +1241,7 @@
               "recursive": false
             },
             "--project": {
-              "description": "Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name).",
+              "description": "Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,
@@ -1367,7 +1367,7 @@
               "recursive": false
             },
             "--project": {
-              "description": "Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name).",
+              "description": "Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,
@@ -1455,7 +1455,7 @@
               "recursive": false
             },
             "--project": {
-              "description": "Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name).",
+              "description": "Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,
@@ -1543,7 +1543,7 @@
               "recursive": false
             },
             "--project": {
-              "description": "Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name).",
+              "description": "Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,

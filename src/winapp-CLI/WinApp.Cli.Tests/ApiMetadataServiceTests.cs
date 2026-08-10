@@ -45,10 +45,46 @@ public sealed class ApiMetadataServiceTests
         }
     }
 
-    private ApiMetadataService CreateService() => new(
+    private ApiMetadataService CreateService(ISdkPackageSource? sdkPackages = null) => new(
         new FakeWinappDirectoryService(new DirectoryInfo(_globalDir)),
         new CurrentDirectoryProvider(_currentDir),
+        sdkPackages ?? new FakeSdkPackageSource(),
         NullLogger<ApiMetadataService>.Instance);
+
+    /// <summary>
+    /// An SDK source with no packages: the SDK scope is unavailable, so resolution
+    /// fails loudly instead of silently answering from some other project. Tests
+    /// that need a working SDK scope pre-write its manifest with
+    /// <see cref="WriteSdkManifest"/> rather than indexing the real machine.
+    /// </summary>
+    private sealed class FakeSdkPackageSource : ISdkPackageSource
+    {
+        public List<PackageWithWinMd> GetSdkPackages() => [];
+    }
+
+    private void WriteSdkManifest()
+    {
+        string cacheDir = Path.Combine(_globalDir, "cache", "find-api");
+        Directory.CreateDirectory(cacheDir);
+        var manifest = new ProjectManifest
+        {
+            ProjectName = ApiCachePaths.SdkScopeName,
+            ProjectDir = string.Empty,
+            ProjectFile = string.Empty,
+            Packages = [new ProjectPackageRef { Id = "WindowsSDK", Version = "10.0.0.0" }],
+            GeneratedAt = DateTime.UtcNow.ToString("o"),
+        };
+        File.WriteAllText(
+            ApiCachePaths.SdkManifestPath(cacheDir),
+            JsonSerializer.Serialize(manifest, ApiSearchJsonContext.Default.ProjectManifest));
+    }
+
+    /// <summary>Creates a project file so the directory looks like a real project to resolution.</summary>
+    private static void WriteProjectFile(string dir, string name)
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, name + ".csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+    }
 
     private void WriteManifest(string name, string? projectDir = null)
     {
@@ -65,36 +101,111 @@ public sealed class ApiMetadataServiceTests
     }
 
     [TestMethod]
-    public void Query_NoIndex_ReturnsNoProject()
+    public void Query_NoIndexAndNoSdk_ReportsSdkUnavailable()
     {
+        // Nothing indexed and no SDK on the machine: the only honest answer is a
+        // loud failure naming both remedies.
         var result = CreateService().Members("Some.Ns.Type", new ApiRequestScope(null, null));
+
+        Assert.AreEqual(ApiQueryOutcome.NoProject, result.Outcome);
+        StringAssert.Contains(result.Message, "no Windows SDK metadata is available");
+    }
+
+    [TestMethod]
+    public void Query_ProjectlessDir_DoesNotAnswerFromUnrelatedLoneProject()
+    {
+        // Regression: a query from a directory with no project must NEVER be answered
+        // from whichever project happens to be the only one cached. Before this, a
+        // lone cached project silently answered — so the result depended on unrelated
+        // global state, and nothing in the output revealed the substitution.
+        WriteManifest("Alpha");
+
+        var result = CreateService().Members("Some.Ns.Type", new ApiRequestScope(null, null));
+
+        Assert.AreEqual(ApiQueryOutcome.NoProject, result.Outcome);
+        StringAssert.Contains(result.Message, "no Windows SDK metadata is available");
+    }
+
+    [TestMethod]
+    public void Query_ProjectlessDir_FallsBackToSdkScope()
+    {
+        WriteManifest("Alpha");
+        WriteSdkManifest();
+
+        var result = CreateService().Namespaces(null, new ApiRequestScope(null, null));
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.AreEqual(ApiScopeNames.Sdk, result.Data!.Scope, "a projectless directory must be answered by the SDK scope, and say so");
+    }
+
+    [TestMethod]
+    public void Query_ProjectlessDir_FallsBackToSdkScope_EvenWithManyProjectsIndexed()
+    {
+        // The outcome must not change just because more projects were indexed at some
+        // point — that was the old fallback's core flaw (1 project answered, 2 errored).
+        WriteManifest("Alpha");
+        WriteManifest("Beta");
+        WriteSdkManifest();
+
+        var result = CreateService().Namespaces(null, new ApiRequestScope(null, null));
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.AreEqual(ApiScopeNames.Sdk, result.Data!.Scope);
+    }
+
+    [TestMethod]
+    public void Query_ProjectInCurrentDir_ResolvesThatProjectAndIsProjectScoped()
+    {
+        WriteProjectFile(_currentDir, "Alpha");
+        WriteManifest("Alpha");
+        WriteSdkManifest();
+
+        var result = CreateService().Namespaces(null, new ApiRequestScope(null, null));
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.AreEqual(ApiScopeNames.Project, result.Data!.Scope, "a real project in the current directory wins over the SDK scope");
+    }
+
+    [TestMethod]
+    public void Query_ProjectInCurrentDir_NotIndexed_DoesNotSilentlyNarrowToSdk()
+    {
+        // The user is standing in a real project. Quietly answering from the SDK
+        // scope would hide its NuGet packages and look like genuine no-match results,
+        // so this must fail with the refresh instruction instead.
+        WriteProjectFile(_currentDir, "Gamma");
+        WriteManifest("Alpha");
+        WriteSdkManifest();
+
+        var result = CreateService().Namespaces(null, new ApiRequestScope(null, null));
 
         Assert.AreEqual(ApiQueryOutcome.NoProject, result.Outcome);
         StringAssert.Contains(result.Message, "find-api refresh");
     }
 
     [TestMethod]
-    public void Query_SingleIndexedProject_ResolvesAndReachesEngine()
+    public void Query_SdkProjectOption_SelectsSdkScopeExplicitly()
     {
+        WriteProjectFile(_currentDir, "Alpha");
         WriteManifest("Alpha");
+        WriteSdkManifest();
 
-        var result = CreateService().Members("Some.Ns.Type", new ApiRequestScope(null, null));
+        var result = CreateService().Namespaces(null, new ApiRequestScope(null, "sdk"));
 
-        // Manifest resolved (lone project), so the engine ran and reported the missing
-        // type rather than a NoProject resolution failure.
-        Assert.AreEqual(ApiQueryOutcome.NotFound, result.Outcome);
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.AreEqual(ApiScopeNames.Sdk, result.Data!.Scope, "--project sdk must select the SDK scope from inside a project");
     }
 
     [TestMethod]
-    public void Query_MultipleProjects_NoScope_IsAmbiguous()
+    public void Query_MultipleProjects_ProjectInCurrentDir_IsNotAmbiguous()
     {
+        WriteProjectFile(_currentDir, "Beta");
         WriteManifest("Alpha");
         WriteManifest("Beta");
 
-        var result = CreateService().Members("Some.Ns.Type", new ApiRequestScope(null, null));
+        var result = CreateService().Namespaces(null, new ApiRequestScope(null, null));
 
-        Assert.AreEqual(ApiQueryOutcome.NoProject, result.Outcome);
-        StringAssert.Contains(result.Message, "Multiple projects");
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.AreEqual(ApiScopeNames.Project, result.Data!.Scope);
     }
 
     [TestMethod]
@@ -121,16 +232,32 @@ public sealed class ApiMetadataServiceTests
     }
 
     [TestMethod]
-    public void Query_ExplicitProjectDir_NoMatch_DoesNotFallBackToLoneProject()
+    public void Query_ExplicitProjectDir_ProjectlessDir_DoesNotFallBackToLoneProject()
     {
-        // Regression (C2): an explicit --project-dir that matches no indexed
-        // project must report "not indexed" rather than silently answering for the
-        // unrelated lone cached project.
+        // Regression (C2): an explicit --project-dir that matches no indexed project
+        // must never silently answer for the unrelated lone cached project. The
+        // directory holds no project, so the SDK scope answers — and with no SDK
+        // available here, that surfaces as a loud failure rather than Alpha's data.
         WriteManifest("Alpha");
         string unrelated = Path.Combine(Directory.GetParent(_globalDir)!.FullName, "unrelated");
         Directory.CreateDirectory(unrelated);
 
         var result = CreateService().Members("Some.Ns.Type", new ApiRequestScope(unrelated, null));
+
+        Assert.AreEqual(ApiQueryOutcome.NoProject, result.Outcome);
+        StringAssert.Contains(result.Message, "no Windows SDK metadata is available");
+    }
+
+    [TestMethod]
+    public void Query_ExplicitProjectDir_UnindexedProject_ReportsNotIndexed()
+    {
+        // A real but unindexed project was named explicitly: report it, rather than
+        // narrowing to the SDK scope and hiding that project's NuGet packages.
+        WriteManifest("Alpha");
+        string other = Path.Combine(Directory.GetParent(_globalDir)!.FullName, "other");
+        WriteProjectFile(other, "Delta");
+
+        var result = CreateService().Members("Some.Ns.Type", new ApiRequestScope(other, null));
 
         Assert.AreEqual(ApiQueryOutcome.NoProject, result.Outcome);
         StringAssert.Contains(result.Message, "No indexed API metadata was found for");

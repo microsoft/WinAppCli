@@ -1126,6 +1126,13 @@ winapp find-api [command] [options]
 
 The index is built from the project's restored NuGet/SDK packages (via `project.assets.json`) on first use and refreshed automatically when the project is restored. It lives under the global `.winapp` cache (`cache/find-api/`) and is shared across projects. Restore the project first (`winapp restore` or `dotnet restore`).
 
+**Scopes.** Every answer comes from exactly one scope, reported as `scope` in `--json` and as a note in text output:
+
+- **`project`** - the project in the current directory (or `--project` / `--project-dir`). Covers the Windows SDK, the Windows App SDK, *and* the project's own NuGet packages.
+- **`sdk`** - the machine-wide Windows SDK + Windows App SDK metadata, used automatically when the current directory contains **no project**. This makes `find-api` usable for exploring APIs before any project exists, and needs no network access. It deliberately does **not** include third-party NuGet packages, so a type from (say) the Community Toolkit will not be found in this scope.
+
+A query from a directory with no project is *always* answered by the `sdk` scope - never by whichever project happens to be indexed in the shared cache - so results never depend on unrelated global state. Pass `--project sdk` to select the SDK scope explicitly from inside a project, and `winapp find-api refresh --project sdk` to rebuild it after installing a new Windows SDK.
+
 **Commands:**
 - *(bare)* `find-api "<query>"` - Lexically search type and member names, grouped by namespace
 - `members <type>` - List a type's properties, events, and methods (with descriptions and inherited members)
@@ -1142,9 +1149,9 @@ The index is built from the project's restored NuGet/SDK packages (via `project.
 - `--max <n>` - Maximum number of namespace-grouped search results (default `30`; search only)
 - `--filter <prefix>` - Only list namespaces starting with this prefix (`namespaces` only)
 - `--scan` - Recursively discover and index every project under the directory (`refresh` only)
-- `--project <name>` - Disambiguate when several projects are indexed (matches the `.csproj`/`.vcxproj` name)
+- `--project <name>` - Project to query (matches the `.csproj`/`.vcxproj` name), or `sdk` to query the machine-wide Windows SDK scope
 - `--project-dir <path>` - Project directory to query (defaults to the current directory)
-- `--json` - Emit a machine-readable payload on stdout (supported by every verb). Under `--json` **every** failure — including argument/parser errors such as a non-integer `--max` — is emitted as a flat `{"error": "..."}` object on stdout with a non-zero exit code, so output stays machine-readable.
+- `--json` - Emit a machine-readable payload on stdout (supported by every verb). Query payloads carry a `scope` field (`project` or `sdk`) naming the source that answered. Under `--json` **every** failure — including argument/parser errors such as a non-integer `--max` — is emitted as a flat `{"error": "..."}` object on stdout with a non-zero exit code, so output stays machine-readable.
 
 **Examples:**
 ```bash
@@ -1162,6 +1169,10 @@ winapp find-api namespaces --filter Microsoft.UI.Xaml
 winapp find-api types Microsoft.UI.Xaml.Controls
 winapp find-api projects
 winapp find-api refresh
+
+# Explore the Windows SDK with no project at all (e.g. before scaffolding an app)
+winapp find-api "acrylic brush"          # from an empty directory -> scope: sdk
+winapp find-api members Button --project sdk
 ```
 
 **Exit codes:** `search` with no hits, `check-property` on a missing property, and `enums` on a non-enum type all exit non-zero — gate code generation and CI checks on them.

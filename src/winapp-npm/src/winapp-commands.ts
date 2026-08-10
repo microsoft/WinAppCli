@@ -288,7 +288,7 @@ export interface FindApiOptions extends CommonOptions {
   json?: boolean;
   /** Maximum number of namespace-grouped results to return. */
   max?: number;
-  /** Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). */
+  /** Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. */
   project?: string;
   /** Project directory to query (defaults to the current directory). Used to locate the indexed project. */
   projectDir?: string;
@@ -318,7 +318,7 @@ export interface FindApiCheckPropertyOptions extends CommonOptions {
   property?: string;
   /** Format output as JSON */
   json?: boolean;
-  /** Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). */
+  /** Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. */
   project?: string;
   /** Project directory to query (defaults to the current directory). Used to locate the indexed project. */
   projectDir?: string;
@@ -346,7 +346,7 @@ export interface FindApiEnumsOptions extends CommonOptions {
   type?: string;
   /** Format output as JSON */
   json?: boolean;
-  /** Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). */
+  /** Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. */
   project?: string;
   /** Project directory to query (defaults to the current directory). Used to locate the indexed project. */
   projectDir?: string;
@@ -373,7 +373,7 @@ export interface FindApiMembersOptions extends CommonOptions {
   type?: string;
   /** Format output as JSON */
   json?: boolean;
-  /** Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). */
+  /** Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. */
   project?: string;
   /** Project directory to query (defaults to the current directory). Used to locate the indexed project. */
   projectDir?: string;
@@ -400,7 +400,7 @@ export interface FindApiNamespacesOptions extends CommonOptions {
   filter?: string;
   /** Format output as JSON */
   json?: boolean;
-  /** Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). */
+  /** Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. */
   project?: string;
   /** Project directory to query (defaults to the current directory). Used to locate the indexed project. */
   projectDir?: string;
@@ -425,7 +425,7 @@ export async function findApiNamespaces(options: FindApiNamespacesOptions = {}):
 export interface FindApiPackagesOptions extends CommonOptions {
   /** Format output as JSON */
   json?: boolean;
-  /** Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). */
+  /** Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. */
   project?: string;
   /** Project directory to query (defaults to the current directory). Used to locate the indexed project. */
   projectDir?: string;
@@ -467,7 +467,7 @@ export async function findApiProjects(options: FindApiProjectsOptions = {}): Pro
 export interface FindApiRefreshOptions extends CommonOptions {
   /** Format output as JSON */
   json?: boolean;
-  /** Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). */
+  /** Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. */
   project?: string;
   /** Project directory to query (defaults to the current directory). Used to locate the indexed project. */
   projectDir?: string;
@@ -494,7 +494,7 @@ export async function findApiRefresh(options: FindApiRefreshOptions = {}): Promi
 export interface FindApiStatsOptions extends CommonOptions {
   /** Format output as JSON */
   json?: boolean;
-  /** Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). */
+  /** Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. */
   project?: string;
   /** Project directory to query (defaults to the current directory). Used to locate the indexed project. */
   projectDir?: string;
@@ -520,7 +520,7 @@ export interface FindApiTypesOptions extends CommonOptions {
   namespace?: string;
   /** Format output as JSON */
   json?: boolean;
-  /** Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). */
+  /** Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. */
   project?: string;
   /** Project directory to query (defaults to the current directory). Used to locate the indexed project. */
   projectDir?: string;

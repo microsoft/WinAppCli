@@ -226,7 +226,7 @@ function findApi(options?: FindApiOptions): Promise<WinappResult>
 | `query` | `string \| undefined` | No | What to search for, e.g. "acrylic brush" or "NavigationView". Matched lexically against type and member names across the project's indexed API metadata. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `max` | `number \| undefined` | No | Maximum number of namespace-grouped results to return. |
-| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `project` | `string \| undefined` | No | Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. |
 | `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -248,7 +248,7 @@ function findApiCheckProperty(options?: FindApiCheckPropertyOptions): Promise<Wi
 | `type` | `string \| undefined` | No | The type to check. |
 | `property` | `string \| undefined` | No | The property name to validate on the type. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `project` | `string \| undefined` | No | Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. |
 | `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -269,7 +269,7 @@ function findApiEnums(options?: FindApiEnumsOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `type` | `string \| undefined` | No | The enum type to list, e.g. Symbol or Microsoft.UI.Xaml.Controls.Symbol. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `project` | `string \| undefined` | No | Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. |
 | `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -290,7 +290,7 @@ function findApiMembers(options?: FindApiMembersOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `type` | `string \| undefined` | No | The type to inspect. Accepts a short name (NavigationView) or a fully-qualified name (Microsoft.UI.Xaml.Controls.NavigationView). |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `project` | `string \| undefined` | No | Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. |
 | `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -311,7 +311,7 @@ function findApiNamespaces(options?: FindApiNamespacesOptions): Promise<WinappRe
 |----------|------|----------|-------------|
 | `filter` | `string \| undefined` | No | Only list namespaces starting with this prefix, e.g. --filter Microsoft.UI. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `project` | `string \| undefined` | No | Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. |
 | `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -331,7 +331,7 @@ function findApiPackages(options?: FindApiPackagesOptions): Promise<WinappResult
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `project` | `string \| undefined` | No | Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. |
 | `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -369,7 +369,7 @@ function findApiRefresh(options?: FindApiRefreshOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `project` | `string \| undefined` | No | Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. |
 | `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
 | `scan` | `boolean \| undefined` | No | Recursively discover and index every project under the directory instead of just the top-level project(s). |
 
@@ -390,7 +390,7 @@ function findApiStats(options?: FindApiStatsOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `project` | `string \| undefined` | No | Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. |
 | `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -411,7 +411,7 @@ function findApiTypes(options?: FindApiTypesOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `namespace` | `string \| undefined` | No | The namespace to list, e.g. Microsoft.UI.Xaml.Controls. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `project` | `string \| undefined` | No | Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. |
 | `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
@@ -1632,7 +1632,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `query` | `string \| undefined` | No | What to search for, e.g. "acrylic brush" or "NavigationView". Matched lexically against type and member names across the project's indexed API metadata. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `max` | `number \| undefined` | No | Maximum number of namespace-grouped results to return. |
-| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `project` | `string \| undefined` | No | Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. |
 | `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
@@ -1645,7 +1645,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `type` | `string \| undefined` | No | The type to check. |
 | `property` | `string \| undefined` | No | The property name to validate on the type. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `project` | `string \| undefined` | No | Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. |
 | `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
@@ -1657,7 +1657,7 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `type` | `string \| undefined` | No | The enum type to list, e.g. Symbol or Microsoft.UI.Xaml.Controls.Symbol. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `project` | `string \| undefined` | No | Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. |
 | `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
@@ -1669,7 +1669,7 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `type` | `string \| undefined` | No | The type to inspect. Accepts a short name (NavigationView) or a fully-qualified name (Microsoft.UI.Xaml.Controls.NavigationView). |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `project` | `string \| undefined` | No | Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. |
 | `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
@@ -1681,7 +1681,7 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `filter` | `string \| undefined` | No | Only list namespaces starting with this prefix, e.g. --filter Microsoft.UI. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `project` | `string \| undefined` | No | Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. |
 | `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
@@ -1692,7 +1692,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `project` | `string \| undefined` | No | Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. |
 | `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
@@ -1712,7 +1712,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `project` | `string \| undefined` | No | Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. |
 | `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
 | `scan` | `boolean \| undefined` | No | Recursively discover and index every project under the directory instead of just the top-level project(s). |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
@@ -1724,7 +1724,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `project` | `string \| undefined` | No | Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. |
 | `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
@@ -1736,7 +1736,7 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `namespace` | `string \| undefined` | No | The namespace to list, e.g. Microsoft.UI.Xaml.Controls. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
-| `project` | `string \| undefined` | No | Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name). |
+| `project` | `string \| undefined` | No | Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. |
 | `projectDir` | `string \| undefined` | No | Project directory to query (defaults to the current directory). Used to locate the indexed project. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |

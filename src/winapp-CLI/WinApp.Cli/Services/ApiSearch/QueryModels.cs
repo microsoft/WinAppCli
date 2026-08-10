@@ -29,6 +29,25 @@ internal readonly record struct ApiQueryResult<T>(ApiQueryOutcome Outcome, strin
     public static ApiQueryResult<T> NotAnEnum(string message) => new(ApiQueryOutcome.NotAnEnum, message, null);
 }
 
+/// <summary>
+/// Implemented by every query payload that is answered from a resolved scope, so
+/// <c>find-api</c> can state — in text and in <c>--json</c> — whether results came
+/// from an indexed project or from the machine-wide Windows SDK. Without this a
+/// caller cannot tell a project-scoped answer from an SDK-only one.
+/// </summary>
+internal interface IApiScopedOutput
+{
+    /// <summary><c>project</c> when answered from an indexed project, <c>sdk</c> for the machine-wide SDK scope.</summary>
+    string? Scope { get; set; }
+}
+
+/// <summary>Well-known <see cref="IApiScopedOutput.Scope"/> values.</summary>
+internal static class ApiScopeNames
+{
+    public const string Project = "project";
+    public const string Sdk = "sdk";
+}
+
 // ---- search ----
 
 /// <summary>A single ranked type/member hit within a namespace group.</summary>
@@ -74,8 +93,11 @@ internal sealed class ApiAmbiguityGroup
 }
 
 /// <summary>The result of a <c>find-api "&lt;query&gt;"</c> search.</summary>
-internal sealed class ApiSearchOutput
+internal sealed class ApiSearchOutput : IApiScopedOutput
 {
+    /// <inheritdoc />
+    public string? Scope { get; set; }
+
     public required string Query { get; init; }
 
     public List<ApiAmbiguityGroup>? Ambiguous { get; init; }
@@ -106,8 +128,11 @@ internal sealed class ApiMemberOutput
 }
 
 /// <summary>The result of <c>find-api members &lt;Type&gt;</c>.</summary>
-internal sealed class ApiMembersOutput
+internal sealed class ApiMembersOutput : IApiScopedOutput
 {
+    /// <inheritdoc />
+    public string? Scope { get; set; }
+
     public required string FullName { get; init; }
 
     public required string Kind { get; init; }
@@ -138,8 +163,11 @@ internal sealed class ApiCrossTypeMember
 }
 
 /// <summary>The result of <c>find-api check-property &lt;Type&gt; &lt;Property&gt;</c>.</summary>
-internal sealed class ApiCheckPropertyOutput
+internal sealed class ApiCheckPropertyOutput : IApiScopedOutput
 {
+    /// <inheritdoc />
+    public string? Scope { get; set; }
+
     public required bool Found { get; init; }
 
     public required string Type { get; init; }
@@ -172,24 +200,33 @@ internal sealed class ApiTypeSummary
 }
 
 /// <summary>The result of <c>find-api types &lt;Namespace&gt;</c>.</summary>
-internal sealed class ApiTypesOutput
+internal sealed class ApiTypesOutput : IApiScopedOutput
 {
+    /// <inheritdoc />
+    public string? Scope { get; set; }
+
     public required string Namespace { get; init; }
 
     public required List<ApiTypeSummary> Types { get; init; }
 }
 
 /// <summary>The result of <c>find-api enums &lt;Type&gt;</c>.</summary>
-internal sealed class ApiEnumsOutput
+internal sealed class ApiEnumsOutput : IApiScopedOutput
 {
+    /// <inheritdoc />
+    public string? Scope { get; set; }
+
     public required string FullName { get; init; }
 
     public required List<string> Values { get; init; }
 }
 
 /// <summary>The result of <c>find-api namespaces</c>.</summary>
-internal sealed class ApiNamespacesOutput
+internal sealed class ApiNamespacesOutput : IApiScopedOutput
 {
+    /// <inheritdoc />
+    public string? Scope { get; set; }
+
     public required List<string> Namespaces { get; init; }
 }
 
@@ -211,16 +248,22 @@ internal sealed class ApiPackageSummary
 }
 
 /// <summary>The result of <c>find-api packages</c>.</summary>
-internal sealed class ApiPackagesOutput
+internal sealed class ApiPackagesOutput : IApiScopedOutput
 {
+    /// <inheritdoc />
+    public string? Scope { get; set; }
+
     public required string ProjectName { get; init; }
 
     public required List<ApiPackageSummary> Packages { get; init; }
 }
 
 /// <summary>The result of <c>find-api stats</c>.</summary>
-internal sealed class ApiStatsOutput
+internal sealed class ApiStatsOutput : IApiScopedOutput
 {
+    /// <inheritdoc />
+    public string? Scope { get; set; }
+
     public required string ProjectName { get; init; }
 
     public required int Packages { get; init; }

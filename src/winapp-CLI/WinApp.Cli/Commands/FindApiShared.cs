@@ -30,7 +30,7 @@ internal static class FindApiShared
 
     public static Option<string?> CreateProjectOption() => new("--project")
     {
-        Description = "Project name to disambiguate when several projects are indexed (matches the .csproj/.vcxproj name).",
+        Description = "Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project.",
     };
 
     public static ApiRequestScope ReadScope(ParseResult parseResult, Option<string?> projectDir, Option<string?> project) =>
@@ -67,9 +67,26 @@ internal static class FindApiShared
         }
         else
         {
+            WriteScopeNote(console, data);
             renderText(data);
         }
         return exit;
+    }
+
+    /// <summary>
+    /// In text mode, say up front when an answer came from the machine-wide SDK
+    /// scope rather than a project. Without this the output is indistinguishable
+    /// from a project-scoped answer, and the absent project NuGet packages
+    /// (CommunityToolkit and friends) would look like genuine "no such API"
+    /// results. JSON callers read the <c>scope</c> field instead.
+    /// </summary>
+    private static void WriteScopeNote(IAnsiConsole console, object data)
+    {
+        if (data is IApiScopedOutput { Scope: ApiScopeNames.Sdk })
+        {
+            console.MarkupLine("[yellow]Note:[/] no project found here \u2014 showing Windows SDK + Windows App SDK APIs only (project NuGet packages are not included).");
+            console.WriteLine();
+        }
     }
 
     /// <summary>
@@ -334,6 +351,7 @@ internal static class FindApiShared
         if (output.Projects.Count == 0)
         {
             console.WriteLine("No projects indexed.");
+            console.WriteLine("Queries from a directory with no project use the Windows SDK scope automatically.");
             return;
         }
         console.WriteLine($"Indexed projects ({output.Projects.Count}):");
@@ -341,6 +359,8 @@ internal static class FindApiShared
         {
             console.WriteLine($"  {project.Name} ({project.PackageCount} package(s))");
         }
+        console.WriteLine();
+        console.WriteLine("Queries from a directory with no project use the Windows SDK scope ('--project sdk').");
     }
 
     public static void RenderRefresh(IAnsiConsole console, ApiRefreshOutput output)
@@ -348,6 +368,14 @@ internal static class FindApiShared
         if (output.ProjectsProcessed == 0)
         {
             console.WriteLine("No projects with API metadata were found to index.");
+            return;
+        }
+        if (output.ProjectNames is [ApiCachePaths.SdkScopeName])
+        {
+            // Not a project index: say what it actually is, so nobody reads
+            // "Indexed 1 project(s)" and assumes their project was picked up.
+            console.WriteLine($"Indexed {ApiCachePaths.SdkScopeName} metadata (no project in this directory).");
+            console.WriteLine($"  Packages parsed: {output.PackagesParsed}, reused from cache: {output.PackagesReused}.");
             return;
         }
         string names = output.ProjectNames.Count > 0 ? $": {string.Join(", ", output.ProjectNames)}" : "";

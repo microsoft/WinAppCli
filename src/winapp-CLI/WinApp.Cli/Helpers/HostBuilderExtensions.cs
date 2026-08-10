@@ -8,6 +8,7 @@ using System.CommandLine.Invocation;
 using System.Diagnostics.CodeAnalysis;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Services;
+using WinApp.Cli.Services.ApiSearch;
 using WinApp.Cli.Services.Controls;
 
 namespace WinApp.Cli.Helpers;
@@ -37,6 +38,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IPackageLayoutService, PackageLayoutService>()
             .AddSingleton<IWinappDirectoryService, WinappDirectoryService>()
             .AddSingleton<IApiMetadataService, ApiMetadataService>()
+            .AddSingleton<ISdkPackageSource, SdkPackageSource>()
             .AddSingleton<IWinmdService, WinmdService>()            .AddSingleton<IWinmdsLockfileService, WinmdsLockfileService>()
             .AddSingleton<IProjectDetectionService, ProjectDetectionService>()
             .AddSingleton<ICsWinRTMetadataShimService, CsWinRTMetadataShimService>()

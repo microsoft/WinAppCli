@@ -32,6 +32,24 @@ internal static class NuGetResolver
         }
 
         packages.AddRange(FindWinMdFromProjectReferences(projectFile));
+        packages.AddRange(CollectSdkPackages(winAppSdkRuntimePath));
+
+        return Deduplicate(packages);
+    }
+
+    /// <summary>
+    /// The machine-wide metadata that needs no project at all: the Windows SDK
+    /// UnionMetadata and the installed WinAppSDK runtime, plus their XML docs from
+    /// the NuGet global cache. This is what backs <c>find-api</c>'s SDK scope when
+    /// a query runs outside any project, so it must not consult
+    /// <c>project.assets.json</c>, <c>packages.config</c>, or project references.
+    /// </summary>
+    public static List<PackageWithWinMd> FindSdkPackages(string? winAppSdkRuntimePath) =>
+        Deduplicate(CollectSdkPackages(winAppSdkRuntimePath));
+
+    private static List<PackageWithWinMd> CollectSdkPackages(string? winAppSdkRuntimePath)
+    {
+        var packages = new List<PackageWithWinMd>();
 
         (List<string> Files, string Version) sdk = FindWindowsSdkWinMd();
         if (sdk.Files.Count > 0)
@@ -45,9 +63,12 @@ internal static class NuGetResolver
             packages.Add(new PackageWithWinMd("WinAppSdkRuntime", runtime.Version, runtime.Files, new List<string>()));
         }
 
-        DiscoverSdkXmlDocs(packages, projectDir);
+        DiscoverSdkXmlDocs(packages);
+        return packages;
+    }
 
-        return packages
+    private static List<PackageWithWinMd> Deduplicate(List<PackageWithWinMd> packages) =>
+        packages
             .GroupBy(p => (p.Id.ToLowerInvariant(), p.Version.ToLowerInvariant()))
             .Select(g =>
             {
@@ -57,7 +78,6 @@ internal static class NuGetResolver
                 return new PackageWithWinMd(first.Id, first.Version, winMdFiles, xmlDocFiles);
             })
             .ToList();
-    }
 
     /// <summary>
     /// Finds XML documentation files in a NuGet package folder that contains a
@@ -104,7 +124,7 @@ internal static class NuGetResolver
     /// (<c>microsoft.windows.sdk.net.ref</c>, <c>microsoft.windowsappsdk.winui</c>)
     /// that provide WinRT API docs, and attaches them to the matching package.
     /// </summary>
-    private static void DiscoverSdkXmlDocs(List<PackageWithWinMd> packages, string projectDir)
+    private static void DiscoverSdkXmlDocs(List<PackageWithWinMd> packages)
     {
         string nugetPackagesDir = GetNuGetPackagesDir();
 
