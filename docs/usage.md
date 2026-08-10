@@ -193,7 +193,7 @@ winapp new --list
 winapp new --name MyApp --template winui-navview
 
 # Always use the newest template pack, no prompts
-winapp new --name MyApp --template-version latest
+winapp new --name MyApp --template-version latest --use-defaults
 
 # Show the underlying dotnet commands and their output
 winapp new --name MyApp --verbose

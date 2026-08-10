@@ -284,6 +284,7 @@ internal class NewCommand : Command, IShortDescription
         IDotNetService dotNetService,
         ICurrentDirectoryProvider currentDirectoryProvider,
         IAnsiConsole ansiConsole,
+        ITemplateCacheReader templateCacheReader,
         ILogger<Handler> logger) : AsynchronousCommandLineAction
     {
         /// <summary>How the caller asked us to resolve the template-pack version.</summary>
@@ -564,13 +565,19 @@ internal class NewCommand : Command, IShortDescription
             // to the first free variant so a taken default becomes "WinUIApp1", "WinUIApp2", etc.
             if (name is null)
             {
-                if (output is not null)
+                // --output is the destination *project directory* for project templates, so its leaf name
+                // is a sensible project name. For item templates --output is the target folder the item is
+                // added into (e.g. the project dir), NOT the item's name, so deriving the name from it would
+                // produce e.g. "DemoApp.xaml". Item templates therefore always fall through to the derived
+                // default name (numbered against the target folder), never the --output leaf.
+                if (output is not null && entry.IsProject)
                 {
                     name = output.Name;
                 }
                 else
                 {
-                    var defaultName = EnsureAvailableName(DefaultNameFor(entry), currentDir, entry);
+                    var targetDir = output ?? currentDir;
+                    var defaultName = EnsureAvailableName(DefaultNameFor(entry), targetDir, entry);
                     name = useDefaults ? defaultName : await PromptNameAsync(defaultName, cancellationToken);
                 }
             }
@@ -653,10 +660,15 @@ internal class NewCommand : Command, IShortDescription
             // templates default to net10.0, so without this an accepted .NET 8/9 SDK would scaffold a
             // project it cannot build. Item templates don't accept --dotnet-version. For a newer SDK,
             // omit the flag and let the template auto-detect the framework from the running dotnet CLI.
-            if (entry.IsProject && sdkVersion.Major is >= 8 and <= 10)
+            // Pin the target framework for project templates so an accepted-but-older SDK doesn't
+            // scaffold a project it can't build (the WinUI templates historically default to the newest
+            // TFM). Both the option name and the supported frameworks are read from the installed pack's
+            // template metadata rather than hard-coded: older packs surfaced this as --dotnetVersion (not
+            // --dotnet-version), and the supported TFM set changes as packs add newer frameworks. Item
+            // templates don't take a framework, so they're skipped.
+            if (entry.IsProject)
             {
-                args.Add("--dotnet-version");
-                args.Add($"net{sdkVersion.Major}.0");
+                AppendTargetFrameworkArgs(args, entry.ShortName, sdkVersion);
             }
 
             if (force)
@@ -962,7 +974,26 @@ internal class NewCommand : Command, IShortDescription
                 return ([], failure);
             }
 
-            return (WinUiTemplateCatalog.ParseList(output), null);
+            var parsed = WinUiTemplateCatalog.ParseList(output);
+
+            // `dotnet new list winui` matches by short-name prefix across *every* installed pack, so a
+            // third-party pack shipping its own `winui*` templates would leak into the catalog and its
+            // aliases into telemetry. Restrict to the templates the resolved Microsoft pack actually owns,
+            // taken from `dotnet new uninstall` (the authoritative per-package Templates block). If that
+            // set can't be determined (unexpected output), fall back to the unfiltered list rather than
+            // hiding every template.
+            var (packExit, packOutput, packStderr) = await dotNetService.RunDotnetCommandAsync(contextDir, ListTemplatePacksArgs, EnglishUiEnvironment, cancellationToken);
+            LogDotnetOutput(ListTemplatePacksArgs, packExit, packOutput, packStderr);
+            if (packExit == 0)
+            {
+                var owned = WinUiTemplateCatalog.ParsePackTemplateShortNames(packOutput, TemplatePackageId);
+                if (owned.Count > 0)
+                {
+                    parsed = parsed.Where(t => t.ShortNames.Any(owned.Contains)).ToList();
+                }
+            }
+
+            return (parsed, null);
         }
 
         private async Task<WinUiTemplateEntry> PromptTemplateAsync(IReadOnlyList<WinUiTemplateEntry> templates, CancellationToken cancellationToken)
@@ -1084,6 +1115,44 @@ internal class NewCommand : Command, IShortDescription
         /// <summary>True when any '/'-separated segment of <paramref name="tags"/> equals <paramref name="segment"/>.</summary>
         private static bool TagsContain(string tags, string segment)
             => tags.Split('/').Any(s => s.Trim().Equals(segment, StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>
+        /// Appends the target-framework option to <paramref name="args"/> for a project template, using
+        /// the template's own metadata (<c>templatecache.json</c>) to choose both the option name and a
+        /// framework the installed SDK can build. Falls back to the historical heuristic
+        /// (<c>--dotnet-version net{major}.0</c> for SDK 8–10) only when no cache describes the template,
+        /// so a missing/unreadable cache still pins a buildable TFM for the common case.
+        /// </summary>
+        private void AppendTargetFrameworkArgs(List<string> args, string shortName, Version sdkVersion)
+        {
+            foreach (var cacheJson in templateCacheReader.ReadTemplateCacheDocuments())
+            {
+                var (found, optionName, tfm) = WinUiTemplateCatalog.DeriveTfmOption(
+                    cacheJson, TemplatePackageId, shortName, sdkVersion.Major);
+                if (!found)
+                {
+                    continue;
+                }
+
+                // The template was located: its metadata is authoritative. Pin only when it declares a
+                // framework choice the SDK can satisfy; otherwise leave the option off and let the
+                // template pick its own default (there is nothing safe to force).
+                if (!string.IsNullOrEmpty(optionName) && !string.IsNullOrEmpty(tfm))
+                {
+                    args.Add("--" + optionName);
+                    args.Add(tfm);
+                }
+
+                return;
+            }
+
+            // No cache described the template — fall back to the previous heuristic.
+            if (sdkVersion.Major is >= 8 and <= 10)
+            {
+                args.Add("--dotnet-version");
+                args.Add($"net{sdkVersion.Major}.0");
+            }
+        }
 
         /// <summary>Human-facing noun for the created artifact, derived from the template's tags.</summary>
         private static string ProjectKind(WinUiTemplateEntry entry)

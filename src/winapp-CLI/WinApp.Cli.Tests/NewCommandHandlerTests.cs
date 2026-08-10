@@ -23,9 +23,12 @@ namespace WinApp.Cli.Tests;
 public class NewCommandHandlerTests : BaseCommandTests
 {
     private readonly FakeDotNetService _dotnet = new();
+    private readonly FakeTemplateCacheReader _templateCache = new();
 
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
-        => services.AddSingleton<IDotNetService>(_dotnet);
+        => services
+            .AddSingleton<IDotNetService>(_dotnet)
+            .AddSingleton<ITemplateCacheReader>(_templateCache);
 
     /// <summary>
     /// A realistic <c>dotnet new list winui --columns-all</c> table used to script the enumeration
@@ -688,6 +691,110 @@ public class NewCommandHandlerTests : BaseCommandTests
 
 
     [TestMethod]
+    public async Task Handler_ItemTemplate_WithOutput_DoesNotNameItemAfterOutputDir()
+    {
+        // For item templates --output is the destination folder, not the item name. The item must still
+        // take its derived default name (MyPage), never the --output leaf ("DemoApp"), while --output is
+        // honoured as the -o target directory the item is added into.
+        var listWithItem = BuildListTable(
+        [
+            ("WinUI Blank App", "winui,winui3", "[C#]", "project", "Microsoft", "Windows/WinUI/Desktop/XAML"),
+            ("WinUI Blank Page", "winui-page,winui3-page", "[C#]", "item", "Microsoft", "Windows/WinUI/Item"),
+        ]);
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, listWithItem, string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && (args[1] == "install" || args[1] == "update" || args[1] == "uninstall"))
+            {
+                return (0, "ok", string.Empty);
+            }
+            return (0, "The template was created successfully.", string.Empty);
+        };
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["--use-defaults", "--json", "--template", "winui-page", "--output", "DemoApp"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        var json = ParseJson(TestAnsiConsole.Output);
+        Assert.AreEqual("MyPage", json.GetProperty("Name").GetString(),
+            "An item template's name must be its derived default (MyPage), never the --output directory name (DemoApp).");
+
+        var scaffold = ScaffoldInvocation();
+        Assert.IsNotNull(scaffold);
+        var tokens = scaffold.ToArray();
+        var nameIdx = Array.IndexOf(tokens, "-n");
+        Assert.AreEqual("MyPage", tokens[nameIdx + 1], "dotnet new must receive the derived item name, not the output dir.");
+        var outIdx = Array.IndexOf(tokens, "-o");
+        Assert.IsTrue(outIdx >= 0 && tokens[outIdx + 1].EndsWith("DemoApp", StringComparison.Ordinal),
+            "--output must still be honoured as the directory the item is added into.");
+    }
+
+    [TestMethod]
+    public async Task Handler_List_ExcludesTemplatesNotOwnedByTheMicrosoftPack()
+    {
+        // `dotnet new list winui` matches winui* templates from *any* installed pack, so a third-party
+        // "winui-foreign" leaks into the raw table. The catalog must be filtered to the templates the
+        // resolved Microsoft pack actually owns (per `dotnet new uninstall`), dropping the foreign one.
+        var listWithForeign = BuildListTable(
+        [
+            ("WinUI Blank App", "winui,winui3", "[C#]", "project", "Microsoft", "Windows/WinUI/Desktop/XAML"),
+            ("WinUI Class Library", "winui-lib,winui3-lib", "[C#]", "project", "Microsoft", "Windows/WinUI/Library"),
+            ("Contoso WinUI Widget", "winui-foreign", "[C#]", "project", "Contoso", "Windows/WinUI/Widget"),
+        ]);
+        const string uninstall =
+            "Currently installed items:\n" +
+            "   Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n" +
+            "      Version: 0.0.6-alpha\n" +
+            "      Templates:\n" +
+            "         WinUI Blank App (winui,winui3) C#\n" +
+            "         WinUI Class Library (winui-lib,winui3-lib) C#\n" +
+            "      Uninstall Command:\n" +
+            "         dotnet new uninstall Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n";
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "uninstall")
+            {
+                return (0, uninstall, string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, listWithForeign, string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && (args[1] == "install" || args[1] == "update"))
+            {
+                return (0, "ok", string.Empty);
+            }
+            return (0, "The template was created successfully.", string.Empty);
+        };
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--list", "--json"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        var json = ParseJson(TestAnsiConsole.Output);
+        var shortNames = json.GetProperty("Templates").EnumerateArray()
+            .Select(t => t.GetProperty("ShortName").GetString())
+            .ToArray();
+        CollectionAssert.Contains(shortNames, "winui", "The Microsoft pack's own templates must remain listed.");
+        CollectionAssert.Contains(shortNames, "winui-lib");
+        CollectionAssert.DoesNotContain(shortNames, "winui-foreign",
+            "A template from another installed pack must be filtered out of the catalog.");
+    }
+
+
+    [TestMethod]
     public async Task Handler_AppTemplate_PrintsWinappRunNextStep()
     {
         ScriptHappyPath();
@@ -782,6 +889,78 @@ public class NewCommandHandlerTests : BaseCommandTests
         Assert.IsNotNull(scaffold);
         CollectionAssert.DoesNotContain(scaffold.ToArray(), "--dotnet-version",
             "For an SDK newer than the templates' choices, omit --dotnet-version and let the template auto-detect.");
+    }
+
+    /// <summary>
+    /// A templatecache.json describing the winui template (net8/9/10 via the dotnet-version option), used
+    /// to drive the metadata-based TFM resolution in handler tests.
+    /// </summary>
+    private const string WinuiCacheJson =
+        "{\"TemplateInfo\":[{" +
+        "\"MountPointUri\":\"C:\\\\pkgs\\\\Microsoft.WindowsAppSDK.WinUI.CSharp.Templates.0.0.6-alpha.nupkg\"," +
+        "\"ShortNameList\":[\"winui\",\"winui3\"]," +
+        "\"Parameters\":[{\"Name\":\"dotnetVersion\",\"DataType\":\"choice\",\"Choices\":{\"net8.0\":{},\"net9.0\":{},\"net10.0\":{}}}]," +
+        "\"HostData\":\"{\\\"symbolInfo\\\":{\\\"dotnetVersion\\\":{\\\"longName\\\":\\\"dotnet-version\\\"}}}\"}]}";
+
+    [TestMethod]
+    public async Task Handler_Scaffold_UsesTemplateMetadataToPinFramework()
+    {
+        // With the template's own metadata available, the option name and value are derived from it.
+        _templateCache.Documents.Add(WinuiCacheJson);
+        ScriptHappyPath(sdkVersion: "9.0.100");
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json", "--name", "MyApp"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        var tokens = ScaffoldInvocation()!.ToArray();
+        var idx = Array.IndexOf(tokens, "--dotnet-version");
+        Assert.IsTrue(idx >= 0, "The option name must be derived from the template's host metadata.");
+        Assert.AreEqual("net9.0", tokens[idx + 1], "The installed SDK's own TFM is offered, so pin it.");
+    }
+
+    [TestMethod]
+    public async Task Handler_Scaffold_NewerSdkPinsHighestSupportedFrameworkFromMetadata()
+    {
+        // SDK 11 but the pack only offers up to net10.0: pin net10.0 (highest supported) instead of
+        // silently falling back to the template's own default.
+        _templateCache.Documents.Add(WinuiCacheJson);
+        ScriptHappyPath(sdkVersion: "11.0.100");
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json", "--name", "MyApp"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        var tokens = ScaffoldInvocation()!.ToArray();
+        var idx = Array.IndexOf(tokens, "--dotnet-version");
+        Assert.IsTrue(idx >= 0, "A newer SDK must still pin the highest framework the pack supports.");
+        Assert.AreEqual("net10.0", tokens[idx + 1]);
+    }
+
+    [TestMethod]
+    public async Task Handler_Scaffold_UsesRawSymbolNameWhenNoHostMapping()
+    {
+        // Older packs exposed the framework symbol with no host longName mapping, so dotnet surfaced it
+        // as --dotnetVersion. The scaffold must use that raw symbol name, not a hard-coded --dotnet-version.
+        const string legacyCache =
+            "{\"TemplateInfo\":[{" +
+            "\"MountPointUri\":\"C:\\\\pkgs\\\\Microsoft.WindowsAppSDK.WinUI.CSharp.Templates.0.0.5-alpha.nupkg\"," +
+            "\"ShortNameList\":[\"winui\"]," +
+            "\"Parameters\":[{\"Name\":\"dotnetVersion\",\"DataType\":\"choice\",\"Choices\":{\"net8.0\":{},\"net9.0\":{},\"net10.0\":{}}}]," +
+            "\"HostData\":\"{\\\"symbolInfo\\\":{}}\"}]}";
+        _templateCache.Documents.Add(legacyCache);
+        ScriptHappyPath(sdkVersion: "9.0.100");
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json", "--name", "MyApp"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        var tokens = ScaffoldInvocation()!.ToArray();
+        CollectionAssert.DoesNotContain(tokens, "--dotnet-version",
+            "A pack without a host mapping must not be invoked with the hard-coded --dotnet-version option.");
+        var idx = Array.IndexOf(tokens, "--dotnetVersion");
+        Assert.IsTrue(idx >= 0, "The raw symbol name (--dotnetVersion) is what dotnet exposes for an unmapped symbol.");
+        Assert.AreEqual("net9.0", tokens[idx + 1]);
     }
 
     [TestMethod]

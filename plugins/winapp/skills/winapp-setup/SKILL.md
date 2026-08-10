@@ -51,7 +51,7 @@ winapp new --list
 winapp new --name MyApp --template winui-navview
 
 # Always use the newest template pack without prompting
-winapp new --name MyApp --template-version latest
+winapp new --name MyApp --template-version latest --use-defaults
 
 # Non-interactive (agent) with machine-readable output
 winapp new --use-defaults --name MyApp --json
