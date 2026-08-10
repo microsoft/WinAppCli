@@ -17,10 +17,9 @@ internal sealed class TemplateCacheReader : ITemplateCacheReader
         string root;
         try
         {
-            root = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".templateengine",
-                "dotnetcli");
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var templateEngineRoot = Path.Combine(userProfile, ".templateengine");
+            root = Path.Combine(templateEngineRoot, "dotnetcli");
         }
         catch (Exception ex) when (ex is ArgumentException or PlatformNotSupportedException)
         {
