@@ -167,9 +167,8 @@ try
     
     # [Temporary], Ensure build tools are available in CI
     Write-Host "[CLI] Ensure build tools are available" -ForegroundColor Cyan
-    $UpdateCmd = "& `"$CliExe`" update"
-    Write-Host "  Command: $UpdateCmd" -ForegroundColor DarkGray
-    Invoke-Expression $UpdateCmd
+    Write-Host "  Command: & `"$CliExe`" update" -ForegroundColor DarkGray
+    & $CliExe update
     
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to download build tools"
@@ -324,16 +323,15 @@ try
     New-Item -ItemType Directory -Path $DistributionPath -Force | Out-Null
     
     # Check for dev certificate and generate if needed
-    $CertParam = ""
+    $CertArgs = @()
     
     if (-not (Test-Path $DevCertPath) -and $Stable -eq $false) {
         Write-Host "[CERT] Dev certificate not found, generating new certificate..." -ForegroundColor Yellow
         Write-Host "  Certificate will be generated from manifest: $TargetManifestPath" -ForegroundColor Gray
         
         # Generate certificate using the CLI
-        $CertGenerateCmd = "& `"$CliExe`" cert generate --manifest `"$TargetManifestPath`""
-        Write-Host "  Command: $CertGenerateCmd" -ForegroundColor DarkGray
-        Invoke-Expression $CertGenerateCmd
+        Write-Host "  Command: & `"$CliExe`" cert generate --manifest `"$TargetManifestPath`"" -ForegroundColor DarkGray
+        & $CliExe cert generate --manifest $TargetManifestPath
         
         if ($LASTEXITCODE -ne 0) {
             Write-Error "Failed to generate certificate"
@@ -351,7 +349,7 @@ try
     
     if ($Stable -eq $false) {
         if (Test-Path $DevCertPath) {
-            $CertParam = "--cert `"$DevCertPath`""
+            $CertArgs = @('--cert', $DevCertPath)
             Write-Host "[INFO] Using dev certificate: $DevCertPath" -ForegroundColor Gray
         } else {
             Write-Warning "Dev certificate not found at $DevCertPath. Packages will not be signed."
@@ -374,9 +372,10 @@ try
     
     # Package x64 directly to final location
     Write-Host "[PACKAGE] Creating x64 MSIX package..." -ForegroundColor Blue
-    $X64PackageCmd = "& `"$CliExe`" package `"$X64LayoutPath`" --name `"$($X64PackageName -replace '\.msix$', '')`" --output `"$(Join-Path $DistributionPath $X64PackageName)`" $CertParam"
-    Write-Host "  Command: $X64PackageCmd" -ForegroundColor Gray
-    Invoke-Expression $X64PackageCmd
+    $X64OutputPath = Join-Path $DistributionPath $X64PackageName
+    $X64PackageArgs = @('package', $X64LayoutPath, '--name', ($X64PackageName -replace '\.msix$', ''), '--output', $X64OutputPath) + $CertArgs
+    Write-Host "  Command: & `"$CliExe`" $($X64PackageArgs -join ' ')" -ForegroundColor Gray
+    & $CliExe @X64PackageArgs
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to create x64 MSIX package"
         exit 1
@@ -386,9 +385,10 @@ try
     
     # Package arm64 directly to final location
     Write-Host "[PACKAGE] Creating arm64 MSIX package..." -ForegroundColor Blue
-    $Arm64PackageCmd = "& `"$CliExe`" package `"$Arm64LayoutPath`" --name `"$($Arm64PackageName -replace '\.msix$', '')`" --output `"$(Join-Path $DistributionPath $Arm64PackageName)`" $CertParam"
-    Write-Host "  Command: $Arm64PackageCmd" -ForegroundColor Gray
-    Invoke-Expression $Arm64PackageCmd
+    $Arm64OutputPath = Join-Path $DistributionPath $Arm64PackageName
+    $Arm64PackageArgs = @('package', $Arm64LayoutPath, '--name', ($Arm64PackageName -replace '\.msix$', ''), '--output', $Arm64OutputPath) + $CertArgs
+    Write-Host "  Command: & `"$CliExe`" $($Arm64PackageArgs -join ' ')" -ForegroundColor Gray
+    & $CliExe @Arm64PackageArgs
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to create arm64 MSIX package"
         exit 1
