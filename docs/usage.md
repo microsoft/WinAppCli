@@ -824,7 +824,8 @@ conflicting pair fails the run with `--X and --Y cannot be used together`:
 
 `WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, and `WinAppRunUnregisterOnExit` can be combined
 with each other. `WinAppRunClean`, `WinAppRunSymbols`, `WinAppRunExecutable`, and `WinAppLaunchArgs`
-have no restrictions.
+have no restrictions. `WinAppRunArgs` adds no restriction of its own, but a switch passed through it
+is checked like any other, so `WinAppRunArgs="--detach"` still conflicts with `WinAppRunNoLaunch`.
 
 ```xml
 <PropertyGroup>

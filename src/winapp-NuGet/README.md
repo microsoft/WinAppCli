@@ -85,7 +85,7 @@ Set these MSBuild properties in your `.csproj` to customize behavior:
 | `WinAppRunNoLaunch` | `WinAppRunDetach`, `WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, `WinAppRunUnregisterOnExit` |
 | `WinAppRunDetach` | `WinAppRunNoLaunch`, `WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, `WinAppRunUnregisterOnExit` |
 
-A conflicting pair fails the run with `--X and --Y cannot be used together`. The other three launch properties can be combined with each other, and `WinAppRunClean`, `WinAppRunSymbols`, `WinAppRunExecutable`, and `WinAppLaunchArgs` have no restrictions.
+A conflicting pair fails the run with `--X and --Y cannot be used together`. The other three launch properties can be combined with each other, and `WinAppRunClean`, `WinAppRunSymbols`, `WinAppRunExecutable`, and `WinAppLaunchArgs` have no restrictions. `WinAppRunArgs` adds no restriction of its own, but a switch passed through it is checked like any other, so `WinAppRunArgs="--detach"` still conflicts with `WinAppRunNoLaunch`.
 
 Example:
 

@@ -108,7 +108,9 @@ The CLI rejects a conflicting pair before doing any work, so the run fails immed
 `WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, and `WinAppRunUnregisterOnExit` can be combined
 with each other. `WinAppRunClean`, `WinAppRunSymbols`, `WinAppRunExecutable`, and `WinAppLaunchArgs`
 have no restrictions. `WinAppRunSymbols` is not rejected on its own, but only has an effect together
-with `WinAppRunDebugOutput`.
+with `WinAppRunDebugOutput`. `WinAppRunArgs` adds no restriction of its own, but a switch passed
+through it is checked like any other, so `WinAppRunArgs="--detach"` still conflicts with
+`WinAppRunNoLaunch`.
 
 #### Escape hatch: WinAppRunArgs
 
@@ -125,7 +127,7 @@ occupies in other toolsets:
 
 ```
 run "<output>" --manifest "<manifest>" --detach --caller nuget-package --verbose
-                                       ^ from WinAppRunDetach            ^ from WinAppRunArgs
+                                       ^ from WinAppRunDetach          ^ from WinAppRunArgs
 ```
 
 Use it for options that have no property rather than to override one. Repeating a boolean switch is
