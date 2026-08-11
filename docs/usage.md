@@ -813,6 +813,19 @@ When using the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, `dotnet 
 | `WinAppRunExecutable` | (empty) | Executable path relative to the build-output folder. Use when the manifest contains `$targetnametoken$` and the output folder has more than one `.exe`. |
 | `WinAppRunArgs` | (empty) | Raw arguments appended to the `winapp run` command line, for options with no dedicated property (for example `--verbose`). Appended after every property above. |
 
+**Mutually exclusive settings.** `WinAppRunNoLaunch` and `WinAppRunDetach` each describe a different
+launch behavior, so they conflict with the other launch properties and with each other. Setting a
+conflicting pair fails the run with `--X and --Y cannot be used together`:
+
+| Property | Cannot be combined with |
+|----------|-------------------------|
+| `WinAppRunNoLaunch` | `WinAppRunDetach`, `WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, `WinAppRunUnregisterOnExit` |
+| `WinAppRunDetach` | `WinAppRunNoLaunch`, `WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, `WinAppRunUnregisterOnExit` |
+
+`WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, and `WinAppRunUnregisterOnExit` can be combined
+with each other. `WinAppRunClean`, `WinAppRunSymbols`, `WinAppRunExecutable`, and `WinAppLaunchArgs`
+have no restrictions.
+
 ```xml
 <PropertyGroup>
   <WinAppRunUseExecutionAlias>true</WinAppRunUseExecutionAlias>

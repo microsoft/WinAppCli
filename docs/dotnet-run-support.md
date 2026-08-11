@@ -87,6 +87,29 @@ samples/
 | `WinAppRunExecutable` | (empty) | Executable path relative to the build-output folder. Use to disambiguate when the manifest contains a `$targetnametoken$` placeholder and the output folder contains more than one `.exe`. |
 | `WinAppRunArgs` | (empty) | Raw arguments appended to the `winapp run` command line, for options that have no dedicated property. See [Escape hatch](#escape-hatch-winapprunargs). |
 
+#### Mutually exclusive settings
+
+`WinAppRunNoLaunch` and `WinAppRunDetach` each describe a different launch behavior — one never
+starts the app, the other starts it and stops tracking it — so neither can be combined with the
+properties that need a tracked, running process, nor with each other:
+
+| Property | Cannot be combined with |
+|----------|-------------------------|
+| `WinAppRunNoLaunch` | `WinAppRunDetach`, `WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, `WinAppRunUnregisterOnExit` |
+| `WinAppRunDetach` | `WinAppRunNoLaunch`, `WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, `WinAppRunUnregisterOnExit` |
+
+The CLI rejects a conflicting pair before doing any work, so the run fails immediately:
+
+```
+> dotnet run -p:WinAppRunDetach=true -p:WinAppRunUnregisterOnExit=true
+❌ --detach and --unregister-on-exit cannot be used together.
+```
+
+`WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, and `WinAppRunUnregisterOnExit` can be combined
+with each other. `WinAppRunClean`, `WinAppRunSymbols`, `WinAppRunExecutable`, and `WinAppLaunchArgs`
+have no restrictions. `WinAppRunSymbols` is not rejected on its own, but only has an effect together
+with `WinAppRunDebugOutput`.
+
 #### Escape hatch: WinAppRunArgs
 
 Every option `winapp run` accepts in folder mode has a dedicated property above. `WinAppRunArgs`
