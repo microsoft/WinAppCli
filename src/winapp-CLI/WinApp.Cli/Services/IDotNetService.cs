@@ -68,6 +68,33 @@ internal interface IDotNetService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Runs a dotnet CLI command passing each argument as a discrete token via
+    /// <see cref="System.Diagnostics.ProcessStartInfo.ArgumentList"/>. Prefer this overload when any
+    /// argument is derived from user input: passing tokens discretely prevents shell/string
+    /// splitting, so a value cannot be broken into multiple arguments by embedded whitespace or
+    /// quotes.
+    /// <para>
+    /// This is <b>not</b> a substitute for validating values against the invoked command's option
+    /// grammar. A single option-shaped token (e.g. a project name of <c>--force</c> or a version of
+    /// <c>-p</c>) is still passed intact to the child process, where dotnet's own parser may
+    /// interpret it as a switch rather than a value. Callers must therefore still validate
+    /// user-supplied values (as the <c>new</c> command does for project names and template
+    /// versions), or place them after a <c>--</c> end-of-options separator where the child command
+    /// supports one.
+    /// </para>
+    /// </summary>
+    /// <param name="environmentOverrides">
+    /// Optional environment variables to set on the child process (merged over the inherited
+    /// environment). Use this to force locale-independent output, e.g. <c>DOTNET_CLI_UI_LANGUAGE=en</c>,
+    /// when the caller parses labels that dotnet would otherwise localize.
+    /// </param>
+    Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(
+        DirectoryInfo workingDirectory,
+        IReadOnlyList<string> arguments,
+        IReadOnlyDictionary<string, string>? environmentOverrides = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Runs a dotnet CLI command in the given working directory, delivering each stdout/stderr line
     /// to the supplied callbacks as it is produced (rather than capturing it all up front). Used for
     /// the project-mode build pass so build progress is visible live. Returns the process exit code.
