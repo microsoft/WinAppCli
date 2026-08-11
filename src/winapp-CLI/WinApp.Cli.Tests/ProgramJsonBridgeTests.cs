@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using System.Diagnostics.Tracing;
+using WinApp.Cli.Commands;
 using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Tests;
@@ -381,6 +382,68 @@ public class ProgramJsonBridgeTests : BaseCommandTests
     // -------------------------------------------------------------------------
     // M3 — bridge is scoped to ui descendants only
     // -------------------------------------------------------------------------
+
+    [TestMethod]
+    public async Task JsonBridge_NewCommand_ParseError_EmitsNewCommandResultJson()
+    {
+        // `--template` is free-form (validated at runtime), so a bad value no longer fails at parse
+        // time. A trailing `--template` with no value is a genuine System.CommandLine parse error.
+        // Without the bridge, System.CommandLine prints human help/error text and JSON callers (agents)
+        // get no machine-readable result. The bridge must emit a flat NewCommandResult on stdout (where
+        // `new`'s success JSON also goes).
+        var (stdout, _, exitCode) = await InvokeProgramAsync(
+            ["new", "--json", "--template"]);
+
+        Assert.AreEqual(NewCommand.ExitInvalidArgs, exitCode,
+            "A `new` parse error must return the same ExitInvalidArgs (2) the handler uses for invalid names/versions.");
+
+        int jsonStart = stdout.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0,
+            $"new parse error with --json must emit a NewCommandResult on stdout; got stdout: {stdout}");
+        var result = JsonSerializer.Deserialize<JsonElement>(stdout.AsSpan(jsonStart).TrimEnd());
+        Assert.IsFalse(result.GetProperty("Created").GetBoolean(),
+            "A parse failure must report Created=false.");
+        var error = result.GetProperty("Error").GetString();
+        Assert.IsFalse(string.IsNullOrWhiteSpace(error),
+            $"The parse error must be surfaced in the JSON Error field; got: {stdout}");
+    }
+
+    [TestMethod]
+    public async Task JsonBridge_NewCommand_InvalidBooleanValue_EmitsNewCommandResultJson()
+    {
+        // `--force=bogus` is rejected by the early invalid-boolean handler in Main, before the main
+        // parse-error bridge. That early exit must still route `new --json` through the structured
+        // envelope (and ExitInvalidArgs) instead of emitting human text.
+        var (stdout, _, exitCode) = await InvokeProgramAsync(
+            ["new", "--json", "--force=bogus"]);
+
+        Assert.AreEqual(NewCommand.ExitInvalidArgs, exitCode,
+            "An invalid boolean value on `new --json` must return ExitInvalidArgs.");
+        int jsonStart = stdout.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0,
+            $"new invalid-boolean with --json must emit a NewCommandResult on stdout; got stdout: {stdout}");
+        var result = JsonSerializer.Deserialize<JsonElement>(stdout.AsSpan(jsonStart).TrimEnd());
+        Assert.IsFalse(result.GetProperty("Created").GetBoolean());
+        Assert.IsFalse(string.IsNullOrWhiteSpace(result.GetProperty("Error").GetString()));
+    }
+
+    [TestMethod]
+    public async Task JsonBridge_NewCommand_SingleDashTypo_EmitsNewCommandResultJson()
+    {
+        // `-template blank` (single dash) is caught by the typo handler in Main, before the main
+        // parse-error bridge. It must also route `new --json` through the structured envelope.
+        var (stdout, _, exitCode) = await InvokeProgramAsync(
+            ["new", "--json", "-template", "blank"]);
+
+        Assert.AreEqual(NewCommand.ExitInvalidArgs, exitCode,
+            "A single-dash typo on `new --json` must return ExitInvalidArgs.");
+        int jsonStart = stdout.IndexOf('{');
+        Assert.IsTrue(jsonStart >= 0,
+            $"new typo with --json must emit a NewCommandResult on stdout; got stdout: {stdout}");
+        var result = JsonSerializer.Deserialize<JsonElement>(stdout.AsSpan(jsonStart).TrimEnd());
+        Assert.IsFalse(result.GetProperty("Created").GetBoolean());
+        Assert.IsFalse(string.IsNullOrWhiteSpace(result.GetProperty("Error").GetString()));
+    }
 
     [TestMethod]
     public async Task JsonBridge_NonUiCommand_ParseError_NoNestedUiSchema()

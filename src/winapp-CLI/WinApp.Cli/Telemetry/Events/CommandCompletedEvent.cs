@@ -33,6 +33,6 @@ internal class CommandCompletedEvent : EventBase
 
     public static void Log(CommandResult commandResult, int exitCode)
     {
-        TelemetryFactory.Get<ITelemetry>().Log("CommandCompleted_Event", LogLevel.Critical, new CommandCompletedEvent(commandResult, DateTime.Now, exitCode));
+        TelemetryFactory.Get<ITelemetry>().Log("CommandCompleted_Event", LogLevel.Critical, new CommandCompletedEvent(commandResult, DateTime.Now, exitCode), TelemetryCorrelation.CurrentId);
     }
 }

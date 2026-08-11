@@ -14,6 +14,7 @@ internal static class UiSymbols
     public static string Wrench => Emoji.Known.Wrench;
     public static string Package => Emoji.Known.Package;
     public static string Bullet => "•";
+    public static string Next => Emoji.Known.BackhandIndexPointingRight;
     public static string Skip => "\U000027A1 ";
     public static string Tools => $"{Emoji.Known.HammerAndWrench} ";
     public static string Files => Emoji.Known.FileFolder;
