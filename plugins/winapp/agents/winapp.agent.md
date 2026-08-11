@@ -22,6 +22,11 @@ You are an expert in Windows app development using the **winapp CLI** — a comm
 Before suggesting a command, determine what the user needs:
 
 ```
+Starting a brand-new app from scratch (no code yet) and want WinUI?
+├─ Yes → winapp new  (scaffolds a WinUI app from an official Windows App SDK
+│         dotnet new template; interactive picker or fully flag-driven for agents)
+└─ No ↓
+
 Does the project already have an appxmanifest.xml?
 ├─ No → winapp init (or winapp manifest generate for just the manifest)
 │        (adds manifest, assets, config, optional SDKs to existing project)
@@ -95,6 +100,20 @@ Building a WinUI 3 UI and need to find the right control or a working sample?
 8. **Run `winapp --cli-schema` for the full CLI reference.** If you need exact option names, defaults, argument types, or details about any command, run `winapp --cli-schema` — it outputs the complete CLI structure as JSON. Use this whenever the information in this file isn't sufficient.
 
 ## Complete command reference
+
+### `winapp new`
+**Purpose:** Create a brand-new **WinUI** app from an official Windows App SDK `dotnet new` template. Unlike `winapp init` (which adds Windows support to an *existing* project), `new` scaffolds a project from scratch. Most WinUI templates already include Windows packaging and identity (`Package.appxmanifest`) — the exception is the `lib` class-library template, which has no app manifest — so no separate `winapp init` step is needed afterward.
+**When to use:** The user has no project yet and wants to start a WinUI app.
+**Behavior:** Interactive by default (pick a template, then a name; output defaults to `./<name>`). Automatically uses defaults in non-interactive environments. Requires the .NET SDK — fails fast with guidance if it's missing (winapp does not install toolchains). Installs the WinUI template pack on demand and delegates scaffolding to `dotnet new`.
+**Key options:**
+- `-t, --template <short-name>` — WinUI template short name from the live catalog (e.g. `winui`, `winui-navview`, `winui-tabview`, `winui-mvvm`, `winui-lib`, `winui-unittest`; default: `winui`). Run `winapp new --list` to see the current set.
+- `-n, --name <name>` — app/project name (default: derived from `--output`, else `WinUIApp`)
+- `-o, --output <path>` — directory to create the app in (default: `./<name>`)
+- `--use-defaults` / `--no-prompt` — skip prompts (blank template, default name)
+- `--force` — scaffold even if the output directory already contains files
+- `--template-version <latest|installed|version>` — WinUI template pack version: `latest` installs the newest published pack, `installed` keeps whatever is already installed, or an explicit version (e.g. `1.2.3`) installs exactly that. Default (no value): install the latest if no pack is present, otherwise check for a newer pack and prompt to update a stale one — not pinned.
+- `--json` — machine-readable output for agents
+**Next step:** `cd <name>` then `winapp run` to build and launch the freshly-scaffolded app. The `lib` template differs — reference it from an app project. The `unittest` template is a packaged MSTest app whose tests run when it's launched (`winapp run`), not via `dotnet test`.
 
 ### `winapp init [base-directory]`
 **Purpose:** Add Windows platform support to an existing project. Creates `appxmanifest.xml`, default image assets, `winapp.yaml` config, and optionally downloads Windows SDK / Windows App SDK packages. Does **not** create a new project — the user must already have a project with their chosen framework.

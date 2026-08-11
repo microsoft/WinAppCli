@@ -499,6 +499,114 @@ internal partial class DotNetService : IDotNetService
         return process.ExitCode;
     }
 
+    /// <inheritdoc />
+    public Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(
+        DirectoryInfo workingDirectory,
+        IReadOnlyList<string> arguments,
+        IReadOnlyDictionary<string, string>? environmentOverrides = null,
+        CancellationToken cancellationToken = default)
+    {
+        var processStartInfo = new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            WorkingDirectory = workingDirectory.FullName,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        // ArgumentList passes each token to the child process as a distinct argv entry, so no shell or
+        // string splitting can inject extra tokens. It does NOT, however, stop an option-shaped value
+        // (e.g. "--force") from being interpreted as a switch by dotnet's own parser — callers must
+        // validate user-derived values against the child command's option grammar, as NewCommand does.
+        foreach (var argument in arguments)
+        {
+            processStartInfo.ArgumentList.Add(argument);
+        }
+
+        if (environmentOverrides is not null)
+        {
+            foreach (var (key, value) in environmentOverrides)
+            {
+                processStartInfo.Environment[key] = value;
+            }
+        }
+
+        return RunDotnetProcessAsync(processStartInfo, cancellationToken);
+    }
+
+    internal static async Task<(int ExitCode, string Output, string Error)> RunDotnetProcessAsync(
+        ProcessStartInfo processStartInfo,
+        CancellationToken cancellationToken,
+        Action<Process>? onProcessStarted = null)
+    {
+        using var process = new Process { StartInfo = processStartInfo };
+
+        var outputBuilder = new StringBuilder();
+        var errorBuilder = new StringBuilder();
+
+        process.OutputDataReceived += (sender, e) =>
+        {
+            if (e.Data != null)
+            {
+                outputBuilder.AppendLine(e.Data);
+            }
+        };
+
+        process.ErrorDataReceived += (sender, e) =>
+        {
+            if (e.Data != null)
+            {
+                errorBuilder.AppendLine(e.Data);
+            }
+        };
+
+        process.Start();
+        onProcessStarted?.Invoke(process);
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            // WaitForExitAsync only stops awaiting on cancellation; the spawned dotnet process keeps
+            // running and can continue mutating the global template store or the output directory
+            // after winapp exits. Kill the whole process tree and wait for it to actually stop before
+            // propagating the cancellation.
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync(CancellationToken.None);
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                // The process already exited between the HasExited check and Kill — nothing to do.
+            }
+            catch (System.ComponentModel.Win32Exception) when (process.HasExited)
+            {
+                // Kill raced with the process exiting on its own; it is already gone, nothing to do.
+                // A Win32Exception while the process is still running means termination genuinely
+                // failed, so it is intentionally left to propagate and surface the kill failure.
+            }
+
+            throw;
+        }
+
+        // WaitForExitAsync returns once the process exits, but the async stdout/stderr readers may
+        // still have buffered data in flight. The parameterless overload blocks until those readers
+        // have flushed, so the StringBuilders are complete before we read them.
+        process.WaitForExit();
+
+        return (process.ExitCode, outputBuilder.ToString(), errorBuilder.ToString());
+    }
+
     public async Task<bool> HasPackageReferenceAsync(FileInfo csprojPath, string packageName, CancellationToken cancellationToken = default)
     {
         // Fast path: many .csproj files declare PackageReference inline. A direct XML scan avoids

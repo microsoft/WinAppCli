@@ -1689,6 +1689,193 @@ public class DotNetServiceTests : BaseCommandTests
 
     #endregion
 
+    #region Process cancellation Tests
+
+    [TestMethod]
+    public async Task RunDotnetProcessAsync_Cancellation_KillsProcessTree()
+    {
+        // Spawn a long-lived process tree (powershell -> ping) so the entireProcessTree kill path is
+        // genuinely exercised, then cancel and assert BOTH the root and its descendant are terminated.
+        // Before the kill-on-cancel fix, WaitForExitAsync only stopped awaiting and left the child
+        // running; asserting the descendant also exits guards the tree-kill (a bare Kill() would leave
+        // ping alive and still pass a root-only assertion).
+        //
+        // The descendant PID is captured via a fully-managed handshake: the PowerShell root starts ping
+        // with -PassThru, writes ping's PID to a temp file, then blocks on Wait-Process. The test polls
+        // that file — no WMI or Win32 process enumeration required.
+        var pidFile = Path.Join(Path.GetTempPath(), $"winapp_treekill_{Guid.NewGuid():N}.pid");
+        // Escape single quotes for the single-quoted PowerShell string literal so a temp path
+        // containing an apostrophe (e.g. a profile like O'Brien) still produces a valid script.
+        var pidFileLiteral = pidFile.Replace("'", "''");
+        var script =
+            "$p = Start-Process -FilePath ping.exe -ArgumentList '-n','60','127.0.0.1' -PassThru -WindowStyle Hidden; " +
+            $"Set-Content -LiteralPath '{pidFileLiteral}' -Value $p.Id; " +
+            "Wait-Process -Id $p.Id";
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-NonInteractive");
+        startInfo.ArgumentList.Add("-Command");
+        startInfo.ArgumentList.Add(script);
+
+        using var cts = new CancellationTokenSource();
+        Task<(int, string, string)>? runTask = null;
+        int? rootPid = null;
+        int? pingPid = null;
+        try
+        {
+            var pidTcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+            runTask = DotNetService.RunDotnetProcessAsync(
+                startInfo,
+                cts.Token,
+                onProcessStarted: p => pidTcs.TrySetResult(p.Id));
+
+            // Wait until the root process is actually running (capture its id before the service disposes it).
+            // Assign the awaited (non-null) id into a non-nullable local, then mirror it into the nullable
+            // placeholder the finally block reads — so the id is never dereferenced through int?.Value.
+            var rootPidValue = await pidTcs.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.CancellationToken);
+            rootPid = rootPidValue;
+            Assert.IsFalse(Process.GetProcessById(rootPidValue).HasExited, "The root process should be running before cancellation.");
+
+            // Capture the ping descendant via the PID file the root script writes.
+            var pingPidValue = await WaitForPidFileAsync(pidFile, TimeSpan.FromSeconds(15), TestContext.CancellationToken);
+            pingPid = pingPidValue;
+            Assert.IsFalse(Process.GetProcessById(pingPidValue).HasExited, "The ping descendant should be running before cancellation.");
+
+            cts.Cancel();
+
+            await Assert.ThrowsAsync<OperationCanceledException>(async () => await runTask);
+
+            // Both the root of the spawned tree AND its ping descendant must be gone. Kill(entireProcessTree)
+            // reaps the whole tree; GetProcessById throws ArgumentException once an id no longer maps to a
+            // running process.
+            Assert.IsTrue(await WaitForProcessExitAsync(rootPidValue, TestContext.CancellationToken),
+                "The spawned root process (powershell.exe) should be killed on cancellation.");
+            Assert.IsTrue(await WaitForProcessExitAsync(pingPidValue, TestContext.CancellationToken),
+                "The ping descendant should be killed on cancellation (proves the whole process tree was terminated).");
+        }
+        finally
+        {
+            // If an assertion or WaitForPidFileAsync threw before (or during) cancellation, the spawned
+            // powershell/ping tree could still be running — and the root script would keep re-creating
+            // the PID file. Cancel, await the run task, and force-kill any survivors so a failed run
+            // can't pollute subsequent tests for up to a minute.
+            cts.Cancel();
+            if (runTask is not null)
+            {
+                try
+                {
+                    await runTask;
+                }
+                catch (OperationCanceledException)
+                {
+                    // Expected once the token is cancelled — cleanup must not mask the real failure.
+                }
+                catch (Exception) when (cts.IsCancellationRequested)
+                {
+                    // A run that already failed (or failed due to cancellation) — swallow only while
+                    // tearing down; the original assertion failure, if any, still surfaces.
+                }
+            }
+
+            KillProcessTreeIfRunning(rootPid);
+            KillProcessTreeIfRunning(pingPid);
+
+            if (File.Exists(pidFile))
+            {
+                File.Delete(pidFile);
+            }
+        }
+    }
+
+    /// <summary>Best-effort force-kill of a process (and its tree) by id, ignoring already-exited processes.</summary>
+    private static void KillProcessTreeIfRunning(int? pid)
+    {
+        if (pid is null)
+        {
+            return;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(pid.Value);
+            process.Kill(entireProcessTree: true);
+        }
+        catch (ArgumentException)
+        {
+            // No process with this id is running (already exited / id freed) — nothing to clean up.
+        }
+        catch (InvalidOperationException)
+        {
+            // The process has already exited between lookup and Kill — nothing to clean up.
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // The OS refused to terminate the process (access/termination failure) — best-effort only.
+        }
+        catch (NotSupportedException)
+        {
+            // Killing the process tree isn't supported in this environment — best-effort only.
+        }
+    }
+
+    /// <summary>Polls until the process with <paramref name="pid"/> has exited (or its id is reused/freed).</summary>
+    private static async Task<bool> WaitForProcessExitAsync(int pid, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            try
+            {
+                if (Process.GetProcessById(pid).HasExited)
+                {
+                    return true;
+                }
+            }
+            catch (ArgumentException)
+            {
+                return true;
+            }
+
+            await Task.Delay(20, cancellationToken);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Polls for the PID file written by the spawned PowerShell root and returns the descendant PID it
+    /// contains. This is the managed alternative to enumerating the process table for a child of the
+    /// root: the root itself reports its child's id, so the test needs no WMI or Win32 interop.
+    /// </summary>
+    private static async Task<int> WaitForPidFileAsync(string pidFile, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (File.Exists(pidFile))
+            {
+                var text = (await File.ReadAllTextAsync(pidFile, cancellationToken)).Trim();
+                if (int.TryParse(text, out var pid))
+                {
+                    return pid;
+                }
+            }
+
+            await Task.Delay(20, cancellationToken);
+        }
+
+        throw new TimeoutException($"The descendant PID file '{pidFile}' was not written within {timeout}.");
+    }
+
+    #endregion
+
     #region RunDotnetCommandAsync cancellation (process-tree kill)
 
     [TestMethod]
