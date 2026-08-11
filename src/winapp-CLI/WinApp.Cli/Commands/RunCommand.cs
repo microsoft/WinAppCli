@@ -442,10 +442,12 @@ internal partial class RunCommand : Command, IShortDescription
 
             // Breadcrumb: we reached folder mode because no top-level .csproj/.sln/.slnx with a runnable
             // app was found, so the path is treated as a pre-built layout (nothing is built). Without
-            // this, a user who pointed at a source directory expecting a build only sees a later
-            // "manifest not found" and can't tell why nothing built. Only meaningful when the input was a
-            // directory; suppressed for --json (pure stdout) and --quiet (Info off).
-            if (!isJson && inputFsi is DirectoryInfo && logger.IsEnabled(LogLevel.Information))
+            // this, a user troubleshooting why a source directory was not built only sees a later
+            // "manifest not found" and can't tell why nothing built. Keep this at debug level: folder
+            // mode is the normal, expected path for a build-output directory — including every
+            // `dotnet run` through the NuGet package, which always points winapp at the output
+            // folder — so at Info it reads as a warning about a situation that is entirely routine.
+            if (!isJson && inputFsi is DirectoryInfo && logger.IsEnabled(LogLevel.Debug))
             {
                 ansiConsole.MarkupLineInterpolated(
                     $"{UiSymbols.Search} No .csproj/.sln/.slnx with a runnable app found in '{inputFolder.FullName}' — running it as a build-output folder.");
