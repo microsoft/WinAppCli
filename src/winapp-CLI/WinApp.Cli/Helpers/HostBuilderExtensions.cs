@@ -41,6 +41,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IProjectDetectionService, ProjectDetectionService>()
             .AddSingleton<ICsWinRTMetadataShimService, CsWinRTMetadataShimService>()
             .AddSingleton<IProjectRunService, ProjectRunService>()
+            .AddSingleton<ITemplateCacheReader, TemplateCacheReader>()
             .AddSingleton<IWorkspaceSetupService, WorkspaceSetupService>()
             .AddSingleton<IWindowsAppRuntimeService, WindowsAppRuntimeService>()
             .AddSingleton<IGitignoreService, GitignoreService>()
@@ -78,6 +79,7 @@ internal static class StoreHostBuilderExtensions
     {
         return serviceCollection
                 .UseCommandHandler<InitCommand, InitCommand.Handler>()
+                .UseCommandHandler<NewCommand, NewCommand.Handler>()
                 .ConfigureCommand<WinAppRootCommand>()
                 .UseCommandHandler<RestoreCommand, RestoreCommand.Handler>()
                 .UseCommandHandler<PackageCommand, PackageCommand.Handler>()

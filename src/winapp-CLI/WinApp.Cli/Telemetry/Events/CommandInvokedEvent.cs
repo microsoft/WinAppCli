@@ -85,6 +85,6 @@ internal class CommandInvokedEvent : EventBase
 
     public static void Log(CommandResult commandResult)
     {
-        TelemetryFactory.Get<ITelemetry>().Log("CommandInvoked_Event", LogLevel.Critical, new CommandInvokedEvent(commandResult, DateTime.Now));
+        TelemetryFactory.Get<ITelemetry>().Log("CommandInvoked_Event", LogLevel.Critical, new CommandInvokedEvent(commandResult, DateTime.Now), TelemetryCorrelation.CurrentId);
     }
 }

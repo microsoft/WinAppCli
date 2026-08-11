@@ -13,6 +13,14 @@ internal class TelemetryFactory
 
     private static Telemetry? telemetryInstance;
 
+    private static ITelemetry? overrideInstance;
+
+    /// <summary>
+    /// Test-only hook: substitute the singleton with a fake <see cref="ITelemetry"/> so tests can
+    /// capture logged events. Pass <c>null</c> to restore the real instance.
+    /// </summary>
+    internal static void SetOverrideForTesting(ITelemetry? instance) => overrideInstance = instance;
+
     private static Telemetry GetTelemetryInstance()
     {
         if (telemetryInstance == null)
@@ -36,6 +44,11 @@ internal class TelemetryFactory
     public static T Get<T>()
         where T : ITelemetry
     {
+        if (overrideInstance is not null)
+        {
+            return (T)overrideInstance;
+        }
+
         return (T)(object)GetTelemetryInstance();
     }
 }
