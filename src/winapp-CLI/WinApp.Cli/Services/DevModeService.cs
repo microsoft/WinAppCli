@@ -4,6 +4,7 @@
 using Microsoft.Win32;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 using WinApp.Cli.ConsoleTasks;
 
 namespace WinApp.Cli.Services;
@@ -33,8 +34,9 @@ Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModel
 
         try
         {
-            var exit = RunElevated(ps,
-                $"-NoProfile -ExecutionPolicy Bypass -Command \"& {{ {EscapeForPSArg(psScript)} }}\"");
+            // -EncodedCommand takes base64 UTF-16LE, so the script never passes through command-line quoting.
+            string encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(psScript));
+            var exit = RunElevated(ps, $"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded}");
             if (exit == 0 || exit == 3010)
             {
                 taskContext.AddDebugMessage("Developer Mode enabled (via PowerShell).");
@@ -108,11 +110,5 @@ Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModel
         p.Start();
         p.WaitForExit();
         return p.ExitCode;
-    }
-
-    private static string EscapeForPSArg(string s)
-    {
-        // Minimal escaping for embedding a script inside -Command "..."
-        return s.Replace("\"", "`\"");
     }
 }

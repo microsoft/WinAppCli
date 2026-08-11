@@ -3,6 +3,8 @@
 
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Spectre.Console.Testing;
 using WinApp.Cli.ConsoleTasks;
@@ -90,7 +92,12 @@ public class DevModeServiceTests
         var psi = captured[0];
         StringAssert.EndsWith(psi.FileName, "powershell.exe");
         Assert.AreEqual("runas", psi.Verb);
-        StringAssert.Contains(psi.Arguments, "AppModelUnlock");
+
+        // The script is passed as base64 UTF-16LE via -EncodedCommand, so assert on the decoded form.
+        var match = Regex.Match(psi.Arguments, @"-EncodedCommand\s+(?<b64>[A-Za-z0-9+/=]+)");
+        Assert.IsTrue(match.Success, $"Expected an -EncodedCommand payload. Got: {psi.Arguments}");
+        var script = Encoding.Unicode.GetString(Convert.FromBase64String(match.Groups["b64"].Value));
+        StringAssert.Contains(script, "AppModelUnlock");
     }
 
     [TestMethod]
