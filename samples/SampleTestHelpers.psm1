@@ -58,6 +58,47 @@ function Resolve-WinappCliPath {
     return $resolved
 }
 
+function ConvertTo-ArgumentList {
+    <#
+    .SYNOPSIS
+    Splits a command-line argument string into discrete arguments, honoring
+    single and double quotes. Used so callers can keep passing a single
+    argument string while the command itself is invoked without Invoke-Expression.
+    #>
+    param(
+        [string]$Arguments
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Arguments)) { return @() }
+
+    $result = [System.Collections.Generic.List[string]]::new()
+    $current = [System.Text.StringBuilder]::new()
+    $quote = [char]0
+    $hasContent = $false
+
+    foreach ($ch in $Arguments.ToCharArray()) {
+        if ($quote -ne [char]0) {
+            if ($ch -eq $quote) { $quote = [char]0 } else { [void]$current.Append($ch) }
+        } elseif ($ch -eq '"' -or $ch -eq "'") {
+            $quote = $ch
+            $hasContent = $true
+        } elseif ([char]::IsWhiteSpace($ch)) {
+            if ($hasContent) {
+                $result.Add($current.ToString())
+                [void]$current.Clear()
+                $hasContent = $false
+            }
+        } else {
+            [void]$current.Append($ch)
+            $hasContent = $true
+        }
+    }
+
+    if ($hasContent) { $result.Add($current.ToString()) }
+
+    return $result.ToArray()
+}
+
 function Invoke-WinappCommand {
     <#
     .SYNOPSIS
@@ -77,19 +118,23 @@ function Invoke-WinappCommand {
     $cliProject = Join-Path $PSScriptRoot "..\src\winapp-CLI\WinApp.Cli\WinApp.Cli.csproj"
     $useDotnet = $env:WINAPP_TEST_USE_DOTNET -eq '1'
 
+    $argList = ConvertTo-ArgumentList -Arguments $Arguments
+
     if (Test-Path $npxWinapp) {
-        $cmd = "npx winapp $Arguments"
+        $exe = 'npx'
+        $argList = @('winapp') + $argList
     } elseif ($pathWinapp -and -not $useDotnet) {
-        $cmd = "winapp $Arguments"
+        $exe = 'winapp'
     } elseif (Test-Path $cliProject) {
         # Fall back to dotnet run when no installed winapp is on PATH, or when explicitly requested.
-        $cmd = "dotnet run --project `"$cliProject`" -- $Arguments"
+        $exe = 'dotnet'
+        $argList = @('run', '--project', $cliProject, '--') + $argList
     } else {
-        $cmd = "winapp $Arguments"
+        $exe = 'winapp'
     }
 
-    Write-Verbose "Running: $cmd"
-    $output = Invoke-Expression $cmd
+    Write-Verbose "Running: $exe $($argList -join ' ')"
+    $output = & $exe @argList
     if ($LASTEXITCODE -ne 0) { throw $FailMessage }
     return $output
 }
@@ -104,7 +149,7 @@ function Install-WinappNpmPackage {
         [string]$PackagePath
     )
     Write-Verbose "Installing winapp from: $PackagePath"
-    Invoke-Expression "npm install `"$PackagePath`" --save-dev"
+    npm install $PackagePath --save-dev
     if ($LASTEXITCODE -ne 0) { throw "Failed to install winapp npm package" }
 }
 
@@ -118,7 +163,7 @@ function Install-WinappGlobal {
         [string]$PackagePath
     )
     Write-Verbose "Installing winapp globally from: $PackagePath"
-    Invoke-Expression "npm install -g `"$PackagePath`""
+    npm install -g $PackagePath
     if ($LASTEXITCODE -ne 0) { throw "Failed to install winapp globally" }
 }
 

@@ -123,7 +123,7 @@ Describe 'winui-solution sample' {
         }
 
         It 'Restores NuGet packages for the solution' -Skip:$script:skip {
-            Invoke-Expression 'dotnet restore WinUISolution.sln'
+            dotnet restore WinUISolution.sln
             $LASTEXITCODE | Should -Be 0
         }
 
@@ -131,7 +131,7 @@ Describe 'winui-solution sample' {
             # Building a .sln with an explicit -r/RID is unsupported (NETSDK1134); the RID
             # is resolved per-project. Drive the arch via -p:Platform only.
             $plat = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'ARM64' } else { 'x64' }
-            Invoke-Expression "dotnet build WinUISolution.sln -c Debug -p:Platform=$plat"
+            dotnet build WinUISolution.sln -c Debug -p:Platform=$plat
             $LASTEXITCODE | Should -Be 0
         }
     }

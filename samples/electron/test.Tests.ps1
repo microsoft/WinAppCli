@@ -68,10 +68,10 @@ Describe "Electron Sample" {
                 for ($i = 1; $i -le $maxRetries; $i++) {
                     if ($i -gt 1) {
                         Remove-Item -Path (Join-Path $script:tempDir "electron-app") -Recurse -Force -ErrorAction SilentlyContinue
-                        Invoke-Expression "npm cache clean --force" 2>$null
+                        npm cache clean --force 2>$null
                         Start-Sleep -Seconds 2
                     }
-                    Invoke-Expression "npx -y create-electron-app@latest electron-app"
+                    npx -y create-electron-app@latest electron-app
                     if ($LASTEXITCODE -eq 0) { $created = $true; break }
                 }
                 $created | Should -Be $true -Because "Electron app creation should succeed within $maxRetries attempts"
@@ -248,7 +248,7 @@ Describe "Electron Sample" {
         It "Should build the C++ addon" -Skip:$script:skip {
             Push-Location $script:appDir
             try {
-                $output = Invoke-Expression "npx node-gyp clean configure build --directory=testCppAddon --verbose 2>&1"
+                $output = npx node-gyp clean configure build --directory=testCppAddon --verbose 2>&1
                 $output | ForEach-Object { Write-Host $_ }
                 $LASTEXITCODE | Should -Be 0
             } finally { Pop-Location }
@@ -257,7 +257,7 @@ Describe "Electron Sample" {
         It "Should build the C# addon" -Skip:$script:skip {
             Push-Location $script:appDir
             try {
-                Invoke-Expression "npm run build-testCsAddon"
+                npm run build-testCsAddon
                 $LASTEXITCODE | Should -Be 0
             } finally { Pop-Location }
         }
@@ -289,7 +289,7 @@ Describe "Electron Sample" {
         It "Should package the Electron app" -Skip:$script:skip {
             Push-Location $script:appDir
             try {
-                Invoke-Expression "npm run package"
+                npm run package
                 $LASTEXITCODE | Should -Be 0
                 $script:outDir = Join-Path $script:appDir "out"
                 $script:outDir | Should -Exist
@@ -327,7 +327,7 @@ Describe "Electron Sample" {
         It "Should install sample dependencies" -Skip:$script:skip {
             Push-Location $script:sampleDir
             try {
-                Invoke-Expression "npm install --ignore-scripts"
+                npm install --ignore-scripts
                 $LASTEXITCODE | Should -Be 0
             } finally { Pop-Location }
         }
@@ -351,7 +351,7 @@ Describe "Electron Sample" {
         It "Should build the C# addon" -Skip:$script:skip {
             Push-Location $script:sampleDir
             try {
-                Invoke-Expression "npm run build-csAddon"
+                npm run build-csAddon
                 $LASTEXITCODE | Should -Be 0
             } finally { Pop-Location }
         }
