@@ -80,6 +80,38 @@ samples/
 | `WinAppRunUseExecutionAlias` | `false` | Launch via execution alias instead of AUMID. Keeps console I/O in the current terminal. Requires `uap5:ExecutionAlias` in the manifest. Cannot be combined with `WinAppRunNoLaunch`. |
 | `WinAppRunNoLaunch` | `false` | Only register package identity without launching the app. Cannot be combined with `WinAppRunUseExecutionAlias`. |
 | `WinAppRunDebugOutput` | `false` | Attach as a debugger to capture `OutputDebugString` messages and first-chance exceptions. Only one debugger can attach at a time, so Visual Studio or VS Code cannot debug simultaneously. Use `WinAppRunNoLaunch` instead to attach a different debugger. Cannot be combined with `WinAppRunNoLaunch`. |
+| `WinAppRunDetach` | `false` | Return immediately after launching instead of waiting for the app to exit. Prints the PID. |
+| `WinAppRunUnregisterOnExit` | `false` | Unregister the development package after the app exits. Only removes packages registered in development mode. |
+| `WinAppRunClean` | `false` | Remove the existing package's application data (LocalState, settings) before re-deploying. Application data is preserved by default. |
+| `WinAppRunSymbols` | `false` | Download symbols from the Microsoft Symbol Server for richer native crash analysis. Only has an effect together with `WinAppRunDebugOutput`. |
+| `WinAppRunExecutable` | (empty) | Executable path relative to the build-output folder. Use to disambiguate when the manifest contains a `$targetnametoken$` placeholder and the output folder contains more than one `.exe`. |
+| `WinAppRunArgs` | (empty) | Raw arguments appended to the `winapp run` command line, for options that have no dedicated property. See [Escape hatch](#escape-hatch-winapprunargs). |
+
+#### Escape hatch: WinAppRunArgs
+
+Every option `winapp run` accepts in folder mode has a dedicated property above. `WinAppRunArgs`
+exists for the rest — the global options such as `--verbose`, and any option added to the CLI before
+a property is wired up for it:
+
+```powershell
+dotnet run -p:WinAppRunArgs="--verbose"
+```
+
+It is appended **after** every property-derived switch, the same position `AdditionalOptions`
+occupies in other toolsets:
+
+```
+run "<output>" --manifest "<manifest>" --detach --caller nuget-package --verbose
+                                       ^ from WinAppRunDetach            ^ from WinAppRunArgs
+```
+
+Use it for options that have no property rather than to override one. Repeating a boolean switch is
+harmless, but `winapp` rejects a scalar option supplied twice instead of letting the later value win:
+
+```
+> dotnet run -p:WinAppRunExecutable=a.exe -p:WinAppRunArgs="--executable b.exe"
+Option '--executable' expects a single argument but 2 were provided.
+```
 
 ### Targets (Microsoft.Windows.SDK.BuildTools.WinApp.targets)
 
