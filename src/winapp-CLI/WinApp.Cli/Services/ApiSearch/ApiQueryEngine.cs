@@ -148,7 +148,7 @@ internal static class ApiQueryEngine
         return cut > 0 ? fullName.Substring(0, cut) : string.Empty;
     }
 
-    public static ApiQueryResult<ApiMembersOutput> Members(string typeName, string cacheDir, ProjectManifest manifest)
+    public static ApiQueryResult<ApiMembersOutput> Members(string typeName, string? filter, string cacheDir, ProjectManifest manifest)
     {
         if (string.IsNullOrWhiteSpace(typeName))
         {
@@ -170,8 +170,18 @@ internal static class ApiQueryEngine
             .Select(m => ToMemberOutput(m.Member, m.DeclaringType, type.FullName))
             .ToList();
 
-        var methods = Project(MemberKind.Method);
-        bool getForCurrentView = methods.Any(m => m.Name.Equals("GetForCurrentView", StringComparison.Ordinal));
+        var allProperties = Project(MemberKind.Property);
+        var allEvents = Project(MemberKind.Event);
+        var allMethods = Project(MemberKind.Method);
+
+        // The GetForCurrentView warning describes the type, not the filtered view,
+        // so it must be computed before filtering or a filter would suppress it.
+        bool getForCurrentView = allMethods.Any(m => m.Name.Equals("GetForCurrentView", StringComparison.Ordinal));
+
+        bool filtered = !string.IsNullOrWhiteSpace(filter);
+        List<ApiMemberOutput> Filter(List<ApiMemberOutput> source) => filtered
+            ? source.Where(m => MatchesFilter(m.Name, filter)).ToList()
+            : source;
 
         return ApiQueryResult<ApiMembersOutput>.Ok(new ApiMembersOutput
         {
@@ -180,12 +190,26 @@ internal static class ApiQueryEngine
             Description = type.Description,
             BaseType = type.BaseType,
             Deprecated = type.DeprecatedMessage,
-            Properties = Project(MemberKind.Property),
-            Events = Project(MemberKind.Event),
-            Methods = methods,
+            Filter = filtered ? filter : null,
+            // Totals are reported only when filtering, so a caller can see how much
+            // of the type was hidden and never mistake a narrow view for the whole API.
+            TotalProperties = filtered ? allProperties.Count : null,
+            TotalEvents = filtered ? allEvents.Count : null,
+            TotalMethods = filtered ? allMethods.Count : null,
+            Properties = Filter(allProperties),
+            Events = Filter(allEvents),
+            Methods = Filter(allMethods),
             GetForCurrentViewWarning = getForCurrentView,
         });
     }
+
+    /// <summary>
+    /// Case-insensitive substring match used by the <c>--filter</c> option on
+    /// <c>members</c> and <c>enums</c>. Substring (not prefix) matching is deliberate:
+    /// callers filter by concept ("folder", "background"), which rarely starts the name.
+    /// </summary>
+    private static bool MatchesFilter(string name, string? filter) =>
+        string.IsNullOrWhiteSpace(filter) || name.Contains(filter, StringComparison.OrdinalIgnoreCase);
 
     public static ApiQueryResult<ApiTypesOutput> Types(string ns, string cacheDir, ProjectManifest manifest)
     {
@@ -226,7 +250,7 @@ internal static class ApiQueryEngine
         return ApiQueryResult<ApiTypesOutput>.Ok(new ApiTypesOutput { Namespace = ns, Types = types });
     }
 
-    public static ApiQueryResult<ApiEnumsOutput> Enums(string typeName, string cacheDir, ProjectManifest manifest)
+    public static ApiQueryResult<ApiEnumsOutput> Enums(string typeName, string? filter, string cacheDir, ProjectManifest manifest)
     {
         if (string.IsNullOrWhiteSpace(typeName))
         {
@@ -241,10 +265,16 @@ internal static class ApiQueryEngine
         {
             return ApiQueryResult<ApiEnumsOutput>.NotAnEnum($"{type.FullName} is not an Enum (kind: {type.Kind}).");
         }
+        List<string> allValues = type.EnumValues ?? new List<string>();
+        bool filtered = !string.IsNullOrWhiteSpace(filter);
         return ApiQueryResult<ApiEnumsOutput>.Ok(new ApiEnumsOutput
         {
             FullName = type.FullName,
-            Values = type.EnumValues ?? new List<string>(),
+            Filter = filtered ? filter : null,
+            TotalValues = filtered ? allValues.Count : null,
+            Values = filtered
+                ? allValues.Where(v => MatchesFilter(v, filter)).ToList()
+                : allValues,
         });
     }
 
@@ -304,7 +334,6 @@ internal static class ApiQueryEngine
         }
         return ApiQueryResult<ApiPackagesOutput>.Ok(new ApiPackagesOutput
         {
-            ProjectName = manifest.ProjectName,
             Packages = summaries,
         });
     }
@@ -336,7 +365,6 @@ internal static class ApiQueryEngine
         }
         return ApiQueryResult<ApiStatsOutput>.Ok(new ApiStatsOutput
         {
-            ProjectName = manifest.ProjectName,
             Packages = manifest.Packages.Count,
             Namespaces = namespaces,
             Types = types,

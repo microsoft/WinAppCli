@@ -977,6 +977,18 @@
             }
           },
           "options": {
+            "--filter": {
+              "description": "Only list values whose name contains this text (case-insensitive), e.g. --filter folder. The unfiltered total is still reported.",
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
             "--json": {
               "description": "Format output as JSON",
               "hidden": false,
@@ -1065,6 +1077,18 @@
             }
           },
           "options": {
+            "--filter": {
+              "description": "Only list members whose name contains this text (case-insensitive), e.g. --filter background. Totals for the unfiltered type are still reported.",
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
             "--json": {
               "description": "Format output as JSON",
               "hidden": false,

@@ -21,6 +21,11 @@ internal sealed class FindApiMembersCommand : Command, IShortDescription
         Arity = ArgumentArity.ZeroOrOne,
     };
 
+    public static Option<string?> FilterOption { get; } = new("--filter")
+    {
+        Description = "Only list members whose name contains this text (case-insensitive), e.g. --filter background. Totals for the unfiltered type are still reported.",
+    };
+
     public static Option<string?> ProjectDirOption { get; } = FindApiShared.CreateProjectDirOption();
     public static Option<string?> ProjectOption { get; } = FindApiShared.CreateProjectOption();
 
@@ -28,6 +33,7 @@ internal sealed class FindApiMembersCommand : Command, IShortDescription
         : base("members", "List the properties, events, and methods of a type (with XML-doc descriptions and inherited members), resolved from the project's indexed API metadata.")
     {
         Arguments.Add(TypeArgument);
+        Options.Add(FilterOption);
         Options.Add(ProjectDirOption);
         Options.Add(ProjectOption);
         Options.Add(WinAppRootCommand.JsonOption);
@@ -47,7 +53,7 @@ internal sealed class FindApiMembersCommand : Command, IShortDescription
             }
 
             var scope = FindApiShared.ReadScope(parseResult, ProjectDirOption, ProjectOption);
-            var result = service.Members(type, scope);
+            var result = service.Members(type, scope, parseResult.GetValue(FilterOption));
             return FindApiShared.Emit(
                 console, json, "members", result, WinAppJsonContext.Default.ApiMembersOutput,
                 data => FindApiShared.RenderMembers(console, data),
@@ -167,6 +173,11 @@ internal sealed class FindApiEnumsCommand : Command, IShortDescription
         Arity = ArgumentArity.ZeroOrOne,
     };
 
+    public static Option<string?> FilterOption { get; } = new("--filter")
+    {
+        Description = "Only list values whose name contains this text (case-insensitive), e.g. --filter folder. The unfiltered total is still reported.",
+    };
+
     public static Option<string?> ProjectDirOption { get; } = FindApiShared.CreateProjectDirOption();
     public static Option<string?> ProjectOption { get; } = FindApiShared.CreateProjectOption();
 
@@ -174,6 +185,7 @@ internal sealed class FindApiEnumsCommand : Command, IShortDescription
         : base("enums", "List the values of an enum type. Exits non-zero when the type exists but is not an enum.")
     {
         Arguments.Add(TypeArgument);
+        Options.Add(FilterOption);
         Options.Add(ProjectDirOption);
         Options.Add(ProjectOption);
         Options.Add(WinAppRootCommand.JsonOption);
@@ -193,7 +205,7 @@ internal sealed class FindApiEnumsCommand : Command, IShortDescription
             }
 
             var scope = FindApiShared.ReadScope(parseResult, ProjectDirOption, ProjectOption);
-            var result = service.Enums(type, scope);
+            var result = service.Enums(type, scope, parseResult.GetValue(FilterOption));
             return FindApiShared.Emit(
                 console, json, "enums", result, WinAppJsonContext.Default.ApiEnumsOutput,
                 data => FindApiShared.RenderEnums(console, data),

@@ -167,6 +167,38 @@ public sealed class ApiMetadataServiceTests
     }
 
     [TestMethod]
+    public void Query_ProjectScope_StampsProjectIdentityOnEveryPayload()
+    {
+        // Project names are not unique across directories, so 'scope: project' alone
+        // does not identify which index answered. Tooling auditing find-api usage must
+        // be able to read the answering project off the payload instead of inferring
+        // it from cache file timestamps.
+        WriteProjectFile(_currentDir, "Alpha");
+        WriteManifest("Alpha", _currentDir);
+        WriteSdkManifest();
+
+        var result = CreateService().Namespaces(null, new ApiRequestScope(null, null));
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.AreEqual("Alpha", result.Data!.ProjectName);
+        Assert.AreEqual(_currentDir, result.Data.ProjectDir);
+    }
+
+    [TestMethod]
+    public void Query_SdkScope_ReportsSdkNameAndNoProjectDir()
+    {
+        // The SDK scope has no project directory; it must be null rather than the
+        // empty string the manifest stores, so consumers can test it directly.
+        WriteSdkManifest();
+
+        var result = CreateService().Namespaces(null, new ApiRequestScope(null, null));
+
+        Assert.AreEqual(ApiScopeNames.Sdk, result.Data!.Scope);
+        Assert.AreEqual(ApiCachePaths.SdkScopeName, result.Data.ProjectName);
+        Assert.IsNull(result.Data.ProjectDir);
+    }
+
+    [TestMethod]
     public void Query_ProjectInCurrentDir_NotIndexed_DoesNotSilentlyNarrowToSdk()
     {
         // The user is standing in a real project. Quietly answering from the SDK

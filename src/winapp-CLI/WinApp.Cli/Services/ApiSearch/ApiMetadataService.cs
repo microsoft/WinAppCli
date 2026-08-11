@@ -27,13 +27,13 @@ internal interface IApiMetadataService
 {
     ApiQueryResult<ApiSearchOutput> Search(string query, int maxResults, ApiRequestScope scope);
 
-    ApiQueryResult<ApiMembersOutput> Members(string fullName, ApiRequestScope scope);
+    ApiQueryResult<ApiMembersOutput> Members(string fullName, ApiRequestScope scope, string? filter = null);
 
     ApiQueryResult<ApiCheckPropertyOutput> CheckProperty(string typeName, string propertyName, ApiRequestScope scope);
 
     ApiQueryResult<ApiTypesOutput> Types(string ns, ApiRequestScope scope);
 
-    ApiQueryResult<ApiEnumsOutput> Enums(string fullName, ApiRequestScope scope);
+    ApiQueryResult<ApiEnumsOutput> Enums(string fullName, ApiRequestScope scope, string? filter = null);
 
     ApiQueryResult<ApiNamespacesOutput> Namespaces(string? filter, ApiRequestScope scope);
 
@@ -58,8 +58,8 @@ internal sealed class ApiMetadataService(
     public ApiQueryResult<ApiSearchOutput> Search(string query, int maxResults, ApiRequestScope scope) =>
         WithManifest(scope, (cacheDir, manifest) => ApiQueryEngine.Search(query, maxResults, cacheDir, manifest));
 
-    public ApiQueryResult<ApiMembersOutput> Members(string fullName, ApiRequestScope scope) =>
-        WithManifest(scope, (cacheDir, manifest) => ApiQueryEngine.Members(fullName, cacheDir, manifest));
+    public ApiQueryResult<ApiMembersOutput> Members(string fullName, ApiRequestScope scope, string? filter = null) =>
+        WithManifest(scope, (cacheDir, manifest) => ApiQueryEngine.Members(fullName, filter, cacheDir, manifest));
 
     public ApiQueryResult<ApiCheckPropertyOutput> CheckProperty(string typeName, string propertyName, ApiRequestScope scope) =>
         WithManifest(scope, (cacheDir, manifest) => ApiQueryEngine.CheckProperty(typeName, propertyName, cacheDir, manifest));
@@ -67,8 +67,8 @@ internal sealed class ApiMetadataService(
     public ApiQueryResult<ApiTypesOutput> Types(string ns, ApiRequestScope scope) =>
         WithManifest(scope, (cacheDir, manifest) => ApiQueryEngine.Types(ns, cacheDir, manifest));
 
-    public ApiQueryResult<ApiEnumsOutput> Enums(string fullName, ApiRequestScope scope) =>
-        WithManifest(scope, (cacheDir, manifest) => ApiQueryEngine.Enums(fullName, cacheDir, manifest));
+    public ApiQueryResult<ApiEnumsOutput> Enums(string fullName, ApiRequestScope scope, string? filter = null) =>
+        WithManifest(scope, (cacheDir, manifest) => ApiQueryEngine.Enums(fullName, filter, cacheDir, manifest));
 
     public ApiQueryResult<ApiNamespacesOutput> Namespaces(string? filter, ApiRequestScope scope) =>
         WithManifest(scope, (cacheDir, manifest) => ApiQueryEngine.Namespaces(filter, cacheDir, manifest));
@@ -154,11 +154,18 @@ internal sealed class ApiMetadataService(
 
         ApiQueryResult<T> result = query(cacheDir, resolved.Manifest);
 
-        // Stamp the scope centrally so every verb reports it identically and no
-        // payload can silently omit which source answered.
+        // Stamp scope and project identity centrally so every verb reports them
+        // identically and no payload can silently omit which index answered.
+        // Project names are not unique across directories, so the directory is
+        // the only reliable identity — callers auditing which project served a
+        // query must not have to infer it from cache timestamps.
         if (result.Data is IApiScopedOutput scoped)
         {
             scoped.Scope = resolved.IsSdk ? ApiScopeNames.Sdk : ApiScopeNames.Project;
+            scoped.ProjectName = resolved.Manifest.ProjectName;
+            scoped.ProjectDir = string.IsNullOrEmpty(resolved.Manifest.ProjectDir)
+                ? null
+                : resolved.Manifest.ProjectDir;
         }
         return result;
     }

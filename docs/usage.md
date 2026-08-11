@@ -1135,10 +1135,10 @@ A query from a directory with no project is *always* answered by the `sdk` scope
 
 **Commands:**
 - *(bare)* `find-api "<query>"` - Lexically search type and member names, grouped by namespace
-- `members <type>` - List a type's properties, events, and methods (with descriptions and inherited members)
+- `members <type> [--filter <text>]` - List a type's properties, events, and methods (with descriptions and inherited members)
 - `check-property <type> <property>` - Validate a property exists on a type (exits non-zero on a miss)
 - `types <namespace>` - List the types declared in a namespace
-- `enums <type>` - List an enum's values (exits non-zero when the type is not an enum)
+- `enums <type> [--filter <text>]` - List an enum's values (exits non-zero when the type is not an enum)
 - `namespaces [--filter <prefix>]` - List the namespaces available to the project
 - `packages` - List the indexed metadata packages, with per-package type/member counts
 - `stats` - Show aggregate index statistics (packages, namespaces, types, members, `.winmd` files)
@@ -1147,11 +1147,11 @@ A query from a directory with no project is *always* answered by the `sdk` scope
 
 **Options:**
 - `--max <n>` - Maximum number of namespace-grouped search results (default `30`; search only)
-- `--filter <prefix>` - Only list namespaces starting with this prefix (`namespaces` only)
+- `--filter <text>` - Narrow a listing. On `members` and `enums` this is a **case-insensitive substring** match on the member/value name — use it instead of dumping a large type or enum and grepping the output. On `namespaces` it is a **prefix** match.
 - `--scan` - Recursively discover and index every project under the directory (`refresh` only)
 - `--project <name>` - Project to query (matches the `.csproj`/`.vcxproj` name), or `sdk` to query the machine-wide Windows SDK scope
 - `--project-dir <path>` - Project directory to query (defaults to the current directory)
-- `--json` - Emit a machine-readable payload on stdout (supported by every verb). Query payloads carry a `scope` field (`project` or `sdk`) naming the source that answered. Under `--json` **every** failure — including argument/parser errors such as a non-integer `--max` — is emitted as a flat `{"error": "..."}` object on stdout with a non-zero exit code, so output stays machine-readable.
+- `--json` - Emit a machine-readable payload on stdout (supported by every verb). Query payloads identify the index that answered via `scope` (`project` or `sdk`), `projectName`, and `projectDir` (absent for the SDK scope) — project names are not unique across directories, so `projectDir` is the reliable identity. Under `--json` **every** failure — including argument/parser errors such as a non-integer `--max` — is emitted as a flat `{"error": "..."}` object on stdout with a non-zero exit code, so output stays machine-readable.
 
 **Examples:**
 ```bash
@@ -1164,6 +1164,10 @@ winapp find-api members Microsoft.UI.Xaml.Controls.NavigationView
 winapp find-api check-property Button Background
 winapp find-api enums Symbol
 
+# Narrow a large type or enum instead of dumping it and grepping
+winapp find-api enums Symbol --filter folder      # 5 of 197 values
+winapp find-api members Button --filter background
+
 # Explore and manage the index
 winapp find-api namespaces --filter Microsoft.UI.Xaml
 winapp find-api types Microsoft.UI.Xaml.Controls
@@ -1174,6 +1178,8 @@ winapp find-api refresh
 winapp find-api "acrylic brush"          # from an empty directory -> scope: sdk
 winapp find-api members Button --project sdk
 ```
+
+When `--filter` is applied, the output still reports the unfiltered total (`totalValues`, or `totalProperties`/`totalEvents`/`totalMethods` in `--json`), so a narrow view is never mistaken for a small API. A filter that matches nothing still exits `0` — that is "nothing matched your filter", not "no such type".
 
 **Exit codes:** `search` with no hits, `check-property` on a missing property, and `enums` on a non-enum type all exit non-zero — gate code generation and CI checks on them.
 

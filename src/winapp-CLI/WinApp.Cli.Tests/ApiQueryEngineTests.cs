@@ -68,7 +68,7 @@ public sealed class ApiQueryEngineTests
     [TestMethod]
     public void Members_ListsPropertiesAndMethods()
     {
-        var result = ApiQueryEngine.Members("My.Ns.Widget", _cacheDir, _manifest);
+        var result = ApiQueryEngine.Members("My.Ns.Widget", null, _cacheDir, _manifest);
 
         Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
         Assert.IsTrue(result.Data!.Properties.Any(p => p.Name == "Color"));
@@ -80,7 +80,7 @@ public sealed class ApiQueryEngineTests
     {
         // Regression (C3): members must accept a short name, matching the help text
         // and the check-property resolution behavior.
-        var result = ApiQueryEngine.Members("Widget", _cacheDir, _manifest);
+        var result = ApiQueryEngine.Members("Widget", null, _cacheDir, _manifest);
 
         Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
         Assert.AreEqual("My.Ns.Widget", result.Data!.FullName);
@@ -89,7 +89,7 @@ public sealed class ApiQueryEngineTests
     [TestMethod]
     public void Members_UnknownType_IsNotFound()
     {
-        var result = ApiQueryEngine.Members("My.Ns.Nope", _cacheDir, _manifest);
+        var result = ApiQueryEngine.Members("My.Ns.Nope", null, _cacheDir, _manifest);
 
         Assert.AreEqual(ApiQueryOutcome.NotFound, result.Outcome);
     }
@@ -97,7 +97,7 @@ public sealed class ApiQueryEngineTests
     [TestMethod]
     public void Enums_ListsValues()
     {
-        var result = ApiQueryEngine.Enums("My.Ns.Mood", _cacheDir, _manifest);
+        var result = ApiQueryEngine.Enums("My.Ns.Mood", null, _cacheDir, _manifest);
 
         Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
         CollectionAssert.AreEqual(new[] { "Happy", "Sad" }, result.Data!.Values);
@@ -107,7 +107,7 @@ public sealed class ApiQueryEngineTests
     public void Enums_ShortName_ResolvesType()
     {
         // Regression (C3): enums must accept a short name too.
-        var result = ApiQueryEngine.Enums("Mood", _cacheDir, _manifest);
+        var result = ApiQueryEngine.Enums("Mood", null, _cacheDir, _manifest);
 
         Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
         Assert.AreEqual("My.Ns.Mood", result.Data!.FullName);
@@ -116,9 +116,75 @@ public sealed class ApiQueryEngineTests
     [TestMethod]
     public void Enums_NonEnumType_IsNotAnEnum()
     {
-        var result = ApiQueryEngine.Enums("My.Ns.Widget", _cacheDir, _manifest);
+        var result = ApiQueryEngine.Enums("My.Ns.Widget", null, _cacheDir, _manifest);
 
         Assert.AreEqual(ApiQueryOutcome.NotAnEnum, result.Outcome);
+    }
+
+    [TestMethod]
+    public void Enums_Unfiltered_ReportsNoFilterMetadata()
+    {
+        var result = ApiQueryEngine.Enums("My.Ns.Mood", null, _cacheDir, _manifest);
+
+        // Unfiltered payloads must stay byte-identical to before --filter existed.
+        Assert.IsNull(result.Data!.Filter);
+        Assert.IsNull(result.Data.TotalValues);
+    }
+
+    [TestMethod]
+    public void Enums_Filter_NarrowsValuesAndReportsTotal()
+    {
+        var result = ApiQueryEngine.Enums("My.Ns.Mood", "hap", _cacheDir, _manifest);
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        CollectionAssert.AreEqual(new[] { "Happy" }, result.Data!.Values);
+        Assert.AreEqual("hap", result.Data.Filter);
+        // The pre-filter total must survive so a caller can tell a narrow view
+        // from a genuinely small enum.
+        Assert.AreEqual(2, result.Data.TotalValues);
+    }
+
+    [TestMethod]
+    public void Enums_Filter_IsCaseInsensitiveSubstring()
+    {
+        var result = ApiQueryEngine.Enums("My.Ns.Mood", "AP", _cacheDir, _manifest);
+
+        CollectionAssert.AreEqual(new[] { "Happy" }, result.Data!.Values);
+    }
+
+    [TestMethod]
+    public void Enums_Filter_NoMatch_IsStillOkWithTotal()
+    {
+        var result = ApiQueryEngine.Enums("My.Ns.Mood", "zzz", _cacheDir, _manifest);
+
+        // A filter miss is not a missing type: the outcome stays Ok so callers
+        // don't confuse "nothing matched my filter" with "no such enum".
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.AreEqual(0, result.Data!.Values.Count);
+        Assert.AreEqual(2, result.Data.TotalValues);
+    }
+
+    [TestMethod]
+    public void Members_Filter_NarrowsAllGroupsAndReportsTotals()
+    {
+        var result = ApiQueryEngine.Members("My.Ns.Widget", "col", _cacheDir, _manifest);
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        CollectionAssert.AreEqual(new[] { "Color" }, result.Data!.Properties.Select(p => p.Name).ToArray());
+        Assert.AreEqual(0, result.Data.Methods.Count);
+        Assert.AreEqual("col", result.Data.Filter);
+        Assert.AreEqual(1, result.Data.TotalProperties);
+        Assert.AreEqual(1, result.Data.TotalMethods);
+    }
+
+    [TestMethod]
+    public void Members_Unfiltered_ReportsNoFilterMetadata()
+    {
+        var result = ApiQueryEngine.Members("My.Ns.Widget", null, _cacheDir, _manifest);
+
+        Assert.IsNull(result.Data!.Filter);
+        Assert.IsNull(result.Data.TotalProperties);
+        Assert.IsNull(result.Data.TotalMethods);
     }
 
     [TestMethod]

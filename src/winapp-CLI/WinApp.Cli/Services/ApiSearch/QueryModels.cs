@@ -39,6 +39,21 @@ internal interface IApiScopedOutput
 {
     /// <summary><c>project</c> when answered from an indexed project, <c>sdk</c> for the machine-wide SDK scope.</summary>
     string? Scope { get; set; }
+
+    /// <summary>
+    /// The indexed project that answered, or the SDK scope name. Reported on every
+    /// payload — not just <c>packages</c>/<c>stats</c> — so a caller can always tell
+    /// which index a result came from.
+    /// </summary>
+    string? ProjectName { get; set; }
+
+    /// <summary>
+    /// Absolute directory of the project that answered (<see langword="null"/> for the
+    /// SDK scope). Project names are not unique across directories, so this is the only
+    /// reliable identity of the answering index — without it, tooling auditing which
+    /// project served a query has to infer it from cache file timestamps.
+    /// </summary>
+    string? ProjectDir { get; set; }
 }
 
 /// <summary>Well-known <see cref="IApiScopedOutput.Scope"/> values.</summary>
@@ -98,6 +113,12 @@ internal sealed class ApiSearchOutput : IApiScopedOutput
     /// <inheritdoc />
     public string? Scope { get; set; }
 
+    /// <inheritdoc />
+    public string? ProjectName { get; set; }
+
+    /// <inheritdoc />
+    public string? ProjectDir { get; set; }
+
     public required string Query { get; init; }
 
     public List<ApiAmbiguityGroup>? Ambiguous { get; init; }
@@ -133,6 +154,12 @@ internal sealed class ApiMembersOutput : IApiScopedOutput
     /// <inheritdoc />
     public string? Scope { get; set; }
 
+    /// <inheritdoc />
+    public string? ProjectName { get; set; }
+
+    /// <inheritdoc />
+    public string? ProjectDir { get; set; }
+
     public required string FullName { get; init; }
 
     public required string Kind { get; init; }
@@ -142,6 +169,18 @@ internal sealed class ApiMembersOutput : IApiScopedOutput
     public string? BaseType { get; init; }
 
     public string? Deprecated { get; init; }
+
+    /// <summary>The <c>--filter</c> substring applied, or <see langword="null"/> when unfiltered.</summary>
+    public string? Filter { get; init; }
+
+    /// <summary>Total property count before filtering; <see langword="null"/> when unfiltered.</summary>
+    public int? TotalProperties { get; init; }
+
+    /// <summary>Total event count before filtering; <see langword="null"/> when unfiltered.</summary>
+    public int? TotalEvents { get; init; }
+
+    /// <summary>Total method count before filtering; <see langword="null"/> when unfiltered.</summary>
+    public int? TotalMethods { get; init; }
 
     public required List<ApiMemberOutput> Properties { get; init; }
 
@@ -167,6 +206,12 @@ internal sealed class ApiCheckPropertyOutput : IApiScopedOutput
 {
     /// <inheritdoc />
     public string? Scope { get; set; }
+
+    /// <inheritdoc />
+    public string? ProjectName { get; set; }
+
+    /// <inheritdoc />
+    public string? ProjectDir { get; set; }
 
     public required bool Found { get; init; }
 
@@ -205,6 +250,12 @@ internal sealed class ApiTypesOutput : IApiScopedOutput
     /// <inheritdoc />
     public string? Scope { get; set; }
 
+    /// <inheritdoc />
+    public string? ProjectName { get; set; }
+
+    /// <inheritdoc />
+    public string? ProjectDir { get; set; }
+
     public required string Namespace { get; init; }
 
     public required List<ApiTypeSummary> Types { get; init; }
@@ -216,7 +267,19 @@ internal sealed class ApiEnumsOutput : IApiScopedOutput
     /// <inheritdoc />
     public string? Scope { get; set; }
 
+    /// <inheritdoc />
+    public string? ProjectName { get; set; }
+
+    /// <inheritdoc />
+    public string? ProjectDir { get; set; }
+
     public required string FullName { get; init; }
+
+    /// <summary>The <c>--filter</c> substring applied, or <see langword="null"/> when unfiltered.</summary>
+    public string? Filter { get; init; }
+
+    /// <summary>Total value count before filtering; <see langword="null"/> when unfiltered.</summary>
+    public int? TotalValues { get; init; }
 
     public required List<string> Values { get; init; }
 }
@@ -226,6 +289,12 @@ internal sealed class ApiNamespacesOutput : IApiScopedOutput
 {
     /// <inheritdoc />
     public string? Scope { get; set; }
+
+    /// <inheritdoc />
+    public string? ProjectName { get; set; }
+
+    /// <inheritdoc />
+    public string? ProjectDir { get; set; }
 
     public required List<string> Namespaces { get; init; }
 }
@@ -253,7 +322,11 @@ internal sealed class ApiPackagesOutput : IApiScopedOutput
     /// <inheritdoc />
     public string? Scope { get; set; }
 
-    public required string ProjectName { get; init; }
+    /// <inheritdoc />
+    public string? ProjectName { get; set; }
+
+    /// <inheritdoc />
+    public string? ProjectDir { get; set; }
 
     public required List<ApiPackageSummary> Packages { get; init; }
 }
@@ -264,7 +337,11 @@ internal sealed class ApiStatsOutput : IApiScopedOutput
     /// <inheritdoc />
     public string? Scope { get; set; }
 
-    public required string ProjectName { get; init; }
+    /// <inheritdoc />
+    public string? ProjectName { get; set; }
+
+    /// <inheritdoc />
+    public string? ProjectDir { get; set; }
 
     public required int Packages { get; init; }
 

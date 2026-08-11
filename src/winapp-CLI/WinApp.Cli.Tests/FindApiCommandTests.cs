@@ -24,6 +24,8 @@ internal sealed class FakeApiMetadataService : IApiMetadataService
     public string? LastSearchQuery { get; private set; }
     public int LastMax { get; private set; }
     public string? LastMembersType { get; private set; }
+    public string? LastMembersFilter { get; private set; }
+    public string? LastEnumsFilter { get; private set; }
     public string? LastCheckType { get; private set; }
     public string? LastCheckProperty { get; private set; }
     public ApiRequestScope LastScope { get; private set; }
@@ -56,9 +58,10 @@ internal sealed class FakeApiMetadataService : IApiMetadataService
         return ApiQueryResult<ApiSearchOutput>.Ok(new ApiSearchOutput { Query = query, Ambiguous = null, Results = results });
     }
 
-    public ApiQueryResult<ApiMembersOutput> Members(string fullName, ApiRequestScope scope)
+    public ApiQueryResult<ApiMembersOutput> Members(string fullName, ApiRequestScope scope, string? filter = null)
     {
         LastMembersType = fullName;
+        LastMembersFilter = filter;
         LastScope = scope;
         return ApiQueryResult<ApiMembersOutput>.Ok(new ApiMembersOutput
         {
@@ -101,9 +104,10 @@ internal sealed class FakeApiMetadataService : IApiMetadataService
         });
     }
 
-    public ApiQueryResult<ApiEnumsOutput> Enums(string fullName, ApiRequestScope scope)
+    public ApiQueryResult<ApiEnumsOutput> Enums(string fullName, ApiRequestScope scope, string? filter = null)
     {
         LastScope = scope;
+        LastEnumsFilter = filter;
         return ApiQueryResult<ApiEnumsOutput>.Ok(new ApiEnumsOutput
         {
             FullName = fullName,
@@ -228,6 +232,33 @@ public sealed class FindApiCommandTests : BaseCommandTests
 
         Assert.AreEqual(1, exit);
         Assert.IsNull(_fake.LastMembersType);
+    }
+
+    [TestMethod]
+    public async Task Members_FilterOption_FlowsToService()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(Command, ["members", "NavigationView", "--filter", "background"]);
+
+        Assert.AreEqual(0, exit);
+        Assert.AreEqual("background", _fake.LastMembersFilter);
+    }
+
+    [TestMethod]
+    public async Task Members_WithoutFilterOption_PassesNull()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(Command, ["members", "NavigationView"]);
+
+        Assert.AreEqual(0, exit);
+        Assert.IsNull(_fake.LastMembersFilter);
+    }
+
+    [TestMethod]
+    public async Task Enums_FilterOption_FlowsToService()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(Command, ["enums", "Symbol", "--filter", "folder"]);
+
+        Assert.AreEqual(0, exit);
+        Assert.AreEqual("folder", _fake.LastEnumsFilter);
     }
 
     [TestMethod]

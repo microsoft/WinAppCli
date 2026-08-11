@@ -197,6 +197,12 @@ internal static class FindApiShared
         {
             console.WriteLine($"  Extends: {output.BaseType}");
         }
+        if (output.Filter is not null)
+        {
+            int shown = output.Properties.Count + output.Events.Count + output.Methods.Count;
+            int total = (output.TotalProperties ?? 0) + (output.TotalEvents ?? 0) + (output.TotalMethods ?? 0);
+            console.WriteLine($"  Filter: '{output.Filter}' \u2014 showing {shown} of {total} members");
+        }
         console.WriteLine();
 
         WriteMemberGroup(console, "Properties:", output.Properties);
@@ -301,9 +307,16 @@ internal static class FindApiShared
     public static void RenderEnums(IAnsiConsole console, ApiEnumsOutput output)
     {
         console.WriteLine($"Enum {output.FullName}");
+        if (output.Filter is not null)
+        {
+            console.WriteLine($"  Filter: '{output.Filter}' \u2014 showing {output.Values.Count} of {output.TotalValues ?? output.Values.Count} values");
+        }
         if (output.Values.Count == 0)
         {
-            console.WriteLine("  (no values)");
+            // Say why the list is empty: a filter miss is not the same as an
+            // enum with no values, and conflating them invites a wrong conclusion
+            // that the API does not exist.
+            console.WriteLine(output.Filter is not null ? "  (no values match the filter)" : "  (no values)");
             return;
         }
         foreach (string value in output.Values)
