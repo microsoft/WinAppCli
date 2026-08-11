@@ -1856,11 +1856,23 @@ public class DotNetServiceTests : BaseCommandTests
     /// </summary>
     /// <remarks>
     /// The read is retried rather than allowed to throw. <see cref="File.Exists"/> turns true the moment
-    /// <c>Set-Content</c> creates the file, but PowerShell still holds the write handle for a short
-    /// window afterwards, and opening it for reading in that window fails with a sharing violation
+    /// <c>Set-Content</c> creates the file, but PowerShell holds the destination open <em>exclusively</em>
+    /// while it writes, and opening it for reading in that window fails with a sharing violation
     /// ("The process cannot access the file ... because it is being used by another process"). Letting
-    /// that escape made this test flaky on busy CI agents. A transient IO failure here means "not
-    /// written yet", which is exactly the condition this loop already exists to wait out.
+    /// that escape made this test flaky on busy CI agents.
+    /// <para>
+    /// Retrying is the fix rather than a workaround: because the writer's handle is exclusive, no
+    /// <see cref="FileShare"/> mode on the reader can open it during the window (measured: a
+    /// <c>FileShare.ReadWrite | FileShare.Delete</c> reader still takes the violation), and publishing
+    /// the file by atomic rename only reduces the window rather than closing it.
+    /// </para>
+    /// <para>
+    /// Only <see cref="IOException"/> is caught, which covers both the sharing violation and the
+    /// <see cref="FileNotFoundException"/> raised while the file is being replaced. A permissions or
+    /// path error surfaces as <see cref="UnauthorizedAccessException"/> and is deliberately left to
+    /// propagate, so a genuine failure is reported immediately instead of being turned into a
+    /// misleading "was not written within ..." timeout.
+    /// </para>
     /// An empty or partially written file is covered by the existing <see cref="int.TryParse(string, out int)"/>
     /// guard, which simply keeps polling until the value parses.
     /// </remarks>
@@ -1879,11 +1891,7 @@ public class DotNetServiceTests : BaseCommandTests
             }
             catch (IOException)
             {
-                // Still being written by the root script — fall through to the delay and retry.
-            }
-            catch (UnauthorizedAccessException)
-            {
-                // Same transient condition, surfaced differently depending on how the handle was opened.
+                // Still being written (or replaced) by the root script — fall through and retry.
             }
 
             if (text is not null && int.TryParse(text, out var pid))
@@ -1895,6 +1903,69 @@ public class DotNetServiceTests : BaseCommandTests
         }
 
         throw new TimeoutException($"The descendant PID file '{pidFile}' was not written within {timeout}.");
+    }
+
+    #endregion
+
+    #region PID file read (flake regression)
+
+    [TestMethod]
+    public async Task WaitForPidFile_WriterHoldsFileExclusively_RetriesInsteadOfThrowing()
+    {
+        // Deterministic reproduction of the CI flake. Previously this only failed when a poll happened
+        // to land inside PowerShell's write window -- a sub-millisecond target against a 20ms poll, so
+        // it survived 400 consecutive local runs while still failing on loaded agents. Holding the file
+        // the way Set-Content does removes the timing luck: the old implementation threw "The process
+        // cannot access the file ... because it is being used by another process" on the first poll,
+        // which is the exact exception seen in CI.
+        //
+        // FileShare.None is what Set-Content actually uses. A reader cannot get in with any share mode
+        // (measured: a FileShare.ReadWrite | FileShare.Delete reader still takes the violation), which
+        // is why the helper retries instead of opening the file differently.
+        var pidFile = Path.Join(_tempDirectory.FullName, $"pidfile_{Guid.NewGuid():N}.pid");
+        await File.WriteAllTextAsync(pidFile, "4242", TestContext.CancellationToken);
+
+        using var exclusive = new FileStream(pidFile, FileMode.Open, FileAccess.Write, FileShare.None);
+        var releaseAfterAWhile = Task.Run(async () =>
+        {
+            await Task.Delay(200, TestContext.CancellationToken);
+            exclusive.Dispose();
+        }, TestContext.CancellationToken);
+
+        var pid = await WaitForPidFileAsync(pidFile, TimeSpan.FromSeconds(15), TestContext.CancellationToken);
+
+        await releaseAfterAWhile;
+        Assert.AreEqual(4242, pid, "The PID must be read once the writer releases its exclusive handle.");
+    }
+
+    [TestMethod]
+    public async Task WaitForPidFile_NeverWritten_ThrowsTimeout()
+    {
+        // The retry must not turn a genuine "never appeared" case into an endless wait.
+        var pidFile = Path.Join(_tempDirectory.FullName, $"absent_{Guid.NewGuid():N}.pid");
+
+        await Assert.ThrowsAsync<TimeoutException>(
+            async () => await WaitForPidFileAsync(pidFile, TimeSpan.FromMilliseconds(200), TestContext.CancellationToken));
+    }
+
+    [TestMethod]
+    public async Task WaitForPidFile_EmptyThenPopulated_WaitsForAParsableValue()
+    {
+        // Set-Content creates the file before its contents land, so a reader can legitimately observe
+        // an empty file. That case is handled by the parse guard, not by the exception filter.
+        var pidFile = Path.Join(_tempDirectory.FullName, $"empty_{Guid.NewGuid():N}.pid");
+        await File.WriteAllTextAsync(pidFile, string.Empty, TestContext.CancellationToken);
+
+        var populate = Task.Run(async () =>
+        {
+            await Task.Delay(150, TestContext.CancellationToken);
+            await File.WriteAllTextAsync(pidFile, "1234", TestContext.CancellationToken);
+        }, TestContext.CancellationToken);
+
+        var pid = await WaitForPidFileAsync(pidFile, TimeSpan.FromSeconds(15), TestContext.CancellationToken);
+
+        await populate;
+        Assert.AreEqual(1234, pid, "An empty file must be polled past, not parsed as a PID.");
     }
 
     #endregion
