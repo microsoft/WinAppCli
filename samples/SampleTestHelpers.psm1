@@ -69,7 +69,7 @@ function ConvertTo-ArgumentList {
         [string]$Arguments
     )
 
-    if ([string]::IsNullOrWhiteSpace($Arguments)) { return @() }
+    if ([string]::IsNullOrWhiteSpace($Arguments)) { return ,@() }
 
     $result = [System.Collections.Generic.List[string]]::new()
     $current = [System.Text.StringBuilder]::new()
@@ -96,7 +96,8 @@ function ConvertTo-ArgumentList {
 
     if ($hasContent) { $result.Add($current.ToString()) }
 
-    return $result.ToArray()
+    # Unary comma stops PowerShell unrolling a one-element array to a string, which would splat per character.
+    return ,$result.ToArray()
 }
 
 function Invoke-WinappCommand {
