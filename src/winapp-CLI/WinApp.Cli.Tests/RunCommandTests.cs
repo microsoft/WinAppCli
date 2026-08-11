@@ -25,7 +25,7 @@ public class RunCommandTests : BaseCommandTests
     private static readonly string[] SupportedArchitectures = ["x64", "arm64", "x86"];
     private static readonly string[] ForcedUnpackagedProperties = ["WindowsPackageType=None", "Foo=Bar"];
 
-    private const string TestManifestContent = """
+    internal const string TestManifestContent = """
         <?xml version="1.0" encoding="utf-8"?>
         <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
                  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
@@ -2250,6 +2250,25 @@ public class RunCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task RunCommand_FolderMode_AtDebugVerbosity_PrintsDiscoveryBreadcrumb()
+    {
+        // This class runs at LogLevel.Debug — the level `--verbose` selects — so the breadcrumb
+        // must still be emitted here. It is how a user who pointed at a source directory expecting
+        // a build finds out why nothing was built. The companion class
+        // RunCommandFolderModeBreadcrumbTests asserts it is hidden at default verbosity.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName]);
+
+        Assert.AreEqual(0, exitCode);
+        StringAssert.Contains(
+            TestAnsiConsole.Output,
+            "No .csproj/.sln/.slnx with a runnable app found",
+            "Debug/verbose output should explain why a directory fell back to build-output folder mode.");
+    }
+
+    [TestMethod]
     public void CanCurrentOsRunArchitecture_IsCaseInsensitive()
     {
         Assert.AreEqual(
@@ -2258,4 +2277,43 @@ public class RunCommandTests : BaseCommandTests
     }
 
     #endregion
+}
+
+/// <summary>
+/// Covers the folder-mode discovery breadcrumb at the CLI's DEFAULT verbosity.
+/// <see cref="RunCommandTests"/> runs at <see cref="LogLevel.Debug"/> (the harness default), which
+/// is the level <c>--verbose</c> selects, so it cannot observe what a normal run prints. This class
+/// pins the level to <see cref="LogLevel.Information"/> — what <c>winapp run</c> uses with no
+/// verbosity flags — to assert the breadcrumb stays hidden.
+/// </summary>
+[TestClass]
+public class RunCommandFolderModeBreadcrumbTests() : BaseCommandTests(logLevel: LogLevel.Information)
+{
+    protected override IServiceCollection ConfigureServices(IServiceCollection services)
+        => services
+            .AddSingleton<IMsixService>(new FakeMsixService())
+            .AddSingleton<IAppLauncherService>(new FakeAppLauncherService())
+            .AddSingleton<IDebugOutputService>(new FakeDebugOutputService())
+            .AddSingleton<IPackageRegistrationService>(new FakePackageRegistrationService())
+            .AddSingleton<INugetService, FakeNugetService>();
+
+    [TestMethod]
+    public async Task RunCommand_FolderMode_AtDefaultVerbosity_OmitsDiscoveryBreadcrumb()
+    {
+        // Running a build-output folder is the normal path — it is what every `dotnet run` through
+        // the NuGet package does, since the targets point winapp at $(OutputPath). Announcing it at
+        // Information made a routine, successful run look like something had gone wrong.
+        await File.WriteAllTextAsync(
+            Path.Combine(_tempDirectory.FullName, "appxmanifest.xml"),
+            RunCommandTests.TestManifestContent,
+            TestContext.CancellationToken);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [_tempDirectory.FullName]);
+
+        Assert.AreEqual(0, exitCode, "Folder mode should succeed");
+        Assert.IsFalse(
+            TestAnsiConsole.Output.Contains("No .csproj/.sln/.slnx with a runnable app found", StringComparison.Ordinal),
+            "The folder-mode breadcrumb is a troubleshooting aid and must not appear at default verbosity");
+    }
 }
