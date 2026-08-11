@@ -1854,18 +1854,41 @@ public class DotNetServiceTests : BaseCommandTests
     /// contains. This is the managed alternative to enumerating the process table for a child of the
     /// root: the root itself reports its child's id, so the test needs no WMI or Win32 interop.
     /// </summary>
+    /// <remarks>
+    /// The read is retried rather than allowed to throw. <see cref="File.Exists"/> turns true the moment
+    /// <c>Set-Content</c> creates the file, but PowerShell still holds the write handle for a short
+    /// window afterwards, and opening it for reading in that window fails with a sharing violation
+    /// ("The process cannot access the file ... because it is being used by another process"). Letting
+    /// that escape made this test flaky on busy CI agents. A transient IO failure here means "not
+    /// written yet", which is exactly the condition this loop already exists to wait out.
+    /// An empty or partially written file is covered by the existing <see cref="int.TryParse(string, out int)"/>
+    /// guard, which simply keeps polling until the value parses.
+    /// </remarks>
     private static async Task<int> WaitForPidFileAsync(string pidFile, TimeSpan timeout, CancellationToken cancellationToken)
     {
         var deadline = DateTime.UtcNow + timeout;
         while (DateTime.UtcNow < deadline)
         {
-            if (File.Exists(pidFile))
+            string? text = null;
+            try
             {
-                var text = (await File.ReadAllTextAsync(pidFile, cancellationToken)).Trim();
-                if (int.TryParse(text, out var pid))
+                if (File.Exists(pidFile))
                 {
-                    return pid;
+                    text = (await File.ReadAllTextAsync(pidFile, cancellationToken)).Trim();
                 }
+            }
+            catch (IOException)
+            {
+                // Still being written by the root script — fall through to the delay and retry.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Same transient condition, surfaced differently depending on how the handle was opened.
+            }
+
+            if (text is not null && int.TryParse(text, out var pid))
+            {
+                return pid;
             }
 
             await Task.Delay(20, cancellationToken);
