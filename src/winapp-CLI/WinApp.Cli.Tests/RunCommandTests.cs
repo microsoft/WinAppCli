@@ -2304,7 +2304,7 @@ public class RunCommandFolderModeBreadcrumbTests() : BaseCommandTests(logLevel: 
         // the NuGet package does, since the targets point winapp at $(OutputPath). Announcing it at
         // Information made a routine, successful run look like something had gone wrong.
         await File.WriteAllTextAsync(
-            Path.Combine(_tempDirectory.FullName, "appxmanifest.xml"),
+            Path.Join(_tempDirectory.FullName, "appxmanifest.xml"),
             RunCommandTests.TestManifestContent,
             TestContext.CancellationToken);
         var command = GetRequiredService<RunCommand>();
