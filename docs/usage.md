@@ -636,6 +636,13 @@ Create a loose layout package from a build output folder, register it with Windo
 - **Folder mode** — the input is a build-output folder (contains a `Package.appxmanifest`/`AppxManifest.xml`).
 - **Project mode** — the input is a `.csproj`, a `.sln`/`.slnx` solution, or a directory containing one. `winapp run` builds the project and launches it, supporting both **packaged** and **unpackaged** WinUI apps. See [Project mode](#project-mode-net-sdk-projects) below.
 
+> [!TIP]
+> Mode selection is silent by default. If a directory was treated as a build-output folder when you
+> expected it to be built as a project, re-run with `--verbose` — folder mode reports why it was
+> chosen (`No .csproj/.sln/.slnx with a runnable app found in '<path>' — running it as a
+> build-output folder.`). A directory is only built as a project when a `.csproj`/`.sln`/`.slnx`
+> with a runnable app sits at its **top level**; it is not searched recursively.
+
 > **This is the preferred command for debugging with package identity** for most frameworks (.NET, C++, Rust, Flutter, Tauri). Unlike [`create-debug-identity`](#create-debug-identity) which registers a sparse package for a single exe, `winapp run` registers the entire folder as a loose layout package, just like a real MSIX install. See the [Debugging Guide](debugging.md) for common debugging workflows.
 
 ```bash
