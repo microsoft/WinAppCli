@@ -194,22 +194,11 @@ internal sealed class ApiMetadataService(
             string? projectName = ApiCacheBuilder.FindProjectNameInDir(projectDir);
             if (projectName is not null)
             {
-                bool found = false;
-                foreach (string manifestPath in Directory.GetFiles(projectsDir, "*.json"))
-                {
-                    string name = Path.GetFileNameWithoutExtension(manifestPath);
-                    if (name.Equals(projectName, StringComparison.OrdinalIgnoreCase) ||
-                        name.StartsWith(projectName + "_", StringComparison.OrdinalIgnoreCase))
-                    {
-                        found = true;
-                        if (assetsWriteTime > File.GetLastWriteTimeUtc(manifestPath))
-                        {
-                            needsUpdate = true;
-                        }
-                        break;
-                    }
-                }
-                if (!found)
+                // Match on the manifest's recorded ProjectDir, not on its file name:
+                // a same-named project in another directory must not be mistaken for
+                // this one and suppress indexing of the project actually being queried.
+                string? manifestPath = FindManifestPathForDir(Directory.GetFiles(projectsDir, "*.json"), projectDir);
+                if (manifestPath is null || assetsWriteTime > File.GetLastWriteTimeUtc(manifestPath))
                 {
                     needsUpdate = true;
                 }
@@ -280,6 +269,26 @@ internal sealed class ApiMetadataService(
     /// the result never depends on unrelated global state. Returns a human-readable
     /// error when resolution is impossible.
     /// </summary>
+    /// <summary>
+    /// Finds the cached manifest that actually belongs to <paramref name="projectDir"/>.
+    /// Manifests are matched on their recorded <c>ProjectDir</c> rather than on file
+    /// name: identically-named projects in different directories must never resolve
+    /// to each other, and legacy caches may still hold unhashed manifest names.
+    /// </summary>
+    private static string? FindManifestPathForDir(string[] files, string projectDir)
+    {
+        string fullPath = Path.GetFullPath(projectDir);
+        foreach (string path in files)
+        {
+            ProjectManifest? manifest = DeserializeManifest(path);
+            if (manifest is not null && manifest.ProjectDir.Equals(fullPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return path;
+            }
+        }
+        return null;
+    }
+
     private ResolvedScope ResolveManifest(ApiRequestScope scope, string cacheDir)
     {
         string projectsDir = Path.Combine(cacheDir, "projects");
@@ -293,14 +302,39 @@ internal sealed class ApiMetadataService(
             {
                 return ResolveSdkScope(cacheDir);
             }
+            var matches = new List<ProjectManifest>();
             foreach (string path in files)
             {
                 string name = Path.GetFileNameWithoutExtension(path);
                 if (name.Equals(scope.Project, StringComparison.OrdinalIgnoreCase) ||
                     name.StartsWith(scope.Project + "_", StringComparison.OrdinalIgnoreCase))
                 {
-                    return ResolvedScope.Project(DeserializeManifest(path));
+                    ProjectManifest? manifest = DeserializeManifest(path);
+                    if (manifest is not null)
+                    {
+                        matches.Add(manifest);
+                    }
                 }
+            }
+
+            List<IGrouping<string, ProjectManifest>> distinct = matches
+                .GroupBy(m => Path.GetFullPath(m.ProjectDir), StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (distinct.Count == 1)
+            {
+                return ResolvedScope.Project(distinct[0].First());
+            }
+            if (distinct.Count > 1)
+            {
+                // Several indexed projects share this name. Answering from whichever
+                // was enumerated first would make the result depend on directory
+                // ordering, so make the caller disambiguate explicitly.
+                string dirs = string.Join(", ", distinct
+                    .Select(g => $"'{g.Key}'")
+                    .OrderBy(d => d, StringComparer.OrdinalIgnoreCase));
+                return ResolvedScope.Failed(
+                    $"Project '{scope.Project}' is ambiguous — {distinct.Count} indexed projects share that name: {dirs}. " +
+                    "Use '--project-dir <path>' to pick one.");
             }
             return ResolvedScope.Failed(files.Length == 0
                 ? $"Project '{scope.Project}' is not indexed — no projects are indexed yet. Run 'winapp find-api refresh' in the project directory, or use '--project sdk' for the Windows SDK scope."
@@ -310,30 +344,18 @@ internal sealed class ApiMetadataService(
         if (scope.ProjectDir is not null)
         {
             string fullPath = Path.GetFullPath(scope.ProjectDir);
-            foreach (string path in files)
+            string? match = FindManifestPathForDir(files, fullPath);
+            if (match is not null)
             {
-                ProjectManifest? manifest = DeserializeManifest(path);
-                if (manifest is not null && manifest.ProjectDir.Equals(fullPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    return ResolvedScope.Project(manifest);
-                }
+                return ResolvedScope.Project(DeserializeManifest(match));
             }
             string? dirProjectName = ApiCacheBuilder.FindProjectNameInDir(fullPath);
             if (dirProjectName is not null)
             {
-                foreach (string path in files)
-                {
-                    string name = Path.GetFileNameWithoutExtension(path);
-                    if (name.Equals(dirProjectName, StringComparison.OrdinalIgnoreCase) ||
-                        name.StartsWith(dirProjectName + "_", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return ResolvedScope.Project(DeserializeManifest(path));
-                    }
-                }
-
                 // An explicit --project-dir named a real project that isn't indexed.
                 // Do NOT quietly widen to the SDK scope — the caller asked about that
-                // project specifically, and its NuGet packages would be missing.
+                // project specifically, and its NuGet packages would be missing — and
+                // do NOT fall back to a same-named manifest from another directory.
                 return ResolvedScope.Failed($"No indexed API metadata was found for '{fullPath}'. Restore the project (so 'project.assets.json' exists), " +
                     $"then run 'winapp find-api refresh' in that directory.{(files.Length == 0 ? "" : $" Indexed projects: {AvailableProjects(files)}.")}");
             }
@@ -344,17 +366,16 @@ internal sealed class ApiMetadataService(
             return ResolveSdkScope(cacheDir);
         }
 
-        string? currentName = ApiCacheBuilder.FindProjectNameInDir(currentDirectory.GetCurrentDirectory());
+        string cwd = currentDirectory.GetCurrentDirectory();
+        string? currentName = ApiCacheBuilder.FindProjectNameInDir(cwd);
         if (currentName is not null)
         {
-            foreach (string path in files)
+            // Resolve strictly by directory. Matching a same-named manifest from a
+            // different directory would answer from an unrelated project's packages.
+            string? match = FindManifestPathForDir(files, cwd);
+            if (match is not null)
             {
-                string name = Path.GetFileNameWithoutExtension(path);
-                if (name.Equals(currentName, StringComparison.OrdinalIgnoreCase) ||
-                    name.StartsWith(currentName + "_", StringComparison.OrdinalIgnoreCase))
-                {
-                    return ResolvedScope.Project(DeserializeManifest(path));
-                }
+                return ResolvedScope.Project(DeserializeManifest(match));
             }
             return ResolvedScope.Failed(NoProjectMessage);
         }

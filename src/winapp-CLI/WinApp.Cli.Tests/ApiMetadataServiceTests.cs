@@ -86,7 +86,7 @@ public sealed class ApiMetadataServiceTests
         File.WriteAllText(Path.Combine(dir, name + ".csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\" />");
     }
 
-    private void WriteManifest(string name, string? projectDir = null)
+    private void WriteManifest(string name, string? projectDir = null, string? fileName = null)
     {
         Directory.CreateDirectory(_projectsDir);
         var manifest = new ProjectManifest
@@ -97,7 +97,7 @@ public sealed class ApiMetadataServiceTests
             Packages = [new ProjectPackageRef { Id = "Some.Pkg", Version = "1.0.0" }],
             GeneratedAt = DateTime.UtcNow.ToString("o"),
         };
-        File.WriteAllText(Path.Combine(_projectsDir, name + ".json"), JsonSerializer.Serialize(manifest, ApiSearchJsonContext.Default.ProjectManifest));
+        File.WriteAllText(Path.Combine(_projectsDir, (fileName ?? name) + ".json"), JsonSerializer.Serialize(manifest, ApiSearchJsonContext.Default.ProjectManifest));
     }
 
     [TestMethod]
@@ -157,7 +157,7 @@ public sealed class ApiMetadataServiceTests
     public void Query_ProjectInCurrentDir_ResolvesThatProjectAndIsProjectScoped()
     {
         WriteProjectFile(_currentDir, "Alpha");
-        WriteManifest("Alpha");
+        WriteManifest("Alpha", _currentDir);
         WriteSdkManifest();
 
         var result = CreateService().Namespaces(null, new ApiRequestScope(null, null));
@@ -186,7 +186,7 @@ public sealed class ApiMetadataServiceTests
     public void Query_SdkProjectOption_SelectsSdkScopeExplicitly()
     {
         WriteProjectFile(_currentDir, "Alpha");
-        WriteManifest("Alpha");
+        WriteManifest("Alpha", _currentDir);
         WriteSdkManifest();
 
         var result = CreateService().Namespaces(null, new ApiRequestScope(null, "sdk"));
@@ -200,7 +200,7 @@ public sealed class ApiMetadataServiceTests
     {
         WriteProjectFile(_currentDir, "Beta");
         WriteManifest("Alpha");
-        WriteManifest("Beta");
+        WriteManifest("Beta", _currentDir);
 
         var result = CreateService().Namespaces(null, new ApiRequestScope(null, null));
 
@@ -261,5 +261,68 @@ public sealed class ApiMetadataServiceTests
 
         Assert.AreEqual(ApiQueryOutcome.NoProject, result.Outcome);
         StringAssert.Contains(result.Message, "No indexed API metadata was found for");
+    }
+
+    [TestMethod]
+    public void Query_ProjectInCurrentDir_DoesNotResolveSameNamedProjectElsewhere()
+    {
+        // Regression (H1): identically-named projects in different directories are a
+        // normal situation (monorepos, a template scaffolded repeatedly). Standing in
+        // one of them must never be answered from another one's index just because the
+        // project names collide — that silently returns the wrong package set.
+        WriteProjectFile(_currentDir, "App");
+        string elsewhere = Path.Combine(Directory.GetParent(_globalDir)!.FullName, "elsewhere", "App");
+        WriteManifest("App", elsewhere);
+        WriteSdkManifest();
+
+        var result = CreateService().Namespaces(null, new ApiRequestScope(null, null));
+
+        Assert.AreEqual(ApiQueryOutcome.NoProject, result.Outcome);
+        StringAssert.Contains(result.Message, "find-api refresh");
+    }
+
+    [TestMethod]
+    public void Query_ExplicitProjectDir_DoesNotResolveSameNamedProjectElsewhere()
+    {
+        // Same collision, reached through --project-dir.
+        string target = Path.Combine(Directory.GetParent(_globalDir)!.FullName, "target", "App");
+        WriteProjectFile(target, "App");
+        string elsewhere = Path.Combine(Directory.GetParent(_globalDir)!.FullName, "elsewhere", "App");
+        WriteManifest("App", elsewhere);
+
+        var result = CreateService().Members("Some.Ns.Type", new ApiRequestScope(target, null));
+
+        Assert.AreEqual(ApiQueryOutcome.NoProject, result.Outcome);
+        StringAssert.Contains(result.Message, "No indexed API metadata was found for");
+    }
+
+    [TestMethod]
+    public void Query_ProjectOption_AmbiguousName_ReportsAmbiguityInsteadOfPickingOne()
+    {
+        // Two indexed projects share a name. Resolving to whichever was enumerated
+        // first would make the answer depend on directory ordering, so this must ask
+        // the caller to disambiguate.
+        string root = Directory.GetParent(_globalDir)!.FullName;
+        WriteManifest("App", Path.Combine(root, "one", "App"), "App_11111111");
+        WriteManifest("App", Path.Combine(root, "two", "App"), "App_22222222");
+
+        var result = CreateService().Members("Some.Ns.Type", new ApiRequestScope(null, "App"));
+
+        Assert.AreEqual(ApiQueryOutcome.NoProject, result.Outcome);
+        StringAssert.Contains(result.Message, "ambiguous");
+        StringAssert.Contains(result.Message, "--project-dir");
+    }
+
+    [TestMethod]
+    public void ManifestName_SameProjectNameInDifferentDirs_ProducesDistinctNames()
+    {
+        // The cache key must include the project's path, otherwise the second project
+        // indexed simply overwrites the first one's manifest.
+        string a = ApiCacheBuilder.ManifestName(Path.Combine("C:", "one", "App.csproj"));
+        string b = ApiCacheBuilder.ManifestName(Path.Combine("C:", "two", "App.csproj"));
+
+        Assert.AreNotEqual(a, b);
+        StringAssert.StartsWith(a, "App_");
+        StringAssert.StartsWith(b, "App_");
     }
 }

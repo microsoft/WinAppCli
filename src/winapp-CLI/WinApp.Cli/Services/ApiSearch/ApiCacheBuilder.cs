@@ -75,18 +75,12 @@ internal static class ApiCacheBuilder
             var manifest = new ProjectManifest
             {
                 ProjectName = projectName,
-                ProjectDir = dir,
+                ProjectDir = Path.GetFullPath(dir),
                 ProjectFile = Path.GetFileName(projectFile),
                 Packages = packageRefs,
                 GeneratedAt = DateTime.UtcNow.ToString("o"),
             };
-            string manifestName = projectName;
-            if (scan)
-            {
-                string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(projectFile))).Substring(0, 8).ToLowerInvariant();
-                manifestName = projectName + "_" + hash;
-            }
-            pendingManifests.Add((manifestName, manifest));
+            pendingManifests.Add((ManifestName(projectFile), manifest));
         }
 
         if (pendingExports.Count > 0)
@@ -376,6 +370,19 @@ internal static class ApiCacheBuilder
     }
 
     /// <summary>Returns the first project name (<c>.csproj</c>/<c>.vcxproj</c>) in a directory, or null.</summary>
+    /// <summary>
+    /// Cache file name for a project's manifest. The project's full path is hashed
+    /// into the name so that identically-named projects in different directories
+    /// (a monorepo, or the same template scaffolded repeatedly) each get their own
+    /// manifest instead of silently overwriting one another.
+    /// </summary>
+    internal static string ManifestName(string projectFile)
+    {
+        string fullPath = Path.GetFullPath(projectFile);
+        string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullPath)))[..8].ToLowerInvariant();
+        return Path.GetFileNameWithoutExtension(fullPath) + "_" + hash;
+    }
+
     internal static string? FindProjectNameInDir(string dir)
     {
         if (!Directory.Exists(dir))
