@@ -62,6 +62,22 @@ When you run `dotnet run`, this package:
 
 ## Configuration
 
+Everything written after `dotnet run` is passed to **your application**, exactly as it would be
+without this package. A standalone `--` is optional and has no effect, because the .NET SDK consumes
+it before forwarding:
+
+```powershell
+dotnet run --devtools          # your app receives --devtools
+dotnet run -- --devtools       # identical
+```
+
+Configure the launcher itself with the MSBuild properties below, which MSBuild consumes so they never
+reach your application:
+
+```powershell
+dotnet run -p:WinAppRunDetach=true --devtools
+```
+
 Set these MSBuild properties in your `.csproj` to customize behavior:
 
 | Property | Default | Description |

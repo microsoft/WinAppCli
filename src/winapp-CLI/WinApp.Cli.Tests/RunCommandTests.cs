@@ -1125,6 +1125,79 @@ public class RunCommandTests : BaseCommandTests
             "Passthrough args after -- should be forwarded to the launcher");
     }
 
+    // --- Migration notice: dotnet run argument routing ---
+
+    [TestMethod]
+    public async Task RunCommand_NuGetCaller_ForwardsKnownOption_PointsAtTheMSBuildProperty()
+    {
+        // The NuGet targets end RunArguments with a separator, so everything typed after
+        // `dotnet run` reaches the app. A project that previously relied on `dotnet run --detach`
+        // keeps working syntactically but silently changes meaning, and MSBuild cannot warn because
+        // it never sees those tokens. winapp is the only place that can.
+        await CreateTestManifestAsync();
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["run", _tempDirectory.FullName, "--caller", "nuget-package", "--", "--detach"]);
+
+        Assert.AreEqual(0, exitCode, "Forwarding is not an error");
+        var output = $"{ConsoleStdOut}{ConsoleStdErr}{TestAnsiConsole.Output}";
+        StringAssert.Contains(output, "'--detach' was passed to your application",
+            "The notice should name the token that changed meaning");
+        StringAssert.Contains(output, "WinAppRunDetach=true",
+            "The notice should name the property that replaces it");
+        Assert.AreEqual("--detach", _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "The token must still reach the app");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_NuGetCaller_ForwardsOptionWithoutProperty_PointsAtWinAppRunArgs()
+    {
+        // Global options such as --verbose have no dedicated property, so the notice has to point at
+        // the raw escape hatch instead of inventing a property name.
+        await CreateTestManifestAsync();
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["run", _tempDirectory.FullName, "--caller", "nuget-package", "--", "--verbose"]);
+
+        Assert.AreEqual(0, exitCode);
+        StringAssert.Contains($"{ConsoleStdOut}{ConsoleStdErr}{TestAnsiConsole.Output}", "WinAppRunArgs=\"--verbose\"",
+            "An option with no dedicated property should point at WinAppRunArgs");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_NuGetCaller_ForwardsUnknownArgument_StaysSilent()
+    {
+        // A genuine app argument never had a winapp meaning, so there is nothing to migrate and a
+        // notice would be pure noise on every single run.
+        await CreateTestManifestAsync();
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["run", _tempDirectory.FullName, "--caller", "nuget-package", "--", "--devtools"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.IsFalse($"{ConsoleStdOut}{ConsoleStdErr}{TestAnsiConsole.Output}".Contains("was passed to your application", StringComparison.Ordinal),
+            "An argument winapp never owned should not produce a migration notice");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DirectCliCaller_ForwardsKnownOption_StaysSilent()
+    {
+        // `winapp run . -- --detach` is an explicit, unambiguous request to forward the token. Only
+        // the NuGet path had its meaning changed, so only it gets the notice.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--", "--detach"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.IsFalse($"{ConsoleStdOut}{ConsoleStdErr}{TestAnsiConsole.Output}".Contains("was passed to your application", StringComparison.Ordinal),
+            "A direct CLI invocation should not be told to use MSBuild properties");
+    }
+
     [TestMethod]
     public async Task RunCommand_BareDoubleDash_LaunchesWithNoArgs()
     {

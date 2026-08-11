@@ -149,6 +149,24 @@ dotnet run
 
 This automatically invokes `winapp run` under the hood — creating a loose layout package, registering it with Windows, and launching your app with full package identity.
 
+Arguments you write after `dotnet run` go to **your application**, exactly as they would if the
+project did not reference this package:
+
+```powershell
+dotnet run --devtools          # your app receives --devtools
+dotnet run -- --devtools       # identical: the SDK consumes the -- before forwarding
+```
+
+Configure the WinApp launcher itself with the `WinAppRun*` MSBuild properties. MSBuild consumes
+these, so they never reach your application:
+
+```powershell
+dotnet run -p:WinAppRunDebugOutput=true -p:WinAppRunDetach=true --devtools
+```
+
+Here the two properties configure WinApp while `--devtools` is passed to your app. See
+[`dotnet run` support](../dotnet-run-support.md) for the full property list.
+
 > [!NOTE]
 > You may see NuGet vulnerability warnings (NU1900) about package sources. These are safe to ignore — they don't affect your build.
 

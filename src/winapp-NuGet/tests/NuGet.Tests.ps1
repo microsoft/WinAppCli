@@ -291,6 +291,69 @@ $extraProps  </PropertyGroup>
             $args | Should -Match ' --caller nuget-package$'
         }
     }
+
+    Context "dotnet run argument routing" {
+        BeforeAll {
+            # RunArguments is what `dotnet run` actually launches, so this Context reads that rather
+            # than the intermediate _WinAppRunArgs the other tests assert on. The distinction matters:
+            # the trailing separator is added only on the dotnet run path, not to the shared argument
+            # list that RunPackagedApp also uses.
+            function script:Get-ComputedRunArguments {
+                param([string]$CaseName)
+                $dir = Join-Path $script:tempRoot $CaseName
+                New-Item -ItemType Directory -Path $dir -Force | Out-Null
+                Set-Content -Path (Join-Path $dir "appxmanifest.xml") -Value '<x/>'
+                $fakeCli = Join-Path $dir "winapp.exe"
+                Set-Content -Path $fakeCli -Value 'stub'
+
+                $csproj = @"
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <WinAppCliPath>$fakeCli</WinAppCliPath>
+  </PropertyGroup>
+  <Import Project="$($script:propsPath)" />
+  <Import Project="$($script:targetsPath)" />
+  <!--
+    Override _WinAppPrepareRunArguments' copy dependency with a no-op. It is declared after the
+    import, so it wins. Only the computed RunArguments string is under test here; leaving the real
+    copy in place would drag in the SDK build targets and require a restored, fully built project
+    just to read one property.
+  -->
+  <Target Name="_WinAppCopyContentToLooseLayout" />
+</Project>
+"@
+                Set-Content -Path (Join-Path $dir "test.csproj") -Value $csproj
+                $out = & dotnet msbuild (Join-Path $dir "test.csproj") -t:_WinAppPrepareRunArguments -getProperty:RunArguments -nologo 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Failed to compute RunArguments:`n$($out -join [Environment]::NewLine)"
+                }
+                ($out | Select-Object -Last 1).ToString().Trim()
+            }
+        }
+
+        It "Ends RunArguments with a separator so dotnet run arguments reach the application" {
+            # The .NET SDK appends the user's application arguments to RunArguments verbatim and drops
+            # any standalone separator they typed, so `dotnet run X` and `dotnet run -- X` arrive
+            # identically. Ending RunArguments with a separator puts everything appended after it in
+            # winapp's passthrough region, which is what makes `dotnet run` behave the same way for a
+            # project that references this package as for one that does not.
+            $runArguments = Get-ComputedRunArguments -CaseName 'run-routing'
+
+            $runArguments | Should -Match ' --caller nuget-package --$'
+        }
+
+        It "Keeps the shared argument list free of the separator (RunPackagedApp is unaffected)" {
+            # RunPackagedApp invokes the CLI directly and appends nothing, so the separator belongs
+            # only on the dotnet run path. A stray trailing separator there would be harmless but
+            # misleading, and it would show up in the logged command line.
+            $sharedArgs = Get-ComputedRunArgs -CaseName 'run-shared-no-sep'
+
+            $sharedArgs | Should -Match ' --caller nuget-package$'
+            $sharedArgs | Should -Not -Match ' --$'
+        }
+    }
 }
 
 Describe "Microsoft.Windows.SDK.BuildTools.WinApp package layout" -Skip:$script:skip {
