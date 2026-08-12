@@ -1946,6 +1946,20 @@ public class DotNetServiceTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task WaitForPidFile_PopulatedFile_ReturnsThePid()
+    {
+        // The straightforward success path, kept as its own test because the two failure-mode tests
+        // below both assert timeouts. Without this, nothing at unit level proves a readable file is
+        // actually parsed -- only the tree-kill test does, and it exercises the whole launcher.
+        var pidFile = Path.Join(_tempDirectory.FullName, $"populated_{Guid.NewGuid():N}.pid");
+        await File.WriteAllTextAsync(pidFile, "4242", TestContext.CancellationToken);
+
+        var pid = await WaitForPidFileAsync(pidFile, TimeSpan.FromSeconds(5), TestContext.CancellationToken);
+
+        Assert.AreEqual(4242, pid);
+    }
+
+    [TestMethod]
     public async Task WaitForPidFile_EmptyFile_IsNotParsedAsAPid()
     {
         // Set-Content creates the file before its contents land, so a reader can legitimately observe
@@ -1956,8 +1970,8 @@ public class DotNetServiceTests : BaseCommandTests
         // Task.Run continuation and asserted the value came back, which made it depend on the thread
         // pool scheduling that continuation promptly -- it timed out on a loaded CI agent running 4
         // test workers, reintroducing exactly the kind of flakiness this file is meant to remove.
-        // Timing out on a permanently empty file proves the guard without racing anything; the
-        // populated path is already covered by the exclusive-handle test and by the tree-kill test.
+        // Timing out on a permanently empty file proves the guard without racing anything, and
+        // WaitForPidFile_PopulatedFile_ReturnsThePid covers the value actually being read.
         var pidFile = Path.Join(_tempDirectory.FullName, $"empty_{Guid.NewGuid():N}.pid");
         await File.WriteAllTextAsync(pidFile, string.Empty, TestContext.CancellationToken);
 
