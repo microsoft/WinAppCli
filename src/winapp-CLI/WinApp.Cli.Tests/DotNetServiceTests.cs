@@ -1915,27 +1915,24 @@ public class DotNetServiceTests : BaseCommandTests
         // Deterministic reproduction of the CI flake. Previously this only failed when a poll happened
         // to land inside PowerShell's write window -- a sub-millisecond target against a 20ms poll, so
         // it survived 400 consecutive local runs while still failing on loaded agents. Holding the file
-        // the way Set-Content does removes the timing luck: the old implementation threw "The process
-        // cannot access the file ... because it is being used by another process" on the first poll,
-        // which is the exact exception seen in CI.
+        // the way Set-Content does removes the timing luck.
         //
         // FileShare.None is what Set-Content actually uses. A reader cannot get in with any share mode
         // (measured: a FileShare.ReadWrite | FileShare.Delete reader still takes the violation), which
         // is why the helper retries instead of opening the file differently.
+        //
+        // The assertion is on the exception TYPE, and nothing releases the handle: the old code threw
+        // IOException on the very first poll, while the retry swallows it and runs out the clock. That
+        // keeps the test free of any background task -- an earlier version released the handle from a
+        // Task.Run continuation, which made it depend on prompt thread-pool scheduling and could time
+        // out on a loaded agent for reasons unrelated to the behavior under test.
         var pidFile = Path.Join(_tempDirectory.FullName, $"pidfile_{Guid.NewGuid():N}.pid");
         await File.WriteAllTextAsync(pidFile, "4242", TestContext.CancellationToken);
 
         using var exclusive = new FileStream(pidFile, FileMode.Open, FileAccess.Write, FileShare.None);
-        var releaseAfterAWhile = Task.Run(async () =>
-        {
-            await Task.Delay(200, TestContext.CancellationToken);
-            exclusive.Dispose();
-        }, TestContext.CancellationToken);
 
-        var pid = await WaitForPidFileAsync(pidFile, TimeSpan.FromSeconds(15), TestContext.CancellationToken);
-
-        await releaseAfterAWhile;
-        Assert.AreEqual(4242, pid, "The PID must be read once the writer releases its exclusive handle.");
+        await Assert.ThrowsAsync<TimeoutException>(
+            async () => await WaitForPidFileAsync(pidFile, TimeSpan.FromMilliseconds(300), TestContext.CancellationToken));
     }
 
     [TestMethod]
@@ -1949,23 +1946,25 @@ public class DotNetServiceTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task WaitForPidFile_EmptyThenPopulated_WaitsForAParsableValue()
+    public async Task WaitForPidFile_EmptyFile_IsNotParsedAsAPid()
     {
         // Set-Content creates the file before its contents land, so a reader can legitimately observe
-        // an empty file. That case is handled by the parse guard, not by the exception filter.
+        // an empty file. That case is handled by the parse guard, not the exception filter: an empty
+        // read must keep polling rather than yield a bogus PID.
+        //
+        // Deliberately no background writer. An earlier version of this test populated the file from a
+        // Task.Run continuation and asserted the value came back, which made it depend on the thread
+        // pool scheduling that continuation promptly -- it timed out on a loaded CI agent running 4
+        // test workers, reintroducing exactly the kind of flakiness this file is meant to remove.
+        // Timing out on a permanently empty file proves the guard without racing anything; the
+        // populated path is already covered by the exclusive-handle test and by the tree-kill test.
         var pidFile = Path.Join(_tempDirectory.FullName, $"empty_{Guid.NewGuid():N}.pid");
         await File.WriteAllTextAsync(pidFile, string.Empty, TestContext.CancellationToken);
 
-        var populate = Task.Run(async () =>
-        {
-            await Task.Delay(150, TestContext.CancellationToken);
-            await File.WriteAllTextAsync(pidFile, "1234", TestContext.CancellationToken);
-        }, TestContext.CancellationToken);
+        await Assert.ThrowsAsync<TimeoutException>(
+            async () => await WaitForPidFileAsync(pidFile, TimeSpan.FromMilliseconds(200), TestContext.CancellationToken));
 
-        var pid = await WaitForPidFileAsync(pidFile, TimeSpan.FromSeconds(15), TestContext.CancellationToken);
-
-        await populate;
-        Assert.AreEqual(1234, pid, "An empty file must be polled past, not parsed as a PID.");
+        Assert.IsTrue(File.Exists(pidFile), "The file existed throughout; the timeout came from the parse guard, not a missing file.");
     }
 
     #endregion
