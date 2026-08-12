@@ -1183,6 +1183,26 @@ public class RunCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task RunCommand_NuGetCaller_ForwardsAttachedValueOption_StillPointsAtTheProperty()
+    {
+        // `--executable=foo.exe` and `--detach=true` configured winapp before this change just as the
+        // separated spelling did, so they need the same notice. Matching the whole token would miss
+        // them and let a previously-working invocation change meaning silently.
+        await CreateTestManifestAsync();
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["run", _tempDirectory.FullName, "--caller", "nuget-package", "--", "--executable=foo.exe"]);
+
+        Assert.AreEqual(0, exitCode);
+        var output = $"{ConsoleStdOut}{ConsoleStdErr}{TestAnsiConsole.Output}";
+        StringAssert.Contains(output, "'--executable=foo.exe' was passed to your application",
+            "The notice should quote the token exactly as the user typed it");
+        StringAssert.Contains(output, "WinAppRunExecutable=<path>",
+            "The property lookup should use the option name, not the attached-value token");
+    }
+
+    [TestMethod]
     public async Task RunCommand_DirectCliCaller_ForwardsKnownOption_StaysSilent()
     {
         // `winapp run . -- --detach` is an explicit, unambiguous request to forward the token. Only

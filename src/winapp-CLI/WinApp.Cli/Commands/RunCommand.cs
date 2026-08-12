@@ -822,14 +822,18 @@ internal partial class RunCommand : Command, IShortDescription
             var alreadyReported = new HashSet<string>(StringComparer.Ordinal);
             foreach (var arg in forwardedArgs)
             {
-                if (!knownOptions.Contains(arg) || !alreadyReported.Add(arg))
+                // An option can arrive attached to its value (--executable=foo.exe, --detach=true).
+                // Those spellings configured winapp before this change just as the separated form did,
+                // so match on the name and keep the original token in the message.
+                var name = arg.Split('=', 2)[0];
+                if (!knownOptions.Contains(name) || !alreadyReported.Add(name))
                 {
                     continue;
                 }
 
                 // Written through ansiConsole (gated on the logger level) to match how the rest of this
                 // command emits user-facing text, so --quiet still suppresses it.
-                var replacement = OptionToMSBuildProperty.TryGetValue(arg, out var property)
+                var replacement = OptionToMSBuildProperty.TryGetValue(name, out var property)
                     ? property
                     : $"WinAppRunArgs=\"{arg}\"";
                 ansiConsole.MarkupLineInterpolated(

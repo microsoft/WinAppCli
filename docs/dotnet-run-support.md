@@ -205,10 +205,12 @@ dotnet run -p:WinAppRunDetach=true --devtools
 
 Here `-p:WinAppRunDetach=true` detaches the launcher and `--devtools` goes to your app.
 
-> [!NOTE]
-> This changed in a previous release. Options written directly after `dotnet run` used to configure
-> WinApp, so `dotnet run --detach` detached the launcher; now it reaches your application. If winapp
-> sees a forwarded argument that matches one of its own options, it prints the property to use:
+> [!IMPORTANT]
+> **This is a breaking change introduced in this release.** Options written directly after
+> `dotnet run` used to configure WinApp, so `dotnet run --detach` detached the launcher; now it
+> reaches your application instead. Move those to the matching property (`-p:WinAppRunDetach=true`).
+> When winapp sees a forwarded argument that matches one of its own options, it prints the
+> replacement:
 >
 > ```
 > ℹ '--detach' was passed to your application, not to winapp.
