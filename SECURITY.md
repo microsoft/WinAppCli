@@ -12,3 +12,7 @@ please review the latest guidance for Microsoft repositories at
 [https://aka.ms/SECURITY.md](https://aka.ms/SECURITY.md).
 
 <!-- END MICROSOFT SECURITY.MD BLOCK -->
+
+## Using winapp CLI securely
+
+For guidance on what winapp CLI development certificates and Developer Mode change on your machine, how to handle `devcert.pfx` safely, and how to sign packages for production, see the [Security guidance](docs/security.md) page.
