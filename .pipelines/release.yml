@@ -38,7 +38,8 @@ extends:
   template: v1/1ES.Official.PipelineTemplate.yml@1esPipelines
   parameters:
     settings:
-      networkIsolationPolicy: Permissive,CFSClean
+      # CFSClean blocks NuGet endpoints, including publishing to api.nuget.org.
+      networkIsolationPolicy: Permissive,CFSClean2
     sdl:
       policheck:
         enabled: true
