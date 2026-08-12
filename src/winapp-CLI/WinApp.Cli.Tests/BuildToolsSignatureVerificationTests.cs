@@ -32,8 +32,8 @@ public class BuildToolsSignatureVerificationTests : BaseCommandTests
         // Mirror the NuGet cache layout the resolver expects, under the cache directory the
         // service is actually pointed at. Using _testWinappDirectory here would miss it entirely
         // and let the resolver fall through to installing the real package.
-        var packagesDir = Path.Combine(_testCacheDirectory.FullName, "packages");
-        _binDir = Directory.CreateDirectory(Path.Combine(
+        var packagesDir = Path.Join(_testCacheDirectory.FullName, "packages");
+        _binDir = Directory.CreateDirectory(Path.Join(
             packagesDir,
             BuildToolsService.BUILD_TOOLS_PACKAGE.ToLowerInvariant(),
             "10.0.26100.1742",
@@ -41,7 +41,7 @@ public class BuildToolsSignatureVerificationTests : BaseCommandTests
             "10.0.26100.0",
             "x64"));
 
-        File.WriteAllText(Path.Combine(_binDir.FullName, "mt.exe"), "fake tool");
+        File.WriteAllText(Path.Join(_binDir.FullName, "mt.exe"), "fake tool");
     }
 
     [TestMethod]
@@ -83,7 +83,7 @@ public class BuildToolsSignatureVerificationTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task EnsureBuildToolAvailableAsync_VerifiesOncePerFileIdentity()
+    public async Task EnsureBuildToolAvailableAsync_VerifiesOnEveryResolution()
     {
         var calls = 0;
         BuildToolsService.SignatureVerifier = (_, _) => { calls++; return true; };
@@ -94,40 +94,44 @@ public class BuildToolsSignatureVerificationTests : BaseCommandTests
             await service.EnsureBuildToolAvailableAsync("mt.exe", TestTaskContext, TestContext.CancellationToken);
         }
 
-        Assert.AreEqual(1, calls, "Repeated resolution of the same binary should reuse the memoized result.");
+        Assert.AreEqual(3, calls, "Every resolution must re-verify the binary currently on disk.");
     }
 
     [TestMethod]
-    public async Task EnsureBuildToolAvailableAsync_ReverifiesWhenTheBinaryChanges()
+    public async Task EnsureBuildToolAvailableAsync_ReverifiesABinarySwappedWithMatchingMetadata()
     {
         var calls = 0;
         BuildToolsService.SignatureVerifier = (_, _) => { calls++; return true; };
         var service = GetRequiredService<IBuildToolsService>();
-        var toolPath = Path.Combine(_binDir.FullName, "mt.exe");
+        var toolPath = Path.Join(_binDir.FullName, "mt.exe");
 
         await service.EnsureBuildToolAvailableAsync("mt.exe", TestTaskContext, TestContext.CancellationToken);
 
-        // A swapped binary must not inherit the previous verdict.
-        File.WriteAllText(toolPath, "different content entirely");
-        File.SetLastWriteTimeUtc(toolPath, DateTime.UtcNow.AddMinutes(1));
+        // Different bytes, identical length and timestamp — the metadata a memoizing cache would
+        // key on, and all of it reproducible by whoever can write the file.
+        var original = new FileInfo(toolPath);
+        var length = (int)original.Length;
+        var timestamp = original.LastWriteTimeUtc;
+        File.WriteAllText(toolPath, new string('x', length));
+        File.SetLastWriteTimeUtc(toolPath, timestamp);
 
         await service.EnsureBuildToolAvailableAsync("mt.exe", TestTaskContext, TestContext.CancellationToken);
 
-        Assert.AreEqual(2, calls, "A binary replaced on disk must be re-verified.");
+        Assert.AreEqual(2, calls, "A swapped binary must not inherit the previous verdict.");
     }
 
     [TestMethod]
     public void SignatureVerifier_DefaultsToTheRealAuthenticodeVerifier()
     {
-        // CleanupBase restores the default; assert the production wiring is the real check
-        // rather than a permanently open gate.
-        BuildToolsService.SignatureVerifier = AuthenticodeVerifier.IsTrustedMicrosoftSigned;
+        // The delegate captured before the suite opened the gate. Asserting on a verifier this test
+        // assigned itself would still pass if production were wired to an always-open gate.
+        var productionVerifier = GlobalTestSetup.ProductionSignatureVerifier;
 
-        var unsigned = Path.Combine(_binDir.FullName, "definitely-not-signed.exe");
+        var unsigned = Path.Join(_binDir.FullName, "definitely-not-signed.exe");
         File.WriteAllText(unsigned, "not a PE file at all");
 
         Assert.IsFalse(
-            BuildToolsService.SignatureVerifier(unsigned, NullLogger.Instance),
+            productionVerifier(unsigned, NullLogger.Instance),
             "The real verifier must reject a file that carries no Authenticode signature.");
     }
 }

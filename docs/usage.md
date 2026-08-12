@@ -1118,6 +1118,24 @@ winapp tool <tool-name> [tool-arguments]
 winapp tool signtool verify /pa MyApp.msix
 ```
 
+**Signature verification**
+
+Build tools are downloaded from NuGet and then executed, so winapp checks each one for a valid Microsoft Authenticode signature immediately before running it. This applies to every command that shells out to an SDK tool, including `tool`, `package`, and `sign`. A tool that fails the check is not run:
+
+```text
+'mt.exe' is not validly signed by Microsoft, so it was not run (C:\...\mt.exe).
+```
+
+The one known case is `Microsoft.Windows.SDK.BuildTools` **10.0.19041.1**, which shipped several auxiliary binaries without a signature. Pin **10.0.22000.194 or newer** in `winapp.yaml` to use them:
+
+```yaml
+packages:
+  - name: Microsoft.Windows.SDK.BuildTools
+    version: 10.0.22000.194
+```
+
+If a tool from a newer package version fails this check, treat it as a genuine problem with the downloaded file rather than something to work around — clear the NuGet cache entry and let winapp download it again.
+
 ---
 
 ### store

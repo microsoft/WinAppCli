@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using Microsoft.Extensions.Logging;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
@@ -11,6 +12,13 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public static class GlobalTestSetup
 {
+    /// <summary>
+    /// The production Authenticode gate, captured before <see cref="AssemblyInitialize"/> opens it
+    /// for the suite. Tests asserting on the real verifier must use this: a value the test assigns
+    /// itself would still pass if production were rewired to an always-true stub.
+    /// </summary>
+    internal static Func<string, ILogger, bool> ProductionSignatureVerifier { get; private set; } = null!;
+
     /// <summary>
     /// Global test initialization - runs once before all tests
     /// </summary>
@@ -33,6 +41,7 @@ public static class GlobalTestSetup
         // gate on build tools is opened once here. Setting it per test would race: the seam is
         // process-wide and tests run in parallel at method level.
         // BuildToolsSignatureVerificationTests drives the gate directly and is [DoNotParallelize].
+        ProductionSignatureVerifier = BuildToolsService.SignatureVerifier;
         BuildToolsService.SignatureVerifier = static (_, _) => true;
     }
 

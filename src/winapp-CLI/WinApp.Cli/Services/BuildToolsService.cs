@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.Logging;
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using WinApp.Cli.ConsoleTasks;
@@ -32,9 +31,6 @@ internal partial class BuildToolsService(
     /// </summary>
     internal static Func<string, ILogger, bool> SignatureVerifier { get; set; } = AuthenticodeVerifier.IsTrustedMicrosoftSigned;
 
-    // Keyed on file identity rather than path alone, so a replaced binary is re-verified.
-    private static readonly ConcurrentDictionary<string, bool> VerifiedTools = new(StringComparer.OrdinalIgnoreCase);
-
     /// <summary>
     /// Throws unless <paramref name="toolPath"/> carries a valid Authenticode signature from
     /// Microsoft. These binaries are downloaded over the network and then executed, so they are
@@ -43,10 +39,10 @@ internal partial class BuildToolsService(
     /// </summary>
     private void VerifyToolIsMicrosoftSigned(FileInfo toolPath)
     {
-        toolPath.Refresh();
-        var key = $"{toolPath.FullName}|{toolPath.Length}|{toolPath.LastWriteTimeUtc.Ticks}";
-
-        if (VerifiedTools.GetOrAdd(key, _ => SignatureVerifier(toolPath.FullName, logger)))
+        // Deliberately not memoized. Any cache key cheap enough to compute here — path, length,
+        // last-write time — is metadata that whoever can replace the file can also reproduce, so a
+        // cached "signed" verdict could be inherited by different bytes.
+        if (SignatureVerifier(toolPath.FullName, logger))
         {
             return;
         }
