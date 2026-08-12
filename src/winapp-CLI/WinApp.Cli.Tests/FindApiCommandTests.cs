@@ -19,6 +19,13 @@ internal sealed class FakeApiMetadataService : IApiMetadataService
     public const string EmptyQuery = "__empty__";
     public const string NoProjectQuery = "__noproject__";
     public const string MissingProperty = "__missing__";
+    public const string MissingType = "__notype__";
+
+    /// <summary>Every subject passed to each verb, in call order — lets batch tests assert fan-out.</summary>
+    public List<string> SearchQueries { get; } = new();
+    public List<string> MembersTypes { get; } = new();
+    public List<string> EnumsTypes { get; } = new();
+    public List<string> CheckedProperties { get; } = new();
 
     public bool SearchCalled { get; private set; }
     public string? LastSearchQuery { get; private set; }
@@ -37,6 +44,7 @@ internal sealed class FakeApiMetadataService : IApiMetadataService
         LastSearchQuery = query;
         LastMax = maxResults;
         LastScope = scope;
+        SearchQueries.Add(query);
 
         if (query == NoProjectQuery)
         {
@@ -63,6 +71,12 @@ internal sealed class FakeApiMetadataService : IApiMetadataService
         LastMembersType = fullName;
         LastMembersFilter = filter;
         LastScope = scope;
+        MembersTypes.Add(fullName);
+        if (fullName == MissingType)
+        {
+            return ApiQueryResult<ApiMembersOutput>.NotFound($"Type '{fullName}' was not found.");
+        }
+
         return ApiQueryResult<ApiMembersOutput>.Ok(new ApiMembersOutput
         {
             FullName = fullName,
@@ -81,6 +95,7 @@ internal sealed class FakeApiMetadataService : IApiMetadataService
         LastCheckType = typeName;
         LastCheckProperty = propertyName;
         LastScope = scope;
+        CheckedProperties.Add(propertyName);
         bool found = propertyName != MissingProperty;
         return ApiQueryResult<ApiCheckPropertyOutput>.Ok(new ApiCheckPropertyOutput
         {
@@ -108,6 +123,7 @@ internal sealed class FakeApiMetadataService : IApiMetadataService
     {
         LastScope = scope;
         LastEnumsFilter = filter;
+        EnumsTypes.Add(fullName);
         return ApiQueryResult<ApiEnumsOutput>.Ok(new ApiEnumsOutput
         {
             FullName = fullName,
@@ -314,5 +330,160 @@ public sealed class FindApiCommandTests : BaseCommandTests
 
         Assert.AreEqual(0, exit);
         Assert.AreEqual("MyApp", _fake.LastScope.Project);
+    }
+
+    // ---- batching ----
+    // A single subject must keep the exact pre-batch payload shape (back-compat);
+    // two or more subjects fan out to one service call each and are wrapped in an
+    // envelope. A batch may only exit 0 when every subject resolved and was found,
+    // otherwise batching would silently hide a miss.
+
+    [TestMethod]
+    public async Task Search_Batch_QueriesEverySubject()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(Command, ["NavigationView", "TeachingTip", "InfoBar"]);
+
+        Assert.AreEqual(0, exit);
+        CollectionAssert.AreEqual(new[] { "NavigationView", "TeachingTip", "InfoBar" }, _fake.SearchQueries);
+    }
+
+    [TestMethod]
+    public async Task Search_Batch_Json_WrapsResultsInEnvelope()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(Command, ["NavigationView", "TeachingTip", "--json"]);
+
+        Assert.AreEqual(0, exit);
+        StringAssert.Contains(TestAnsiConsole.Output, "\"count\"");
+        StringAssert.Contains(TestAnsiConsole.Output, "\"results\"");
+    }
+
+    [TestMethod]
+    public async Task Search_SingleSubject_Json_KeepsFlatPayload()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(Command, ["NavigationView", "--json"]);
+
+        Assert.AreEqual(0, exit);
+        Assert.IsFalse(TestAnsiConsole.Output.Contains("\"results\":["), "single-subject payload must not be wrapped in a batch envelope");
+    }
+
+    [TestMethod]
+    public async Task Search_Batch_ExitsOne_WhenAnySubjectHasNoHits()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(Command, ["NavigationView", FakeApiMetadataService.EmptyQuery]);
+
+        Assert.AreEqual(1, exit);
+        Assert.AreEqual(2, _fake.SearchQueries.Count);
+    }
+
+    [TestMethod]
+    public async Task Members_Batch_QueriesEveryType()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(Command, ["members", "InfoBar", "TeachingTip"]);
+
+        Assert.AreEqual(0, exit);
+        CollectionAssert.AreEqual(new[] { "InfoBar", "TeachingTip" }, _fake.MembersTypes);
+    }
+
+    [TestMethod]
+    public async Task Members_Batch_AppliesFilterToEverySubject()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(Command, ["members", "InfoBar", "TeachingTip", "--filter", "color"]);
+
+        Assert.AreEqual(0, exit);
+        Assert.AreEqual(2, _fake.MembersTypes.Count);
+        Assert.AreEqual("color", _fake.LastMembersFilter);
+    }
+
+    [TestMethod]
+    public async Task Members_Batch_ExitsOne_WhenAnyTypeIsMissing()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(Command, ["members", "InfoBar", FakeApiMetadataService.MissingType]);
+
+        Assert.AreEqual(1, exit);
+        Assert.AreEqual(2, _fake.MembersTypes.Count);
+        StringAssert.Contains(TestAnsiConsole.Output, "Color");
+    }
+
+    [TestMethod]
+    public async Task Enums_Batch_QueriesEveryType()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(Command, ["enums", "Symbol", "Visibility"]);
+
+        Assert.AreEqual(0, exit);
+        CollectionAssert.AreEqual(new[] { "Symbol", "Visibility" }, _fake.EnumsTypes);
+    }
+
+    [TestMethod]
+    public async Task CheckProperty_Batch_ChecksEveryPropertyOnTheType()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(Command, ["check-property", "InfoBar", "Severity", "IsOpen", "Message"]);
+
+        Assert.AreEqual(0, exit);
+        Assert.AreEqual("InfoBar", _fake.LastCheckType);
+        CollectionAssert.AreEqual(new[] { "Severity", "IsOpen", "Message" }, _fake.CheckedProperties);
+    }
+
+    [TestMethod]
+    public async Task CheckProperty_Batch_ExitsOne_WhenAnyPropertyIsMissing()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(
+            Command,
+            ["check-property", "InfoBar", "Severity", FakeApiMetadataService.MissingProperty, "IsOpen"]);
+
+        Assert.AreEqual(1, exit);
+        Assert.AreEqual(3, _fake.CheckedProperties.Count);
+    }
+
+    [TestMethod]
+    public async Task CheckProperty_Batch_Json_ReportsMissingCount()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(
+            Command,
+            ["check-property", "InfoBar", "Severity", FakeApiMetadataService.MissingProperty, "--json"]);
+
+        Assert.AreEqual(1, exit);
+        StringAssert.Contains(TestAnsiConsole.Output, "\"missingCount\"");
+        StringAssert.Contains(TestAnsiConsole.Output, "\"count\"");
+    }
+
+    [TestMethod]
+    public async Task CheckProperty_SingleProperty_KeepsOriginalBehaviour()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(Command, ["check-property", "InfoBar", "Severity"]);
+
+        Assert.AreEqual(0, exit);
+        Assert.AreEqual("InfoBar", _fake.LastCheckType);
+        Assert.AreEqual("Severity", _fake.LastCheckProperty);
+        Assert.AreEqual(1, _fake.CheckedProperties.Count);
+    }
+
+    [TestMethod]
+    public async Task CheckProperty_NoProperty_Fails()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(Command, ["check-property", "InfoBar"]);
+
+        Assert.AreEqual(1, exit);
+        Assert.AreEqual(0, _fake.CheckedProperties.Count);
+    }
+
+    [TestMethod]
+    public async Task HiddenVerbs_AreNotAdvertised()
+    {
+        var hidden = Command.Subcommands
+            .Where(c => c.Hidden)
+            .Select(c => c.Name)
+            .ToList();
+
+        CollectionAssert.Contains(hidden, "types");
+        CollectionAssert.Contains(hidden, "namespaces");
+        CollectionAssert.Contains(hidden, "projects");
+    }
+
+    [TestMethod]
+    public async Task HiddenVerbs_StillWork_WhenInvokedExplicitly()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(Command, ["types", "Test.Ns"]);
+
+        Assert.AreEqual(0, exit);
     }
 }

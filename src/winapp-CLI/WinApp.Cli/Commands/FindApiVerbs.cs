@@ -7,6 +7,7 @@ using Spectre.Console;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
+using WinApp.Cli.Services.ApiSearch;
 
 namespace WinApp.Cli.Commands;
 
@@ -15,22 +16,22 @@ internal sealed class FindApiMembersCommand : Command, IShortDescription
 {
     public string ShortDescription => "List a type's properties, events, and methods";
 
-    public static Argument<string?> TypeArgument { get; } = new("type")
+    public static Argument<string[]> TypeArgument { get; } = new("type")
     {
-        Description = "The type to inspect. Accepts a short name (NavigationView) or a fully-qualified name (Microsoft.UI.Xaml.Controls.NavigationView).",
-        Arity = ArgumentArity.ZeroOrOne,
+        Description = "One or more types to inspect. Accepts short names (NavigationView) or fully-qualified names (Microsoft.UI.Xaml.Controls.NavigationView). Pass several to resolve them in a single call.",
+        Arity = ArgumentArity.ZeroOrMore,
     };
 
     public static Option<string?> FilterOption { get; } = new("--filter")
     {
-        Description = "Only list members whose name contains this text (case-insensitive), e.g. --filter background. Totals for the unfiltered type are still reported.",
+        Description = "Only list members whose name contains this text (case-insensitive), e.g. --filter background. Totals for the unfiltered type are still reported. Applies to every type in the call.",
     };
 
     public static Option<string?> ProjectDirOption { get; } = FindApiShared.CreateProjectDirOption();
     public static Option<string?> ProjectOption { get; } = FindApiShared.CreateProjectOption();
 
     public FindApiMembersCommand()
-        : base("members", "List the properties, events, and methods of a type (with XML-doc descriptions and inherited members), resolved from the project's indexed API metadata.")
+        : base("members", "List the properties, events, and methods of one or more types (with XML-doc descriptions and inherited members), resolved from the project's indexed API metadata. Pass several type names to inspect them all in one call.")
     {
         Arguments.Add(TypeArgument);
         Options.Add(FilterOption);
@@ -46,18 +47,36 @@ internal sealed class FindApiMembersCommand : Command, IShortDescription
         private int Execute(ParseResult parseResult)
         {
             bool json = parseResult.GetValue(WinAppRootCommand.JsonOption);
-            string? type = parseResult.GetValue(TypeArgument);
-            if (string.IsNullOrWhiteSpace(type))
+            List<string> types = FindApiShared.ReadSubjects(parseResult.GetValue(TypeArgument));
+            if (types.Count == 0)
             {
-                return FindApiShared.Fail(console, json, "A type name is required, e.g. winapp find-api members NavigationView.");
+                return FindApiShared.Fail(console, json, "At least one type name is required, e.g. winapp find-api members NavigationView (or several: members NavigationView InfoBar).");
             }
 
             var scope = FindApiShared.ReadScope(parseResult, ProjectDirOption, ProjectOption);
-            var result = service.Members(type, scope, parseResult.GetValue(FilterOption));
-            return FindApiShared.Emit(
-                console, json, "members", result, WinAppJsonContext.Default.ApiMembersOutput,
+            string? filter = parseResult.GetValue(FilterOption);
+
+            if (types.Count == 1)
+            {
+                var single = service.Members(types[0], scope, filter);
+                return FindApiShared.Emit(
+                    console, json, "members", single, WinAppJsonContext.Default.ApiMembersOutput,
+                    data => FindApiShared.RenderMembers(console, data),
+                    data => (0, data.Properties.Count + data.Events.Count + data.Methods.Count, true));
+            }
+
+            var results = types.ConvertAll(t => (t, service.Members(t, scope, filter)));
+            return FindApiShared.EmitBatch(
+                console, json, "members", results,
+                (ok, errors) => new ApiMembersBatchOutput
+                {
+                    Count = ok.Count,
+                    Results = ok,
+                    Errors = errors.Count > 0 ? errors : null,
+                },
+                WinAppJsonContext.Default.ApiMembersBatchOutput,
                 data => FindApiShared.RenderMembers(console, data),
-                data => (0, data.Properties.Count + data.Events.Count + data.Methods.Count, true));
+                data => (data.Properties.Count + data.Events.Count + data.Methods.Count, true));
         }
     }
 }
@@ -73,17 +92,17 @@ internal sealed class FindApiCheckPropertyCommand : Command, IShortDescription
         Arity = ArgumentArity.ZeroOrOne,
     };
 
-    public static Argument<string?> PropertyArgument { get; } = new("property")
+    public static Argument<string[]> PropertyArgument { get; } = new("property")
     {
-        Description = "The property name to validate on the type.",
-        Arity = ArgumentArity.ZeroOrOne,
+        Description = "One or more property names to validate on the type. Pass several to check them all in a single call.",
+        Arity = ArgumentArity.ZeroOrMore,
     };
 
     public static Option<string?> ProjectDirOption { get; } = FindApiShared.CreateProjectDirOption();
     public static Option<string?> ProjectOption { get; } = FindApiShared.CreateProjectOption();
 
     public FindApiCheckPropertyCommand()
-        : base("check-property", "Validate that a property exists on a type before you write XAML/code against it. On a miss, suggests similar properties on the type, attached-property forms, and other types that declare the property. Exits non-zero when the property does not exist.")
+        : base("check-property", "Validate that one or more properties exist on a type before you write XAML/code against it. Pass several property names to check them in one call. On a miss, suggests similar properties on the type, attached-property forms, and other types that declare the property. Exits non-zero when any property does not exist.")
     {
         Arguments.Add(TypeArgument);
         Arguments.Add(PropertyArgument);
@@ -100,18 +119,37 @@ internal sealed class FindApiCheckPropertyCommand : Command, IShortDescription
         {
             bool json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             string? type = parseResult.GetValue(TypeArgument);
-            string? property = parseResult.GetValue(PropertyArgument);
-            if (string.IsNullOrWhiteSpace(type) || string.IsNullOrWhiteSpace(property))
+            List<string> properties = FindApiShared.ReadSubjects(parseResult.GetValue(PropertyArgument));
+            if (string.IsNullOrWhiteSpace(type) || properties.Count == 0)
             {
-                return FindApiShared.Fail(console, json, "Usage: winapp find-api check-property <Type> <Property>.");
+                return FindApiShared.Fail(console, json, "Usage: winapp find-api check-property <Type> <Property> [<Property>...].");
             }
 
             var scope = FindApiShared.ReadScope(parseResult, ProjectDirOption, ProjectOption);
-            var result = service.CheckProperty(type, property, scope);
-            return FindApiShared.Emit(
-                console, json, "check-property", result, WinAppJsonContext.Default.ApiCheckPropertyOutput,
-                data => FindApiShared.RenderCheckProperty(console, data),
-                data => (data.Found ? 0 : 1, 0, data.Found));
+
+            if (properties.Count == 1)
+            {
+                var single = service.CheckProperty(type, properties[0], scope);
+                return FindApiShared.Emit(
+                    console, json, "check-property", single, WinAppJsonContext.Default.ApiCheckPropertyOutput,
+                    data => FindApiShared.RenderCheckProperty(console, data),
+                    data => (data.Found ? 0 : 1, 0, data.Found));
+            }
+
+            var results = properties.ConvertAll(p => (p, service.CheckProperty(type, p, scope)));
+            return FindApiShared.EmitBatch(
+                console, json, "check-property", results,
+                (ok, errors) => new ApiCheckPropertyBatchOutput
+                {
+                    Count = ok.Count,
+                    MissingCount = ok.Count(r => !r.Found) + errors.Count,
+                    Results = ok,
+                    Errors = errors.Count > 0 ? errors : null,
+                },
+                WinAppJsonContext.Default.ApiCheckPropertyBatchOutput,
+                data => FindApiShared.RenderCheckPropertyCompact(console, data),
+                data => (0, data.Found),
+                separateItems: false);
         }
     }
 }
@@ -133,6 +171,11 @@ internal sealed class FindApiTypesCommand : Command, IShortDescription
     public FindApiTypesCommand()
         : base("types", "List the types declared in a namespace (class/struct/enum/interface/delegate) with their base types.")
     {
+        // Hidden, not removed. Across two full benchmark iterations (48 trial-runs) this
+        // verb was never invoked once, while sitting in help and in the generated schema
+        // as one more near-duplicate for an agent to choose wrongly between `search`,
+        // `members`, and `types`. It still works for anyone who knows it exists.
+        Hidden = true;
         Arguments.Add(NamespaceArgument);
         Options.Add(ProjectDirOption);
         Options.Add(ProjectOption);
@@ -167,22 +210,22 @@ internal sealed class FindApiEnumsCommand : Command, IShortDescription
 {
     public string ShortDescription => "List the values of an enum type";
 
-    public static Argument<string?> TypeArgument { get; } = new("type")
+    public static Argument<string[]> TypeArgument { get; } = new("type")
     {
-        Description = "The enum type to list, e.g. Symbol or Microsoft.UI.Xaml.Controls.Symbol.",
-        Arity = ArgumentArity.ZeroOrOne,
+        Description = "One or more enum types to list, e.g. Symbol or Microsoft.UI.Xaml.Controls.Symbol. Pass several to list them in a single call.",
+        Arity = ArgumentArity.ZeroOrMore,
     };
 
     public static Option<string?> FilterOption { get; } = new("--filter")
     {
-        Description = "Only list values whose name contains this text (case-insensitive), e.g. --filter folder. The unfiltered total is still reported.",
+        Description = "Only list values whose name contains this text (case-insensitive), e.g. --filter folder. The unfiltered total is still reported. Prefer listing the whole enum once over repeated filtered calls \u2014 most enums are small enough that the full list is cheaper than several narrowed lookups.",
     };
 
     public static Option<string?> ProjectDirOption { get; } = FindApiShared.CreateProjectDirOption();
     public static Option<string?> ProjectOption { get; } = FindApiShared.CreateProjectOption();
 
     public FindApiEnumsCommand()
-        : base("enums", "List the values of an enum type. Exits non-zero when the type exists but is not an enum.")
+        : base("enums", "List the values of one or more enum types. Pass several type names to list them in one call. Exits non-zero when a type exists but is not an enum.")
     {
         Arguments.Add(TypeArgument);
         Options.Add(FilterOption);
@@ -198,18 +241,36 @@ internal sealed class FindApiEnumsCommand : Command, IShortDescription
         private int Execute(ParseResult parseResult)
         {
             bool json = parseResult.GetValue(WinAppRootCommand.JsonOption);
-            string? type = parseResult.GetValue(TypeArgument);
-            if (string.IsNullOrWhiteSpace(type))
+            List<string> types = FindApiShared.ReadSubjects(parseResult.GetValue(TypeArgument));
+            if (types.Count == 0)
             {
-                return FindApiShared.Fail(console, json, "An enum type name is required, e.g. winapp find-api enums Symbol.");
+                return FindApiShared.Fail(console, json, "At least one enum type name is required, e.g. winapp find-api enums Symbol (or several: enums Symbol IconSource).");
             }
 
             var scope = FindApiShared.ReadScope(parseResult, ProjectDirOption, ProjectOption);
-            var result = service.Enums(type, scope, parseResult.GetValue(FilterOption));
-            return FindApiShared.Emit(
-                console, json, "enums", result, WinAppJsonContext.Default.ApiEnumsOutput,
+            string? filter = parseResult.GetValue(FilterOption);
+
+            if (types.Count == 1)
+            {
+                var single = service.Enums(types[0], scope, filter);
+                return FindApiShared.Emit(
+                    console, json, "enums", single, WinAppJsonContext.Default.ApiEnumsOutput,
+                    data => FindApiShared.RenderEnums(console, data),
+                    data => (0, data.Values.Count, true));
+            }
+
+            var results = types.ConvertAll(t => (t, service.Enums(t, scope, filter)));
+            return FindApiShared.EmitBatch(
+                console, json, "enums", results,
+                (ok, errors) => new ApiEnumsBatchOutput
+                {
+                    Count = ok.Count,
+                    Results = ok,
+                    Errors = errors.Count > 0 ? errors : null,
+                },
+                WinAppJsonContext.Default.ApiEnumsBatchOutput,
                 data => FindApiShared.RenderEnums(console, data),
-                data => (0, data.Values.Count, true));
+                data => (data.Values.Count, true));
         }
     }
 }
@@ -230,6 +291,8 @@ internal sealed class FindApiNamespacesCommand : Command, IShortDescription
     public FindApiNamespacesCommand()
         : base("namespaces", "List the namespaces available to the project across its indexed API metadata, optionally filtered by prefix.")
     {
+        // Hidden for the same reason as `types`: never invoked in 48 trial-runs.
+        Hidden = true;
         Options.Add(FilterOption);
         Options.Add(ProjectDirOption);
         Options.Add(ProjectOption);
@@ -328,6 +391,10 @@ internal sealed class FindApiProjectsCommand : Command, IShortDescription
     public FindApiProjectsCommand()
         : base("projects", "List every project that currently has an API index in the shared cache, with the number of packages indexed for each.")
     {
+        // Hidden for the same reason as `types`: never invoked in 48 trial-runs. This one
+        // is also cache introspection rather than API discovery, so it answers a question
+        // an agent writing code never has.
+        Hidden = true;
         Options.Add(WinAppRootCommand.JsonOption);
     }
 

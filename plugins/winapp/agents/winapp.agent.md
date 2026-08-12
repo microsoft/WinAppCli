@@ -249,15 +249,19 @@ Building a WinUI 3 UI and need to find the right control or a working sample?
 **When to use:** When an AI agent or developer needs to confirm that a type/property/enum exists, discover the members of a control, or find the right API by intent (e.g. "acrylic brush") before writing WinUI/WinRT code. Add `--json` for machine-readable output.
 
 **Key subcommands:**
-- `find-api "<query>"` — lexical search for types/members by name or intent (bare form).
-- `find-api members <type>` — list properties, events, and methods of a type (accepts a short name like `NavigationView` or a fully-qualified name), including inherited members.
-- `find-api check-property <type> <property>` — verify a (dependency/attached) property exists on a type; suggests near-matches when it doesn't.
-- `find-api types <namespace>` — list the types in a namespace.
-- `find-api enums <type>` — list an enum's values (accepts a short or fully-qualified name).
-- `find-api namespaces [filter]` — list indexed namespaces.
+- `find-api "<query>" ["<query>"...]` — lexical search for types/members by name or intent (bare form).
+- `find-api members <type> [<type>...]` — list properties, events, and methods of a type (accepts a short name like `NavigationView` or a fully-qualified name), including inherited members.
+- `find-api check-property <type> <property> [<property>...]` — verify (dependency/attached) properties exist on a type; suggests near-matches when they don't.
+- `find-api enums <type> [<type>...]` — list an enum's values (accepts a short or fully-qualified name).
 - `find-api packages` / `find-api stats` — show indexed packages / index statistics for the project.
-- `find-api projects` — list all indexed projects.
 - `find-api refresh [--scan] [--project <name>]` — rebuild the API index for the project (forces a full re-index).
+
+**Batch your lookups.** `search`, `members`, `enums`, and `check-property` each accept
+multiple subjects in one invocation. Cost is dominated by the number of calls, not the
+size of the answer, so verify everything you're unsure about in a single call
+(`find-api check-property InfoBar Severity IsOpen Message`) rather than one per turn.
+A single subject keeps the original payload shape; a batch returns
+`{ count, results: [...] }` and exits non-zero if *any* subject is missing.
 
 ### `winapp find-ui "<query>"` — WinUI control & sample search
 **Purpose:** Lexically search **WinUI** controls and samples (WinUI 3 Gallery + Windows Community Toolkit, plus curated core patterns) for a working code example. The microsoft-ui-reactor ReactorGallery is an **opt-in** source, excluded from a normal search and searched only via `--source reactor` (its C#-only declarative samples don't paste into a standard XAML app — Reactor/MVU projects only). WinUI-only — not WPF/WinForms.

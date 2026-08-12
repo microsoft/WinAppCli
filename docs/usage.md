@@ -1134,20 +1134,24 @@ The index is built from the project's restored NuGet/SDK packages (via `project.
 A query from a directory with no project is *always* answered by the `sdk` scope - never by whichever project happens to be indexed in the shared cache - so results never depend on unrelated global state. Pass `--project sdk` to select the SDK scope explicitly from inside a project, and `winapp find-api refresh --project sdk` to rebuild it after installing a new Windows SDK.
 
 **Commands:**
-- *(bare)* `find-api "<query>"` - Lexically search type and member names, grouped by namespace
-- `members <type> [--filter <text>]` - List a type's properties, events, and methods (with descriptions and inherited members)
-- `check-property <type> <property>` - Validate a property exists on a type (exits non-zero on a miss)
-- `types <namespace>` - List the types declared in a namespace
-- `enums <type> [--filter <text>]` - List an enum's values (exits non-zero when the type is not an enum)
-- `namespaces [--filter <prefix>]` - List the namespaces available to the project
+- *(bare)* `find-api "<query>" ["<query>"...]` - Lexically search type and member names, grouped by namespace
+- `members <type> [<type>...] [--filter <text>]` - List a type's properties, events, and methods (with descriptions and inherited members)
+- `check-property <type> <property> [<property>...]` - Validate properties exist on a type (exits non-zero if any is missing)
+- `enums <type> [<type>...] [--filter <text>]` - List an enum's values (exits non-zero when the type is not an enum)
 - `packages` - List the indexed metadata packages, with per-package type/member counts
 - `stats` - Show aggregate index statistics (packages, namespaces, types, members, `.winmd` files)
-- `projects` - List every project that currently has an API index in the shared cache
 - `refresh [--scan]` - Rebuild the index for a project (`--scan` indexes every project under the directory)
+
+**Batching.** `search`, `members`, `enums`, and `check-property` accept **multiple subjects in one invocation**. For an AI agent this is the single biggest cost lever: the marginal cost of a lookup is dominated by the round trip (each call re-sends the whole conversation), not by the size of the payload, so one call answering ten questions is far cheaper than ten calls.
+
+- A **single** subject returns exactly the payload shape it always has, in both text and `--json`.
+- **Two or more** subjects return an envelope — `{ "count": N, "results": [ ... ] }` in `--json`, with each element being the normal single-subject payload; `check-property` adds `missingCount`. Text output renders each subject in sequence under one scope header.
+- `check-property` batches **properties on one type**: the first argument is the type, every argument after it is a property. In batch mode a property that exists prints a single ✅ line; full near-miss detail is printed only for ones that don't.
+- A batch exits `0` only if **every** subject resolved *and* was found — so a batch is still safe to gate codegen on.
 
 **Options:**
 - `--max <n>` - Maximum number of namespace-grouped search results (default `30`; search only)
-- `--filter <text>` - Narrow a listing. On `members` and `enums` this is a **case-insensitive substring** match on the member/value name — use it instead of dumping a large type or enum and grepping the output. On `namespaces` it is a **prefix** match.
+- `--filter <text>` - Narrow a listing on `members` and `enums`: a **case-insensitive substring** match on the member/value name. Best used on types with hundreds of members. Most enums are small enough to dump whole (even `Symbol`, the largest in WinUI at 197 values), so filtering them usually costs more than it saves once you factor in a second guess. Never re-run the same command with different filter text — dump once and read it.
 - `--scan` - Recursively discover and index every project under the directory (`refresh` only)
 - `--project <name>` - Project to query (matches the `.csproj`/`.vcxproj` name), or `sdk` to query the machine-wide Windows SDK scope
 - `--project-dir <path>` - Project directory to query (defaults to the current directory)
@@ -1164,14 +1168,16 @@ winapp find-api members Microsoft.UI.Xaml.Controls.NavigationView
 winapp find-api check-property Button Background
 winapp find-api enums Symbol
 
-# Narrow a large type or enum instead of dumping it and grepping
-winapp find-api enums Symbol --filter folder      # 5 of 197 values
+# Batch — one call instead of one per subject
+winapp find-api check-property InfoBar Severity IsOpen Message Title
+winapp find-api members InfoBar TeachingTip ContentDialog
+winapp find-api enums InfoBarSeverity Visibility
+winapp find-api "acrylic brush" "teaching tip" --max 5
+
+# Narrow a large type instead of dumping it and grepping
 winapp find-api members Button --filter background
 
-# Explore and manage the index
-winapp find-api namespaces --filter Microsoft.UI.Xaml
-winapp find-api types Microsoft.UI.Xaml.Controls
-winapp find-api projects
+# Manage the index
 winapp find-api refresh
 
 # Explore the Windows SDK with no project at all (e.g. before scaffolding an app)
@@ -1179,9 +1185,9 @@ winapp find-api "acrylic brush"          # from an empty directory -> scope: sdk
 winapp find-api members Button --project sdk
 ```
 
-When `--filter` is applied, the output still reports the unfiltered total (`totalValues`, or `totalProperties`/`totalEvents`/`totalMethods` in `--json`), so a narrow view is never mistaken for a small API. A filter that matches nothing still exits `0` — that is "nothing matched your filter", not "no such type".
+When `--filter` is applied, the output still reports the unfiltered total (`totalValues`, or `totalProperties`/`totalEvents`/`totalMethods` in `--json`), so a narrow view is never mistaken for a small API. A filter that matches nothing still exits `0` and says so explicitly — that is "nothing matched your filter", not "no such type".
 
-**Exit codes:** `search` with no hits, `check-property` on a missing property, and `enums` on a non-enum type all exit non-zero — gate code generation and CI checks on them.
+**Exit codes:** `search` with no hits, `check-property` on a missing property, and `enums` on a non-enum type all exit non-zero — gate code generation and CI checks on them. A batched invocation exits non-zero if *any* subject fails.
 
 **Related:** `find-api` answers "does this API exist and what are its members?"; use [`find-ui`](#find-ui) to find a working WinUI sample for a control.
 

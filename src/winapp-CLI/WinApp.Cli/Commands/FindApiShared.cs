@@ -74,20 +74,123 @@ internal static class FindApiShared
     }
 
     /// <summary>
-    /// In text mode, say up front when an answer came from the machine-wide SDK
-    /// scope rather than a project. Without this the output is indistinguishable
-    /// from a project-scoped answer, and the absent project NuGet packages
-    /// (CommunityToolkit and friends) would look like genuine "no such API"
-    /// results. JSON callers read the <c>scope</c> field instead.
+    /// In text mode, state which index answered before rendering the payload.
+    ///
+    /// This used to fire only for the machine-wide SDK scope. It now fires for every
+    /// scoped verb because benchmark analysis found <c>--json</c> was used on ~1% of
+    /// calls — so the project attribution carried in the JSON payload was, in practice,
+    /// unobservable. An answer sourced from the wrong index is indistinguishable from a
+    /// correct one without it, and project names are not unique across directories,
+    /// which is why the directory is printed alongside the name.
     /// </summary>
     private static void WriteScopeNote(IAnsiConsole console, object data)
     {
-        if (data is IApiScopedOutput { Scope: ApiScopeNames.Sdk })
+        if (data is not IApiScopedOutput scoped)
+        {
+            return;
+        }
+
+        if (scoped.Scope == ApiScopeNames.Sdk)
         {
             console.MarkupLine("[yellow]Note:[/] no project found here \u2014 showing Windows SDK + Windows App SDK APIs only (project NuGet packages are not included).");
             console.WriteLine();
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(scoped.ProjectName))
+        {
+            string where = string.IsNullOrEmpty(scoped.ProjectDir) ? "" : $" ({scoped.ProjectDir})";
+            console.MarkupLineInterpolated($"[grey]Project: {scoped.ProjectName}{where}[/]");
+            console.WriteLine();
         }
     }
+
+    /// <summary>
+    /// Render several subjects answered by one invocation. Emits a single batch envelope
+    /// in <c>--json</c> and a separator-delimited sequence in text, with the scope header
+    /// printed once rather than per subject.
+    ///
+    /// Exit code is 0 only when every subject resolved and was found: a batch that
+    /// silently succeeded on 7 of 8 lookups would be worse than no batching at all,
+    /// because the caller's whole reason for batching is to stop checking individually.
+    /// </summary>
+    public static int EmitBatch<T, TBatch>(
+        IAnsiConsole console,
+        bool json,
+        string verb,
+        List<(string Subject, ApiQueryResult<T> Result)> results,
+        Func<List<T>, List<ApiBatchError>, TBatch> buildBatch,
+        JsonTypeInfo<TBatch> batchJsonType,
+        Action<T> renderText,
+        Func<T, (int Count, bool Found)> summarize,
+        bool separateItems = true)
+        where T : class
+        where TBatch : class
+    {
+        var ok = new List<T>();
+        var errors = new List<ApiBatchError>();
+        int totalCount = 0;
+        bool allFound = true;
+
+        foreach ((string subject, ApiQueryResult<T> result) in results)
+        {
+            if (result.IsOk && result.Data is not null)
+            {
+                ok.Add(result.Data);
+                (int count, bool found) = summarize(result.Data);
+                totalCount += count;
+                if (!found)
+                {
+                    allFound = false;
+                }
+            }
+            else
+            {
+                errors.Add(new ApiBatchError
+                {
+                    Subject = subject,
+                    Message = result.Message ?? $"'{subject}' could not be resolved.",
+                });
+                allFound = false;
+            }
+        }
+
+        FindApiUsageEvent.Log(verb, json, totalCount, allFound);
+
+        if (json)
+        {
+            console.Profile.Out.Writer.WriteLine(JsonSerializer.Serialize(buildBatch(ok, errors), batchJsonType));
+            return allFound ? 0 : 1;
+        }
+
+        if (ok.Count > 0)
+        {
+            WriteScopeNote(console, ok[0]);
+        }
+
+        for (int i = 0; i < ok.Count; i++)
+        {
+            if (i > 0 && separateItems)
+            {
+                console.WriteLine();
+            }
+            renderText(ok[i]);
+        }
+
+        foreach (ApiBatchError error in errors)
+        {
+            console.MarkupLineInterpolated($"[red]{UiSymbols.Error} {error.Message}[/]");
+        }
+
+        return allFound ? 0 : 1;
+    }
+
+    /// <summary>
+    /// Split the positional subjects of a batched verb, trimming blanks. Returns an empty
+    /// list when nothing usable was supplied so the caller can emit its own usage error.
+    /// </summary>
+    public static List<string> ReadSubjects(IEnumerable<string>? raw) =>
+        raw?.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).ToList() ?? [];
 
     /// <summary>
     /// Emit an unwrapped payload (verbs like <c>projects</c>/<c>refresh</c> that
@@ -209,6 +312,15 @@ internal static class FindApiShared
         WriteMemberGroup(console, "Events:", output.Events);
         WriteMemberGroup(console, "Methods:", output.Methods);
 
+        if (output.Properties.Count == 0 && output.Events.Count == 0 && output.Methods.Count == 0)
+        {
+            // Distinguish a filter miss from a type with no members. Rendering nothing at
+            // all reads as "this type does not exist", which is the wrong conclusion to
+            // hand an agent that is deciding whether to use the API.
+            console.WriteLine(output.Filter is not null ? "  (no members match the filter)" : "  (no members)");
+            console.WriteLine();
+        }
+
         if (output.GetForCurrentViewWarning)
         {
             console.WriteLine("  \u26a0\ufe0f GetForCurrentView() requires a CoreWindow (UWP). Desktop WinUI 3 apps");
@@ -293,6 +405,34 @@ internal static class FindApiShared
             }
             console.WriteLine();
         }
+    }
+
+    /// <summary>
+    /// Batch rendering for <c>check-property</c>: a confirmation collapses to one line,
+    /// while a miss keeps the full suggestion block.
+    ///
+    /// Measured usage skews ~91% confirmations, and a confirmation carries no actionable
+    /// information beyond "yes" — printing its signature, description, and declaring type
+    /// is paid for on every subsequent turn of the conversation. A miss is the opposite:
+    /// it is the only outcome the caller has to do something about, so it keeps the
+    /// near-miss suggestions that let them fix it without a follow-up <c>members</c> call.
+    /// </summary>
+    public static void RenderCheckPropertyCompact(IAnsiConsole console, ApiCheckPropertyOutput output)
+    {
+        if (output is { Found: true, Match: not null })
+        {
+            string inherited = output.Match is { Inherited: true, DeclaringType: not null } ? $"  (from {output.Match.DeclaringType})" : "";
+            console.WriteLine($"\u2705 {output.Type}.{output.Match.Name}{inherited}");
+            return;
+        }
+
+        if (output is { Attached: true, AttachedInfo: not null })
+        {
+            console.WriteLine($"\u2705 {output.Type}.{output.Property} (attached)");
+            return;
+        }
+
+        RenderCheckProperty(console, output);
     }
 
     public static void RenderTypes(IAnsiConsole console, ApiTypesOutput output)

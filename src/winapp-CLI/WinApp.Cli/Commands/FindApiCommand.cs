@@ -7,6 +7,7 @@ using Spectre.Console;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
+using WinApp.Cli.Services.ApiSearch;
 
 namespace WinApp.Cli.Commands;
 
@@ -24,10 +25,10 @@ internal sealed class FindApiCommand : Command, IShortDescription
 {
     public string ShortDescription => "Search a project's Windows/WinRT API surface (types, members, enums)";
 
-    public static Argument<string?> QueryArgument { get; } = new("query")
+    public static Argument<string[]> QueryArgument { get; } = new("query")
     {
-        Description = "What to search for, e.g. \"acrylic brush\" or \"NavigationView\". Matched lexically against type and member names across the project's indexed API metadata.",
-        Arity = ArgumentArity.ZeroOrOne,
+        Description = "What to search for, e.g. \"acrylic brush\" or \"NavigationView\". Matched lexically against type and member names across the project's indexed API metadata. Pass several quoted queries to run them in a single call.",
+        Arity = ArgumentArity.ZeroOrMore,
     };
 
     public static Option<int> MaxOption { get; } = new("--max")
@@ -50,7 +51,7 @@ internal sealed class FindApiCommand : Command, IShortDescription
         FindApiStatsCommand statsCommand,
         FindApiProjectsCommand projectsCommand,
         FindApiRefreshCommand refreshCommand)
-        : base("find-api", "Search and inspect the Windows/WinRT API surface (types, members, enums, namespaces) available to a project, resolved from its referenced .winmd/.dll metadata. The bare form searches; sub-verbs drill into a specific type, namespace, or the index itself. The index is built from the project's restored NuGet/SDK packages and refreshed automatically when the project is restored.")
+        : base("find-api", "Search and inspect the Windows/WinRT API surface (types, members, enums) available to a project, resolved from its referenced .winmd/.dll metadata. The bare form searches; sub-verbs drill into a specific type or the index itself. Search, members, enums, and check-property each accept several subjects in one call — batch your lookups rather than issuing one call per question. The index is built from the project's restored NuGet/SDK packages and refreshed automatically when the project is restored.")
     {
         Arguments.Add(QueryArgument);
         Options.Add(MaxOption);
@@ -76,14 +77,14 @@ internal sealed class FindApiCommand : Command, IShortDescription
         private int Execute(ParseResult parseResult)
         {
             bool json = parseResult.GetValue(WinAppRootCommand.JsonOption);
-            string? query = parseResult.GetValue(QueryArgument);
+            List<string> queries = FindApiShared.ReadSubjects(parseResult.GetValue(QueryArgument));
 
-            if (string.IsNullOrWhiteSpace(query))
+            if (queries.Count == 0)
             {
                 return FindApiShared.Fail(
                     console,
                     json,
-                    "Provide a search query (e.g. winapp find-api \"acrylic brush\"), or use a sub-verb: members, check-property, types, enums, namespaces, packages, stats, projects, refresh.");
+                    "Provide a search query (e.g. winapp find-api \"acrylic brush\"), or use a sub-verb: members, check-property, enums, packages, stats, refresh.");
             }
 
             int max = parseResult.GetValue(MaxOption);
@@ -93,16 +94,38 @@ internal sealed class FindApiCommand : Command, IShortDescription
             }
 
             var scope = FindApiShared.ReadScope(parseResult, ProjectDirOption, ProjectOption);
-            var result = service.Search(query, max, scope);
 
-            return FindApiShared.Emit(
-                console, json, "search", result, WinAppJsonContext.Default.ApiSearchOutput,
-                data => FindApiShared.RenderSearch(console, data),
+            if (queries.Count == 1)
+            {
+                var single = service.Search(queries[0], max, scope);
+                return FindApiShared.Emit(
+                    console, json, "search", single, WinAppJsonContext.Default.ApiSearchOutput,
+                    data => FindApiShared.RenderSearch(console, data),
+                    data =>
+                    {
+                        bool hasHits = data.Results.Count > 0 || data.Ambiguous is { Count: > 0 };
+                        return (hasHits ? 0 : 1, data.Results.Count, hasHits);
+                    });
+            }
+
+            var results = queries.ConvertAll(q => (q, service.Search(q, max, scope)));
+            return FindApiShared.EmitBatch(
+                console, json, "search", results,
+                (ok, errors) => new ApiSearchBatchOutput
+                {
+                    Count = ok.Count,
+                    Results = ok,
+                    Errors = errors.Count > 0 ? errors : null,
+                },
+                WinAppJsonContext.Default.ApiSearchBatchOutput,
                 data =>
                 {
-                    bool hasHits = data.Results.Count > 0 || data.Ambiguous is { Count: > 0 };
-                    return (hasHits ? 0 : 1, data.Results.Count, hasHits);
-                });
+                    // Which query produced which block is not otherwise recoverable once
+                    // several are rendered back to back.
+                    console.MarkupLineInterpolated($"[grey]Query: {data.Query}[/]");
+                    FindApiShared.RenderSearch(console, data);
+                },
+                data => (data.Results.Count, data.Results.Count > 0 || data.Ambiguous is { Count: > 0 }));
         }
     }
 }

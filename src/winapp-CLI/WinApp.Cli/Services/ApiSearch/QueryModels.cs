@@ -63,6 +63,73 @@ internal static class ApiScopeNames
     public const string Sdk = "sdk";
 }
 
+// ---- batching ----
+//
+// Every verb accepts several subjects in one invocation (`members Button TextBox`,
+// `check-property Button Background Foreground`). This exists for cost, not
+// convenience: benchmark analysis showed the marginal token cost of a find-api call
+// is dominated by the conversation context re-sent on the turn that issues it, not
+// by the size of the payload returned. Verifying eight APIs in eight calls therefore
+// costs roughly eight times a single verification regardless of how small each
+// answer is, and shrinking individual payloads (the `--filter` approach) cannot fix
+// it. Collapsing N lookups into one turn is the only lever that does.
+//
+// A single subject keeps the original single-object payload so existing callers and
+// scripts are unaffected; the batch envelope appears only when more than one subject
+// is supplied.
+
+/// <summary>A subject in a batch that could not be answered, paired with why.</summary>
+internal sealed class ApiBatchError
+{
+    /// <summary>The subject as the caller supplied it (type name, property, or query).</summary>
+    public required string Subject { get; init; }
+
+    public required string Message { get; init; }
+}
+
+/// <summary>Envelope for a multi-subject <c>find-api "&lt;query&gt;" "&lt;query&gt;"</c>.</summary>
+internal sealed class ApiSearchBatchOutput
+{
+    public required int Count { get; init; }
+
+    public required List<ApiSearchOutput> Results { get; init; }
+
+    public List<ApiBatchError>? Errors { get; init; }
+}
+
+/// <summary>Envelope for a multi-type <c>find-api members</c>.</summary>
+internal sealed class ApiMembersBatchOutput
+{
+    public required int Count { get; init; }
+
+    public required List<ApiMembersOutput> Results { get; init; }
+
+    public List<ApiBatchError>? Errors { get; init; }
+}
+
+/// <summary>Envelope for a multi-type <c>find-api enums</c>.</summary>
+internal sealed class ApiEnumsBatchOutput
+{
+    public required int Count { get; init; }
+
+    public required List<ApiEnumsOutput> Results { get; init; }
+
+    public List<ApiBatchError>? Errors { get; init; }
+}
+
+/// <summary>Envelope for a multi-property <c>find-api check-property</c>.</summary>
+internal sealed class ApiCheckPropertyBatchOutput
+{
+    public required int Count { get; init; }
+
+    /// <summary>Number of subjects that did NOT resolve — the count worth acting on.</summary>
+    public required int MissingCount { get; init; }
+
+    public required List<ApiCheckPropertyOutput> Results { get; init; }
+
+    public List<ApiBatchError>? Errors { get; init; }
+}
+
 // ---- search ----
 
 /// <summary>A single ranked type/member hit within a namespace group.</summary>

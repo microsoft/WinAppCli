@@ -761,18 +761,17 @@
       }
     },
     "find-api": {
-      "description": "Search and inspect the Windows/WinRT API surface (types, members, enums, namespaces) available to a project, resolved from its referenced .winmd/.dll metadata. The bare form searches; sub-verbs drill into a specific type, namespace, or the index itself. The index is built from the project's restored NuGet/SDK packages and refreshed automatically when the project is restored.",
+      "description": "Search and inspect the Windows/WinRT API surface (types, members, enums) available to a project, resolved from its referenced .winmd/.dll metadata. The bare form searches; sub-verbs drill into a specific type or the index itself. Search, members, enums, and check-property each accept several subjects in one call — batch your lookups rather than issuing one call per question. The index is built from the project's restored NuGet/SDK packages and refreshed automatically when the project is restored.",
       "hidden": false,
       "arguments": {
         "query": {
-          "description": "What to search for, e.g. \"acrylic brush\" or \"NavigationView\". Matched lexically against type and member names across the project's indexed API metadata.",
+          "description": "What to search for, e.g. \"acrylic brush\" or \"NavigationView\". Matched lexically against type and member names across the project's indexed API metadata. Pass several quoted queries to run them in a single call.",
           "order": 0,
           "hidden": false,
-          "valueType": "System.String",
+          "valueType": "System.String[]",
           "hasDefaultValue": false,
           "arity": {
-            "minimum": 0,
-            "maximum": 1
+            "minimum": 0
           }
         }
       },
@@ -862,7 +861,7 @@
       },
       "subcommands": {
         "check-property": {
-          "description": "Validate that a property exists on a type before you write XAML/code against it. On a miss, suggests similar properties on the type, attached-property forms, and other types that declare the property. Exits non-zero when the property does not exist.",
+          "description": "Validate that one or more properties exist on a type before you write XAML/code against it. Pass several property names to check them in one call. On a miss, suggests similar properties on the type, attached-property forms, and other types that declare the property. Exits non-zero when any property does not exist.",
           "hidden": false,
           "arguments": {
             "type": {
@@ -877,14 +876,13 @@
               }
             },
             "property": {
-              "description": "The property name to validate on the type.",
+              "description": "One or more property names to validate on the type. Pass several to check them all in a single call.",
               "order": 1,
               "hidden": false,
-              "valueType": "System.String",
+              "valueType": "System.String[]",
               "hasDefaultValue": false,
               "arity": {
-                "minimum": 0,
-                "maximum": 1
+                "minimum": 0
               }
             }
           },
@@ -961,24 +959,23 @@
           }
         },
         "enums": {
-          "description": "List the values of an enum type. Exits non-zero when the type exists but is not an enum.",
+          "description": "List the values of one or more enum types. Pass several type names to list them in one call. Exits non-zero when a type exists but is not an enum.",
           "hidden": false,
           "arguments": {
             "type": {
-              "description": "The enum type to list, e.g. Symbol or Microsoft.UI.Xaml.Controls.Symbol.",
+              "description": "One or more enum types to list, e.g. Symbol or Microsoft.UI.Xaml.Controls.Symbol. Pass several to list them in a single call.",
               "order": 0,
               "hidden": false,
-              "valueType": "System.String",
+              "valueType": "System.String[]",
               "hasDefaultValue": false,
               "arity": {
-                "minimum": 0,
-                "maximum": 1
+                "minimum": 0
               }
             }
           },
           "options": {
             "--filter": {
-              "description": "Only list values whose name contains this text (case-insensitive), e.g. --filter folder. The unfiltered total is still reported.",
+              "description": "Only list values whose name contains this text (case-insensitive), e.g. --filter folder. The unfiltered total is still reported. Prefer listing the whole enum once over repeated filtered calls — most enums are small enough that the full list is cheaper than several narrowed lookups.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,
@@ -1061,111 +1058,23 @@
           }
         },
         "members": {
-          "description": "List the properties, events, and methods of a type (with XML-doc descriptions and inherited members), resolved from the project's indexed API metadata.",
+          "description": "List the properties, events, and methods of one or more types (with XML-doc descriptions and inherited members), resolved from the project's indexed API metadata. Pass several type names to inspect them all in one call.",
           "hidden": false,
           "arguments": {
             "type": {
-              "description": "The type to inspect. Accepts a short name (NavigationView) or a fully-qualified name (Microsoft.UI.Xaml.Controls.NavigationView).",
+              "description": "One or more types to inspect. Accepts short names (NavigationView) or fully-qualified names (Microsoft.UI.Xaml.Controls.NavigationView). Pass several to resolve them in a single call.",
               "order": 0,
               "hidden": false,
-              "valueType": "System.String",
+              "valueType": "System.String[]",
               "hasDefaultValue": false,
               "arity": {
-                "minimum": 0,
-                "maximum": 1
+                "minimum": 0
               }
             }
           },
           "options": {
             "--filter": {
-              "description": "Only list members whose name contains this text (case-insensitive), e.g. --filter background. Totals for the unfiltered type are still reported.",
-              "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--json": {
-              "description": "Format output as JSON",
-              "hidden": false,
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--project": {
-              "description": "Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project.",
-              "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--project-dir": {
-              "description": "Project directory to query (defaults to the current directory). Used to locate the indexed project.",
-              "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--quiet": {
-              "description": "Suppress progress messages",
-              "hidden": false,
-              "aliases": [
-                "-q"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--verbose": {
-              "description": "Enable verbose output",
-              "hidden": false,
-              "aliases": [
-                "-v"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            }
-          }
-        },
-        "namespaces": {
-          "description": "List the namespaces available to the project across its indexed API metadata, optionally filtered by prefix.",
-          "hidden": false,
-          "options": {
-            "--filter": {
-              "description": "Only list namespaces starting with this prefix, e.g. --filter Microsoft.UI.",
+              "description": "Only list members whose name contains this text (case-insensitive), e.g. --filter background. Totals for the unfiltered type are still reported. Applies to every type in the call.",
               "hidden": false,
               "valueType": "System.String",
               "hasDefaultValue": false,
@@ -1322,57 +1231,6 @@
             }
           }
         },
-        "projects": {
-          "description": "List every project that currently has an API index in the shared cache, with the number of packages indexed for each.",
-          "hidden": false,
-          "options": {
-            "--json": {
-              "description": "Format output as JSON",
-              "hidden": false,
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--quiet": {
-              "description": "Suppress progress messages",
-              "hidden": false,
-              "aliases": [
-                "-q"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--verbose": {
-              "description": "Enable verbose output",
-              "hidden": false,
-              "aliases": [
-                "-v"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            }
-          }
-        },
         "refresh": {
           "description": "Rebuild the API metadata index for a project from its restored packages. Runs automatically when a project is restored; run it manually to force a re-index or to index a project for the first time.",
           "hidden": false,
@@ -1464,94 +1322,6 @@
         "stats": {
           "description": "Show aggregate statistics for a project's API index: package, namespace, type, member, and .winmd file counts.",
           "hidden": false,
-          "options": {
-            "--json": {
-              "description": "Format output as JSON",
-              "hidden": false,
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--project": {
-              "description": "Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project.",
-              "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--project-dir": {
-              "description": "Project directory to query (defaults to the current directory). Used to locate the indexed project.",
-              "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 1,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--quiet": {
-              "description": "Suppress progress messages",
-              "hidden": false,
-              "aliases": [
-                "-q"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            },
-            "--verbose": {
-              "description": "Enable verbose output",
-              "hidden": false,
-              "aliases": [
-                "-v"
-              ],
-              "valueType": "System.Boolean",
-              "hasDefaultValue": true,
-              "defaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              },
-              "required": false,
-              "recursive": false
-            }
-          }
-        },
-        "types": {
-          "description": "List the types declared in a namespace (class/struct/enum/interface/delegate) with their base types.",
-          "hidden": false,
-          "arguments": {
-            "namespace": {
-              "description": "The namespace to list, e.g. Microsoft.UI.Xaml.Controls.",
-              "order": 0,
-              "hidden": false,
-              "valueType": "System.String",
-              "hasDefaultValue": false,
-              "arity": {
-                "minimum": 0,
-                "maximum": 1
-              }
-            }
-          },
           "options": {
             "--json": {
               "description": "Format output as JSON",
