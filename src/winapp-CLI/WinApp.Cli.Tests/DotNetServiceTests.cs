@@ -1948,8 +1948,8 @@ public class DotNetServiceTests : BaseCommandTests
     [TestMethod]
     public async Task WaitForPidFile_PopulatedFile_ReturnsThePid()
     {
-        // The straightforward success path, kept as its own test because the two failure-mode tests
-        // below both assert timeouts. Without this, nothing at unit level proves a readable file is
+        // The straightforward success path, kept as its own test because every other test in this
+        // region asserts a timeout. Without this, nothing at unit level proves a readable file is
         // actually parsed -- only the tree-kill test does, and it exercises the whole launcher.
         var pidFile = Path.Join(_tempDirectory.FullName, $"populated_{Guid.NewGuid():N}.pid");
         await File.WriteAllTextAsync(pidFile, "4242", TestContext.CancellationToken);
