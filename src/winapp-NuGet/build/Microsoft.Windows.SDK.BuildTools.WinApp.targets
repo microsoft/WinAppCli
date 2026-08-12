@@ -223,7 +223,18 @@
       <_WinAppRunArgs Condition="'$(WinAppRunUseExecutionAlias)' == 'true'">$(_WinAppRunArgs) --with-alias</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppRunNoLaunch)' == 'true'">$(_WinAppRunArgs) --no-launch</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppRunDebugOutput)' == 'true'">$(_WinAppRunArgs) --debug-output</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppRunDetach)' == 'true'">$(_WinAppRunArgs) --detach</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppRunUnregisterOnExit)' == 'true'">$(_WinAppRunArgs) --unregister-on-exit</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppRunClean)' == 'true'">$(_WinAppRunArgs) --clean</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppRunSymbols)' == 'true'">$(_WinAppRunArgs) --symbols</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppRunExecutable)' != ''">$(_WinAppRunArgs) --executable "$(WinAppRunExecutable)"</_WinAppRunArgs>
       <_WinAppRunArgs>$(_WinAppRunArgs) --caller nuget-package</_WinAppRunArgs>
+      <!--
+        WinAppRunArgs is appended last so it lands after every property-derived switch,
+        matching the position AdditionalOptions occupies in other toolsets. It is the
+        escape hatch for options with no dedicated property, such as the verbose switch.
+      -->
+      <_WinAppRunArgs Condition="'$(WinAppRunArgs)' != ''">$(_WinAppRunArgs) $(WinAppRunArgs)</_WinAppRunArgs>
     </PropertyGroup>
   </Target>
 
