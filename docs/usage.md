@@ -1126,9 +1126,9 @@ Build tools are downloaded from NuGet and then executed, so winapp checks each o
 'mt.exe' is not validly signed by Microsoft, so it was not run (C:\...\mt.exe).
 ```
 
-The one known case is `Microsoft.Windows.SDK.BuildTools` **10.0.19041.1**, which shipped several auxiliary binaries without a signature. That version is unlisted on NuGet, so a normal restore will not select it.
+A failure here means the file on disk is not what Microsoft published — most often a corrupt or partial download. Delete the package from the NuGet cache and run the command again so winapp re-downloads it.
 
-A failure here therefore means the file on disk is not what Microsoft published — most often a corrupt or partial download. Delete the package from the NuGet cache and run the command again so winapp re-downloads it. Treat a repeated failure as a real problem with the file rather than something to work around.
+The one exception is an explicit pin to `Microsoft.Windows.SDK.BuildTools` **10.0.19041.1**, which genuinely shipped some auxiliary binaries unsigned. Re-downloading will not help there — move to a newer version instead. That release is unlisted, so only a `winapp.yaml` that pinned it before it was pulled can still reach it.
 
 ---
 
