@@ -144,7 +144,7 @@ module.exports = {
 ```
 
 > [!IMPORTANT]
-> `forge.config.js` is normally committed to source control, so never put a real signing certificate's password in it. The `password` default above only makes sense because `devcert.pfx` is a throwaway development certificate. For production signing, keep the certificate and its password in your CI secret store — or use Azure Trusted Signing, which has no password at all. See [Security guidance](../security.md).
+> `forge.config.js` is normally committed to source control, so never put a real signing certificate's password in it. The `password` default above only makes sense because `devcert.pfx` is a throwaway development certificate. For production signing, keep the certificate and its password in your CI secret store — or use Azure Trusted Signing, which has no password at all. See [Security guidance](../../security.md).
 
 #### Update Package.appxmanifest
 

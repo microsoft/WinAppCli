@@ -36,7 +36,7 @@ With `--export-cer`, it also writes a `.cer` file next to the `.pfx`. That file 
 
 ### The default password
 
-`winapp cert generate` uses `password` as the PFX password unless you pass `--password`. The same default applies to [`winapp sign --cert-password`](usage.md#sign) and [`winapp pack`](usage.md#pack).
+`winapp cert generate` uses `password` as the PFX password unless you pass `--password`. The same default applies when you later supply that certificate to [`winapp sign`](usage.md#sign), whose password option is also `--password`, and to [`winapp pack`](usage.md#pack), which takes `--cert-password`.
 
 A well-known password means the private key in `devcert.pfx` is effectively unprotected — anyone who obtains the file can sign code with it. That is an acceptable trade-off for a throwaway certificate that only ever signs local test builds on your own machine, and it is why the default exists.
 
@@ -95,14 +95,23 @@ Get-ChildItem Cert:\LocalMachine\TrustedPeople |
     Format-List Subject, Thumbprint, NotAfter
 ```
 
-Then remove it from the machine trust store, and from your personal store where `cert generate` also placed it:
+Then remove it from the machine trust store. This step needs elevation:
 
 ```powershell
 # Run as Administrator. Replace with the thumbprint from the previous command.
 $thumbprint = 'ABCD...'
 Remove-Item -Path "Cert:\LocalMachine\TrustedPeople\$thumbprint"
+```
+
+`cert generate` also placed the certificate, along with its private key, in your personal store. Remove that from a **normal, non-elevated prompt, signed in as the account that ran `cert generate`**:
+
+```powershell
+$thumbprint = 'ABCD...'
 Remove-Item -Path "Cert:\CurrentUser\My\$thumbprint"
 ```
+
+> [!IMPORTANT]
+> Run the two commands above in the contexts shown. If you elevated using a different administrator account, `Cert:\CurrentUser` in that elevated session is that administrator's store — not yours — so the private key would be left behind in the generating user's store.
 
 Finally, delete the `.pfx` and any `.cer` copies you handed out, and unregister packages you sideloaded with it:
 
@@ -139,7 +148,7 @@ Practically, this means the machine will:
 
 ### Controlling when it is enabled
 
-`winapp init` prompts before touching anything, and skips the prompt entirely — leaving Developer Mode unchanged — when run non-interactively or with `--use-defaults` / `--no-prompt`. That makes CI runs safe by default:
+`winapp init` asks before changing anything, and `--use-defaults` skips the question entirely, leaving Developer Mode untouched. That makes scripted and CI runs safe by default:
 
 ```powershell
 winapp init --use-defaults
@@ -170,7 +179,7 @@ A development certificate only works for people who have explicitly trusted it. 
   winapp az-sign .\MyApp.msix
   ```
 
-- **A code-signing certificate from a trusted certificate authority** — use [`winapp sign`](usage.md#sign) with `--cert` and `--cert-password`. You are then responsible for storing the key material safely; keep it in a hardware token, a key vault, or your CI provider's secret store, and never in the repository.
+- **A code-signing certificate from a trusted certificate authority** — pass it to [`winapp sign`](usage.md#sign) as the second positional argument, with its password in `--password`. You are then responsible for storing the key material safely; keep it in a hardware token, a key vault, or your CI provider's secret store, and never in the repository.
 
 - **The Microsoft Store** — if you distribute exclusively through the Store, it signs the package for you and you do not need to sign before submission.
 
@@ -181,7 +190,7 @@ In every case the certificate subject must match the `Publisher` value in your m
 Certificate passwords belong in your CI secret store, not in a config file. Read them from the environment instead of hard-coding them:
 
 ```powershell
-winapp sign .\MyApp.msix --cert $env:SIGNING_CERT_PATH --cert-password $env:SIGNING_CERT_PASSWORD
+winapp sign .\MyApp.msix $env:SIGNING_CERT_PATH --password $env:SIGNING_CERT_PASSWORD
 ```
 
 The same applies to build configuration checked into source control, such as an Electron Forge config — see [Electron packaging](guides/electron/packaging.md). `winapp az-sign` avoids the problem entirely, because there is no password to pass.
