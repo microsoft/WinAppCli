@@ -56,6 +56,48 @@
       Use WinAppRunNoLaunch instead if you need to attach a different debugger.
     -->
     <WinAppRunDebugOutput Condition="'$(WinAppRunDebugOutput)' == ''">false</WinAppRunDebugOutput>
+
+    <!--
+      When true, return immediately after launching the application instead of
+      waiting for it to exit. The PID is printed to stdout.
+    -->
+    <WinAppRunDetach Condition="'$(WinAppRunDetach)' == ''">false</WinAppRunDetach>
+
+    <!--
+      When true, unregister the development package after the application exits.
+      Only removes packages that were registered in development mode.
+    -->
+    <WinAppRunUnregisterOnExit Condition="'$(WinAppRunUnregisterOnExit)' == ''">false</WinAppRunUnregisterOnExit>
+
+    <!--
+      When true, remove the existing package's application data (LocalState, settings,
+      and so on) before re-deploying. Application data is preserved by default.
+    -->
+    <WinAppRunClean Condition="'$(WinAppRunClean)' == ''">false</WinAppRunClean>
+
+    <!--
+      When true, download symbols from the Microsoft Symbol Server for richer native
+      crash analysis. Only has an effect together with WinAppRunDebugOutput.
+    -->
+    <WinAppRunSymbols Condition="'$(WinAppRunSymbols)' == ''">false</WinAppRunSymbols>
+
+    <!--
+      Path to the executable, relative to the build-output folder. Use to disambiguate
+      when the manifest contains a $targetnametoken$ placeholder and the output folder
+      contains more than one .exe.
+    -->
+    <WinAppRunExecutable Condition="'$(WinAppRunExecutable)' == ''"></WinAppRunExecutable>
+
+    <!--
+      Raw arguments appended to the winapp run command line, for options that have no
+      dedicated property above (the verbose switch, for example). Appended AFTER every
+      property above, following the same convention as AdditionalOptions in other toolsets.
+
+      Use this for options that have no property rather than to override one: winapp
+      rejects a scalar option supplied twice ("Option 'executable' expects a single
+      argument but 2 were provided") instead of letting the later value win.
+    -->
+    <WinAppRunArgs Condition="'$(WinAppRunArgs)' == ''"></WinAppRunArgs>
   </PropertyGroup>
 
 </Project>
