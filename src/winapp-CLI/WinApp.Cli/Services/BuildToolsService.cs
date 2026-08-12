@@ -25,6 +25,35 @@ internal partial class BuildToolsService(
     internal const string WINAPP_SDK_RUNTIME_PACKAGE = "Microsoft.WindowsAppSDK.Runtime";
 
     /// <summary>
+    /// Authenticode gate applied to every build tool before it is executed. Defaults to the real
+    /// verifier; tests override it because their fixtures stand in dummy unsigned files for the
+    /// real SDK binaries.
+    /// </summary>
+    internal static Func<string, ILogger, bool> SignatureVerifier { get; set; } = AuthenticodeVerifier.IsTrustedMicrosoftSigned;
+
+    /// <summary>
+    /// Throws unless <paramref name="toolPath"/> carries a valid Authenticode signature from
+    /// Microsoft. These binaries are downloaded over the network and then executed, so they are
+    /// verified at the point of use — which also covers <c>winapp tool</c>, where the executable
+    /// name comes from the user.
+    /// </summary>
+    private void VerifyToolIsMicrosoftSigned(FileInfo toolPath)
+    {
+        // Deliberately not memoized. Any cache key cheap enough to compute here — path, length,
+        // last-write time — is metadata that whoever can replace the file can also reproduce, so a
+        // cached "signed" verdict could be inherited by different bytes.
+        if (SignatureVerifier(toolPath.FullName, logger))
+        {
+            return;
+        }
+
+        throw new BuildToolSignatureException(
+            $"'{toolPath.Name}' is not validly signed by Microsoft, so it was not run ({toolPath.FullName}). " +
+            "The file on disk is not what Microsoft published, which usually means a corrupt or partial " +
+            "download. Delete the package from the NuGet cache and run the command again to re-download it.");
+    }
+
+    /// <summary>
     /// Find the architecture-specific bin path within a package in the NuGet global packages
     /// cache (layout: {cache}/{lowercase-id}/{version}/{subPath}/{sdk-version}/{arch}).
     /// Resolves the pinned version (from winapp.yaml or the project's .csproj) when available,
@@ -228,6 +257,8 @@ internal partial class BuildToolsService(
             throw new FileNotFoundException($"Could not find '{actualToolName}' in the Windows SDK Build Tools.");
         }
 
+        VerifyToolIsMicrosoftSigned(toolPath);
+
         return toolPath;
     }
 
@@ -308,6 +339,10 @@ internal partial class BuildToolsService(
         // signtool), otherwise ensure the build tool is available, installing BuildTools if necessary.
         var toolPath = toolPathOverride
             ?? await EnsureBuildToolAvailableAsync(tool.ExecutableName, taskContext, cancellationToken: cancellationToken);
+
+        // Re-checked here because callers may supply an override that never went through
+        // resolution (the architecture-matched signtool). Memoized, so this is not a second scan.
+        VerifyToolIsMicrosoftSigned(toolPath);
 
         var psi = new ProcessStartInfo
         {
