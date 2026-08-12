@@ -43,7 +43,7 @@ Describe "Rust App Sample" {
         It "Should create a new Rust project" -Skip:$script:skip {
             Push-Location $script:tempDir
             try {
-                Invoke-Expression "cargo new test-rust-app"
+                cargo new test-rust-app
                 $LASTEXITCODE | Should -Be 0
                 $script:rustProjectDir = Join-Path $script:tempDir "test-rust-app"
                 $script:rustProjectDir | Should -Exist
@@ -71,7 +71,7 @@ Describe "Rust App Sample" {
         It "Should build Rust app in debug mode" -Skip:$script:skip {
             Push-Location $script:rustProjectDir
             try {
-                Invoke-Expression "cargo build"
+                cargo build
                 $LASTEXITCODE | Should -Be 0
             } finally { Pop-Location }
         }
@@ -107,7 +107,7 @@ Describe "Rust App Sample" {
         It "Should build Rust app in release mode" -Skip:$script:skip {
             Push-Location $script:rustProjectDir
             try {
-                Invoke-Expression "cargo build --release"
+                cargo build --release
                 $LASTEXITCODE | Should -Be 0
             } finally { Pop-Location }
         }
@@ -160,7 +160,7 @@ Describe "Rust App Sample" {
         It "Should build existing sample with cargo" -Skip:$script:skip {
             Push-Location $script:sampleDir
             try {
-                Invoke-Expression "cargo build"
+                cargo build
                 $LASTEXITCODE | Should -Be 0
             } finally { Pop-Location }
         }

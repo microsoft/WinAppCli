@@ -52,7 +52,7 @@ Describe 'sparse-app sample' {
                 $script:tempDir = New-TempTestDirectory -Prefix 'sparse-guide'
                 Push-Location $script:tempDir
 
-                Invoke-Expression 'dotnet new wpf -n test-sparse-app'
+                dotnet new wpf -n test-sparse-app
                 $script:dotnetNewExit = $LASTEXITCODE
 
                 if ($script:dotnetNewExit -eq 0) {
@@ -73,7 +73,7 @@ Describe 'sparse-app sample' {
         }
 
         It 'Builds the app in Debug mode' -Skip:$script:skip {
-            Invoke-Expression 'dotnet build -c Debug'
+            dotnet build -c Debug
             $LASTEXITCODE | Should -Be 0
         }
 
@@ -139,12 +139,12 @@ Describe 'sparse-app sample' {
         }
 
         It 'Restores NuGet packages' -Skip:$script:skip {
-            Invoke-Expression 'dotnet restore'
+            dotnet restore
             $LASTEXITCODE | Should -Be 0
         }
 
         It 'Builds the existing sample in Debug mode' -Skip:$script:skip {
-            Invoke-Expression 'dotnet build -c Debug'
+            dotnet build -c Debug
             $LASTEXITCODE | Should -Be 0
         }
 
@@ -158,7 +158,7 @@ Describe 'sparse-app sample' {
         It 'Compiles the Inno Setup installer script (ISCC)' -Skip:$script:skipIscc {
             # Publish framework-dependent so the installer's [Files] publish glob resolves,
             # then compile the checked-in installer to catch syntax/path regressions.
-            Invoke-Expression 'dotnet publish -c Release -r win-x64 --self-contained false'
+            dotnet publish -c Release -r win-x64 --self-contained false
             $LASTEXITCODE | Should -Be 0
             'SparseAppSample.identity.msix' | Should -Exist
 

@@ -56,7 +56,7 @@ Describe "Tauri App Sample" {
         It "Should install npm dependencies" -Skip:$script:skip {
             Push-Location $script:tempApp
             try {
-                Invoke-Expression "npm install"
+                npm install
                 $LASTEXITCODE | Should -Be 0
             } finally { Pop-Location }
         }
@@ -76,7 +76,7 @@ Describe "Tauri App Sample" {
         It "Should build Tauri app in debug mode" -Skip:$script:skip {
             Push-Location $script:tempApp
             try {
-                Invoke-Expression "cargo build --manifest-path src-tauri\Cargo.toml"
+                cargo build --manifest-path src-tauri\Cargo.toml
                 $LASTEXITCODE | Should -Be 0
             } finally { Pop-Location }
         }
@@ -94,7 +94,7 @@ Describe "Tauri App Sample" {
         It "Should build Tauri app in release mode" -Skip:$script:skip {
             Push-Location $script:tempApp
             try {
-                Invoke-Expression "cargo build --release --manifest-path src-tauri\Cargo.toml"
+                cargo build --release --manifest-path src-tauri\Cargo.toml
                 $LASTEXITCODE | Should -Be 0
             } finally { Pop-Location }
         }
@@ -143,7 +143,7 @@ Describe "Tauri App Sample" {
         It "Should install sample npm dependencies" -Skip:$script:skip {
             Push-Location $script:sampleDir
             try {
-                Invoke-Expression "npm install"
+                npm install
                 $LASTEXITCODE | Should -Be 0
             } finally { Pop-Location }
         }
@@ -151,7 +151,7 @@ Describe "Tauri App Sample" {
         It "Should build sample Rust backend" -Skip:$script:skip {
             Push-Location $script:sampleDir
             try {
-                Invoke-Expression "cargo build --manifest-path src-tauri\Cargo.toml"
+                cargo build --manifest-path src-tauri\Cargo.toml
                 $LASTEXITCODE | Should -Be 0
             } finally { Pop-Location }
         }
