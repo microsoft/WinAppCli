@@ -85,8 +85,7 @@ export function formatJsBindingsImportsHints(result: EnsureJsBindingsImportsResu
 }
 
 export type JsBindingsImportsHintInput =
-  | { kind: 'configured'; result: EnsureJsBindingsImportsResult }
-  | { kind: 'unsupported' };
+  { kind: 'configured'; result: EnsureJsBindingsImportsResult } | { kind: 'unsupported' };
 
 /** Build the hint lines `handleInit` should emit for the `#winapp/bindings` imports map.
  *  Pure so quiet/json gating can be tested without mutating package.json. */

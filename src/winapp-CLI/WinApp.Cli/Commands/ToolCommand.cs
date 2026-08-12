@@ -87,6 +87,11 @@ internal class ToolCommand : Command, IShortDescription
                                "Usage: winapp tool [--quiet] <command> [args...]" + Environment.NewLine +
                                "Example: winapp tool makeappx.exe pack /o /d \"./msix\" /nv /p \"./dist/app.msix\"");
                 }
+                catch (BuildToolSignatureException ex)
+                {
+                    // The tool was found; it was refused. Do not claim it is missing.
+                    return (1, ex.Message);
+                }
                 catch (InvalidOperationException ex)
                 {
                     return (1, "Could not install or find Windows SDK Build Tools." + Environment.NewLine +
