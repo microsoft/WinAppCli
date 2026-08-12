@@ -1128,8 +1128,6 @@ Build tools are downloaded from NuGet and then executed, so winapp checks each o
 
 A failure here means the file on disk is not what Microsoft published — most often a corrupt or partial download. Delete the package from the NuGet cache and run the command again so winapp re-downloads it.
 
-The one exception is an explicit pin to `Microsoft.Windows.SDK.BuildTools` **10.0.19041.1**, which genuinely shipped some auxiliary binaries unsigned. Re-downloading will not help there — move to a newer version instead. That release is unlisted, so only a `winapp.yaml` that pinned it before it was pulled can still reach it.
-
 ---
 
 ### store
