@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using WinApp.Cli.ConsoleTasks;
@@ -23,6 +24,38 @@ internal partial class BuildToolsService(
     internal const string CPP_SDK_PACKAGE = "Microsoft.Windows.SDK.CPP";
     internal const string WINAPP_SDK_PACKAGE = "Microsoft.WindowsAppSDK";
     internal const string WINAPP_SDK_RUNTIME_PACKAGE = "Microsoft.WindowsAppSDK.Runtime";
+
+    /// <summary>
+    /// Authenticode gate applied to every build tool before it is executed. Defaults to the real
+    /// verifier; tests override it because their fixtures stand in dummy unsigned files for the
+    /// real SDK binaries.
+    /// </summary>
+    internal static Func<string, ILogger, bool> SignatureVerifier { get; set; } = AuthenticodeVerifier.IsTrustedMicrosoftSigned;
+
+    // Keyed on file identity rather than path alone, so a replaced binary is re-verified.
+    private static readonly ConcurrentDictionary<string, bool> VerifiedTools = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Throws unless <paramref name="toolPath"/> carries a valid Authenticode signature from
+    /// Microsoft. These binaries are downloaded over the network and then executed, so they are
+    /// verified at the point of use — which also covers <c>winapp tool</c>, where the executable
+    /// name comes from the user.
+    /// </summary>
+    private void VerifyToolIsMicrosoftSigned(FileInfo toolPath)
+    {
+        toolPath.Refresh();
+        var key = $"{toolPath.FullName}|{toolPath.Length}|{toolPath.LastWriteTimeUtc.Ticks}";
+
+        if (VerifiedTools.GetOrAdd(key, _ => SignatureVerifier(toolPath.FullName, logger)))
+        {
+            return;
+        }
+
+        throw new BuildToolSignatureException(
+            $"'{toolPath.Name}' is not validly signed by Microsoft, so it was not run ({toolPath.FullName}). " +
+            $"Several auxiliary binaries in {BUILD_TOOLS_PACKAGE} 10.0.19041.1 shipped without a signature; " +
+            $"pin 10.0.22000.194 or newer in winapp.yaml to use them.");
+    }
 
     /// <summary>
     /// Find the architecture-specific bin path within a package in the NuGet global packages
@@ -228,6 +261,8 @@ internal partial class BuildToolsService(
             throw new FileNotFoundException($"Could not find '{actualToolName}' in the Windows SDK Build Tools.");
         }
 
+        VerifyToolIsMicrosoftSigned(toolPath);
+
         return toolPath;
     }
 
@@ -308,6 +343,10 @@ internal partial class BuildToolsService(
         // signtool), otherwise ensure the build tool is available, installing BuildTools if necessary.
         var toolPath = toolPathOverride
             ?? await EnsureBuildToolAvailableAsync(tool.ExecutableName, taskContext, cancellationToken: cancellationToken);
+
+        // Re-checked here because callers may supply an override that never went through
+        // resolution (the architecture-matched signtool). Memoized, so this is not a second scan.
+        VerifyToolIsMicrosoftSigned(toolPath);
 
         var psi = new ProcessStartInfo
         {

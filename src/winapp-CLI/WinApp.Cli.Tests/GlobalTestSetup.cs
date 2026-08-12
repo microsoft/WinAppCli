@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using WinApp.Cli.Services;
+
 namespace WinApp.Cli.Tests;
 
 /// <summary>
@@ -26,6 +28,12 @@ public static class GlobalTestSetup
         Environment.SetEnvironmentVariable("TERM_PROGRAM", "");
         Environment.SetEnvironmentVariable("VSCODE_PID", "");
         Environment.SetEnvironmentVariable("WT_SESSION", "");
+
+        // Fixtures stand in dummy unsigned files for the real SDK binaries, so the Authenticode
+        // gate on build tools is opened once here. Setting it per test would race: the seam is
+        // process-wide and tests run in parallel at method level.
+        // BuildToolsSignatureVerificationTests drives the gate directly and is [DoNotParallelize].
+        BuildToolsService.SignatureVerifier = static (_, _) => true;
     }
 
     /// <summary>
