@@ -68,7 +68,7 @@ public class BuildToolsSignatureVerificationTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task EnsureBuildToolAvailableAsync_WhenToolIsNotSigned_MessageNamesTheAffectedVersionAndRemedy()
+    public async Task EnsureBuildToolAvailableAsync_WhenToolIsNotSigned_MessageNamesTheToolAndTheRemedy()
     {
         BuildToolsService.SignatureVerifier = static (_, _) => false;
         var service = GetRequiredService<IBuildToolsService>();
@@ -76,10 +76,8 @@ public class BuildToolsSignatureVerificationTests : BaseCommandTests
         var ex = await Assert.ThrowsExactlyAsync<BuildToolSignatureException>(
             async () => await service.EnsureBuildToolAvailableAsync("mt.exe", TestTaskContext, TestContext.CancellationToken));
 
-        // The one known-unsigned release, and the first release that fixed it.
-        StringAssert.Contains(ex.Message, "10.0.19041.1");
-        StringAssert.Contains(ex.Message, "10.0.22000.194");
         StringAssert.Contains(ex.Message, "mt.exe");
+        StringAssert.Contains(ex.Message, "NuGet cache");
     }
 
     [TestMethod]

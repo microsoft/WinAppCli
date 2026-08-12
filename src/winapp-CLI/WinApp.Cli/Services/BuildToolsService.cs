@@ -49,8 +49,8 @@ internal partial class BuildToolsService(
 
         throw new BuildToolSignatureException(
             $"'{toolPath.Name}' is not validly signed by Microsoft, so it was not run ({toolPath.FullName}). " +
-            $"Several auxiliary binaries in {BUILD_TOOLS_PACKAGE} 10.0.19041.1 shipped without a signature; " +
-            $"pin 10.0.22000.194 or newer in winapp.yaml to use them.");
+            "The file on disk is not what Microsoft published, which usually means a corrupt or partial " +
+            "download. Delete the package from the NuGet cache and run the command again to re-download it.");
     }
 
     /// <summary>
