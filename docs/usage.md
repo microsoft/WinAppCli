@@ -806,6 +806,26 @@ When using the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, `dotnet 
 | `WinAppRunUseExecutionAlias` | `false` | Launch via execution alias instead of AUMID activation |
 | `WinAppRunNoLaunch` | `false` | Only register identity without launching |
 | `WinAppRunDebugOutput` | `false` | Capture `OutputDebugString` messages and first-chance exceptions. Only one debugger can attach at a time (prevents VS/VS Code). Use `WinAppRunNoLaunch` instead to attach a different debugger. |
+| `WinAppRunDetach` | `false` | Return immediately after launching instead of waiting for the app to exit. Prints the PID. |
+| `WinAppRunUnregisterOnExit` | `false` | Unregister the development package after the app exits |
+| `WinAppRunClean` | `false` | Remove the existing package's application data (LocalState, settings) before re-deploying |
+| `WinAppRunSymbols` | `false` | Download symbols from the Microsoft Symbol Server for richer native crash analysis. Only has an effect with `WinAppRunDebugOutput`. |
+| `WinAppRunExecutable` | (empty) | Executable path relative to the build-output folder. Use when the manifest contains `$targetnametoken$` and the output folder has more than one `.exe`. |
+| `WinAppRunArgs` | (empty) | Raw arguments appended to the `winapp run` command line, for options with no dedicated property (for example `--verbose`). Appended after every property above. |
+
+**Mutually exclusive settings.** `WinAppRunNoLaunch` and `WinAppRunDetach` each describe a different
+launch behavior, so they conflict with the other launch properties and with each other. Setting a
+conflicting pair fails the run with `--X and --Y cannot be used together`:
+
+| Property | Cannot be combined with |
+|----------|-------------------------|
+| `WinAppRunNoLaunch` | `WinAppRunDetach`, `WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, `WinAppRunUnregisterOnExit` |
+| `WinAppRunDetach` | `WinAppRunNoLaunch`, `WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, `WinAppRunUnregisterOnExit` |
+
+`WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, and `WinAppRunUnregisterOnExit` can be combined
+with each other. `WinAppRunClean`, `WinAppRunSymbols`, `WinAppRunExecutable`, and `WinAppLaunchArgs`
+have no restrictions. `WinAppRunArgs` adds no restriction of its own, but a switch passed through it
+is checked like any other, so `WinAppRunArgs="--detach"` still conflicts with `WinAppRunNoLaunch`.
 
 ```xml
 <PropertyGroup>
