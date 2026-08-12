@@ -107,8 +107,7 @@ export async function addElectronDebugIdentity(
       if (fsSync.existsSync(electronPackageJsonPath)) {
         try {
           installedVersion = JSON.parse(fsSync.readFileSync(electronPackageJsonPath, 'utf-8')).version as
-            | string
-            | undefined;
+            string | undefined;
         } catch {
           // Ignore errors reading package.json
         }
