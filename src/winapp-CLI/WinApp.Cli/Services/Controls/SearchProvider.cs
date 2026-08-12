@@ -8,6 +8,26 @@ using System.Text.Json;
 using WinApp.Cli.Helpers;
 
 /// <summary>
+/// Where a provider's loaded corpus actually came from. Surfaced so callers can tell a
+/// live result from the embedded floor — a stale-but-present corpus and a freshly
+/// fetched one are very different things to an agent reasoning about the answer.
+/// </summary>
+internal enum CorpusOrigin
+{
+    /// <summary>No corpus loaded.</summary>
+    None,
+
+    /// <summary>Served from the corpus baked into the binary (no network, no cache).</summary>
+    Embedded,
+
+    /// <summary>Served from this machine's previously fetched cache.</summary>
+    Cache,
+
+    /// <summary>Fetched from GitHub during this invocation.</summary>
+    Network
+}
+
+/// <summary>
 /// Data contributed by a search provider: its scenarios plus the per-control
 /// tag and keyword dictionaries. Tag/keyword keys are bare controlIds — the
 /// engine namespaces them by provider id (<c>{providerId}:{controlId}</c>).
@@ -15,10 +35,11 @@ using WinApp.Cli.Helpers;
 internal sealed record ProviderData(
     Scenario[] Scenarios,
     Dictionary<string, string[]> Tags,
-    Dictionary<string, string[]> Keywords)
+    Dictionary<string, string[]> Keywords,
+    CorpusOrigin Origin = CorpusOrigin.None)
 {
     public static ProviderData Empty { get; } =
-        new(Array.Empty<Scenario>(), new(), new());
+        new(Array.Empty<Scenario>(), new(), new(), CorpusOrigin.None);
 }
 
 /// <summary>
@@ -38,11 +59,10 @@ internal interface ISearchProvider
     string DisplayName { get; }
 
     /// <summary>
-    /// Load this provider's data. Serves the per-user cache when fresh; otherwise
-    /// fetches from GitHub (network required) and primes the cache. Unlike the
-    /// upstream tool, find-ui embeds no scenario snapshot, so a cold cache MUST
-    /// reach the network — callers surface a clear "run online once" error when
-    /// the fetch yields nothing. <paramref name="onFetchStarting"/> is invoked
+    /// Load this provider's data. Serves the per-user cache when fresh, otherwise
+    /// fetches from GitHub and primes the cache, and falls back to the corpus baked
+    /// into the binary when neither is available — so a cold cache with no network
+    /// still returns a usable corpus. <paramref name="onFetchStarting"/> is invoked
     /// (with <see cref="DisplayName"/>) immediately before a network fetch begins,
     /// so callers can show a one-time "fetching…" notice; a warm-cache load never
     /// invokes it.
@@ -55,10 +75,11 @@ internal interface ISearchProvider
 
 /// <summary>
 /// Boilerplate shared by every GitHub-backed provider: the on-disk cache
-/// protocol (schema-version stamp + 7-day TTL + atomic writes) and the
-/// fetch-on-cold-cache flow. Concrete providers only supply their identity and
-/// their GitHub fetch. The cache root is injected so it can live under the
-/// managed <c>.winapp</c> directory (and be redirected in tests).
+/// protocol (schema-version stamp + 7-day TTL + atomic writes), the fetch flow,
+/// and the embedded-snapshot floor that keeps the provider usable with no
+/// network. Concrete providers only supply their identity and their GitHub
+/// fetch. The cache root is injected so it can live under the managed
+/// <c>.winapp</c> directory (and be redirected in tests).
 /// </summary>
 internal abstract class CachedProviderBase : ISearchProvider
 {
@@ -90,13 +111,12 @@ internal abstract class CachedProviderBase : ISearchProvider
         if (!forceRefresh)
         {
             var cached = TryReadCache();
-            if (cached != null) return cached;
+            if (cached != null) return PreferNewerOf(cached.Value.Data, cached.Value.WrittenAt);
         }
 
-        // Cold/stale cache (or forced): no embedded snapshot exists, so fetch
-        // from GitHub. Treat a thrown transport/parse failure the same as an
-        // empty result so cold-cache offline surfaces the friendly "run online
-        // once" error and a forced refresh can fall back to the existing cache.
+        // Cold/stale cache (or forced): fetch from GitHub. Treat a thrown
+        // transport/parse failure the same as an empty result so an offline run falls
+        // through to the cache and then to the embedded snapshot rather than throwing.
         ProviderData fetched;
         try
         {
@@ -121,24 +141,54 @@ internal abstract class CachedProviderBase : ISearchProvider
         if (fetched.Scenarios.Length > 0)
         {
             await TryWriteCacheAsync(fetched, cancellationToken).ConfigureAwait(false);
-            return fetched;
+            return fetched with { Origin = CorpusOrigin.Network };
         }
 
-        // Fetch failed (offline / upstream error). Fall back to any existing cache
-        // rather than dropping the provider entirely — a stale corpus beats no
-        // corpus. Ignore the TTL here: the whole point of the fallback is to serve
-        // data that is (by definition) past its freshness window when the network is
-        // unreachable. This applies whether the refresh was forced OR a normal load
-        // whose cache simply aged out past the TTL — otherwise an offline user loses
-        // find-ui seven days after their last successful fetch. A cold or
-        // schema-incompatible cache still returns null, so the caller surfaces the
-        // "connect and run once" error only when there is genuinely nothing cached.
+        // Fetch failed (offline / proxy / upstream error). Fall back to any existing
+        // cache rather than dropping the provider — a stale corpus beats no corpus.
+        // Ignore the TTL here: the whole point of the fallback is to serve data that is
+        // (by definition) past its freshness window when the network is unreachable.
         var staleCached = TryReadCache(ignoreTtl: true);
-        if (staleCached != null) return staleCached;
-        return ProviderData.Empty;
+        if (staleCached != null) return PreferNewerOf(staleCached.Value.Data, staleCached.Value.WrittenAt);
+
+        // Nothing on disk either. The corpus baked into the binary is the floor that
+        // keeps find-ui working in the environment it is built for: agent sandboxes and
+        // corporate networks where raw.githubusercontent.com is filtered, where every
+        // path above fails on a first run.
+        return LoadEmbedded() ?? ProviderData.Empty;
     }
 
-    private ProviderData? TryReadCache(bool ignoreTtl = false)
+    /// <summary>
+    /// The embedded snapshot for this provider, with the provider's own read-side tag
+    /// normalization applied so it is indistinguishable from a cache read. Baked tags are
+    /// already written clean, so this is idempotent — it exists so a provider that changes
+    /// its normalization can't have the snapshot silently diverge from every other path.
+    /// </summary>
+    private ProviderData? LoadEmbedded()
+    {
+        var snapshot = EmbeddedSnapshot.TryLoad(Id);
+        return snapshot is null ? null : snapshot with { Tags = NormalizeTagsOnRead(snapshot.Tags) };
+    }
+
+    /// <summary>
+    /// Choose between a cache read and the embedded snapshot by which one pulled from
+    /// upstream more recently. Both timestamps mean the same thing, so they compare
+    /// directly. This matters on upgrade: a newly installed binary can carry a corpus
+    /// baked more recently than this machine last fetched, and without the comparison
+    /// the TTL would pin the older cached copy for up to a week.
+    /// </summary>
+    private ProviderData PreferNewerOf(ProviderData cached, DateTime cacheWrittenAt)
+    {
+        var bakedAt = EmbeddedSnapshot.BakedAtUtc;
+        if (bakedAt is null || bakedAt <= cacheWrittenAt)
+        {
+            return cached;
+        }
+
+        return LoadEmbedded() ?? cached;
+    }
+
+    private (ProviderData Data, DateTime WrittenAt)? TryReadCache(bool ignoreTtl = false)
     {
         var scenariosPath = Path.Combine(CacheDir, "scenarios.json");
         var tagsPath = Path.Combine(CacheDir, "tags.json");
@@ -178,7 +228,8 @@ internal abstract class CachedProviderBase : ISearchProvider
                 catch { keywords = null; }
             }
 
-            return new ProviderData(scenarios, NormalizeTagsOnRead(tags), keywords ?? new());
+            return (new ProviderData(scenarios, NormalizeTagsOnRead(tags), keywords ?? new(), CorpusOrigin.Cache),
+                    lastUpdated.Value);
         }
         catch { return null; }
     }

@@ -94,13 +94,19 @@ winapp find-ui "color picker" --json
   a `reactor-<control>-<n>` `--id` still fetches even without the flag. Skipping
   Reactor by default keeps its C#-only samples from outranking usable controls in
   a standard XAML app.
-- **Core patterns work offline.** `--source core` (and an all-core `--id`) search
-  the built-in patterns without any network access or fetch notice. Only the
-  Gallery/Toolkit/Reactor corpus is fetched from GitHub on first use and cached
-  per-user under `<global .winapp>/cache/find-ui`. Subsequent runs are served from
-  the cache (refreshed at most every 7 days, or on demand with `--refresh`). If the
-  very first Gallery/Toolkit/Reactor run is offline you'll get a clear "connect and
-  run once" message.
+- **Everything works offline.** The Gallery/Toolkit/Reactor corpus ships inside the
+  CLI, so search, `--list`, and `--id` all work with no network access — including
+  on a first run in a sandbox or behind a proxy that blocks
+  `raw.githubusercontent.com`. When GitHub is reachable the CLI refreshes from it
+  and caches per-user under `<global .winapp>/cache/find-ui` (refreshed at most
+  every 7 days, or on demand with `--refresh`); the built-in corpus is a floor,
+  never a ceiling, so live data always wins. `--source core` searches the curated
+  built-in patterns and never touches the network at all.
+- **Check the corpus provenance when it matters.** `--json` carries `"corpus"`:
+  `"network"` (fetched this run), `"cache"` (this machine's earlier fetch), or
+  `"embedded"` (built into the CLI because GitHub was unreachable). Only
+  `"embedded"` may lag upstream — re-run with `--refresh` once online if a sample
+  looks out of date.
 - **Scenario ids** are stable within a cached corpus and **case-insensitive** —
   `GALLERY-TABVIEW-1` resolves the same as `gallery-tabview-1`. Gallery/Toolkit/Reactor ids
   look like `gallery-<control>-<n>` / `toolkit-<control>-<n>` /

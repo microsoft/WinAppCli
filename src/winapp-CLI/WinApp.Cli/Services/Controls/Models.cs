@@ -9,7 +9,50 @@ using System.Text.Json.Serialization;
 [JsonSerializable(typeof(CorePattern[]))]
 [JsonSerializable(typeof(Dictionary<string, string[]>))]
 [JsonSerializable(typeof(DocLink[]))]
+[JsonSerializable(typeof(ProviderSnapshot))]
+[JsonSerializable(typeof(SnapshotManifest))]
 internal partial class ControlsJsonContext : JsonSerializerContext { }
+
+/// <summary>
+/// Write-side context for baked snapshots: indented so the committed corpus produces a
+/// reviewable line-by-line diff instead of one unreadable mega-line. Reading goes through
+/// <see cref="ControlsJsonContext"/>; only <c>--bake</c> uses this.
+/// </summary>
+[JsonSourceGenerationOptions(WriteIndented = true)]
+[JsonSerializable(typeof(ProviderSnapshot))]
+[JsonSerializable(typeof(SnapshotManifest))]
+internal partial class ControlsSnapshotWriteContext : JsonSerializerContext { }
+
+/// <summary>
+/// One provider's baked corpus, as committed under <c>Services/Controls/Data</c>
+/// and embedded (Brotli-compressed) in the binary. Mirrors <see cref="ProviderData"/>
+/// but as a single self-describing document rather than the three loose files the
+/// per-user cache writes, so the embedded floor is one resource per provider.
+///
+/// The dictionaries are sorted rather than hashed so a re-bake of unchanged upstream
+/// content is byte-identical. Without that, every bake would emit a reordered file and
+/// the drift check could not tell a real corpus change from serialization noise.
+/// </summary>
+internal sealed class ProviderSnapshot
+{
+    [JsonPropertyName("scenarios")] public Scenario[] Scenarios { get; set; } = [];
+    [JsonPropertyName("tags")] public SortedDictionary<string, string[]> Tags { get; set; } = new(StringComparer.Ordinal);
+    [JsonPropertyName("keywords")] public SortedDictionary<string, string[]> Keywords { get; set; } = new(StringComparer.Ordinal);
+}
+
+/// <summary>
+/// Metadata for the embedded snapshot set. <see cref="BakedAtUtc"/> is the moment the
+/// corpus was pulled from upstream — directly comparable with the per-user cache's
+/// <c>last-updated.txt</c>, which is what lets a freshly-installed binary prefer its
+/// own snapshot over an older on-disk cache. <see cref="CacheVersion"/> pins the
+/// parse/extraction logic the snapshot was produced by.
+/// </summary>
+internal sealed class SnapshotManifest
+{
+    [JsonPropertyName("bakedAtUtc")] public DateTime BakedAtUtc { get; set; }
+    [JsonPropertyName("cacheVersion")] public string CacheVersion { get; set; } = "";
+    [JsonPropertyName("scenarioCounts")] public SortedDictionary<string, int> ScenarioCounts { get; set; } = new(StringComparer.Ordinal);
+}
 
 internal sealed class Scenario
 {

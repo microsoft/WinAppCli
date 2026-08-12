@@ -141,11 +141,16 @@ public class ControlsFetchNoticeTests
         var rootB = NewTempCacheRoot();
         try
         {
-            // gallery has data (caches after first fetch); toolkit always comes back empty
-            // (its fetch never populates a cache), so the corpus is partial and the service
-            // must NOT memoize it — the next call re-attempts both providers.
+            // gallery has data (caches after first fetch); the second provider always comes
+            // back empty (its fetch never populates a cache), so the corpus is partial and
+            // the service must NOT memoize it — the next call re-attempts both providers.
+            //
+            // The empty provider deliberately uses an id with no baked corpus. A real
+            // provider id would fall through to the embedded snapshot, making the corpus
+            // complete and correctly memoizable — which is the fix for #704, not a partial
+            // corpus, and is covered by EmbeddedSnapshotTests.
             var gallery = new StubProvider(rootA, "gallery", "Gallery (WinUI 3)", SampleData("gallery"));
-            var toolkit = new StubProvider(rootB, "toolkit", "CommunityToolkit", ProviderData.Empty);
+            var toolkit = new StubProvider(rootB, "toolkit-no-snapshot", "CommunityToolkit", ProviderData.Empty);
             var service = new ControlsSearchService([gallery, toolkit]);
 
             var first = new List<string>();
@@ -176,12 +181,16 @@ public class ControlsFetchNoticeTests
         {
             // Simulate an offline cold start: FetchAsync throws. The notice fires before the
             // fetch attempt, and LoadAsync swallows the failure into Empty.
-            var provider = new ThrowingProvider(root, "gallery", "Gallery (WinUI 3)");
+            //
+            // Deliberately uses an id with no baked corpus so this stays a test of the
+            // notice alone. A real provider id would fall through to the embedded snapshot
+            // (covered by EmbeddedSnapshotTests), which is orthogonal to the notice.
+            var provider = new ThrowingProvider(root, "notice-only", "Gallery (WinUI 3)");
             var notices = new List<string>();
 
             var data = await provider.LoadAsync(onFetchStarting: notices.Add);
 
-            Assert.AreEqual(0, data.Scenarios.Length, "an offline cold fetch yields no data");
+            Assert.AreEqual(0, data.Scenarios.Length, "an offline cold fetch with no floor yields no data");
             CollectionAssert.AreEqual(GalleryOnly, notices,
                 "the notice fires even when the fetch itself fails");
         }
@@ -197,17 +206,22 @@ public class ControlsFetchNoticeTests
         var root = NewTempCacheRoot();
         try
         {
+            // Uses an id with no baked corpus to isolate the stale-cache path: with a real
+            // provider id a 30-day-old cache would correctly lose to the newer embedded
+            // snapshot, which is a different behaviour tested in EmbeddedSnapshotTests.
+            const string id = "stale-only";
+
             // Prime a cache, then backdate its timestamp past the 7-day TTL.
-            var seed = new StubProvider(root, "gallery", "Gallery (WinUI 3)", SampleData("gallery"));
+            var seed = new StubProvider(root, id, "Gallery (WinUI 3)", SampleData(id));
             await seed.LoadAsync();
-            var tsPath = Path.Combine(root, "gallery", "last-updated.txt");
+            var tsPath = Path.Combine(root, id, "last-updated.txt");
             Assert.IsTrue(File.Exists(tsPath), "priming load should have written the cache");
             File.WriteAllText(tsPath, DateTime.UtcNow.AddDays(-30).ToString("o"));
 
             // A NON-forced load now misses on the TTL, attempts a fetch, and the fetch
             // fails (offline). It must fall back to the stale cache rather than returning
             // Empty — otherwise an offline user loses find-ui 7 days after their last fetch.
-            var offline = new ThrowingProvider(root, "gallery", "Gallery (WinUI 3)");
+            var offline = new ThrowingProvider(root, id, "Gallery (WinUI 3)");
             var data = await offline.LoadAsync(forceRefresh: false);
 
             Assert.AreEqual(1, data.Scenarios.Length,

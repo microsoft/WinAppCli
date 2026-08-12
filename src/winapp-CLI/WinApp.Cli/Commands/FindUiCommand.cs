@@ -30,6 +30,7 @@ internal sealed class FindUiCommand : Command, IShortDescription
     public static Option<string?> SourceOption { get; }
     public static Option<int> MaxOption { get; }
     public static Option<bool> RefreshOption { get; }
+    public static Option<string?> BakeOption { get; }
 
     static FindUiCommand()
     {
@@ -66,10 +67,20 @@ internal sealed class FindUiCommand : Command, IShortDescription
         {
             Description = "Bypass the local cache and re-fetch the WinUI corpus from GitHub."
         };
+
+        // Build-time only: regenerates the corpus committed under Services/Controls/Data
+        // that ships embedded in the binary. Hidden because it is a maintainer operation,
+        // not a user-facing one — CliSchema drops hidden options, so it stays out of
+        // docs/cli-schema.json and the agent-facing surface.
+        BakeOption = new Option<string?>("--bake")
+        {
+            Description = "Fetch every source fresh and write the baked snapshot set to the given directory (build-time maintenance).",
+            Hidden = true
+        };
     }
 
     public FindUiCommand()
-        : base("find-ui", "Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery and the Windows Community Toolkit by default (plus the microsoft-ui-reactor ReactorGallery as an opt-in source via --source reactor); not WPF/WinForms. The Gallery/Toolkit/Reactor corpus is fetched from GitHub on first use and cached per-user, so the first such run needs network access; --source core searches the built-in patterns and works fully offline.")
+        : base("find-ui", "Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery and the Windows Community Toolkit by default (plus the microsoft-ui-reactor ReactorGallery as an opt-in source via --source reactor); not WPF/WinForms. A corpus is baked into the CLI, so this works offline and behind proxies; when GitHub is reachable it refreshes to the latest samples and caches them per-user.")
     {
         Arguments.Add(QueryArgument);
         Options.Add(IdOption);
@@ -77,6 +88,7 @@ internal sealed class FindUiCommand : Command, IShortDescription
         Options.Add(SourceOption);
         Options.Add(MaxOption);
         Options.Add(RefreshOption);
+        Options.Add(BakeOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -94,6 +106,15 @@ internal sealed class FindUiCommand : Command, IShortDescription
             var source = parseResult.GetValue(SourceOption);
             var max = parseResult.GetValue(MaxOption);
             var refresh = parseResult.GetValue(RefreshOption);
+            var bakeDirectory = parseResult.GetValue(BakeOption);
+
+            // Maintenance mode: regenerate the committed corpus and exit. Handled before
+            // every other check because a bake takes none of the search/fetch/browse
+            // arguments those checks require.
+            if (!string.IsNullOrWhiteSpace(bakeDirectory))
+            {
+                return await BakeAsync(bakeDirectory, json, cancellationToken).ConfigureAwait(false);
+            }
 
             if (source is not null && !ProviderRegistry.IsValidSourceFilter(source))
             {
@@ -172,6 +193,8 @@ internal sealed class FindUiCommand : Command, IShortDescription
                 return Fail(json, $"Failed to load the WinUI corpus: {ex.Message}");
             }
 
+            NoteEmbeddedCorpus();
+
             if (list)
             {
                 return EmitList(engine, json);
@@ -183,6 +206,35 @@ internal sealed class FindUiCommand : Command, IShortDescription
             }
 
             return EmitSearch(engine, query!, max, source, includeReactor, json);
+        }
+
+        /// <summary>
+        /// The <c>corpus</c> value for JSON output, or null when nothing upstream-derived
+        /// was loaded (a core-patterns-only result).
+        /// </summary>
+        private string? CorpusLabel() => searchService.LoadedOrigin switch
+        {
+            CorpusOrigin.Network => "network",
+            CorpusOrigin.Cache => "cache",
+            CorpusOrigin.Embedded => "embedded",
+            _ => null
+        };
+
+        /// <summary>
+        /// Tell the user when results came from the corpus baked into the CLI. Without this
+        /// the offline path is silent and indistinguishable from a live fetch — and the
+        /// "Fetching WinUI controls from GitHub..." notice has usually already been shown by
+        /// the attempt that failed, which would otherwise imply the data is current.
+        /// </summary>
+        private void NoteEmbeddedCorpus()
+        {
+            if (searchService.LoadedOrigin != CorpusOrigin.Embedded)
+            {
+                return;
+            }
+
+            logger.LogInformation(
+                "Using the WinUI corpus built into the CLI (GitHub was unreachable). These samples may lag upstream; run with --refresh when online.");
         }
 
         private int EmitSearch(SearchEngine engine, string query, int max, string? source, bool includeReactor, bool json)
@@ -208,6 +260,7 @@ internal sealed class FindUiCommand : Command, IShortDescription
                 {
                     Query = query,
                     MatchCount = groups.Count,
+                    Corpus = CorpusLabel(),
                     Matches = groups.Select(g => new FindUiMatchJson
                     {
                         Source = g.Source,
@@ -284,7 +337,7 @@ internal sealed class FindUiCommand : Command, IShortDescription
 
             if (json)
             {
-                var result = new FindUiCodeJsonOutput { Results = entries };
+                var result = new FindUiCodeJsonOutput { Corpus = CorpusLabel(), Results = entries };
                 console.Profile.Out.Writer.WriteLine(JsonSerializer.Serialize(result, WinAppJsonContext.Default.FindUiCodeJsonOutput));
                 return entries.All(e => e.Found) ? 0 : 1;
             }
@@ -424,7 +477,7 @@ internal sealed class FindUiCommand : Command, IShortDescription
 
             if (json)
             {
-                var result = new FindUiListJsonOutput { Count = items.Count, Items = items };
+                var result = new FindUiListJsonOutput { Count = items.Count, Corpus = CorpusLabel(), Items = items };
                 console.Profile.Out.Writer.WriteLine(JsonSerializer.Serialize(result, WinAppJsonContext.Default.FindUiListJsonOutput));
                 return items.Count > 0 ? 0 : 1;
             }
@@ -449,13 +502,47 @@ internal sealed class FindUiCommand : Command, IShortDescription
 
         /// <summary>
         /// Message for a filtered request (<c>--source X</c> or an <c>X-*</c> <c>--id</c>) whose
-        /// source loaded no scenarios. find-ui ships no embedded snapshot, so a source that
-        /// never fetched (offline, proxy-blocked, or an upstream path rename) is simply absent —
-        /// naming it keeps the "run online once" guidance actionable instead of a false "no match".
+        /// source loaded no scenarios. With a corpus baked into the binary this should now only
+        /// happen if that snapshot is missing or was produced by a different
+        /// <see cref="CacheVersion"/> — so the guidance is still to refresh, but the message no
+        /// longer claims the data was never fetched.
         /// </summary>
         private static string SourceUnavailableMessage(string source) =>
-            $"No '{source}' control data is available locally. find-ui fetches each source from " +
-            "GitHub on first use — connect to the internet and run the command once (or add --refresh) " +
-            $"to populate the '{source}' cache.";
+            $"No '{source}' control data could be loaded. find-ui normally serves this source from " +
+            "the corpus baked into the CLI or a per-user cache; if both are unavailable, run the " +
+            $"command with --refresh while online to repopulate the '{source}' data.";
+
+        /// <summary>
+        /// Regenerate the committed corpus. Fails loudly on a partial bake: a snapshot missing a
+        /// source would ship a binary that silently can't answer for it, which is the exact
+        /// failure mode the embedded corpus exists to prevent.
+        /// </summary>
+        private async Task<int> BakeAsync(string outputDirectory, bool json, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var failures = await SnapshotBaker
+                    .BakeAsync(outputDirectory, message => logger.LogInformation("{Message}", message), cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (failures.Count > 0)
+                {
+                    return Fail(json,
+                        $"Bake incomplete — no fresh data fetched for: {string.Join(", ", failures)}. " +
+                        "The existing committed snapshot was left untouched.");
+                }
+
+                return 0;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "find-ui bake failed");
+                return Fail(json, $"Bake failed: {ex.Message}");
+            }
+        }
     }
 }

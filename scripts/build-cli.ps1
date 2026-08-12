@@ -27,6 +27,12 @@
     Skip NuGet, MSIX, docs, and npm package creation (builds the CLI and runs tests). Alias: TestsOnly
 .PARAMETER Stable
     Use stable build configuration (default: false, uses prerelease config)
+.PARAMETER SkipBake
+    Skip refreshing the find-ui corpus baked into the CLI. The bake only runs on -Stable
+    builds; use this to opt out of it on a release build (the committed snapshot is shipped
+    as-is).
+.PARAMETER Bake
+    Refresh the find-ui corpus even on a prerelease build. Requires network access to GitHub.
 .EXAMPLE
     .\scripts\build-cli.ps1
 .EXAMPLE
@@ -49,6 +55,8 @@
     .\scripts\build-cli.ps1 -TestsOnly
 .EXAMPLE
     .\scripts\build-cli.ps1 -Stable
+.EXAMPLE
+    .\scripts\build-cli.ps1 -Bake
 #>
 
 param(
@@ -64,7 +72,9 @@ param(
     [switch]$OnlyDocs = $false,
     [Alias("TestsOnly")]
     [switch]$OnlyTests = $false,
-    [switch]$Stable = $false
+    [switch]$Stable = $false,
+    [switch]$SkipBake = $false,
+    [switch]$Bake = $false
 )
 
 # Validate compound flag usage
@@ -179,6 +189,65 @@ try
 
     # InformationalVersion shows in --version output (e.g., "0.1.0-prerelease.73")
     $InformationalVersion = $FullVersion
+
+    # Step 1b: Refresh the find-ui corpus baked into the binary.
+    #
+    # The snapshot is an EmbeddedResource, so it must be regenerated BEFORE the publish
+    # below or the release ships the previous corpus. It only runs for stable builds
+    # (or explicit -Bake): every prerelease re-baking would churn a ~930 KB committed diff
+    # for no benefit, since the snapshot only reaches users when they upgrade the CLI.
+    #
+    # A bake failure is never fatal. Upstream being unreachable or restructured must not
+    # block a release -- the previous committed corpus is still valid, just older. What IS
+    # fatal is having no corpus at all on a stable build: that ships a CLI whose find-ui is
+    # non-functional offline, which is the exact regression the embedded snapshot exists to
+    # prevent (issue #704).
+    $SnapshotDataPath = "$CliSolutionDir\WinApp.Cli\Services\Controls\Data"
+    $ShouldBake = ($Stable -or $Bake) -and (-not $SkipBake)
+
+    if ($ShouldBake) {
+        Write-Host "[BAKE] Refreshing find-ui corpus from GitHub..." -ForegroundColor Blue
+
+        # Keep the last known good set aside. A partial bake rewrites the sources that
+        # succeeded but leaves the manifest alone, so the committed set would end up
+        # internally inconsistent -- fresh scenarios stamped with a stale bake time.
+        # Restoring wholesale is the only way to keep the corpus coherent.
+        $BakeBackup = Join-Path ([System.IO.Path]::GetTempPath()) "winapp-bake-backup-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $BakeBackup -Force | Out-Null
+        $PreviousSnapshots = @(Get-ChildItem -Path $SnapshotDataPath -Filter "snapshot-*" -ErrorAction SilentlyContinue)
+        $PreviousSnapshots | Copy-Item -Destination $BakeBackup -Force
+
+        dotnet run --project $CliProjectPath -c Debug -- find-ui --bake $SnapshotDataPath
+        $BakeExitCode = $LASTEXITCODE
+
+        if ($BakeExitCode -ne 0) {
+            Write-Warning "[BAKE] Corpus refresh failed (exit $BakeExitCode). Restoring the previously committed snapshot and continuing."
+            Get-ChildItem -Path $SnapshotDataPath -Filter "snapshot-*" -ErrorAction SilentlyContinue | Remove-Item -Force
+            Get-ChildItem -Path $BakeBackup -ErrorAction SilentlyContinue | Copy-Item -Destination $SnapshotDataPath -Force
+        } else {
+            Write-Host "[BAKE] Corpus refreshed." -ForegroundColor Green
+        }
+
+        Remove-Item $BakeBackup -Recurse -Force -ErrorAction SilentlyContinue
+    } elseif ($Stable) {
+        Write-Host "[BAKE] Skipped (-SkipBake); shipping the committed find-ui corpus as-is." -ForegroundColor Yellow
+    }
+
+    # Whether or not we just baked, a stable build must carry a complete, non-empty corpus.
+    # This catches the restored-from-backup case as well as a repo that never had one.
+    if ($Stable) {
+        $RequiredSnapshots = @("snapshot-manifest.json", "snapshot-gallery.json.br", "snapshot-toolkit.json.br", "snapshot-reactor.json.br")
+        $MissingSnapshots = @(
+            $RequiredSnapshots | Where-Object {
+                $p = Join-Path $SnapshotDataPath $_
+                (-not (Test-Path $p)) -or ((Get-Item $p).Length -eq 0)
+            }
+        )
+        if ($MissingSnapshots.Count -gt 0) {
+            Write-Error "Stable build is missing the find-ui corpus: $($MissingSnapshots -join ', '). Shipping without it leaves find-ui non-functional offline (issue #704). Run: dotnet run --project $CliProjectPath -- find-ui --bake $SnapshotDataPath"
+            exit 1
+        }
+    }
 
     # Step 2: Publish CLI for x64 and arm64 (implicitly builds the CLI project)
     Write-Host "[PUBLISH] Publishing CLI for x64..." -ForegroundColor Blue

@@ -1,0 +1,216 @@
+name: find-ui corpus drift
+
+# The find-ui corpus is baked into the CLI at release time so the command works offline
+# (issue #704). That snapshot is only as good as the fetchers that produced it, and both
+# can rot silently between releases:
+#
+#   * upstream adds or reworks samples  -> the shipped corpus drifts out of date
+#   * upstream restructures a repo      -> a fetcher returns nothing and the source
+#                                          quietly disappears from the next release
+#
+# The second failure is the dangerous one: nothing in the normal build catches it, because
+# a fetch that returns zero scenarios looks exactly like a network blip. This job bakes on
+# a schedule purely to detect both, and reports by opening an issue.
+#
+# It deliberately does NOT open a pull request. The snapshot only reaches users when they
+# upgrade the CLI, so an auto-PR would add bot churn (dependabot is already the #2
+# committer here) to refresh data that nothing consumes until the next release bake.
+# `permissions` withholds `contents: write` so that stays true by construction.
+
+on:
+  schedule:
+    # Weekly, Monday 09:15 UTC. Offset from codeql.yml (Sun 20:35) to avoid contending
+    # for runners, and early in the week so a broken fetcher is seen before a release.
+    - cron: '15 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-drift:
+    # windows-latest, not ubuntu: the bake runs the real CLI, which is Windows-only.
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Bake a fresh corpus
+        id: bake
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "corpus-drift"
+          "output=$out" >> $env:GITHUB_OUTPUT
+
+          dotnet run --project src/winapp-CLI/WinApp.Cli/WinApp.Cli.csproj -c Debug -- find-ui --bake $out
+          "exitCode=$LASTEXITCODE" >> $env:GITHUB_OUTPUT
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Bake failed with exit code $LASTEXITCODE. Reporting as a fetcher failure."
+          }
+        # A failed bake is the signal, not an infrastructure error -- keep going and report it.
+        continue-on-error: true
+
+      - name: Compare against the committed corpus
+        id: diff
+        shell: pwsh
+        # Passed through the environment rather than interpolated into the script body:
+        # `${{ }}` inside PowerShell collides with its own ${...} variable syntax, and
+        # env vars keep the step parseable (and lintable) on its own.
+        env:
+          BAKE_OUTPUT: ${{ steps.bake.outputs.output }}
+          BAKE_EXIT_CODE: ${{ steps.bake.outputs.exitCode }}
+        run: |
+          $committed = "src/winapp-CLI/WinApp.Cli/Services/Controls/Data"
+          $fresh = $env:BAKE_OUTPUT
+          $bakeFailed = $env:BAKE_EXIT_CODE -ne "0"
+
+          if ($bakeFailed) {
+            "status=bake-failed" >> $env:GITHUB_OUTPUT
+            "summary=The scheduled bake failed, so at least one source returned no fetched data." >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          # snapshot-manifest.json is excluded on purpose: bakedAtUtc changes on every run,
+          # so including it would report drift 100% of the time and train everyone to ignore
+          # this job. Note that it matches "snapshot-*.json" too, hence the explicit skip.
+          # The corpus files themselves are byte-deterministic for unchanged upstream input,
+          # which is what makes a hash comparison meaningful here.
+          $drifted = @()
+          $lines = @()
+          $corpusFiles = Get-ChildItem $fresh -Filter "snapshot-*.json" |
+            Where-Object { $_.Name -ne 'snapshot-manifest.json' }
+
+          if ($corpusFiles.Count -eq 0) {
+            "status=bake-failed" >> $env:GITHUB_OUTPUT
+            "summary=The bake reported success but produced no corpus files." >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          foreach ($file in $corpusFiles) {
+            $old = Join-Path $committed $file.Name
+            if (-not (Test-Path $old)) {
+              $drifted += $file.Name
+              $lines += "- ``$($file.Name)`` — **new source**, not yet committed"
+              continue
+            }
+
+            if ((Get-FileHash $file.FullName).Hash -ne (Get-FileHash $old).Hash) {
+              $freshCount = (Get-Content $file.FullName -Raw | ConvertFrom-Json).scenarios.Count
+              $oldCount = (Get-Content $old -Raw | ConvertFrom-Json).scenarios.Count
+              $delta = $freshCount - $oldCount
+              $drifted += $file.Name
+              $lines += "- ``$($file.Name)`` — $oldCount → $freshCount scenarios ($(if ($delta -ge 0) { "+$delta" } else { "$delta" }))"
+            }
+          }
+
+          if ($drifted.Count -eq 0) {
+            "status=clean" >> $env:GITHUB_OUTPUT
+            Write-Host "Committed corpus matches upstream."
+            exit 0
+          }
+
+          "status=drift" >> $env:GITHUB_OUTPUT
+          $summary = $lines -join "%0A"
+          "summary=$summary" >> $env:GITHUB_OUTPUT
+          Write-Host "Drift detected in: $($drifted -join ', ')"
+
+      - name: Report
+        if: steps.diff.outputs.status != 'clean'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          DRIFT_STATUS: ${{ steps.diff.outputs.status }}
+          DRIFT_SUMMARY: ${{ steps.diff.outputs.summary }}
+        with:
+          script: |
+            const status = process.env.DRIFT_STATUS;
+            const summary = (process.env.DRIFT_SUMMARY || '').replace(/%0A/g, '\n');
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const LABEL = 'find-ui-corpus';
+
+            // Ensure the label exists before it is used to look issues up. Creating it here
+            // rather than relying on issue creation to conjure it keeps the dedup query
+            // below meaningful on the very first run, and makes the workflow self-contained
+            // if the label is ever deleted.
+            try {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: LABEL,
+                color: 'c5def5',
+                description: 'Automated find-ui corpus drift / bake failure reports',
+              });
+            } catch (error) {
+              if (error.status !== 422) throw error;   // 422 == already exists
+            }
+
+            // A broken fetcher and a stale corpus need different titles and different
+            // urgency, but they share one issue slot each so a weekly schedule can't
+            // accumulate duplicates. Existing open issues are updated with a comment.
+            const isFailure = status === 'bake-failed';
+            const title = isFailure
+              ? 'find-ui corpus: a source failed to bake'
+              : 'find-ui corpus: committed snapshot has drifted from upstream';
+
+            const body = isFailure
+              ? [
+                  'The scheduled bake could not fetch one or more find-ui sources.',
+                  '',
+                  summary,
+                  '',
+                  'This usually means an upstream repository was restructured and the corresponding',
+                  'fetcher no longer finds samples. Left unfixed, the next release bakes without that',
+                  'source and it silently disappears from `find-ui` — the offline corpus would still',
+                  'load, just with a hole in it.',
+                  '',
+                  `[Workflow run](${runUrl})`,
+                ].join('\n')
+              : [
+                  'Upstream samples have changed since the committed find-ui corpus was baked.',
+                  '',
+                  summary,
+                  '',
+                  '**No action is required.** The corpus is refreshed automatically by',
+                  '`scripts/build-cli.ps1` on the next `-Stable` release, and users with network',
+                  'access already get live data — the baked snapshot is only the offline floor.',
+                  '',
+                  'This issue exists so a *large* or *unexpected* swing (a source losing most of its',
+                  'scenarios, for example) is visible before it ships.',
+                  '',
+                  `[Workflow run](${runUrl})`,
+                ].join('\n');
+
+            const existing = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: LABEL,
+              per_page: 100,
+            });
+
+            const match = existing.find(i => i.title === title);
+            if (match) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: match.number,
+                body: `Still present as of the latest scheduled check.\n\n${summary}\n\n[Workflow run](${runUrl})`,
+              });
+              console.log(`Updated existing issue #${match.number}.`);
+              return;
+            }
+
+            const created = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: [LABEL],
+            });
+            console.log(`Opened issue #${created.data.number}.`);

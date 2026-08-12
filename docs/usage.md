@@ -1147,7 +1147,9 @@ Search **WinUI** controls and samples for a working code example. WinUI-only: th
 winapp find-ui "<query>" [options]
 ```
 
-The corpus is fetched from GitHub on first use and cached per-user under `<global .winapp>/cache/find-ui`, so the **first run requires network access**. Subsequent runs are served from the local cache (refreshed at most every 7 days, or on demand with `--refresh`).
+The Gallery, Toolkit, and Reactor corpora ship **inside the CLI**, so `find-ui` works with no network access — including on a first run in an agent sandbox or behind a corporate proxy that blocks `raw.githubusercontent.com`. When GitHub *is* reachable the CLI refreshes from it and caches the result per-user under `<global .winapp>/cache/find-ui`; the built-in corpus is only a floor, never a ceiling. Cached data is refreshed at most every 7 days, or on demand with `--refresh`.
+
+The built-in corpus is regenerated at release time, so it is at most one release behind upstream. When results are served from it because GitHub was unreachable, `find-ui` says so on stderr and `--json` output carries `"corpus": "embedded"` (other values: `"network"` for a fresh fetch, `"cache"` for the local cache).
 
 **Options:**
 

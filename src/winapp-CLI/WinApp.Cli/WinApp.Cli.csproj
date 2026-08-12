@@ -53,11 +53,25 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- find-ui curated enrichment (tags/keywords) + core patterns. The large
-         Gallery/Toolkit scenario corpora are NOT embedded — they are fetched
-         from GitHub on first use and cached per-user. -->
+    <!-- find-ui curated enrichment (tags/keywords) + core patterns. -->
     <EmbeddedResource Include="Services\Controls\Data\core-patterns.json" LogicalName="core-patterns.json" />
     <EmbeddedResource Include="Services\Controls\Data\gallery-tags.json" LogicalName="gallery-tags.json" />
+    <!--
+      The baked corpus floor (see EmbeddedSnapshot.cs). ~910 KB of JSON compresses ~10x,
+      so the compressed form is what ships. The hidden bake option writes BOTH forms:
+      the .json is committed for review (a corpus regression has to be visible as a
+      readable diff) and the .json.br is what gets embedded. SnapshotParityTests fails
+      the build if the two ever disagree, so the compressed blob can't silently drift
+      from the reviewed source.
+    -->
+    <EmbeddedResource Include="Services\Controls\Data\snapshot-manifest.json"
+                      LogicalName="snapshot-manifest.json"
+                      Condition="Exists('Services\Controls\Data\snapshot-manifest.json')" />
+    <EmbeddedResource Include="Services\Controls\Data\snapshot-*.json.br">
+      <LogicalName>%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <!-- Committed for review only; the compressed sibling above is what ships. -->
+    <None Include="Services\Controls\Data\snapshot-*.json" />
   </ItemGroup>
 
   <ItemGroup>

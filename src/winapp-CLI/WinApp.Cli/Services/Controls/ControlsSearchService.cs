@@ -9,14 +9,14 @@ using WinApp.Cli.Services;
 /// Builds and memoizes the <see cref="SearchEngine"/> that backs
 /// <c>winapp find-ui</c>. Scenario data comes from the registered
 /// <see cref="ISearchProvider"/>s (WinUI Gallery + Community Toolkit + Reactor),
-/// which serve a fresh per-user cache or fetch from GitHub on a cold/stale cache.
-/// The curated core patterns are baked in (they have no upstream endpoint).
+/// each of which serves a fresh per-user cache, a GitHub fetch, or — when neither is
+/// available — the corpus baked into the binary. The curated core patterns are baked in
+/// separately (they have no upstream endpoint).
 ///
-/// find-ui ships no embedded scenario snapshot, so the very first run (or any
-/// run with a cold cache) requires network access. When every provider comes
-/// back empty — the signature of an offline cold start — a
-/// <see cref="ControlsDataUnavailableException"/> is thrown so the command can
-/// emit a clear "run online once" message instead of silently returning no hits.
+/// Because every provider has that embedded floor, an offline cold start returns real
+/// results rather than failing. <see cref="ControlsDataUnavailableException"/> is now
+/// reserved for the genuinely broken case: no cache, no network, and no usable embedded
+/// snapshot.
 /// </summary>
 internal interface IControlsSearchService
 {
@@ -45,6 +45,16 @@ internal interface IControlsSearchService
     /// </summary>
     Task<SearchEngine> GetEngineAsync(bool forceRefresh = false, bool allowCoreOnly = false, bool coreOnly = false, bool includeReactor = false, Action<string>? onFetchStarting = null, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Least-fresh origin among the providers loaded by the most recent
+    /// <see cref="GetEngineAsync"/> call, or <see cref="CorpusOrigin.None"/> when only the
+    /// curated core patterns were used. Reported to callers so an offline fallback is
+    /// distinguishable from a live answer — if one source came from the network and
+    /// another from the embedded floor, the embedded one is what the caller needs to know
+    /// about.
+    /// </summary>
+    CorpusOrigin LoadedOrigin { get; }
+
     /// <summary>Delete every provider's per-user cache so the next load re-fetches.</summary>
     void ClearCache();
 }
@@ -70,6 +80,13 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
     // safe to memoize; kept separate from the network-backed engines above.
     private SearchEngine? _coreOnlyEngine;
 
+    /// <summary>
+    /// Least-fresh origin across the providers contributing to the memoized engine.
+    /// Recomputed on each build; a memoized hit keeps reporting the origin the corpus was
+    /// actually loaded from, which is what the caller wants to surface.
+    /// </summary>
+    public CorpusOrigin LoadedOrigin { get; private set; } = CorpusOrigin.None;
+
     /// <summary>Production constructor: providers are rooted at the managed
     /// global <c>.winapp</c> cache directory so environment/test path overrides
     /// (<c>WINAPP_CLI_CACHE_DIRECTORY</c>) and repo-wide path policy apply.</summary>
@@ -92,6 +109,7 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
         // the "fetching…" notice never fires. Returned before any provider is touched.
         if (coreOnly)
         {
+            LoadedOrigin = CorpusOrigin.None;
             if (_coreOnlyEngine != null)
             {
                 return _coreOnlyEngine;
@@ -147,6 +165,7 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
             var allTags = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
             var allKeywords = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
             bool anyProviderEmpty = false;
+            var leastFreshOrigin = CorpusOrigin.None;
 
             foreach (var provider in _providers)
             {
@@ -166,6 +185,7 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
                     anyProviderEmpty = true;
                     continue;
                 }
+                leastFreshOrigin = Weakest(leastFreshOrigin, data.Origin);
                 allScenarios.AddRange(data.Scenarios);
                 foreach (var kv in data.Tags) allTags[$"{provider.Id}:{kv.Key}"] = kv.Value;
                 foreach (var kv in data.Keywords) allKeywords[$"{provider.Id}:{kv.Key}"] = kv.Value;
@@ -173,11 +193,14 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
 
             if (allScenarios.Count == 0)
             {
-                // No network corpus. The embedded core patterns are always available,
-                // so for requests that a core-only corpus can satisfy (--list,
-                // --source core, --id <core-id>) return a core-only engine rather
-                // than failing. Not memoized: the network corpus may load on a later
-                // call, and this degraded engine must not be pinned.
+                LoadedOrigin = CorpusOrigin.None;
+
+                // Neither cache, network, nor embedded snapshot produced anything — the
+                // embedded floor is missing or unreadable. The curated core patterns are
+                // compiled in separately and always available, so requests a core-only
+                // corpus can satisfy (--list, --source core, --id <core-id>) still work.
+                // Not memoized: the network corpus may load on a later call, and this
+                // degraded engine must not be pinned.
                 if (allowCoreOnly)
                 {
                     return new SearchEngine(
@@ -188,10 +211,13 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
                 }
 
                 throw new ControlsDataUnavailableException(
-                    "No WinUI control data is available. find-ui fetches the WinUI Gallery, " +
-                    "Community Toolkit, and Reactor corpora from GitHub on first use — connect to the " +
-                    "internet and run the command once to populate the local cache.");
+                    "No WinUI control data could be loaded. find-ui serves the WinUI Gallery, " +
+                    "Community Toolkit, and Reactor corpora from a snapshot baked into the CLI, " +
+                    "refreshed from GitHub when reachable — if you are seeing this, that snapshot " +
+                    "is missing or unreadable. Run with --refresh while online to repopulate the cache.");
             }
+
+            LoadedOrigin = leastFreshOrigin;
 
             // Single corpus-boundary guard: strip terminal-control characters and drop
             // structurally-broken XAML / brace-unbalanced C# before anything downstream
@@ -228,6 +254,20 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
         }
     }
 
+    /// <summary>
+    /// Least-fresh of two origins, ignoring <see cref="CorpusOrigin.None"/> (which means
+    /// "nothing loaded" rather than a real source). The enum is ordered by freshness, so
+    /// the lower value wins: one source falling back to the embedded floor is the fact
+    /// worth reporting even if another was fetched live.
+    /// </summary>
+    private static CorpusOrigin Weakest(CorpusOrigin current, CorpusOrigin candidate)
+    {
+        if (current == CorpusOrigin.None) return candidate;
+        if (candidate == CorpusOrigin.None) return current;
+        return (CorpusOrigin)Math.Min((int)current, (int)candidate);
+    }
+
+    /// <summary>Delete every provider's per-user cache so the next load re-fetches.</summary>
     public void ClearCache()
     {
         _engine = null;
