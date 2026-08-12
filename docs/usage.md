@@ -938,26 +938,27 @@ winapp cert install ./mycert.pfx
 Sign MSIX packages and executables with certificates.
 
 ```bash
-winapp sign <file-path> [options]
+winapp sign <file-path> <cert-path> [options]
 ```
 
 **Arguments:**
 
 - `file-path` - Path to MSIX package or executable to sign
+- `cert-path` - Path to the signing certificate (.pfx)
 
 **Options:**
 
-- `--cert <path>` - Path to signing certificate
-- `--cert-password <password>` - Certificate password (default: "password")
+- `--password <password>` - Certificate password (default: "password")
+- `--timestamp <url>` - RFC 3161 timestamp server URL
 
 **Examples:**
 
 ```bash
 # Sign MSIX package
-winapp sign MyApp.msix --cert ./mycert.pfx
+winapp sign MyApp.msix ./mycert.pfx
 
-# Sign executable
-winapp sign ./bin/MyApp.exe --cert ./mycert.pfx --cert-password mypassword
+# Sign executable with a non-default certificate password
+winapp sign ./bin/MyApp.exe ./mycert.pfx --password mypassword
 ```
 
 ---
