@@ -260,15 +260,11 @@ internal static class WinMdParser
     private static List<WinMdParameterInfo> GetMethodParameters(MetadataReader reader, MethodDefinition method, MethodSignature<string> sig)
     {
         var parameters = new List<WinMdParameterInfo>();
-        var names = new List<string>();
-        foreach (ParameterHandle handle in method.GetParameters())
-        {
-            Parameter parameter = reader.GetParameter(handle);
-            if (parameter.SequenceNumber > 0)
-            {
-                names.Add(reader.GetString(parameter.Name));
-            }
-        }
+        var names = method.GetParameters()
+            .Select(reader.GetParameter)
+            .Where(parameter => parameter.SequenceNumber > 0)
+            .Select(parameter => reader.GetString(parameter.Name))
+            .ToList();
         for (int i = 0; i < sig.ParameterTypes.Length; i++)
         {
             parameters.Add(new WinMdParameterInfo
@@ -282,19 +278,13 @@ internal static class WinMdParser
 
     internal static List<string> ParseEnumValues(MetadataReader reader, TypeDefinition typeDef)
     {
-        var values = new List<string>();
-        foreach (FieldDefinitionHandle fieldHandle in typeDef.GetFields())
-        {
-            FieldDefinition field = reader.GetFieldDefinition(fieldHandle);
-            string name = reader.GetString(field.Name);
-            if (name != "value__"
-                && (field.Attributes & FieldAttributes.FieldAccessMask) == FieldAttributes.Public
+        return typeDef.GetFields()
+            .Select(reader.GetFieldDefinition)
+            .Where(field => (field.Attributes & FieldAttributes.FieldAccessMask) == FieldAttributes.Public
                 && (field.Attributes & FieldAttributes.Static) != FieldAttributes.PrivateScope)
-            {
-                values.Add(name);
-            }
-        }
-        return values;
+            .Select(field => reader.GetString(field.Name))
+            .Where(name => name != "value__")
+            .ToList();
     }
 
     private static string GetHandleTypeName(MetadataReader reader, EntityHandle handle)

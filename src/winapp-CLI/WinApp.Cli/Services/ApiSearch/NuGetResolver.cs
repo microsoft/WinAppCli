@@ -295,15 +295,11 @@ internal static class NuGetResolver
                         {
                             continue;
                         }
-                        var dlls = new List<string>();
-                        foreach (JsonProperty entry in compileEl.EnumerateObject())
-                        {
-                            string entryName = entry.Name;
-                            if (entryName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) && !entryName.EndsWith("/_._", StringComparison.Ordinal))
-                            {
-                                dlls.Add(entryName);
-                            }
-                        }
+                        var dlls = compileEl.EnumerateObject()
+                            .Select(entry => entry.Name)
+                            .Where(entryName => entryName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+                                && !entryName.EndsWith("/_._", StringComparison.Ordinal))
+                            .ToList();
                         if (dlls.Count > 0)
                         {
                             compileByLibrary[library.Name] = dlls;
@@ -346,14 +342,9 @@ internal static class NuGetResolver
                     files.AddRange(Directory.GetFiles(packageDir, "*.winmd", SearchOption.AllDirectories));
                     if (compileByLibrary.TryGetValue(library.Name, out var dlls))
                     {
-                        foreach (string dll in dlls)
-                        {
-                            string dllPath = Path.Combine(packageDir, dll.Replace('/', Path.DirectorySeparatorChar));
-                            if (File.Exists(dllPath))
-                            {
-                                files.Add(dllPath);
-                            }
-                        }
+                        files.AddRange(dlls
+                            .Select(dll => Path.Combine(packageDir, dll.Replace('/', Path.DirectorySeparatorChar)))
+                            .Where(File.Exists));
                     }
                 }
                 var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -363,15 +354,11 @@ internal static class NuGetResolver
                     continue;
                 }
 
-                var xmlDocs = new List<string>();
-                foreach (string packageFolder in packageFolders)
-                {
-                    string packageDir = Path.Combine(packageFolder, relativePath);
-                    if (Directory.Exists(packageDir))
-                    {
-                        xmlDocs.AddRange(FindXmlDocsInPackageFolder(packageDir));
-                    }
-                }
+                var xmlDocs = packageFolders
+                    .Select(packageFolder => Path.Combine(packageFolder, relativePath))
+                    .Where(Directory.Exists)
+                    .SelectMany(FindXmlDocsInPackageFolder)
+                    .ToList();
                 packages.Add(new PackageWithWinMd(id, version, files, xmlDocs));
             }
         }
@@ -388,14 +375,7 @@ internal static class NuGetResolver
             return true;
         }
         string[] prefixes = { "System.", "Microsoft.NETCore.", "Microsoft.NET.", "runtime.", "Microsoft.Build.", "Microsoft.CodeAnalysis.", "Microsoft.DiaSymReader." };
-        foreach (string prefix in prefixes)
-        {
-            if (packageId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-        return false;
+        return prefixes.Any(prefix => packageId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
     }
 
     internal static List<PackageWithWinMd> FindPackagesFromConfig(string configPath, string projectDir)

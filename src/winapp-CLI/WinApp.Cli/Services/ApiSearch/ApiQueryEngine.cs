@@ -293,10 +293,7 @@ internal static class ApiQueryEngine
             {
                 continue;
             }
-            foreach (string ns in list)
-            {
-                sorted.Add(ns);
-            }
+            sorted.UnionWith(list);
         }
         var filtered = sorted
             .Where(ns => filter == null || ns.StartsWith(filter, StringComparison.OrdinalIgnoreCase))

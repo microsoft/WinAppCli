@@ -36,15 +36,9 @@ internal static class Scoring
         string[] terms = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (terms.Length > 1)
         {
-            bool allTermsMatch = true;
-            foreach (string term in terms)
-            {
-                if (!name.Contains(term, StringComparison.OrdinalIgnoreCase) && !fullName.Contains(term, StringComparison.OrdinalIgnoreCase))
-                {
-                    allTermsMatch = false;
-                    break;
-                }
-            }
+            bool allTermsMatch = terms.All(term =>
+                name.Contains(term, StringComparison.OrdinalIgnoreCase)
+                || fullName.Contains(term, StringComparison.OrdinalIgnoreCase));
             if (allTermsMatch)
             {
                 return 40;
