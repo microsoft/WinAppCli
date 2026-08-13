@@ -7,11 +7,7 @@ import * as os from 'os';
 import { readPackageJsonDoc, mutatePackageJsonDoc } from './package-json-doc';
 
 export type RuntimeDependencyOutcome =
-  | 'added'
-  | 'alreadyPresent'
-  | 'presentInDevDependencies'
-  | 'noPackageJson'
-  | 'versionMismatch';
+  'added' | 'alreadyPresent' | 'presentInDevDependencies' | 'noPackageJson' | 'versionMismatch';
 
 export interface EnsureRuntimeDependencyResult {
   outcome: RuntimeDependencyOutcome;

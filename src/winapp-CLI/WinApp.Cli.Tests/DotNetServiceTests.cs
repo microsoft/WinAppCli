@@ -1689,6 +1689,300 @@ public class DotNetServiceTests : BaseCommandTests
 
     #endregion
 
+    #region Process cancellation Tests
+
+    [TestMethod]
+    public async Task RunDotnetProcessAsync_Cancellation_KillsProcessTree()
+    {
+        // Spawn a long-lived process tree (powershell -> ping) so the entireProcessTree kill path is
+        // genuinely exercised, then cancel and assert BOTH the root and its descendant are terminated.
+        // Before the kill-on-cancel fix, WaitForExitAsync only stopped awaiting and left the child
+        // running; asserting the descendant also exits guards the tree-kill (a bare Kill() would leave
+        // ping alive and still pass a root-only assertion).
+        //
+        // The descendant PID is captured via a fully-managed handshake: the PowerShell root starts ping
+        // with -PassThru, writes ping's PID to a temp file, then blocks on Wait-Process. The test polls
+        // that file — no WMI or Win32 process enumeration required.
+        var pidFile = Path.Join(Path.GetTempPath(), $"winapp_treekill_{Guid.NewGuid():N}.pid");
+        // Escape single quotes for the single-quoted PowerShell string literal so a temp path
+        // containing an apostrophe (e.g. a profile like O'Brien) still produces a valid script.
+        var pidFileLiteral = pidFile.Replace("'", "''");
+        var script =
+            "$p = Start-Process -FilePath ping.exe -ArgumentList '-n','60','127.0.0.1' -PassThru -WindowStyle Hidden; " +
+            $"Set-Content -LiteralPath '{pidFileLiteral}' -Value $p.Id; " +
+            "Wait-Process -Id $p.Id";
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-NonInteractive");
+        startInfo.ArgumentList.Add("-Command");
+        startInfo.ArgumentList.Add(script);
+
+        using var cts = new CancellationTokenSource();
+        Task<(int, string, string)>? runTask = null;
+        int? rootPid = null;
+        int? pingPid = null;
+        try
+        {
+            var pidTcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+            runTask = DotNetService.RunDotnetProcessAsync(
+                startInfo,
+                cts.Token,
+                onProcessStarted: p => pidTcs.TrySetResult(p.Id));
+
+            // Wait until the root process is actually running (capture its id before the service disposes it).
+            // Assign the awaited (non-null) id into a non-nullable local, then mirror it into the nullable
+            // placeholder the finally block reads — so the id is never dereferenced through int?.Value.
+            var rootPidValue = await pidTcs.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.CancellationToken);
+            rootPid = rootPidValue;
+            Assert.IsFalse(Process.GetProcessById(rootPidValue).HasExited, "The root process should be running before cancellation.");
+
+            // Capture the ping descendant via the PID file the root script writes.
+            var pingPidValue = await WaitForPidFileAsync(pidFile, TimeSpan.FromSeconds(15), TestContext.CancellationToken);
+            pingPid = pingPidValue;
+            Assert.IsFalse(Process.GetProcessById(pingPidValue).HasExited, "The ping descendant should be running before cancellation.");
+
+            cts.Cancel();
+
+            await Assert.ThrowsAsync<OperationCanceledException>(async () => await runTask);
+
+            // Both the root of the spawned tree AND its ping descendant must be gone. Kill(entireProcessTree)
+            // reaps the whole tree; GetProcessById throws ArgumentException once an id no longer maps to a
+            // running process.
+            Assert.IsTrue(await WaitForProcessExitAsync(rootPidValue, TestContext.CancellationToken),
+                "The spawned root process (powershell.exe) should be killed on cancellation.");
+            Assert.IsTrue(await WaitForProcessExitAsync(pingPidValue, TestContext.CancellationToken),
+                "The ping descendant should be killed on cancellation (proves the whole process tree was terminated).");
+        }
+        finally
+        {
+            // If an assertion or WaitForPidFileAsync threw before (or during) cancellation, the spawned
+            // powershell/ping tree could still be running — and the root script would keep re-creating
+            // the PID file. Cancel, await the run task, and force-kill any survivors so a failed run
+            // can't pollute subsequent tests for up to a minute.
+            cts.Cancel();
+            if (runTask is not null)
+            {
+                try
+                {
+                    await runTask;
+                }
+                catch (OperationCanceledException)
+                {
+                    // Expected once the token is cancelled — cleanup must not mask the real failure.
+                }
+                catch (Exception) when (cts.IsCancellationRequested)
+                {
+                    // A run that already failed (or failed due to cancellation) — swallow only while
+                    // tearing down; the original assertion failure, if any, still surfaces.
+                }
+            }
+
+            KillProcessTreeIfRunning(rootPid);
+            KillProcessTreeIfRunning(pingPid);
+
+            if (File.Exists(pidFile))
+            {
+                File.Delete(pidFile);
+            }
+        }
+    }
+
+    /// <summary>Best-effort force-kill of a process (and its tree) by id, ignoring already-exited processes.</summary>
+    private static void KillProcessTreeIfRunning(int? pid)
+    {
+        if (pid is null)
+        {
+            return;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById(pid.Value);
+            process.Kill(entireProcessTree: true);
+        }
+        catch (ArgumentException)
+        {
+            // No process with this id is running (already exited / id freed) — nothing to clean up.
+        }
+        catch (InvalidOperationException)
+        {
+            // The process has already exited between lookup and Kill — nothing to clean up.
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // The OS refused to terminate the process (access/termination failure) — best-effort only.
+        }
+        catch (NotSupportedException)
+        {
+            // Killing the process tree isn't supported in this environment — best-effort only.
+        }
+    }
+
+    /// <summary>Polls until the process with <paramref name="pid"/> has exited (or its id is reused/freed).</summary>
+    private static async Task<bool> WaitForProcessExitAsync(int pid, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            try
+            {
+                if (Process.GetProcessById(pid).HasExited)
+                {
+                    return true;
+                }
+            }
+            catch (ArgumentException)
+            {
+                return true;
+            }
+
+            await Task.Delay(20, cancellationToken);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Polls for the PID file written by the spawned PowerShell root and returns the descendant PID it
+    /// contains. This is the managed alternative to enumerating the process table for a child of the
+    /// root: the root itself reports its child's id, so the test needs no WMI or Win32 interop.
+    /// </summary>
+    /// <remarks>
+    /// The read is retried rather than allowed to throw. <see cref="File.Exists"/> turns true the moment
+    /// <c>Set-Content</c> creates the file, but PowerShell holds the destination open <em>exclusively</em>
+    /// while it writes, and opening it for reading in that window fails with a sharing violation
+    /// ("The process cannot access the file ... because it is being used by another process"). Letting
+    /// that escape made this test flaky on busy CI agents.
+    /// <para>
+    /// Retrying is the fix rather than a workaround: because the writer's handle is exclusive, no
+    /// <see cref="FileShare"/> mode on the reader can open it during the window (measured: a
+    /// <c>FileShare.ReadWrite | FileShare.Delete</c> reader still takes the violation), and publishing
+    /// the file by atomic rename only reduces the window rather than closing it.
+    /// </para>
+    /// <para>
+    /// Only <see cref="IOException"/> is caught, which covers both the sharing violation and the
+    /// <see cref="FileNotFoundException"/> raised while the file is being replaced. A permissions or
+    /// path error surfaces as <see cref="UnauthorizedAccessException"/> and is deliberately left to
+    /// propagate, so a genuine failure is reported immediately instead of being turned into a
+    /// misleading "was not written within ..." timeout.
+    /// </para>
+    /// An empty or partially written file is covered by the existing <see cref="int.TryParse(string, out int)"/>
+    /// guard, which simply keeps polling until the value parses.
+    /// </remarks>
+    private static async Task<int> WaitForPidFileAsync(string pidFile, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            string? text = null;
+            try
+            {
+                if (File.Exists(pidFile))
+                {
+                    text = (await File.ReadAllTextAsync(pidFile, cancellationToken)).Trim();
+                }
+            }
+            catch (IOException)
+            {
+                // Still being written (or replaced) by the root script — fall through and retry.
+            }
+
+            if (text is not null && int.TryParse(text, out var pid))
+            {
+                return pid;
+            }
+
+            await Task.Delay(20, cancellationToken);
+        }
+
+        throw new TimeoutException($"The descendant PID file '{pidFile}' was not written within {timeout}.");
+    }
+
+    #endregion
+
+    #region PID file read (flake regression)
+
+    [TestMethod]
+    public async Task WaitForPidFile_WriterHoldsFileExclusively_RetriesInsteadOfThrowing()
+    {
+        // Deterministic reproduction of the CI flake. Previously this only failed when a poll happened
+        // to land inside PowerShell's write window -- a sub-millisecond target against a 20ms poll, so
+        // it survived 400 consecutive local runs while still failing on loaded agents. Holding the file
+        // the way Set-Content does removes the timing luck.
+        //
+        // FileShare.None is what Set-Content actually uses. A reader cannot get in with any share mode
+        // (measured: a FileShare.ReadWrite | FileShare.Delete reader still takes the violation), which
+        // is why the helper retries instead of opening the file differently.
+        //
+        // The assertion is on the exception TYPE, and nothing releases the handle: the old code threw
+        // IOException on the very first poll, while the retry swallows it and runs out the clock. That
+        // keeps the test free of any background task -- an earlier version released the handle from a
+        // Task.Run continuation, which made it depend on prompt thread-pool scheduling and could time
+        // out on a loaded agent for reasons unrelated to the behavior under test.
+        var pidFile = Path.Join(_tempDirectory.FullName, $"pidfile_{Guid.NewGuid():N}.pid");
+        await File.WriteAllTextAsync(pidFile, "4242", TestContext.CancellationToken);
+
+        using var exclusive = new FileStream(pidFile, FileMode.Open, FileAccess.Write, FileShare.None);
+
+        await Assert.ThrowsAsync<TimeoutException>(
+            async () => await WaitForPidFileAsync(pidFile, TimeSpan.FromMilliseconds(300), TestContext.CancellationToken));
+    }
+
+    [TestMethod]
+    public async Task WaitForPidFile_NeverWritten_ThrowsTimeout()
+    {
+        // The retry must not turn a genuine "never appeared" case into an endless wait.
+        var pidFile = Path.Join(_tempDirectory.FullName, $"absent_{Guid.NewGuid():N}.pid");
+
+        await Assert.ThrowsAsync<TimeoutException>(
+            async () => await WaitForPidFileAsync(pidFile, TimeSpan.FromMilliseconds(200), TestContext.CancellationToken));
+    }
+
+    [TestMethod]
+    public async Task WaitForPidFile_PopulatedFile_ReturnsThePid()
+    {
+        // The straightforward success path, kept as its own test because every other test in this
+        // region asserts a timeout. Without this, nothing at unit level proves a readable file is
+        // actually parsed -- only the tree-kill test does, and it exercises the whole launcher.
+        var pidFile = Path.Join(_tempDirectory.FullName, $"populated_{Guid.NewGuid():N}.pid");
+        await File.WriteAllTextAsync(pidFile, "4242", TestContext.CancellationToken);
+
+        var pid = await WaitForPidFileAsync(pidFile, TimeSpan.FromSeconds(5), TestContext.CancellationToken);
+
+        Assert.AreEqual(4242, pid);
+    }
+
+    [TestMethod]
+    public async Task WaitForPidFile_EmptyFile_IsNotParsedAsAPid()
+    {
+        // Set-Content creates the file before its contents land, so a reader can legitimately observe
+        // an empty file. That case is handled by the parse guard, not the exception filter: an empty
+        // read must keep polling rather than yield a bogus PID.
+        //
+        // Deliberately no background writer. An earlier version of this test populated the file from a
+        // Task.Run continuation and asserted the value came back, which made it depend on the thread
+        // pool scheduling that continuation promptly -- it timed out on a loaded CI agent running 4
+        // test workers, reintroducing exactly the kind of flakiness this file is meant to remove.
+        // Timing out on a permanently empty file proves the guard without racing anything, and
+        // WaitForPidFile_PopulatedFile_ReturnsThePid covers the value actually being read.
+        var pidFile = Path.Join(_tempDirectory.FullName, $"empty_{Guid.NewGuid():N}.pid");
+        await File.WriteAllTextAsync(pidFile, string.Empty, TestContext.CancellationToken);
+
+        await Assert.ThrowsAsync<TimeoutException>(
+            async () => await WaitForPidFileAsync(pidFile, TimeSpan.FromMilliseconds(200), TestContext.CancellationToken));
+
+        Assert.IsTrue(File.Exists(pidFile), "The file existed throughout; the timeout came from the parse guard, not a missing file.");
+    }
+
+    #endregion
+
     #region RunDotnetCommandAsync cancellation (process-tree kill)
 
     [TestMethod]

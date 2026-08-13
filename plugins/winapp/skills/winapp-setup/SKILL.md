@@ -1,10 +1,11 @@
 ---
 name: winapp-setup
-description: Set up a Windows app project for MSIX packaging, Windows SDK access, or Windows API usage. Use when adding Windows support to an Electron, .NET, C++, Rust, Flutter, or Tauri project, or restoring SDK packages after cloning.
+description: Set up a Windows app project for MSIX packaging, Windows SDK access, or Windows API usage, or scaffold a brand-new WinUI 3 app. Use when creating or scaffolding a new WinUI app from scratch, adding Windows support to an Electron, .NET, C++, Rust, Flutter, or Tauri project, or restoring SDK packages after cloning.
 ---
 ## When to use
 
 Use this skill when:
+- **Scaffolding a brand-new WinUI 3 app** from an official Windows App SDK template (`winapp new`)
 - **Adding Windows platform support** to an existing project (Electron, .NET, C++, Rust, Flutter, Tauri, etc.)
 - **Cloning a repo** that already uses winapp and need to restore SDK packages
 - **Updating SDK versions** to get the latest Windows SDK or Windows App SDK
@@ -34,6 +35,27 @@ You need an **existing app project** — `winapp init` does **not** create new p
 **`.winapp/`** is the local folder where SDK packages and generated projections (e.g., CppWinRT headers) are stored. This folder is `.gitignore`d — team members recreate it via `winapp restore`.
 
 ## Usage
+
+### Create a new WinUI app
+
+To start a brand-new **WinUI** app (rather than adding Windows support to an existing project), use `winapp new`. It verifies the .NET SDK, installs the official WinUI `dotnet new` template pack on demand (grabbing the latest, or offering to update a stale one), and scaffolds the app against your installed SDK's target framework. Most WinUI templates already include packaging/identity, so **no `winapp init` step is needed** afterward — follow the template-specific next step `winapp new` prints when it finishes. App templates go straight to `winapp run` (which builds and launches the app); the `winui-lib` (class library) and `winui-unittest` templates differ (reference the library from an app project, or `winapp run` the packaged test app to run its tests). The template list is read live from the installed pack — run `winapp new --list` to see the current set.
+
+```powershell
+# Interactive — pick a template, then name/output
+winapp new
+
+# See the available templates without scaffolding
+winapp new --list
+
+# One-shot with a specific template (short names come from `winapp new --list`)
+winapp new --name MyApp --template winui-navview
+
+# Always use the newest template pack without prompting
+winapp new --name MyApp --template-version latest --use-defaults
+
+# Non-interactive (agent) with machine-readable output
+winapp new --use-defaults --name MyApp --json
+```
 
 ### Initialize a new winapp project
 

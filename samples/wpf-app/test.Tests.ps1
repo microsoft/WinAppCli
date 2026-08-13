@@ -40,7 +40,7 @@ Describe 'wpf-app sample' {
                 $script:tempDir = New-TempTestDirectory -Prefix 'wpf-guide'
                 Push-Location $script:tempDir
 
-                Invoke-Expression 'dotnet new wpf -n test-wpf-app'
+                dotnet new wpf -n test-wpf-app
                 $script:dotnetNewExit = $LASTEXITCODE
 
                 if ($script:dotnetNewExit -eq 0) {
@@ -69,7 +69,7 @@ Describe 'wpf-app sample' {
         }
 
         It 'Builds in Debug mode' -Skip:$script:skip {
-            Invoke-Expression 'dotnet build -c Debug /p:ApplyDebugIdentity=false'
+            dotnet build -c Debug /p:ApplyDebugIdentity=false
             $LASTEXITCODE | Should -Be 0
         }
 
@@ -95,7 +95,7 @@ Describe 'wpf-app sample' {
 
         It 'Builds in Release mode with RID' -Skip:$script:skip {
             $rid = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'win-arm64' } else { 'win-x64' }
-            Invoke-Expression "dotnet build -c Release -r $rid"
+            dotnet build -c Release -r $rid
             $LASTEXITCODE | Should -Be 0
         }
 
@@ -128,12 +128,12 @@ Describe 'wpf-app sample' {
         }
 
         It 'Restores NuGet packages' -Skip:$script:skip {
-            Invoke-Expression 'dotnet restore'
+            dotnet restore
             $LASTEXITCODE | Should -Be 0
         }
 
         It 'Builds existing sample in Debug mode' -Skip:$script:skip {
-            Invoke-Expression 'dotnet build -c Debug /p:ApplyDebugIdentity=false'
+            dotnet build -c Debug /p:ApplyDebugIdentity=false
             $LASTEXITCODE | Should -Be 0
         }
     }
