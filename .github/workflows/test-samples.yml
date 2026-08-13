@@ -154,7 +154,13 @@ jobs:
       if: >-
         steps.check.outputs.skip != 'true' &&
         contains(fromJson('["rust-app", "tauri-app"]'), matrix.sample)
-      uses: dtolnay/rust-toolchain@stable
+      shell: pwsh
+      # windows-latest already ships rustup with a stable toolchain, so this selects
+      # what is on the image rather than pulling a third-party action or fetching a toolchain.
+      run: |
+        rustup default stable
+        rustc --version
+        cargo --version
 
     # Install the Inno Setup compiler (ISCC.exe) so the sparse-app installer test
     # actually compiles installer/setup.iss instead of being skipped for a missing ISCC.
