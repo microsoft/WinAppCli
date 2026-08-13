@@ -112,6 +112,23 @@ public class ToolCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task Tool_SignatureRefused_ReportsRefusalWithoutTheInstallationPrefix()
+    {
+        var command = GetRequiredService<ToolCommand>();
+        _fakeBuildTools.ExceptionToThrow = new BuildToolSignatureException(
+            "'mt.exe' is not validly signed by Microsoft, so it was not run (C:\\tools\\mt.exe).");
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["mt", "-manifest"]);
+
+        Assert.AreEqual(1, exitCode);
+        var stderr = ConsoleStdErr.ToString();
+        StringAssert.Contains(stderr, "is not validly signed by Microsoft");
+        Assert.IsFalse(
+            stderr.Contains("Could not install or find", StringComparison.Ordinal),
+            "The tool was found and refused, so reporting it as missing would send users the wrong way.");
+    }
+
+    [TestMethod]
     public async Task Tool_UnexpectedError_ReturnsError()
     {
         var command = GetRequiredService<ToolCommand>();

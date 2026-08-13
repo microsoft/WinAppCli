@@ -971,26 +971,27 @@ winapp cert install ./mycert.pfx
 Sign MSIX packages and executables with certificates.
 
 ```bash
-winapp sign <file-path> [options]
+winapp sign <file-path> <cert-path> [options]
 ```
 
 **Arguments:**
 
 - `file-path` - Path to MSIX package or executable to sign
+- `cert-path` - Path to the signing certificate (.pfx)
 
 **Options:**
 
-- `--cert <path>` - Path to signing certificate
-- `--cert-password <password>` - Certificate password (default: "password")
+- `--password <password>` - Certificate password (default: "password")
+- `--timestamp <url>` - RFC 3161 timestamp server URL
 
 **Examples:**
 
 ```bash
 # Sign MSIX package
-winapp sign MyApp.msix --cert ./mycert.pfx
+winapp sign MyApp.msix ./mycert.pfx
 
-# Sign executable
-winapp sign ./bin/MyApp.exe --cert ./mycert.pfx --cert-password mypassword
+# Sign executable with a non-default certificate password
+winapp sign ./bin/MyApp.exe ./mycert.pfx --password mypassword
 ```
 
 ---
@@ -1130,6 +1131,16 @@ winapp tool <tool-name> [tool-arguments]
 # Use signtool to verify signature
 winapp tool signtool verify /pa MyApp.msix
 ```
+
+**Signature verification**
+
+Build tools are downloaded from NuGet and then executed, so winapp checks each one for a valid Microsoft Authenticode signature immediately before running it. This applies to every command that shells out to an SDK tool, including `tool`, `package`, and `sign`. A tool that fails the check is not run:
+
+```text
+'mt.exe' is not validly signed by Microsoft, so it was not run (C:\...\mt.exe).
+```
+
+A failure here means the file on disk is not what Microsoft published — most often a corrupt or partial download. Delete the package from the NuGet cache and run the command again so winapp re-downloads it.
 
 ---
 
