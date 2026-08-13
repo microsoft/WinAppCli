@@ -94,13 +94,14 @@ internal sealed class FindApiCommand : Command, IShortDescription
             }
 
             var scope = FindApiShared.ReadScope(parseResult, ProjectDirOption, ProjectOption);
+            bool verbose = parseResult.GetValue(WinAppRootCommand.VerboseOption);
 
             if (queries.Count == 1)
             {
                 var single = service.Search(queries[0], max, scope);
                 return FindApiShared.Emit(
                     console, json, "search", single, WinAppJsonContext.Default.ApiSearchOutput,
-                    data => FindApiShared.RenderSearch(console, data),
+                    data => FindApiShared.RenderSearch(console, data, verbose),
                     data =>
                     {
                         bool hasHits = data.Results.Count > 0 || data.Ambiguous is { Count: > 0 };
@@ -123,7 +124,7 @@ internal sealed class FindApiCommand : Command, IShortDescription
                     // Which query produced which block is not otherwise recoverable once
                     // several are rendered back to back.
                     console.MarkupLineInterpolated($"[grey]Query: {data.Query}[/]");
-                    FindApiShared.RenderSearch(console, data);
+                    FindApiShared.RenderSearch(console, data, verbose);
                 },
                 data => (data.Results.Count, data.Results.Count > 0 || data.Ambiguous is { Count: > 0 }));
         }

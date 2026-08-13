@@ -231,7 +231,7 @@ internal static class FindApiShared
 
     // ---- text renderers (mirror the standalone tool's plain output) ----
 
-    public static void RenderSearch(IAnsiConsole console, ApiSearchOutput output)
+    public static void RenderSearch(IAnsiConsole console, ApiSearchOutput output, bool verbose)
     {
         if (output.Ambiguous is { Count: > 0 })
         {
@@ -272,9 +272,15 @@ internal static class FindApiShared
         foreach (ApiNamespaceHit ns in output.Results)
         {
             console.WriteLine($"[{ns.Score}] {ns.Namespace}");
-            foreach (string file in ns.Files)
+            if (verbose)
             {
-                console.WriteLine($"    File: {file}");
+                // The on-disk cache path is a debugging aid, not an answer. It is long,
+                // absolute, and user-specific, so at default verbosity it was crowding
+                // out the API facts the caller actually asked for.
+                foreach (string file in ns.Files)
+                {
+                    console.WriteLine($"    File: {file}");
+                }
             }
             foreach (ApiTypeHit match in ns.Matches)
             {

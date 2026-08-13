@@ -1236,6 +1236,8 @@ winapp find-api [command] [options]
 
 The index is built from the project's restored NuGet/SDK packages (via `project.assets.json`) on first use and refreshed automatically when the project is restored. It lives under the global `.winapp` cache (`cache/find-api/`) and is shared across projects. Restore the project first (`winapp restore` or `dotnet restore`).
 
+Search output lists the matching namespaces and types. Add `--verbose` to also print the on-disk cache file backing each namespace, which is useful when diagnosing a stale or unexpected index.
+
 **Scopes.** Every answer comes from exactly one scope, reported as `scope` in `--json` and as a note in text output:
 
 - **`project`** - the project in the current directory (or `--project` / `--project-dir`). Covers the Windows SDK, the Windows App SDK, *and* the project's own NuGet packages.

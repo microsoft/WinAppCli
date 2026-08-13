@@ -21,6 +21,9 @@ internal sealed class FakeApiMetadataService : IApiMetadataService
     public const string MissingProperty = "__missing__";
     public const string MissingType = "__notype__";
 
+    /// <summary>Cache path the fake reports for a namespace hit; only shown at --verbose.</summary>
+    public const string CacheFilePath = @"C:\fake\cache\find-api\Test_Ns.json";
+
     /// <summary>Every subject passed to each verb, in call order — lets batch tests assert fan-out.</summary>
     public List<string> SearchQueries { get; } = new();
     public List<string> MembersTypes { get; } = new();
@@ -59,7 +62,7 @@ internal sealed class FakeApiMetadataService : IApiMetadataService
                 {
                     Namespace = "Test.Ns",
                     Score = 100,
-                    Files = new List<string>(),
+                    Files = new List<string> { CacheFilePath },
                     Matches = new List<ApiTypeHit> { new() { Display = "Class Test.Ns.Foo", Score = 100 } },
                 },
             };
@@ -490,5 +493,30 @@ public sealed class FindApiCommandTests : BaseCommandTests
         int exit = await ParseAndInvokeWithCaptureAsync(Command, ["types", "Test.Ns"]);
 
         Assert.AreEqual(0, exit);
+    }
+
+    // ---- cache-path noise is verbose-only ----
+
+    [TestMethod]
+    public async Task Search_DefaultVerbosity_OmitsCacheFilePath()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(Command, ["NavigationView"]);
+
+        Assert.AreEqual(0, exit);
+        // The on-disk cache path is a debugging aid. At default verbosity it was up to
+        // ~40% of the response, crowding out the API facts the caller asked for.
+        StringAssert.Contains(TestAnsiConsole.Output, "Test.Ns");
+        Assert.IsFalse(
+            TestAnsiConsole.Output.Contains(FakeApiMetadataService.CacheFilePath, StringComparison.Ordinal),
+            "search output must not print the internal cache path at default verbosity");
+    }
+
+    [TestMethod]
+    public async Task Search_Verbose_ShowsCacheFilePath()
+    {
+        int exit = await ParseAndInvokeWithCaptureAsync(Command, ["NavigationView", "--verbose"]);
+
+        Assert.AreEqual(0, exit);
+        StringAssert.Contains(TestAnsiConsole.Output, FakeApiMetadataService.CacheFilePath);
     }
 }
