@@ -25,6 +25,12 @@ resources:
       branches:
         include:
           - rel/v*
+      # Only Release_GitHub, matching the dependsOn this stage had inside release.yml.
+      # Without it the trigger waits for the whole run, so a failure in a later stage
+      # (Release_WinGet expires its PAT every 90 days) would silently skip publishing.
+      # nuget-packages is produced by Build, so it is already available at this point.
+      stages:
+        - Release_GitHub
 
 extends:
   template: v1/1ES.Official.PipelineTemplate.yml@1esPipelines
