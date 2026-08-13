@@ -63,12 +63,19 @@ When you run `dotnet run`, this package:
 ## Configuration
 
 Everything written after `dotnet run` is passed to **your application**, exactly as it would be
-without this package. A standalone `--` is optional and has no effect, because the .NET SDK consumes
-it before forwarding:
+without this package. A standalone `--` is optional for arguments that do not collide with a
+`dotnet run` option, because the .NET SDK consumes the separator before forwarding:
 
 ```powershell
 dotnet run --devtools          # your app receives --devtools
 dotnet run -- --devtools       # identical
+```
+
+Use `--` when your app's flag is also a `dotnet run` option (`--configuration`, `--framework`,
+`--project`, `-c`, `-f`, `-r`, ...); otherwise the SDK claims it and your app never sees it:
+
+```powershell
+dotnet run -- --configuration Release   # your app receives --configuration Release
 ```
 
 Configure the launcher itself with the MSBuild properties below, which MSBuild consumes so they never

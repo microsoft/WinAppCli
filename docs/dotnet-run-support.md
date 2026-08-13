@@ -192,10 +192,20 @@ dotnet run -- --devtools       # identical
 dotnet run --detach            # your app receives --detach
 ```
 
-A standalone `--` is optional and has no effect. The .NET SDK consumes it while parsing its own
-command line and never re-emits it, so `dotnet run --devtools` and `dotnet run -- --devtools` reach
-winapp as exactly the same token list. (Mechanically, the targets end `RunArguments` with a
-separator, so every argument the SDK appends lands in winapp's passthrough region.)
+A standalone `--` is optional for arguments that do not collide with a `dotnet run` option: the .NET
+SDK consumes the separator while parsing its own command line and never re-emits it, so
+`dotnet run --devtools` and `dotnet run -- --devtools` reach winapp as exactly the same token list.
+(Mechanically, the targets end `RunArguments` with a separator, so every argument the SDK appends
+lands in winapp's passthrough region.)
+
+Use `--` when your application takes a flag that `dotnet run` itself defines — `--configuration`,
+`--framework`, `--project`, `--no-build`, `-c`, `-f`, `-r`, `-v`, and friends. Without it the SDK
+claims the token and your app never sees it:
+
+```powershell
+dotnet run --configuration Release      # the SDK builds Release; your app gets nothing
+dotnet run -- --configuration Release   # your app receives --configuration Release
+```
 
 Configure the launcher itself with the `WinAppRun*` MSBuild properties, which MSBuild consumes:
 

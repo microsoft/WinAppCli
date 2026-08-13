@@ -1151,19 +1151,48 @@ public class RunCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task RunCommand_NuGetCaller_ForwardsOptionWithoutProperty_PointsAtWinAppRunArgs()
+    [DataRow("--verbose", DisplayName = "global option with no property")]
+    [DataRow("--help", DisplayName = "the app's own help flag")]
+    [DataRow("--configuration", DisplayName = "project-mode option, ignored in folder mode")]
+    [DataRow("-p", DisplayName = "project-mode short option")]
+    [DataRow("--no-build", DisplayName = "project-mode switch")]
+    public async Task RunCommand_NuGetCaller_ForwardsOptionWithNoProperty_StaysSilent(string forwarded)
     {
-        // Global options such as --verbose have no dedicated property, so the notice has to point at
-        // the raw escape hatch instead of inventing a property name.
+        // Notices are limited to options that have a property replacing them. Everything here either
+        // never applied on this path (the project-mode options are ignored in folder mode, which is
+        // the only mode the NuGet targets use) or has no property to point at, so there is nothing to
+        // migrate and a notice would be noise on an ordinary application flag.
+        //
+        // The removed generic WinAppRunArgs fallback also produced advice that fails: for
+        // `--configuration Release` it suggested WinAppRunArgs="--configuration", dropping the value,
+        // and that command errors with "Required argument missing for option: '--configuration'".
         await CreateTestManifestAsync();
         var rootCommand = GetRequiredService<WinAppRootCommand>();
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
-            ["run", _tempDirectory.FullName, "--caller", "nuget-package", "--", "--verbose"]);
+            ["run", _tempDirectory.FullName, "--caller", "nuget-package", "--", forwarded]);
 
         Assert.AreEqual(0, exitCode);
-        StringAssert.Contains($"{ConsoleStdOut}{ConsoleStdErr}{TestAnsiConsole.Output}", "WinAppRunArgs=\"--verbose\"",
-            "An option with no dedicated property should point at WinAppRunArgs");
+        Assert.IsFalse($"{ConsoleStdOut}{ConsoleStdErr}{TestAnsiConsole.Output}".Contains("was passed to your application", StringComparison.Ordinal),
+            $"'{forwarded}' has no replacement property, so it must not produce a migration notice");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_NuGetCaller_ForwardsOptionWithValue_KeepsTheValueWithTheApp()
+    {
+        // Regression guard for the dropped-value problem: an option taking a value must reach the app
+        // intact, and must not be described by a notice that omits the value.
+        await CreateTestManifestAsync();
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["run", _tempDirectory.FullName, "--caller", "nuget-package", "--", "--configuration", "Release"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual("--configuration Release", _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "The option and its value must both reach the app");
+        Assert.IsFalse($"{ConsoleStdOut}{ConsoleStdErr}{TestAnsiConsole.Output}".Contains("WinAppRunArgs", StringComparison.Ordinal),
+            "No WinAppRunArgs suggestion should be emitted for an option whose value it would drop");
     }
 
     [TestMethod]

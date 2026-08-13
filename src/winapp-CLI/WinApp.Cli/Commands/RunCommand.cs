@@ -786,6 +786,16 @@ internal partial class RunCommand : Command, IShortDescription
         /// Only fires for the NuGet caller: a direct <c>winapp run . -- --detach</c> is an explicit,
         /// unambiguous request to forward the token, so warning there would be noise. Suppressed under
         /// <c>--json</c> to keep stdout a single machine-readable document.
+        /// <para>
+        /// <see cref="OptionToMSBuildProperty"/> is the whole trigger set. Notices are limited to
+        /// options that (a) actually did something on this path before the change and (b) have a
+        /// property that replaces them, so every notice carries advice that works. Matching every
+        /// option the parser knows would flag ordinary application flags -- <c>--help</c>,
+        /// <c>--configuration</c>, <c>-p</c> -- because the project-mode options are ignored in folder
+        /// mode, which is the only mode the NuGet targets use. There is deliberately no generic
+        /// fallback: it could only guess <c>WinAppRunArgs</c>, and for an option that takes a value
+        /// that guess drops the value and produces a command that fails.
+        /// </para>
         /// </remarks>
         private void WarnIfNuGetCallerForwardedAWinAppOption(
             ParseResult parseResult,
@@ -802,23 +812,6 @@ internal partial class RunCommand : Command, IShortDescription
                 return;
             }
 
-            // Collect the option names reachable from this command, walking up to the root so global
-            // options (--verbose, --quiet, --json) are covered too. Reading them from the parse result
-            // keeps the check matching reality as options are added or renamed, rather than drifting
-            // against a hardcoded list.
-            var knownOptions = new HashSet<string>(StringComparer.Ordinal);
-            for (SymbolResult? cursor = parseResult.CommandResult; cursor is CommandResult cr; cursor = cr.Parent)
-            {
-                foreach (var option in cr.Command.Options)
-                {
-                    knownOptions.Add(option.Name);
-                    foreach (var alias in option.Aliases)
-                    {
-                        knownOptions.Add(alias);
-                    }
-                }
-            }
-
             var alreadyReported = new HashSet<string>(StringComparer.Ordinal);
             foreach (var arg in forwardedArgs)
             {
@@ -826,16 +819,13 @@ internal partial class RunCommand : Command, IShortDescription
                 // Those spellings configured winapp before this change just as the separated form did,
                 // so match on the name and keep the original token in the message.
                 var name = arg.Split('=', 2)[0];
-                if (!knownOptions.Contains(name) || !alreadyReported.Add(name))
+                if (!OptionToMSBuildProperty.TryGetValue(name, out var replacement) || !alreadyReported.Add(name))
                 {
                     continue;
                 }
 
                 // Written through ansiConsole (gated on the logger level) to match how the rest of this
                 // command emits user-facing text, so --quiet still suppresses it.
-                var replacement = OptionToMSBuildProperty.TryGetValue(name, out var property)
-                    ? property
-                    : $"WinAppRunArgs=\"{arg}\"";
                 ansiConsole.MarkupLineInterpolated(
                     $"{UiSymbols.Info} '{arg}' was passed to your application, not to winapp. To configure winapp, use -p:{replacement} instead.");
             }
