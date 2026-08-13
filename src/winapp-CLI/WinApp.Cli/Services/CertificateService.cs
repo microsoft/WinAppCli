@@ -336,10 +336,12 @@ internal partial class CertificateService(
                 };
             }
 
-            // Display password information
             if (password == "password")
             {
-                taskContext.AddStatusMessage($"{UiSymbols.Note} Using default password");
+                taskContext.AddStatusMessage(
+                    $"{UiSymbols.Warning} Protected with the default password ('password'), which is public. " +
+                    "Treat this certificate as development-only: anyone who obtains the .pfx can sign as you. " +
+                    "Pass --password to choose your own, and use a CA-issued certificate or Azure Trusted Signing to ship.");
             }
 
             // Install certificate if requested
