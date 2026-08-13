@@ -23,9 +23,22 @@ When a build fails with any of these, the error is a claim about the API surface
 | XAML "unknown member/property" | The property isn't on that element | `winapp find-api check-property <Type> <Property>` |
 | `CS0104` ambiguous reference | The short name exists in two namespaces | `winapp find-api <TypeName>` (lists every candidate fully-qualified) |
 
-Guessing a replacement name and rebuilding is slower than one lookup and is how
-hallucinated APIs survive several build cycles. If a fix doesn't work the first time,
-you *must* look it up rather than guessing again.
+**Read the whole error list first, then make one call.** A failed build almost never
+reports exactly one bad symbol, and fixing them one at a time means one lookup, one edit,
+and one rebuild per symbol — the slowest possible loop. Collect *every* uncertain type and
+member from the complete build output, then verify them together:
+
+```powershell
+# Build failed with CS0117 on Severity, CS1061 on Titel, CS0246 on TeachingTipBar.
+# One call, not three:
+winapp find-api check-property InfoBar Severity Titel IsOpen
+winapp find-api TeachingTipBar TeachingTip
+```
+
+Then apply all the fixes in one edit and rebuild once. Guessing a replacement name and
+rebuilding is slower than one lookup and is how hallucinated APIs survive several build
+cycles. If a fix doesn't work the first time, you *must* look it up rather than guessing
+again.
 
 ## Batch your lookups — one call, many subjects
 **This is the single most important thing to get right.** The dominant cost of a
@@ -51,6 +64,15 @@ winapp find-api "acrylic brush" "teaching tip" --max 5
 The other verbs take a list of types/queries. In batch mode `check-property` prints a
 one-line ✅ per property that exists and the full near-miss detail only for ones that
 don't, so a clean batch is nearly free to read.
+
+**Two moments to batch, and the second is the one people miss:**
+
+1. **Before you write code** — verify every type and property the screen needs, in one call.
+2. **After a build fails** — read the *entire* error list, collect every uncertain symbol
+   across all of it, and verify them in one call before you edit anything. Fixing errors
+   one at a time is the most expensive loop available: it costs a lookup, an edit, and a
+   full rebuild per symbol, and a rebuild usually surfaces the next bad symbol you could
+   have caught in the same call.
 
 **Exit code:** a batch exits `0` only if *every* subject resolved and was found. Any
 missing type or property exits `1`, so you can still gate codegen on a whole batch.

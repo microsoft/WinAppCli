@@ -260,7 +260,10 @@ Building a WinUI 3 UI and need to find the right control or a working sample?
 multiple subjects in one invocation. Cost is dominated by the number of calls, not the
 size of the answer, so verify everything you're unsure about in a single call
 (`find-api check-property InfoBar Severity IsOpen Message`) rather than one per turn.
-A single subject keeps the original payload shape; a batch returns
+Batch at two moments: before writing code, and **after a build fails** — read the whole
+error list, collect every uncertain symbol from all of it, and verify them in one call
+before editing. Fixing compile errors one at a time costs a lookup, an edit, and a full
+rebuild per symbol. A single subject keeps the original payload shape; a batch returns
 `{ count, results: [...] }` and exits non-zero if *any* subject is missing.
 
 ### `winapp find-ui "<query>"` — WinUI control & sample search
