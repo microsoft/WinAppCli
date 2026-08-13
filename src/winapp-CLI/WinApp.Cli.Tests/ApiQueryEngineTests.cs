@@ -14,6 +14,10 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public sealed class ApiQueryEngineTests
 {
+    private static readonly string[] MoodValues = ["Happy", "Sad"];
+    private static readonly string[] HappyOnly = ["Happy"];
+    private static readonly string[] ColorOnly = ["Color"];
+
     private string _cacheDir = null!;
     private ProjectManifest _manifest = null!;
 
@@ -100,7 +104,7 @@ public sealed class ApiQueryEngineTests
         var result = ApiQueryEngine.Enums("My.Ns.Mood", null, _cacheDir, _manifest);
 
         Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
-        CollectionAssert.AreEqual(new[] { "Happy", "Sad" }, result.Data!.Values);
+        CollectionAssert.AreEqual(MoodValues, result.Data!.Values);
     }
 
     [TestMethod]
@@ -137,7 +141,7 @@ public sealed class ApiQueryEngineTests
         var result = ApiQueryEngine.Enums("My.Ns.Mood", "hap", _cacheDir, _manifest);
 
         Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
-        CollectionAssert.AreEqual(new[] { "Happy" }, result.Data!.Values);
+        CollectionAssert.AreEqual(HappyOnly, result.Data!.Values);
         Assert.AreEqual("hap", result.Data.Filter);
         // The pre-filter total must survive so a caller can tell a narrow view
         // from a genuinely small enum.
@@ -149,7 +153,7 @@ public sealed class ApiQueryEngineTests
     {
         var result = ApiQueryEngine.Enums("My.Ns.Mood", "AP", _cacheDir, _manifest);
 
-        CollectionAssert.AreEqual(new[] { "Happy" }, result.Data!.Values);
+        CollectionAssert.AreEqual(HappyOnly, result.Data!.Values);
     }
 
     [TestMethod]
@@ -170,7 +174,7 @@ public sealed class ApiQueryEngineTests
         var result = ApiQueryEngine.Members("My.Ns.Widget", "col", _cacheDir, _manifest);
 
         Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
-        CollectionAssert.AreEqual(new[] { "Color" }, result.Data!.Properties.Select(p => p.Name).ToArray());
+        CollectionAssert.AreEqual(ColorOnly, result.Data!.Properties.Select(p => p.Name).ToArray());
         Assert.AreEqual(0, result.Data.Methods.Count);
         Assert.AreEqual("col", result.Data.Filter);
         Assert.AreEqual(1, result.Data.TotalProperties);

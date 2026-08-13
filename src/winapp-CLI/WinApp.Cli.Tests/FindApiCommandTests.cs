@@ -178,6 +178,11 @@ internal sealed class FakeApiMetadataService : IApiMetadataService
 [TestClass]
 public sealed class FindApiCommandTests : BaseCommandTests
 {
+    private static readonly string[] ThreeSearchSubjects = ["NavigationView", "TeachingTip", "InfoBar"];
+    private static readonly string[] TwoMemberTypes = ["InfoBar", "TeachingTip"];
+    private static readonly string[] TwoEnumTypes = ["Symbol", "Visibility"];
+    private static readonly string[] ThreeCheckedProperties = ["Severity", "IsOpen", "Message"];
+
     private FakeApiMetadataService _fake = null!;
 
     protected override IServiceCollection ConfigureServices(IServiceCollection services)
@@ -344,7 +349,7 @@ public sealed class FindApiCommandTests : BaseCommandTests
         int exit = await ParseAndInvokeWithCaptureAsync(Command, ["NavigationView", "TeachingTip", "InfoBar"]);
 
         Assert.AreEqual(0, exit);
-        CollectionAssert.AreEqual(new[] { "NavigationView", "TeachingTip", "InfoBar" }, _fake.SearchQueries);
+        CollectionAssert.AreEqual(ThreeSearchSubjects, _fake.SearchQueries);
     }
 
     [TestMethod]
@@ -381,7 +386,7 @@ public sealed class FindApiCommandTests : BaseCommandTests
         int exit = await ParseAndInvokeWithCaptureAsync(Command, ["members", "InfoBar", "TeachingTip"]);
 
         Assert.AreEqual(0, exit);
-        CollectionAssert.AreEqual(new[] { "InfoBar", "TeachingTip" }, _fake.MembersTypes);
+        CollectionAssert.AreEqual(TwoMemberTypes, _fake.MembersTypes);
     }
 
     [TestMethod]
@@ -410,7 +415,7 @@ public sealed class FindApiCommandTests : BaseCommandTests
         int exit = await ParseAndInvokeWithCaptureAsync(Command, ["enums", "Symbol", "Visibility"]);
 
         Assert.AreEqual(0, exit);
-        CollectionAssert.AreEqual(new[] { "Symbol", "Visibility" }, _fake.EnumsTypes);
+        CollectionAssert.AreEqual(TwoEnumTypes, _fake.EnumsTypes);
     }
 
     [TestMethod]
@@ -420,7 +425,7 @@ public sealed class FindApiCommandTests : BaseCommandTests
 
         Assert.AreEqual(0, exit);
         Assert.AreEqual("InfoBar", _fake.LastCheckType);
-        CollectionAssert.AreEqual(new[] { "Severity", "IsOpen", "Message" }, _fake.CheckedProperties);
+        CollectionAssert.AreEqual(ThreeCheckedProperties, _fake.CheckedProperties);
     }
 
     [TestMethod]
