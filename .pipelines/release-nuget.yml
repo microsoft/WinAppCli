@@ -1,0 +1,95 @@
+# Publishes the signed NuGet packages produced by "WinDevCLI - Release" to nuget.org.
+#
+# This lives in its own pipeline because 1ES network isolation policy is pipeline-wide and
+# cannot be scoped to a single stage or job. CFSClean sinkholes api.nuget.org, so a pipeline
+# that pushes to nuget.org cannot run under it. Keeping the push here lets the main release
+# pipeline stay on CFSClean, and limits the CFS exception to a pipeline that only downloads
+# an already-signed .nupkg and publishes it - it never restores packages.
+#
+# Once ESRP Release supports NuGet, this should move to EsrpRelease (as the npm publish in
+# release.yml already does) and the policy here can go back to CFSClean.
+
+trigger: none
+pr: none
+
+resources:
+  repositories:
+  - repository: 1esPipelines
+    type: git
+    name: 1ESPipelineTemplates/1ESPipelineTemplates
+    ref: refs/tags/release
+  pipelines:
+  - pipeline: release
+    source: '\Windows Developer CLI\WinDevCLI - Release'
+    trigger:
+      branches:
+        include:
+          - rel/v*
+
+extends:
+  template: v1/1ES.Official.PipelineTemplate.yml@1esPipelines
+  parameters:
+    settings:
+      networkIsolationPolicy: Permissive,CFSClean2
+    sdl:
+      sourceAnalysisPool:
+        name: Azure-Pipelines-1ESPT-ExDShared
+        image: windows-latest
+        os: windows
+    stages:
+    - stage: Release_NuGet
+      displayName: Publish the NuGet Release
+      jobs:
+      - job: create_nuget_release
+        pool:
+          name: Azure-Pipelines-1ESPT-ExDShared
+          image: windows-latest
+          os: windows
+          hostArchitecture: amd64
+        displayName: NuGet Release
+        templateContext:
+          type: releaseJob
+          isProduction: true
+          inputs:
+          - input: pipelineArtifact
+            pipeline: release
+            artifactName: nuget-packages
+            targetPath: $(Pipeline.Workspace)/nuget-packages
+        steps:
+          # Replaces the DoEsrp gate the stage had while it lived in release.yml: the
+          # nuget-packages artifact is published whether or not ESRP signing ran, so verify
+          # the packages really are signed rather than pushing unsigned ones to nuget.org.
+          - task: PowerShell@2
+            displayName: 'Verify NuGet packages are signed'
+            inputs:
+              targetType: inline
+              pwsh: true
+              errorActionPreference: stop
+              script: |
+                if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+                  throw "dotnet was not found on the agent; cannot verify package signatures."
+                }
+
+                $packages = Get-ChildItem '$(Pipeline.Workspace)/nuget-packages' -Filter *.nupkg -File
+                if (-not $packages) {
+                  throw "No .nupkg files were found to publish."
+                }
+
+                foreach ($package in $packages) {
+                  Write-Host "Verifying $($package.Name)"
+                  & dotnet nuget verify $package.FullName --all
+                  if ($LASTEXITCODE -ne 0) {
+                    throw "Signature verification failed for $($package.Name). Refusing to publish to nuget.org."
+                  }
+                }
+          - task: 1ES.PublishNuget@1
+            displayName: 'NuGet push to nuget.org'
+            retryCountOnTaskFailure: 2
+            inputs:
+              # nuget.exe rather than DotNetCoreCLI@2, which cannot use the encrypted API
+              # key from the service connection.
+              useDotNetTask: false
+              packagesToPush: '$(Pipeline.Workspace)/nuget-packages/*.nupkg'
+              packageParentPath: '$(Pipeline.Workspace)/nuget-packages'
+              nuGetFeedType: external
+              publishFeedCredentials: 'NuGet-WinAppCLI'
