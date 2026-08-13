@@ -34,6 +34,15 @@ parameters:
     type: boolean
     default: false
 
+variables:
+  # Declared once so the URL and its hash cannot drift apart across the stages that install gh.
+  # To bump: take the version and its SHA-256 from the gh_<version>_checksums.txt asset published
+  # with the release at https://github.com/cli/cli/releases.
+  - name: GhCliUrl
+    value: https://github.com/cli/cli/releases/download/v2.97.0/gh_2.97.0_windows_amd64.zip
+  - name: GhCliSha256
+    value: 35D7FE05C4DD1411FFDA1E73DFC7C6F44B75C936CA51FA6595C657FDC0350CEC
+
 extends:
   template: v1/1ES.Official.PipelineTemplate.yml@1esPipelines
   parameters:
@@ -371,13 +380,18 @@ extends:
                 Invoke-WebRequest https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx -OutFile $vcLibsFile
                 Add-AppxPackage $vcLibsFile
                 
-                # Install gh
-                # TODO: Change this to get the latest version of gh
+                # Install gh with integrity verification
                 Write-Host "Installing gh..."
                 $tempDir = "$(Agent.TempDirectory)"
                 Write-Host "TempDir: $tempDir"
-                Invoke-WebRequest -Uri "https://github.com/cli/cli/releases/download/v2.83.1/gh_2.83.1_windows_amd64.zip" -OutFile "$tempdir\gh.zip"
-                Expand-Archive "$tempdir\gh.zip" -DestinationPath "$tempDir\gh"
+                $ghZipPath = "$tempDir\gh.zip"
+                Invoke-WebRequest -Uri "$(GhCliUrl)" -OutFile $ghZipPath
+                $actualHash = (Get-FileHash $ghZipPath -Algorithm SHA256).Hash
+                if ($actualHash -ne "$(GhCliSha256)") {
+                  Write-Error "SHA-256 mismatch for gh.zip! Expected: $(GhCliSha256), Got: $actualHash"
+                  exit 1
+                }
+                Expand-Archive $ghZipPath -DestinationPath "$tempDir\gh"
 
                 # Download and install wingetcreate
                 Write-Host "Installing wingetcreate..."
@@ -464,13 +478,11 @@ extends:
                 # Install gh with integrity verification
                 Write-Host "Installing gh..."
                 $tempDir = "$(Agent.TempDirectory)"
-                $ghZipUrl = "https://github.com/cli/cli/releases/download/v2.83.1/gh_2.83.1_windows_amd64.zip"
                 $ghZipPath = "$tempDir\gh.zip"
-                $ghExpectedHash = "1324871424CB8CB3793914565026A8DA53B1A633FA05760597ABEF54B57FF12E"
-                Invoke-WebRequest -Uri $ghZipUrl -OutFile $ghZipPath
+                Invoke-WebRequest -Uri "$(GhCliUrl)" -OutFile $ghZipPath
                 $actualHash = (Get-FileHash $ghZipPath -Algorithm SHA256).Hash
-                if ($actualHash -ne $ghExpectedHash) {
-                  Write-Error "SHA-256 mismatch for gh.zip! Expected: $ghExpectedHash, Got: $actualHash"
+                if ($actualHash -ne "$(GhCliSha256)") {
+                  Write-Error "SHA-256 mismatch for gh.zip! Expected: $(GhCliSha256), Got: $actualHash"
                   exit 1
                 }
                 Expand-Archive $ghZipPath -DestinationPath "$tempDir\gh"
