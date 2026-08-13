@@ -33,6 +33,45 @@ node cli.js help
 .\scripts\build-cli.ps1
 ```
 
+### Running tests on a Microsoft corporate machine
+
+`api.nuget.org` is **not reachable** from corp machines. Any test that downloads a package
+(anything touching `Microsoft.Windows.SDK.BuildTools`, so most of `PackageCommand`,
+`SignCommand` and `MsixService` coverage) fails with:
+
+```
+Failed to install Microsoft.Windows.SDK.BuildTools: The SSL connection could not be established
+```
+
+**This is a known limitation, not a flaky test and not a transient outage.** Do not dismiss a
+failure on these grounds and do not re-run hoping it passes. `NugetService` falls back to
+`api.nuget.org` only when the feed environment variables are unset; point them at the internal
+feed instead — the same values `.pipelines/templates/build.yaml` uses in CI:
+
+```powershell
+$env:WINAPP_NUGET_FLAT_CONTAINER = 'https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/nuget/v3/flat2'
+$env:WINAPP_NUGET_REGISTRATION   = 'https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/nuget/v3/registrations2-semver2'
+$env:WINAPP_NUGET_AUTH_PREFIX    = 'https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/nuget/v3/'
+
+# Basic auth as VssSessionToken:<token>, applied only to URLs under WINAPP_NUGET_AUTH_PREFIX
+$t = azureauth aad --resource 499b84ac-1321-427f-aa17-267ca6975798 `
+    --client 872cd9fa-d31f-45e0-9eab-6e460a02d1f1 `
+    --tenant 72f988bf-86f1-41af-91ab-2d7cd011db47 --output token
+$env:VSS_NUGET_ACCESSTOKEN = ($t | Select-Object -Last 1).Trim()
+```
+
+Confirm the feed answers before spending time on a long run:
+
+```powershell
+$cred = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("VssSessionToken:$env:VSS_NUGET_ACCESSTOKEN"))
+Invoke-RestMethod "$env:WINAPP_NUGET_FLAT_CONTAINER/microsoft.windows.sdk.buildtools/index.json" `
+    -Headers @{ Authorization = "Basic $cred" }
+```
+
+More generally: if something fails locally but passes in CI, the difference is configuration,
+not luck. Check `.pipelines/templates/build.yaml` for the environment CI provides before
+concluding a failure is environmental.
+
 ## Always update documentation and samples
 When adding or changing public facing features, ensure all documentation is also updated. Places to update (but not limited to):
 
