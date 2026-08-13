@@ -62,6 +62,9 @@ Additional Electron guides:
 - The key prerequisite is `Package.appxmanifest`, not `winapp.yaml`
 - No native addon step needed — unlike Electron, .NET can call Windows APIs directly
 - `winapp init` automatically adds the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, enabling `dotnet run` with automatic identity registration
+- Arguments written after `dotnet run` go to the launched application, exactly as they would without the package; configure the launcher itself with the `WinAppRun*` MSBuild properties
+- Example combining both: `dotnet run -p:WinAppRunDetach=true --app-arg` (WinApp detaches, the app receives `--app-arg`)
+- Use `--` when the app's flag is also a `dotnet run` option (`--configuration`, `--framework`, `--project`, `-c`, `-f`, `-r`, ...), e.g. `dotnet run -- --configuration Release`; otherwise the SDK claims it and the app never sees it
 
 **If you already have a `Package.appxmanifest`** (e.g., WinUI 3 apps or projects with an existing packaging setup), you likely **don't need `winapp init`** — your project is already configured for packaged builds. Just make sure:
 - Your `.csproj` references the `Microsoft.WindowsAppSDK` NuGet package (WinUI 3 apps already have this)

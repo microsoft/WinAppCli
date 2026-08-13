@@ -1125,6 +1125,128 @@ public class RunCommandTests : BaseCommandTests
             "Passthrough args after -- should be forwarded to the launcher");
     }
 
+    // --- Migration notice: dotnet run argument routing ---
+
+    [TestMethod]
+    public async Task RunCommand_NuGetCaller_ForwardsKnownOption_PointsAtTheMSBuildProperty()
+    {
+        // The NuGet targets end RunArguments with a separator, so everything typed after
+        // `dotnet run` reaches the app. A project that previously relied on `dotnet run --detach`
+        // keeps working syntactically but silently changes meaning, and MSBuild cannot warn because
+        // it never sees those tokens. winapp is the only place that can.
+        await CreateTestManifestAsync();
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["run", _tempDirectory.FullName, "--caller", "nuget-package", "--", "--detach"]);
+
+        Assert.AreEqual(0, exitCode, "Forwarding is not an error");
+        var output = $"{ConsoleStdOut}{ConsoleStdErr}{TestAnsiConsole.Output}";
+        StringAssert.Contains(output, "'--detach' was passed to your application",
+            "The notice should name the token that changed meaning");
+        StringAssert.Contains(output, "WinAppRunDetach=true",
+            "The notice should name the property that replaces it");
+        Assert.AreEqual("--detach", _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "The token must still reach the app");
+    }
+
+    [TestMethod]
+    [DataRow("--verbose", DisplayName = "global option with no property")]
+    [DataRow("--help", DisplayName = "the app's own help flag")]
+    [DataRow("--configuration", DisplayName = "project-mode option, ignored in folder mode")]
+    [DataRow("-p", DisplayName = "project-mode short option")]
+    [DataRow("--no-build", DisplayName = "project-mode switch")]
+    public async Task RunCommand_NuGetCaller_ForwardsOptionWithNoProperty_StaysSilent(string forwarded)
+    {
+        // Notices are limited to options that have a property replacing them. Everything here either
+        // never applied on this path (the project-mode options are ignored in folder mode, which is
+        // the only mode the NuGet targets use) or has no property to point at, so there is nothing to
+        // migrate and a notice would be noise on an ordinary application flag.
+        //
+        // The removed generic WinAppRunArgs fallback also produced advice that fails: for
+        // `--configuration Release` it suggested WinAppRunArgs="--configuration", dropping the value,
+        // and that command errors with "Required argument missing for option: '--configuration'".
+        await CreateTestManifestAsync();
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["run", _tempDirectory.FullName, "--caller", "nuget-package", "--", forwarded]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.IsFalse($"{ConsoleStdOut}{ConsoleStdErr}{TestAnsiConsole.Output}".Contains("was passed to your application", StringComparison.Ordinal),
+            $"'{forwarded}' has no replacement property, so it must not produce a migration notice");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_NuGetCaller_ForwardsOptionWithValue_KeepsTheValueWithTheApp()
+    {
+        // Regression guard for the dropped-value problem: an option taking a value must reach the app
+        // intact, and must not be described by a notice that omits the value.
+        await CreateTestManifestAsync();
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["run", _tempDirectory.FullName, "--caller", "nuget-package", "--", "--configuration", "Release"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual("--configuration Release", _fakeAppLauncherService.LaunchCalls[0].Arguments,
+            "The option and its value must both reach the app");
+        Assert.IsFalse($"{ConsoleStdOut}{ConsoleStdErr}{TestAnsiConsole.Output}".Contains("WinAppRunArgs", StringComparison.Ordinal),
+            "No WinAppRunArgs suggestion should be emitted for an option whose value it would drop");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_NuGetCaller_ForwardsUnknownArgument_StaysSilent()
+    {
+        // A genuine app argument never had a winapp meaning, so there is nothing to migrate and a
+        // notice would be pure noise on every single run.
+        await CreateTestManifestAsync();
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["run", _tempDirectory.FullName, "--caller", "nuget-package", "--", "--devtools"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.IsFalse($"{ConsoleStdOut}{ConsoleStdErr}{TestAnsiConsole.Output}".Contains("was passed to your application", StringComparison.Ordinal),
+            "An argument winapp never owned should not produce a migration notice");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_NuGetCaller_ForwardsAttachedValueOption_StillPointsAtTheProperty()
+    {
+        // `--executable=foo.exe` and `--detach=true` configured winapp before this change just as the
+        // separated spelling did, so they need the same notice. Matching the whole token would miss
+        // them and let a previously-working invocation change meaning silently.
+        await CreateTestManifestAsync();
+        var rootCommand = GetRequiredService<WinAppRootCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(rootCommand,
+            ["run", _tempDirectory.FullName, "--caller", "nuget-package", "--", "--executable=foo.exe"]);
+
+        Assert.AreEqual(0, exitCode);
+        var output = $"{ConsoleStdOut}{ConsoleStdErr}{TestAnsiConsole.Output}";
+        StringAssert.Contains(output, "'--executable=foo.exe' was passed to your application",
+            "The notice should quote the token exactly as the user typed it");
+        StringAssert.Contains(output, "WinAppRunExecutable=<path>",
+            "The property lookup should use the option name, not the attached-value token");
+    }
+
+    [TestMethod]
+    public async Task RunCommand_DirectCliCaller_ForwardsKnownOption_StaysSilent()
+    {
+        // `winapp run . -- --detach` is an explicit, unambiguous request to forward the token. Only
+        // the NuGet path had its meaning changed, so only it gets the notice.
+        await CreateTestManifestAsync();
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command,
+            [_tempDirectory.FullName, "--", "--detach"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.IsFalse($"{ConsoleStdOut}{ConsoleStdErr}{TestAnsiConsole.Output}".Contains("was passed to your application", StringComparison.Ordinal),
+            "A direct CLI invocation should not be told to use MSBuild properties");
+    }
+
     [TestMethod]
     public async Task RunCommand_BareDoubleDash_LaunchesWithNoArgs()
     {
