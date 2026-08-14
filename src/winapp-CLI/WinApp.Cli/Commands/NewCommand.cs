@@ -911,10 +911,11 @@ internal class NewCommand : Command, IShortDescription
         /// Checks the NuGet feed for a newer WinUI pack via <c>dotnet new update --check-only</c> (which
         /// resolves through the caller's configured feeds and surfaces prerelease updates).
         /// <para>
-        /// <c>Succeeded</c> is <see langword="false"/> when the check itself failed (feed unreachable,
-        /// non-zero exit) so the caller can avoid caching a failure as an authoritative result;
-        /// <c>Latest</c> is the newest available version, or <see langword="null"/> when the pack is
-        /// already up-to-date.
+        /// <c>Succeeded</c> is <see langword="false"/> when the check couldn't produce an authoritative
+        /// result — a non-zero exit (feed unreachable) or exit 0 with output we can't interpret (an SDK
+        /// output-format change, truncated stdout) — so the caller avoids caching a non-result as
+        /// "up-to-date" for a day; <c>Latest</c> is the newest available version, or <see langword="null"/>
+        /// when the pack is already up-to-date.
         /// </para>
         /// </summary>
         private async Task<(bool Succeeded, string? Latest)> GetLatestAvailableVersionAsync(DirectoryInfo cwd, string installed, CancellationToken cancellationToken)
@@ -926,7 +927,13 @@ internal class NewCommand : Command, IShortDescription
                 return (false, null);
             }
 
-            var (_, latest) = WinUiTemplateCatalog.ParseUpdateCheck(output, TemplatePackageId);
+            var (outcome, _, latest) = WinUiTemplateCatalog.ParseUpdateCheck(output, TemplatePackageId);
+            if (outcome == UpdateCheckOutcome.Unrecognized)
+            {
+                // Exit 0 but output we can't interpret: don't cache it as authoritative — retry next run.
+                return (false, null);
+            }
+
             return (true, latest);
         }
 

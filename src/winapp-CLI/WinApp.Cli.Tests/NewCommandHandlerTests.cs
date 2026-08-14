@@ -1355,7 +1355,7 @@ public class NewCommandHandlerTests : BaseCommandTests
         var globalDir = GetRequiredService<IWinappDirectoryService>().GetGlobalWinappDirectory();
         globalDir.Create();
         var content = $"{DateTimeOffset.UtcNow:O}\n{installedVersion}\n{latestVersion}";
-        File.WriteAllText(Path.Combine(globalDir.FullName, ".template-update-check"), content);
+        File.WriteAllText(Path.Join(globalDir.FullName, ".template-update-check"), content);
     }
 
     [TestMethod]
@@ -1465,7 +1465,7 @@ public class NewCommandHandlerTests : BaseCommandTests
 
         Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
         var globalDir = GetRequiredService<IWinappDirectoryService>().GetGlobalWinappDirectory();
-        var cacheFile = new FileInfo(Path.Combine(globalDir.FullName, ".template-update-check"));
+        var cacheFile = new FileInfo(Path.Join(globalDir.FullName, ".template-update-check"));
         cacheFile.Refresh();
         Assert.IsFalse(cacheFile.Exists,
             "A failed feed check must not be cached, so the next run retries instead of skipping for a day.");

@@ -46,7 +46,7 @@ internal sealed class TemplateUpdateCheckThrottle(
             latestVersion = string.IsNullOrEmpty(cache.LatestVersion) ? null : cache.LatestVersion;
             return true;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException)
         {
             logger.LogDebug(ex, "Failed to read template update-check cache; treating as due.");
             return false;
@@ -61,7 +61,7 @@ internal sealed class TemplateUpdateCheckThrottle(
                 GetCacheFile(),
                 new Entry(UtcNowProvider(), installedVersion, latestVersion ?? ""));
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             logger.LogDebug(ex, "Failed to write template update-check cache.");
         }
@@ -70,7 +70,7 @@ internal sealed class TemplateUpdateCheckThrottle(
     private FileInfo GetCacheFile()
     {
         var globalDir = winappDirectoryService.GetGlobalWinappDirectory();
-        return new FileInfo(Path.Combine(globalDir.FullName, CacheFileName));
+        return new FileInfo(Path.Join(globalDir.FullName, CacheFileName));
     }
 
     private static Entry ReadCache(FileInfo cacheFile)
@@ -107,7 +107,7 @@ internal sealed class TemplateUpdateCheckThrottle(
             cacheFile.Refresh();
             cacheFile.Attributes |= FileAttributes.Hidden;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
             logger.LogDebug(ex, "Failed to hide template update-check cache file.");
         }

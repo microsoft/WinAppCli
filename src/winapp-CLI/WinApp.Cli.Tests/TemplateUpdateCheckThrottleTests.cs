@@ -18,7 +18,7 @@ public class TemplateUpdateCheckThrottleTests
     [TestInitialize]
     public void Setup()
     {
-        _globalDir = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"TplThrottle_{Guid.NewGuid():N}"));
+        _globalDir = new DirectoryInfo(Path.Join(Path.GetTempPath(), $"TplThrottle_{Guid.NewGuid():N}"));
         _globalDir.Create();
     }
 
@@ -29,7 +29,7 @@ public class TemplateUpdateCheckThrottleTests
         {
             _globalDir.Delete(true);
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DirectoryNotFoundException)
         {
             // best-effort cleanup
         }
@@ -111,7 +111,7 @@ public class TemplateUpdateCheckThrottleTests
         var throttle = CreateThrottle();
         throttle.Record("1.0.0", "1.2.0");
 
-        var cacheFile = new FileInfo(Path.Combine(_globalDir.FullName, ".template-update-check"));
+        var cacheFile = new FileInfo(Path.Join(_globalDir.FullName, ".template-update-check"));
         cacheFile.Refresh();
 
         Assert.IsTrue(cacheFile.Exists, "Recording a check must persist the cache file.");
