@@ -5,6 +5,7 @@ using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.ComponentModel;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
@@ -679,9 +680,42 @@ internal class NewCommand : Command, IShortDescription
             // Show a transient spinner while dotnet new runs (interactive terminals only); it clears
             // once scaffolding completes and WriteSuccess prints the "Created"/"Added" line in its place.
             var verb = entry.IsItem ? "Adding" : "Creating";
+            var scaffoldMessage = $"{verb} {name} from {entry.ShortName}...";
             var (exitCode, stdout, stderr) = await WithSpinnerAsync(
-                $"{verb} {name} from {entry.ShortName}...",
-                () => dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken: cancellationToken));
+                scaffoldMessage,
+                async updateStatus =>
+                {
+                    var stdoutBuilder = new StringBuilder();
+                    var stderrBuilder = new StringBuilder();
+                    var outputLock = new Lock();
+                    var packageStatusShown = 0;
+
+                    void CaptureLine(StringBuilder builder, string line)
+                    {
+                        lock (outputLock)
+                        {
+                            builder.AppendLine(line);
+                        }
+
+                        if (IsPackageRestoreOutput(line)
+                            && Interlocked.Exchange(ref packageStatusShown, 1) == 0)
+                        {
+                            updateStatus("Downloading and restoring NuGet packages, this may take a moment…");
+                        }
+                    }
+
+                    var scaffoldExit = await dotNetService.RunDotnetStreamingAsync(
+                        workingDir,
+                        args,
+                        line => CaptureLine(stdoutBuilder, line),
+                        line => CaptureLine(stderrBuilder, line),
+                        cancellationToken);
+
+                    lock (outputLock)
+                    {
+                        return (scaffoldExit, stdoutBuilder.ToString(), stderrBuilder.ToString());
+                    }
+                });
             LogDotnetOutput(args, exitCode, stdout, stderr);
             if (exitCode != 0)
             {
@@ -866,18 +900,28 @@ internal class NewCommand : Command, IShortDescription
         /// the operation completes, so callers print their own result line afterwards.
         /// </summary>
         private async Task<T> WithSpinnerAsync<T>(string message, Func<Task<T>> operation)
+            => await WithSpinnerAsync(message, _ => operation());
+
+        private async Task<T> WithSpinnerAsync<T>(string message, Func<Action<string>, Task<T>> operation)
         {
             if (!ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger))
             {
-                return await operation();
+                return await operation(_ => { });
             }
 
             return await ansiConsole.Status()
                 .AutoRefresh(true)
                 .Spinner(Spinner.Known.Dots)
                 .SpinnerStyle(Style.Parse("blue"))
-                .StartAsync(message, async _ => await operation());
+                .StartAsync(message, async context =>
+                    await operation(status => context.Status(status)));
         }
+
+        internal static bool IsPackageRestoreOutput(string line)
+            => line.Contains("Adding a package reference", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("Adding PackageReference", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("Restoring packages for", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("Determining projects to restore", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>Returns the installed WinUI pack version, or <c>null</c> when the pack isn't installed.</summary>
         private async Task<string?> QueryInstalledPackVersionAsync(DirectoryInfo cwd, CancellationToken cancellationToken)

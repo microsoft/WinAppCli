@@ -136,6 +136,23 @@ internal class FakeDotNetService : IDotNetService
         return Task.FromResult(0);
     }
 
+    public Task<int> RunDotnetStreamingAsync(DirectoryInfo workingDirectory, IReadOnlyList<string> arguments, Action<string>? onOutputLine, Action<string>? onErrorLine, CancellationToken cancellationToken = default)
+    {
+        ArgumentListInvocations.Add(arguments.ToArray());
+        ArgumentListEnvironmentInvocations.Add(null);
+        ArgumentListWorkingDirectories.Add(workingDirectory);
+        var result = RunDotnetArgumentListHandler?.Invoke(arguments) ?? (0, string.Empty, string.Empty);
+        foreach (var line in result.Output.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries))
+        {
+            onOutputLine?.Invoke(line);
+        }
+        foreach (var line in result.Error.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries))
+        {
+            onErrorLine?.Invoke(line);
+        }
+        return Task.FromResult(result.ExitCode);
+    }
+
     /// <summary>
     /// When set, <see cref="RunDotnetInheritedAsync"/> returns this handler's result (keyed on the
     /// argument string) instead of the default success. Lets a test control the exit code of the

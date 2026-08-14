@@ -109,6 +109,17 @@ internal interface IDotNetService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Runs a dotnet CLI command with injection-safe discrete arguments, delivering stdout/stderr
+    /// lines as they are produced. The command's output is not retained unless the callbacks do so.
+    /// </summary>
+    Task<int> RunDotnetStreamingAsync(
+        DirectoryInfo workingDirectory,
+        IReadOnlyList<string> arguments,
+        Action<string>? onOutputLine,
+        Action<string>? onErrorLine,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Runs a dotnet CLI command with <b>inherited</b> stdio: the child inherits winapp's own console
     /// handles (no redirection, no read pumps), so dotnet sees a real terminal and its native terminal
     /// logger renders the live build (single warnings, live progress) directly. Used for the project-mode
