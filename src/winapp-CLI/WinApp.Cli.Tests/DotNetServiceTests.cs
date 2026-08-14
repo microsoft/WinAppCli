@@ -1704,13 +1704,7 @@ public class DotNetServiceTests : BaseCommandTests
         // with -PassThru, writes ping's PID to a temp file, then blocks on Wait-Process. The test polls
         // that file — no WMI or Win32 process enumeration required.
         var pidFile = Path.Join(Path.GetTempPath(), $"winapp_treekill_{Guid.NewGuid():N}.pid");
-        // Escape single quotes for the single-quoted PowerShell string literal so a temp path
-        // containing an apostrophe (e.g. a profile like O'Brien) still produces a valid script.
-        var pidFileLiteral = pidFile.Replace("'", "''");
-        var script =
-            "$p = Start-Process -FilePath ping.exe -ArgumentList '-n','60','127.0.0.1' -PassThru -WindowStyle Hidden; " +
-            $"Set-Content -LiteralPath '{pidFileLiteral}' -Value $p.Id; " +
-            "Wait-Process -Id $p.Id";
+        var script = BuildTreeKillScript(pidFile, "ping.exe");
 
         var startInfo = new ProcessStartInfo
         {
@@ -1744,8 +1738,11 @@ public class DotNetServiceTests : BaseCommandTests
             rootPid = rootPidValue;
             Assert.IsFalse(Process.GetProcessById(rootPidValue).HasExited, "The root process should be running before cancellation.");
 
-            // Capture the ping descendant via the PID file the root script writes.
-            var pingPidValue = await WaitForPidFileAsync(pidFile, TimeSpan.FromSeconds(15), TestContext.CancellationToken);
+            // Capture the ping descendant via the PID file the root script writes. The run task is passed
+            // in so a root that dies before publishing fails here with its own stderr rather than after a
+            // silent wait. The budget is generous because it costs nothing on success (a healthy spawn
+            // publishes in well under a second) and only bounds a genuinely wedged agent.
+            var pingPidValue = await WaitForPidFileAsync(pidFile, TimeSpan.FromSeconds(30), TestContext.CancellationToken, runTask);
             pingPid = pingPidValue;
             Assert.IsFalse(Process.GetProcessById(pingPidValue).HasExited, "The ping descendant should be running before cancellation.");
 
@@ -1793,6 +1790,38 @@ public class DotNetServiceTests : BaseCommandTests
                 File.Delete(pidFile);
             }
         }
+    }
+
+    /// <summary>
+    /// Builds the root script for the tree-kill test: start <paramref name="childExe"/>, publish its PID
+    /// to <paramref name="pidFile"/>, then block until it exits.
+    /// </summary>
+    /// <remarks>
+    /// <c>$ErrorActionPreference = 'Stop'</c> is what keeps the published PID file honest, and it is the
+    /// fix for a CI flake rather than boilerplate. A <c>Start-Process</c> failure is a NON-terminating
+    /// error by default, so the script used to carry straight on to <c>Set-Content</c> with <c>$p</c>
+    /// still null, publish a 0-byte file, and leave the reader polling a file that would never parse
+    /// until its whole budget expired — reporting that the file "was not written" about a file that had
+    /// in fact been written, just empty. Stopping on the error means the root exits instead, with the
+    /// real reason on stderr for <see cref="WaitForPidFileAsync"/> to surface.
+    /// <para>
+    /// Shared with the regression test so the script proven not to publish an empty file is the very
+    /// script the tree-kill test runs, and the two cannot drift apart.
+    /// </para>
+    /// </remarks>
+    private static string BuildTreeKillScript(string pidFile, string childExe)
+    {
+        // Escape single quotes for the single-quoted PowerShell string literals so a temp path
+        // containing an apostrophe (e.g. a profile like O'Brien) still produces a valid script.
+        var pidFileLiteral = pidFile.Replace("'", "''");
+        var childExeLiteral = childExe.Replace("'", "''");
+
+        return
+            "$ErrorActionPreference = 'Stop'; " +
+            $"$p = Start-Process -FilePath '{childExeLiteral}' -ArgumentList '-n','60','127.0.0.1' -PassThru -WindowStyle Hidden; " +
+            "if ($null -eq $p) { throw 'Start-Process returned no process object' }; " +
+            $"Set-Content -LiteralPath '{pidFileLiteral}' -Value $p.Id; " +
+            "Wait-Process -Id $p.Id";
     }
 
     /// <summary>Best-effort force-kill of a process (and its tree) by id, ignoring already-exited processes.</summary>
@@ -1875,10 +1904,23 @@ public class DotNetServiceTests : BaseCommandTests
     /// </para>
     /// An empty or partially written file is covered by the existing <see cref="int.TryParse(string, out int)"/>
     /// guard, which simply keeps polling until the value parses.
+    /// <para>
+    /// <paramref name="rootTask"/> is the optional launcher task for the process that publishes the file.
+    /// The PID can only ever arrive from that process, so once it has exited the wait is already lost and
+    /// running out the clock just delays the failure and throws away the reason. Awaiting the completed
+    /// task yields its exit code and captured stderr, turning a blind "not written" timeout into the
+    /// actual error the script reported.
+    /// </para>
     /// </remarks>
-    private static async Task<int> WaitForPidFileAsync(string pidFile, TimeSpan timeout, CancellationToken cancellationToken)
+    private static async Task<int> WaitForPidFileAsync(
+        string pidFile,
+        TimeSpan timeout,
+        CancellationToken cancellationToken,
+        Task<(int ExitCode, string Output, string Error)>? rootTask = null)
     {
         var deadline = DateTime.UtcNow + timeout;
+        var everExisted = false;
+        string? lastRead = null;
         while (DateTime.UtcNow < deadline)
         {
             string? text = null;
@@ -1886,6 +1928,7 @@ public class DotNetServiceTests : BaseCommandTests
             {
                 if (File.Exists(pidFile))
                 {
+                    everExisted = true;
                     text = (await File.ReadAllTextAsync(pidFile, cancellationToken)).Trim();
                 }
             }
@@ -1894,16 +1937,40 @@ public class DotNetServiceTests : BaseCommandTests
                 // Still being written (or replaced) by the root script — fall through and retry.
             }
 
-            if (text is not null && int.TryParse(text, out var pid))
+            if (text is not null)
             {
-                return pid;
+                lastRead = text;
+                if (int.TryParse(text, out var pid))
+                {
+                    return pid;
+                }
+            }
+
+            if (rootTask is { IsCompleted: true })
+            {
+                // Awaiting a faulted task rethrows the original exception, which is at least as
+                // informative as anything this method could compose.
+                var (exitCode, output, error) = await rootTask;
+                throw new InvalidOperationException(
+                    $"The root process exited with code {exitCode} before publishing a descendant PID to " +
+                    $"'{pidFile}'. stderr: {DescribeStream(error)} | stdout: {DescribeStream(output)}");
             }
 
             await Task.Delay(20, cancellationToken);
         }
 
-        throw new TimeoutException($"The descendant PID file '{pidFile}' was not written within {timeout}.");
+        var state = (everExisted, lastRead) switch
+        {
+            (false, _) => "it was never created",
+            (true, null) => "it was created but could never be read (the writer held it exclusively for the whole wait)",
+            _ => $"it was created but never contained a parsable PID (last read: '{lastRead}')",
+        };
+        throw new TimeoutException($"The descendant PID file '{pidFile}' was not usable within {timeout}: {state}.");
     }
+
+    /// <summary>Renders a captured stdio stream for a failure message, collapsing it onto one line.</summary>
+    private static string DescribeStream(string? stream)
+        => string.IsNullOrWhiteSpace(stream) ? "(empty)" : stream.Trim().ReplaceLineEndings(" ");
 
     #endregion
 
@@ -1979,6 +2046,92 @@ public class DotNetServiceTests : BaseCommandTests
             async () => await WaitForPidFileAsync(pidFile, TimeSpan.FromMilliseconds(200), TestContext.CancellationToken));
 
         Assert.IsTrue(File.Exists(pidFile), "The file existed throughout; the timeout came from the parse guard, not a missing file.");
+    }
+
+    [TestMethod]
+    public async Task WaitForPidFile_RootExitedWithoutPublishing_FailsFastWithTheRootsError()
+    {
+        // The PID can only ever come from the root process, so once it has exited the wait is already
+        // lost. The old helper had no idea the root was gone and kept polling to the end of its budget,
+        // then reported "was not written" -- true, but silent about why. This is the diagnosis half of
+        // the CI flake fix: the failure must name the root's exit code and stderr.
+        var pidFile = Path.Join(_tempDirectory.FullName, $"rootdied_{Guid.NewGuid():N}.pid");
+        var rootTask = Task.FromResult((ExitCode: 1, Output: "some stdout", Error: "Start-Process : cannot find the file"));
+
+        var sw = Stopwatch.StartNew();
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await WaitForPidFileAsync(pidFile, TimeSpan.FromSeconds(30), TestContext.CancellationToken, rootTask));
+        sw.Stop();
+
+        StringAssert.Contains(ex.Message, "exited with code 1");
+        StringAssert.Contains(ex.Message, "cannot find the file", "The root's stderr is the whole point of the diagnostic.");
+        Assert.IsLessThan(TimeSpan.FromSeconds(5), sw.Elapsed,
+            "A dead root must fail fast rather than wait out the full timeout.");
+    }
+
+    [TestMethod]
+    public async Task WaitForPidFile_NeverWritten_TimeoutSaysSo()
+    {
+        // The timeout message has to distinguish "never created" from "created but unusable", because
+        // the two point at completely different causes and the old wording ("was not written") was
+        // actively misleading for the second one.
+        var pidFile = Path.Join(_tempDirectory.FullName, $"missing_{Guid.NewGuid():N}.pid");
+
+        var ex = await Assert.ThrowsAsync<TimeoutException>(
+            async () => await WaitForPidFileAsync(pidFile, TimeSpan.FromMilliseconds(200), TestContext.CancellationToken));
+
+        StringAssert.Contains(ex.Message, "never created");
+    }
+
+    [TestMethod]
+    public async Task WaitForPidFile_EmptyFile_TimeoutReportsItWasCreatedButUnparsable()
+    {
+        // The exact shape of the CI flake: Set-Content published a 0-byte file, so the file WAS written
+        // and the old "was not written within 00:00:15" message sent anyone reading it down the wrong path.
+        var pidFile = Path.Join(_tempDirectory.FullName, $"emptymsg_{Guid.NewGuid():N}.pid");
+        await File.WriteAllTextAsync(pidFile, string.Empty, TestContext.CancellationToken);
+
+        var ex = await Assert.ThrowsAsync<TimeoutException>(
+            async () => await WaitForPidFileAsync(pidFile, TimeSpan.FromMilliseconds(200), TestContext.CancellationToken));
+
+        StringAssert.Contains(ex.Message, "never contained a parsable PID");
+    }
+
+    [TestMethod]
+    public async Task TreeKillScript_WhenTheChildCannotStart_PublishesNoPidFileAtAll()
+    {
+        // Root-cause regression guard. Start-Process failure is a NON-terminating error, so without
+        // $ErrorActionPreference = 'Stop' the script ran on to Set-Content with a null $p and left a
+        // 0-byte PID file behind -- which the reader then polled until it timed out. Measured against
+        // the unhardened script, this produced a zero-length file every time.
+        //
+        // Driving the real script through a real PowerShell is the point: the bug lived in PowerShell's
+        // error semantics, so nothing short of running it can prove the behaviour.
+        var pidFile = Path.Join(_tempDirectory.FullName, $"nostart_{Guid.NewGuid():N}.pid");
+        var script = BuildTreeKillScript(pidFile, "winapp_no_such_binary_" + Guid.NewGuid().ToString("N") + ".exe");
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        startInfo.ArgumentList.Add("-NoProfile");
+        startInfo.ArgumentList.Add("-NonInteractive");
+        startInfo.ArgumentList.Add("-Command");
+        startInfo.ArgumentList.Add(script);
+
+        using var process = Process.Start(startInfo)!;
+        var stderr = await process.StandardError.ReadToEndAsync(TestContext.CancellationToken);
+        await process.WaitForExitAsync(TestContext.CancellationToken);
+
+        Assert.IsFalse(
+            File.Exists(pidFile),
+            $"A failed child start must abort the script before Set-Content, leaving no PID file to mislead the reader. stderr: {stderr}");
+        Assert.AreNotEqual(0, process.ExitCode, "The script must report the failure through its exit code.");
+        StringAssert.Contains(stderr, "Start-Process", "The reason has to reach stderr, which is what the reader surfaces.");
     }
 
     #endregion
