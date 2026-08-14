@@ -41,6 +41,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IProjectDetectionService, ProjectDetectionService>()
             .AddSingleton<ICsWinRTMetadataShimService, CsWinRTMetadataShimService>()
             .AddSingleton<IProjectRunService, ProjectRunService>()
+            .AddSingleton<IAnalyzerInjectionService, AnalyzerInjectionService>()
             .AddSingleton<ITemplateCacheReader, TemplateCacheReader>()
             .AddSingleton<IWorkspaceSetupService, WorkspaceSetupService>()
             .AddSingleton<IWindowsAppRuntimeService, WindowsAppRuntimeService>()
