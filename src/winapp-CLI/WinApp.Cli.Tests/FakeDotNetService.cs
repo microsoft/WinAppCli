@@ -107,14 +107,39 @@ internal class FakeDotNetService : IDotNetService
     /// <summary>Records the working directory passed alongside each argument-list invocation.</summary>
     public List<DirectoryInfo> ArgumentListWorkingDirectories { get; } = [];
 
-    public Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(DirectoryInfo workingDirectory, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string>? environmentOverrides = null, CancellationToken cancellationToken = default)
+    public Task<(int ExitCode, string Output, string Error)> RunDotnetCommandAsync(DirectoryInfo workingDirectory, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string>? environmentOverrides = null, Action<string>? onOutputLine = null, Action<string>? onErrorLine = null, CancellationToken cancellationToken = default)
     {
         ArgumentListInvocations.Add(arguments.ToArray());
         ArgumentListEnvironmentInvocations.Add(environmentOverrides);
         ArgumentListWorkingDirectories.Add(workingDirectory);
         var result = RunDotnetArgumentListHandler?.Invoke(arguments) ?? (0, string.Empty, string.Empty);
+
+        // Mirror the real service: when a caller supplies line callbacks (e.g. the verbose scaffold
+        // streaming its post-creation output), replay the scripted stdout/stderr through them so tests
+        // can assert the output was surfaced live.
+        if (onOutputLine is not null)
+        {
+            foreach (var line in SplitLines(result.Item2))
+            {
+                onOutputLine(line);
+            }
+        }
+
+        if (onErrorLine is not null)
+        {
+            foreach (var line in SplitLines(result.Item3))
+            {
+                onErrorLine(line);
+            }
+        }
+
         return Task.FromResult(result);
     }
+
+    private static IEnumerable<string> SplitLines(string? text)
+        => string.IsNullOrEmpty(text)
+            ? []
+            : text.Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd('\n').Split('\n');
 
     /// <summary>
     /// When set, <see cref="RunDotnetStreamingAsync"/> invokes this handler (given the argument

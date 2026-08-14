@@ -531,6 +531,94 @@ public class NewCommandHandlerTests : BaseCommandTests
     }
 
     [TestMethod]
+    [DoNotParallelize] // InvokeWithAmbientConsoleCaptureAsync swaps the process-wide AnsiConsole.
+    public async Task Handler_Verbose_StreamsScaffoldPostActionOutput()
+    {
+        // BaseCommandTests wires logging at Debug (i.e. --verbose). The scaffold's dotnet new output —
+        // including its post-creation actions (restore, package add, etc.) — must be surfaced live so a
+        // failing post action can be diagnosed (#753). Script a scaffold whose stdout carries the
+        // post-action markers dotnet new emits.
+        const string postActionOutput =
+            "The template \"WinUI 3 App\" was created successfully.\n" +
+            "Processing post-creation actions...\n" +
+            "Restoring packages for C:\\proj\\VerboseApp.csproj...";
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "uninstall")
+            {
+                return (0, string.Empty, string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "install")
+            {
+                return (0, "Success: installed.", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, SampleListOutput, string.Empty);
+            }
+            return (0, postActionOutput, string.Empty); // scaffold + post actions
+        };
+        var command = GetRequiredService<NewCommand>();
+
+        var (exitCode, ambientOutput) = await InvokeWithAmbientConsoleCaptureAsync(
+            command, ["--use-defaults", "--name", "VerboseApp"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        StringAssert.Contains(ambientOutput, "Processing post-creation actions",
+            $"Verbose scaffolding must surface dotnet new's post-creation action output. Output:\n{ambientOutput}");
+        StringAssert.Contains(ambientOutput, "Restoring packages",
+            $"Verbose scaffolding must surface post-action restore output so failures are diagnosable. Output:\n{ambientOutput}");
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // InvokeWithAmbientConsoleCaptureAsync swaps the process-wide AnsiConsole.
+    public async Task Handler_ScaffoldFails_SurfacesPostActionErrorDetail()
+    {
+        // A post action can fail while dotnet new writes the reason to stdout (not stderr) and returns
+        // a non-zero exit. The failure detail must still capture that stdout so the error is actionable.
+        const string failedPostAction =
+            "Processing post-creation actions...\n" +
+            "Restore failed: unable to resolve Microsoft.WindowsAppSDK.";
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "uninstall")
+            {
+                return (0, string.Empty, string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "install")
+            {
+                return (0, "Success: installed.", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, SampleListOutput, string.Empty);
+            }
+            return (1, failedPostAction, string.Empty); // scaffold post action fails, detail on stdout
+        };
+        var command = GetRequiredService<NewCommand>();
+
+        var (exitCode, ambientOutput) = await InvokeWithAmbientConsoleCaptureAsync(
+            command, ["--use-defaults", "--name", "FailApp"]);
+
+        Assert.AreEqual(NewCommand.ExitScaffoldFailed, exitCode);
+        // The error detail (logged at Error level) routes to stderr; it must carry the stdout-borne
+        // post-action reason so the failure is actionable rather than a bare exit code.
+        StringAssert.Contains(ConsoleStdErr.ToString(), "Restore failed",
+            $"A post-action failure written to stdout must surface in the error detail. Stderr:\n{ConsoleStdErr}");
+        // Under --verbose the same output is also streamed live as it is produced.
+        StringAssert.Contains(ambientOutput, "Restore failed",
+            $"Verbose scaffolding must stream the failing post-action output live. Output:\n{ambientOutput}");
+    }
+
+    [TestMethod]
     public async Task Handler_NameEscapingCurrentDirectory_ReturnsInvalidArgs()
     {
         ScriptHappyPath();
