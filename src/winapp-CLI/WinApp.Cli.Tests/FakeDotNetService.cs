@@ -136,7 +136,7 @@ internal class FakeDotNetService : IDotNetService
         return Task.FromResult(result);
     }
 
-    private static IEnumerable<string> SplitLines(string? text)
+    private static string[] SplitLines(string? text)
         => string.IsNullOrEmpty(text)
             ? []
             : text.Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd('\n').Split('\n');
