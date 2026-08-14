@@ -285,6 +285,7 @@ internal class NewCommand : Command, IShortDescription
         ICurrentDirectoryProvider currentDirectoryProvider,
         IAnsiConsole ansiConsole,
         ITemplateCacheReader templateCacheReader,
+        ITemplateUpdateCheckThrottle templateUpdateThrottle,
         ILogger<Handler> logger) : AsynchronousCommandLineAction
     {
         /// <summary>How the caller asked us to resolve the template-pack version.</summary>
@@ -801,10 +802,22 @@ internal class NewCommand : Command, IShortDescription
                         return (true, await QueryInstalledPackVersionAsync(cwd, cancellationToken), null);
                     }
 
-                    // Installed: only offer an update when the pack is actually behind the feed.
-                    var latest = await WithSpinnerAsync(
-                        "Checking for WinUI template pack updates...",
-                        () => GetLatestAvailableVersionAsync(cwd, installed, cancellationToken));
+                    // Installed: only offer an update when the pack is actually behind the feed. The
+                    // feed round-trip is throttled to once a day so back-to-back invocations (e.g. list
+                    // then scaffold) don't each pay the latency; between checks the cached result is reused.
+                    string? latest;
+                    if (templateUpdateThrottle.TryGetRecentLatest(installed, out var cachedLatest))
+                    {
+                        latest = cachedLatest;
+                    }
+                    else
+                    {
+                        latest = await WithSpinnerAsync(
+                            "Checking for WinUI template pack updates...",
+                            () => GetLatestAvailableVersionAsync(cwd, installed, cancellationToken));
+                        templateUpdateThrottle.Record(installed, latest);
+                    }
+
                     var isStale = latest is not null
                         && NuGetVersionHelper.Compare(installed, latest) is int cmp && cmp < 0;
 

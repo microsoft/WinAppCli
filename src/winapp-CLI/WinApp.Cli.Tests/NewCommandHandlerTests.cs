@@ -1346,6 +1346,94 @@ public class NewCommandHandlerTests : BaseCommandTests
             "A non-interactive (--use-defaults) run must keep the installed pack rather than performing a machine-wide update.");
     }
 
+    /// <summary>
+    /// Writes the throttle's <c>.template-update-check</c> cache into the isolated global winapp dir so
+    /// the handler treats the staleness check as already performed (stamped now).
+    /// </summary>
+    private void SeedTemplateUpdateCache(string installedVersion, string latestVersion)
+    {
+        var globalDir = GetRequiredService<IWinappDirectoryService>().GetGlobalWinappDirectory();
+        globalDir.Create();
+        var content = $"{DateTimeOffset.UtcNow:O}\n{installedVersion}\n{latestVersion}";
+        File.WriteAllText(Path.Combine(globalDir.FullName, ".template-update-check"), content);
+    }
+
+    [TestMethod]
+    public async Task Handler_StalePackInteractive_RecentCache_SkipsFeedCheckButStillUpdates()
+    {
+        // A check ran within the day and found 0.0.6-alpha; the handler must reuse that instead of
+        // re-hitting the feed, yet still offer the update.
+        SeedTemplateUpdateCache("0.0.5-alpha", "0.0.6-alpha");
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "uninstall")
+            {
+                return (0, "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n   Version: 0.0.5-alpha\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "install")
+            {
+                return (0, "Success", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, SampleListOutput, string.Empty);
+            }
+            return (0, "created", string.Empty);
+        };
+        TestAnsiConsole.Input.PushTextWithEnter("y"); // update prompt
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--template", "winui", "--name", "MyApp"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        Assert.IsFalse(
+            _dotnet.ArgumentListInvocations.Any(a => a.Count >= 2 && a[0] == "new" && a[1] == "update"),
+            "A check performed within the last day must not re-run the NuGet feed staleness check.");
+        var install = _dotnet.ArgumentListInvocations
+            .FirstOrDefault(a => a.Count >= 3 && a[0] == "new" && a[1] == "install");
+        Assert.IsNotNull(install, "Accepting the update prompt must install the newer pack.");
+        Assert.AreEqual($"{NewCommand.TemplatePackageId}::0.0.6-alpha", install[2],
+            "The update must use the latest version from the cached check.");
+    }
+
+    [TestMethod]
+    public async Task Handler_UpToDatePack_RecentCache_SkipsFeedCheck()
+    {
+        // The last check (within the day) found the pack up-to-date (empty latest): no feed call, no install.
+        SeedTemplateUpdateCache("0.0.6-alpha", "");
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "uninstall")
+            {
+                return (0, "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n   Version: 0.0.6-alpha\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, SampleListOutput, string.Empty);
+            }
+            return (0, "created", string.Empty);
+        };
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--template", "winui", "--name", "MyApp"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        Assert.IsFalse(
+            _dotnet.ArgumentListInvocations.Any(a => a.Count >= 2 && a[0] == "new" && a[1] == "update"),
+            "A recent up-to-date check must be reused rather than re-querying the feed.");
+        Assert.IsFalse(
+            _dotnet.ArgumentListInvocations.Any(a => a.Count >= 2 && a[0] == "new" && a[1] == "install"),
+            "An up-to-date pack must not be reinstalled.");
+    }
+
     [TestMethod]
     [DoNotParallelize] // Swaps the process-wide TelemetryFactory override.
     public async Task Handler_HappyPath_EmitsCorrelatedNewCommandEvent()
