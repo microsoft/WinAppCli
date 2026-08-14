@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <RootNamespace>Microsoft.WindowsAppSDK.Analyzers</RootNamespace>
+    <AssemblyName>Microsoft.WindowsAppSDK.Analyzers</AssemblyName>
+
+    <!--
+      Packing is currently disabled. The analyzer ships from this repo as a
+      committed prebuilt DLL under plugins/winui/skills/winui-dev-workflow/analyzer/.
+      A NuGet distribution is tracked separately as a post-launch workstream.
+    -->
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <PackageId>Microsoft.WindowsAppSDK.Analyzers</PackageId>
+    <PackageVersion>0.1.0-alpha</PackageVersion>
+    <Description>Roslyn analyzers for WinUI 3 / Windows App SDK apps. Catches UWP→WinUI compatibility issues, runtime pitfalls, MVVM regressions, and interop bugs at build time.</Description>
+    <PackageTags>winui;winui3;windowsappsdk;analyzers;roslyn</PackageTags>
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <NoPackageAnalysis>true</NoPackageAnalysis>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+
+    <!--
+      Suppressed analyzer self-checks:
+      RS2008  Release tracking — tracked separately; will add AnalyzerReleases.{Shipped,Unshipped}.md before 1.0.
+      RS1032  Message punctuation rules — our messages contain code samples with periods/braces.
+      RS1030  Compilation.GetSemanticModel — needed for cross-file XAML→code-behind correlation.
+      CA1310  StringComparison — our string compares are over symbol display strings, ordinal is fine implicitly.
+      NU1701  TFM mismatch from Microsoft.CodeAnalysis.Testing transitive — only affects test project.
+    -->
+    <NoWarn>$(NoWarn);RS2008;RS1032;RS1030;CA1310;NU1701</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.12.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="5.3.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- Pack the analyzer DLL and targets into the correct NuGet folders (only effective when GeneratePackageOnBuild=true). -->
+  <ItemGroup>
+    <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    <None Include="Microsoft.WindowsAppSDK.Analyzers.targets" Pack="true" PackagePath="buildTransitive" Visible="false" />
+    <None Include="Microsoft.WindowsAppSDK.Analyzers.targets" Pack="true" PackagePath="build" Visible="false" />
+  </ItemGroup>
+
+</Project>

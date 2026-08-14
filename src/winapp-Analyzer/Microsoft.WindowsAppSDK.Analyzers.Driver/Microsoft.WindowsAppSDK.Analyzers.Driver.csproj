@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Self-contained console driver that hosts the winui-analyzer over still-UWP source
+    (no restore/build) and emits the migration-plan JSON contract to stdout. Provides the
+    out-of-build entry point the UWP -> WinUI 3 migration tooling consumes at Step 0
+    (read from stdout). Published framework-dependent; it embeds Roslyn, so it can't be
+    AOT-compiled.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Microsoft.WindowsAppSDK.Analyzers.Driver</RootNamespace>
+    <AssemblyName>winui-analyze</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- App-style CA rules (public-API/localization) don't apply to an internal tool exe. -->
+    <NoWarn>$(NoWarn);CA1515;CA1303;CA1861;CA2007</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Reference the analyzer as a normal library (instantiate its DiagnosticAnalyzers at
+         runtime); PrivateAssets=all stops the analyzer from also running on this project. -->
+    <ProjectReference Include="..\Microsoft.WindowsAppSDK.Analyzers\Microsoft.WindowsAppSDK.Analyzers.csproj"
+                      PrivateAssets="all" ReferenceOutputAssembly="true" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.12.0" />
+  </ItemGroup>
+
+</Project>
