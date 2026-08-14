@@ -19,6 +19,41 @@ public class NewCommandTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task AwaitWithDelayedActionAsync_DelayCompletesFirst_InvokesActionAndReturnsResult()
+    {
+        var operation = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var delay = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var actionInvoked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var resultTask = NewCommand.Handler.AwaitWithDelayedActionAsync(
+            operation.Task,
+            delay.Task,
+            () => actionInvoked.SetResult());
+
+        delay.SetResult();
+        await actionInvoked.Task.WaitAsync(TestContext.CancellationToken);
+        Assert.IsFalse(resultTask.IsCompleted);
+
+        operation.SetResult(42);
+        Assert.AreEqual(42, await resultTask);
+    }
+
+    [TestMethod]
+    public async Task AwaitWithDelayedActionAsync_OperationCompletesFirst_DoesNotInvokeAction()
+    {
+        var delay = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var actionInvoked = false;
+
+        var result = await NewCommand.Handler.AwaitWithDelayedActionAsync(
+            Task.FromResult(42),
+            delay.Task,
+            () => actionInvoked = true);
+
+        Assert.AreEqual(42, result);
+        Assert.IsFalse(actionInvoked);
+    }
+
+    [TestMethod]
     public void Parse_NoArgs_HasNoErrors()
     {
         var command = GetRequiredService<NewCommand>();

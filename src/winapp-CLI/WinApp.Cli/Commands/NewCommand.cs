@@ -899,18 +899,28 @@ internal class NewCommand : Command, IShortDescription
                 .StartAsync(message, async context =>
                 {
                     var operationTask = operation();
-                    var delayTask = Task.Delay(delay);
-                    if (await Task.WhenAny(operationTask, delayTask) == delayTask
-                        && !operationTask.IsCompleted)
-                    {
-                        context.Status(delayedMessage);
-                    }
-
-                    return await operationTask;
+                    return await AwaitWithDelayedActionAsync(
+                        operationTask,
+                        Task.Delay(delay),
+                        () => context.Status(delayedMessage));
                 });
         }
 
         internal static TimeSpan ScaffoldStatusDelay => TimeSpan.FromSeconds(10);
+
+        internal static async Task<T> AwaitWithDelayedActionAsync<T>(
+            Task<T> operationTask,
+            Task delayTask,
+            Action delayedAction)
+        {
+            if (await Task.WhenAny(operationTask, delayTask) == delayTask
+                && !operationTask.IsCompleted)
+            {
+                delayedAction();
+            }
+
+            return await operationTask;
+        }
 
         /// <summary>Returns the installed WinUI pack version, or <c>null</c> when the pack isn't installed.</summary>
         private async Task<string?> QueryInstalledPackVersionAsync(DirectoryInfo cwd, CancellationToken cancellationToken)
