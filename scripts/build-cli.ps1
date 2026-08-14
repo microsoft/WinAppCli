@@ -105,6 +105,7 @@ try
     $CliSolutionPath = "$CliSolutionDir\winapp.sln"
     $CliProjectPath = "$CliSolutionDir\WinApp.Cli\WinApp.Cli.csproj"
     $CliTestsProjectPath = "$CliSolutionDir\WinApp.Cli.Tests\WinApp.Cli.Tests.csproj"
+    $AnalyzerTestsProjectPath = "$ProjectRoot\src\winapp-Analyzer\Microsoft.WindowsAppSDK.Analyzers.Tests\Microsoft.WindowsAppSDK.Analyzers.Tests.csproj"
     $ArtifactsPath = "artifacts"
     $TestResultsPath = "TestResults"
 
@@ -271,6 +272,15 @@ try
         $CoverageSettings = (Resolve-Path "$CliSolutionDir\coverage.runsettings").Path
         dotnet run --project $CliTestsProjectPath -c Debug --no-build --results-directory $CliSolutionDir\TestResults --report-trx --coverage --coverage-settings $CoverageSettings --coverage-output-format cobertura
         $TestExitCode = $LASTEXITCODE
+
+        # Run the WinUI analyzer test suite (separate solution folder, src\winapp-Analyzer). These
+        # xUnit tests validate the analyzer rules themselves; fold their result into $TestExitCode so a
+        # regression fails the build the same way the CLI suite does. See issue #634.
+        Write-Host "[TEST] Running WinUI analyzer tests..." -ForegroundColor Blue
+        dotnet test $AnalyzerTestsProjectPath -c Debug --results-directory $CliSolutionDir\TestResults
+        if ($LASTEXITCODE -ne 0 -and $TestExitCode -eq 0) {
+            $TestExitCode = $LASTEXITCODE
+        }
     
         # Copy test results to artifacts BEFORE checking for failure - find all TRX files
         Write-Host "[TEST] Collecting test results..." -ForegroundColor Blue
