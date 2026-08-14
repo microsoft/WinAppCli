@@ -1689,26 +1689,6 @@ public class DotNetServiceTests : BaseCommandTests
 
     #endregion
 
-    [TestMethod]
-    public async Task RunDotnetStreamingAsync_ArgumentList_StreamsOutput()
-    {
-        var output = new List<string>();
-        var errors = new List<string>();
-
-        var exitCode = await _dotNetService.RunDotnetStreamingAsync(
-            new DirectoryInfo(_testTempDirectory),
-            ["--version"],
-            output.Add,
-            errors.Add,
-            TestContext.CancellationToken);
-
-        Assert.AreEqual(0, exitCode);
-        Assert.IsNotEmpty(output);
-        Assert.IsEmpty(errors);
-        Assert.IsTrue(Version.TryParse(output[0], out _),
-            $"Expected the installed SDK version, but got: {string.Join(Environment.NewLine, output)}");
-    }
-
     #region Process cancellation Tests
 
     [TestMethod]

@@ -396,18 +396,6 @@ internal partial class DotNetService : IDotNetService
         CancellationToken cancellationToken = default)
         => RunDotnetCoreAsync(workingDirectory, arguments, onOutputLine, onErrorLine, cancellationToken);
 
-    public Task<int> RunDotnetStreamingAsync(
-        DirectoryInfo workingDirectory,
-        IReadOnlyList<string> arguments,
-        Action<string>? onOutputLine,
-        Action<string>? onErrorLine,
-        CancellationToken cancellationToken = default)
-    {
-        var processStartInfo = CreateArgumentListStartInfo(workingDirectory, arguments);
-        return RunDotnetProcessStreamingAsync(
-            processStartInfo, onOutputLine, onErrorLine, cancellationToken);
-    }
-
     public Task<int> RunDotnetInheritedAsync(
         DirectoryInfo workingDirectory,
         string arguments,
@@ -518,23 +506,6 @@ internal partial class DotNetService : IDotNetService
         IReadOnlyDictionary<string, string>? environmentOverrides = null,
         CancellationToken cancellationToken = default)
     {
-        var processStartInfo = CreateArgumentListStartInfo(workingDirectory, arguments);
-
-        if (environmentOverrides is not null)
-        {
-            foreach (var (key, value) in environmentOverrides)
-            {
-                processStartInfo.Environment[key] = value;
-            }
-        }
-
-        return RunDotnetProcessAsync(processStartInfo, cancellationToken);
-    }
-
-    private static ProcessStartInfo CreateArgumentListStartInfo(
-        DirectoryInfo workingDirectory,
-        IReadOnlyList<string> arguments)
-    {
         var processStartInfo = new ProcessStartInfo
         {
             FileName = "dotnet",
@@ -547,69 +518,22 @@ internal partial class DotNetService : IDotNetService
 
         // ArgumentList passes each token to the child process as a distinct argv entry, so no shell or
         // string splitting can inject extra tokens. It does NOT, however, stop an option-shaped value
-        // from being interpreted as a switch by dotnet's own parser.
+        // (e.g. "--force") from being interpreted as a switch by dotnet's own parser — callers must
+        // validate user-derived values against the child command's option grammar, as NewCommand does.
         foreach (var argument in arguments)
         {
             processStartInfo.ArgumentList.Add(argument);
         }
 
-        return processStartInfo;
-    }
-
-    private static async Task<int> RunDotnetProcessStreamingAsync(
-        ProcessStartInfo processStartInfo,
-        Action<string>? onOutputLine,
-        Action<string>? onErrorLine,
-        CancellationToken cancellationToken)
-    {
-        using var process = new Process { StartInfo = processStartInfo };
-
-        process.OutputDataReceived += (_, e) =>
+        if (environmentOverrides is not null)
         {
-            if (e.Data is not null)
+            foreach (var (key, value) in environmentOverrides)
             {
-                onOutputLine?.Invoke(e.Data);
+                processStartInfo.Environment[key] = value;
             }
-        };
-        process.ErrorDataReceived += (_, e) =>
-        {
-            if (e.Data is not null)
-            {
-                onErrorLine?.Invoke(e.Data);
-            }
-        };
-
-        process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        try
-        {
-            await process.WaitForExitAsync(cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                    await process.WaitForExitAsync(CancellationToken.None);
-                }
-            }
-            catch (InvalidOperationException)
-            {
-                // The process exited between the HasExited check and Kill.
-            }
-            catch (System.ComponentModel.Win32Exception) when (process.HasExited)
-            {
-                // Kill raced with normal process exit.
-            }
-            throw;
         }
 
-        process.WaitForExit();
-        return process.ExitCode;
+        return RunDotnetProcessAsync(processStartInfo, cancellationToken);
     }
 
     internal static async Task<(int ExitCode, string Output, string Error)> RunDotnetProcessAsync(

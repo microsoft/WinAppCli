@@ -13,20 +13,9 @@ namespace WinApp.Cli.Tests;
 public class NewCommandTests : BaseCommandTests
 {
     [TestMethod]
-    [DataRow("Adding a package reference Microsoft.WindowsAppSDK to project file")]
-    [DataRow("info : Adding PackageReference for package 'Microsoft.WindowsAppSDK'")]
-    [DataRow("info : Restoring packages for C:\\src\\App.csproj...")]
-    [DataRow("  Determining projects to restore...")]
-    public void IsPackageRestoreOutput_PackageActivity_ReturnsTrue(string line)
+    public void ScaffoldStatusDelay_IsTenSeconds()
     {
-        Assert.IsTrue(NewCommand.Handler.IsPackageRestoreOutput(line));
-    }
-
-    [TestMethod]
-    public void IsPackageRestoreOutput_UnrelatedScaffoldOutput_ReturnsFalse()
-    {
-        Assert.IsFalse(NewCommand.Handler.IsPackageRestoreOutput(
-            "The template \"WinUI Blank App\" was created successfully."));
+        Assert.AreEqual(TimeSpan.FromSeconds(10), NewCommand.Handler.ScaffoldStatusDelay);
     }
 
     [TestMethod]
