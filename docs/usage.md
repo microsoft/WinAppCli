@@ -764,6 +764,14 @@ Under `--json` or `--quiet` the invocation and build output go to stderr so stdo
 
 **Option applicability:** the identity/loose-layout options (`--manifest`, `--output-appx-directory`, `--no-launch`, `--with-alias`, `--unregister-on-exit`, `--clean`, `--executable`) apply to packaged apps only. They are rejected with a clear error for unpackaged apps (which have no MSIX package). Launch/debug options (`--args`/`--`, `--detach`, `--debug-output`, `--symbols`, `--json`) work in both.
 
+**WinUI analyzer diagnostics:** for **WinUI projects** (`UseWinUI=true`), `winapp run` automatically surfaces the WinUI Roslyn analyzer's warnings (rule IDs `WUIxxxx`) during the build — the same diagnostics you would get from the [`Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer`](https://www.nuget.org/packages/Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer) package. They catch common UWP→WinUI 3 compatibility issues, runtime pitfalls, MVVM regressions, and interop bugs. Details:
+
+- **Scoped to WinUI.** Non-WinUI projects are never touched, and in a mixed solution only the `UseWinUI=true` projects in the build graph are analyzed.
+- **Warnings only.** Every rule ships at `Warning` severity, so the analyzer never fails a build; the warnings appear inline in the streamed build output (and on stderr under `--json`/`--quiet`, alongside all other build diagnostics).
+- **Opt out by referencing it yourself.** If your project already has a `<PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer" />` (directly or via `Directory.Packages.props`), `winapp run` detects it and does **not** inject a second copy — your referenced version wins.
+- **Non-invasive.** Injection uses a build-only MSBuild hook; it does not modify your `.csproj`, `Directory.Build.props`, or any file on disk, and it re-chains any `CustomAfterMicrosoftCommonTargets` you already set.
+- **Incremental builds:** like all compiler diagnostics, the warnings are emitted when the project actually compiles. A no-op rebuild (nothing changed) skips compilation and therefore re-prints nothing — edit a file or `--no-build`-off a clean rebuild to see them again.
+
 **Project-mode examples:**
 
 ```bash

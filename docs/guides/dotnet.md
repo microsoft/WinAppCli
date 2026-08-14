@@ -210,6 +210,8 @@ Project mode supports both **packaged** and **unpackaged** WinUI apps — it det
 
 The `dotnet build` output streams live, with the exact invocation printed first. Add `--verbose` for winapp's own build decision traces. Requires .NET SDK 8.0.100 or newer. See [`winapp run` in the usage reference](../usage.md#project-mode-net-sdk-projects) for the full option list.
 
+> **WinUI analyzer warnings.** For WinUI projects (`UseWinUI=true`), `winapp run` automatically surfaces the WinUI Roslyn analyzer's `WUIxxxx` warnings in the build output — catching UWP→WinUI 3 compatibility issues, runtime pitfalls, MVVM regressions, and interop bugs at build time. They are warnings only (never fail the build), scoped to WinUI projects, and skipped if you already reference the `Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer` package yourself. See [WinUI analyzer diagnostics](../usage.md#project-mode-net-sdk-projects) for details.
+
 > **No Windows SDK installed?** C#/WinRT authoring projects normally need a registered Windows SDK to build. When project mode detects none (clean CI, containers, SDK-less dev boxes), it points cswinrt at the winmds from the auto-restored `Microsoft.Windows.SDK.NET.Ref` package so the build still succeeds — no action needed. It does nothing when an SDK is installed or when you set `-p CsWinRTWindowsMetadata=…` yourself.
 
 To add the NuGet package back: `dotnet add package Microsoft.Windows.SDK.BuildTools.WinApp --prerelease`
