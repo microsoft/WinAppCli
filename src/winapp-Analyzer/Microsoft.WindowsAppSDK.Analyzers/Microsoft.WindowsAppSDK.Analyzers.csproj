@@ -8,29 +8,40 @@
     <AssemblyName>Microsoft.WindowsAppSDK.Analyzers</AssemblyName>
 
     <!--
-      Packing is currently disabled. The analyzer ships from this repo as a
-      committed prebuilt DLL under plugins/winui/skills/winui-dev-workflow/analyzer/.
-      A NuGet distribution is tracked separately as a post-launch workstream.
+      Packing is driven by scripts/package-nuget.ps1 (GeneratePackageOnBuild stays
+      off so ordinary solution builds don't pack). The package is published
+      standalone as Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer; winapp also
+      consumes it at build time and embeds the extracted analyzer DLL. The
+      PackageId differs from the AssemblyName on purpose: the assembly identity
+      (and the WUIxxxx rule IDs) stay stable while the package rides winappCli's
+      own Microsoft.Windows.SDK.BuildTools.* namespace.
     -->
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
-    <PackageId>Microsoft.WindowsAppSDK.Analyzers</PackageId>
-    <PackageVersion>0.1.0-alpha</PackageVersion>
+    <PackageId>Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer</PackageId>
     <Description>Roslyn analyzers for WinUI 3 / Windows App SDK apps. Catches UWP→WinUI compatibility issues, runtime pitfalls, MVVM regressions, and interop bugs at build time.</Description>
     <PackageTags>winui;winui3;windowsappsdk;analyzers;roslyn</PackageTags>
     <DevelopmentDependency>true</DevelopmentDependency>
     <NoPackageAnalysis>true</NoPackageAnalysis>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     <IncludeBuildOutput>false</IncludeBuildOutput>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
+    <!--
+      No symbol package: this is an analyzer packed via analyzers/ (IncludeBuildOutput
+      is false, so there is no library PDB to ship). The repo-wide IncludeSymbols=true
+      would otherwise emit an empty .snupkg and fail packing with NU5017.
+    -->
+    <IncludeSymbols>false</IncludeSymbols>
 
     <!--
       Suppressed analyzer self-checks:
-      RS2008  Release tracking — tracked separately; will add AnalyzerReleases.{Shipped,Unshipped}.md before 1.0.
       RS1032  Message punctuation rules — our messages contain code samples with periods/braces.
       RS1030  Compilation.GetSemanticModel — needed for cross-file XAML→code-behind correlation.
       CA1310  StringComparison — our string compares are over symbol display strings, ordinal is fine implicitly.
       NU1701  TFM mismatch from Microsoft.CodeAnalysis.Testing transitive — only affects test project.
+      (RS2008 release tracking is now satisfied by AnalyzerReleases.{Shipped,Unshipped}.md below.)
     -->
-    <NoWarn>$(NoWarn);RS2008;RS1032;RS1030;CA1310;NU1701</NoWarn>
+    <NoWarn>$(NoWarn);RS1032;RS1030;CA1310;NU1701</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -38,11 +49,28 @@
     <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="5.3.0" PrivateAssets="all" />
   </ItemGroup>
 
-  <!-- Pack the analyzer DLL and targets into the correct NuGet folders (only effective when GeneratePackageOnBuild=true). -->
+  <!-- Package-root content (also satisfies NuGet's non-empty-package check, NU5017). -->
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="" Visible="false" />
+    <None Include="..\icon.png" Pack="true" PackagePath="" Visible="false" />
+  </ItemGroup>
+
+  <!-- Analyzer release tracking (satisfies RS2008; validated by Microsoft.CodeAnalysis.Analyzers). -->
+  <ItemGroup>
+    <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
+    <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
+  </ItemGroup>
+
+  <!--
+    Pack the analyzer DLL and targets into the correct NuGet folders (only effective
+    when packing). NuGet auto-imports build/$(PackageId).targets and
+    buildTransitive/$(PackageId).targets, so the file is renamed to match PackageId
+    on pack even though the on-disk name tracks the assembly.
+  -->
   <ItemGroup>
     <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
-    <None Include="Microsoft.WindowsAppSDK.Analyzers.targets" Pack="true" PackagePath="buildTransitive" Visible="false" />
-    <None Include="Microsoft.WindowsAppSDK.Analyzers.targets" Pack="true" PackagePath="build" Visible="false" />
+    <None Include="Microsoft.WindowsAppSDK.Analyzers.targets" Pack="true" PackagePath="buildTransitive/$(PackageId).targets" Visible="false" />
+    <None Include="Microsoft.WindowsAppSDK.Analyzers.targets" Pack="true" PackagePath="build/$(PackageId).targets" Visible="false" />
   </ItemGroup>
 
 </Project>
