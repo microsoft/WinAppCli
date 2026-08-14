@@ -3,6 +3,7 @@
 
 using System.Globalization;
 using Microsoft.Extensions.Logging;
+using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Services;
 
@@ -98,11 +99,8 @@ internal sealed class TemplateUpdateCheckThrottle(
     {
         cacheFile.Directory?.Create();
 
-        // Write to a temp file then move for atomic replacement.
-        var tempPath = cacheFile.FullName + ".tmp";
         var content = $"{entry.LastCheck?.ToString("O", CultureInfo.InvariantCulture) ?? ""}\n{entry.InstalledVersion}\n{entry.LatestVersion}";
-        File.WriteAllText(tempPath, content);
-        File.Move(tempPath, cacheFile.FullName, overwrite: true);
+        AtomicFile.WriteAllText(cacheFile.FullName, content);
 
         try
         {

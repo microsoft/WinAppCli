@@ -1435,6 +1435,43 @@ public class NewCommandHandlerTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task Handler_UpdateCheckFails_DoesNotCacheResult()
+    {
+        // The feed check fails (non-zero exit). The failure must NOT be cached as "up-to-date",
+        // otherwise the next run within the day would wrongly skip the retry.
+        _dotnet.RunDotnetArgumentListHandler = args =>
+        {
+            if (args.Count >= 1 && args[0] == "--version")
+            {
+                return (0, "9.0.100\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "uninstall")
+            {
+                return (0, "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates\n   Version: 0.0.5-alpha\n", string.Empty);
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "update")
+            {
+                return (1, string.Empty, "Unable to reach the feed."); // transient failure
+            }
+            if (args.Count >= 2 && args[0] == "new" && args[1] == "list")
+            {
+                return (0, SampleListOutput, string.Empty);
+            }
+            return (0, "created", string.Empty);
+        };
+        var command = GetRequiredService<NewCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--use-defaults", "--json", "--name", "MyApp"]);
+
+        Assert.AreEqual(NewCommand.ExitSuccess, exitCode);
+        var globalDir = GetRequiredService<IWinappDirectoryService>().GetGlobalWinappDirectory();
+        var cacheFile = new FileInfo(Path.Combine(globalDir.FullName, ".template-update-check"));
+        cacheFile.Refresh();
+        Assert.IsFalse(cacheFile.Exists,
+            "A failed feed check must not be cached, so the next run retries instead of skipping for a day.");
+    }
+
+    [TestMethod]
     [DoNotParallelize] // Swaps the process-wide TelemetryFactory override.
     public async Task Handler_HappyPath_EmitsCorrelatedNewCommandEvent()
     {

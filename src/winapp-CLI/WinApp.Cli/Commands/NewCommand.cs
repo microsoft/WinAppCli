@@ -812,10 +812,17 @@ internal class NewCommand : Command, IShortDescription
                     }
                     else
                     {
-                        latest = await WithSpinnerAsync(
+                        var (checkSucceeded, feedLatest) = await WithSpinnerAsync(
                             "Checking for WinUI template pack updates...",
                             () => GetLatestAvailableVersionAsync(cwd, installed, cancellationToken));
-                        templateUpdateThrottle.Record(installed, latest);
+                        latest = feedLatest;
+
+                        // Only throttle a check that actually reached the feed. A transient failure must
+                        // retry on the next run rather than be cached as "up-to-date" for a day.
+                        if (checkSucceeded)
+                        {
+                            templateUpdateThrottle.Record(installed, latest);
+                        }
                     }
 
                     var isStale = latest is not null
@@ -901,22 +908,26 @@ internal class NewCommand : Command, IShortDescription
         }
 
         /// <summary>
-        /// Returns the newest available WinUI pack version reported by <c>dotnet new update
-        /// --check-only</c> (which resolves through the caller's configured NuGet feeds and surfaces
-        /// prerelease updates), or <c>null</c> when the pack is already up-to-date or the check fails.
-        /// Falls back to <paramref name="installed"/>'s value semantics via a null return.
+        /// Checks the NuGet feed for a newer WinUI pack via <c>dotnet new update --check-only</c> (which
+        /// resolves through the caller's configured feeds and surfaces prerelease updates).
+        /// <para>
+        /// <c>Succeeded</c> is <see langword="false"/> when the check itself failed (feed unreachable,
+        /// non-zero exit) so the caller can avoid caching a failure as an authoritative result;
+        /// <c>Latest</c> is the newest available version, or <see langword="null"/> when the pack is
+        /// already up-to-date.
+        /// </para>
         /// </summary>
-        private async Task<string?> GetLatestAvailableVersionAsync(DirectoryInfo cwd, string installed, CancellationToken cancellationToken)
+        private async Task<(bool Succeeded, string? Latest)> GetLatestAvailableVersionAsync(DirectoryInfo cwd, string installed, CancellationToken cancellationToken)
         {
             var (exit, output, stderr) = await dotNetService.RunDotnetCommandAsync(cwd, UpdateCheckArgs, EnglishUiEnvironment, cancellationToken);
             LogDotnetOutput(UpdateCheckArgs, exit, output, stderr);
             if (exit != 0)
             {
-                return null;
+                return (false, null);
             }
 
             var (_, latest) = WinUiTemplateCatalog.ParseUpdateCheck(output, TemplatePackageId);
-            return latest;
+            return (true, latest);
         }
 
         /// <summary>
