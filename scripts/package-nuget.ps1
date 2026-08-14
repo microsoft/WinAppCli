@@ -3,8 +3,9 @@
 .SYNOPSIS
     Package Windows App Development CLI as a NuGet package
 .DESCRIPTION
-    This script creates the Microsoft.Windows.SDK.BuildTools.WinApp NuGet package - MSBuild integration for 'dotnet run' with packaged apps.
-    This package includes the CLI binaries from artifacts/cli and outputs the .nupkg file to artifacts/nuget.
+    This script creates the winappCli NuGet packages and outputs the .nupkg files to artifacts/nuget:
+      - Microsoft.Windows.SDK.BuildTools.WinApp        (MSBuild integration for 'dotnet run' with packaged apps; bundles the CLI binaries)
+      - Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer (standalone WinUI Roslyn analyzer; shares the CLI version)
 .PARAMETER Version
     Version number for the NuGet package (e.g., "1.0.0" or "1.0.0-prerelease.73").
     If not specified, reads from version.json and calculates based on Stable flag.
@@ -167,6 +168,26 @@ try
     }
     
     Write-Host "[NUGET] Microsoft.Windows.SDK.BuildTools.WinApp package created successfully!" -ForegroundColor Green
+
+    # ============================================================================
+    # Step 2: Build Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer package
+    # ============================================================================
+    Write-Host ""
+    Write-Host "[NUGET] Building Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer package..." -ForegroundColor Blue
+
+    # Standalone WinUI Roslyn analyzer package. Shares the CLI version (same
+    # $Version computed above); winapp also consumes this package at build time
+    # and embeds the extracted analyzer DLL.
+    $AnalyzerCsproj = Join-Path $ProjectRoot "src\winapp-Analyzer\Microsoft.WindowsAppSDK.Analyzers\Microsoft.WindowsAppSDK.Analyzers.csproj"
+
+    dotnet pack $AnalyzerCsproj -c Release -o $OutputPath /p:Version=$Version /p:PackageVersion=$Version
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to create Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer NuGet package"
+        exit 1
+    }
+
+    Write-Host "[NUGET] Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer package created successfully!" -ForegroundColor Green
     # ============================================================================
     # Summary
     # ============================================================================
