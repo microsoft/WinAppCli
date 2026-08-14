@@ -60,6 +60,31 @@
     <EmbeddedResource Include="Services\Controls\Data\gallery-tags.json" LogicalName="gallery-tags.json" />
   </ItemGroup>
 
+  <!--
+    WinUI analyzer embedding (issue #634).
+    Build the in-repo analyzer and embed its exact output DLL so 'winapp run' can
+    extract and inject it as a restore-invisible <Analyzer> during project-mode
+    builds. ReferenceOutputAssembly=false keeps it off the CLI's own compile /
+    analyzer path; OutputItemType captures the built DLL for embedding. Because
+    the source lives in this repo, the embedded DLL is byte-identical to the one
+    packed into Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer (provenance gate).
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\winapp-Analyzer\Microsoft.WindowsAppSDK.Analyzers\Microsoft.WindowsAppSDK.Analyzers.csproj"
+                      ReferenceOutputAssembly="false"
+                      OutputItemType="_WinUIAnalyzerDll"
+                      SkipGetTargetFrameworkProperties="true"
+                      PrivateAssets="all" />
+  </ItemGroup>
+
+  <Target Name="EmbedWinUIAnalyzer"
+          AfterTargets="ResolveProjectReferences"
+          BeforeTargets="BeforeCompile;CoreCompile">
+    <ItemGroup>
+      <EmbeddedResource Include="@(_WinUIAnalyzerDll)" LogicalName="Microsoft.WindowsAppSDK.Analyzers.dll" />
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
     <PackageReference Include="Azure.Identity" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
