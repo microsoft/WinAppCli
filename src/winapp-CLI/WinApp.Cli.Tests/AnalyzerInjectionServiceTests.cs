@@ -87,6 +87,19 @@ public class AnalyzerInjectionServiceTests
     }
 
     [TestMethod]
+    public void PrepareInjection_HookPropsGatesAnalyzerAndXamlOnUseWinUI()
+    {
+        // The global -p: carrying the hook propagates into the whole ProjectReference closure, so both
+        // the <Analyzer> ItemGroup and the XAML target must be gated on UseWinUI (design M1) to stay off
+        // any non-WinUI project the closure includes.
+        AnalyzerInjection injection = _service.PrepareInjection()!;
+        string props = File.ReadAllText(injection.HookPropsPath);
+
+        StringAssert.Contains(props, "<ItemGroup Condition=\"'$(UseWinUI)' == 'true'\">");
+        StringAssert.Contains(props, "Condition=\"'$(UseWinUI)' == 'true'\">");
+    }
+
+    [TestMethod]
     public void PrepareInjection_IsIdempotentAndLeavesNoTempFiles()
     {
         AnalyzerInjection first = _service.PrepareInjection()!;

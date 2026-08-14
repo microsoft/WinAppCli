@@ -16,6 +16,7 @@ internal sealed partial class ProjectRunService(
     IDotNetService dotNetService,
     IProjectDetectionService projectDetectionService,
     ICsWinRTMetadataShimService csWinRTMetadataShimService,
+    IAnalyzerInjectionService analyzerInjectionService,
     IAnsiConsole ansiConsole,
     ILogger<ProjectRunService> logger) : IProjectRunService
 {
@@ -254,7 +255,12 @@ internal sealed partial class ProjectRunService(
         // actually built.
         if (!options.NoBuild)
         {
-            var buildExit = await RunBuildPassAsync(csproj, buildOptions, workingDir, csWinRTMetadata, cancellationToken);
+            // Prepare WinUI analyzer injection (issue #634). Best-effort and null for non-WinUI projects,
+            // projects that already reference the analyzer package, or any probe failure — in which case
+            // the build proceeds exactly as before.
+            var analyzerInjection = await TryPrepareAnalyzerInjectionAsync(csproj, buildOptions, workingDir, cancellationToken);
+
+            var buildExit = await RunBuildPassAsync(csproj, buildOptions, workingDir, csWinRTMetadata, cancellationToken, analyzerInjection);
             if (buildExit != 0)
             {
                 // dotnet's diagnostics were already streamed live; log the summary and propagate the exit code.
@@ -629,7 +635,8 @@ internal sealed partial class ProjectRunService(
         ProjectRunOptions options,
         DirectoryInfo workingDir,
         string? csWinRTMetadataFolder,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        AnalyzerBuildInjection? analyzerInjection = null)
     {
         var verbosity = ResolveBuildVerbosity(logger, options.Json);
 
@@ -640,7 +647,7 @@ internal sealed partial class ProjectRunService(
         // (Console.Error is synchronized, so concurrent stdout/stderr callbacks are safe).
         if (options.Json || !logger.IsEnabled(LogLevel.Information))
         {
-            var redirectedArgs = BuildBuildPassArguments(csproj, options, verbosity, csWinRTMetadataFolder);
+            var redirectedArgs = BuildBuildPassArguments(csproj, options, verbosity, csWinRTMetadataFolder, analyzerInjection: analyzerInjection);
             // --json emits the invocation on stderr (the injected args stay discoverable); --quiet suppresses it.
             if (options.Json)
             {
@@ -658,7 +665,7 @@ internal sealed partial class ProjectRunService(
         // failures are self-describing.
         var nativeTerminal = NativeTerminalGateOverrideForTests?.Invoke()
             ?? ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger);
-        var buildArgs = BuildBuildPassArguments(csproj, options, verbosity, csWinRTMetadataFolder, nativeTerminal);
+        var buildArgs = BuildBuildPassArguments(csproj, options, verbosity, csWinRTMetadataFolder, nativeTerminal, analyzerInjection);
         ansiConsole.MarkupLineInterpolated($"{UiSymbols.Wrench} {banner}");
         ansiConsole.MarkupLineInterpolated($"[dim]   dotnet {Markup.Escape(RedactSecretsForDisplay(buildArgs))}[/]");
 

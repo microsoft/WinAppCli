@@ -84,14 +84,21 @@ internal sealed class AnalyzerInjectionService(IWinappDirectoryService winappDir
             Injected by 'winapp run' to surface WinUI analyzer diagnostics (issue #634).
             This file lives in the per-user winapp cache and is threaded in via
             -p:CustomAfterMicrosoftCommonTargets= on the build pass only.
+
+            Everything here is gated on '$(UseWinUI)' == 'true'. The global -p: that
+            carries this hook propagates into the whole ProjectReference closure, so
+            the guard is what keeps the analyzer scoped to WinUI projects and off any
+            non-WinUI library the closure happens to include (design M1).
           -->
-          <ItemGroup>
+          <ItemGroup Condition="'$(UseWinUI)' == 'true'">
             <Analyzer Include="$(MSBuildThisFileDirectory)Microsoft.WindowsAppSDK.Analyzers.dll" />
           </ItemGroup>
 
           <!-- Surface XAML files as AdditionalFiles so the XAML rules can inspect them
                (mirrors Microsoft.Windows.SDK.BuildTools.WinUIAnalyzer's packaged .targets). -->
-          <Target Name="WinAppInjectXamlFilesForAnalyzer" BeforeTargets="CoreCompile">
+          <Target Name="WinAppInjectXamlFilesForAnalyzer"
+                  BeforeTargets="CoreCompile"
+                  Condition="'$(UseWinUI)' == 'true'">
             <ItemGroup>
               <AdditionalFiles Include="@(Page)" Condition="'%(Extension)' == '.xaml'" />
               <AdditionalFiles Include="@(ApplicationDefinition)" Condition="'%(Extension)' == '.xaml'" />
