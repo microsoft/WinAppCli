@@ -132,6 +132,48 @@ public class ProjectRunServiceAnalyzerTests
         Assert.IsFalse(args.Contains("-p:CustomAfterMicrosoftCommonTargets="));
     }
 
+    [TestMethod]
+    public void BuildAnalyzerProbeArguments_MirrorsBuildPassRidAndPlatform()
+    {
+        // Regression: the probe must evaluate the SAME effective project the build does, or a
+        // CustomAfterMicrosoftCommonTargets / analyzer PackageReference that is conditional on the
+        // RID/TFM reads differently here than at build time (issue #634 review, H1). The build pass
+        // conveys arch via -r win-<arch> (RuntimeIdentifier) and injects a resolved Platform.
+        var options = new ProjectRunOptions(
+            "Debug", "arm64", Framework: null, NoBuild: false, NoRestore: false,
+            Properties: [], Platform: "ARM64");
+        var args = ProjectRunService.BuildAnalyzerProbeArguments(WriteCsproj(WinUiCsproj), options);
+
+        StringAssert.Contains(args, "-p:RuntimeIdentifier=win-arm64");
+        StringAssert.Contains(args, "-p:Platform=ARM64");
+    }
+
+    [TestMethod]
+    public void BuildAnalyzerProbeArguments_IncludesTargetFrameworkWhenResolved()
+    {
+        // A multi-targeted project pins an effective TFM; the probe must pin the same one so a
+        // per-TFM-conditional hook resolves as the build sees it (not the empty outer evaluation).
+        var options = new ProjectRunOptions(
+            "Debug", "x64", Framework: "net9.0-windows10.0.19041.0",
+            NoBuild: false, NoRestore: false, Properties: []);
+        var args = ProjectRunService.BuildAnalyzerProbeArguments(WriteCsproj(WinUiCsproj), options);
+
+        StringAssert.Contains(args, "-p:TargetFramework=net9.0-windows10.0.19041.0");
+    }
+
+    [TestMethod]
+    public void BuildAnalyzerProbeArguments_OmitsRuntimeIdentifierWhenOptionSet()
+    {
+        // When the build omits the RID (Platform conveys arch), the probe must too, so the two
+        // passes stay in lock-step.
+        var options = new ProjectRunOptions(
+            "Debug", "x64", Framework: null, NoBuild: false, NoRestore: false,
+            Properties: [], Platform: "x64", OmitRuntimeIdentifier: true);
+        var args = ProjectRunService.BuildAnalyzerProbeArguments(WriteCsproj(WinUiCsproj), options);
+
+        Assert.IsFalse(args.Contains("-p:RuntimeIdentifier="), "RID must be omitted when OmitRuntimeIdentifier is set.");
+    }
+
     // ---- Build-pass argument injection (T5.2/T5.3) -----------------------------------------
 
     [TestMethod]

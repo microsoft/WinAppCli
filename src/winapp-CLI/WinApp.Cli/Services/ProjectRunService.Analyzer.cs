@@ -185,12 +185,18 @@ internal sealed partial class ProjectRunService
 
     /// <summary>
     /// Builds the evaluate-only probe arguments: <c>dotnet msbuild &lt;csproj&gt; --getProperty:UseWinUI
-    /// --getProperty:CustomAfterMicrosoftCommonTargets --getItem:PackageReference</c> plus the build's
-    /// Configuration / Platform / solution / forwardable user <c>-p</c>. It deliberately does NOT set
+    /// --getProperty:CustomAfterMicrosoftCommonTargets --getItem:PackageReference</c> plus the SAME
+    /// effective MSBuild globals the build pass uses (Configuration / RuntimeIdentifier /
+    /// TargetFramework / Platform / solution / forwardable user <c>-p</c>), so a project whose
+    /// <c>CustomAfterMicrosoftCommonTargets</c> or analyzer <c>PackageReference</c> is conditional on the
+    /// RID or TFM evaluates the same value the build will see (else a conditional user hook is read as
+    /// empty here and then silently shadowed by the injected global). It deliberately does NOT set
     /// <c>CustomAfterMicrosoftCommonTargets</c> (that is what we are reading).
     /// </summary>
     internal static string BuildAnalyzerProbeArguments(FileInfo csproj, ProjectRunOptions options)
     {
+        var rid = RunArchHelper.ToRuntimeIdentifier(options.Architecture);
+
         var tokens = new List<string>
         {
             "msbuild",
@@ -200,6 +206,18 @@ internal sealed partial class ProjectRunService
             "--getItem:PackageReference",
             $"-p:Configuration={options.Configuration}",
         };
+
+        // Mirror the build/evaluate passes' effective RID and TFM so a hook / PackageReference
+        // conditioned on either resolves identically to what the build sees.
+        if (!options.OmitRuntimeIdentifier)
+        {
+            tokens.Add($"-p:RuntimeIdentifier={rid}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Framework))
+        {
+            tokens.Add($"-p:TargetFramework={options.Framework}");
+        }
 
         if (!string.IsNullOrWhiteSpace(options.Platform))
         {
