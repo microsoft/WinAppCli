@@ -221,7 +221,7 @@ public class BuildToolsServiceTests : BaseCommandTests
         // ("1.0"). Before pin normalization these strings did not match, so the pinned version was treated as
         // "not found" and — because a tool path is architecture-scoped (a strict requirement) — FindPackagePath
         // returned null instead of the pinned build tools.
-        var packagesDir = Path.Combine(_testCacheDirectory.FullName, "packages");
+        var packagesDir = Path.Join(_testCacheDirectory.FullName, "packages");
 
         // The pinned (shorthand) version, stored on disk under its normalized "1.0.0" name.
         // Path.Join rather than Path.Combine: it always concatenates, so no segment can discard the ones
@@ -248,9 +248,9 @@ public class BuildToolsServiceTests : BaseCommandTests
         // Assert - the shorthand pin must resolve to the normalized "1.0.0" cache directory, not null and not
         // the newer 2.0.0 version.
         Assert.IsNotNull(result, "Shorthand pin '1.0' should have matched the normalized '1.0.0' cache directory.");
-        Assert.Contains(Path.Combine("buildtools", "1.0.0"),
+        Assert.Contains(Path.Join("buildtools", "1.0.0"),
             result.FullName, $"Expected the resolved path under the normalized '1.0.0' directory but got: {result.FullName}");
-        Assert.DoesNotContain(Path.Combine("buildtools", "2.0.0"),
+        Assert.DoesNotContain(Path.Join("buildtools", "2.0.0"),
             result.FullName, $"The shorthand pin must not fall back to the newer 2.0.0 version: {result.FullName}");
     }
 
