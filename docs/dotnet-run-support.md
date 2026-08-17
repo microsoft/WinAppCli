@@ -274,17 +274,22 @@ Capture OutputDebugString messages and first-chance exceptions:
 
 ## Production Blockers
 
-### 1. CLI AOT Build Issues (BLOCKING)
+### 1. CLI AOT Build Issues (RESOLVED)
 
-The CLI currently has NativeAOT compilation errors related to Newtonsoft.Json and NuGet.Protocol. These must be resolved before the NuGet package can include the CLI binaries.
+Earlier prototypes of the CLI hit NativeAOT compilation errors from Newtonsoft.Json (reflection-heavy
+serialization) and NuGet.Protocol (dynamic code generation), which blocked shipping the CLI binaries in
+the NuGet package.
 
-**Error summary:**
-- 146 trim/AOT analysis errors
-- Related to reflection-heavy code in Newtonsoft.Json
-- Related to dynamic code generation in NuGet.Protocol
+**Resolution (shipped):**
+- The CLI consumes the NuGet client libraries (`NuGet.Protocol`/`Packaging`/`Configuration`/`Credentials`)
+  and opts into their AOT-friendly JSON path with the runtime feature switch
+  `NuGet.UseSystemTextJsonDeserialization=true` (`Trim=true`) in `WinApp.Cli.csproj`.
+- With System.Text.Json deserialization enabled, Newtonsoft.Json is fully trimmed out of the native image,
+  so the DynamicProxy code paths that produced the trim/AOT warnings are no longer reachable.
+- `dotnet publish -c Release -r <rid> -p:PublishAot=true` now completes with **0 warnings** under
+  `TreatWarningsAsErrors` for both `win-x64` and `win-arm64`.
 
-**Resolution:**
-- Wait until https://github.com/NuGet/Home/issues/14408
+See the [NuGet AOT tracking issue](https://github.com/NuGet/Home/issues/14408) (now closed) for background.
 
 ### 2. Developer Mode Requirement
 

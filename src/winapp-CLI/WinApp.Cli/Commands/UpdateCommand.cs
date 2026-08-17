@@ -35,6 +35,12 @@ internal class UpdateCommand : Command, IShortDescription
             {
                 try
                 {
+                    // Tracks packages whose latest-version lookup failed closed (e.g. a feed outage or auth
+                    // failure). GetLatestVersionAsync now throws rather than returning a stale answer, and a
+                    // lookup failure must not be reported as an authoritative "up to date" result — so record
+                    // them and fail the command (non-zero) at the end instead of emitting the success message.
+                    var lookupFailures = new List<string>();
+
                     // Step 1: Find yaml config file
                     taskContext.AddDebugMessage($"{UiSymbols.Note} Checking for winapp.yaml configuration...");
 
@@ -63,7 +69,11 @@ internal class UpdateCommand : Command, IShortDescription
                                     {
                                         var latestVersion = await nugetService.GetLatestVersionAsync(package.Name, setupSdks, cancellationToken);
 
-                                        if (latestVersion != package.Version)
+                                        // Only advance to a strictly greater version. Comparing by value
+                                        // (not string inequality) avoids two hazards: a normalized-but-equal
+                                        // version (e.g. "1.0" vs "1.0.0") spuriously counting as an update,
+                                        // and a lower "latest" ever silently downgrading the pinned version.
+                                        if (NugetService.CompareVersions(latestVersion, package.Version) > 0)
                                         {
                                             taskContext.AddStatusMessage($"{UiSymbols.Rocket} {package.Name}: {package.Version} → {latestVersion}");
                                             updatedConfig.SetVersion(package.Name, latestVersion);
@@ -71,20 +81,35 @@ internal class UpdateCommand : Command, IShortDescription
                                         }
                                         else
                                         {
-                                            taskContext.AddDebugMessage($"{UiSymbols.Check} {package.Name}: already latest ({latestVersion})");
+                                            taskContext.AddDebugMessage($"{UiSymbols.Check} {package.Name}: already up to date ({package.Version})");
                                             updatedConfig.SetVersion(package.Name, package.Version);
                                         }
+                                    }
+                                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                                    {
+                                        // A user cancellation (Ctrl+C) must abort the whole command, not be
+                                        // recorded as an ordinary lookup failure that would let the loop keep
+                                        // checking packages and then proceed to install / build-tool work.
+                                        throw;
                                     }
                                     catch (Exception ex)
                                     {
                                         taskContext.AddStatusMessage($"{UiSymbols.Warning} Failed to check {package.Name}: {ex.Message}");
-                                        // Keep current version on error
+                                        // Keep current version on error, but remember the failure so the
+                                        // command exits non-zero and does not claim everything is up to date.
                                         updatedConfig.SetVersion(package.Name, package.Version);
+                                        lookupFailures.Add(package.Name);
                                     }
                                 }
 
                                 return 0;
                             }, cancellationToken);
+
+                            // The package-check subtask runs inside a task wrapper that catches and swallows
+                            // exceptions, so a cancellation rethrown mid-loop stops the loop but does not
+                            // propagate on its own. Surface it here before acting on the (partial) results, so
+                            // Ctrl+C aborts the command instead of falling through to install and build-tool work.
+                            cancellationToken.ThrowIfCancellationRequested();
 
                             if (hasUpdates)
                             {
@@ -110,7 +135,12 @@ internal class UpdateCommand : Command, IShortDescription
                             }
                             else
                             {
-                                taskContext.AddStatusMessage($"{UiSymbols.Check} All packages are already up to date");
+                                // Only assert everything is current when every lookup actually succeeded. A
+                                // failed lookup (recorded above) is not evidence of being up to date.
+                                if (lookupFailures.Count == 0)
+                                {
+                                    taskContext.AddStatusMessage($"{UiSymbols.Check} All packages are already up to date");
+                                }
                             }
                         }
                     }
@@ -149,6 +179,13 @@ internal class UpdateCommand : Command, IShortDescription
                     else
                     {
                         taskContext.AddDebugMessage($"{UiSymbols.Note} Windows App SDK packages not found, skipping runtime installation");
+                    }
+
+                    // A version lookup that failed closed (feed outage / auth failure) must fail the command:
+                    // returning 0 here would report a feed error as a successful, authoritative update.
+                    if (lookupFailures.Count > 0)
+                    {
+                        return (1, $"{UiSymbols.Error} Update failed: could not determine the latest version for {lookupFailures.Count} package(s): {string.Join(", ", lookupFailures)}. Their pinned versions in winapp.yaml were left unchanged.");
                     }
 
                     return (0, "Update completed successfully!");

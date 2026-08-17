@@ -44,28 +44,40 @@ Failed to install Microsoft.Windows.SDK.BuildTools: The SSL connection could not
 ```
 
 **This is a known limitation, not a flaky test and not a transient outage.** Do not dismiss a
-failure on these grounds and do not re-run hoping it passes. `NugetService` falls back to
-`api.nuget.org` only when the feed environment variables are unset; point them at the internal
-feed instead — the same values `.pipelines/templates/build.yaml` uses in CI:
+failure on these grounds and do not re-run hoping it passes.
+
+`NugetService` resolves its package sources from the standard `nuget.config` hierarchy (rooted at
+the working directory), so pointing it at a reachable mirror is a config change, not an
+environment-variable override. Add a mirror of nuget.org to your user-level
+`%APPDATA%\NuGet\NuGet.Config` — the corporate proxy works and needs no token:
+
+```xml
+<add key="azure-default" value="https://packagefeedproxy.microsoft.io/nuget/v3/index.json" protocolVersion="3" />
+```
+
+The repo-root `nuget.config` deliberately declares no `<packageSources>`, so that user-level source
+is inherited by both `dotnet restore` and the CLI's own package downloads.
+
+The live-feed integration tests in `NugetServiceTests` pin themselves to an isolated config so they
+can't inherit a machine that has nuget.org disabled. Point them at the same mirror:
 
 ```powershell
-$env:WINAPP_NUGET_FLAT_CONTAINER = 'https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/nuget/v3/flat2'
-$env:WINAPP_NUGET_REGISTRATION   = 'https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/nuget/v3/registrations2-semver2'
-$env:WINAPP_NUGET_AUTH_PREFIX    = 'https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/nuget/v3/'
+$env:WINAPP_TEST_NUGET_SOURCE = 'https://packagefeedproxy.microsoft.io/nuget/v3/index.json'
+```
 
-# Basic auth as VssSessionToken:<token>, applied only to URLs under WINAPP_NUGET_AUTH_PREFIX
+Confirm the mirror answers before spending time on a long run:
+
+```powershell
+Invoke-RestMethod 'https://packagefeedproxy.microsoft.io/nuget/v3/index.json'
+```
+
+If you need the `pde-oss_Internal` feed itself (the one CI restores from), it requires a token:
+
+```powershell
 $t = azureauth aad --resource 499b84ac-1321-427f-aa17-267ca6975798 `
     --client 872cd9fa-d31f-45e0-9eab-6e460a02d1f1 `
     --tenant 72f988bf-86f1-41af-91ab-2d7cd011db47 --output token
 $env:VSS_NUGET_ACCESSTOKEN = ($t | Select-Object -Last 1).Trim()
-```
-
-Confirm the feed answers before spending time on a long run:
-
-```powershell
-$cred = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("VssSessionToken:$env:VSS_NUGET_ACCESSTOKEN"))
-Invoke-RestMethod "$env:WINAPP_NUGET_FLAT_CONTAINER/microsoft.windows.sdk.buildtools/index.json" `
-    -Headers @{ Authorization = "Basic $cred" }
 ```
 
 More generally: if something fails locally but passes in CI, the difference is configuration,

@@ -2,133 +2,44 @@
 // Licensed under the MIT License.
 
 using System.Collections.Concurrent;
-using System.IO.Compression;
-using System.Net.Http.Headers;
-using System.Text;
-using System.Text.Json;
-using System.Text.RegularExpressions;
-using System.Xml;
+using NuGet.Common;
+using NuGet.Configuration;
+using NuGet.Packaging;
+using NuGet.Packaging.Core;
+using NuGet.Protocol;
+using NuGet.Protocol.Core.Types;
+using NuGet.Versioning;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Services;
 
-internal partial class NugetService(IWinappDirectoryService winappDirectoryService) : INugetService
+/// <summary>
+/// Wraps the official NuGet client libraries (NuGet.Protocol / NuGet.Packaging /
+/// NuGet.Configuration). Package sources, credentials and the global packages folder are resolved
+/// from the user's <c>nuget.config</c> hierarchy (rooted at the current working directory), so
+/// private/custom feeds and mirrors are honored when restoring SDK packages. Source resolution /
+/// credentials / eligibility are delegated to <see cref="NugetSourceProvider"/> and package
+/// download/extraction to <see cref="NugetPackageDownloader"/>; this service owns version selection,
+/// dependency traversal and the on-disk cache layout.
+/// </summary>
+internal partial class NugetService : INugetService
 {
-    private static readonly HttpClient Http = new();
-
-    /// <summary>
-    /// Seam for the flat-container and registration HTTP GETs used by package download,
-    /// version resolution, and dependency parsing. Defaults to the shared <see cref="Http"/>
-    /// client; tests replace it with canned in-memory responses so those paths run without
-    /// network I/O.
-    /// </summary>
-    /// <remarks>
-    /// The default delegate wraps the single real
-    /// <see cref="HttpClient.GetAsync(string?, System.Threading.CancellationToken)"/> network
-    /// boundary. That boundary itself is not unit-coverable without a live NuGet endpoint; see
-    /// issue #630. Only the default delegate performs network I/O.
-    /// </remarks>
-    internal static Func<string, CancellationToken, Task<HttpResponseMessage>> HttpGetAsync { get; set; }
-        = SendHttpGetAsync;
-
-    /// <summary>
-    /// Seam for the current user's profile directory, used to compute the default NuGet
-    /// global-packages location (<c>%USERPROFILE%\.nuget\packages</c>). Defaults to
-    /// <see cref="Environment.GetFolderPath(Environment.SpecialFolder)"/> so production behavior is
-    /// unchanged; tests point it at a temporary directory so the default create-branch runs
-    /// hermetically without mutating the developer's (or CI runner's) real user profile.
-    /// </summary>
-    internal static Func<string> GetUserProfileDirectory { get; set; }
-        = static () => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-
-    private const string DefaultFlatIndex = "https://api.nuget.org/v3-flatcontainer";
-    private const string DefaultRegistrationIndex = "https://api.nuget.org/v3/registration5-semver1";
-    internal const string FlatContainerEnvironmentVariable = "WINAPP_NUGET_FLAT_CONTAINER";
-    internal const string RegistrationEnvironmentVariable = "WINAPP_NUGET_REGISTRATION";
-    internal const string AuthPrefixEnvironmentVariable = "WINAPP_NUGET_AUTH_PREFIX";
-    internal const string AzureArtifactsTokenEnvironmentVariable = "VSS_NUGET_ACCESSTOKEN";
+    private static readonly ILogger Logger = NullLogger.Instance;
     private static readonly ConcurrentDictionary<string, Dictionary<string, string>> DependencyCache = new(StringComparer.OrdinalIgnoreCase);
 
-    internal static string FlatIndex => GetFeedEndpoint(FlatContainerEnvironmentVariable, DefaultFlatIndex);
-    internal static string RegistrationIndex => GetFeedEndpoint(RegistrationEnvironmentVariable, DefaultRegistrationIndex);
+    private readonly IWinappDirectoryService _winappDirectoryService;
+    private readonly NugetSourceProvider _sourceProvider;
+    private readonly NugetPackageDownloader _downloader;
 
-    private static string GetFeedEndpoint(string environmentVariable, string defaultEndpoint)
-        => (Environment.GetEnvironmentVariable(environmentVariable) ?? defaultEndpoint).TrimEnd('/');
-
-    internal static async Task<HttpResponseMessage> SendHttpGetAsync(string url, CancellationToken cancellationToken)
+    public NugetService(
+        IWinappDirectoryService winappDirectoryService,
+        NugetSourceProvider sourceProvider,
+        NugetPackageDownloader downloader)
     {
-        using var request = CreateHttpRequest(url);
-        return await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-    }
-
-    internal static HttpRequestMessage CreateHttpRequest(string url)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Get, url);
-        var authPrefix = Environment.GetEnvironmentVariable(AuthPrefixEnvironmentVariable);
-        var accessToken = Environment.GetEnvironmentVariable(AzureArtifactsTokenEnvironmentVariable);
-
-        if (!string.IsNullOrWhiteSpace(authPrefix)
-            && !string.IsNullOrWhiteSpace(accessToken)
-            && url.StartsWith(authPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            var credential = Convert.ToBase64String(Encoding.UTF8.GetBytes($"VssSessionToken:{accessToken}"));
-            request.Headers.Authorization = new AuthenticationHeaderValue("Basic", credential);
-        }
-
-        return request;
-    }
-
-    public DirectoryInfo GetNuGetGlobalPackagesDir()
-    {
-        // In test mode (cache override set), use a "packages" subdir of the override directory
-        var globalDir = winappDirectoryService.GetGlobalWinappDirectory();
-        if (IsTestOverride(globalDir))
-        {
-            var overrideDir = new DirectoryInfo(Path.Combine(globalDir.FullName, "packages"));
-            if (!overrideDir.Exists)
-            {
-                overrideDir.Create();
-            }
-            return overrideDir;
-        }
-
-        // NUGET_PACKAGES env var takes priority
-        var envPath = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
-        if (!string.IsNullOrEmpty(envPath))
-        {
-            var envDir = new DirectoryInfo(envPath);
-            if (!envDir.Exists)
-            {
-                envDir.Create();
-            }
-            return envDir;
-        }
-
-        // Default: %USERPROFILE%/.nuget/packages
-        var userProfile = GetUserProfileDirectory();
-        var nugetDir = new DirectoryInfo(Path.Combine(userProfile, ".nuget", "packages"));
-        if (!nugetDir.Exists)
-        {
-            nugetDir.Create();
-        }
-        return nugetDir;
-    }
-
-    public DirectoryInfo GetNuGetPackageDir(string packageName, string version)
-    {
-        var cache = GetNuGetGlobalPackagesDir();
-        return new DirectoryInfo(Path.Combine(cache.FullName, packageName.ToLowerInvariant(), version));
-    }
-
-    /// <summary>
-    /// Detects whether the global winapp directory is a test override (not the real user profile .winapp).
-    /// </summary>
-    private static bool IsTestOverride(DirectoryInfo globalDir)
-    {
-        var defaultWinapp = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".winapp");
-        return !string.Equals(globalDir.FullName, defaultWinapp, StringComparison.OrdinalIgnoreCase)
-            && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY"));
+        _winappDirectoryService = winappDirectoryService;
+        _sourceProvider = sourceProvider;
+        _downloader = downloader;
     }
 
     private static readonly string[] IgnoredDependencyPrefixes =
@@ -150,23 +61,135 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
         $"{BuildToolsService.CPP_SDK_PACKAGE}.arm64"
     ];
 
+    public DirectoryInfo GetNuGetGlobalPackagesDir()
+    {
+        // In test mode (cache override set), use a "packages" subdir of the override directory
+        var globalDir = _winappDirectoryService.GetGlobalWinappDirectory();
+        if (IsTestOverride(globalDir))
+        {
+            var overrideDir = new DirectoryInfo(Path.Combine(globalDir.FullName, "packages"));
+            if (!overrideDir.Exists)
+            {
+                overrideDir.Create();
+            }
+            return overrideDir;
+        }
+
+        // Resolve the global packages folder from the user's NuGet configuration. This honors the
+        // NUGET_PACKAGES environment variable and the `globalPackagesFolder` setting in nuget.config,
+        // falling back to %USERPROFILE%/.nuget/packages.
+        var globalPackagesFolder = SettingsUtility.GetGlobalPackagesFolder(_sourceProvider.Settings);
+        var nugetDir = new DirectoryInfo(globalPackagesFolder);
+        if (!nugetDir.Exists)
+        {
+            nugetDir.Create();
+        }
+        return nugetDir;
+    }
+
+    public DirectoryInfo GetNuGetPackageDir(string packageName, string version)
+    {
+        // Validate the identity BEFORE it is ever turned into a filesystem path. A malformed id or a value
+        // that is not a real NuGet version (e.g. "..") must never be concatenated into the cache path: it
+        // could otherwise resolve to a directory outside the package folder (path traversal) that a later
+        // DirectoryInfo.Exists() check would treat as an already-installed package. There is deliberately no
+        // raw string fallback — an unparseable version is an error, not a literal folder name.
+        if (string.IsNullOrWhiteSpace(packageName) || !PackageIdValidator.IsValidPackageId(packageName))
+        {
+            throw new InvalidOperationException(
+                $"'{packageName}' is not a valid NuGet package id.");
+        }
+
+        var parsed = ParseVersion(packageName, version);
+        var cache = GetNuGetGlobalPackagesDir();
+        // Resolve the on-disk folder the same way the global-packages writer does, so the path matches
+        // regardless of how the version string is expressed (NuGet stores e.g. "1.0" under "1.0.0").
+        var resolver = new VersionFolderPathResolver(cache.FullName);
+        return new DirectoryInfo(resolver.GetInstallPath(packageName, parsed));
+    }
+
+    /// <summary>
+    /// Reports whether <paramref name="package"/> <paramref name="version"/> is FULLY installed in the NuGet
+    /// global-packages cache. The version directory merely existing is not sufficient: NuGet writes the
+    /// ".nupkg.metadata" completion marker only after extraction finishes, so an interrupted download can
+    /// leave a partial folder (missing nuspec / lib files) with no marker. Both this service and higher-level
+    /// callers must gate "already installed" decisions on this single predicate so a partial cache entry is
+    /// never mistaken for a complete install (which would let restore report a truncated dependency graph as
+    /// success).
+    /// </summary>
+    public bool IsPackageInstalled(string package, string version) =>
+        HasCompletionMarker(GetNuGetPackageDir(package, version));
+
+    /// <summary>
+    /// True when <paramref name="packageDir"/> exists and contains NuGet's ".nupkg.metadata" completion
+    /// marker — the same signal NuGet itself uses to treat a global-packages entry as fully extracted.
+    /// </summary>
+    private static bool HasCompletionMarker(DirectoryInfo packageDir) =>
+        packageDir.Exists && File.Exists(Path.Combine(packageDir.FullName, ".nupkg.metadata"));
+
+    /// <summary>
+    /// Normalizes a version string to NuGet's canonical form (e.g. "1.0" -> "1.0.0") so the value stored
+    /// and returned by the installer matches the on-disk global-packages folder layout. Returns the input
+    /// unchanged if it is not a parseable NuGet version.
+    /// </summary>
+    internal static string NormalizeVersion(string version) =>
+        NuGetVersion.TryParse(version, out var parsed) ? parsed.ToNormalizedString() : version;
+
+    /// <summary>
+    /// Parses a version string into a <see cref="NuGetVersion"/>, throwing an
+    /// <see cref="InvalidOperationException"/> that names the package and the offending value when it is
+    /// not a valid NuGet version. <see cref="NuGetVersion.Parse(string)"/> would otherwise surface a raw
+    /// <see cref="ArgumentException"/> with a message less actionable than the rest of this service.
+    /// </summary>
+    private static NuGetVersion ParseVersion(string packageId, string version)
+    {
+        if (!NuGetVersion.TryParse(version, out var parsed))
+        {
+            throw new InvalidOperationException(
+                $"'{version}' is not a valid NuGet version for package '{packageId}'. Specify a valid NuGet version such as 1.2.3 or 1.2.3-preview.");
+        }
+
+        return parsed;
+    }
+
+    /// <summary>
+    /// Detects whether the global winapp directory is a test override (not the real user profile .winapp).
+    /// </summary>
+    private static bool IsTestOverride(DirectoryInfo globalDir)
+    {
+        var defaultWinapp = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".winapp");
+        return !string.Equals(globalDir.FullName, defaultWinapp, StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY"));
+    }
+
     public async Task<Dictionary<string, string>> InstallPackageAsync(string package, string version, TaskContext taskContext, CancellationToken cancellationToken = default)
     {
+        NugetSourceProvider.EnsureCredentialService();
         var packages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        await InstallPackageRecursiveAsync(package, version, packages, taskContext, cancellationToken);
+        var dependencyFailures = new List<string>();
+        // Every declared range seen for a given dependency id is accumulated here as the graph is walked, so a
+        // later branch can be evaluated against the full constraint set rather than only its own range.
+        var dependencyConstraints = new Dictionary<string, List<VersionRange>>(StringComparer.OrdinalIgnoreCase);
+        using var cacheContext = new SourceCacheContext();
+        await InstallPackageRecursiveAsync(package, version, packages, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
+
+        // A downloaded root package with unresolvable/uninstallable REQUIRED transitive dependencies is an
+        // incomplete install, not a success. Each gap was surfaced as a warning above (and the rest of the
+        // tree was still installed best-effort); now fail the operation so callers such as `restore` exit
+        // non-zero instead of reporting a partial install as complete.
+        if (dependencyFailures.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Installed {package} {version} but {dependencyFailures.Count} required dependency(ies) could not be installed: {string.Join("; ", dependencyFailures)}.");
+        }
+
         return packages;
     }
 
     /// <summary>
     /// Downloads and extracts a NuGet package to the global packages cache, then recursively installs dependencies.
     /// </summary>
-    /// <remarks>
-    /// The leading <c>installed.ContainsKey(package)</c> short-circuit is a defensive guard: the public
-    /// entry point seeds an empty dictionary and <see cref="ResolveDependenciesAsync"/> already skips
-    /// dependencies that are present before recursing, so this branch is not reachable through the public
-    /// API and is intentionally left uncovered. See issue #630.
-    /// </remarks>
-    private async Task InstallPackageRecursiveAsync(string package, string version, Dictionary<string, string> installed, TaskContext taskContext, CancellationToken cancellationToken)
+    private async Task InstallPackageRecursiveAsync(string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, Dictionary<string, List<VersionRange>> dependencyConstraints, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         // Already processed this package?
         if (installed.ContainsKey(package))
@@ -174,382 +197,312 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
             return;
         }
 
-        var packageDir = GetNuGetPackageDir(package, version);
+        // Store the canonical (normalized) version so the value recorded in `installed` matches the
+        // on-disk NuGet folder layout (e.g. "1.0" -> "1.0.0"). Downstream consumers build cache paths by
+        // concatenating this value, so an un-normalized shorthand would point them at a folder that the
+        // global-packages writer never created.
+        var normalizedVersion = NormalizeVersion(version);
 
-        // Already installed on disk?
-        if (packageDir.Exists)
+        var packageDir = GetNuGetPackageDir(package, normalizedVersion);
+
+        // Already fully installed on disk? Gate on the shared completion-marker predicate (see
+        // IsPackageInstalled): the directory merely existing is not enough, because an interrupted extraction
+        // can leave a partial folder with no ".nupkg.metadata" marker. Accepting that corrupt entry would let
+        // ReadDependenciesFromNuspec return an empty set and restore report a truncated graph as success. When
+        // the marker is missing, fall through so the downloader re-extracts and completes the entry.
+        if (HasCompletionMarker(packageDir))
         {
-            taskContext.AddDebugMessage($"{UiSymbols.Skip} {package} {version} already present");
-            installed[package] = version;
+            taskContext.AddDebugMessage($"{UiSymbols.Skip} {package} {normalizedVersion} already present");
+            installed[package] = normalizedVersion;
             // Still resolve dependencies to populate installed dictionary
-            await ResolveDependenciesAsync(packageDir, package, version, installed, taskContext, cancellationToken);
+            await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
             return;
         }
 
-        // Download .nupkg from the NuGet flat container API
-        var lowerId = package.ToLowerInvariant();
-        var lowerVersion = version.ToLowerInvariant();
-        var url = $"{FlatIndex}/{lowerId}/{lowerVersion}/{lowerId}.{lowerVersion}.nupkg";
+        // Download and extract the package from the user's configured NuGet sources into the
+        // global packages folder (using the standard NuGet on-disk layout). Throws with the
+        // underlying source error if no configured source can provide the package.
+        var identity = new PackageIdentity(package, ParseVersion(package, normalizedVersion));
+        await _downloader.DownloadPackageAsync(identity, GetNuGetGlobalPackagesDir().FullName, cacheContext, cancellationToken);
 
-        using var resp = await HttpGetAsync(url, cancellationToken);
-        if (!resp.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException($"Failed to download {package} {version} from NuGet (HTTP {resp.StatusCode})");
-        }
-
-        // Extract to the NuGet global cache location
-        Directory.CreateDirectory(packageDir.FullName);
-
-        await using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
-        ZipFile.ExtractToDirectory(stream, packageDir.FullName, overwriteFiles: true);
-
-        installed[package] = version;
-        taskContext.AddStatusMessage($"{UiSymbols.Check} Installed {package} {version}");
+        installed[package] = normalizedVersion;
+        taskContext.AddStatusMessage($"{UiSymbols.Check} Installed {package} {normalizedVersion}");
 
         // Recursively install dependencies
-        await ResolveDependenciesAsync(packageDir, package, version, installed, taskContext, cancellationToken);
+        await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
     }
 
     /// <summary>
     /// Reads the .nuspec from an extracted package and recursively installs dependencies.
     /// </summary>
-    private async Task ResolveDependenciesAsync(DirectoryInfo packageDir, string package, string version, Dictionary<string, string> installed, TaskContext taskContext, CancellationToken cancellationToken)
+    private async Task ResolveDependenciesAsync(DirectoryInfo packageDir, string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, Dictionary<string, List<VersionRange>> dependencyConstraints, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
+        Dictionary<string, VersionRange> deps;
         try
         {
-            var deps = ReadDependenciesFromNuspec(packageDir, package);
-            foreach (var (depName, depVersionRange) in deps)
-            {
-                if (installed.ContainsKey(depName))
-                {
-                    continue;
-                }
-
-                var depVersion = ParseMinimumVersion(depVersionRange);
-                if (!string.IsNullOrEmpty(depVersion))
-                {
-                    await InstallPackageRecursiveAsync(depName, depVersion, installed, taskContext, cancellationToken);
-                }
-            }
+            deps = ReadDependenciesFromNuspec(packageDir, package);
         }
         catch (Exception ex)
         {
-            // Dependency resolution failures are non-fatal; the main package is installed.
-            // Log so transitive dependency issues are visible in verbose/debug output.
-            taskContext.AddDebugMessage($"{UiSymbols.Note} Dependency resolution for {package} {version}: {ex.Message}");
+            // The package was downloaded, but its .nuspec cannot be read so its dependency graph is unknown.
+            // This is different from a package that simply declares no dependencies (that reads back as an
+            // empty set without throwing): an unreadable manifest means required transitive packages may be
+            // silently missing. Record it as a failure — like the dependency resolution/install errors below —
+            // so the overall install fails loudly instead of reporting success with an incomplete graph.
+            taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not read dependencies for {package} {version}: {ex.Message}");
+            dependencyFailures.Add($"{package} {version}: dependency manifest could not be read: {ex.Message}");
+            return;
         }
-    }
 
-    /// <summary>
-    /// Reads dependencies from the .nuspec file embedded in an extracted NuGet package.
-    /// </summary>
-    private static Dictionary<string, string> ReadDependenciesFromNuspec(DirectoryInfo packageDir, string packageName)
-    {
-        var dependencies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        // The .nuspec file is at the root of the extracted package, named {lowercase-id}.nuspec
-        var nuspecPath = Path.Combine(packageDir.FullName, $"{packageName.ToLowerInvariant()}.nuspec");
-        if (!File.Exists(nuspecPath))
+        foreach (var (depName, depVersionRange) in deps)
         {
-            // Try finding any .nuspec file
-            var nuspecFiles = Directory.GetFiles(packageDir.FullName, "*.nuspec", SearchOption.TopDirectoryOnly);
-            if (nuspecFiles.Length == 0)
+            // Accumulate every range required for this dependency id across all branches of the graph so a
+            // later branch can be evaluated against the full constraint set, not just its own range.
+            if (!dependencyConstraints.TryGetValue(depName, out var accumulatedRanges))
             {
-                return dependencies;
+                accumulatedRanges = [];
+                dependencyConstraints[depName] = accumulatedRanges;
             }
-            nuspecPath = nuspecFiles[0];
-        }
+            accumulatedRanges.Add(depVersionRange);
 
-        var doc = new XmlDocument();
-        doc.Load(nuspecPath);
-
-        var nsMgr = new XmlNamespaceManager(doc.NameTable);
-        var ns = doc.DocumentElement?.NamespaceURI ?? string.Empty;
-        if (!string.IsNullOrEmpty(ns))
-        {
-            nsMgr.AddNamespace("ns", ns);
-        }
-
-        var prefix = string.IsNullOrEmpty(ns) ? "" : "ns:";
-        var depNodes = doc.SelectNodes($"//{prefix}dependency", nsMgr);
-        if (depNodes != null)
-        {
-            foreach (XmlNode node in depNodes)
+            if (installed.TryGetValue(depName, out var installedDepVersion))
             {
-                var depId = node.Attributes?["id"]?.Value;
-                var depVersion = node.Attributes?["version"]?.Value;
-                if (!string.IsNullOrEmpty(depId) && !string.IsNullOrEmpty(depVersion))
+                // The dependency id was already installed earlier in this operation, which fixed its version.
+                // A package-id match alone is not enough: in a diamond graph two branches can require ranges
+                // the selected version does not both satisfy. Distinguish two cases:
+                //   * GENUINE conflict — no single version can satisfy every accumulated range (e.g. [1,2) and
+                //     [2,3)). That graph is unsatisfiable and must fail the operation rather than be accepted
+                //     as a complete install with an invalid graph.
+                //   * Differing lower bounds only — some version satisfies every range (e.g. [1.0,) then
+                //     [2.0,)), but winapp keeps the already-selected (lowest) version. That is a documented
+                //     limitation of its resolve-as-it-installs strategy (winapp targets curated SDK graphs and
+                //     does not perform NuGet's global upgrade/downgrade unification), not a conflict — warn at
+                //     debug level and continue so common differing-minimum diamonds are not falsely failed.
+                if (!(NuGetVersion.TryParse(installedDepVersion, out var installedNuGetVersion)
+                        && RangeSatisfiesWithFloat(depVersionRange, installedNuGetVersion)))
                 {
-                    dependencies.TryAdd(depId, depVersion);
-                }
-            }
-        }
-
-        return dependencies;
-    }
-
-    /// <summary>
-    /// Parses a NuGet version range and extracts the minimum version.
-    /// Handles: "1.0.0", "[1.0.0]", "[1.0.0, )", "(1.0.0, 2.0.0)", and the
-    /// bracket-stripped form "1.0.0, 2.0.0" (which can happen when callers
-    /// pre-clean brackets without splitting on the range separator).
-    /// </summary>
-    internal static string ParseMinimumVersion(string versionRange)
-    {
-        if (string.IsNullOrWhiteSpace(versionRange))
-        {
-            return string.Empty;
-        }
-
-        // Strip brackets/parens (no-op if none are present)
-        var trimmed = versionRange.Trim().TrimStart('[', '(').TrimEnd(']', ')');
-
-        // Take the lower bound (before comma if present). Always check for a comma —
-        // a NuGet range with brackets stripped (e.g. "1.0.0, 2.0.0") still needs
-        // splitting; otherwise we'd treat the whole thing as a literal version.
-        var commaIdx = trimmed.IndexOf(',');
-        if (commaIdx >= 0)
-        {
-            trimmed = trimmed[..commaIdx].Trim();
-        }
-
-        return trimmed;
-    }
-
-    public async Task<string> GetLatestVersionAsync(string packageName, SdkInstallMode sdkInstallMode, CancellationToken cancellationToken = default)
-    {
-        if (sdkInstallMode == SdkInstallMode.None)
-        {
-            throw new ArgumentException("sdkInstallMode cannot be None", nameof(sdkInstallMode));
-        }
-
-        var list = await GetListedVersionsAsync(packageName, cancellationToken);
-
-        // If not winapp SDK, preview and experimental versions are the same
-        if (packageName.StartsWith(BuildToolsService.WINAPP_SDK_PACKAGE, StringComparison.OrdinalIgnoreCase))
-        {
-            if (sdkInstallMode == SdkInstallMode.Stable)
-            {
-                // Only stable versions (no prerelease suffix)
-                list = [.. list.Where(v => !v.Contains('-', StringComparison.Ordinal))];
-            }
-            else if (sdkInstallMode == SdkInstallMode.Preview)
-            {
-                // Only with preview
-                list = [.. list.Where(v => v.Contains("-preview", StringComparison.OrdinalIgnoreCase))];
-            }
-            else if (sdkInstallMode == SdkInstallMode.Experimental)
-            {
-                // Only with experimental
-                list = [.. list.Where(v => v.Contains("-experimental", StringComparison.OrdinalIgnoreCase))];
-            }
-            // For Experimental mode: keep all versions (no filtering needed)
-        }
-        else
-        {
-            if (sdkInstallMode == SdkInstallMode.Stable)
-            {
-                // Only stable versions (no prerelease suffix)
-                list = [.. list.Where(v => !v.Contains('-', StringComparison.Ordinal))];
-            }
-        }
-
-        if (list.Count == 0)
-        {
-            throw new InvalidOperationException($"No versions found for {packageName}");
-        }
-
-        list.Sort(CompareVersions);
-        return list[^1];
-    }
-
-    /// <summary>
-    /// Fetches all listed (non-unlisted) versions of a package from the NuGet registration API.
-    /// The flat container index does not distinguish between listed and unlisted versions,
-    /// so we use the registration endpoint which includes a "listed" property.
-    /// </summary>
-    private static async Task<List<string>> GetListedVersionsAsync(string packageName, CancellationToken cancellationToken)
-    {
-        var url = $"{RegistrationIndex}/{packageName.ToLowerInvariant()}/index.json";
-        using var resp = await HttpGetAsync(url, cancellationToken);
-        resp.EnsureSuccessStatusCode();
-        using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
-        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-
-        var list = new List<string>();
-
-        // The registration index contains "items" (pages). Each page may have inline "items"
-        // or require a separate fetch via its "@id" URL.
-        if (!doc.RootElement.TryGetProperty("items", out var pages) || pages.ValueKind != JsonValueKind.Array)
-        {
-            throw new InvalidOperationException($"No versions found for {packageName}");
-        }
-
-        foreach (var page in pages.EnumerateArray())
-        {
-            JsonElement leafItems;
-
-            if (page.TryGetProperty("items", out var inlineItems) && inlineItems.ValueKind == JsonValueKind.Array)
-            {
-                leafItems = inlineItems;
-            }
-            else
-            {
-                // Page items are not inlined; fetch the page by its @id
-                if (!page.TryGetProperty("@id", out var pageIdElem))
-                {
-                    continue;
-                }
-
-                var pageUrl = pageIdElem.GetString();
-                if (string.IsNullOrEmpty(pageUrl))
-                {
-                    continue;
-                }
-
-                using var pageResp = await HttpGetAsync(pageUrl, cancellationToken);
-                pageResp.EnsureSuccessStatusCode();
-                using var pageStream = await pageResp.Content.ReadAsStreamAsync(cancellationToken);
-                using var pageDoc = await JsonDocument.ParseAsync(pageStream, cancellationToken: cancellationToken);
-
-                if (!pageDoc.RootElement.TryGetProperty("items", out var fetchedItems) || fetchedItems.ValueKind != JsonValueKind.Array)
-                {
-                    continue;
-                }
-
-                leafItems = fetchedItems.Clone();
-            }
-
-            foreach (var leaf in leafItems.EnumerateArray())
-            {
-                if (!leaf.TryGetProperty("catalogEntry", out var catalogEntry))
-                {
-                    continue;
-                }
-
-                // Skip unlisted versions
-                if (catalogEntry.TryGetProperty("listed", out var listedProp) && !listedProp.GetBoolean())
-                {
-                    continue;
-                }
-
-                if (catalogEntry.TryGetProperty("version", out var versionProp))
-                {
-                    var v = versionProp.GetString();
-                    if (!string.IsNullOrWhiteSpace(v))
+                    var rangeText = depVersionRange.OriginalString ?? depVersionRange.ToNormalizedString();
+                    if (RangesHaveCommonVersion(accumulatedRanges))
                     {
-                        list.Add(v);
+                        taskContext.AddDebugMessage(
+                            $"{UiSymbols.Skip} {depName} kept at already-selected {installedDepVersion}; {package} {version} requests '{rangeText}' (a higher version would also satisfy it, but winapp keeps the first-selected version).");
+                    }
+                    else
+                    {
+                        var conflict = $"{depName} cannot be resolved to a single version: already selected {installedDepVersion}, but {package} {version} requires '{rangeText}' and no version satisfies every requirement";
+                        taskContext.AddStatusMessage($"{UiSymbols.Warning} Dependency version conflict: {conflict}");
+                        dependencyFailures.Add(conflict);
                     }
                 }
-            }
-        }
-
-        return list;
-    }
-
-    [GeneratedRegex(@"[\[\]\(\)]")]
-    private static partial Regex BracketsAndParenthesesRegex();
-
-    /// <inheritdoc />
-    public async Task<Dictionary<string, string>> GetPackageDependenciesAsync(string packageName, string version, CancellationToken cancellationToken = default)
-    {
-        var cacheKey = $"{packageName}/{version}";
-        if (DependencyCache.TryGetValue(cacheKey, out var cached))
-        {
-            return new Dictionary<string, string>(cached, StringComparer.OrdinalIgnoreCase);
-        }
-
-        var directDeps = await FetchDirectDependenciesAsync(packageName, version, cancellationToken);
-
-        // Recursively resolve transitive dependencies
-        var allDeps = new Dictionary<string, string>(directDeps, StringComparer.OrdinalIgnoreCase);
-        foreach (var (depId, depVersion) in directDeps)
-        {
-            // Normalize the dependency's version range to its minimum version before recursing so the
-            // transitive nuspec URL is well-formed. FetchDirectDependenciesAsync only strips brackets
-            // (e.g. "[2.0.0, )" -> "2.0.0, "), which would otherwise build a malformed flat-container
-            // URL and silently drop transitive dependencies nested under a range-versioned package.
-            var depMinVersion = ParseMinimumVersion(depVersion);
-            if (string.IsNullOrEmpty(depMinVersion))
-            {
-                // An open-lower-bound or otherwise unparseable range (e.g. "(,2.0.0]") has no concrete
-                // minimum to form a flat-container URL from; the direct dependency is already in allDeps,
-                // so skip its transitive fetch instead of requesting a malformed ".../<id>//<id>.nuspec".
                 continue;
             }
 
-            var transitiveDeps = await GetPackageDependenciesAsync(depId, depMinVersion, cancellationToken);
-            foreach (var (transitiveId, transitiveVersion) in transitiveDeps)
+            try
             {
-                allDeps.TryAdd(transitiveId, transitiveVersion);
+                var depVersion = await ResolveDependencyVersionAsync(depName, depVersionRange, cacheContext, cancellationToken);
+                if (string.IsNullOrEmpty(depVersion))
+                {
+                    // A null result now means only a version-less / fully unbounded dependency (the range
+                    // constrains nothing); skip it rather than guessing a version to install. A bounded range
+                    // that cannot be resolved throws instead and is surfaced by the catch below as a
+                    // non-fatal per-dependency warning, so it is no longer silently dropped.
+                    continue;
+                }
+
+                await InstallPackageRecursiveAsync(depName, depVersion, installed, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Never mask a genuine cancellation as a successful (but incomplete) install.
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // A single transitive dependency that cannot be resolved (e.g. its only satisfying source
+                // could not be queried) or installed should not abort the rest of the tree — keep installing
+                // the remaining dependencies best-effort — but the failure must be both visible (not hidden
+                // behind verbose-only logging) AND fail the overall operation. Record it so InstallPackageAsync
+                // exits non-zero rather than reporting an incomplete install as success.
+                taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not install dependency {depName} (required by {package} {version}): {ex.Message}");
+                dependencyFailures.Add($"{depName} (required by {package} {version}): {ex.Message}");
             }
         }
-
-        DependencyCache[cacheKey] = allDeps;
-        return new Dictionary<string, string>(allDeps, StringComparer.OrdinalIgnoreCase);
     }
 
-    private static async Task<Dictionary<string, string>> FetchDirectDependenciesAsync(string packageName, string version, CancellationToken cancellationToken)
+    /// <summary>
+    /// Like <see cref="VersionRange.Satisfies(NuGetVersion)"/> but also applies a floating range's full
+    /// semantics. <c>VersionRange.Satisfies</c> only checks the declared min/max bounds, and a float declares no
+    /// upper bound and carries prerelease/prefix eligibility that the bounds don't express — so a stable
+    /// <c>1.*</c> reports satisfying <c>2.0.0</c> (above the band) and <c>1.5.0-preview</c> (a prerelease the
+    /// stable float excludes). <see cref="FloatRange.Satisfies(NuGetVersion)"/> is the authoritative predicate
+    /// for that (ceiling, prerelease eligibility, and prefix), so defer to it for floating ranges. Without this,
+    /// a diamond where one branch already fixed the shared dependency to a version outside a later branch's
+    /// float (e.g. the 2.* branch installs 2.0.0 first, then the 1.* branch is checked) would be silently
+    /// accepted as satisfied.
+    /// </summary>
+    internal static bool RangeSatisfiesWithFloat(VersionRange range, NuGetVersion version)
     {
-        var dependencies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        // Fetch the .nuspec from NuGet flat container API
-        var id = packageName.ToLowerInvariant();
-        var ver = version.ToLowerInvariant();
-        var nuspecUrl = $"{FlatIndex}/{id}/{ver}/{id}.nuspec";
-
-        using var resp = await HttpGetAsync(nuspecUrl, cancellationToken);
-        if (!resp.IsSuccessStatusCode)
+        if (!range.Satisfies(version))
         {
-            return dependencies;
+            return false;
         }
 
-        await using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
-        var doc = new XmlDocument();
-        doc.Load(stream);
-
-        // The nuspec uses a default namespace; we need a namespace manager
-        var nsMgr = new XmlNamespaceManager(doc.NameTable);
-        var ns = doc.DocumentElement?.NamespaceURI ?? string.Empty;
-        if (!string.IsNullOrEmpty(ns))
+        if (range.IsFloating && range.Float is { } floatRange)
         {
-            nsMgr.AddNamespace("ns", ns);
+            return floatRange.Satisfies(version);
         }
 
-        var prefix = string.IsNullOrEmpty(ns) ? "" : "ns:";
-        var depNodes = doc.SelectNodes($"//{prefix}dependency", nsMgr);
-        if (depNodes != null)
+        return true;
+    }
+
+    /// <summary>
+    /// Returns true when at least one version could satisfy ALL of <paramref name="ranges"/> simultaneously.
+    /// Used to tell a genuinely unsatisfiable set of diamond constraints (e.g. [1.0,2.0) and [2.0,3.0), which
+    /// must fail the install) apart from constraints that merely differ in their lower bound (e.g. [1.0,) and
+    /// [2.0,), where a higher version satisfies both and keeping winapp's first-selected version is a
+    /// documented limitation, not a conflict).
+    ///
+    /// The ranges are intersected as numeric intervals — the greatest lower bound and least upper bound, each
+    /// carrying its own inclusivity, with a floating range's implicit next-prefix ceiling folded into the upper
+    /// bound (1.* caps just below 2.0.0). Working with the actual interval (rather than only testing each
+    /// range's minimum version) is what makes an exclusive lower bound correct: [1.0.0,3.0.0) and (2.0.0,4.0.0)
+    /// share 2.1.0, yet neither minimum (1.0.0, 2.0.0) lies in both, so a minimum-only test would falsely report
+    /// a conflict. A prerelease-prefix float (1.2.3-beta.*) has no numeric ceiling and its floor overlaps a
+    /// sibling prefix (1.2.3-rc.*) that shares no real version, so when one is present a non-empty numeric
+    /// interval is confirmed with a concrete witness via <see cref="RangeSatisfiesWithFloat"/> (which honors the
+    /// float ceiling, prerelease eligibility and prefix).
+    /// </summary>
+    internal static bool RangesHaveCommonVersion(IReadOnlyList<VersionRange> ranges)
+    {
+        // Greatest lower bound / least upper bound of the intersection. null = open on that side.
+        NuGetVersion? low = null;
+        var lowInclusive = true;
+        NuGetVersion? high = null;
+        var highInclusive = true;
+
+        foreach (var range in ranges)
         {
-            foreach (XmlNode node in depNodes)
+            var (rangeLow, rangeLowInclusive, rangeHigh, rangeHighInclusive) = GetEffectiveBounds(range);
+
+            if (rangeLow is not null)
             {
-                var depId = node.Attributes?["id"]?.Value;
-                var depVersion = node.Attributes?["version"]?.Value;
-                if (!string.IsNullOrEmpty(depId) && !string.IsNullOrEmpty(depVersion)
-                    && !IgnoredDependencyPrefixes.Any(p => depId.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+                var comparison = low is null ? 1 : rangeLow.CompareTo(low);
+                if (comparison > 0)
                 {
-                    // Remove any brackets or parentheses from the version string
-                    var cleanedVersion = BracketsAndParenthesesRegex().Replace(depVersion, "");
-                    dependencies.TryAdd(depId, cleanedVersion);
+                    low = rangeLow;
+                    lowInclusive = rangeLowInclusive;
+                }
+                else if (comparison == 0)
+                {
+                    // Same greatest lower bound from two ranges: the intersection includes it only if both do.
+                    lowInclusive &= rangeLowInclusive;
+                }
+            }
+
+            if (rangeHigh is not null)
+            {
+                var comparison = high is null ? -1 : rangeHigh.CompareTo(high);
+                if (comparison < 0)
+                {
+                    high = rangeHigh;
+                    highInclusive = rangeHighInclusive;
+                }
+                else if (comparison == 0)
+                {
+                    highInclusive &= rangeHighInclusive;
                 }
             }
         }
 
-        return dependencies;
-    }
-
-    public static int CompareVersions(string a, string b)
-    {
-        var ap = a.Split('.', '-', StringSplitOptions.RemoveEmptyEntries);
-        var bp = b.Split('.', '-', StringSplitOptions.RemoveEmptyEntries);
-        for (int i = 0; i < Math.Max(ap.Length, bp.Length); i++)
+        // Empty numeric interval => no version can satisfy every range. The interval is empty when the lower
+        // bound is above the upper bound, or they touch at a single point that at least one side excludes.
+        if (low is not null && high is not null)
         {
-            int ai = i < ap.Length && int.TryParse(ap[i], out var av) ? av : 0;
-            int bi = i < bp.Length && int.TryParse(bp[i], out var bv) ? bv : 0;
-            if (ai != bi)
+            var comparison = low.CompareTo(high);
+            if (comparison > 0 || (comparison == 0 && !(lowInclusive && highInclusive)))
             {
-                return ai.CompareTo(bi);
+                return false;
             }
         }
-        return 0;
+
+        // A non-empty numeric interval settles plain and numeric-float ranges. Prerelease-prefix floats need a
+        // witness because their numeric floor over-includes sibling prerelease prefixes (see summary).
+        if (!ranges.Any(IsPrereleasePrefixFloat))
+        {
+            return true;
+        }
+
+        // Candidate witnesses anchored at the intersection's lower edge: each floating range's floor and the
+        // numeric greatest lower bound when it is itself included. For the prerelease-prefix floats winapp
+        // actually encounters (an inclusive floor, open above) one of these is the binding version.
+        var witnesses = new List<NuGetVersion>();
+        foreach (var range in ranges)
+        {
+            if (range.IsFloating && range.Float is { } floatRange)
+            {
+                witnesses.Add(floatRange.MinVersion);
+            }
+        }
+
+        if (low is not null && lowInclusive)
+        {
+            witnesses.Add(low);
+        }
+
+        return witnesses.Any(witness => ranges.All(range => RangeSatisfiesWithFloat(range, witness)));
+    }
+
+    private static bool IsPrereleasePrefixFloat(VersionRange range)
+        => range.IsFloating && range.Float is { } floatRange && floatRange.MinVersion.IsPrerelease;
+
+    /// <summary>
+    /// Projects a range onto the numeric interval used by <see cref="RangesHaveCommonVersion"/>: its declared
+    /// lower/upper bounds plus, for a floating range, the implicit exclusive ceiling just below the next prefix
+    /// increment (1.* => &lt; 2.0.0, 1.2.* => &lt; 1.3.0). Interval intersection fundamentally needs numeric
+    /// endpoints, which is why the ceiling is materialized here; <see cref="RangeSatisfiesWithFloat"/> remains
+    /// the authoritative point test, and the caller's prerelease-prefix witness check recovers the semantics a
+    /// numeric ceiling cannot express.
+    /// </summary>
+    private static (NuGetVersion? Low, bool LowInclusive, NuGetVersion? High, bool HighInclusive) GetEffectiveBounds(VersionRange range)
+    {
+        NuGetVersion? low = range.HasLowerBound ? range.MinVersion : null;
+        var lowInclusive = range.HasLowerBound && range.IsMinInclusive;
+
+        NuGetVersion? high = range.HasUpperBound ? range.MaxVersion : null;
+        var highInclusive = range.HasUpperBound && range.IsMaxInclusive;
+
+        if (range.IsFloating && range.Float is { } floatRange && TryGetFloatUpperBound(floatRange) is { } floatCeiling)
+        {
+            // The floated ceiling is the exclusive next-prefix boundary; fold it in when it is tighter than any
+            // declared upper bound.
+            if (high is null || floatCeiling < high)
+            {
+                high = floatCeiling;
+                highInclusive = false;
+            }
+        }
+
+        return (low, lowInclusive, high, highInclusive);
+    }
+
+    /// <summary>
+    /// The exclusive numeric ceiling of a numeric floating range (the first version the float no longer
+    /// accepts): 1.* => 2.0.0, 1.2.* => 1.3.0, 1.2.3.* => 1.2.4. Fully-open floats (*) and prerelease-only
+    /// floats (1.2.3-beta.*, which float the label of a fixed major.minor.patch) have no finite numeric ceiling
+    /// and return null — the former is open above, the latter is bounded by the prerelease witness check.
+    /// </summary>
+    private static NuGetVersion? TryGetFloatUpperBound(FloatRange floatRange)
+    {
+        var prefix = floatRange.MinVersion;
+        return floatRange.FloatBehavior switch
+        {
+            NuGetVersionFloatBehavior.Minor or NuGetVersionFloatBehavior.PrereleaseMinor
+                => new NuGetVersion(prefix.Major + 1, 0, 0),
+            NuGetVersionFloatBehavior.Patch or NuGetVersionFloatBehavior.PrereleasePatch
+                => new NuGetVersion(prefix.Major, prefix.Minor + 1, 0),
+            NuGetVersionFloatBehavior.Revision or NuGetVersionFloatBehavior.PrereleaseRevision
+                => new NuGetVersion(prefix.Major, prefix.Minor, prefix.Patch + 1),
+            _ => null,
+        };
     }
 }
