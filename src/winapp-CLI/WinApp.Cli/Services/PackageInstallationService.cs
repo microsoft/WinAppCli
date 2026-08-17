@@ -121,11 +121,14 @@ internal sealed class PackageInstallationService(
             version = NugetService.NormalizeVersion(version);
 
             // Install the package (and its transitive graph). InstallPackageAsync already short-circuits a
-            // fully-cached package via the completion marker and, on that marker hit, resolves dependencies from
-            // the package's extracted local .nuspec — not from the currently configured feeds. Resolving cache
-            // hits here through the feed-based GetPackageDependenciesAsync instead would break documented cache
-            // reuse under a private nuget.config (a cached id/version absent or unmapped on the current feed
-            // would fail the restore) and could install a graph that diverges from what is actually on disk.
+            // fully-cached package via the completion marker and, on that marker hit, reads its dependency
+            // LIST from the package's extracted local .nuspec rather than from the configured feeds. Each
+            // dependency's declared range is still resolved to a concrete version against the feeds, falling
+            // back to a completed cache entry when they cannot answer, so an already-extracted graph restores
+            // offline. Resolving cache hits here through the feed-based GetPackageDependenciesAsync instead
+            // would break documented cache reuse under a private nuget.config (a cached id/version absent or
+            // unmapped on the current feed would fail the restore) and could install a graph that diverges
+            // from what is actually on disk.
             taskContext.AddStatusMessage($"{UiSymbols.Bullet} {packageName} {version}");
 
             var installedVersions = await nugetService.InstallPackageAsync(packageName, version, taskContext, cancellationToken);

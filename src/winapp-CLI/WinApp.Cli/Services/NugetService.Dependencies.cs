@@ -285,11 +285,23 @@ internal partial class NugetService
             return best.ToNormalizedString();
         }
 
-        // Nothing satisfied the range. A bounded range that matches no available version means a REQUIRED
-        // transitive package cannot be resolved, so fail loudly instead of returning null (which both callers
-        // read as "omit this dependency"): the graph path would otherwise report success with a package
-        // missing and the install path would silently skip it. Distinguish the causes so the error is
-        // actionable.
+        // Nothing the sources offered satisfied the range. Before failing, check whether a FULLY installed
+        // cache entry already satisfies it. A completed entry is a package winapp (or NuGet) previously
+        // extracted, so a graph that is already on disk restores without contacting a feed at all — which is
+        // what makes an offline restore, or one under a packageSourceMapping that excludes a transitive
+        // package, work. This is deliberately confined to the failure paths: folding cached versions into the
+        // candidate set above would let a cached version win NuGet's lowest-applicable rule and change which
+        // version is selected even when every source is reachable.
+        var cached = FindSatisfyingCachedVersion(packageId, range);
+        if (cached is not null)
+        {
+            return cached;
+        }
+
+        // A bounded range that matches no available version means a REQUIRED transitive package cannot be
+        // resolved, so fail loudly instead of returning null (which both callers read as "omit this
+        // dependency"): the graph path would otherwise report success with a package missing and the install
+        // path would silently skip it. Distinguish the causes so the error is actionable.
         if (candidates.Error is not null)
         {
             // A source that could have satisfied the range could not be queried (feed/auth/network error);
@@ -311,6 +323,48 @@ internal partial class NugetService
         // Eligible sources were queried and answered, but none offers a version satisfying the range.
         throw new InvalidOperationException(
             $"Cannot resolve dependency '{packageId}': no version offered by the configured NuGet sources satisfies '{range}'.");
+    }
+
+    /// <summary>
+    /// Finds the lowest FULLY installed version of <paramref name="packageId"/> in the NuGet global packages
+    /// folder that satisfies <paramref name="range"/>, or null when none does. Used only as a fallback once
+    /// the configured sources have failed to produce a satisfying version, so a dependency graph that is
+    /// already extracted on disk can be restored without contacting a feed.
+    ///
+    /// Only entries carrying NuGet's completion marker count, matching the predicate the rest of the service
+    /// gates "already installed" on: a partial folder left by an interrupted extraction must not be accepted
+    /// as a resolvable version. Selection mirrors the online path — lowest applicable, re-checked with the
+    /// float-aware predicate so a floating range never resolves to a version outside its band.
+    /// </summary>
+    private string? FindSatisfyingCachedVersion(string packageId, VersionRange range)
+    {
+        var packageRoot = new DirectoryInfo(
+            Path.Combine(GetNuGetGlobalPackagesDir().FullName, packageId.ToLowerInvariant()));
+        if (!packageRoot.Exists)
+        {
+            return null;
+        }
+
+        var installed = new List<NuGetVersion>();
+        foreach (var versionDir in packageRoot.EnumerateDirectories())
+        {
+            // The folder name is NuGet's normalized version. A directory that does not parse is not a cache
+            // entry this service wrote, so ignore it rather than guessing.
+            if (NuGetVersion.TryParse(versionDir.Name, out var parsed) && HasCompletionMarker(versionDir))
+            {
+                installed.Add(parsed);
+            }
+        }
+
+        if (installed.Count == 0)
+        {
+            return null;
+        }
+
+        var best = range.FindBestMatch(installed);
+        return best is not null && RangeSatisfiesWithFloat(range, best)
+            ? best.ToNormalizedString()
+            : null;
     }
 
     /// <summary>
