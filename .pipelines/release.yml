@@ -33,6 +33,10 @@ parameters:
     displayName: GitHub Release already exists, skip uploading GitHub release (GitHubReleaseAlreadyExists)
     type: boolean
     default: false
+  - name: PublishSymbols
+    displayName: Publish private symbols to symweb (PublishSymbols)
+    type: boolean
+    default: true
 
 variables:
   # Declared once so the URL and its hash cannot drift apart across the stages that install gh.
@@ -298,6 +302,94 @@ extends:
                 addChangeLog: false
                 releaseNotesSource: 'filePath'
                 releaseNotesFilePath: '$(Pipeline.Workspace)/release-notes/full-release-notes.md'
+
+    - ${{ if eq(parameters.PublishSymbols, 'true') }}:
+      - stage: Publish_Symbols
+        displayName: Publish Symbols
+        dependsOn: Build
+        variables:
+          version: $[ stageDependencies.Build.Build.outputs['SetMeta.version'] ]
+          # Both are provisioned by the EP CDP symbols team. SymbolPublishingProject is CASE SENSITIVE
+          # and must match the created project exactly, or the publish request 404s.
+          SymbolPublishingServiceConnection: 'WinAppCLISymbolPublishing'
+          SymbolPublishingProject: 'WinAppCLI'
+          # Used twice: as the PublishSymbols@2 artifact name and as the request name the symbol API
+          # promotes. They must be identical or the request finds nothing to publish.
+          SymbolsArtifactName: 'WinAppCLI_$(version)_$(Build.BuildNumber)'
+        jobs:
+        - job: publish_symbols
+          displayName: Publish Symbols to symweb
+          pool:
+            name: Azure-Pipelines-1ESPT-ExDShared
+            image: windows-latest
+            os: windows
+            hostArchitecture: amd64
+          templateContext:
+            type: releaseJob
+            isProduction: true
+            inputs:
+            - input: pipelineArtifact
+              artifactName: cli-binaries
+              targetPath: $(Pipeline.Workspace)/symbolStaging
+          steps:
+            - task: AzurePowerShell@5
+              displayName: Acquire symbol request API token
+              inputs:
+                azureSubscription: $(SymbolPublishingServiceConnection)
+                azurePowerShellVersion: LatestVersion
+                pwsh: true
+                ScriptType: InlineScript
+                Inline: |-
+                  $token = (Get-AzAccessToken -AsSecureString -ResourceUrl api://30471ccf-0966-45b9-a979-065dbedb24c1).Token |
+                      ConvertFrom-SecureString -AsPlainText
+                  Write-Host "##vso[task.setvariable variable=SymbolAccessToken;issecret=true]$token"
+
+            # Uploads to the symbol service of the ADO org this pipeline runs in (microsoft), which is
+            # why the symbol project's source organization must be `microsoft` rather than the default.
+            - task: PublishSymbols@2
+              displayName: Upload PDBs to the Azure DevOps symbol service
+              inputs:
+                SymbolsFolder: $(Pipeline.Workspace)/symbolStaging
+                SearchPattern: '**/*.pdb'
+                SymbolServerType: TeamServices
+                SymbolsProduct: WinAppCLI
+                SymbolsVersion: $(version)
+                SymbolsArtifactName: $(SymbolsArtifactName)
+                # ~100 years. The standalone reference script defaults to 6 days, which would silently
+                # expire the symbols for a shipped release.
+                SymbolExpirationInDays: 36530
+                # Non-mandatory per the requirement, and srcsrv indexing does not map cleanly onto a
+                # GitHub-sourced NativeAOT build. Tracked separately.
+                IndexSources: false
+                DetailedLog: true
+                SymbolsMaximumWaitTime: 30
+
+            - pwsh: |-
+                $ErrorActionPreference = 'Stop'
+                $PSDefaultParameterValues['Invoke-RestMethod:Headers'] = @{ Authorization = "Bearer $(SymbolAccessToken)" }
+                $PSDefaultParameterValues['Invoke-RestMethod:ContentType'] = 'application/json'
+                $PSDefaultParameterValues['Invoke-RestMethod:Method'] = 'POST'
+
+                $baseUri = "https://symbolrequestprod.trafficmanager.net/projects/$(SymbolPublishingProject)/requests"
+
+                # Round-trip UTC: the service binds this to a DateTime, and a culture-formatted
+                # string would be ambiguous on a non-en-US agent.
+                $createBody = @{
+                    requestName    = '$(SymbolsArtifactName)'
+                    expirationTime = [DateTime]::UtcNow.AddDays(36530).ToString('o')
+                }
+                Write-Host "Registering symbol request $($createBody.requestName)"
+                Invoke-RestMethod -Uri $baseUri -Body ($createBody | ConvertTo-Json -Compress)
+
+                # publishToPublicServer stays false: MSDL requires an allowed-private-symbols policy,
+                # and the requirement only calls for the internal server.
+                $publishBody = @{
+                    publishToInternalServer = $true
+                    publishToPublicServer   = $false
+                }
+                Write-Host "Promoting $($createBody.requestName) to symweb"
+                Invoke-RestMethod -Uri "$baseUri/$($createBody.requestName)" -Body ($publishBody | ConvertTo-Json -Compress)
+              displayName: Request publication to symweb
 
     - ${{ if eq(parameters.DoEsrp, 'true') }}:
       - stage: Release_Npm
