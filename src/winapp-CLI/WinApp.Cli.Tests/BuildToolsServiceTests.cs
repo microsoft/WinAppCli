@@ -224,14 +224,16 @@ public class BuildToolsServiceTests : BaseCommandTests
         var packagesDir = Path.Combine(_testCacheDirectory.FullName, "packages");
 
         // The pinned (shorthand) version, stored on disk under its normalized "1.0.0" name.
-        var pinnedBinDir = Path.Combine(packagesDir, "microsoft.windows.sdk.buildtools", "1.0.0", "bin", "10.0.26100.0", "x64");
+        // Path.Join rather than Path.Combine: it always concatenates, so no segment can discard the ones
+        // before it.
+        var pinnedBinDir = Path.Join(packagesDir, "microsoft.windows.sdk.buildtools", "1.0.0", "bin", "10.0.26100.0", "x64");
         Directory.CreateDirectory(pinnedBinDir);
-        File.WriteAllText(Path.Combine(pinnedBinDir, "mt.exe"), "pinned mt.exe");
+        File.WriteAllText(Path.Join(pinnedBinDir, "mt.exe"), "pinned mt.exe");
 
         // A newer version that the pin must NOT select (proving the pin was honored, not the latest fallback).
-        var newerBinDir = Path.Combine(packagesDir, "microsoft.windows.sdk.buildtools", "2.0.0", "bin", "10.0.26100.0", "x64");
+        var newerBinDir = Path.Join(packagesDir, "microsoft.windows.sdk.buildtools", "2.0.0", "bin", "10.0.26100.0", "x64");
         Directory.CreateDirectory(newerBinDir);
-        File.WriteAllText(Path.Combine(newerBinDir, "mt.exe"), "newer mt.exe");
+        File.WriteAllText(Path.Join(newerBinDir, "mt.exe"), "newer mt.exe");
 
         // Pin the shorthand "1.0" (quoted so YAML keeps it a string rather than parsing it as a float).
         var configContent = @"packages:

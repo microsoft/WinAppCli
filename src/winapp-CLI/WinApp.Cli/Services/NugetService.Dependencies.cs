@@ -352,9 +352,14 @@ internal partial class NugetService
             return null;
         }
 
-        var packageRoot = new DirectoryInfo(
-            Path.Combine(GetNuGetGlobalPackagesDir().FullName, normalizedPackageId));
-        if (!packageRoot.Exists)
+        // Locate the package's cache folder by enumerating for it rather than composing a path. This keeps the
+        // probe strictly read-only — it must never create a directory in the user's global packages folder as
+        // a side effect of a lookup that misses — and the id is validated above, so it carries no wildcard
+        // characters and matches at most the one folder.
+        var packageRoot = GetNuGetGlobalPackagesDir()
+            .EnumerateDirectories(normalizedPackageId)
+            .FirstOrDefault();
+        if (packageRoot is null)
         {
             return null;
         }
