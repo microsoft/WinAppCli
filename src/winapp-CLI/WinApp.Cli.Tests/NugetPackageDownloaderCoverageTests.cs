@@ -129,7 +129,7 @@ public class NugetPackageDownloaderCoverageTests : BaseCommandTests
                 {
                     File.Delete(leakedTempFile);
                 }
-                catch
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     // Best-effort: the file may already be gone.
                 }
@@ -201,7 +201,7 @@ public class NugetPackageDownloaderCoverageTests : BaseCommandTests
         {
             for (var attempt = 0; ; attempt++)
             {
-                var probe = new TcpListener(IPAddress.Loopback, 0);
+                using var probe = new TcpListener(IPAddress.Loopback, 0);
                 probe.Start();
                 var port = ((IPEndPoint)probe.LocalEndpoint).Port;
                 probe.Stop();
@@ -230,8 +230,11 @@ public class NugetPackageDownloaderCoverageTests : BaseCommandTests
                 {
                     context = await _listener.GetContextAsync();
                 }
-                catch
+                catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException or OperationCanceledException)
                 {
+                    // Dispose() stops and closes the listener, which is how this loop is terminated; any of
+                    // these means the listener is gone, so exit rather than spin. Anything else is a real
+                    // defect in the fake feed and is allowed to surface.
                     break;
                 }
 
@@ -239,13 +242,13 @@ public class NugetPackageDownloaderCoverageTests : BaseCommandTests
                 {
                     Handle(context);
                 }
-                catch
+                catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException or IOException)
                 {
                     try
                     {
                         context.Response.Abort();
                     }
-                    catch
+                    catch (Exception abortEx) when (abortEx is HttpListenerException or ObjectDisposedException)
                     {
                         // Best-effort; the client may already have disconnected.
                     }
@@ -309,7 +312,7 @@ public class NugetPackageDownloaderCoverageTests : BaseCommandTests
                 _listener.Stop();
                 _listener.Close();
             }
-            catch
+            catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException)
             {
                 // Best-effort teardown.
             }
@@ -318,7 +321,7 @@ public class NugetPackageDownloaderCoverageTests : BaseCommandTests
             {
                 _serveLoop.Wait(TimeSpan.FromSeconds(5));
             }
-            catch
+            catch (Exception ex) when (ex is AggregateException or OperationCanceledException)
             {
                 // The loop observes cancellation/disposal; ignore any teardown race.
             }

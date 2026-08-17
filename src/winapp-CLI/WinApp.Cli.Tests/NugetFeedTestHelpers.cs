@@ -66,7 +66,7 @@ internal static class NugetFeedTestHelpers
                 dir.Delete(true);
             }
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Best-effort cleanup.
         }

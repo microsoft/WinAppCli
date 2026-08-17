@@ -705,7 +705,7 @@ public class NugetServiceDownloadTests : BaseCommandTests
                 // Reserve an ephemeral loopback port, then hand it to HttpListener. The brief gap between
                 // closing the probe socket and binding the listener is a benign test-only race; retry a
                 // few times if the port is taken in between.
-                var probe = new TcpListener(IPAddress.Loopback, 0);
+                using var probe = new TcpListener(IPAddress.Loopback, 0);
                 probe.Start();
                 var port = ((IPEndPoint)probe.LocalEndpoint).Port;
                 probe.Stop();
@@ -734,9 +734,11 @@ public class NugetServiceDownloadTests : BaseCommandTests
                 {
                     context = await _listener.GetContextAsync();
                 }
-                catch
+                catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException or OperationCanceledException)
                 {
-                    // Listener stopped/disposed; end the loop.
+                    // Dispose() stops and closes the listener, which is how this loop is terminated; any of
+                    // these means the listener is gone, so exit rather than spin. Anything else is a real
+                    // defect in the fake feed and is allowed to surface.
                     break;
                 }
 
@@ -744,13 +746,13 @@ public class NugetServiceDownloadTests : BaseCommandTests
                 {
                     Handle(context);
                 }
-                catch
+                catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException or IOException)
                 {
                     try
                     {
                         context.Response.Abort();
                     }
-                    catch
+                    catch (Exception abortEx) when (abortEx is HttpListenerException or ObjectDisposedException)
                     {
                         // Best-effort; the client may have already disconnected.
                     }
@@ -874,7 +876,7 @@ public class NugetServiceDownloadTests : BaseCommandTests
                 _listener.Stop();
                 _listener.Close();
             }
-            catch
+            catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException)
             {
                 // Best-effort teardown.
             }
@@ -883,7 +885,7 @@ public class NugetServiceDownloadTests : BaseCommandTests
             {
                 _serveLoop.Wait(TimeSpan.FromSeconds(5));
             }
-            catch
+            catch (Exception ex) when (ex is AggregateException or OperationCanceledException)
             {
                 // The loop observes cancellation/disposal; ignore any teardown race.
             }

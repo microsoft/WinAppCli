@@ -138,10 +138,12 @@ internal sealed class NugetPackageDownloader(NugetSourceProvider sourceProvider)
                 {
                     DeleteTempFile(tempFile);
                 }
-                catch
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     // Best-effort cleanup of the temp download: a failure to delete the temporary file must
-                    // not fail the user's package download, so any cleanup error is swallowed here.
+                    // not fail the user's package download, so the cleanup error is swallowed here. Scoped to
+                    // the failures File.Delete actually reports (a locked/in-use file, a denied ACL) so an
+                    // unexpected defect in the seam still surfaces.
                 }
             }
         }
