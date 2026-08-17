@@ -31,6 +31,16 @@ internal partial class NugetService
         // and read outside the extracted package. Callers reach here via GetNuGetPackageDir, which already
         // rejects invalid ids, so this is defense in depth that keeps the invariant local and checkable.
         var nuspecFileName = Path.GetFileName($"{packageName.ToLowerInvariant()}.nuspec");
+
+        // GetFileName above strips any directory part; assert the result really is a plain relative name so a
+        // hostile or malformed id can never make Path.Combine discard packageDir and read outside the
+        // extracted package.
+        if (Path.IsPathRooted(nuspecFileName))
+        {
+            throw new InvalidOperationException(
+                $"'{packageName}' is not a usable NuGet package id: it does not resolve to a file name inside the package directory.");
+        }
+
         var nuspecPath = Path.Combine(packageDir.FullName, nuspecFileName);
         if (!File.Exists(nuspecPath))
         {

@@ -432,10 +432,16 @@ internal class WorkspaceSetupService(
                             }
                             catch (Exception ex)
                             {
-                                taskContext.AddDebugMessage($"{UiSymbols.Note} Could not get version for {packageName}: {ex.Message}");
+                                // Surface the underlying reason rather than burying it in verbose-only output.
+                                // Sources come from the user's nuget.config, so the likely causes here are a
+                                // feed that is unreachable/blocked, unauthenticated, or simply doesn't carry the
+                                // package — and the NuGet layer's message names the offending source and why it
+                                // failed. Reporting only "Failed to get version for X" leaves the user with no
+                                // way to connect the failure to the nuget.config that selected that feed.
+                                taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not get version for {packageName}: {ex.Message}");
                                 if (required)
                                 {
-                                    return (1, $"Failed to get version for {packageName}");
+                                    return (1, $"Failed to get version for {packageName}: {ex.Message}");
                                 }
                             }
 
@@ -447,10 +453,13 @@ internal class WorkspaceSetupService(
                             }
                             catch (Exception ex)
                             {
-                                taskContext.AddDebugMessage($"{UiSymbols.Note} Could not add {packageName}: {ex.Message}");
+                                // Same reasoning as the version lookup above: 'dotnet add package' fails here
+                                // when the feeds in the project's nuget.config cannot serve the package, and its
+                                // message carries that detail. Keep it visible instead of debug-only.
+                                taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not add {packageName}: {ex.Message}");
                                 if (required)
                                 {
-                                    return (1, $"Failed to add {packageName} package reference");
+                                    return (1, $"Failed to add {packageName} package reference: {ex.Message}");
                                 }
                                 failedPackages.Add(packageName);
                             }
