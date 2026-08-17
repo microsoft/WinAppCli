@@ -338,23 +338,34 @@ internal partial class NugetService
     /// </summary>
     private string? FindSatisfyingCachedVersion(string packageId, VersionRange range)
     {
+        // The id arrives from a dependency entry in another package's manifest, so prove it is a plain single
+        // path segment before building a path from it: a rooted or separator-bearing value would make
+        // Path.Combine discard the cache root and probe an unintended location. A cache probe has no business
+        // throwing, so an unusable id simply means "nothing cached" and the caller falls through to its
+        // regular source-based diagnostics.
+        var normalizedPackageId = packageId.ToLowerInvariant();
+        if (!PackageIdValidator.IsValidPackageId(normalizedPackageId)
+            || Path.IsPathRooted(normalizedPackageId)
+            || normalizedPackageId.Contains(Path.DirectorySeparatorChar)
+            || normalizedPackageId.Contains(Path.AltDirectorySeparatorChar))
+        {
+            return null;
+        }
+
         var packageRoot = new DirectoryInfo(
-            Path.Combine(GetNuGetGlobalPackagesDir().FullName, packageId.ToLowerInvariant()));
+            Path.Combine(GetNuGetGlobalPackagesDir().FullName, normalizedPackageId));
         if (!packageRoot.Exists)
         {
             return null;
         }
 
-        var installed = new List<NuGetVersion>();
-        foreach (var versionDir in packageRoot.EnumerateDirectories())
-        {
-            // The folder name is NuGet's normalized version. A directory that does not parse is not a cache
-            // entry this service wrote, so ignore it rather than guessing.
-            if (NuGetVersion.TryParse(versionDir.Name, out var parsed) && HasCompletionMarker(versionDir))
-            {
-                installed.Add(parsed);
-            }
-        }
+        // The folder name is NuGet's normalized version. A directory that does not parse is not a cache entry
+        // this service wrote, and one without the completion marker is a partial extraction, so neither counts
+        // as a resolvable version.
+        var installed = packageRoot.EnumerateDirectories()
+            .Where(versionDir => NuGetVersion.TryParse(versionDir.Name, out _) && HasCompletionMarker(versionDir))
+            .Select(versionDir => NuGetVersion.Parse(versionDir.Name))
+            .ToList();
 
         if (installed.Count == 0)
         {
