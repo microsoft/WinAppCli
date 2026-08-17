@@ -107,14 +107,17 @@ public class PackageInstallationServiceTests
     }
 
     [TestMethod]
-    public async Task EnsurePackageAsync_AlreadyPresent_SkipsInstall()
+    public async Task EnsurePackageAsync_AlreadyPresent_DelegatesSoTheGraphIsStillVerified()
     {
         MarkPresent("Pkg.X", "3.0.0");
 
         var ok = await _service.EnsurePackageAsync(_rootDir, "Pkg.X", _taskContext, version: "3.0.0");
 
         Assert.IsTrue(ok);
-        Assert.AreEqual(0, _nuget.InstalledPackages.Count, "Package already present; no install should occur.");
+        // The root is cached, but EnsurePackageAsync must still hand off to the NuGet service: that call
+        // short-circuits the completed root (no re-download) while walking its dependency graph, so a
+        // transitive package that went missing is repaired instead of being reported as a complete install.
+        CollectionAssert.Contains(_nuget.InstalledPackages, ("Pkg.X", "3.0.0"), "The install path must still be entered for a cached root.");
     }
 
     [TestMethod]

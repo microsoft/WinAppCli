@@ -48,17 +48,21 @@ internal sealed class PackageInstallationService(
             version = await nugetService.GetLatestVersionAsync(packageName, sdkInstallMode, cancellationToken);
         }
 
-        // Check if already installed in NuGet global cache (require the completion marker, not just the
-        // directory, so a partial/interrupted extraction is re-downloaded rather than trusted).
+        // Report the root package's cache state up front so the user still sees a "already present" line
+        // rather than an "Installing..." line for a package that is already on disk.
         if (nugetService.IsPackageInstalled(packageName, version))
         {
             taskContext.AddStatusMessage($"{UiSymbols.Skip} {packageName} {version} already present");
-            return version;
+        }
+        else
+        {
+            taskContext.AddStatusMessage($"{UiSymbols.Package} Installing {packageName} {version}...");
         }
 
-        // Install the package
-        taskContext.AddStatusMessage($"{UiSymbols.Package} Installing {packageName} {version}...");
-
+        // Always delegate, including on a cache hit. InstallPackageAsync short-circuits a completed root via
+        // the completion marker (so this does not re-download it) but still walks the graph from the root's
+        // extracted local .nuspec. Returning early here instead would report success for a root whose
+        // transitive packages were deleted or never finished installing, leaving the graph unrepaired.
         await nugetService.InstallPackageAsync(packageName, version, taskContext, cancellationToken);
         return version;
     }

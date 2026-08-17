@@ -76,9 +76,35 @@ internal class WorkspaceSetupService(
         }
         else if (dotNetService.FindCsproj(options.BaseDirectory).Count > 0 && !configService.Exists())
         {
-            // Restore on a .NET project that was initialized with winapp init (no winapp.yaml)
-            logger.LogError(".NET project detected, but no winapp.yaml configuration file was found. The 'winapp restore' command is not supported for .NET projects without a winapp.yaml. Please run 'dotnet restore' to restore NuGet packages for this project.");
-            return 1;
+            // Restore on a .NET project that `winapp init` configured. For .NET projects init records the SDK
+            // package versions as PackageReferences in the .csproj rather than in a winapp.yaml, so there is
+            // no winapp.yaml to read and `dotnet restore` is what actually restores them. Run it instead of
+            // failing with an instruction to run it by hand: `winapp init` leaves the project in exactly this
+            // shape, so `winapp restore` immediately afterwards must not be an error.
+            var csprojFiles = dotNetService.FindCsproj(options.BaseDirectory);
+            var projectToRestore = await SelectCsprojFileAsync(csprojFiles, cancellationToken);
+
+            logger.LogInformation(
+                "{UISymbol} .NET project detected with no winapp.yaml — its SDK packages are PackageReferences in {Project}. Running 'dotnet restore'.",
+                UiSymbols.Note,
+                projectToRestore.Name);
+
+            var restoreExitCode = await dotNetService.RunDotnetInheritedAsync(
+                projectToRestore.Directory!,
+                $"restore \"{projectToRestore.FullName}\"",
+                cancellationToken);
+
+            if (restoreExitCode != 0)
+            {
+                logger.LogError(
+                    "'dotnet restore' failed for {Project} (exit code {ExitCode}).",
+                    projectToRestore.Name,
+                    restoreExitCode);
+                return 1;
+            }
+
+            logger.LogInformation("{UISymbol} Restore completed for {Project}.", UiSymbols.Check, projectToRestore.Name);
+            return 0;
         }
 
         // Restore on a non-.NET project with no winapp.yaml — nothing to restore.

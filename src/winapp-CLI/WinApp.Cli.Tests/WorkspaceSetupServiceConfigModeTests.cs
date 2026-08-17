@@ -85,8 +85,13 @@ public class WorkspaceSetupServiceConfigModeTests : BaseCommandTests
         Assert.AreEqual(0, result);
     }
 
+    /// <summary>
+    /// `winapp init` on a .NET project records the SDK package versions as PackageReferences in the .csproj
+    /// rather than in a winapp.yaml, so a follow-up `winapp restore` finds no yaml. That must not be an error:
+    /// restore delegates to `dotnet restore`, which is what actually restores those PackageReferences.
+    /// </summary>
     [TestMethod]
-    public async Task Restore_DotNetProject_WithoutYaml_ReturnsError()
+    public async Task Restore_DotNetProject_WithoutYaml_DelegatesToDotnetRestore()
     {
         await CreateCsprojAsync(_tempDirectory, "App");
 
@@ -101,6 +106,6 @@ public class WorkspaceSetupServiceConfigModeTests : BaseCommandTests
         var service = GetRequiredService<IWorkspaceSetupService>();
         var result = await service.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
-        Assert.AreNotEqual(0, result);
+        Assert.AreEqual(0, result);
     }
 }
