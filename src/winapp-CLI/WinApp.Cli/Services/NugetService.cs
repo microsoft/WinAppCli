@@ -423,6 +423,18 @@ internal partial class NugetService : INugetService
             {
                 return false;
             }
+
+            // The interval collapsed to a single included version, so the question is fully decidable: that
+            // version is the ONLY candidate, and testing it with the float-aware predicate is exact — no
+            // witness heuristics, and no risk of a false conflict. This is what a numeric interval alone
+            // cannot express, because prerelease eligibility is not an interval property: a stable float
+            // rejects prereleases, so `1.*` and the exact pin `[1.5.0-preview]` intersect at the non-empty
+            // point 1.5.0-preview yet share no version. Exact pins are the common shape here (the SDK
+            // packages pin their sub-packages that way), so this is worth deciding precisely.
+            if (comparison == 0)
+            {
+                return ranges.All(range => RangeSatisfiesWithFloat(range, low));
+            }
         }
 
         // A non-empty numeric interval settles plain and numeric-float ranges. Prerelease-prefix floats need a
@@ -436,12 +448,9 @@ internal partial class NugetService : INugetService
         // numeric greatest lower bound when it is itself included. For the prerelease-prefix floats winapp
         // actually encounters (an inclusive floor, open above) one of these is the binding version.
         var witnesses = new List<NuGetVersion>();
-        foreach (var range in ranges)
+        foreach (var range in ranges.Where(r => r.IsFloating && r.Float is not null))
         {
-            if (range.IsFloating && range.Float is { } floatRange)
-            {
-                witnesses.Add(floatRange.MinVersion);
-            }
+            witnesses.Add(range.Float!.MinVersion);
         }
 
         if (low is not null && lowInclusive)

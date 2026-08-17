@@ -25,8 +25,13 @@ internal partial class NugetService
     {
         var dependencies = new Dictionary<string, VersionRange>(StringComparer.OrdinalIgnoreCase);
 
-        // The .nuspec file is at the root of the extracted package, named {lowercase-id}.nuspec
-        var nuspecPath = Path.Combine(packageDir.FullName, $"{packageName.ToLowerInvariant()}.nuspec");
+        // The .nuspec file is at the root of the extracted package, named {lowercase-id}.nuspec. Force the
+        // segment to a bare file name: the id originates from a dependency entry in another package's
+        // manifest, and a rooted or multi-segment value would otherwise make Path.Combine discard packageDir
+        // and read outside the extracted package. Callers reach here via GetNuGetPackageDir, which already
+        // rejects invalid ids, so this is defense in depth that keeps the invariant local and checkable.
+        var nuspecFileName = Path.GetFileName($"{packageName.ToLowerInvariant()}.nuspec");
+        var nuspecPath = Path.Combine(packageDir.FullName, nuspecFileName);
         if (!File.Exists(nuspecPath))
         {
             // Try finding any .nuspec file
@@ -48,16 +53,16 @@ internal partial class NugetService
         var nuspec = new NuspecReader(nuspecPath);
         foreach (var group in nuspec.GetDependencyGroups())
         {
-            foreach (var dependency in group.Packages)
+            // Skip framework/runtime reference packages (same filter as FetchDirectDependenciesAsync)
+            // so we don't attempt to install non-winapp packages that aren't served by the feed.
+            var applicable = group.Packages.Where(dependency =>
+                !string.IsNullOrEmpty(dependency.Id)
+                && dependency.VersionRange != null
+                && !IgnoredDependencyPrefixes.Any(p => dependency.Id.StartsWith(p, StringComparison.OrdinalIgnoreCase)));
+
+            foreach (var dependency in applicable)
             {
-                // Skip framework/runtime reference packages (same filter as FetchDirectDependenciesAsync)
-                // so we don't attempt to install non-winapp packages that aren't served by the feed.
-                if (!string.IsNullOrEmpty(dependency.Id)
-                    && dependency.VersionRange != null
-                    && !IgnoredDependencyPrefixes.Any(p => dependency.Id.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
-                {
-                    dependencies.TryAdd(dependency.Id, dependency.VersionRange);
-                }
+                dependencies.TryAdd(dependency.Id, dependency.VersionRange);
             }
         }
 
@@ -120,7 +125,6 @@ internal partial class NugetService
                 // Only with experimental
                 list = [.. list.Where(v => v.Contains("-experimental", StringComparison.OrdinalIgnoreCase))];
             }
-            // For Experimental mode: keep all versions (no filtering needed)
         }
         else
         {

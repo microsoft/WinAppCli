@@ -54,6 +54,14 @@ public class NugetServiceVersionRangeTests
     [DataRow("1.2.3.*|1.2.3.*", true, DisplayName = "Identical revision floats (1.2.3.*) are satisfiable")]
     [DataRow("1.2.3.*|1.2.4.*", false, DisplayName = "Disjoint revision floats (1.2.3.* and 1.2.4.*) are a conflict")]
     [DataRow("1.2.3.*|[1.2.4.0, 2.0.0)", false, DisplayName = "Revision float's exclusive 1.2.4.0 ceiling meets a range starting at 1.2.4.0")]
+    // Single-point intersections are decided exactly against every range, because prerelease eligibility is
+    // not expressible as a numeric interval: a stable float rejects prereleases, so an exact prerelease pin
+    // inside its numeric band still shares no version with it.
+    [DataRow("1.*|[1.5.0-preview]", false, DisplayName = "Stable float and an exact in-band prerelease pin share no version")]
+    [DataRow("1.*|[1.5.0]", true, DisplayName = "Stable float and an exact in-band stable pin share 1.5.0")]
+    [DataRow("1.2.3-beta.*|[1.2.3-beta.5]", true, DisplayName = "Prerelease-prefix float and an exact pin on that prefix share the pinned version")]
+    [DataRow("1.2.3-beta.*|[1.2.3-rc.5]", false, DisplayName = "Prerelease-prefix float and an exact pin on a sibling prefix share no version")]
+    [DataRow("2.*|[1.5.0]", false, DisplayName = "Exact pin below a float's floor is a conflict")]
     public void RangesHaveCommonVersion_AccountsForFloatingBands(string pipeSeparatedRanges, bool expected)
     {
         var ranges = pipeSeparatedRanges.Split('|').Select(VersionRange.Parse).ToList();
