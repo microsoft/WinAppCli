@@ -168,6 +168,24 @@ public class ZipRangeExtractorTests
     }
 
     [TestMethod]
+    [DataRow(28, DisplayName = "oversized name length")]
+    [DataRow(30, DisplayName = "oversized extra length")]
+    [DataRow(32, DisplayName = "oversized comment length")]
+    public void ParseCentralDirectory_LengthsPastEndOfDirectory_ThrowsInvalidData(int lengthFieldOffset)
+    {
+        // Found by the OneFuzz harness: these three 16-bit lengths are attacker-controlled and were
+        // sliced on without validation, surfacing as ArgumentOutOfRangeException rather than a
+        // rejected archive.
+        var header = new byte[46];
+        WriteU32(header, 0, 0x02014b50);
+        WriteU16(header, lengthFieldOffset, 0xFFFF);
+
+        var ex = Assert.ThrowsExactly<InvalidDataException>(
+            () => ZipRangeExtractor.ParseCentralDirectory(header, archiveBase: 0));
+        StringAssert.Contains(ex.Message, "extends past");
+    }
+
+    [TestMethod]
     public void ParseCentralDirectory_Zip64ExtraField_Applies64BitValues()
     {
         const long compressed = 0x1_0000_0001;   // > 4 GiB, forcing the 0xFFFFFFFF marker

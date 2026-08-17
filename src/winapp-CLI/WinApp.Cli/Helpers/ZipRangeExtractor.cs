@@ -129,6 +129,14 @@ internal static class ZipRangeExtractor
             var commentLen = BinaryPrimitives.ReadUInt16LittleEndian(centralDirectory.AsSpan(p + 32));
             long localOffset = BinaryPrimitives.ReadUInt32LittleEndian(centralDirectory.AsSpan(p + 42));
 
+            // The three lengths are attacker-controlled; without this the slices below read past the
+            // buffer and surface as ArgumentOutOfRangeException instead of a rejected archive.
+            if ((long)p + 46 + nameLen + extraLen + commentLen > centralDirectory.Length)
+            {
+                throw new InvalidDataException(
+                    $"Central-directory entry at offset {p} declares {nameLen + extraLen + commentLen} bytes of name/extra/comment, which extends past the {centralDirectory.Length}-byte directory.");
+            }
+
             var name = System.Text.Encoding.UTF8.GetString(centralDirectory, p + 46, nameLen);
             var extra = centralDirectory.AsSpan(p + 46 + nameLen, extraLen);
 
