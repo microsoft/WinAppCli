@@ -319,8 +319,9 @@ extends:
         variables:
           version: $[ stageDependencies.Build.Build.outputs['SetMeta.version'] ]
           # Used twice: as the PublishSymbols@2 artifact name and as the request name the symbol API
-          # promotes. They must be identical or the request finds nothing to publish.
-          SymbolsArtifactName: 'WinAppCLI_$(version)_$(Build.BuildNumber)'
+          # promotes. They must be identical or the request finds nothing to publish. The attempt is
+          # part of the name so a re-run creates a fresh request instead of colliding with its own.
+          SymbolsArtifactName: 'WinAppCLI_$(version)_$(Build.BuildNumber)_$(System.JobAttempt)'
         jobs:
         - job: publish_symbols
           displayName: Publish Symbols to symweb and MSDL
@@ -353,9 +354,6 @@ extends:
             # why the symbol project's source organization must be `microsoft` rather than the default.
             - task: PublishSymbols@2
               displayName: Upload PDBs to the Azure DevOps symbol service
-              # The artifact name is fixed per build, so a re-run after a later failure would fail here
-              # on the existing request and never reach the REST calls. Surfaces as a warning instead.
-              continueOnError: true
               inputs:
                 SymbolsFolder: $(Pipeline.Workspace)/symbolStaging
                 SearchPattern: '**/*.pdb'
