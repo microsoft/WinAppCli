@@ -186,6 +186,24 @@ public class ZipRangeExtractorTests
     }
 
     [TestMethod]
+    [DataRow(0, DisplayName = "signature is the whole tail")]
+    [DataRow(8, DisplayName = "signature 8 bytes from the end")]
+    [DataRow(17, DisplayName = "one byte short of a full record")]
+    public async Task FindCentralDirectory_TruncatedEocdRecord_ThrowsInvalidData(int trailingBytes)
+    {
+        // The EOCD signature can legitimately appear within the final 21 bytes, leaving the fixed
+        // fields past the end of the buffer. Reading them unguarded is a bounds gap, not a rejection.
+        var archive = new byte[64 + trailingBytes];
+        WriteU32(archive, 64 - 4, 0x06054b50);
+
+        var reader = new MemoryRangeReader(archive);
+
+        var ex = await Assert.ThrowsExactlyAsync<InvalidDataException>(async () =>
+            await ZipRangeExtractor.FindCentralDirectoryAsync(reader, 0, archive.Length, CancellationToken.None));
+        StringAssert.Contains(ex.Message, "truncated");
+    }
+
+    [TestMethod]
     public void ParseCentralDirectory_Zip64ExtraField_Applies64BitValues()
     {
         const long compressed = 0x1_0000_0001;   // > 4 GiB, forcing the 0xFFFFFFFF marker

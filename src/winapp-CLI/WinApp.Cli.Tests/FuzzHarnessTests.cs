@@ -138,6 +138,11 @@ public class FuzzHarnessTests
 
     private static string Describe(List<Exception> escapes)
     {
+        if (escapes.Count == 0)
+        {
+            return "no escapes";
+        }
+
         var summary = string.Join("; ", escapes.GroupBy(e => e.GetType().Name)
                                                .Select(g => $"{g.Key} x{g.Count()} (e.g. {g.First().Message})"));
 

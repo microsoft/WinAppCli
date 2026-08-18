@@ -65,7 +65,7 @@ public static class FuzzableCode
 
         try
         {
-            var reader = new MemoryRangeReader(bytes);
+            var reader = new BoundedRangeReader(new MemoryRangeReader(bytes));
             var total = Await(reader.GetLengthAsync(CancellationToken.None));
 
             var (cdOffset, cdSize) = Await(
@@ -77,7 +77,16 @@ public static class FuzzableCode
             // that name, so index into the entries instead to keep the nested path reachable.
             foreach (var inner in outerEntries.Take(MaxEntriesToVisit))
             {
-                VisitAsInnerArchive(reader, inner);
+                // Per entry, not around the loop: most entries are not archives, and rejecting one
+                // must not stop the walk before it reaches the nested .msix.
+                try
+                {
+                    VisitAsInnerArchive(reader, inner);
+                }
+                catch (Exception ex) when (IsExpectedArchiveRejection(ex))
+                {
+                    // This entry is not a usable nested archive; keep going.
+                }
             }
         }
         catch (Exception ex) when (IsExpectedArchiveRejection(ex))
@@ -87,7 +96,7 @@ public static class FuzzableCode
         }
     }
 
-    private static void VisitAsInnerArchive(MemoryRangeReader reader, ZipEntry inner)
+    private static void VisitAsInnerArchive(BoundedRangeReader reader, ZipEntry inner)
     {
         // Extracting the entry directly exercises the stored/deflate paths...
         _ = Await(ZipRangeExtractor.ExtractEntryAsync(reader, inner, CancellationToken.None));
@@ -107,17 +116,51 @@ public static class FuzzableCode
     }
 
     /// <summary>
-    /// Exceptions the production caller already treats as "this archive is not usable".
-    /// <see cref="OutOfMemoryException"/> is intentionally absent: entry sizes are attacker-controlled
-    /// independently of input length, so an allocation blow-up is a finding worth reporting.
+    /// Exceptions that mean "this archive is not usable" rather than "the parser has a gap".
+    /// <para>
+    /// <see cref="ArgumentOutOfRangeException"/> is deliberately absent. A range read that runs off
+    /// the end of the archive is a legitimate rejection, but <see cref="BoundedRangeReader"/> reports
+    /// that as <see cref="InvalidDataException"/>, so anything still surfacing as out-of-range came
+    /// from the parser indexing a buffer it already holds — the bug class this target exists to find.
+    /// </para>
+    /// <para>
+    /// <see cref="OutOfMemoryException"/> is absent for the same reason: entry sizes are
+    /// attacker-controlled independently of input length, so an allocation blow-up is a finding.
+    /// </para>
     /// </summary>
     private static bool IsExpectedArchiveRejection(Exception ex) => ex
-        is InvalidDataException          // the parser's own deliberate rejections
+        is InvalidDataException          // the parser's own deliberate rejections, and short reads
         or NotSupportedException         // unsupported compression method
-        or OverflowException             // checked cast of an oversized central-directory size
-        or ArgumentOutOfRangeException;  // range read outside the archive, which both range readers reject
+        or OverflowException;            // checked cast of an oversized central-directory size
 
     // The parser is async; libFuzzer targets must be void. These calls never touch I/O because the
     // reader is memory-backed, so blocking cannot deadlock.
     private static T Await<T>(Task<T> task) => task.GetAwaiter().GetResult();
+}
+
+/// <summary>
+/// Wraps <see cref="MemoryRangeReader"/> so that asking for bytes outside the archive reads as a
+/// rejected archive instead of an out-of-range access.
+/// </summary>
+/// <remarks>
+/// Without this the harness cannot tell "the parser asked for a range past EOF", which is a normal
+/// consequence of malformed input, apart from "the parser indexed past a buffer it already holds",
+/// which is a bounds bug. Collapsing both into <see cref="ArgumentOutOfRangeException"/> is what
+/// previously made this target blind to the latter.
+/// </remarks>
+internal sealed class BoundedRangeReader(MemoryRangeReader inner) : IRangeReader
+{
+    public Task<long> GetLengthAsync(CancellationToken cancellationToken) => inner.GetLengthAsync(cancellationToken);
+
+    public Task<byte[]> ReadAsync(long offset, int length, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return inner.ReadAsync(offset, length, cancellationToken);
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            throw new InvalidDataException($"Range {offset}..{offset + length} is outside the archive.", ex);
+        }
+    }
 }

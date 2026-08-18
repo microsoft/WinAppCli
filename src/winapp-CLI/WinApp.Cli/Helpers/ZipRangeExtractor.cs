@@ -40,6 +40,7 @@ internal static class ZipRangeExtractor
     private const uint Zip64EocdSignature = 0x06064b50;  // PK\x06\x06
     private const uint CentralHeaderSignature = 0x02014b50; // PK\x01\x02
     private const int MaxEocdSearch = 65557; // 22-byte EOCD + 64KiB max comment
+    private const int MinEocdSize = 22;      // signature through the comment-length field
     private const uint Zip64Marker = 0xFFFFFFFF;
     private const ushort Zip64ExtraId = 0x0001;
 
@@ -59,6 +60,13 @@ internal static class ZipRangeExtractor
         if (eocd < 0)
         {
             throw new InvalidDataException("End-of-central-directory record not found.");
+        }
+
+        // The signature can appear in the last 21 bytes, leaving the fixed fields below truncated.
+        if (eocd + MinEocdSize > tail.Length)
+        {
+            throw new InvalidDataException(
+                $"End-of-central-directory record at offset {eocd} is truncated: {tail.Length - eocd} of {MinEocdSize} bytes present.");
         }
 
         var count = BinaryPrimitives.ReadUInt16LittleEndian(tail.AsSpan(eocd + 10));
