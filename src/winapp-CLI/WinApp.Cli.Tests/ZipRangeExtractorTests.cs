@@ -312,6 +312,49 @@ public class ZipRangeExtractorTests
         Assert.AreEqual(1000 + localOffset, entry.LocalHeaderOffset, "64-bit local-header offset must be applied then rebased.");
     }
 
+    [TestMethod]
+    public async Task FindCentralDirectory_CommentPackedWithCandidates_DoesNotProbeUnbounded()
+    {
+        // A 64 KiB comment can hold thousands of EOCD-shaped candidates. Each one that points outside
+        // the tail costs a round trip on the HTTP reader, so the scan has to stop probing.
+        const int total = 200_000; // larger than the tail window, so candidate heads fall outside it
+        var data = new byte[total];
+
+        // Fill the tail with back-to-back candidates whose comment lengths all run to the end and whose
+        // directories claim to live at the front of the archive, outside the tail.
+        for (var pos = total - 22; pos >= total - 20_000; pos -= 22)
+        {
+            WriteU32(data, pos, 0x06054b50);
+            WriteU16(data, pos + 10, 1);
+            WriteU32(data, pos + 12, 46);
+            WriteU32(data, pos + 16, (uint)(pos - 46));
+            WriteU16(data, pos + 20, (ushort)(total - pos - 22));
+        }
+
+        var reader = new CountingRangeReader(data);
+
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(async () =>
+            await ZipRangeExtractor.FindCentralDirectoryAsync(reader, 0, data.Length, CancellationToken.None));
+
+        // One tail read plus a bounded number of candidate probes.
+        Assert.IsTrue(reader.Reads <= 12, $"Expected the scan to stop probing, but it issued {reader.Reads} reads.");
+    }
+
+    private sealed class CountingRangeReader(byte[] data) : IRangeReader
+    {
+        private readonly MemoryRangeReader _inner = new(data);
+
+        public int Reads { get; private set; }
+
+        public Task<long> GetLengthAsync(CancellationToken cancellationToken) => _inner.GetLengthAsync(cancellationToken);
+
+        public Task<byte[]> ReadAsync(long offset, int length, CancellationToken cancellationToken)
+        {
+            Reads++;
+            return _inner.ReadAsync(offset, length, cancellationToken);
+        }
+    }
+
     /// <summary>One stored, empty entry: the smallest thing that is recognisably a central directory.</summary>
     private static byte[] MinimalCentralDirectory()
     {

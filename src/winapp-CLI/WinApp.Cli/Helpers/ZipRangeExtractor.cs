@@ -42,6 +42,7 @@ internal static class ZipRangeExtractor
     private const int MaxEocdSearch = 65557; // 22-byte EOCD + 64KiB max comment
     private const int MinEocdSize = 22;      // signature through the comment-length field
     private const int MinCentralHeaderSize = 46; // fixed part of one central-directory header
+    private const int MaxDirectoryProbes = 8;    // reads outside the tail spent confirming candidates
     private const uint Zip64Marker = 0xFFFFFFFF;
     private const ushort Zip64ExtraId = 0x0001;
 
@@ -60,6 +61,7 @@ internal static class ZipRangeExtractor
         // A legal comment can hold a complete fake record, so a candidate is only accepted once the
         // directory it points at is confirmed to be one.
         (long Offset, long Size)? emptyFallback = null;
+        var probes = 0;
 
         for (var eocd = NextEocdCandidate(tail, tail.Length); eocd >= 0; eocd = NextEocdCandidate(tail, eocd))
         {
@@ -84,26 +86,47 @@ internal static class ZipRangeExtractor
 
                 // A comment can carry a forged locator and record too, so the resolved directory gets
                 // the same confirmation. It runs up to the record describing it rather than the EOCD.
-                if (await IsCentralDirectoryAsync(reader, archiveBase, archiveSize, cdOffset, cdSize, recordOffset, cancellationToken))
+                var (isZip64Directory, zip64Probed) = await IsCentralDirectoryAsync(
+                    reader, archiveBase, archiveSize, cdOffset, cdSize, recordOffset, tail, tailStart, cancellationToken);
+                if (isZip64Directory)
                 {
                     return (archiveBase + cdOffset, cdSize);
+                }
+
+                if (zip64Probed && ++probes >= MaxDirectoryProbes)
+                {
+                    break;
                 }
 
                 continue;
             }
 
             // A record declaring no directory has nothing to confirm, and a zeroed record planted in a
-            // comment looks exactly like one. Keep it only as a fallback for a genuinely empty archive.
+            // comment looks exactly like one. Require it to sit where an empty directory would, and let
+            // an earlier candidate replace a later one so the comment cannot win.
             if (count == 0 && cdSize == 0)
             {
-                emptyFallback ??= (archiveBase + cdOffset, 0);
+                if (archiveBase + cdOffset == tailStart + eocd)
+                {
+                    emptyFallback = (archiveBase + cdOffset, 0);
+                }
+
                 continue;
             }
 
             // In a ZIP32 archive the directory runs right up to the record describing it.
-            if (await IsCentralDirectoryAsync(reader, archiveBase, archiveSize, cdOffset, cdSize, tailStart + eocd, cancellationToken))
+            var (isDirectory, probed) = await IsCentralDirectoryAsync(
+                reader, archiveBase, archiveSize, cdOffset, cdSize, tailStart + eocd, tail, tailStart, cancellationToken);
+            if (isDirectory)
             {
                 return (archiveBase + cdOffset, cdSize);
+            }
+
+            // Every candidate that points outside the tail costs a round trip on the HTTP reader, and a
+            // 64 KiB comment can hold thousands of them. A real archive needs one.
+            if (probed && ++probes >= MaxDirectoryProbes)
+            {
+                break;
             }
         }
 
@@ -112,25 +135,34 @@ internal static class ZipRangeExtractor
 
     /// <summary>
     /// Confirms a candidate's declared central directory is inside the archive, is large enough to hold
-    /// a header, and actually starts with one.
+    /// a header, ends where the record describing it begins, and actually starts with one.
     /// </summary>
-    private static async Task<bool> IsCentralDirectoryAsync(
-        IRangeReader reader, long archiveBase, long archiveSize, long cdOffset, long cdSize, long mustEndAt, CancellationToken cancellationToken)
+    /// <returns>Whether it is a directory, and whether confirming it cost a read outside the tail.</returns>
+    private static async Task<(bool IsDirectory, bool Probed)> IsCentralDirectoryAsync(
+        IRangeReader reader, long archiveBase, long archiveSize, long cdOffset, long cdSize, long mustEndAt,
+        byte[] tail, long tailStart, CancellationToken cancellationToken)
     {
         // Anything shorter than one header cannot be the directory a non-empty record claims, which is
         // what a comment-planted record uses to pass a signature-only check.
         if (cdOffset < 0 || cdSize < MinCentralHeaderSize || cdOffset > archiveSize - cdSize)
         {
-            return false;
+            return (false, false);
         }
 
         if (archiveBase + cdOffset + cdSize != mustEndAt)
         {
-            return false;
+            return (false, false);
         }
 
-        var head = await reader.ReadAsync(archiveBase + cdOffset, 4, cancellationToken);
-        return BinaryPrimitives.ReadUInt32LittleEndian(head) == CentralHeaderSignature;
+        var head = archiveBase + cdOffset;
+        if (head >= tailStart && head + 4 <= tailStart + tail.Length)
+        {
+            var local = BinaryPrimitives.ReadUInt32LittleEndian(tail.AsSpan((int)(head - tailStart)));
+            return (local == CentralHeaderSignature, false);
+        }
+
+        var bytes = await reader.ReadAsync(head, 4, cancellationToken);
+        return (BinaryPrimitives.ReadUInt32LittleEndian(bytes) == CentralHeaderSignature, true);
     }
 
     private static async Task<(long Offset, long Size, long RecordOffset)> ReadZip64DirectoryAsync(
