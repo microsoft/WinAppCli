@@ -9,8 +9,7 @@ namespace WinApp.Cli.Commands;
 
 internal class RestoreCommand : Command, IShortDescription
 {
-    public string ShortDescription => "Restore packages and projections from winapp.yaml";
-
+    public string ShortDescription => "Restore packages and projections for an initialized project";
     public static Argument<DirectoryInfo> BaseDirectoryArgument { get; }
     public static Option<DirectoryInfo> ConfigDirOption { get; }
     static RestoreCommand()
@@ -29,7 +28,7 @@ internal class RestoreCommand : Command, IShortDescription
         ConfigDirOption.AcceptExistingOnly();
     }
 
-    public RestoreCommand() : base("restore", "Use after cloning a repo or when .winapp/ folder is missing. Reinstalls SDK packages from existing winapp.yaml without changing versions. Requires winapp.yaml (created by 'init'). To check for newer SDK versions, use 'update' instead.")
+    public RestoreCommand() : base("restore", "Use after cloning a repo or when .winapp/ folder is missing. Reinstalls SDK packages without changing versions, reading them from winapp.yaml or, for a .NET project initialized by 'init', from the .csproj via 'dotnet restore'. Requires a project already initialized by 'init'. To check for newer SDK versions, use 'update' instead.")
     {
         Arguments.Add(BaseDirectoryArgument);
         Options.Add(ConfigDirOption);

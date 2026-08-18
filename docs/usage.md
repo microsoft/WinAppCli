@@ -224,7 +224,7 @@ winapp restore [options]
 - Stores shareable files in the global cache directory
 
 > [!NOTE]
-> For .NET projects initialized with `winapp init`, there is no `winapp.yaml`. Use `dotnet restore` to restore NuGet packages instead.
+> For .NET projects initialized with `winapp init`, there is no `winapp.yaml` — the SDK package versions are recorded as `PackageReference` entries in the `.csproj`. `winapp restore` detects this and runs `dotnet restore` for you, so the command works the same way from either kind of project.
 
 **Examples:**
 

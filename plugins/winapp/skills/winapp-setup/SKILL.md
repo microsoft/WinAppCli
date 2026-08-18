@@ -123,7 +123,7 @@ winapp restore
 winapp restore ./my-project
 ```
 
-Use `restore` when you clone a repo that already has `winapp.yaml` but no `.winapp/` folder.
+Use `restore` when you clone a repo that already has `winapp.yaml` but no `.winapp/` folder. For a .NET project that `init` configured, there is no `winapp.yaml` — the SDK packages are `PackageReference` entries in the `.csproj` — and `restore` detects that and runs `dotnet restore` for you, so the same command works from either project shape.
 
 ### Private or custom NuGet feeds
 

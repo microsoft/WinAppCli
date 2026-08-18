@@ -103,7 +103,7 @@ This command will:
 - Create `Package.appxmanifest` and `Assets` folder for your app identity
 
 > [!NOTE]
-> Unlike native/C++ projects, the .NET flow does **not** create a `winapp.yaml` file. NuGet packages are managed directly via your `.csproj`. Use `dotnet restore` to restore packages after cloning.
+> Unlike native/C++ projects, the .NET flow does **not** create a `winapp.yaml` file. NuGet packages are managed directly via your `.csproj`. After cloning, run either `winapp restore` (which detects the .NET layout and runs `dotnet restore` for you) or `dotnet restore` directly.
 
 You can open `Package.appxmanifest` to further customize properties like the display name, publisher, and capabilities.
 
