@@ -232,6 +232,8 @@ public class ZipRangeExtractorTests
     [DataRow((ushort)0, 0u, 0u, DisplayName = "zeroed fake record")]
     [DataRow((ushort)1, 1u, 0u, DisplayName = "fake record pointing at offset zero")]
     [DataRow((ushort)1, 64u, 8u, DisplayName = "fake record pointing into file data")]
+    [DataRow((ushort)1, 4u, 0u, DisplayName = "fake record with a header-sized truncated directory")]
+    [DataRow((ushort)0xFFFF, 0xFFFFFFFFu, 0xFFFFFFFFu, DisplayName = "fake record claiming ZIP64")]
     public async Task FindCentralDirectory_FakeEocdInComment_StillFindsTheRealDirectory(
         ushort fakeCount, uint fakeSize, uint fakeOffset)
     {

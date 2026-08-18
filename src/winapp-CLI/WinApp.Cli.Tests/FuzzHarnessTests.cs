@@ -193,6 +193,7 @@ public class FuzzHarnessTests
             ["archive-comment"] = WithArchiveComment(BuildNestedBundle(), "seed-comment"),
             ["zip64"] = ToZip64(BuildZip([("a.bin", FakePe(), CompressionLevel.Optimal)])),
             ["zip64-nested"] = ToZip64(BuildNestedBundle()),
+            ["zip64-extra"] = WithZip64Extra(BuildZip([("a.bin", FakePe(), CompressionLevel.Optimal)])),
         };
 
         foreach (var (name, bytes) in seeds)
@@ -240,8 +241,8 @@ public class FuzzHarnessTests
     /// </summary>
     /// <remarks>
     /// <see cref="ZipArchive"/> only emits ZIP64 for archives too large to build here, so without this
-    /// the corpus never reaches the ZIP64 locator/record path or the ZIP64 extra field — the parts a
-    /// mutator cannot synthesise on its own.
+    /// the corpus never reaches the ZIP64 locator/record path — something a mutator cannot synthesise
+    /// on its own. See <see cref="WithZip64Extra"/> for the extra-field path.
     /// </remarks>
     private static byte[] ToZip64(byte[] archive)
     {
@@ -277,6 +278,53 @@ public class FuzzHarnessTests
         BinaryPrimitives.WriteUInt32LittleEndian(tail.AsSpan(16), 0xFFFFFFFF);
 
         return [.. body, .. record, .. locator, .. tail];
+    }
+
+    /// <summary>
+    /// Moves a single-entry archive's sizes and local-header offset into a ZIP64 extra field, leaving
+    /// <c>0xFFFFFFFF</c> markers in the fixed fields.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ToZip64"/> only reaches the locator/record path; the extra field is parsed by
+    /// <c>ApplyZip64Extra</c> on a different code path, and a mutator will not synthesise a well-formed
+    /// one from a 32-bit seed.
+    /// </remarks>
+    private static byte[] WithZip64Extra(byte[] archive)
+    {
+        var eocd = LastIndexOfEocd(archive);
+        Assert.IsTrue(eocd >= 0, "Expected a well-formed archive to contain an EOCD record.");
+
+        var cdSize = (int)BinaryPrimitives.ReadUInt32LittleEndian(archive.AsSpan(eocd + 12));
+        var cdOffset = (int)BinaryPrimitives.ReadUInt32LittleEndian(archive.AsSpan(eocd + 16));
+
+        var header = archive.AsSpan(cdOffset, cdSize).ToArray();
+        var nameLen = BinaryPrimitives.ReadUInt16LittleEndian(header.AsSpan(28));
+        var extraLen = BinaryPrimitives.ReadUInt16LittleEndian(header.AsSpan(30));
+
+        // The parser reads the ZIP64 extra in this fixed order, for whichever fields are marked.
+        var extra = new byte[28];
+        WriteU16(extra, 0, 0x0001);
+        WriteU16(extra, 2, 24);
+        BinaryPrimitives.WriteUInt64LittleEndian(extra.AsSpan(4), BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(24)));
+        BinaryPrimitives.WriteUInt64LittleEndian(extra.AsSpan(12), BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(20)));
+        BinaryPrimitives.WriteUInt64LittleEndian(extra.AsSpan(20), BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(42)));
+
+        BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(20), 0xFFFFFFFF);
+        BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(24), 0xFFFFFFFF);
+        BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(42), 0xFFFFFFFF);
+        WriteU16(header, 30, (ushort)(extraLen + extra.Length));
+
+        var insertAt = 46 + nameLen + extraLen;
+        var newHeader = new byte[header.Length + extra.Length];
+        header.AsSpan(0, insertAt).CopyTo(newHeader);
+        extra.CopyTo(newHeader.AsSpan(insertAt));
+        header.AsSpan(insertAt).CopyTo(newHeader.AsSpan(insertAt + extra.Length));
+
+        var tail = new byte[22];
+        archive.AsSpan(eocd, 22).CopyTo(tail);
+        BinaryPrimitives.WriteUInt32LittleEndian(tail.AsSpan(12), (uint)newHeader.Length);
+
+        return [.. archive.AsSpan(0, cdOffset), .. newHeader, .. tail];
     }
 
     private static int LastIndexOfEocd(byte[] buffer)

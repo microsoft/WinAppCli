@@ -41,6 +41,7 @@ internal static class ZipRangeExtractor
     private const uint CentralHeaderSignature = 0x02014b50; // PK\x01\x02
     private const int MaxEocdSearch = 65557; // 22-byte EOCD + 64KiB max comment
     private const int MinEocdSize = 22;      // signature through the comment-length field
+    private const int MinCentralHeaderSize = 46; // fixed part of one central-directory header
     private const uint Zip64Marker = 0xFFFFFFFF;
     private const ushort Zip64ExtraId = 0x0001;
 
@@ -68,9 +69,20 @@ internal static class ZipRangeExtractor
 
             if (cdOffset == Zip64Marker || cdSize == Zip64Marker || count == 0xFFFF)
             {
-                // The ZIP64 record carries its own signature, so that path rejects a fake for us.
-                (cdOffset, cdSize) = await ReadZip64DirectoryAsync(
-                    reader, archiveBase, tail, tailStart, eocd, cancellationToken);
+                try
+                {
+                    // Forging this means also forging a locator and a signed ZIP64 record, so the
+                    // record's own signature check is the gate here.
+                    (cdOffset, cdSize) = await ReadZip64DirectoryAsync(
+                        reader, archiveBase, tail, tailStart, eocd, cancellationToken);
+                }
+                catch (InvalidDataException)
+                {
+                    // A marker-bearing record planted in a comment has no usable locator or record;
+                    // keep scanning rather than failing the whole archive.
+                    continue;
+                }
+
                 return (archiveBase + cdOffset, cdSize);
             }
 
@@ -82,7 +94,8 @@ internal static class ZipRangeExtractor
                 continue;
             }
 
-            if (await IsCentralDirectoryAsync(reader, archiveBase, archiveSize, cdOffset, cdSize, cancellationToken))
+            // In a ZIP32 archive the directory runs right up to the record describing it.
+            if (await IsCentralDirectoryAsync(reader, archiveBase, archiveSize, cdOffset, cdSize, tailStart + eocd, cancellationToken))
             {
                 return (archiveBase + cdOffset, cdSize);
             }
@@ -92,13 +105,20 @@ internal static class ZipRangeExtractor
     }
 
     /// <summary>
-    /// Confirms a candidate's declared central directory is inside the archive and actually starts
-    /// with a central-directory header.
+    /// Confirms a candidate's declared central directory is inside the archive, is large enough to hold
+    /// a header, and actually starts with one.
     /// </summary>
     private static async Task<bool> IsCentralDirectoryAsync(
-        IRangeReader reader, long archiveBase, long archiveSize, long cdOffset, long cdSize, CancellationToken cancellationToken)
+        IRangeReader reader, long archiveBase, long archiveSize, long cdOffset, long cdSize, long mustEndAt, CancellationToken cancellationToken)
     {
-        if (cdOffset < 0 || cdSize < 4 || cdOffset > archiveSize - cdSize)
+        // Anything shorter than one header cannot be the directory a non-empty record claims, which is
+        // what a comment-planted record uses to pass a signature-only check.
+        if (cdOffset < 0 || cdSize < MinCentralHeaderSize || cdOffset > archiveSize - cdSize)
+        {
+            return false;
+        }
+
+        if (archiveBase + cdOffset + cdSize != mustEndAt)
         {
             return false;
         }
