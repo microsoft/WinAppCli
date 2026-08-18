@@ -56,23 +56,55 @@ internal static class ZipRangeExtractor
         var tailStart = archiveBase + archiveSize - tailLen;
         var tail = await reader.ReadAsync(tailStart, tailLen, cancellationToken);
 
-        var eocd = FindEocd(tail);
-        if (eocd < 0)
+        // A legal comment can hold a complete fake record, so a candidate is only accepted once the
+        // directory it points at is confirmed to be one.
+        (long Offset, long Size)? emptyFallback = null;
+
+        for (var eocd = NextEocdCandidate(tail, tail.Length); eocd >= 0; eocd = NextEocdCandidate(tail, eocd))
         {
-            throw new InvalidDataException("End-of-central-directory record not found.");
+            var count = BinaryPrimitives.ReadUInt16LittleEndian(tail.AsSpan(eocd + 10));
+            long cdSize = BinaryPrimitives.ReadUInt32LittleEndian(tail.AsSpan(eocd + 12));
+            long cdOffset = BinaryPrimitives.ReadUInt32LittleEndian(tail.AsSpan(eocd + 16));
+
+            if (cdOffset == Zip64Marker || cdSize == Zip64Marker || count == 0xFFFF)
+            {
+                // The ZIP64 record carries its own signature, so that path rejects a fake for us.
+                (cdOffset, cdSize) = await ReadZip64DirectoryAsync(
+                    reader, archiveBase, tail, tailStart, eocd, cancellationToken);
+                return (archiveBase + cdOffset, cdSize);
+            }
+
+            // A record declaring no directory has nothing to confirm, and a zeroed record planted in a
+            // comment looks exactly like one. Keep it only as a fallback for a genuinely empty archive.
+            if (count == 0 && cdSize == 0)
+            {
+                emptyFallback ??= (archiveBase + cdOffset, 0);
+                continue;
+            }
+
+            if (await IsCentralDirectoryAsync(reader, archiveBase, archiveSize, cdOffset, cdSize, cancellationToken))
+            {
+                return (archiveBase + cdOffset, cdSize);
+            }
         }
 
-        var count = BinaryPrimitives.ReadUInt16LittleEndian(tail.AsSpan(eocd + 10));
-        long cdSize = BinaryPrimitives.ReadUInt32LittleEndian(tail.AsSpan(eocd + 12));
-        long cdOffset = BinaryPrimitives.ReadUInt32LittleEndian(tail.AsSpan(eocd + 16));
+        return emptyFallback ?? throw new InvalidDataException("End-of-central-directory record not found.");
+    }
 
-        if (cdOffset == Zip64Marker || cdSize == Zip64Marker || count == 0xFFFF)
+    /// <summary>
+    /// Confirms a candidate's declared central directory is inside the archive and actually starts
+    /// with a central-directory header.
+    /// </summary>
+    private static async Task<bool> IsCentralDirectoryAsync(
+        IRangeReader reader, long archiveBase, long archiveSize, long cdOffset, long cdSize, CancellationToken cancellationToken)
+    {
+        if (cdOffset < 0 || cdSize < 4 || cdOffset > archiveSize - cdSize)
         {
-            (cdOffset, cdSize) = await ReadZip64DirectoryAsync(
-                reader, archiveBase, tail, tailStart, eocd, cancellationToken);
+            return false;
         }
 
-        return (archiveBase + cdOffset, cdSize);
+        var head = await reader.ReadAsync(archiveBase + cdOffset, 4, cancellationToken);
+        return BinaryPrimitives.ReadUInt32LittleEndian(head) == CentralHeaderSignature;
     }
 
     private static async Task<(long Offset, long Size)> ReadZip64DirectoryAsync(
@@ -223,11 +255,20 @@ internal static class ZipRangeExtractor
     /// <c>PK\x05\x06</c>, and a truncated tail can end mid-record. A real record has its full fixed
     /// fields and a declared comment length that runs exactly to the end of the archive.
     /// </remarks>
-    private static int FindEocd(ReadOnlySpan<byte> tail)
+    /// <summary>
+    /// Returns the next end-of-central-directory candidate strictly before <paramref name="before"/>,
+    /// scanning backward, or -1.
+    /// </summary>
+    /// <remarks>
+    /// A candidate must have its full fixed fields and a declared comment length that runs exactly to
+    /// the end of the archive. That is necessary but not sufficient: comment bytes can satisfy it too,
+    /// so the caller still has to confirm the directory the candidate points at.
+    /// </remarks>
+    private static int NextEocdCandidate(ReadOnlySpan<byte> tail, int before)
     {
-        var emptyCandidate = -1;
+        var start = Math.Min(before - 1, tail.Length - MinEocdSize);
 
-        for (var i = tail.Length - MinEocdSize; i >= 0; i--)
+        for (var i = start; i >= 0; i--)
         {
             if (BinaryPrimitives.ReadUInt32LittleEndian(tail.Slice(i)) != EocdSignature)
             {
@@ -235,30 +276,13 @@ internal static class ZipRangeExtractor
             }
 
             var commentLen = BinaryPrimitives.ReadUInt16LittleEndian(tail.Slice(i + 20));
-            if (i + MinEocdSize + commentLen != tail.Length)
+            if (i + MinEocdSize + commentLen == tail.Length)
             {
-                continue;
+                return i;
             }
-
-            // A zeroed record sitting in a real archive's comment satisfies everything above and would
-            // otherwise win, making a non-empty archive parse as empty. Prefer a record that declares a
-            // directory, and fall back to the empty one only if there is nothing better.
-            var count = BinaryPrimitives.ReadUInt16LittleEndian(tail.Slice(i + 10));
-            var declaredSize = BinaryPrimitives.ReadUInt32LittleEndian(tail.Slice(i + 12));
-            if (count == 0 && declaredSize == 0)
-            {
-                if (emptyCandidate < 0)
-                {
-                    emptyCandidate = i;
-                }
-
-                continue;
-            }
-
-            return i;
         }
 
-        return emptyCandidate;
+        return -1;
     }
 
     private static int LastIndexOfSignature(ReadOnlySpan<byte> buffer, uint signature)
@@ -285,7 +309,9 @@ internal sealed class MemoryRangeReader(byte[] data) : IRangeReader
 
     public Task<byte[]> ReadAsync(long offset, int length, CancellationToken cancellationToken)
     {
-        if (offset < 0 || length < 0 || offset + length > data.Length)
+        // Written to avoid offset + length, which overflows for a ZIP64-sized offset and would let the
+        // read through to Array.Copy.
+        if (offset < 0 || length < 0 || offset > data.Length || length > data.Length - offset)
         {
             throw new ArgumentOutOfRangeException(nameof(offset), $"Range {offset}..{offset + length} is outside the buffer ({data.Length}).");
         }

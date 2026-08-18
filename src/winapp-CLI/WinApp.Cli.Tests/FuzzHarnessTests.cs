@@ -1,6 +1,7 @@
 ﻿// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Reflection;
 using System.Text;
@@ -190,6 +191,8 @@ public class FuzzHarnessTests
                                         ("dir/sub/c.txt", Encoding.UTF8.GetBytes("three"), CompressionLevel.Optimal)]),
             ["nested-bundle"] = BuildNestedBundle(),
             ["archive-comment"] = WithArchiveComment(BuildNestedBundle(), "seed-comment"),
+            ["zip64"] = ToZip64(BuildZip([("a.bin", FakePe(), CompressionLevel.Optimal)])),
+            ["zip64-nested"] = ToZip64(BuildNestedBundle()),
         };
 
         foreach (var (name, bytes) in seeds)
@@ -229,6 +232,51 @@ public class FuzzHarnessTests
         commentBytes.CopyTo(result, archive.Length);
         WriteU16(result, eocd + 20, (ushort)commentBytes.Length);
         return result;
+    }
+
+    /// <summary>
+    /// Rewrites an archive's tail into ZIP64 form: an EOCD full of markers, preceded by a ZIP64
+    /// locator and record carrying the real values.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ZipArchive"/> only emits ZIP64 for archives too large to build here, so without this
+    /// the corpus never reaches the ZIP64 locator/record path or the ZIP64 extra field — the parts a
+    /// mutator cannot synthesise on its own.
+    /// </remarks>
+    private static byte[] ToZip64(byte[] archive)
+    {
+        var eocd = LastIndexOfEocd(archive);
+        Assert.IsTrue(eocd >= 0, "Expected a well-formed archive to contain an EOCD record.");
+
+        var count = BinaryPrimitives.ReadUInt16LittleEndian(archive.AsSpan(eocd + 10));
+        var cdSize = BinaryPrimitives.ReadUInt32LittleEndian(archive.AsSpan(eocd + 12));
+        var cdOffset = BinaryPrimitives.ReadUInt32LittleEndian(archive.AsSpan(eocd + 16));
+
+        var body = archive.AsSpan(0, eocd).ToArray();
+
+        var record = new byte[56];
+        BinaryPrimitives.WriteUInt32LittleEndian(record.AsSpan(0), 0x06064b50);
+        BinaryPrimitives.WriteUInt64LittleEndian(record.AsSpan(4), 44);   // bytes following this field
+        WriteU16(record, 12, 45);
+        WriteU16(record, 14, 45);
+        BinaryPrimitives.WriteUInt64LittleEndian(record.AsSpan(24), count);
+        BinaryPrimitives.WriteUInt64LittleEndian(record.AsSpan(32), count);
+        BinaryPrimitives.WriteUInt64LittleEndian(record.AsSpan(40), cdSize);
+        BinaryPrimitives.WriteUInt64LittleEndian(record.AsSpan(48), cdOffset);
+
+        var locator = new byte[20];
+        BinaryPrimitives.WriteUInt32LittleEndian(locator.AsSpan(0), 0x07064b50);
+        BinaryPrimitives.WriteUInt64LittleEndian(locator.AsSpan(8), (ulong)body.Length);
+        BinaryPrimitives.WriteUInt32LittleEndian(locator.AsSpan(16), 1);
+
+        var tail = new byte[22];
+        BinaryPrimitives.WriteUInt32LittleEndian(tail.AsSpan(0), 0x06054b50);
+        WriteU16(tail, 8, 0xFFFF);
+        WriteU16(tail, 10, 0xFFFF);
+        BinaryPrimitives.WriteUInt32LittleEndian(tail.AsSpan(12), 0xFFFFFFFF);
+        BinaryPrimitives.WriteUInt32LittleEndian(tail.AsSpan(16), 0xFFFFFFFF);
+
+        return [.. body, .. record, .. locator, .. tail];
     }
 
     private static int LastIndexOfEocd(byte[] buffer)

@@ -229,14 +229,21 @@ public class ZipRangeExtractorTests
     }
 
     [TestMethod]
-    public async Task FindCentralDirectory_FakeEmptyEocdInComment_StillFindsTheRealDirectory()
+    [DataRow((ushort)0, 0u, 0u, DisplayName = "zeroed fake record")]
+    [DataRow((ushort)1, 1u, 0u, DisplayName = "fake record pointing at offset zero")]
+    [DataRow((ushort)1, 64u, 8u, DisplayName = "fake record pointing into file data")]
+    public async Task FindCentralDirectory_FakeEocdInComment_StillFindsTheRealDirectory(
+        ushort fakeCount, uint fakeSize, uint fakeOffset)
     {
-        // A whole zeroed EOCD hidden in the comment satisfies the comment-length rule, so a naive
-        // backward scan returns it and the archive parses as empty.
+        // A whole EOCD hidden in the comment satisfies the comment-length rule, so a scan that trusts
+        // the last match returns it and the archive parses as empty or from attacker-chosen offsets.
         var archive = BuildZip([("a.bin", Encoding.UTF8.GetBytes("stored"), CompressionLevel.NoCompression)]);
 
         var fake = new byte[22];
         WriteU32(fake, 0, 0x06054b50);
+        WriteU16(fake, 10, fakeCount);
+        WriteU32(fake, 12, fakeSize);
+        WriteU32(fake, 16, fakeOffset);
 
         var withComment = new byte[archive.Length + fake.Length];
         Array.Copy(archive, withComment, archive.Length);
@@ -249,8 +256,18 @@ public class ZipRangeExtractorTests
 
         var entries = ZipRangeExtractor.ParseCentralDirectory(
             await reader.ReadAsync(offset, (int)size, CancellationToken.None), 0);
-        Assert.AreEqual(1, entries.Count, "The real directory should win over a zeroed record in the comment.");
+        Assert.AreEqual(1, entries.Count, "The real directory should win over a record planted in the comment.");
         Assert.AreEqual("a.bin", entries[0].Name);
+    }
+
+    [TestMethod]
+    public async Task MemoryRangeReader_OffsetNearLongMaxValue_ThrowsWithoutOverflowing()
+    {
+        // offset + length overflows to a negative number, which would slip past a naive guard.
+        var reader = new MemoryRangeReader(new byte[16]);
+
+        await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(async () =>
+            await reader.ReadAsync(long.MaxValue - 1, 8, CancellationToken.None));
     }
 
     [TestMethod]
