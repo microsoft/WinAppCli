@@ -191,8 +191,8 @@ public class ZipRangeExtractorTests
     [DataRow(17, DisplayName = "one byte short of a full record")]
     public async Task FindCentralDirectory_TruncatedEocdRecord_ThrowsInvalidData(int trailingBytes)
     {
-        // The EOCD signature can legitimately appear within the final 21 bytes, leaving the fixed
-        // fields past the end of the buffer. Reading them unguarded is a bounds gap, not a rejection.
+        // The EOCD signature can sit within the final 21 bytes, leaving the fixed fields past the end
+        // of the buffer. Reading them unguarded is a bounds gap, not a rejection.
         var archive = new byte[64 + trailingBytes];
         WriteU32(archive, 64 - 4, 0x06054b50);
 
@@ -200,7 +200,32 @@ public class ZipRangeExtractorTests
 
         var ex = await Assert.ThrowsExactlyAsync<InvalidDataException>(async () =>
             await ZipRangeExtractor.FindCentralDirectoryAsync(reader, 0, archive.Length, CancellationToken.None));
-        StringAssert.Contains(ex.Message, "truncated");
+        StringAssert.Contains(ex.Message, "not found");
+    }
+
+    [TestMethod]
+    public async Task FindCentralDirectory_ArchiveCommentContainingEocdSignature_StillParses()
+    {
+        // A ZIP comment may legally contain PK\x05\x06. Taking the *last* signature match lands
+        // inside the comment rather than on the real record.
+        var archive = BuildZip([("a.bin", Encoding.UTF8.GetBytes("stored"), CompressionLevel.NoCompression)]);
+        var comment = new byte[] { 0x50, 0x4b, 0x05, 0x06 };
+
+        var withComment = new byte[archive.Length + comment.Length];
+        Array.Copy(archive, withComment, archive.Length);
+        Array.Copy(comment, 0, withComment, archive.Length, comment.Length);
+
+        // The EOCD comment-length field is the last two bytes of the fixed record.
+        WriteU16(withComment, archive.Length - 2, (ushort)comment.Length);
+
+        var reader = new MemoryRangeReader(withComment);
+        var (offset, size) = await ZipRangeExtractor.FindCentralDirectoryAsync(
+            reader, 0, withComment.Length, CancellationToken.None);
+
+        var entries = ZipRangeExtractor.ParseCentralDirectory(
+            await reader.ReadAsync(offset, (int)size, CancellationToken.None), 0);
+        Assert.AreEqual(1, entries.Count);
+        Assert.AreEqual("a.bin", entries[0].Name);
     }
 
     [TestMethod]

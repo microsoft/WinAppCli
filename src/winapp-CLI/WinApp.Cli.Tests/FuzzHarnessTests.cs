@@ -101,10 +101,13 @@ public class FuzzHarnessTests
 
             Assert.AreEqual("WinApp.Cli.Fuzz.dll", target.GetProperty("dll").GetString());
 
-            // No compliance claim is generated when FuzzingTargetBinaries is empty, and the SDL work
-            // item link is what ties the resulting claim back to the fuzzing requirement.
-            Assert.IsTrue(target.GetProperty("FuzzingTargetBinaries").GetArrayLength() > 0,
-                "FuzzingTargetBinaries must name the shipping binary, or OneFuzz generates no claim.");
+            // The claim is attributed to the binary named here, so it has to be the shipping one:
+            // a non-empty array containing only the harness would still produce no useful claim.
+            var targetBinaries = target.GetProperty("FuzzingTargetBinaries").EnumerateArray()
+                                       .Select(b => b.GetString())
+                                       .ToList();
+            CollectionAssert.Contains(targetBinaries, "winapp.dll",
+                $"FuzzingTargetBinaries must name winapp.dll, or the claim is not attributed to the shipping binary. Found: {string.Join(", ", targetBinaries)}");
             Assert.AreEqual(63509499, entry.GetProperty("SdlWorkItemId").GetInt32());
         }
     }
@@ -168,6 +171,13 @@ public class FuzzHarnessTests
         var root = Path.Join(AppContext.BaseDirectory, "fuzz-corpus");
         var archiveDir = Path.Join(root, "ziprangeextractor-archive");
         var directoryDir = Path.Join(root, "ziprangeextractor-centraldirectory");
+
+        // Stale files from an earlier seed set would survive under bin and break the counts below.
+        if (Directory.Exists(root))
+        {
+            Directory.Delete(root, recursive: true);
+        }
+
         Directory.CreateDirectory(archiveDir);
         Directory.CreateDirectory(directoryDir);
 

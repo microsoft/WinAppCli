@@ -56,17 +56,10 @@ internal static class ZipRangeExtractor
         var tailStart = archiveBase + archiveSize - tailLen;
         var tail = await reader.ReadAsync(tailStart, tailLen, cancellationToken);
 
-        var eocd = LastIndexOfSignature(tail, EocdSignature);
+        var eocd = FindEocd(tail);
         if (eocd < 0)
         {
             throw new InvalidDataException("End-of-central-directory record not found.");
-        }
-
-        // The signature can appear in the last 21 bytes, leaving the fixed fields below truncated.
-        if (eocd + MinEocdSize > tail.Length)
-        {
-            throw new InvalidDataException(
-                $"End-of-central-directory record at offset {eocd} is truncated: {tail.Length - eocd} of {MinEocdSize} bytes present.");
         }
 
         var count = BinaryPrimitives.ReadUInt16LittleEndian(tail.AsSpan(eocd + 10));
@@ -220,6 +213,33 @@ internal static class ZipRangeExtractor
             : new MemoryStream();
         deflate.CopyTo(output);
         return output.ToArray();
+    }
+
+    /// <summary>
+    /// Finds the end-of-central-directory record in the archive tail.
+    /// </summary>
+    /// <remarks>
+    /// The last signature match is not good enough on either side: a ZIP comment may legally contain
+    /// <c>PK\x05\x06</c>, and a truncated tail can end mid-record. A real record has its full fixed
+    /// fields and a declared comment length that runs exactly to the end of the archive.
+    /// </remarks>
+    private static int FindEocd(ReadOnlySpan<byte> tail)
+    {
+        for (var i = tail.Length - MinEocdSize; i >= 0; i--)
+        {
+            if (BinaryPrimitives.ReadUInt32LittleEndian(tail.Slice(i)) != EocdSignature)
+            {
+                continue;
+            }
+
+            var commentLen = BinaryPrimitives.ReadUInt16LittleEndian(tail.Slice(i + 20));
+            if (i + MinEocdSize + commentLen == tail.Length)
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     private static int LastIndexOfSignature(ReadOnlySpan<byte> buffer, uint signature)
