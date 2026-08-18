@@ -92,11 +92,16 @@ internal sealed class NugetSourceProvider
             // EFFECTIVE eligible set, so two roots that differ only in allowInsecureConnections resolve from
             // different feeds and must get distinct keys — otherwise the opted-in root's cached dependencies
             // could be served to a non-opted-in root, bypassing the HTTP rejection.
+            // Include the source PROPERTIES that change how a repository behaves, not just its name and URL:
+            // two roots listing the same feed at a different protocolVersion talk to it through a different
+            // protocol (v2 vs v3) and can resolve different graphs, and allowInsecureConnections decides
+            // whether a plain-HTTP feed is usable at all. Sharing one cache entry across those would serve a
+            // graph resolved under settings that do not apply.
             var sources = string.Join(
                 ";",
                 new PackageSourceProvider(Settings).LoadPackageSources()
                     .Where(s => s.IsEnabled && !IsInsecureSource(s))
-                    .Select(s => $"{s.Name}|{s.Source}"));
+                    .Select(s => $"{s.Name}|{s.Source}|v{s.ProtocolVersion}|insecure={s.AllowInsecureConnections}"));
             // Record the complete mapping entries (source key -> ordered patterns), not just whether mapping
             // is enabled: two configs with identical sources/global folder but different package-to-source
             // mappings resolve dependencies from different feeds and must not share the cache.
