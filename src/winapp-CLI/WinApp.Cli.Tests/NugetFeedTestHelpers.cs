@@ -27,10 +27,10 @@ internal static class NugetFeedTestHelpers
     private sealed class DefaultWinappDirectoryService : IWinappDirectoryService
     {
         public DirectoryInfo GetGlobalWinappDirectory() =>
-            new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".winapp"));
+            new(Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".winapp"));
 
         public DirectoryInfo GetLocalWinappDirectory(DirectoryInfo? baseDirectory = null) =>
-            new(Path.Combine((baseDirectory ?? new DirectoryInfo(Directory.GetCurrentDirectory())).FullName, ".winapp"));
+            new(Path.Join((baseDirectory ?? new DirectoryInfo(Directory.GetCurrentDirectory())).FullName, ".winapp"));
 
         public void SetCacheDirectoryForTesting(DirectoryInfo? cacheDirectory)
         {
@@ -48,13 +48,13 @@ internal static class NugetFeedTestHelpers
 
     internal static DirectoryInfo CreateFeedTestDirectory()
     {
-        var dir = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"NugetFeedTests_{Guid.NewGuid():N}"));
+        var dir = new DirectoryInfo(Path.Join(Path.GetTempPath(), $"NugetFeedTests_{Guid.NewGuid():N}"));
         dir.Create();
         return dir;
     }
 
     internal static void WriteNuGetConfig(DirectoryInfo dir, string contents) =>
-        File.WriteAllText(Path.Combine(dir.FullName, "nuget.config"), contents);
+        File.WriteAllText(Path.Join(dir.FullName, "nuget.config"), contents);
 
     internal static void TryDelete(DirectoryInfo dir)
     {
@@ -94,7 +94,7 @@ internal static class NugetFeedTestHelpers
         }
 
         // A .nupkg must contain at least one file; add a trivial lib file from a temp source.
-        var contentFile = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.txt");
+        var contentFile = Path.Join(Path.GetTempPath(), $"{Guid.NewGuid():N}.txt");
         File.WriteAllText(contentFile, "test");
         try
         {
@@ -117,7 +117,7 @@ internal static class NugetFeedTestHelpers
     /// </summary>
     internal static void WriteNupkgToFeed(DirectoryInfo feedDir, string id, string version, params (string Id, string Version)[] dependencies) =>
         File.WriteAllBytes(
-            Path.Combine(feedDir.FullName, $"{id}.{version}.nupkg"),
+            Path.Join(feedDir.FullName, $"{id}.{version}.nupkg"),
             BuildNupkgBytes(id, version, dependencies));
 
     internal static void WriteLocalFeedConfig(DirectoryInfo root, DirectoryInfo feed, DirectoryInfo packages) =>

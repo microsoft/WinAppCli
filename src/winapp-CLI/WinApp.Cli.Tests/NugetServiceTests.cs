@@ -36,7 +36,7 @@ public class NugetServiceTests : BaseCommandTests
         // Settings are evaluated lazily on first use, so writing the file here (before any test body runs) is
         // sufficient.
         File.WriteAllText(
-            Path.Combine(_tempDirectory.FullName, "nuget.config"),
+            Path.Join(_tempDirectory.FullName, "nuget.config"),
             $"""
             <?xml version="1.0" encoding="utf-8"?>
             <configuration>

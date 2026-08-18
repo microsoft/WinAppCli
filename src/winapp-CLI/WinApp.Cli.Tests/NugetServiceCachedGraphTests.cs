@@ -63,9 +63,9 @@ public class NugetServiceCachedGraphTests : BaseCommandTests
         var root = CreateFeedTestDirectory();
         try
         {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
             feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
             WriteNupkgToFeed(feed, "Cached.Root", "1.0.0", ("Cached.Child", "[1.0.0, )"));
             WriteNupkgToFeed(feed, "Cached.Child", "1.0.0", ("Cached.Leaf", "[1.0.0, )"));
@@ -105,9 +105,9 @@ public class NugetServiceCachedGraphTests : BaseCommandTests
         var root = CreateFeedTestDirectory();
         try
         {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
             feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
             WriteNupkgToFeed(feed, "Mapped.Root", "1.0.0", ("Mapped.Child", "[1.0.0, )"));
             WriteNupkgToFeed(feed, "Mapped.Child", "1.0.0");
@@ -160,9 +160,9 @@ public class NugetServiceCachedGraphTests : BaseCommandTests
         var root = CreateFeedTestDirectory();
         try
         {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
             feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
             // Warm the cache with Pinned.Child 1.0.0 via a root that pins it exactly.
             WriteNupkgToFeed(feed, "Pinned.Warmer", "1.0.0", ("Pinned.Child", "[1.0.0]"));
@@ -173,7 +173,7 @@ public class NugetServiceCachedGraphTests : BaseCommandTests
             await CreateServiceRootedAt(root)
                 .InstallPackageAsync("Pinned.Warmer", "1.0.0", TestTaskContext, TestContext.CancellationToken);
             Assert.IsTrue(
-                Directory.Exists(Path.Combine(packages.FullName, "pinned.child", "1.0.0")),
+                Directory.Exists(Path.Join(packages.FullName, "pinned.child", "1.0.0")),
                 "Pinned.Child 1.0.0 must be cached for this test to mean anything.");
 
             // A different root requires >= 2.0.0. The cache holds only 1.0.0, which does NOT satisfy that

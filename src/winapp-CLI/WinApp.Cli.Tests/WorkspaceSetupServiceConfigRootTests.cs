@@ -26,7 +26,7 @@ public class WorkspaceSetupServiceConfigRootTests : BaseCommandTests
         // one feed; a separate config directory declares a DIFFERENT feed. Both <clear /> inherited sources,
         // so each directory resolves exactly one distinct source (and the config dir's <clear /> also
         // removes the parent working-directory feed from its own hierarchy).
-        await File.WriteAllTextAsync(Path.Combine(_tempDirectory.FullName, "nuget.config"), """
+        await File.WriteAllTextAsync(Path.Join(_tempDirectory.FullName, "nuget.config"), """
             <?xml version="1.0" encoding="utf-8"?>
             <configuration>
               <packageSources>
@@ -37,7 +37,7 @@ public class WorkspaceSetupServiceConfigRootTests : BaseCommandTests
             """);
 
         var configDir = _tempDirectory.CreateSubdirectory("project-root");
-        await File.WriteAllTextAsync(Path.Combine(configDir.FullName, "nuget.config"), """
+        await File.WriteAllTextAsync(Path.Join(configDir.FullName, "nuget.config"), """
             <?xml version="1.0" encoding="utf-8"?>
             <configuration>
               <packageSources>

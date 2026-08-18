@@ -56,7 +56,7 @@ internal sealed class NugetPackageDownloader(NugetSourceProvider sourceProvider)
             // Use a random temp path instead of Path.GetTempFileName(): the latter eagerly creates an
             // empty file (which File.Create below immediately overwrites) and throws once ~65,535 temp
             // files already exist in the directory.
-            var tempFile = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            var tempFile = Path.Join(Path.GetTempPath(), Path.GetRandomFileName());
             try
             {
                 bool copied;

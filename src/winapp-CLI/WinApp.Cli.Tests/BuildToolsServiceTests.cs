@@ -224,8 +224,6 @@ public class BuildToolsServiceTests : BaseCommandTests
         var packagesDir = Path.Join(_testCacheDirectory.FullName, "packages");
 
         // The pinned (shorthand) version, stored on disk under its normalized "1.0.0" name.
-        // Path.Join rather than Path.Combine: it always concatenates, so no segment can discard the ones
-        // before it.
         var pinnedBinDir = Path.Join(packagesDir, "microsoft.windows.sdk.buildtools", "1.0.0", "bin", "10.0.26100.0", "x64");
         Directory.CreateDirectory(pinnedBinDir);
         File.WriteAllText(Path.Join(pinnedBinDir, "mt.exe"), "pinned mt.exe");

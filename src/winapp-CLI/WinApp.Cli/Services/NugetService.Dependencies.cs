@@ -27,21 +27,20 @@ internal partial class NugetService
 
         // The .nuspec file is at the root of the extracted package, named {lowercase-id}.nuspec. Force the
         // segment to a bare file name: the id originates from a dependency entry in another package's
-        // manifest, and a rooted or multi-segment value would otherwise make Path.Combine discard packageDir
-        // and read outside the extracted package. Callers reach here via GetNuGetPackageDir, which already
-        // rejects invalid ids, so this is defense in depth that keeps the invariant local and checkable.
+        // manifest, so a rooted or multi-segment value must not be able to escape the extracted package.
+        // Callers reach here via GetNuGetPackageDir, which already rejects invalid ids, so this is defense in
+        // depth that keeps the invariant local and checkable.
         var nuspecFileName = Path.GetFileName($"{packageName.ToLowerInvariant()}.nuspec");
 
         // GetFileName above strips any directory part; assert the result really is a plain relative name so a
-        // hostile or malformed id can never make Path.Combine discard packageDir and read outside the
-        // extracted package.
+        // hostile or malformed id can never resolve outside the extracted package.
         if (Path.IsPathRooted(nuspecFileName))
         {
             throw new InvalidOperationException(
                 $"'{packageName}' is not a usable NuGet package id: it does not resolve to a file name inside the package directory.");
         }
 
-        var nuspecPath = Path.Combine(packageDir.FullName, nuspecFileName);
+        var nuspecPath = Path.Join(packageDir.FullName, nuspecFileName);
         if (!File.Exists(nuspecPath))
         {
             // Try finding any .nuspec file
@@ -339,10 +338,9 @@ internal partial class NugetService
     private string? FindSatisfyingCachedVersion(string packageId, VersionRange range)
     {
         // The id arrives from a dependency entry in another package's manifest, so prove it is a plain single
-        // path segment before building a path from it: a rooted or separator-bearing value would make
-        // Path.Combine discard the cache root and probe an unintended location. A cache probe has no business
-        // throwing, so an unusable id simply means "nothing cached" and the caller falls through to its
-        // regular source-based diagnostics.
+        // path segment before it is used to locate a folder: a rooted or separator-bearing value must not be
+        // able to point the probe outside the cache. A cache probe has no business throwing, so an unusable id
+        // simply means "nothing cached" and the caller falls through to its regular source-based diagnostics.
         var normalizedPackageId = packageId.ToLowerInvariant();
         if (!PackageIdValidator.IsValidPackageId(normalizedPackageId)
             || Path.IsPathRooted(normalizedPackageId)

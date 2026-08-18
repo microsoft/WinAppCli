@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
 using WinApp.Cli.Services;
@@ -174,7 +174,7 @@ public class NugetServiceFeedTests : BaseCommandTests
 
             var service = CreateServiceRootedAt(root);
 
-            var expected = new DirectoryInfo(Path.Combine(root.FullName, "custom-packages")).FullName;
+            var expected = new DirectoryInfo(Path.Join(root.FullName, "custom-packages")).FullName;
             var actual = service.GetNuGetGlobalPackagesDir().FullName;
 
             Assert.AreEqual(
@@ -523,9 +523,9 @@ public class NugetServiceFeedTests : BaseCommandTests
             // second-listed source, so a bug that queried just the first source (or returned only its
             // max) would yield 1.0.0 — this pins the "highest across ALL eligible sources" contract that
             // the single-source live tests never exercise.
-            var low = new DirectoryInfo(Path.Combine(root.FullName, "low"));
+            var low = new DirectoryInfo(Path.Join(root.FullName, "low"));
             low.Create();
-            var high = new DirectoryInfo(Path.Combine(root.FullName, "high"));
+            var high = new DirectoryInfo(Path.Join(root.FullName, "high"));
             high.Create();
 
             WriteNupkgToFeed(low, "Multi.Pkg", "1.0.0");
@@ -577,7 +577,7 @@ public class NugetServiceFeedTests : BaseCommandTests
             // must fail closed (throw and name the failed source) rather than return the reachable feed's
             // partial result. The broken source uses the reserved '.invalid' TLD (RFC 6761), which never
             // resolves, keeping this deterministic and offline.
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
             feed.Create();
             WriteNupkgToFeed(feed, "FailClosed.Pkg", "1.0.0");
 

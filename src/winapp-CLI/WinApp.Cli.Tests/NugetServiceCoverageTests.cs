@@ -33,9 +33,9 @@ public class NugetServiceCoverageTests : BaseCommandTests
     /// </summary>
     private static (DirectoryInfo Feed, DirectoryInfo Packages) SetUpLocalFeed(DirectoryInfo root)
     {
-        var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+        var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
         feed.Create();
-        var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+        var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
         WriteLocalFeedConfig(root, feed, packages);
         return (feed, packages);
     }
@@ -94,7 +94,7 @@ public class NugetServiceCoverageTests : BaseCommandTests
             // must fail loudly rather than treat the missing manifest as "no dependencies".
             var packageDir = service.GetNuGetPackageDir("Corrupt.Pkg", "1.0.0");
             packageDir.Create();
-            File.WriteAllText(Path.Combine(packageDir.FullName, ".nupkg.metadata"), "{}");
+            File.WriteAllText(Path.Join(packageDir.FullName, ".nupkg.metadata"), "{}");
 
             var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
                 async () => await service.InstallPackageAsync("Corrupt.Pkg", "1.0.0", TestTaskContext, TestContext.CancellationToken));
@@ -126,8 +126,8 @@ public class NugetServiceCoverageTests : BaseCommandTests
             // named "renamed.pkg.nuspec", so only the fallback search resolves it (declaring no dependencies).
             var packageDir = service.GetNuGetPackageDir("Renamed.Pkg", "1.0.0");
             packageDir.Create();
-            File.WriteAllText(Path.Combine(packageDir.FullName, ".nupkg.metadata"), "{}");
-            File.WriteAllText(Path.Combine(packageDir.FullName, "not-the-id.nuspec"), """
+            File.WriteAllText(Path.Join(packageDir.FullName, ".nupkg.metadata"), "{}");
+            File.WriteAllText(Path.Join(packageDir.FullName, "not-the-id.nuspec"), """
                 <?xml version="1.0" encoding="utf-8"?>
                 <package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
                   <metadata>
@@ -259,7 +259,7 @@ public class NugetServiceCoverageTests : BaseCommandTests
             // Root declares a dependency with NO version constraint (an unbounded range). That constrains
             // nothing, so the resolver skips it rather than pulling in an arbitrary version.
             File.WriteAllBytes(
-                Path.Combine(feed.FullName, "Versionless.Root.1.0.0.nupkg"),
+                Path.Join(feed.FullName, "Versionless.Root.1.0.0.nupkg"),
                 BuildNupkgWithVersionlessDependency("Versionless.Root", "1.0.0", "Versionless.Dep"));
 
             var service = CreateServiceRootedAt(root);
@@ -288,7 +288,7 @@ public class NugetServiceCoverageTests : BaseCommandTests
             var (feed, _) = SetUpLocalFeed(root);
 
             File.WriteAllBytes(
-                Path.Combine(feed.FullName, "Versionless.Install.1.0.0.nupkg"),
+                Path.Join(feed.FullName, "Versionless.Install.1.0.0.nupkg"),
                 BuildNupkgWithVersionlessDependency("Versionless.Install", "1.0.0", "Versionless.Dep"));
 
             var service = CreateServiceRootedAt(root);
@@ -439,7 +439,7 @@ public class NugetServiceCoverageTests : BaseCommandTests
             NuGetFramework.Parse("net10.0"),
             [new PackageDependency(dependencyId)]));
 
-        var contentFile = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.txt");
+        var contentFile = Path.Join(Path.GetTempPath(), $"{Guid.NewGuid():N}.txt");
         File.WriteAllText(contentFile, "test");
         try
         {

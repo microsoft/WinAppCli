@@ -40,7 +40,7 @@ public class WorkspaceSetupServiceConfigModeTests : BaseCommandTests
 
     private static async Task<FileInfo> CreateCsprojAsync(DirectoryInfo directory, string projectName)
     {
-        var csprojPath = Path.Combine(directory.FullName, $"{projectName}.csproj");
+        var csprojPath = Path.Join(directory.FullName, $"{projectName}.csproj");
         await File.WriteAllTextAsync(csprojPath, @"<Project Sdk=""Microsoft.NET.Sdk"">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -57,7 +57,7 @@ public class WorkspaceSetupServiceConfigModeTests : BaseCommandTests
         var result = await service.SetupWorkspaceAsync(ConfigOnlyOptions(SdkInstallMode.Experimental), TestContext.CancellationToken);
 
         Assert.AreEqual(0, result);
-        Assert.IsTrue(File.Exists(Path.Combine(_tempDirectory.FullName, "winapp.yaml")));
+        Assert.IsTrue(File.Exists(Path.Join(_tempDirectory.FullName, "winapp.yaml")));
     }
 
     [TestMethod]
@@ -67,7 +67,7 @@ public class WorkspaceSetupServiceConfigModeTests : BaseCommandTests
         var result = await service.SetupWorkspaceAsync(ConfigOnlyOptions(SdkInstallMode.Preview), TestContext.CancellationToken);
 
         Assert.AreEqual(0, result);
-        Assert.IsTrue(File.Exists(Path.Combine(_tempDirectory.FullName, "winapp.yaml")));
+        Assert.IsTrue(File.Exists(Path.Join(_tempDirectory.FullName, "winapp.yaml")));
     }
 
     [TestMethod]

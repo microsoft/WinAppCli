@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
 using WinApp.Cli.Services;
@@ -26,9 +26,9 @@ public class NugetServiceDependencyTests : BaseCommandTests
         var root = CreateFeedTestDirectory();
         try
         {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
             feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
             // Root depends on Child with an EXCLUSIVE lower bound: (1.0.0, 2.0.0]. The declared lower bound
             // 1.0.0 does NOT satisfy the range, so reducing the range to MinVersion would resolve to a
@@ -60,9 +60,9 @@ public class NugetServiceDependencyTests : BaseCommandTests
         var root = CreateFeedTestDirectory();
         try
         {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
             feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
             // Root depends on Child with an UPPER-BOUND-ONLY range: (, 2.0.0]. MinVersion is null for such a
             // range, so the old MinVersion-based logic silently DROPPED the dependency. The lowest listed
@@ -93,9 +93,9 @@ public class NugetServiceDependencyTests : BaseCommandTests
         var root = CreateFeedTestDirectory();
         try
         {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
             feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
             // Root depends on Child with a plain inclusive lower bound (1.0.0 == [1.0.0, )). The declared
             // lower bound 1.0.0 is NOT listed on the feed; only 1.1.0 and 2.0.0 are. NuGet's lowest-applicable
@@ -130,7 +130,7 @@ public class NugetServiceDependencyTests : BaseCommandTests
             // A second eligible source that could have satisfied Child is unreachable (reserved '.invalid'
             // TLD, RFC 6761). Turning that source failure into an empty version list would silently drop the
             // dependency; instead the range resolver must surface the error so the graph caller sees it.
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
             feed.Create();
             WriteNupkgToFeed(feed, "Broken.Root", "1.0.0", ("Broken.Child", "[1.0.0, )"));
 
@@ -185,17 +185,17 @@ public class NugetServiceDependencyTests : BaseCommandTests
         var rootB = CreateFeedTestDirectory();
         try
         {
-            var feedA = new DirectoryInfo(Path.Combine(rootA.FullName, "feed"));
+            var feedA = new DirectoryInfo(Path.Join(rootA.FullName, "feed"));
             feedA.Create();
             WriteNupkgToFeed(feedA, "Scoped.Root", "1.0.0", ("Scoped.ChildA", "1.0.0"));
             WriteNupkgToFeed(feedA, "Scoped.ChildA", "1.0.0");
-            WriteLocalFeedConfig(rootA, feedA, new DirectoryInfo(Path.Combine(rootA.FullName, "packages")));
+            WriteLocalFeedConfig(rootA, feedA, new DirectoryInfo(Path.Join(rootA.FullName, "packages")));
 
-            var feedB = new DirectoryInfo(Path.Combine(rootB.FullName, "feed"));
+            var feedB = new DirectoryInfo(Path.Join(rootB.FullName, "feed"));
             feedB.Create();
             WriteNupkgToFeed(feedB, "Scoped.Root", "1.0.0", ("Scoped.ChildB", "1.0.0"));
             WriteNupkgToFeed(feedB, "Scoped.ChildB", "1.0.0");
-            WriteLocalFeedConfig(rootB, feedB, new DirectoryInfo(Path.Combine(rootB.FullName, "packages")));
+            WriteLocalFeedConfig(rootB, feedB, new DirectoryInfo(Path.Join(rootB.FullName, "packages")));
 
             var depsA = await CreateServiceRootedAt(rootA).GetPackageDependenciesAsync("Scoped.Root", "1.0.0", TestContext.CancellationToken);
             var depsB = await CreateServiceRootedAt(rootB).GetPackageDependenciesAsync("Scoped.Root", "1.0.0", TestContext.CancellationToken);
@@ -221,17 +221,17 @@ public class NugetServiceDependencyTests : BaseCommandTests
         // root B routes everything to feed Y (whose Root depends on Map.ChildY). The cache scope must include
         // the full mapping rules so B does not receive A's cached dependency.
         var shared = CreateFeedTestDirectory();
-        var rootA = new DirectoryInfo(Path.Combine(shared.FullName, "rootA"));
-        var rootB = new DirectoryInfo(Path.Combine(shared.FullName, "rootB"));
+        var rootA = new DirectoryInfo(Path.Join(shared.FullName, "rootA"));
+        var rootB = new DirectoryInfo(Path.Join(shared.FullName, "rootB"));
         rootA.Create();
         rootB.Create();
         try
         {
-            var feedX = new DirectoryInfo(Path.Combine(shared.FullName, "feedX"));
-            var feedY = new DirectoryInfo(Path.Combine(shared.FullName, "feedY"));
+            var feedX = new DirectoryInfo(Path.Join(shared.FullName, "feedX"));
+            var feedY = new DirectoryInfo(Path.Join(shared.FullName, "feedY"));
             feedX.Create();
             feedY.Create();
-            var packages = new DirectoryInfo(Path.Combine(shared.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(shared.FullName, "packages"));
 
             // Same package id/version in both feeds, but each declares a different dependency.
             WriteNupkgToFeed(feedX, "Map.Root", "1.0.0", ("Map.ChildX", "1.0.0"));
@@ -292,17 +292,17 @@ public class NugetServiceDependencyTests : BaseCommandTests
         // sources by name, both roots would collapse to one cache key and root B would receive root A's
         // cached graph — the regression this test guards against.
         var shared = CreateFeedTestDirectory();
-        var rootA = new DirectoryInfo(Path.Combine(shared.FullName, "rootA"));
-        var rootB = new DirectoryInfo(Path.Combine(shared.FullName, "rootB"));
+        var rootA = new DirectoryInfo(Path.Join(shared.FullName, "rootA"));
+        var rootB = new DirectoryInfo(Path.Join(shared.FullName, "rootB"));
         rootA.Create();
         rootB.Create();
         try
         {
-            var feedX = new DirectoryInfo(Path.Combine(shared.FullName, "feedX"));
-            var feedY = new DirectoryInfo(Path.Combine(shared.FullName, "feedY"));
+            var feedX = new DirectoryInfo(Path.Join(shared.FullName, "feedX"));
+            var feedY = new DirectoryInfo(Path.Join(shared.FullName, "feedY"));
             feedX.Create();
             feedY.Create();
-            var packages = new DirectoryInfo(Path.Combine(shared.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(shared.FullName, "packages"));
 
             // Same package id/version in both feeds, each declaring a DIFFERENT dependency, so the resolved
             // graph reveals which source "won".
@@ -368,9 +368,9 @@ public class NugetServiceDependencyTests : BaseCommandTests
         var root = CreateFeedTestDirectory();
         try
         {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
             feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
             // Root depends on Child with a bounded range [5.0.0, ) that NO available version satisfies (the
             // feed only carries Child 1.0.0). A required transitive package that cannot be resolved must FAIL
@@ -402,9 +402,9 @@ public class NugetServiceDependencyTests : BaseCommandTests
         var root = CreateFeedTestDirectory();
         try
         {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
             feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
             // The feed physically carries both packages, but packageSourceMapping only routes 'Excl.Root*' to
             // it. The transitive 'Excl.Child' matches NO mapping pattern, so it has zero eligible sources.
@@ -456,9 +456,9 @@ public class NugetServiceDependencyTests : BaseCommandTests
         var root = CreateFeedTestDirectory();
         try
         {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
             feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
             // A cyclic graph: Cycle.A depends on Cycle.B, which depends back on Cycle.A. A cache entry is only
             // published after a package's whole subtree resolves, so without explicit cycle detection Cycle.A

@@ -51,7 +51,7 @@ internal class WorkspaceSetupService(
 {
     public async Task<int> SetupWorkspaceAsync(WorkspaceSetupOptions options, CancellationToken cancellationToken = default)
     {
-        configService.ConfigPath = new FileInfo(Path.Combine(options.ConfigDir.FullName, "winapp.yaml"));
+        configService.ConfigPath = new FileInfo(Path.Join(options.ConfigDir.FullName, "winapp.yaml"));
 
         // Resolve the user's nuget.config hierarchy from the selected project/config directory, which can
         // differ from the process working directory when `init <dir>` / `restore --config-dir <dir>` is
@@ -587,12 +587,12 @@ internal class WorkspaceSetupService(
                             if (usedVersions.TryGetValue(BuildToolsService.WINAPP_SDK_PACKAGE, out var wasdkVersion))
                             {
                                 var pkgDir = nugetService.GetNuGetPackageDir(BuildToolsService.WINAPP_SDK_PACKAGE, wasdkVersion);
-                                var licenseSrc = Path.Combine(pkgDir.FullName, "license.txt");
+                                var licenseSrc = Path.Join(pkgDir.FullName, "license.txt");
                                 if (File.Exists(licenseSrc))
                                 {
-                                    var shareDir = Path.Combine(localWinappDir.FullName, "share", BuildToolsService.WINAPP_SDK_PACKAGE);
+                                    var shareDir = Path.Join(localWinappDir.FullName, "share", BuildToolsService.WINAPP_SDK_PACKAGE);
                                     Directory.CreateDirectory(shareDir);
-                                    var licenseDst = Path.Combine(shareDir, "copyright");
+                                    var licenseDst = Path.Join(shareDir, "copyright");
                                     File.Copy(licenseSrc, licenseDst, overwrite: true);
                                     taskContext.AddDebugMessage($"{UiSymbols.Check} License copied → {licenseDst}");
                                 }
@@ -759,7 +759,7 @@ internal class WorkspaceSetupService(
 
                 if (!options.RequireExistingConfig && options.SdkInstallMode != SdkInstallMode.None && !options.NoGitignore && localWinappDir?.Parent != null)
                 {
-                    var gitignorePath = Path.Combine(localWinappDir.Parent.FullName, ".gitignore");
+                    var gitignorePath = Path.Join(localWinappDir.Parent.FullName, ".gitignore");
 
                     if (File.Exists(gitignorePath))
                     {

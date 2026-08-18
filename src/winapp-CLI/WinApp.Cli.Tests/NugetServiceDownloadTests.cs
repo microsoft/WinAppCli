@@ -35,9 +35,9 @@ public class NugetServiceDownloadTests : BaseCommandTests
         var root = CreateFeedTestDirectory();
         try
         {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
             feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
             // Root's .nuspec declares its dependency with an EXCLUSIVE lower bound (1.0.0, 2.0.0]. Installing
             // the lower bound 1.0.0 would be wrong (the range excludes it); the install must resolve and
@@ -76,9 +76,9 @@ public class NugetServiceDownloadTests : BaseCommandTests
         var root = CreateFeedTestDirectory();
         try
         {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
             feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
             // Root's .nuspec requires Child [5.0.0, ), but the feed only carries Child 1.0.0. The root package
             // itself downloads fine, but a REQUIRED transitive dependency cannot be resolved. The install must
@@ -122,9 +122,9 @@ public class NugetServiceDownloadTests : BaseCommandTests
         var root = CreateFeedTestDirectory();
         try
         {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
             feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
             // Package A depends on Package B; both live only in the local feed (no network).
             WriteNupkgToFeed(feed, "Winapp.TestA", "1.0.0", ("Winapp.TestB", "1.0.0"));
@@ -166,9 +166,9 @@ public class NugetServiceDownloadTests : BaseCommandTests
         var root = CreateFeedTestDirectory();
         try
         {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
             feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
             // The feed exists but does not contain the requested package: the content download fails on
             // every eligible source, which must surface as an actionable error rather than silently succeeding.
@@ -211,11 +211,11 @@ public class NugetServiceDownloadTests : BaseCommandTests
             // throw; a successful install proves it fails over past both an unreachable source and a
             // missing one and installs from the third. The broken source uses the reserved '.invalid' TLD
             // (RFC 6761), which never resolves, keeping the test deterministic and offline.
-            var empty = new DirectoryInfo(Path.Combine(root.FullName, "empty"));
+            var empty = new DirectoryInfo(Path.Join(root.FullName, "empty"));
             empty.Create();
-            var good = new DirectoryInfo(Path.Combine(root.FullName, "good"));
+            var good = new DirectoryInfo(Path.Join(root.FullName, "good"));
             good.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
             WriteNupkgToFeed(good, "Failover.Pkg", "1.0.0");
 
@@ -282,7 +282,7 @@ public class NugetServiceDownloadTests : BaseCommandTests
         var root = CreateFeedTestDirectory();
         try
         {
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
             // The private HTTP feed rejects anonymous requests with 401; the matching credentials live in
             // <packageSourceCredentials>, which is exactly how a user authenticates a company mirror. A
@@ -337,7 +337,7 @@ public class NugetServiceDownloadTests : BaseCommandTests
         var root = CreateFeedTestDirectory();
         try
         {
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
             // Same private feed, but NO <packageSourceCredentials>. The feed answers 401 and, because the
             // credential service is non-interactive (redirected input / CI), NuGet cannot prompt — the

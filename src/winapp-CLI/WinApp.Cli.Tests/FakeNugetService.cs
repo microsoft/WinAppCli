@@ -106,7 +106,7 @@ internal class FakeNugetService : INugetService
         {
             throw new InvalidOperationException("FakeNugetService.CacheDirectory must be set before calling GetNuGetGlobalPackagesDir");
         }
-        var dir = new DirectoryInfo(Path.Combine(CacheDirectory.FullName, "packages"));
+        var dir = new DirectoryInfo(Path.Join(CacheDirectory.FullName, "packages"));
         if (!dir.Exists)
         {
             dir.Create();
@@ -117,13 +117,13 @@ internal class FakeNugetService : INugetService
     public DirectoryInfo GetNuGetPackageDir(string packageName, string version)
     {
         var cache = GetNuGetGlobalPackagesDir();
-        return new DirectoryInfo(Path.Combine(cache.FullName, packageName.ToLowerInvariant(), version));
+        return new DirectoryInfo(Path.Join(cache.FullName, packageName.ToLowerInvariant(), version));
     }
 
     public bool IsPackageInstalled(string packageName, string version)
     {
         var dir = GetNuGetPackageDir(packageName, version);
-        return dir.Exists && File.Exists(Path.Combine(dir.FullName, ".nupkg.metadata"));
+        return dir.Exists && File.Exists(Path.Join(dir.FullName, ".nupkg.metadata"));
     }
 
     /// <summary>
@@ -134,6 +134,6 @@ internal class FakeNugetService : INugetService
     {
         var dir = GetNuGetPackageDir(packageName, version);
         dir.Create();
-        File.WriteAllText(Path.Combine(dir.FullName, ".nupkg.metadata"), "{}");
+        File.WriteAllText(Path.Join(dir.FullName, ".nupkg.metadata"), "{}");
     }
 }

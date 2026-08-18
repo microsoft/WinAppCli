@@ -31,10 +31,10 @@ public class PackageInstallationServiceTests
     [TestInitialize]
     public void Setup()
     {
-        _tempDir = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"PkgInstTest_{Guid.NewGuid():N}"));
+        _tempDir = new DirectoryInfo(Path.Join(Path.GetTempPath(), $"PkgInstTest_{Guid.NewGuid():N}"));
         _tempDir.Create();
         _cacheDir = _tempDir.CreateSubdirectory("cache");
-        _rootDir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "root"));
+        _rootDir = new DirectoryInfo(Path.Join(_tempDir.FullName, "root"));
         _config = new FakeConfigService();
         _nuget = new FakeNugetService { CacheDirectory = _cacheDir };
         _service = new PackageInstallationService(_config, _nuget, NullLogger<PackageInstallationService>.Instance);
@@ -221,7 +221,7 @@ public class PackageInstallationServiceTests
 
     private sealed class FakeConfigService : IConfigService
     {
-        public FileInfo ConfigPath { get; set; } = new(Path.Combine(Path.GetTempPath(), "winapp.yaml"));
+        public FileInfo ConfigPath { get; set; } = new(Path.Join(Path.GetTempPath(), "winapp.yaml"));
         public bool ExistsResult { get; set; }
         public WinappConfig Config { get; set; } = new();
 

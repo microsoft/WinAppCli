@@ -29,9 +29,9 @@ public class NugetServiceInstallGraphTests : BaseCommandTests
         var root = CreateFeedTestDirectory();
         try
         {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
             feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
             // Diamond graph: Root depends on both A and B; A pins Diamond.C to EXACTLY 1.0.0 while B pins it
             // to EXACTLY 2.0.0. Whichever branch installs first fixes Diamond.C's version; the other branch's
@@ -74,9 +74,9 @@ public class NugetServiceInstallGraphTests : BaseCommandTests
         var root = CreateFeedTestDirectory();
         try
         {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
             feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
             // Diamond graph whose two branches require DiffMin.C at DIFFERENT LOWER BOUNDS but with no upper
             // bound: A needs [1.0.0, ) and B needs [2.0.0, ). Unlike conflicting exact pins, a version (2.0.0)
@@ -122,9 +122,9 @@ public class NugetServiceInstallGraphTests : BaseCommandTests
         var root = CreateFeedTestDirectory();
         try
         {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
             feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
             WriteNupkgToFeed(feed, "Partial.Pkg", "1.0.0");
             WriteLocalFeedConfig(root, feed, packages);
@@ -135,7 +135,7 @@ public class NugetServiceInstallGraphTests : BaseCommandTests
             // completion marker (written last by NuGet) was never produced, so the entry is incomplete.
             var packageDir = service.GetNuGetPackageDir("Partial.Pkg", "1.0.0");
             packageDir.Create();
-            var marker = Path.Combine(packageDir.FullName, ".nupkg.metadata");
+            var marker = Path.Join(packageDir.FullName, ".nupkg.metadata");
             Assert.IsFalse(File.Exists(marker), "Precondition: the incomplete cache folder must have no completion marker.");
 
             var installed = await service.InstallPackageAsync("Partial.Pkg", "1.0.0", TestTaskContext, TestContext.CancellationToken);
@@ -144,7 +144,7 @@ public class NugetServiceInstallGraphTests : BaseCommandTests
             // extracted, evidenced by both the completion marker and the extracted nuspec being present.
             Assert.IsTrue(installed.ContainsKey("Partial.Pkg"), "The package must be reported installed.");
             Assert.IsTrue(File.Exists(marker), "The completion marker must exist, proving the package was actually (re-)downloaded rather than skipped.");
-            Assert.IsTrue(File.Exists(Path.Combine(packageDir.FullName, "Partial.Pkg.nuspec")), "The extracted nuspec must exist, proving real extraction into the previously-empty folder.");
+            Assert.IsTrue(File.Exists(Path.Join(packageDir.FullName, "Partial.Pkg.nuspec")), "The extracted nuspec must exist, proving real extraction into the previously-empty folder.");
         }
         finally
         {

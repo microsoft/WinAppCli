@@ -52,7 +52,7 @@ public class NugetPackageDownloaderCoverageTests : BaseCommandTests
 
             var sourceProvider = CreateSourceProviderRootedAt(root);
             var downloader = new NugetPackageDownloader(sourceProvider);
-            var globalPackagesFolder = Path.Combine(root.FullName, "packages");
+            var globalPackagesFolder = Path.Join(root.FullName, "packages");
             Directory.CreateDirectory(globalPackagesFolder);
 
             var identity = new PackageIdentity("Broken.Content.Pkg", NuGetVersion.Parse("1.0.0"));
@@ -86,9 +86,9 @@ public class NugetPackageDownloaderCoverageTests : BaseCommandTests
         string? leakedTempFile = null;
         try
         {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
             feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
             packages.Create();
             WriteLocalFeedConfig(root, feed, packages);
             WriteNupkgToFeed(feed, "Cleanup.Pkg", "1.0.0");
@@ -114,7 +114,7 @@ public class NugetPackageDownloaderCoverageTests : BaseCommandTests
             await downloader.DownloadPackageAsync(identity, packages.FullName, cacheContext, TestContext.CancellationToken);
 
             Assert.IsTrue(
-                Directory.Exists(Path.Combine(packages.FullName, "cleanup.pkg", "1.0.0")),
+                Directory.Exists(Path.Join(packages.FullName, "cleanup.pkg", "1.0.0")),
                 "The package must have extracted into the global packages folder despite the temp-cleanup failure.");
 
             Assert.IsNotNull(leakedTempFile, "The temp-file cleanup seam must have been invoked with a real temp-file path.");

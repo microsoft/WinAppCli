@@ -29,9 +29,9 @@ public class PackageInstallationServiceCacheMarkerTests : BaseCommandTests
         var root = CreateFeedTestDirectory();
         try
         {
-            var feed = new DirectoryInfo(Path.Combine(root.FullName, "feed"));
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
             feed.Create();
-            var packages = new DirectoryInfo(Path.Combine(root.FullName, "packages"));
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
             WriteNupkgToFeed(feed, "Solo.Pkg", "1.0.0");
             WriteLocalFeedConfig(root, feed, packages);
@@ -42,7 +42,7 @@ public class PackageInstallationServiceCacheMarkerTests : BaseCommandTests
                 nuget,
                 GetRequiredService<ILogger<PackageInstallationService>>());
 
-            var projectDir = new DirectoryInfo(Path.Combine(root.FullName, "project"));
+            var projectDir = new DirectoryInfo(Path.Join(root.FullName, "project"));
             projectDir.Create();
 
             // Simulate an interrupted extraction: the version folder exists but the ".nupkg.metadata"
@@ -51,7 +51,7 @@ public class PackageInstallationServiceCacheMarkerTests : BaseCommandTests
             // downloading the package.
             var packageDir = nuget.GetNuGetPackageDir("Solo.Pkg", "1.0.0");
             packageDir.Create();
-            var marker = Path.Combine(packageDir.FullName, ".nupkg.metadata");
+            var marker = Path.Join(packageDir.FullName, ".nupkg.metadata");
             Assert.IsFalse(File.Exists(marker), "Precondition: the incomplete cache folder must have no completion marker.");
 
             var installed = await installer.InstallPackagesAsync(
@@ -65,7 +65,7 @@ public class PackageInstallationServiceCacheMarkerTests : BaseCommandTests
             // fully extracted, evidenced by both the completion marker and the extracted nuspec being present.
             Assert.IsTrue(installed.ContainsKey("Solo.Pkg"), "The package must be reported installed.");
             Assert.IsTrue(File.Exists(marker), "The completion marker must exist, proving the package was actually (re-)downloaded rather than skipped.");
-            Assert.IsTrue(File.Exists(Path.Combine(packageDir.FullName, "Solo.Pkg.nuspec")), "The extracted nuspec must exist, proving real extraction into the previously-empty folder.");
+            Assert.IsTrue(File.Exists(Path.Join(packageDir.FullName, "Solo.Pkg.nuspec")), "The extracted nuspec must exist, proving real extraction into the previously-empty folder.");
         }
         finally
         {

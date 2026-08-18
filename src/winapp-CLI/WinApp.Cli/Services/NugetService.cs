@@ -67,7 +67,7 @@ internal partial class NugetService : INugetService
         var globalDir = _winappDirectoryService.GetGlobalWinappDirectory();
         if (IsTestOverride(globalDir))
         {
-            var overrideDir = new DirectoryInfo(Path.Combine(globalDir.FullName, "packages"));
+            var overrideDir = new DirectoryInfo(Path.Join(globalDir.FullName, "packages"));
             if (!overrideDir.Exists)
             {
                 overrideDir.Create();
@@ -125,7 +125,7 @@ internal partial class NugetService : INugetService
     /// marker — the same signal NuGet itself uses to treat a global-packages entry as fully extracted.
     /// </summary>
     private static bool HasCompletionMarker(DirectoryInfo packageDir) =>
-        packageDir.Exists && File.Exists(Path.Combine(packageDir.FullName, ".nupkg.metadata"));
+        packageDir.Exists && File.Exists(Path.Join(packageDir.FullName, ".nupkg.metadata"));
 
     /// <summary>
     /// Normalizes a version string to NuGet's canonical form (e.g. "1.0" -> "1.0.0") so the value stored
@@ -157,7 +157,7 @@ internal partial class NugetService : INugetService
     /// </summary>
     private static bool IsTestOverride(DirectoryInfo globalDir)
     {
-        var defaultWinapp = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".winapp");
+        var defaultWinapp = Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".winapp");
         return !string.Equals(globalDir.FullName, defaultWinapp, StringComparison.OrdinalIgnoreCase)
             && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY"));
     }
