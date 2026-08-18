@@ -225,6 +225,8 @@ internal static class ZipRangeExtractor
     /// </remarks>
     private static int FindEocd(ReadOnlySpan<byte> tail)
     {
+        var emptyCandidate = -1;
+
         for (var i = tail.Length - MinEocdSize; i >= 0; i--)
         {
             if (BinaryPrimitives.ReadUInt32LittleEndian(tail.Slice(i)) != EocdSignature)
@@ -233,13 +235,30 @@ internal static class ZipRangeExtractor
             }
 
             var commentLen = BinaryPrimitives.ReadUInt16LittleEndian(tail.Slice(i + 20));
-            if (i + MinEocdSize + commentLen == tail.Length)
+            if (i + MinEocdSize + commentLen != tail.Length)
             {
-                return i;
+                continue;
             }
+
+            // A zeroed record sitting in a real archive's comment satisfies everything above and would
+            // otherwise win, making a non-empty archive parse as empty. Prefer a record that declares a
+            // directory, and fall back to the empty one only if there is nothing better.
+            var count = BinaryPrimitives.ReadUInt16LittleEndian(tail.Slice(i + 10));
+            var declaredSize = BinaryPrimitives.ReadUInt32LittleEndian(tail.Slice(i + 12));
+            if (count == 0 && declaredSize == 0)
+            {
+                if (emptyCandidate < 0)
+                {
+                    emptyCandidate = i;
+                }
+
+                continue;
+            }
+
+            return i;
         }
 
-        return -1;
+        return emptyCandidate;
     }
 
     private static int LastIndexOfSignature(ReadOnlySpan<byte> buffer, uint signature)

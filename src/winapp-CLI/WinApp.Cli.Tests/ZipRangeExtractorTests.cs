@@ -229,6 +229,31 @@ public class ZipRangeExtractorTests
     }
 
     [TestMethod]
+    public async Task FindCentralDirectory_FakeEmptyEocdInComment_StillFindsTheRealDirectory()
+    {
+        // A whole zeroed EOCD hidden in the comment satisfies the comment-length rule, so a naive
+        // backward scan returns it and the archive parses as empty.
+        var archive = BuildZip([("a.bin", Encoding.UTF8.GetBytes("stored"), CompressionLevel.NoCompression)]);
+
+        var fake = new byte[22];
+        WriteU32(fake, 0, 0x06054b50);
+
+        var withComment = new byte[archive.Length + fake.Length];
+        Array.Copy(archive, withComment, archive.Length);
+        Array.Copy(fake, 0, withComment, archive.Length, fake.Length);
+        WriteU16(withComment, archive.Length - 2, (ushort)fake.Length);
+
+        var reader = new MemoryRangeReader(withComment);
+        var (offset, size) = await ZipRangeExtractor.FindCentralDirectoryAsync(
+            reader, 0, withComment.Length, CancellationToken.None);
+
+        var entries = ZipRangeExtractor.ParseCentralDirectory(
+            await reader.ReadAsync(offset, (int)size, CancellationToken.None), 0);
+        Assert.AreEqual(1, entries.Count, "The real directory should win over a zeroed record in the comment.");
+        Assert.AreEqual("a.bin", entries[0].Name);
+    }
+
+    [TestMethod]
     public void ParseCentralDirectory_Zip64ExtraField_Applies64BitValues()
     {
         const long compressed = 0x1_0000_0001;   // > 4 GiB, forcing the 0xFFFFFFFF marker
