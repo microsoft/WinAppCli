@@ -89,15 +89,6 @@ internal class WorkspaceSetupService(
             // that for each project in the directory is both safe and what a multi-project repo needs.
             var csprojFiles = dotNetService.FindCsproj(options.BaseDirectory);
 
-            // Honor `--config-dir` here too. The native path roots its NuGet hierarchy at options.ConfigDir
-            // (SetConfigRoot above), but a delegated `dotnet restore` resolves nuget.config relative to the
-            // project, so without this a .NET project would restore from different feeds than a native one
-            // asked to use the same config directory. Only passed when the caller actually selected a
-            // different directory AND it supplies a config: in the default case (config dir == project dir)
-            // nothing is passed, so normal nuget.config discovery — including the user/machine level — is
-            // untouched, which --configfile would otherwise replace.
-            var selectedConfig = new FileInfo(Path.Join(options.ConfigDir.FullName, "nuget.config"));
-
             logger.LogInformation(
                 "{UISymbol} .NET project detected with no winapp.yaml — SDK packages are PackageReferences in {Count} project(s). Running 'dotnet restore'.",
                 UiSymbols.Note,
@@ -105,27 +96,28 @@ internal class WorkspaceSetupService(
 
             foreach (var projectToRestore in csprojFiles)
             {
-                var usesSelectedConfig = selectedConfig.Exists
-                    && !string.Equals(
-                        projectToRestore.Directory!.FullName.TrimEnd(Path.DirectorySeparatorChar),
-                        options.ConfigDir.FullName.TrimEnd(Path.DirectorySeparatorChar),
-                        StringComparison.OrdinalIgnoreCase);
-
-                var configFileArgument = usesSelectedConfig
-                    ? $" --configfile \"{selectedConfig.FullName}\""
-                    : string.Empty;
-
-                if (usesSelectedConfig)
+                // Let dotnet resolve nuget.config itself, relative to the project. That is the standard
+                // hierarchy — the project's directory and its ancestors, merged with the user and machine
+                // levels — and it is exactly what the user gets running `dotnet restore` by hand.
+                //
+                // Deliberately NOT forwarding the selected config directory as `--configfile`: that switch
+                // replaces the whole hierarchy with one file, so a source declared there but authenticated
+                // through credentials in the user-level config would start failing. Verified: restoring with
+                // `--configfile` pointing at a config that lists one source drops every user-level source.
+                // Since the config root cannot be honored without that loss, say so instead of silently
+                // restoring from feeds the user did not select.
+                if (!IsSameOrAncestorDirectory(options.ConfigDir, projectToRestore.Directory!))
                 {
-                    logger.LogDebug(
-                        "Using the NuGet configuration from the selected config directory for {Project}: {ConfigFile}",
-                        projectToRestore.Name,
-                        selectedConfig.FullName);
+                    logger.LogWarning(
+                        "{UISymbol} The selected configuration directory ({ConfigDir}) does not apply to {Project}: 'dotnet restore' resolves nuget.config relative to the project. Its own nuget.config hierarchy is used instead.",
+                        UiSymbols.Warning,
+                        options.ConfigDir.FullName,
+                        projectToRestore.Name);
                 }
 
                 var restoreExitCode = await dotNetService.RunDotnetInheritedAsync(
                     projectToRestore.Directory!,
-                    $"restore \"{projectToRestore.FullName}\"{configFileArgument}",
+                    $"restore \"{projectToRestore.FullName}\"",
                     cancellationToken);
 
                 if (restoreExitCode != 0)
@@ -868,6 +860,27 @@ internal class WorkspaceSetupService(
                 return (1, "Error!");
             }
         }, cancellationToken);
+    }
+
+    /// <summary>
+    /// True when <paramref name="candidate"/> is <paramref name="directory"/> itself or one of its ancestors.
+    /// Used to tell whether a selected configuration directory is already part of the nuget.config hierarchy
+    /// that <c>dotnet restore</c> discovers for a project, since that discovery walks up from the project.
+    /// </summary>
+    private static bool IsSameOrAncestorDirectory(DirectoryInfo candidate, DirectoryInfo directory)
+    {
+        var candidatePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(candidate.FullName));
+
+        for (var current = directory; current is not null; current = current.Parent)
+        {
+            var currentPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(current.FullName));
+            if (string.Equals(candidatePath, currentPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

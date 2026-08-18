@@ -598,7 +598,7 @@ internal partial class NugetService
 
                 dependencyInfo = await byIdResource.GetDependencyInfoAsync(packageName, nugetVersion, cacheContext, Logger, cancellationToken);
             }
-            catch (FatalProtocolException ex)
+            catch (Exception ex) when (ex is FatalProtocolException or IOException or UnauthorizedAccessException)
             {
                 // A canceled nuspec fetch can be surfaced as a PackageNotFoundProtocolException (a
                 // FatalProtocolException) once retries are exhausted; preserve cancellation instead of
@@ -606,7 +606,11 @@ internal partial class NugetService
                 // matches the contract enforced in GetListedVersionsAsync.
                 cancellationToken.ThrowIfCancellationRequested();
 
-                // Source unreachable/unauthorized; remember why and try the next one.
+                // Source unreachable/unauthorized; remember why and try the next one. IO/access failures are
+                // included because a local-folder source reads the package straight off disk, so an
+                // unreadable or locked feed folder surfaces as those rather than a protocol error — and that
+                // must fail over to the next eligible source exactly like an unreachable HTTP feed, not abort
+                // resolution for a package a later source can still provide.
                 lastError = ex;
                 lastErrorSource = repo.PackageSource.Name;
                 continue;

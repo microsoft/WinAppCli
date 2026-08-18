@@ -84,7 +84,7 @@ internal sealed class NugetPackageDownloader(NugetSourceProvider sourceProvider)
 
                         copied = await byIdResource.CopyNupkgToStreamAsync(identity.Id, identity.Version, fileStream, cacheContext, downloadLogger, cancellationToken);
                     }
-                    catch (FatalProtocolException ex)
+                    catch (Exception ex) when (ex is FatalProtocolException or IOException or UnauthorizedAccessException)
                     {
                         // A canceled request can be surfaced as a FatalProtocolException once the final
                         // HTTP attempt is exhausted; preserve cancellation instead of recording it as a
@@ -92,7 +92,10 @@ internal sealed class NugetPackageDownloader(NugetSourceProvider sourceProvider)
                         cancellationToken.ThrowIfCancellationRequested();
 
                         // Source unreachable/unauthorized or does not have this package; remember why
-                        // (e.g. 401/403/network) and try the next source.
+                        // (e.g. 401/403/network) and try the next source. IO/access failures count too: a
+                        // local-folder source opens the .nupkg straight off disk, so a locked or unreadable
+                        // feed folder surfaces as those rather than a protocol error, and it must fail over
+                        // to the next eligible source instead of aborting the whole download.
                         lastError = ex;
                         lastErrorSource = repo.PackageSource.Name;
                         continue;

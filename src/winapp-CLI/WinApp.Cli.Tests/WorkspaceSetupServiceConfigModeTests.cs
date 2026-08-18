@@ -147,64 +147,49 @@ public class WorkspaceSetupServiceConfigModeTests : BaseCommandTests
     }
 
     /// <summary>
-    /// `restore --config-dir <dir>` selects the NuGet configuration for the native path, so the delegated
-    /// .NET restore must use it too — otherwise a .NET project would resolve packages from different feeds
-    /// than a native one given the same option.
+    /// `restore --config-dir <dir>` cannot be forwarded to the delegated .NET restore: `--configfile` replaces
+    /// the whole nuget.config hierarchy with a single file, which would drop user-level sources and the
+    /// credentials stored with them. So the project's own hierarchy is used and the mismatch is reported.
     /// </summary>
     [TestMethod]
-    public async Task Restore_DotNetProject_WithSeparateConfigDir_PassesThatConfigToDotnetRestore()
+    public async Task Restore_DotNetProject_WithUnrelatedConfigDir_UsesProjectHierarchyAndWarns()
     {
         await CreateCsprojAsync(_tempDirectory, "App");
 
-        var configDir = _tempDirectory.CreateSubdirectory("nugetconfig");
-        var configFile = Path.Join(configDir.FullName, "nuget.config");
-        await File.WriteAllTextAsync(
-            configFile,
-            """
-            <?xml version="1.0" encoding="utf-8"?>
-            <configuration>
-              <packageSources>
-                <clear />
-              </packageSources>
-            </configuration>
-            """);
-
-        var options = new WorkspaceSetupOptions
+        // A sibling directory, so it is NOT part of the project's own nuget.config hierarchy.
+        var configDir = _tempDirectory.Parent!.CreateSubdirectory($"cfg_{Guid.NewGuid():N}");
+        try
         {
-            BaseDirectory = _tempDirectory,
-            ConfigDir = configDir,
-            RequireExistingConfig = true,
-            NoGitignore = true
-        };
+            var options = new WorkspaceSetupOptions
+            {
+                BaseDirectory = _tempDirectory,
+                ConfigDir = configDir,
+                RequireExistingConfig = true,
+                NoGitignore = true
+            };
 
-        var service = GetRequiredService<IWorkspaceSetupService>();
-        var result = await service.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+            var service = GetRequiredService<IWorkspaceSetupService>();
+            var result = await service.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
-        Assert.AreEqual(0, result);
-        Assert.HasCount(1, _dotnet.InheritedCalls);
-        StringAssert.Contains(_dotnet.InheritedCalls[0], "--configfile", StringComparison.Ordinal);
-        StringAssert.Contains(_dotnet.InheritedCalls[0], configFile, StringComparison.Ordinal);
+            Assert.AreEqual(0, result);
+            Assert.HasCount(1, _dotnet.InheritedCalls);
+            // Never --configfile: that would discard the user/machine levels of the hierarchy.
+            Assert.DoesNotContain("--configfile", _dotnet.InheritedCalls[0], StringComparison.Ordinal);
+        }
+        finally
+        {
+            configDir.Delete(recursive: true);
+        }
     }
 
     /// <summary>
-    /// In the default case the config directory IS the project directory, so nothing is passed and dotnet's
-    /// normal nuget.config discovery — including the user and machine levels — is left intact. Passing
-    /// --configfile there would replace that hierarchy with a single file.
+    /// When the config directory already sits in the project's own hierarchy (the common case — it defaults to
+    /// the current directory), dotnet's discovery covers it, so nothing is overridden and nothing is warned.
     /// </summary>
     [TestMethod]
     public async Task Restore_DotNetProject_WithDefaultConfigDir_DoesNotOverrideNugetDiscovery()
     {
         await CreateCsprojAsync(_tempDirectory, "App");
-        await File.WriteAllTextAsync(
-            Path.Join(_tempDirectory.FullName, "nuget.config"),
-            """
-            <?xml version="1.0" encoding="utf-8"?>
-            <configuration>
-              <packageSources>
-                <clear />
-              </packageSources>
-            </configuration>
-            """);
 
         var options = new WorkspaceSetupOptions
         {
