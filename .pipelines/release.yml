@@ -311,7 +311,11 @@ extends:
     - ${{ if eq(parameters.PublishSymbols, 'true') }}:
       - stage: Publish_Symbols
         displayName: Publish Symbols
-        dependsOn: Build
+        # Build supplies the version output; Release_GitHub gates on the release actually shipping, so
+        # a failed release cannot leave century-retention symbols published for a build nobody has.
+        dependsOn:
+          - Build
+          - Release_GitHub
         variables:
           version: $[ stageDependencies.Build.Build.outputs['SetMeta.version'] ]
           # Used twice: as the PublishSymbols@2 artifact name and as the request name the symbol API
@@ -349,6 +353,9 @@ extends:
             # why the symbol project's source organization must be `microsoft` rather than the default.
             - task: PublishSymbols@2
               displayName: Upload PDBs to the Azure DevOps symbol service
+              # The artifact name is fixed per build, so a re-run after a later failure would fail here
+              # on the existing request and never reach the REST calls. Surfaces as a warning instead.
+              continueOnError: true
               inputs:
                 SymbolsFolder: $(Pipeline.Workspace)/symbolStaging
                 SearchPattern: '**/*.pdb'
@@ -385,14 +392,14 @@ extends:
                 Invoke-RestMethod -Uri $baseUri -Body ($createBody | ConvertTo-Json -Compress)
 
                 # Public symbols land on MSDL stripped: with no allowed-private-symbols policy on the
-                # project, the service runs the private data out of the PDB before it goes external.
+                # project, the service strips the private data out of the PDB before it goes external.
                 $publishBody = @{
                     publishToInternalServer = $true
                     publishToPublicServer   = $true
                 }
                 Write-Host "Promoting $($createBody.requestName) to symweb and MSDL"
                 Invoke-RestMethod -Uri "$baseUri/$($createBody.requestName)" -Body ($publishBody | ConvertTo-Json -Compress)
-              displayName: Request publication to symweb
+              displayName: Request publication to symweb and MSDL
 
     - ${{ if eq(parameters.DoEsrp, 'true') }}:
       - stage: Release_Npm
