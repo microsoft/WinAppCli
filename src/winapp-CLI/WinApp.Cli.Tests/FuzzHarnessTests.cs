@@ -76,7 +76,7 @@ public class FuzzHarnessTests
     [TestMethod]
     public void OneFuzzConfig_ReferencesTargetsThatActuallyResolve()
     {
-        var configPath = Path.Combine(AppContext.BaseDirectory, "OneFuzzConfig.json");
+        var configPath = Path.Join(AppContext.BaseDirectory, "OneFuzzConfig.json");
         Assert.IsTrue(File.Exists(configPath),
             $"OneFuzzConfig.json must reach the build output so it lands in the OneFuzz drop directory. Looked in {AppContext.BaseDirectory}.");
 
@@ -136,9 +136,14 @@ public class FuzzHarnessTests
         return reader.ReadAsync(offset, (int)size, CancellationToken.None).GetAwaiter().GetResult();
     }
 
-    private static string Describe(List<Exception> escapes) =>
-        string.Join("; ", escapes.GroupBy(e => e.GetType().Name)
-                                 .Select(g => $"{g.Key} x{g.Count()} (e.g. {g.First().Message})"));
+    private static string Describe(List<Exception> escapes)
+    {
+        var summary = string.Join("; ", escapes.GroupBy(e => e.GetType().Name)
+                                               .Select(g => $"{g.Key} x{g.Count()} (e.g. {g.First().Message})"));
+
+        // The counts say how reachable a gap is; the first stack says where it is.
+        return $"{summary}{Environment.NewLine}First escape:{Environment.NewLine}{escapes[0]}";
+    }
 
     /// <summary>
     /// Writes the seed corpus for both fuzz targets and asserts every seed is structurally valid.
@@ -155,9 +160,9 @@ public class FuzzHarnessTests
     [TestMethod]
     public void GenerateSeedCorpus_ProducesValidSeedsForBothTargets()
     {
-        var root = Path.Combine(AppContext.BaseDirectory, "fuzz-corpus");
-        var archiveDir = Path.Combine(root, "ziprangeextractor-archive");
-        var directoryDir = Path.Combine(root, "ziprangeextractor-centraldirectory");
+        var root = Path.Join(AppContext.BaseDirectory, "fuzz-corpus");
+        var archiveDir = Path.Join(root, "ziprangeextractor-archive");
+        var directoryDir = Path.Join(root, "ziprangeextractor-centraldirectory");
         Directory.CreateDirectory(archiveDir);
         Directory.CreateDirectory(directoryDir);
 
@@ -178,8 +183,8 @@ public class FuzzHarnessTests
             var entries = ParseArchive(bytes);
             Assert.IsTrue(entries.Count > 0, $"Seed '{name}' produced no entries, so it would cover nothing.");
 
-            File.WriteAllBytes(Path.Combine(archiveDir, $"{name}.zip"), bytes);
-            File.WriteAllBytes(Path.Combine(directoryDir, $"{name}.cd.bin"), CarveCentralDirectory(bytes));
+            File.WriteAllBytes(Path.Join(archiveDir, $"{name}.zip"), bytes);
+            File.WriteAllBytes(Path.Join(directoryDir, $"{name}.cd.bin"), CarveCentralDirectory(bytes));
         }
 
         Assert.AreEqual(seeds.Count, Directory.GetFiles(archiveDir).Length);
@@ -259,6 +264,8 @@ public class FuzzHarnessTests
             }
             catch (Exception ex)
             {
+                // Deliberately unfiltered: anything reaching here is something the harness failed to
+                // absorb, and narrowing it would hide the unexpected types this test exists to catch.
                 escapes.Add(ex);
             }
         }
