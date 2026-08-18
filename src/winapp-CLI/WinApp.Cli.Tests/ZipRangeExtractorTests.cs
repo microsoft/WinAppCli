@@ -320,14 +320,14 @@ public class ZipRangeExtractorTests
         const int total = 200_000; // larger than the tail window, so candidate heads fall outside it
         var data = new byte[total];
 
-        // Fill the tail with back-to-back candidates whose comment lengths all run to the end and whose
-        // directories claim to live at the front of the archive, outside the tail.
+        // Fill the tail with back-to-back candidates whose comment lengths all run to the end. Their
+        // directories start at offset 0 - outside the tail - so confirming each one costs a real read.
         for (var pos = total - 22; pos >= total - 20_000; pos -= 22)
         {
             WriteU32(data, pos, 0x06054b50);
             WriteU16(data, pos + 10, 1);
-            WriteU32(data, pos + 12, 46);
-            WriteU32(data, pos + 16, (uint)(pos - 46));
+            WriteU32(data, pos + 12, (uint)pos);   // size: directory spans from 0 up to this record
+            WriteU32(data, pos + 16, 0);           // offset: front of the archive, outside the tail
             WriteU16(data, pos + 20, (ushort)(total - pos - 22));
         }
 

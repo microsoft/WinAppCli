@@ -79,8 +79,14 @@ internal static class ZipRangeExtractor
                 }
                 catch (InvalidDataException)
                 {
-                    // A marker-bearing record planted in a comment has no usable locator or record;
-                    // keep scanning rather than failing the whole archive.
+                    // A marker-bearing record planted in a comment has no usable locator or record.
+                    // Resolving it may already have cost a locator scan and a read, so it is charged
+                    // against the same budget rather than letting failures loop for free.
+                    if (++probes >= MaxDirectoryProbes)
+                    {
+                        break;
+                    }
+
                     continue;
                 }
 
