@@ -147,6 +147,82 @@ public class WorkspaceSetupServiceConfigModeTests : BaseCommandTests
     }
 
     /// <summary>
+    /// `restore --config-dir <dir>` selects the NuGet configuration for the native path, so the delegated
+    /// .NET restore must use it too — otherwise a .NET project would resolve packages from different feeds
+    /// than a native one given the same option.
+    /// </summary>
+    [TestMethod]
+    public async Task Restore_DotNetProject_WithSeparateConfigDir_PassesThatConfigToDotnetRestore()
+    {
+        await CreateCsprojAsync(_tempDirectory, "App");
+
+        var configDir = _tempDirectory.CreateSubdirectory("nugetconfig");
+        var configFile = Path.Join(configDir.FullName, "nuget.config");
+        await File.WriteAllTextAsync(
+            configFile,
+            """
+            <?xml version="1.0" encoding="utf-8"?>
+            <configuration>
+              <packageSources>
+                <clear />
+              </packageSources>
+            </configuration>
+            """);
+
+        var options = new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = configDir,
+            RequireExistingConfig = true,
+            NoGitignore = true
+        };
+
+        var service = GetRequiredService<IWorkspaceSetupService>();
+        var result = await service.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+
+        Assert.AreEqual(0, result);
+        Assert.HasCount(1, _dotnet.InheritedCalls);
+        StringAssert.Contains(_dotnet.InheritedCalls[0], "--configfile", StringComparison.Ordinal);
+        StringAssert.Contains(_dotnet.InheritedCalls[0], configFile, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// In the default case the config directory IS the project directory, so nothing is passed and dotnet's
+    /// normal nuget.config discovery — including the user and machine levels — is left intact. Passing
+    /// --configfile there would replace that hierarchy with a single file.
+    /// </summary>
+    [TestMethod]
+    public async Task Restore_DotNetProject_WithDefaultConfigDir_DoesNotOverrideNugetDiscovery()
+    {
+        await CreateCsprojAsync(_tempDirectory, "App");
+        await File.WriteAllTextAsync(
+            Path.Join(_tempDirectory.FullName, "nuget.config"),
+            """
+            <?xml version="1.0" encoding="utf-8"?>
+            <configuration>
+              <packageSources>
+                <clear />
+              </packageSources>
+            </configuration>
+            """);
+
+        var options = new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            RequireExistingConfig = true,
+            NoGitignore = true
+        };
+
+        var service = GetRequiredService<IWorkspaceSetupService>();
+        var result = await service.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+
+        Assert.AreEqual(0, result);
+        Assert.HasCount(1, _dotnet.InheritedCalls);
+        Assert.DoesNotContain("--configfile", _dotnet.InheritedCalls[0], StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A failing `dotnet restore` must surface as a non-zero exit rather than being reported as a success.
     /// </summary>
     [TestMethod]

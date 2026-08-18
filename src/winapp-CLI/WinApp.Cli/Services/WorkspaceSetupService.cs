@@ -89,6 +89,15 @@ internal class WorkspaceSetupService(
             // that for each project in the directory is both safe and what a multi-project repo needs.
             var csprojFiles = dotNetService.FindCsproj(options.BaseDirectory);
 
+            // Honor `--config-dir` here too. The native path roots its NuGet hierarchy at options.ConfigDir
+            // (SetConfigRoot above), but a delegated `dotnet restore` resolves nuget.config relative to the
+            // project, so without this a .NET project would restore from different feeds than a native one
+            // asked to use the same config directory. Only passed when the caller actually selected a
+            // different directory AND it supplies a config: in the default case (config dir == project dir)
+            // nothing is passed, so normal nuget.config discovery — including the user/machine level — is
+            // untouched, which --configfile would otherwise replace.
+            var selectedConfig = new FileInfo(Path.Join(options.ConfigDir.FullName, "nuget.config"));
+
             logger.LogInformation(
                 "{UISymbol} .NET project detected with no winapp.yaml — SDK packages are PackageReferences in {Count} project(s). Running 'dotnet restore'.",
                 UiSymbols.Note,
@@ -96,9 +105,27 @@ internal class WorkspaceSetupService(
 
             foreach (var projectToRestore in csprojFiles)
             {
+                var usesSelectedConfig = selectedConfig.Exists
+                    && !string.Equals(
+                        projectToRestore.Directory!.FullName.TrimEnd(Path.DirectorySeparatorChar),
+                        options.ConfigDir.FullName.TrimEnd(Path.DirectorySeparatorChar),
+                        StringComparison.OrdinalIgnoreCase);
+
+                var configFileArgument = usesSelectedConfig
+                    ? $" --configfile \"{selectedConfig.FullName}\""
+                    : string.Empty;
+
+                if (usesSelectedConfig)
+                {
+                    logger.LogDebug(
+                        "Using the NuGet configuration from the selected config directory for {Project}: {ConfigFile}",
+                        projectToRestore.Name,
+                        selectedConfig.FullName);
+                }
+
                 var restoreExitCode = await dotNetService.RunDotnetInheritedAsync(
                     projectToRestore.Directory!,
-                    $"restore \"{projectToRestore.FullName}\"",
+                    $"restore \"{projectToRestore.FullName}\"{configFileArgument}",
                     cancellationToken);
 
                 if (restoreExitCode != 0)
