@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Matches WinApp.Cli so the harness exercises the shipping assembly itself, which is what
+         OneFuzz attributes the compliance claim to via FuzzingTargetBinaries. -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsPublishable>false</IsPublishable>
+    <!-- libFuzzer resolves the target by name via reflection, so symbols must ship alongside it. -->
+    <DebugType>portable</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WinApp.Cli\WinApp.Cli.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="OneFuzzConfig.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>

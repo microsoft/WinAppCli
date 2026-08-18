@@ -41,6 +41,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\WinApp.Cli\WinApp.Cli.csproj" />
+    <ProjectReference Include="..\WinApp.Cli.Fuzz\WinApp.Cli.Fuzz.csproj" />
   </ItemGroup>
 
   <ItemGroup>
