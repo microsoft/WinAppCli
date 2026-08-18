@@ -284,6 +284,18 @@ internal class UiSendKeysCommand : Command, IShortDescription
                         effectiveHwnd = targetHwnd;
                     }
 
+                    // Confirm the window this command is about to drive still exists and still belongs to
+                    // the resolved app. Without --target the session HWND was captured before the queue
+                    // wait and may since have been closed and its handle recycled by another process; with
+                    // --target the re-resolved element must still live under the same process. Keystrokes
+                    // are irreversible, so this gate runs before foreground, focus, post or send.
+                    if (!DesktopTargetValidation.TryConfirmTargetWindow(
+                            systemQuery, targetHwnd, session.ProcessId, logger, json, "send-keys",
+                            parseResult.InvocationConfiguration.Error))
+                    {
+                        return 1;
+                    }
+
                     // Request foreground on the top-level window that owns the target, so activation is
                     // asked for once at the right level rather than on a child control HWND.
                     if (targetHwnd != 0)

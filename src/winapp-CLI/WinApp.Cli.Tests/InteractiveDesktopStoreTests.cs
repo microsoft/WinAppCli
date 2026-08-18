@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using WinApp.Cli.Services.InteractiveDesktop;
@@ -482,5 +484,144 @@ public class InteractiveDesktopStoreTests
         public long? TryGetProcessStartTicksUtc(int processId) => _real.TryGetProcessStartTicksUtc(processId);
 
         public bool? IsProcessAlive(int processId, long startTicksUtc) => _real.IsProcessAlive(processId, startTicksUtc);
+    }
+
+    // ------------------------------------------------------------------------ lock retryability
+
+    [TestMethod]
+    public void OnlySharingAndLockViolationsAreTreatedAsContention()
+    {
+        // Win32 codes arrive in the low word of HResult as 0x8007xxxx.
+        Assert.IsTrue(CoordinationLockIo.IsContention(new IOException("busy", unchecked((int)0x80070020))),
+            "ERROR_SHARING_VIOLATION means another process holds the file");
+        Assert.IsTrue(CoordinationLockIo.IsContention(new IOException("locked", unchecked((int)0x80070021))),
+            "ERROR_LOCK_VIOLATION means a byte-range lock is held");
+    }
+
+    [TestMethod]
+    public void OtherIoFailuresAreNotContentionAndMustNotBeRetried()
+    {
+        // Retrying these forever would be indistinguishable from waiting on a real lock, so the command
+        // would hang instead of reporting that coordination is unavailable.
+        Assert.IsFalse(CoordinationLockIo.IsContention(new IOException("gone", unchecked((int)0x80070003))),
+            "ERROR_PATH_NOT_FOUND will never clear by waiting");
+        Assert.IsFalse(CoordinationLockIo.IsContention(new IOException("device", unchecked((int)0x8007001F))),
+            "ERROR_GEN_FAILURE is a real device failure");
+        Assert.IsFalse(CoordinationLockIo.IsContention(new IOException("handles", unchecked((int)0x80070004))),
+            "ERROR_TOO_MANY_OPEN_FILES is a process-level failure");
+        Assert.IsFalse(CoordinationLockIo.IsContention(new FileNotFoundException()),
+            "a missing file is not contention");
+    }
+
+    [TestMethod]
+    public void ANonContentionStateLockFailureReportsCoordinationUnavailable()
+    {
+        // A directory sitting where the lock file belongs makes FileStream fail with a non-sharing
+        // error, which must fail closed rather than spin forever.
+        _paths.EnsureDirectories();
+        var occupied = Path.Combine(_paths.LockDirectory, "occupied.lock");
+        Directory.CreateDirectory(occupied);
+
+        var store = new InteractiveDesktopStateStore(
+            new RedirectedStateLockPaths(_paths, occupied), _participants, new TickCountClock(),
+            NullLogger<InteractiveDesktopStateStore>.Instance);
+
+        var ex = Assert.ThrowsExactly<UiCoordinationException>(
+            () => store.AcquireStateLock(CancellationToken.None).Dispose());
+        Assert.AreEqual(UiCoordinationErrorCodes.Unavailable, ex.Code,
+            "a real I/O failure must fail closed instead of retrying forever");
+    }
+
+    /// <summary>Redirects only <c>state.lock</c>, so a test can point it at an unusable path.</summary>
+    private sealed class RedirectedStateLockPaths(IInteractiveDesktopPaths inner, string stateLockPath)
+        : IInteractiveDesktopPaths
+    {
+        public string LockDirectory => inner.LockDirectory;
+
+        public string ParticipantsDirectory => inner.ParticipantsDirectory;
+
+        public string StatePath => inner.StatePath;
+
+        public string StateLockPath => stateLockPath;
+
+        public string ActiveLockPath => inner.ActiveLockPath;
+
+        public string LeaseSearchPattern => inner.LeaseSearchPattern;
+
+        public string LeasePath(int processId, long startTicksUtc) => inner.LeasePath(processId, startTicksUtc);
+
+        public bool TryParseLeaseFileName(string fileName, out int processId, out long startTicksUtc)
+            => inner.TryParseLeaseFileName(fileName, out processId, out startTicksUtc);
+
+        public void EnsureDirectories() => inner.EnsureDirectories();
+    }
+
+    // ------------------------------------------------------------------------ directory ownership
+
+    [TestMethod]
+    public void ADirectoryOwnedByAnotherUserIsRejectedEvenWithACurrentUserOnlyDacl()
+    {
+        // The owner of an object implicitly holds WRITE_DAC, so a foreign owner can rewrite even a
+        // protected, current-user-only DACL at any moment. Checking the DACL alone is not enough.
+        var currentUser = WindowsIdentity.GetCurrent().User!;
+        var stranger = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+
+        var security = new DirectorySecurity();
+        security.SetOwner(stranger);
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.AddAccessRule(new FileSystemAccessRule(
+            currentUser, FileSystemRights.FullControl,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None, AccessControlType.Allow));
+
+        Assert.IsFalse(InteractiveDesktopPaths.IsCurrentUserOnly(security, currentUser),
+            "a foreign owner retains WRITE_DAC and can re-permission the directory behind our back");
+    }
+
+    [TestMethod]
+    public void ADirectoryOwnedByTheCurrentUserWithAProtectedSelfOnlyDaclIsAccepted()
+    {
+        var currentUser = WindowsIdentity.GetCurrent().User!;
+
+        var security = new DirectorySecurity();
+        security.SetOwner(currentUser);
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.AddAccessRule(new FileSystemAccessRule(
+            currentUser, FileSystemRights.FullControl,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None, AccessControlType.Allow));
+
+        Assert.IsTrue(InteractiveDesktopPaths.IsCurrentUserOnly(security, currentUser));
+    }
+
+    [TestMethod]
+    public void ADirectoryGrantingAnotherIdentityIsRejectedEvenWhenOwnedByTheCurrentUser()
+    {
+        var currentUser = WindowsIdentity.GetCurrent().User!;
+        var everyone = new SecurityIdentifier(WellKnownSidType.WorldSid, null);
+
+        var security = new DirectorySecurity();
+        security.SetOwner(currentUser);
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.AddAccessRule(new FileSystemAccessRule(
+            everyone, FileSystemRights.FullControl,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None, AccessControlType.Allow));
+
+        Assert.IsFalse(InteractiveDesktopPaths.IsCurrentUserOnly(security, currentUser),
+            "a world-writable coordination directory must never be accepted");
+    }
+
+    [TestMethod]
+    public void ADirectoryWithInheritedRulesIsRejected()
+    {
+        var currentUser = WindowsIdentity.GetCurrent().User!;
+
+        var security = new DirectorySecurity();
+        security.SetOwner(currentUser);
+        security.SetAccessRuleProtection(isProtected: false, preserveInheritance: true);
+
+        Assert.IsFalse(InteractiveDesktopPaths.IsCurrentUserOnly(security, currentUser),
+            "inherited rules can grant whatever the parent grants, including other users");
     }
 }

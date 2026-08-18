@@ -113,9 +113,14 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
                     bufferSize: 1,
                     FileOptions.None);
             }
-            catch (IOException)
+            catch (IOException ex) when (CoordinationLockIo.IsContention(ex))
             {
                 // Held by a process inside its desktop-sensitive section.
+            }
+            catch (IOException ex)
+            {
+                // Not contention: retrying would wait forever on a failure that will never clear.
+                throw CoordinationLockIo.CannotOpen(activeLockPath, ex);
             }
             catch (UnauthorizedAccessException ex)
             {
@@ -208,11 +213,12 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
                 {
                     var exitCode = await body(this, cancellationToken).ConfigureAwait(false);
 
-                    // A body that swallowed its own cancellation must not be treated as a normal
-                    // completion: renewing the idle grace for a command that never really ran would hold
-                    // the desktop against every other owner. The handler catch-all is filtered to let
-                    // cancellation escape, and this is the backstop if one ever is not.
-                    bodyCompletedNormally = !cancellationToken.IsCancellationRequested;
+                    // "Completed normally" means the body RETURNED rather than threw — deliberately not
+                    // "the token is unset". `ui record` observes Ctrl+C on purpose, finalizes the MP4 and
+                    // returns success; that is a completed command and must renew the owner's grace.
+                    // Commands that must not renew let the cancellation propagate instead, which is why
+                    // handler catch-alls are filtered with UiCoordinatedAction.IsCoordinationFault.
+                    bodyCompletedNormally = true;
                     return exitCode;
                 }
                 finally

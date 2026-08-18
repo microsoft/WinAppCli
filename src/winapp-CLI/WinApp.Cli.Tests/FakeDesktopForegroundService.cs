@@ -21,9 +21,15 @@ internal sealed class FakeDesktopForegroundService : IDesktopForegroundService
     /// <summary>Handles this fake reports as minimized, to drive the screenshot escalation path.</summary>
     public HashSet<long> MinimizedWindows { get; } = [];
 
+    /// <summary>
+    /// Reports every window as minimized, so a test can force the screenshot escalation path without
+    /// having to know which handle the fake session happens to resolve to.
+    /// </summary>
+    public bool AllWindowsMinimized { get; set; }
+
     public void RequestForeground(long hwnd) => ForegroundRequests.Add(hwnd);
 
-    public bool IsMinimized(long hwnd) => MinimizedWindows.Contains(hwnd);
+    public bool IsMinimized(long hwnd) => AllWindowsMinimized || MinimizedWindows.Contains(hwnd);
 
     public void Restore(long hwnd) => RestoreRequests.Add(hwnd);
 }

@@ -152,6 +152,50 @@ public partial class UiCommandTests
         Assert.AreEqual(UiTurnMode.DesktopExclusive, _fakeDesktopLock.Runs[0].Mode);
     }
 
+    [TestMethod]
+    public async Task Screenshot_LetsACancelledEscalationEscapeInsteadOfReportingAnInternalError()
+    {
+        // The handler's catch-all must not swallow cancellation raised by escalation: the user would see
+        // internal_error instead of a cancellation, and the coordinator would treat the body as having
+        // completed and renew the owner's grace for a command that never captured anything.
+        _fakeUia.ScreenshotResult = (new byte[4 * 4 * 4], 4, 4);
+        _fakeUia.ScreenshotThrow = new WinApp.Cli.Services.DesktopEscalationRequiredException("the target window is minimized");
+        _fakeDesktopLock.ThrowOnEscalation = new OperationCanceledException();
+
+        var command = GetRequiredService<UiScreenshotCommand>();
+        var output = Path.Combine(_tempDirectory.FullName, "cancelled.png");
+        _ = await ParseAndInvokeWithCaptureAsync(
+            command, ["-a", "TestApp", "--output", output, "--json"]);
+
+        var emitted = $"{ConsoleStdOut}{ConsoleStdErr}";
+        Assert.AreEqual(1, _fakeDesktopLock.Escalations, "the observational pass must have forced an escalation");
+        Assert.IsTrue(
+            string.IsNullOrWhiteSpace(emitted),
+            "the handler must report nothing for a cancelled escalation and let it propagate, so the "
+                + $"coordinator can emit the structured cancellation and exit 130. It emitted: {emitted}");
+        Assert.IsFalse(File.Exists(output), "a cancelled capture must publish no image");
+    }
+
+    [TestMethod]
+    public async Task Screenshot_ReportsCoordinationUnavailableRatherThanInternalErrorWhenEscalationFails()
+    {
+        _fakeUia.ScreenshotResult = (new byte[4 * 4 * 4], 4, 4);
+        _fakeUia.ScreenshotThrow = new WinApp.Cli.Services.DesktopEscalationRequiredException("the target window is minimized");
+        _fakeDesktopLock.ThrowOnEscalation = new UiCoordinationException(
+            UiCoordinationErrorCodes.Unavailable, "newer state", "update winapp");
+
+        var command = GetRequiredService<UiScreenshotCommand>();
+        var output = Path.Combine(_tempDirectory.FullName, "unavailable.png");
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["-a", "TestApp", "--output", output, "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        StringAssert.Contains($"{ConsoleStdOut}{ConsoleStdErr}", UiCoordinationErrorCodes.Unavailable,
+            "a coordination failure must keep its own error code and remediation");
+        Assert.IsFalse(File.Exists(output), "no image may be published when escalation was refused");
+    }
+
     // ------------------------------------------------- desktop-section placement and revalidation
 
     [TestMethod]
@@ -202,6 +246,69 @@ public partial class UiCommandTests
         CollectionAssert.Contains(_fakeDesktopForeground.ForegroundRequests, 2222L);
         CollectionAssert.DoesNotContain(_fakeDesktopForeground.ForegroundRequests, 1111L,
             "the pre-wait window handle must never be foregrounded");
+    }
+
+    [TestMethod]
+    public async Task SendKeys_RefusesWhenTheTargetWindowClosedWhileQueued()
+    {
+        // Keystrokes are irreversible, so send-keys must revalidate its window after the queue wait just
+        // as click and invoke do — otherwise it types into whatever now owns a recycled handle.
+        _fakeUia.FindSingleResult = new UiElement
+        {
+            Id = "txt", Selector = "txt", Name = "Value",
+            X = 10, Y = 20, Width = 40, Height = 30, WindowHandle = 4242,
+        };
+        _fakeSystemQuery.ProcessIdForWindowResult = 0;
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["hello", "-a", "TestApp", "--target", "txt", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeDesktopForeground.ForegroundRequests.Count,
+            "a closed target must be refused before anything touches the desktop");
+    }
+
+    [TestMethod]
+    public async Task SendKeys_RefusesWhenTheWindowHandleWasRecycledByAnotherProcess()
+    {
+        _fakeUia.FindSingleResult = new UiElement
+        {
+            Id = "txt", Selector = "txt", Name = "Value",
+            X = 10, Y = 20, Width = 40, Height = 30, WindowHandle = 4242,
+        };
+        // The handle now belongs to a different process: Windows reused it while this command queued.
+        _fakeSystemQuery.ProcessIdForWindowResult = 9999;
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["hello", "-a", "TestApp", "--target", "txt", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeDesktopForeground.ForegroundRequests.Count,
+            "a recycled handle must be refused before anything touches the desktop");
+    }
+
+    [TestMethod]
+    public async Task SendKeys_WithoutATargetStillValidatesTheSessionWindow()
+    {
+        // With no --target the session HWND was captured before the queue wait, so it needs the same
+        // check: nothing re-resolves it on the way in.
+        _fakeSession.SessionResult = new UiSessionInfo
+        {
+            ProcessId = 1234,
+            ProcessName = "TestApp",
+            WindowTitle = "Test Window",
+            WindowHandle = 4242,
+        };
+        _fakeSystemQuery.ProcessIdForWindowResult = 0;
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["hello", "-a", "TestApp", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeDesktopForeground.ForegroundRequests.Count,
+            "a stale session window must be refused before anything touches the desktop");
     }
 
     [TestMethod]

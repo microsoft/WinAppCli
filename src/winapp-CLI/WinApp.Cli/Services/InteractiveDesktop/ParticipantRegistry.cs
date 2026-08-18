@@ -164,10 +164,20 @@ internal sealed class ParticipantRegistry(
                 FileOptions.DeleteOnClose);
             return false;
         }
+        catch (FileNotFoundException)
+        {
+            // The holder's handle closed between enumeration and this probe, so Windows removed the
+            // file. That is proof of death, not of life — unlike a sharing violation below.
+            return false;
+        }
         catch (IOException)
         {
             // Sharing violation: another process holds this lease FileShare.None. That is the liveness
             // proof — including for a suspended process, which still owns its handle.
+            //
+            // Any other I/O failure also lands here deliberately. Unlike lock acquisition (see
+            // CoordinationLockIo), a probe that cannot prove death must assume life: pruning a live
+            // participant would strand its turn, whereas an over-cautious "live" only delays reclaim.
             return true;
         }
         catch (UnauthorizedAccessException ex)

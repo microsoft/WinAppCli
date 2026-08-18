@@ -33,21 +33,7 @@ internal sealed partial class UiAutomationService
 {
     internal static Func<Windows.Win32.Foundation.HWND, int, int, byte[]> s_captureFromWindow = CaptureFromWindow;
     internal static Func<int, int, int, int, int, int, byte[]> s_captureFromScreenScaled = CaptureFromScreenScaled;
-    internal static Action<Windows.Win32.Foundation.HWND> s_foregroundWindowForBlankRetry = ForegroundWindowForBlankRetry;
     internal static Action<int> s_sleepForBlankRetry = Thread.Sleep;
-
-    /// <remarks>
-    /// Coverage ceiling (issue #630): this is a direct Win32 foreground request used only after a
-    /// native PrintWindow blank frame. Tests cover callers through the injectable seam.
-    /// <para>
-    /// Coordination (issue #764): this bypasses <see cref="IDesktopForegroundService"/> only because it
-    /// is an established test seam with an <c>HWND</c> signature. Its single caller
-    /// (<see cref="CaptureFromWindowWithBlankRetryAsync"/>) invokes it inside a desktop section, so the
-    /// foreground change is still serialized against every other coordinated process.
-    /// </para>
-    /// </remarks>
-    private static void ForegroundWindowForBlankRetry(Windows.Win32.Foundation.HWND hwnd)
-        => Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
 
     /// <remarks>
     /// Coverage ceiling (issue #630): tests cover real WGC/screen/PrintWindow attempts and deterministic
@@ -231,7 +217,9 @@ internal sealed partial class UiAutomationService
         _logger.LogDebug("PrintWindow returned blank frame; foregrounding and retrying");
         await using (await desktopSection.EnterAsync(ct).ConfigureAwait(false))
         {
-            s_foregroundWindowForBlankRetry(hwnd);
+            // Every foreground request goes through the one service, so coordination has a single
+            // choke point and tests observe it through the injected fake.
+            _desktopForeground.RequestForeground((nint)hwnd);
             s_sleepForBlankRetry(200);
             pixels = s_captureFromWindow(hwnd, width, height);
         }

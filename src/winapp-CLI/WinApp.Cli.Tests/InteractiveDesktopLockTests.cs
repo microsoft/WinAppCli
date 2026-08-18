@@ -498,44 +498,37 @@ public class InteractiveDesktopLockTests
         var state = _store.Read().State!;
         Assert.AreEqual(0, state.Waiters.Count, "the escalation's ticket must be removed");
         Assert.AreEqual(deadlineBefore, state.IdleExpiresTick64,
-            "a cancelled stranger must not disturb the current owner's idle deadline");
+            "a command cancelled while queued never ran, so it must renew no grace — neither its own "
+                + "(it never held the turn) nor the current owner's");
     }
 
     [TestMethod]
-    public async Task ABodyThatSwallowsCancellationStillDoesNotRenewTheGrace()
+    public async Task AnActiveRecordingThatFinalizesOnCancellationStillRenewsTheGrace()
     {
-        // Defence in depth for the handler catch-all: even if a body swallows its own cancellation, the
-        // coordinator must not treat that as a normal completion and extend the owner's turn.
-        Assert.AreEqual(0, await RunAsync(UiTurnMode.DesktopExclusive, "ui click", (_, _) => Task.FromResult(0)));
-        var deadlineAfterNormalCommand = ReadOwnerDeadline();
-        Assert.AreNotEqual(0, deadlineAfterNormalCommand, "an ordinary completion establishes the grace");
+        // `ui record` observes Ctrl+C deliberately: it stops capturing, finalizes the MP4, and returns
+        // success. That is a completed command, so the owner keeps its turn and its grace — the agent is
+        // expected to issue a follow-up command next. "Completed normally" therefore means the body
+        // returned, not that the token is unset.
+        Assert.AreEqual(0, await RunAsync(UiTurnMode.TurnShared, "ui record", (_, _) => Task.FromResult(0)));
+        var deadlineBeforeRecording = ReadOwnerDeadline();
 
-        // Any renewal would land strictly later than the deadline captured above.
         await Task.Delay(50);
 
         using var cts = new CancellationTokenSource();
         var bodyObservedCancellation = false;
-        var exitCode = await RunAsyncWithToken(UiTurnMode.DesktopExclusive, "ui click", async (_, token) =>
+        var exitCode = await RunAsyncWithToken(UiTurnMode.TurnShared, "ui record", async (_, token) =>
         {
+            // Stands in for a capture loop that is interrupted and finalizes its output.
             await cts.CancelAsync();
             bodyObservedCancellation = token.IsCancellationRequested;
-            try
-            {
-                token.ThrowIfCancellationRequested();
-            }
-            catch (OperationCanceledException)
-            {
-                // Deliberately swallowed, imitating an over-broad handler catch.
-            }
-
-            return 1;
+            return 0;
         }, cts.Token);
 
-        Assert.AreEqual(1, exitCode, "the body's own result is preserved");
+        Assert.AreEqual(0, exitCode, "a finalized recording reports success");
         Assert.IsTrue(bodyObservedCancellation,
-            "the body must actually observe cancellation, or this test proves nothing");
-        Assert.AreEqual(deadlineAfterNormalCommand, ReadOwnerDeadline(),
-            "a cancelled command must not renew the owner's idle grace, however its body handled the cancellation");
+            "the recording must actually observe cancellation, or this test proves nothing");
+        Assert.IsTrue(ReadOwnerDeadline() > deadlineBeforeRecording,
+            "a recording that finalized and returned successfully must renew its owner's idle grace");
     }
 
     [TestMethod]

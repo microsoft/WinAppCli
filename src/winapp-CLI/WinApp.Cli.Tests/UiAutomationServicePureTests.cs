@@ -194,20 +194,22 @@ public class UiAutomationServicePureTests
     public async Task CaptureFromWindowWithBlankRetry_RetriesBlankFrame()
     {
         var calls = 0;
-        var foregrounded = false;
         UiAutomationService.s_captureFromWindow = (_, _, _) =>
             ++calls == 1 ? new byte[8] : new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 };
-        UiAutomationService.s_foregroundWindowForBlankRetry = _ => foregrounded = true;
         UiAutomationService.s_sleepForBlankRetry = ms => Assert.AreEqual(200, ms);
 
+        // Foreground now goes through the one injected service rather than a private static seam, so
+        // the test observes the same choke point coordination relies on.
+        var foreground = new FakeDesktopForegroundService();
         var service = new UiAutomationService(
-            NullLogger<UiAutomationService>.Instance, new SelectorService(), new FakeDesktopForegroundService());
+            NullLogger<UiAutomationService>.Instance, new SelectorService(), foreground);
         var section = new CountingDesktopSection();
         var pixels = await service.CaptureFromWindowWithBlankRetryAsync(
             new HWND(123), 1, 2, section, observeOnly: false, CancellationToken.None);
 
         Assert.AreEqual(2, calls, "blank first capture must trigger one retry");
-        Assert.IsTrue(foregrounded, "blank retry must foreground the target window");
+        CollectionAssert.AreEqual(new long[] { 123 }, foreground.ForegroundRequests,
+            "blank retry must foreground the target window through IDesktopForegroundService");
         Assert.AreEqual(1, section.Enters, "the blank-retry foreground must happen inside a desktop section");
         CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 }, pixels);
     }
@@ -216,17 +218,18 @@ public class UiAutomationServicePureTests
     public async Task CaptureFromWindowWithBlankRetry_ObserveOnlyRequestsEscalationInsteadOfForegrounding()
     {
         UiAutomationService.s_captureFromWindow = (_, _, _) => new byte[8];
-        UiAutomationService.s_foregroundWindowForBlankRetry =
-            _ => Assert.Fail("an observational pass must never take the foreground");
 
+        var foreground = new FakeDesktopForegroundService();
         var service = new UiAutomationService(
-            NullLogger<UiAutomationService>.Instance, new SelectorService(), new FakeDesktopForegroundService());
+            NullLogger<UiAutomationService>.Instance, new SelectorService(), foreground);
         var section = new CountingDesktopSection();
 
         await Assert.ThrowsExactlyAsync<DesktopEscalationRequiredException>(
             () => service.CaptureFromWindowWithBlankRetryAsync(
                 new HWND(123), 1, 2, section, observeOnly: true, CancellationToken.None));
 
+        Assert.AreEqual(0, foreground.ForegroundRequests.Count,
+            "an observational pass must never take the foreground");
         Assert.AreEqual(0, section.Enters, "an observational pass must not take active.lock");
     }
 
@@ -239,15 +242,16 @@ public class UiAutomationServicePureTests
             calls++;
             return new byte[] { 0, 0, 0, 1 };
         };
-        UiAutomationService.s_foregroundWindowForBlankRetry = _ => Assert.Fail("non-blank capture must not foreground/retry");
 
+        var foreground = new FakeDesktopForegroundService();
         var service = new UiAutomationService(
-            NullLogger<UiAutomationService>.Instance, new SelectorService(), new FakeDesktopForegroundService());
+            NullLogger<UiAutomationService>.Instance, new SelectorService(), foreground);
         var section = new CountingDesktopSection();
         var pixels = await service.CaptureFromWindowWithBlankRetryAsync(
             new HWND(456), 1, 1, section, observeOnly: false, CancellationToken.None);
 
         Assert.AreEqual(1, calls);
+        Assert.AreEqual(0, foreground.ForegroundRequests.Count, "non-blank capture must not foreground/retry");
         Assert.AreEqual(0, section.Enters, "a clean capture must never take active.lock");
         Assert.AreEqual(1, pixels[3]);
     }

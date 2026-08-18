@@ -243,6 +243,19 @@ internal sealed class InteractiveDesktopPaths : IInteractiveDesktopPaths
             }
 
             directoryInfo.SetAccessControl(BuildCurrentUserOnlySecurity());
+
+            // Verify rather than assume. Taking ownership can be refused without throwing on every
+            // Windows configuration, and a directory whose owner is still a stranger remains
+            // re-permissionable behind our back — so confirm the repair actually took effect and fail
+            // closed if it did not.
+            directoryInfo.Refresh();
+            if (!IsCurrentUserOnly(directoryInfo.GetAccessControl(), currentUser))
+            {
+                throw new UiCoordinationException(
+                    UiCoordinationErrorCodes.Unavailable,
+                    $"The UI coordination directory '{directoryInfo.FullName}' is still owned or reachable by another user after repair.",
+                    "Point WINAPP_UI_LOCK_DIRECTORY at a directory this user owns, or remove the override to use the default location under %LOCALAPPDATA%.");
+            }
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or PrivilegeNotHeldException or InvalidOperationException)
         {
@@ -255,8 +268,24 @@ internal sealed class InteractiveDesktopPaths : IInteractiveDesktopPaths
         }
     }
 
-    private static bool IsCurrentUserOnly(DirectorySecurity security, SecurityIdentifier currentUser)
+    /// <summary>
+    /// Whether <paramref name="security"/> describes a directory only the current user can reach or
+    /// re-permission.
+    /// </summary>
+    /// <remarks>
+    /// Owner is checked as well as the DACL because the owner of an object implicitly holds
+    /// <c>WRITE_DAC</c>: a foreign owner can rewrite even a protected, current-user-only DACL and grant
+    /// itself access at any time. That matters most for a <c>WINAPP_UI_LOCK_DIRECTORY</c> override under
+    /// a shared path, where another user may have created the directory first.
+    /// </remarks>
+    internal static bool IsCurrentUserOnly(DirectorySecurity security, SecurityIdentifier currentUser)
     {
+        if (security.GetOwner(typeof(SecurityIdentifier)) is not SecurityIdentifier owner
+            || owner != currentUser)
+        {
+            return false;
+        }
+
         if (!security.AreAccessRulesProtected)
         {
             // Inherited rules can grant anyone the parent grants, which for a shared override directory

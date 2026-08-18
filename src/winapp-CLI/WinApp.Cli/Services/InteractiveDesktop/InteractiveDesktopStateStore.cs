@@ -86,9 +86,14 @@ internal sealed class InteractiveDesktopStateStore(
                     bufferSize: 1,
                     FileOptions.None);
             }
-            catch (IOException)
+            catch (IOException ex) when (CoordinationLockIo.IsContention(ex))
             {
                 // Held by another coordinator mid-transition. Spin briefly, then yield.
+            }
+            catch (IOException ex)
+            {
+                // Not contention: retrying would hang forever on a failure that will never clear.
+                throw CoordinationLockIo.CannotOpen(paths.StateLockPath, ex);
             }
             catch (UnauthorizedAccessException ex)
             {
