@@ -131,13 +131,14 @@ public class ZipRangeExtractorTests
     [TestMethod]
     public async Task FindCentralDirectory_Zip64Eocd_ResolvesOffsetAndSize()
     {
-        // Hand-build a ZIP64 tail: [cd placeholder][zip64 eocd][zip64 locator][eocd], because
+        // Hand-build a ZIP64 tail: [cd][zip64 eocd][zip64 locator][eocd], because
         // System.IO.Compression only emits ZIP64 for archives too large to construct in a unit test.
         const long cdOffset = 0;
-        const long cdSize = 10;
+        var directory = MinimalCentralDirectory();
+        long cdSize = directory.Length;
         var buf = new List<byte>();
 
-        buf.AddRange(new byte[cdSize]);                       // central-directory placeholder
+        buf.AddRange(directory);
         var recordRelative = buf.Count;                       // offset of the ZIP64 EOCD record
 
         var record = new byte[56];
@@ -311,6 +312,17 @@ public class ZipRangeExtractorTests
         Assert.AreEqual(1000 + localOffset, entry.LocalHeaderOffset, "64-bit local-header offset must be applied then rebased.");
     }
 
+    /// <summary>One stored, empty entry: the smallest thing that is recognisably a central directory.</summary>
+    private static byte[] MinimalCentralDirectory()
+    {
+        var name = Encoding.UTF8.GetBytes("a.bin");
+        var header = new byte[46 + name.Length];
+        WriteU32(header, 0, 0x02014b50);
+        WriteU16(header, 28, (ushort)name.Length);
+        name.CopyTo(header, 46);
+        return header;
+    }
+
     private static void WriteU16(byte[] buffer, int offset, ushort value) =>
         System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(buffer.AsSpan(offset), value);
 
@@ -396,23 +408,25 @@ public class ZipRangeExtractorTests
     [TestMethod]
     public async Task FindCentralDirectory_Zip64RecordOutsideTailWindow_ReadsViaRanged()
     {
-        // Archive larger than the EOCD search window, with the ZIP64 EOCD record near the start so
-        // it falls outside the trailing tail read and must be fetched with a separate ranged read.
+        // Archive larger than the EOCD search window, with the ZIP64 EOCD record right after the
+        // directory so it falls outside the trailing tail read and must be fetched with a ranged read.
         const long cdOffset = 0;
-        const long cdSize = 10;
+        var directory = MinimalCentralDirectory();
+        long cdSize = directory.Length;
         const int total = 66000; // > MaxEocdSearch (65557)
         var data = new byte[total];
+        directory.CopyTo(data, (int)cdOffset);
 
         var record = new byte[56];
         WriteU32(record, 0, 0x06064b50);
         WriteU64(record, 40, unchecked((ulong)cdSize));
         WriteU64(record, 48, unchecked((ulong)cdOffset));
-        record.CopyTo(data, 0); // record at offset 0 (outside the tail window)
+        record.CopyTo(data, (int)cdSize); // record follows the directory, outside the tail window
 
         var locatorOffset = total - 22 - 20;
         var locator = new byte[20];
         WriteU32(locator, 0, 0x07064b50);
-        WriteU64(locator, 8, 0); // relative offset of the ZIP64 EOCD record = 0
+        WriteU64(locator, 8, (ulong)cdSize); // relative offset of the ZIP64 EOCD record
         locator.CopyTo(data, locatorOffset);
 
         var eocd = new byte[22];

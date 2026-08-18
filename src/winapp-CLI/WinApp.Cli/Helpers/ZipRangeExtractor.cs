@@ -69,12 +69,11 @@ internal static class ZipRangeExtractor
 
             if (cdOffset == Zip64Marker || cdSize == Zip64Marker || count == 0xFFFF)
             {
+                long recordOffset;
                 try
                 {
-                    // Forging this means also forging a locator and a signed ZIP64 record, so the
-                    // record's own signature check is the gate here.
-                    (cdOffset, cdSize) = await ReadZip64DirectoryAsync(
-                        reader, archiveBase, tail, tailStart, eocd, cancellationToken);
+                    (cdOffset, cdSize, recordOffset) = await ReadZip64DirectoryAsync(
+                        reader, archiveBase, archiveSize, tail, tailStart, eocd, cancellationToken);
                 }
                 catch (InvalidDataException)
                 {
@@ -83,7 +82,14 @@ internal static class ZipRangeExtractor
                     continue;
                 }
 
-                return (archiveBase + cdOffset, cdSize);
+                // A comment can carry a forged locator and record too, so the resolved directory gets
+                // the same confirmation. It runs up to the record describing it rather than the EOCD.
+                if (await IsCentralDirectoryAsync(reader, archiveBase, archiveSize, cdOffset, cdSize, recordOffset, cancellationToken))
+                {
+                    return (archiveBase + cdOffset, cdSize);
+                }
+
+                continue;
             }
 
             // A record declaring no directory has nothing to confirm, and a zeroed record planted in a
@@ -127,8 +133,8 @@ internal static class ZipRangeExtractor
         return BinaryPrimitives.ReadUInt32LittleEndian(head) == CentralHeaderSignature;
     }
 
-    private static async Task<(long Offset, long Size)> ReadZip64DirectoryAsync(
-        IRangeReader reader, long archiveBase, byte[] tail, long tailStart, int eocd, CancellationToken cancellationToken)
+    private static async Task<(long Offset, long Size, long RecordOffset)> ReadZip64DirectoryAsync(
+        IRangeReader reader, long archiveBase, long archiveSize, byte[] tail, long tailStart, int eocd, CancellationToken cancellationToken)
     {
         var locator = LastIndexOfSignature(tail.AsSpan(0, eocd), Zip64LocatorSignature);
         if (locator < 0)
@@ -138,6 +144,15 @@ internal static class ZipRangeExtractor
 
         // Offset of the ZIP64 EOCD record, relative to the archive's base.
         var recordRelative = (long)BinaryPrimitives.ReadUInt64LittleEndian(tail.AsSpan(locator + 8));
+
+        // Attacker-controlled, and passing it straight to the reader turns a malformed archive into an
+        // out-of-range or transport error instead of a rejection.
+        if (recordRelative < 0 || recordRelative > archiveSize - 56)
+        {
+            throw new InvalidDataException(
+                $"ZIP64 locator points at offset {recordRelative}, which cannot hold a record in a {archiveSize}-byte archive.");
+        }
+
         var recordAbsolute = archiveBase + recordRelative;
 
         byte[] record;
@@ -160,7 +175,7 @@ internal static class ZipRangeExtractor
 
         var cdSize = (long)BinaryPrimitives.ReadUInt64LittleEndian(record.AsSpan(recordPos + 40));
         var cdOffset = (long)BinaryPrimitives.ReadUInt64LittleEndian(record.AsSpan(recordPos + 48));
-        return (cdOffset, cdSize);
+        return (cdOffset, cdSize, recordAbsolute);
     }
 
     /// <summary>
@@ -268,14 +283,6 @@ internal static class ZipRangeExtractor
     }
 
     /// <summary>
-    /// Finds the end-of-central-directory record in the archive tail.
-    /// </summary>
-    /// <remarks>
-    /// The last signature match is not good enough on either side: a ZIP comment may legally contain
-    /// <c>PK\x05\x06</c>, and a truncated tail can end mid-record. A real record has its full fixed
-    /// fields and a declared comment length that runs exactly to the end of the archive.
-    /// </remarks>
-    /// <summary>
     /// Returns the next end-of-central-directory candidate strictly before <paramref name="before"/>,
     /// scanning backward, or -1.
     /// </summary>
@@ -333,7 +340,7 @@ internal sealed class MemoryRangeReader(byte[] data) : IRangeReader
         // read through to Array.Copy.
         if (offset < 0 || length < 0 || offset > data.Length || length > data.Length - offset)
         {
-            throw new ArgumentOutOfRangeException(nameof(offset), $"Range {offset}..{offset + length} is outside the buffer ({data.Length}).");
+            throw new ArgumentOutOfRangeException(nameof(offset), $"Range of {length} bytes at offset {offset} is outside the buffer ({data.Length}).");
         }
 
         var slice = new byte[length];
