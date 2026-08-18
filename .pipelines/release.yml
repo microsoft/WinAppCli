@@ -37,6 +37,11 @@ parameters:
     displayName: Publish symbols to symweb and MSDL (PublishSymbols)
     type: boolean
     default: true
+  - name: symbolsIdentity
+    type: object
+    default:
+      serviceConnection: $(SymbolPublishingServiceConnection)
+      project: $(SymbolPublishingProject)
 
 variables:
   # Declared once so the URL and its hash cannot drift apart across the stages that install gh.
@@ -309,10 +314,6 @@ extends:
         dependsOn: Build
         variables:
           version: $[ stageDependencies.Build.Build.outputs['SetMeta.version'] ]
-          # Both are provisioned by the EP CDP symbols team. SymbolPublishingProject is CASE SENSITIVE
-          # and must match the created project exactly, or the publish request 404s.
-          SymbolPublishingServiceConnection: 'WinAppCLISymbolPublishing'
-          SymbolPublishingProject: 'WinAppCLI'
           # Used twice: as the PublishSymbols@2 artifact name and as the request name the symbol API
           # promotes. They must be identical or the request finds nothing to publish.
           SymbolsArtifactName: 'WinAppCLI_$(version)_$(Build.BuildNumber)'
@@ -335,7 +336,7 @@ extends:
             - task: AzurePowerShell@5
               displayName: Acquire symbol request API token
               inputs:
-                azureSubscription: $(SymbolPublishingServiceConnection)
+                azureSubscription: ${{ parameters.symbolsIdentity.serviceConnection }}
                 azurePowerShellVersion: LatestVersion
                 pwsh: true
                 ScriptType: InlineScript
@@ -370,7 +371,9 @@ extends:
                 $PSDefaultParameterValues['Invoke-RestMethod:ContentType'] = 'application/json'
                 $PSDefaultParameterValues['Invoke-RestMethod:Method'] = 'POST'
 
-                $baseUri = "https://symbolrequestprod.trafficmanager.net/projects/$(SymbolPublishingProject)/requests"
+                # The symbol project name is CASE SENSITIVE and must match the provisioned project
+                # exactly, or the request 404s.
+                $baseUri = "https://symbolrequestprod.trafficmanager.net/projects/${{ parameters.symbolsIdentity.project }}/requests"
 
                 # Round-trip UTC: the service binds this to a DateTime, and a culture-formatted
                 # string would be ambiguous on a non-en-US agent.
