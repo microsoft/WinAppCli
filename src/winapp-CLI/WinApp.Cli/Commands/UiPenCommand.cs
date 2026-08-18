@@ -10,6 +10,7 @@ using Spectre.Console;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
+using WinApp.Cli.Services.InteractiveDesktop;
 
 namespace WinApp.Cli.Commands;
 
@@ -85,10 +86,46 @@ internal class UiPenCommand : Command, IShortDescription
         IPointerInput pointerInput,
         IForegroundGuard foregroundGuard,
         IAnsiConsole ansiConsole,
-        ILogger<UiPenCommand> logger) : AsynchronousCommandLineAction
+        IDesktopForegroundService desktopForeground,
+        ISystemUiQuery systemQuery,
+        IInteractiveDesktopLock desktopLock,
+        ILogger<UiPenCommand> logger) : UiCoordinatedAction(desktopLock, logger)
     {
-        public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
+        /// <summary>
+        /// The fully validated argument set, produced once by <see cref="Validate"/> so
+        /// <see cref="Preflight"/> and <see cref="ExecuteAsync"/> share one parse.
+        /// </summary>
+        private readonly record struct PenArgs(
+            bool Json,
+            string? SelectorStr,
+            string? App,
+            long? Window,
+            string? AtStr,
+            string? PathStr,
+            PointerPoint? At,
+            List<PointerPoint>? Path,
+            float Pressure,
+            int TiltX,
+            int TiltY,
+            bool Eraser,
+            int DurationMs);
+
+        protected override string Operation => "ui pen";
+
+        /// <summary>Synthetic pen injection is OS-wide and lands wherever the desktop points.</summary>
+        protected override UiTurnMode ResolveMode(ParseResult parseResult) => UiTurnMode.DesktopExclusive;
+
+        protected override int? Preflight(ParseResult parseResult) => Validate(parseResult, out _);
+
+        /// <summary>
+        /// Semantic validation. Runs before the missing-app check so a malformed value produces
+        /// <c>invalid_arguments</c> rather than <c>missing_app</c> (M5 root-cause fix), and before any
+        /// coordination so a malformed command never joins the desktop queue.
+        /// </summary>
+        private int? Validate(ParseResult parseResult, out PenArgs args)
         {
+            args = default;
+
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var selectorStr = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
@@ -104,8 +141,14 @@ internal class UiPenCommand : Command, IShortDescription
             bool pathWasSupplied = (parseResult.GetResult(PathOption)?.Tokens.Count ?? 0) > 0;
             bool durationWasSupplied = (parseResult.GetResult(DurationOption)?.Tokens.Count ?? 0) > 0;
 
-            // Semantic validation runs BEFORE the missing-app check so a malformed value
-            // produces invalid_arguments rather than missing_app (M5 root-cause fix).
+            int RejectInvalidArguments(string message)
+            {
+                logger.LogError("{Symbol} {Message}", UiSymbols.Error, message);
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, message,
+                    errorOut: parseResult.InvocationConfiguration.Error);
+                return 1;
+            }
+
             if (!float.IsFinite(pressure) || pressure < 0f || pressure > 1f)
             {
                 logger.LogError("{Symbol} --pressure must be a finite number between 0.0 and 1.0. Got '{Pressure}'.", UiSymbols.Error, pressure);
@@ -184,6 +227,18 @@ internal class UiPenCommand : Command, IShortDescription
                 return 1;
             }
 
+            args = new PenArgs(json, selectorStr, app, window, atStr, pathStr, at, path,
+                pressure, tiltX, tiltY, eraser, durationMs);
+            return null;
+        }
+
+        protected override async Task<int> ExecuteAsync(ParseResult parseResult, IUiTurn turn, CancellationToken cancellationToken)
+        {
+            // Preflight already ran this and rejected every invalid combination, so it cannot fail here.
+            Validate(parseResult, out var args);
+            var (json, selectorStr, app, window, atStr, pathStr, at, path,
+                 pressure, tiltX, tiltY, eraser, durationMs) = args;
+
             // Track whether --path was provided (before the inner block mutates path).
             // Used by M7: the selector branch calls SetForeground during stable-resolve so we skip
             // the post-resolution SetForeground for that path only.
@@ -198,44 +253,59 @@ internal class UiPenCommand : Command, IShortDescription
                 // was given, or selectorStr when the selector resolved the contact point.
                 var targetLabel = pathStr ?? (at is not null ? atStr : selectorStr);
 
-                // Build the ink path: explicit --path wins; else --at; else the selector's center.
-                if (path is null)
+                PointerCommandSupport.InjectionPreparation prep;
+
+                // Foreground and synthetic pointer injection share the desktop; the selector re-resolve
+                // inside ResolvePointAsync foregrounds the target, so it belongs in the section too. The
+                // warning composition and result formatting below do not.
+                await using (await turn.EnterAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    var target = await PointerCommandSupport.ResolvePointAsync(
-                        uiAutomation, selectorService, session, selectorStr, at, atStr,
-                        "pen", "pen point", logger, json, cancellationToken);
-                    if (!target.Ok)
+                    // Build the ink path: explicit --path wins; else --at; else the selector's center.
+                    if (path is null)
+                    {
+                        var target = await PointerCommandSupport.ResolvePointAsync(
+                            uiAutomation, selectorService, desktopForeground, session, selectorStr, at, atStr,
+                            "pen", "pen point", logger, json, cancellationToken);
+                        if (!target.Ok)
+                        {
+                            return 1;
+                        }
+
+                        targetHwnd = target.TargetHwnd;
+                        path = [target.Point];
+                    }
+
+                        if (!DesktopTargetValidation.TryConfirmTargetWindow(
+                                systemQuery, targetHwnd, session.ProcessId, logger, json, "pen",
+                                parseResult.InvocationConfiguration.Error))
+                        {
+                            return 1;
+                        }
+
+                    // M7: SetForeground only when the selector branch did not already do it.
+                    // The selector branch (no --path and no --at) calls SetForeground during stable-resolve;
+                    // the --at and --path branches do not, so they need it here before injection.
+                    if (pathFromOption || at is not null)
+                    {
+                        await PointerCommandSupport.SetForegroundAsync(desktopForeground, targetHwnd, cancellationToken);
+                    }
+
+                    prep = PointerCommandSupport.TryPrepareInjection(
+                        uiAutomation, foregroundGuard, targetHwnd, path, "pen", "pen input", logger, json);
+                    if (!prep.Ok)
                     {
                         return 1;
                     }
 
-                    targetHwnd = target.TargetHwnd;
-                    path = [target.Point];
-                }
-
-                // M7: SetForeground only when the selector branch did not already do it.
-                // The selector branch (no --path and no --at) calls SetForeground during stable-resolve;
-                // the --at and --path branches do not, so they need it here before injection.
-                if (pathFromOption || at is not null)
-                {
-                    await PointerCommandSupport.SetForegroundAsync(targetHwnd, cancellationToken);
-                }
-
-                var prep = PointerCommandSupport.TryPrepareInjection(
-                    uiAutomation, foregroundGuard, targetHwnd, path, "pen", "pen input", logger, json);
-                if (!prep.Ok)
-                {
-                    return 1;
-                }
-
-                // M6: narrow the injection_unsupported catch to only the actual injection call so that
-                // pre-injection failures (element not found, etc.) are NOT mis-classified as
-                // injection_unsupported. Session resolution failures surface as missing_app (outer catch).
-                if (!PointerCommandSupport.TryInject(
-                    () => pointerInput.Pen(path, pressure, tiltX, tiltY, eraser, durationMs),
-                    logger, json, parseResult.InvocationConfiguration.Error))
-                {
-                    return 1;
+                    // M6: narrow the injection_unsupported catch to only the actual injection call so that
+                    // pre-injection failures (element not found, etc.) are NOT mis-classified as
+                    // injection_unsupported. Session resolution failures surface as missing_app (outer catch).
+                    if (!PointerCommandSupport.TryInject(
+                        () => pointerInput.Pen(path, pressure, tiltX, tiltY, eraser, durationMs),
+                        logger, json, parseResult.InvocationConfiguration.Error))
+                    {
+                        return 1;
+                    }
                 }
 
                 var action = eraser ? "erase" : (path.Count > 1 ? "draw" : "tap");
@@ -318,14 +388,6 @@ internal class UiPenCommand : Command, IShortDescription
             catch (Exception ex)
             {
                 UiErrors.GenericError(logger, ex, json, parseResult.InvocationConfiguration.Error);
-                return 1;
-            }
-
-            int RejectInvalidArguments(string message)
-            {
-                logger.LogError("{Symbol} {Message}", UiSymbols.Error, message);
-                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, message,
-                    errorOut: parseResult.InvocationConfiguration.Error);
                 return 1;
             }
         }

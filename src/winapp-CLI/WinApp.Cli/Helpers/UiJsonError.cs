@@ -30,17 +30,34 @@ internal static class UiJsonError
     public const string CodeFrameOutputFailed = "frame_output_failed";
     public const string CodePartialOutput = "partial_output";
 
+    /// <summary><c>WINAPP_UI_OWNER_ID</c> was set but empty/whitespace or over 256 characters.</summary>
+    public const string CodeInvalidUiOwnerId = "invalid_ui_owner_id";
+
+    /// <summary>Desktop turn coordination could not be read, published, or safely recovered.</summary>
+    public const string CodeDesktopCoordinationUnavailable = "desktop_coordination_unavailable";
+
+    /// <summary>Too many commands are already waiting for the desktop.</summary>
+    public const string CodeQueueCapacityExceeded = "queue_capacity_exceeded";
+
+    /// <summary>The command was cancelled while waiting for the desktop and never ran.</summary>
+    public const string CodeCancelled = "cancelled";
+
     /// <summary>Write a JSON error envelope to stderr. No-op when <paramref name="json"/> is false.</summary>
     /// <param name="errorOut">
     /// Optional error writer; defaults to <see cref="Console.Error"/>. Pass
     /// <c>parseResult.InvocationConfiguration.Error</c> from a command handler so test harnesses
     /// that set <c>InvocationConfiguration.Error</c> to a capturing writer can inspect the output.
     /// </param>
+    /// <param name="coordination">
+    /// Optional desktop-coordination detail (wait duration, queue position) attached to cancellation and
+    /// other coordination errors.
+    /// </param>
     public static void Emit(bool json, string code, string message,
                             string? selector = null, string? details = null,
                             TextWriter? errorOut = null,
                             string? recoveryHint = null,
-                            UiPartialOutputInfo? partialOutput = null)
+                            UiPartialOutputInfo? partialOutput = null,
+                            UiCoordinationInfo? coordination = null)
     {
         if (!json) { return; }
 
@@ -54,6 +71,7 @@ internal static class UiJsonError
                 Details = details,
                 RecoveryHint = recoveryHint,
                 PartialOutput = partialOutput,
+                Coordination = coordination,
             },
         };
         var payload = JsonSerializer.Serialize(result, UiJsonLineContext.Default.UiErrorResult);

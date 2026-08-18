@@ -1,0 +1,412 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+using System.Text.Json;
+using Microsoft.Extensions.Logging.Abstractions;
+using WinApp.Cli.Services.InteractiveDesktop;
+
+namespace WinApp.Cli.Tests;
+
+/// <summary>
+/// File-level coverage of the coordination store, participant leases, and lock-directory setup
+/// (issue #764). Everything here runs against a throwaway directory supplied through
+/// <c>WINAPP_UI_LOCK_DIRECTORY</c>, so a test never touches the developer's live coordination state.
+/// </summary>
+[TestClass]
+[DoNotParallelize] // WINAPP_UI_LOCK_DIRECTORY is process-wide.
+public class InteractiveDesktopStoreTests
+{
+    private string _lockDirectory = null!;
+    private string? _previousOverride;
+    private InteractiveDesktopPaths _paths = null!;
+    private ParticipantRegistry _participants = null!;
+    private InteractiveDesktopStateStore _store = null!;
+    private FakeProcessInspector _inspector = null!;
+
+    [TestInitialize]
+    public void Setup()
+    {
+        _lockDirectory = Path.Combine(Path.GetTempPath(), $"winapp-locks-{Guid.NewGuid():N}");
+        _previousOverride = Environment.GetEnvironmentVariable(
+            InteractiveDesktopPaths.LockDirectoryOverrideVariable);
+        Environment.SetEnvironmentVariable(
+            InteractiveDesktopPaths.LockDirectoryOverrideVariable, _lockDirectory);
+
+        _inspector = new FakeProcessInspector();
+        _paths = new InteractiveDesktopPaths(_inspector);
+        _participants = new ParticipantRegistry(_paths, _inspector, NullLogger<ParticipantRegistry>.Instance);
+        _store = new InteractiveDesktopStateStore(
+            _paths, _participants, new FixedClock(), NullLogger<InteractiveDesktopStateStore>.Instance);
+    }
+
+    [TestCleanup]
+    public void Cleanup()
+    {
+        Environment.SetEnvironmentVariable(
+            InteractiveDesktopPaths.LockDirectoryOverrideVariable, _previousOverride);
+        try
+        {
+            if (Directory.Exists(_lockDirectory))
+            {
+                Directory.Delete(_lockDirectory, recursive: true);
+            }
+        }
+        catch (IOException)
+        {
+            // A leaked temp directory must never fail a test.
+        }
+    }
+
+    // ------------------------------------------------------------------------------- fresh vs corrupt
+
+    [TestMethod]
+    public void Read_MissingFile_StartsFresh()
+    {
+        using var stateLock = _store.AcquireStateLock(CancellationToken.None);
+        var result = _store.Read();
+
+        Assert.IsFalse(result.RecoveredFromCorruption, "a missing file is an ordinary first run");
+        Assert.IsNotNull(result.State);
+        Assert.IsNull(result.State!.Owner);
+    }
+
+    [TestMethod]
+    public void Read_EmptyFile_IsTreatedAsCorruptionNotFreshState()
+    {
+        // Atomic publication never produces an empty file, so one means a torn write or truncation.
+        _paths.EnsureDirectories();
+        File.WriteAllText(_paths.StatePath, string.Empty);
+
+        using var stateLock = _store.AcquireStateLock(CancellationToken.None);
+        var result = _store.Read();
+
+        Assert.IsTrue(result.RecoveredFromCorruption,
+            "an existing empty state file must take the guarded recovery path");
+        Assert.IsTrue(
+            Directory.EnumerateFiles(_paths.LockDirectory, "state.corrupt-*.json").Any(),
+            "the unreadable file must be quarantined rather than silently discarded");
+    }
+
+    [TestMethod]
+    public void Read_WhitespaceFile_IsTreatedAsCorruption()
+    {
+        _paths.EnsureDirectories();
+        File.WriteAllText(_paths.StatePath, "   \r\n  ");
+
+        using var stateLock = _store.AcquireStateLock(CancellationToken.None);
+        Assert.IsTrue(_store.Read().RecoveredFromCorruption);
+    }
+
+    [TestMethod]
+    public void Read_CorruptStateWithALiveParticipant_FailsClosed()
+    {
+        _paths.EnsureDirectories();
+        File.WriteAllText(_paths.StatePath, "{ this is not json");
+
+        // A live lease means some other winapp process is mid-workflow; rebuilding state under it would
+        // strand its ownership and let two processes drive the desktop.
+        using var lease = _participants.OpenLease(_inspector.CurrentProcessId, _inspector.CurrentProcessStartTicksUtc);
+
+        using var stateLock = _store.AcquireStateLock(CancellationToken.None);
+        var ex = Assert.ThrowsExactly<UiCoordinationException>(() => _store.Read());
+        Assert.AreEqual(UiCoordinationErrorCodes.Unavailable, ex.Code);
+    }
+
+    [TestMethod]
+    public void Read_EmptyStateWithALiveParticipant_FailsClosed()
+    {
+        _paths.EnsureDirectories();
+        File.WriteAllText(_paths.StatePath, string.Empty);
+
+        using var lease = _participants.OpenLease(_inspector.CurrentProcessId, _inspector.CurrentProcessStartTicksUtc);
+
+        using var stateLock = _store.AcquireStateLock(CancellationToken.None);
+        var ex = Assert.ThrowsExactly<UiCoordinationException>(() => _store.Read());
+        Assert.AreEqual(UiCoordinationErrorCodes.Unavailable, ex.Code);
+    }
+
+    [TestMethod]
+    public void Read_UnknownNewerVersion_IsNeverResetOrDowngraded()
+    {
+        _paths.EnsureDirectories();
+        const string future = """{"version":99,"turnId":7,"nextTicket":3,"ownerCommands":[],"waiters":[]}""";
+        File.WriteAllText(_paths.StatePath, future);
+
+        using (var stateLock = _store.AcquireStateLock(CancellationToken.None))
+        {
+            var result = _store.Read();
+            Assert.IsTrue(result.UnknownNewerVersion);
+            Assert.IsNull(result.State);
+            Assert.IsFalse(result.RecoveredFromCorruption, "a newer schema is not corruption");
+        }
+
+        Assert.AreEqual(future, File.ReadAllText(_paths.StatePath), "the newer document must be left alone");
+    }
+
+    // ------------------------------------------------------------------- structural validation
+
+    [TestMethod]
+    public void Read_DuplicateTicketAcrossOwnerCommandsAndWaiters_IsCorrupt()
+    {
+        // Ticket 5 appearing in both lists would make two commands share one barrier position.
+        WriteRawState("""
+            {"version":1,"turnId":1,"nextTicket":9,"owner":{"kind":"explicit","key":"a"},
+             "ownerCommands":[{"ticket":5,"pid":10,"processStartTicksUtc":1,"operation":"ui click","mode":"DesktopExclusive","status":"running"}],
+             "waiters":[{"ticket":5,"ownerKey":"b","ownerKind":"explicit","pid":11,"processStartTicksUtc":2,"operation":"ui click","mode":"DesktopExclusive"}]}
+            """);
+
+        AssertRecovered();
+    }
+
+    [TestMethod]
+    public void Read_NextTicketNotAheadOfEveryPersistedTicket_IsCorrupt()
+    {
+        // nextTicket 5 would re-issue ticket 5 and collide with the running command.
+        WriteRawState("""
+            {"version":1,"turnId":1,"nextTicket":5,"owner":{"kind":"explicit","key":"a"},
+             "ownerCommands":[{"ticket":5,"pid":10,"processStartTicksUtc":1,"operation":"ui click","mode":"DesktopExclusive","status":"running"}],
+             "waiters":[]}
+            """);
+
+        AssertRecovered();
+    }
+
+    [TestMethod]
+    public void Read_OwnerCommandsWithoutAnOwner_IsCorrupt()
+    {
+        WriteRawState("""
+            {"version":1,"turnId":1,"nextTicket":9,
+             "ownerCommands":[{"ticket":5,"pid":10,"processStartTicksUtc":1,"operation":"ui click","mode":"DesktopExclusive","status":"running"}],
+             "waiters":[]}
+            """);
+
+        AssertRecovered();
+    }
+
+    [TestMethod]
+    public void Read_ObserveEntryCarryingATicket_IsCorrupt()
+    {
+        // Observations never serialize as barriers, so a ticket on one is meaningless and would be
+        // compared against real barrier tickets.
+        WriteRawState("""
+            {"version":1,"turnId":1,"nextTicket":9,"owner":{"kind":"explicit","key":"a"},
+             "ownerCommands":[{"ticket":5,"pid":10,"processStartTicksUtc":1,"operation":"ui inspect","mode":"Observe","status":"running"}],
+             "waiters":[]}
+            """);
+
+        AssertRecovered();
+    }
+
+    [TestMethod]
+    public void Read_OutOfRangeEnumValue_IsCorrupt()
+    {
+        WriteRawState("""
+            {"version":1,"turnId":1,"nextTicket":9,"owner":{"kind":"explicit","key":"a"},
+             "ownerCommands":[{"ticket":5,"pid":10,"processStartTicksUtc":1,"operation":"ui click","mode":42,"status":"running"}],
+             "waiters":[]}
+            """);
+
+        AssertRecovered();
+    }
+
+    // ------------------------------------------------------------------- publication round-trip
+
+    [TestMethod]
+    public void Publish_RoundTripsStateAndPreservesUnknownFieldsFromANewerWriter()
+    {
+        _paths.EnsureDirectories();
+        WriteRawState("""
+            {"version":1,"turnId":3,"nextTicket":9,"owner":{"kind":"explicit","key":"a","futureOwnerField":"keep-me"},
+             "ownerCommands":[],"waiters":[],"futureRootField":{"nested":true}}
+            """);
+
+        using (var stateLock = _store.AcquireStateLock(CancellationToken.None))
+        {
+            var state = _store.Read().State!;
+            state.TurnId = 4;
+            _store.Publish(state);
+        }
+
+        using var document = JsonDocument.Parse(File.ReadAllText(_paths.StatePath));
+        Assert.AreEqual(4, document.RootElement.GetProperty("turnId").GetInt32());
+        Assert.IsTrue(document.RootElement.TryGetProperty("futureRootField", out _),
+            "unknown root fields from a newer writer must survive a rewrite");
+        Assert.IsTrue(document.RootElement.GetProperty("owner").TryGetProperty("futureOwnerField", out _),
+            "unknown owner fields from a newer writer must survive a rewrite");
+    }
+
+    [TestMethod]
+    public void Publish_LeavesNoTemporaryFilesBehind()
+    {
+        using (var stateLock = _store.AcquireStateLock(CancellationToken.None))
+        {
+            _store.Publish(InteractiveDesktopState.CreateFresh());
+        }
+
+        Assert.AreEqual(0, Directory.EnumerateFiles(_paths.LockDirectory, "*.tmp").Count());
+    }
+
+    [TestMethod]
+    public void StateRemainsReadableWhileTheActiveLockIsHeld()
+    {
+        // active.lock guards the desktop, not the metadata: a queued command must still be able to read
+        // and update state while another process is mid-gesture.
+        _paths.EnsureDirectories();
+        using var activeLock = new FileStream(
+            _paths.ActiveLockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+
+        using var stateLock = _store.AcquireStateLock(CancellationToken.None);
+        var state = _store.Read().State!;
+        state.TurnId = 11;
+        _store.Publish(state);
+
+        Assert.IsFalse(_store.IsActiveLockFree());
+    }
+
+    // --------------------------------------------------------------------------- participant leases
+
+    [TestMethod]
+    public void Lease_IsHeldWhileOpenAndDeletedOnClose()
+    {
+        var leasePath = _paths.LeasePath(_inspector.CurrentProcessId, _inspector.CurrentProcessStartTicksUtc);
+
+        var lease = _participants.OpenLease(_inspector.CurrentProcessId, _inspector.CurrentProcessStartTicksUtc);
+        Assert.IsTrue(File.Exists(leasePath));
+        Assert.IsTrue(_participants.IsParticipantLive(_inspector.CurrentProcessId, _inspector.CurrentProcessStartTicksUtc));
+        Assert.IsTrue(_participants.AnyLiveParticipant());
+
+        lease.Dispose();
+
+        // DeleteOnClose means the OS removes the file, which is exactly what makes heartbeats unnecessary.
+        Assert.IsFalse(File.Exists(leasePath));
+        Assert.IsFalse(_participants.AnyLiveParticipant());
+    }
+
+    [TestMethod]
+    public void Lease_OrphanedFileFromAPowerLossIsNotLiveAndIsCleanedUp()
+    {
+        _paths.EnsureDirectories();
+        var orphan = _paths.LeasePath(999_999, 12_345);
+        File.WriteAllText(orphan, string.Empty);
+
+        Assert.IsFalse(_participants.IsParticipantLive(999_999, 12_345),
+            "an openable lease proves its holder is gone");
+        Assert.IsFalse(File.Exists(orphan), "the stale lease file must be removed while probing");
+    }
+
+    [TestMethod]
+    public void Lease_FileNameRoundTripsThroughTheProcessIdentity()
+    {
+        var path = _paths.LeasePath(4242, 987_654_321);
+        Assert.IsTrue(_paths.TryParseLeaseFileName(Path.GetFileName(path), out var pid, out var startTicks));
+        Assert.AreEqual(4242, pid);
+        Assert.AreEqual(987_654_321, startTicks);
+    }
+
+    // ------------------------------------------------------------------------- lock directory setup
+
+    [TestMethod]
+    public void EnsureDirectories_RepairsAnExistingDirectoryWithInheritedPermissions()
+    {
+        // A WINAPP_UI_LOCK_DIRECTORY pointed at a shared location can already exist with inherited
+        // rules that let another user tamper with coordination state or hold a lease.
+        Directory.CreateDirectory(_lockDirectory);
+        var before = new DirectoryInfo(_lockDirectory).GetAccessControl();
+        Assert.IsFalse(before.AreAccessRulesProtected, "precondition: the directory starts with inherited rules");
+
+        _paths.EnsureDirectories();
+
+        var after = new DirectoryInfo(_lockDirectory).GetAccessControl();
+        Assert.IsTrue(after.AreAccessRulesProtected,
+            "an existing coordination directory must not be left with inherited permissions");
+    }
+
+    [TestMethod]
+    public void EnsureDirectories_IsSafeToCallRepeatedlyAndConcurrently()
+    {
+        // Every state-lock acquisition and lease open calls this, and several winapp processes can race.
+        Parallel.For(0, 16, _ => _paths.EnsureDirectories());
+
+        Assert.IsTrue(Directory.Exists(_paths.LockDirectory));
+        Assert.IsTrue(Directory.Exists(_paths.ParticipantsDirectory));
+    }
+
+    [TestMethod]
+    public void Paths_RejectARelativeOverrideDirectory()
+    {
+        Environment.SetEnvironmentVariable(
+            InteractiveDesktopPaths.LockDirectoryOverrideVariable, "relative\\locks");
+
+        // A relative path resolves against the caller's working directory, so two winapp processes
+        // started in different folders would silently coordinate against different files.
+        var ex = Assert.ThrowsExactly<UiCoordinationException>(() => new InteractiveDesktopPaths(_inspector));
+        Assert.AreEqual(UiCoordinationErrorCodes.Unavailable, ex.Code);
+    }
+
+    [TestMethod]
+    public void Paths_RejectANetworkOverrideDirectory()
+    {
+        Environment.SetEnvironmentVariable(
+            InteractiveDesktopPaths.LockDirectoryOverrideVariable, @"\\server\share\locks");
+
+        // SMB byte-range locking is advisory, so exclusive-share semantics would silently not exclude.
+        var ex = Assert.ThrowsExactly<UiCoordinationException>(() => new InteractiveDesktopPaths(_inspector));
+        Assert.AreEqual(UiCoordinationErrorCodes.Unavailable, ex.Code);
+    }
+
+    [TestMethod]
+    public void Paths_ScopeEveryArtifactToTheWindowsSession()
+    {
+        // Two signed-in sessions have independent foreground/focus/input, so they must not queue
+        // behind each other.
+        var otherSession = new InteractiveDesktopPaths(new FakeProcessInspector { CurrentSessionId = 7 });
+
+        Assert.AreNotEqual(_paths.StatePath, otherSession.StatePath);
+        Assert.AreNotEqual(_paths.ActiveLockPath, otherSession.ActiveLockPath);
+        Assert.AreNotEqual(_paths.StateLockPath, otherSession.StateLockPath);
+    }
+
+    private void WriteRawState(string json)
+    {
+        _paths.EnsureDirectories();
+        File.WriteAllText(_paths.StatePath, json);
+    }
+
+    private void AssertRecovered()
+    {
+        using var stateLock = _store.AcquireStateLock(CancellationToken.None);
+        var result = _store.Read();
+        Assert.IsTrue(result.RecoveredFromCorruption,
+            "structurally invalid scheduling state must be quarantined, not used");
+        Assert.IsNotNull(result.State);
+        Assert.IsNull(result.State!.Owner);
+    }
+
+    private sealed class FixedClock : IMonotonicClock
+    {
+        public long NowTicks64 => 1_000_000;
+
+        public DateTimeOffset UtcNow => new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+    }
+
+    /// <summary>
+    /// Reports this test process's real identity — the lease protocol needs a genuinely live process —
+    /// while letting a test vary the Windows session id.
+    /// </summary>
+    private sealed class FakeProcessInspector : IProcessInspector
+    {
+        private readonly ProcessInspector _real = new();
+
+        public int CurrentSessionId { get; init; } = 1;
+
+        public int CurrentProcessId => _real.CurrentProcessId;
+
+        public long CurrentProcessStartTicksUtc => _real.CurrentProcessStartTicksUtc;
+
+        public int? TryGetParentProcessId() => _real.TryGetParentProcessId();
+
+        public long? TryGetProcessStartTicksUtc(int processId) => _real.TryGetProcessStartTicksUtc(processId);
+
+        public bool? IsProcessAlive(int processId, long startTicksUtc) => _real.IsProcessAlive(processId, startTicksUtc);
+    }
+}

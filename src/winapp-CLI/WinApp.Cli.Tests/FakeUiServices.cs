@@ -4,6 +4,8 @@
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
+using WinApp.Cli.Services.InteractiveDesktop;
+
 namespace WinApp.Cli.Tests;
 
 /// <summary>
@@ -176,7 +178,7 @@ internal class FakeUiAutomationService : IUiAutomationService
         return Task.FromResult(PropertiesResult);
     }
 
-    public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, CancellationToken ct)
+    public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, IDesktopSection desktopSection, bool observeOnly, CancellationToken ct)
     {
         if (ScreenshotThrow is not null) { throw ScreenshotThrow; }
         return Task.FromResult(ScreenshotResult);
@@ -194,7 +196,7 @@ internal class FakeUiAutomationService : IUiAutomationService
 
     public bool? RecordingStartedFrameArtifactsActiveOverride { get; set; }
 
-    public async Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action<bool>? onRecordingStarted = null)
+    public async Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, IDesktopSection desktopSection, CancellationToken ct, Action<bool>? onRecordingStarted = null)
     {
         LastRecordOptions = options;
         if (RecordException is not null)
@@ -260,6 +262,13 @@ internal class FakeUiAutomationService : IUiAutomationService
         };
     }
 
+    /// <summary>
+    /// The element passed to the most recent <see cref="InvokeAsync"/> call, or <see langword="null"/>
+    /// when nothing was invoked. Lets a test assert that a queued command acted on the element it
+    /// re-resolved inside its desktop section rather than the advisory one read before waiting (#764).
+    /// </summary>
+    public UiElement? LastInvokedElement { get; private set; }
+
     public Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
     {
         if (InvokeThrow is not null) { throw InvokeThrow; }
@@ -267,6 +276,7 @@ internal class FakeUiAutomationService : IUiAutomationService
         {
             throw new InvalidOperationException("Element does not support an actionable pattern (test).");
         }
+        LastInvokedElement = element;
         return Task.FromResult(InvokeResult);
     }
 
@@ -276,9 +286,17 @@ internal class FakeUiAutomationService : IUiAutomationService
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// The element passed to the most recent <see cref="FocusAsync"/> call, or <see langword="null"/>
+    /// when focus was never applied. Used to assert send-keys never focuses a target before the
+    /// foreground has been verified (spec §13).
+    /// </summary>
+    public UiElement? LastFocusedElement { get; private set; }
+
     public Task FocusAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
     {
         if (FocusThrow is not null) { throw FocusThrow; }
+        LastFocusedElement = element;
         return Task.CompletedTask;
     }
 
@@ -519,8 +537,13 @@ internal sealed class FakeSystemUiQuery : ISystemUiQuery
     /// <summary>Handle returned by <see cref="GetForegroundWindow"/>. Default 0 = "no foreground".</summary>
     public nint ForegroundWindowResult { get; set; }
 
-    /// <summary>PID returned by <see cref="GetProcessIdForWindow"/>. Default 0 = "window not found".</summary>
-    public uint ProcessIdForWindowResult { get; set; }
+    /// <summary>
+    /// PID returned by <see cref="GetProcessIdForWindow"/>. Defaults to the fake session's PID (1234)
+    /// so a window looks alive and owned by the session under test — the post-wait target check treats
+    /// 0 as "this window no longer exists" (issue #764). Set it to 0 to model a closed window, or to a
+    /// different PID to model a recycled handle.
+    /// </summary>
+    public uint ProcessIdForWindowResult { get; set; } = 1234;
 
     /// <summary>Title returned by <see cref="GetWindowText"/>. Default null = "no/empty title".</summary>
     public string? WindowTextResult { get; set; }

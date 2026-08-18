@@ -9,6 +9,7 @@ using System.Diagnostics.CodeAnalysis;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Services;
 using WinApp.Cli.Services.Controls;
+using WinApp.Cli.Services.InteractiveDesktop;
 
 namespace WinApp.Cli.Helpers;
 
@@ -72,6 +73,15 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<ISystemUiQuery, SystemUiQuery>()
             .AddSingleton<IUiSessionService, UiSessionService>()
             .AddSingleton<IUiAutomationService, UiAutomationService>()
+            // Cooperative desktop turn coordination (issue #764)
+            .AddSingleton<IMonotonicClock, TickCountClock>()
+            .AddSingleton<IProcessInspector, ProcessInspector>()
+            .AddSingleton<IInteractiveDesktopPaths, InteractiveDesktopPaths>()
+            .AddSingleton<IParticipantRegistry, ParticipantRegistry>()
+            .AddSingleton<IInteractiveDesktopStateStore, InteractiveDesktopStateStore>()
+            .AddSingleton<IUiOwnerResolver, UiOwnerResolver>()
+            .AddSingleton<IInteractiveDesktopLock, InteractiveDesktopLock>()
+            .AddSingleton<IDesktopForegroundService, DesktopForegroundService>()
             .AddSingleton<IControlsSearchService, ControlsSearchService>();
     }
 

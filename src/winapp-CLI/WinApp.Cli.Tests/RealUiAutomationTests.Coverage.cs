@@ -8,6 +8,8 @@ using Windows.Win32.UI.Accessibility;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
+using WinApp.Cli.Helpers;
+
 namespace WinApp.Cli.Tests;
 
 public partial class RealUiAutomationTests
@@ -256,7 +258,7 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var logger = new CapturingLogger<UiAutomationService>();
-        var svc = new UiAutomationService(logger, new SelectorService());
+        var svc = new UiAutomationService(logger, new SelectorService(), new DesktopForegroundService());
         var session = NonExplicitSession(fx);
         var childHwnd = fx.OnUiThread(() => (nint)fx.InvokeButton.Handle);
         UiAutomationService.s_getAllAppWindows = (_, _) => [(fx.Hwnd, fx.ProcessId, fx.Title), (childHwnd, fx.ProcessId, "child")];
@@ -368,7 +370,7 @@ public partial class RealUiAutomationTests
     public async Task InvalidStoredHwndFallsBackAndReturnsEmpty()
     {
         var logger = new CapturingLogger<UiAutomationService>();
-        var svc = new UiAutomationService(logger, new SelectorService());
+        var svc = new UiAutomationService(logger, new SelectorService(), new DesktopForegroundService());
         var session = new UiSessionInfo
         {
             ProcessId = int.MaxValue,
@@ -440,7 +442,7 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var logger = new CapturingLogger<UiAutomationService>();
-        var svc = new UiAutomationService(logger, new SelectorService());
+        var svc = new UiAutomationService(logger, new SelectorService(), new DesktopForegroundService());
         var session = NonExplicitSession(fx);
         var otherHwnd = fx.Hwnd + 1000;
         UiAutomationService.s_getAllAppWindows = (_, _) => [(fx.Hwnd, fx.ProcessId, fx.Title), (otherHwnd, fx.ProcessId, "faulty")];
@@ -459,7 +461,7 @@ public partial class RealUiAutomationTests
     public async Task FaultInjectedComProxies_CoverPatternBranches()
     {
         var logger = new CapturingLogger<UiAutomationService>();
-        var svc = new UiAutomationService(logger, new SelectorService());
+        var svc = new UiAutomationService(logger, new SelectorService(), new DesktopForegroundService());
         var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake", WindowHandle = 0 };
         var model = new UiElement { Id = "fake", Type = "Custom", AutomationId = "fakeAid", Selector = null };
         var rect = new RECT { left = 1, top = 2, right = 11, bottom = 12 };
@@ -583,7 +585,7 @@ public partial class RealUiAutomationTests
     public async Task FaultInjectedComProxies_CoverPromoteFailureAndPatternCatches()
     {
         var logger = new CapturingLogger<UiAutomationService>();
-        var svc = new UiAutomationService(logger, new SelectorService());
+        var svc = new UiAutomationService(logger, new SelectorService(), new DesktopForegroundService());
         var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake", WindowHandle = 111 };
         var target = ComProxy<IUIAutomationElement>((method, _) => method.Name switch
         {
@@ -671,7 +673,7 @@ public partial class RealUiAutomationTests
     public async Task NativeSeams_CoverRootElementFallbacks()
     {
         var logger = new CapturingLogger<UiAutomationService>();
-        var svc = new UiAutomationService(logger, new SelectorService());
+        var svc = new UiAutomationService(logger, new SelectorService(), new DesktopForegroundService());
         var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake", WindowHandle = 0 };
         var target = ComProxy<IUIAutomationElement>((method, _) => method.Name switch
         {
@@ -938,7 +940,7 @@ public partial class RealUiAutomationTests
     public async Task SetValueAsync_LegacyIAccessibleComFailureIsLoggedAndThrows()
     {
         var logger = new CapturingLogger<UiAutomationService>();
-        var svc = new UiAutomationService(logger, new SelectorService());
+        var svc = new UiAutomationService(logger, new SelectorService(), new DesktopForegroundService());
         var session = new UiSessionInfo { ProcessId = Environment.ProcessId, ProcessName = "fake" };
         var model = new UiElement { Id = "legacy", Type = "Edit", AutomationId = "legacyAid" };
         var legacyPattern = ComProxy<IUIAutomationLegacyIAccessiblePattern>((_, _) => ThrowCom());

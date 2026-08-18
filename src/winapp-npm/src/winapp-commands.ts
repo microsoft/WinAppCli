@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.5.1
+ * Source schema version: 0.6.1
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -35,6 +35,17 @@ export interface CommonOptions {
   verbose?: boolean;
   /** Working directory for the CLI process (defaults to process.cwd()). */
   cwd?: string;
+  /**
+   * Cancels the whole native invocation, not just a wait for the shared desktop.
+   *
+   * `winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
+   * workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
+   * not run, but Windows releases its coordination handles and deletes its participant lease, and
+   * other processes reclaim the queue entry. If the abort lands after the command acquired the
+   * desktop, UI side effects may already have happened, and aborting an active recording can leave
+   * partial output. Rejects with an `AbortError`.
+   */
+  signal?: AbortSignal;
 }
 
 /** Result returned by every command wrapper. */
@@ -64,7 +75,10 @@ function pushCommon(args: string[], opts: CommonOptions): void {
 }
 
 function captureOpts(opts: CommonOptions): CallWinappCliCaptureOptions {
-  return opts.cwd ? { cwd: opts.cwd } : {};
+  const result: CallWinappCliCaptureOptions = {};
+  if (opts.cwd) result.cwd = opts.cwd;
+  if (opts.signal) result.signal = opts.signal;
+  return result;
 }
 
 async function execCommand(args: string[], opts: CommonOptions): Promise<WinappResult> {

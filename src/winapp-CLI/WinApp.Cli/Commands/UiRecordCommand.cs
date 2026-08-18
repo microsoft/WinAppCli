@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
+using WinApp.Cli.Services.InteractiveDesktop;
 
 namespace WinApp.Cli.Commands;
 
@@ -45,7 +46,8 @@ internal class UiRecordCommand : Command, IShortDescription
         IUiSessionService sessionService,
         IUiAutomationService uiAutomation,
         IAnsiConsole ansiConsole,
-        ILogger<UiRecordCommand> logger) : AsynchronousCommandLineAction
+        IInteractiveDesktopLock desktopLock,
+        ILogger<UiRecordCommand> logger) : UiCoordinatedAction(desktopLock, logger)
     {
         // Test seams: override Console.IsInputRedirected and Console.In without process-level side effects.
         internal static Func<bool>? s_isInputRedirectedOverride;
@@ -54,18 +56,25 @@ internal class UiRecordCommand : Command, IShortDescription
         // Prevents the stdin monitor from racing disposal of its cancellation source.
         private volatile bool _stdinMonitorStopped;
 
-        public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
+        protected override string Operation => "ui record";
+
+        /// <remarks>
+        /// Spec §6.3: recording claims the workflow turn so no other owner can take the desktop mid-capture,
+        /// but it is <see cref="UiTurnMode.TurnShared"/> rather than exclusive so the same owner's clicks and
+        /// typing can be recorded while it runs. Recording duration starts after turn acquisition, because the
+        /// coordinator returns only once this command is runnable.
+        /// </remarks>
+        protected override UiTurnMode ResolveMode(ParseResult parseResult) => UiTurnMode.TurnShared;
+
+        protected override int? Preflight(ParseResult parseResult)
         {
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
-            var quiet = parseResult.GetValue(WinAppRootCommand.QuietOption);
-            var selector = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
             var durationSec = parseResult.GetValue(SharedUiOptions.DurationSecOption);
             var fps = parseResult.GetValue(SharedUiOptions.FpsOption);
             var maxEdge = parseResult.GetValue(SharedUiOptions.MaxEdgeOption);
             var maxEdgeExplicit = parseResult.GetResult(SharedUiOptions.MaxEdgeOption)?.Implicit == false;
-            var captureScreen = parseResult.GetValue(SharedUiOptions.CaptureScreenOption);
             var output = parseResult.GetValue(SharedUiOptions.OutputOption);
             var frames = parseResult.GetValue(FramesOption);
 
@@ -109,17 +118,74 @@ internal class UiRecordCommand : Command, IShortDescription
                     logger.LogError("{Symbol} {Message}", UiSymbols.Error, message);
                     return 1;
                 }
-
-                if (!maxEdgeExplicit)
-                {
-                    maxEdge = DefaultFrameArtifactMaxEdge;
-                }
             }
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
                 UiErrors.MissingApp(logger, json);
                 return 1;
+            }
+
+            // The output path is caller-supplied text, so its shape and collision checks are local too.
+            // Refusing here means a bad path never waits behind another workflow's turn.
+            try
+            {
+                var probePath = Path.GetFullPath(output ?? "recording-probe.mp4");
+                if (frames && output is not null)
+                {
+                    var probeFramesDirectory = GetFramesDirectory(probePath);
+                    if (Path.Exists(probePath))
+                    {
+                        UiJsonError.Emit(
+                            json,
+                            UiJsonError.CodeOutputExists,
+                            $"MP4 output already exists: {probePath}",
+                            errorOut: parseResult.InvocationConfiguration.Error,
+                            recoveryHint: "Choose a new --output path; recording never replaces existing artifacts.");
+                        logger.LogError("{Symbol} MP4 output already exists: {Path}", UiSymbols.Error, probePath);
+                        return 1;
+                    }
+                    if (Path.Exists(probeFramesDirectory))
+                    {
+                        UiJsonError.Emit(
+                            json,
+                            UiJsonError.CodeOutputExists,
+                            $"Frame artifact output already exists: {probeFramesDirectory}",
+                            errorOut: parseResult.InvocationConfiguration.Error,
+                            recoveryHint: "Choose a new --output path; the derived frame directory already exists and is never replaced.");
+                        logger.LogError("{Symbol} Frame artifact output already exists: {Path}", UiSymbols.Error, probeFramesDirectory);
+                        return 1;
+                    }
+                }
+            }
+            catch (Exception pathEx) when (pathEx is ArgumentException or NotSupportedException or PathTooLongException or IOException)
+            {
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, $"Invalid output path: {pathEx.Message}");
+                logger.LogError("{Symbol} Invalid output path: {Message}", UiSymbols.Error, pathEx.Message);
+                return 1;
+            }
+
+            return null;
+        }
+
+        protected override async Task<int> ExecuteAsync(ParseResult parseResult, IUiTurn turn, CancellationToken cancellationToken)
+        {
+            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
+            var quiet = parseResult.GetValue(WinAppRootCommand.QuietOption);
+            var selector = parseResult.GetValue(SharedUiOptions.SelectorArgument);
+            var app = parseResult.GetValue(SharedUiOptions.AppOption);
+            var window = parseResult.GetValue(SharedUiOptions.WindowOption);
+            var durationSec = parseResult.GetValue(SharedUiOptions.DurationSecOption);
+            var fps = parseResult.GetValue(SharedUiOptions.FpsOption);
+            var maxEdge = parseResult.GetValue(SharedUiOptions.MaxEdgeOption);
+            var maxEdgeExplicit = parseResult.GetResult(SharedUiOptions.MaxEdgeOption)?.Implicit == false;
+            var captureScreen = parseResult.GetValue(SharedUiOptions.CaptureScreenOption);
+            var output = parseResult.GetValue(SharedUiOptions.OutputOption);
+            var frames = parseResult.GetValue(FramesOption);
+
+            if (frames && !maxEdgeExplicit)
+            {
+                maxEdge = DefaultFrameArtifactMaxEdge;
             }
 
             // Set _stdinMonitorStopped before disposing this source.
@@ -231,7 +297,7 @@ internal class UiRecordCommand : Command, IShortDescription
                     FramesDirectory = framesDirectory,
                 };
 
-                var result = await uiAutomation.RecordAsync(session, selector, options, linkedCts.Token, OnRecordingStarted);
+                var result = await uiAutomation.RecordAsync(session, selector, options, turn, linkedCts.Token, OnRecordingStarted);
 
                 if (json)
                 {

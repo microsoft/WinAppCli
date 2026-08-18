@@ -353,7 +353,7 @@ public partial class UiCommandTests
                 Interlocked.Exchange(ref unhandled, null);
 
                 var cts = CancellationTokenSource.CreateLinkedTokenSource(CancellationToken.None);
-                var handler = new UiRecordCommand.Handler(null!, null!, null!, null!);
+                var handler = new UiRecordCommand.Handler(null!, null!, null!, null!, null!);
 
                 cts.Dispose();
 

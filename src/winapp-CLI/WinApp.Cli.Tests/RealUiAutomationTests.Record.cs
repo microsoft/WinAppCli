@@ -6,6 +6,8 @@ using System.Text.Json;
 using Windows.Win32.Foundation;
 using WinApp.Cli.Services;
 
+using WinApp.Cli.Services.InteractiveDesktop;
+
 namespace WinApp.Cli.Tests;
 
 public partial class RealUiAutomationTests
@@ -45,7 +47,7 @@ public partial class RealUiAutomationTests
             Fps = 2,
             MaxEdge = 64,
             CaptureScreen = false,
-        }, CancellationToken.None, _ => started++);
+        }, NullDesktopSection.Instance, CancellationToken.None, _ => started++);
 
         Assert.AreEqual("wgc", result.Mode);
         Assert.AreEqual(2, result.Frames);
@@ -85,7 +87,7 @@ public partial class RealUiAutomationTests
             Fps = 5,
             MaxEdge = 0,
             CaptureScreen = false,
-        }, CancellationToken.None);
+        }, NullDesktopSection.Instance, CancellationToken.None);
 
         Assert.AreEqual(1, result.Frames, "closed WGC items should drain the cached frame once before finalizing");
         Assert.AreEqual("wgc", result.Mode);
@@ -117,7 +119,7 @@ public partial class RealUiAutomationTests
             Fps = 1,
             MaxEdge = 64,
             CaptureScreen = true,
-        }, CancellationToken.None);
+        }, NullDesktopSection.Instance, CancellationToken.None);
 
         Assert.AreEqual("screen", result.Mode);
         Assert.AreEqual(1, result.Frames);
@@ -150,7 +152,7 @@ public partial class RealUiAutomationTests
             Fps = 1,
             MaxEdge = 64,
             CaptureScreen = false,
-        }, CancellationToken.None);
+        }, NullDesktopSection.Instance, CancellationToken.None);
 
         Assert.AreEqual("printwindow", result.Mode);
         Assert.AreEqual(1, result.Frames);
@@ -184,7 +186,7 @@ public partial class RealUiAutomationTests
             Fps = 2,
             MaxEdge = 64,
             CaptureScreen = false,
-        }, CancellationToken.None);
+        }, NullDesktopSection.Instance, CancellationToken.None);
 
         Assert.AreEqual(2, result.Frames);
         Assert.IsNotNull(result.FrameArtifacts);
@@ -224,7 +226,7 @@ public partial class RealUiAutomationTests
                 DurationSec = 1,
                 Fps = 1,
                 MaxEdge = 64,
-            }, CancellationToken.None));
+            }, NullDesktopSection.Instance, CancellationToken.None));
 
         Assert.IsNotNull(exception.FramesDirectory);
         StringAssert.StartsWith(exception.FramesDirectory, framesDirectory + ".partial-");
@@ -270,7 +272,7 @@ public partial class RealUiAutomationTests
                 DurationSec = 1,
                 Fps = 1,
                 MaxEdge = 64,
-            }, CancellationToken.None));
+            }, NullDesktopSection.Instance, CancellationToken.None));
 
         Assert.AreEqual("winning recording", await File.ReadAllTextAsync(output));
         Assert.IsFalse(Directory.Exists(framesDirectory));
@@ -310,7 +312,7 @@ public partial class RealUiAutomationTests
                 DurationSec = 1,
                 Fps = 1,
                 MaxEdge = 64,
-            }, CancellationToken.None));
+            }, NullDesktopSection.Instance, CancellationToken.None));
 
         StringAssert.Contains(exception.InnerException!.Message, "frame failure");
         Assert.IsFalse(Directory.EnumerateFileSystemEntries(root).Any());
@@ -351,7 +353,7 @@ public partial class RealUiAutomationTests
             DurationSec = 10,
             Fps = 1,
             MaxEdge = 64,
-        }, cts.Token);
+        }, NullDesktopSection.Instance, cts.Token);
 
         Assert.AreEqual(1, result.Frames);
         Assert.AreEqual(1, frameSink.SampleCount);
@@ -389,7 +391,7 @@ public partial class RealUiAutomationTests
                 DurationSec = 1,
                 Fps = 1,
                 MaxEdge = 64,
-            }, CancellationToken.None));
+            }, NullDesktopSection.Instance, CancellationToken.None));
 
         Assert.AreEqual(output, exception.VideoPath);
         Assert.IsTrue(File.Exists(output));
@@ -437,7 +439,7 @@ public partial class RealUiAutomationTests
                 DurationSec = 1,
                 Fps = 1,
                 MaxEdge = 64,
-            }, CancellationToken.None));
+            }, NullDesktopSection.Instance, CancellationToken.None));
 
         Assert.AreEqual(output, exception.VideoPath);
         Assert.IsTrue(File.Exists(output));
@@ -472,7 +474,7 @@ public partial class RealUiAutomationTests
             DurationSec = 1,
             Fps = 1,
             MaxEdge = 64,
-        }, CancellationToken.None);
+        }, NullDesktopSection.Instance, CancellationToken.None);
 
         Assert.IsNotNull(result.FrameArtifacts);
         Assert.IsTrue(result.FrameArtifacts.Truncated);

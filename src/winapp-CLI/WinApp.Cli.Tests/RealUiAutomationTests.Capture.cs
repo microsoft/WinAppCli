@@ -6,6 +6,8 @@ using Windows.Win32.UI.Accessibility;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
+using WinApp.Cli.Services.InteractiveDesktop;
+
 namespace WinApp.Cli.Tests;
 
 public partial class RealUiAutomationTests
@@ -24,7 +26,7 @@ public partial class RealUiAutomationTests
         await ResolveAsync(svc, session, "btnInvoke");
 
         var (pixels, width, height) = await CaptureNonBlankAsync(fx,
-            () => svc.ScreenshotAsync(session, null, captureScreen: false, focus: true, CancellationToken.None));
+            () => svc.ScreenshotAsync(session, null, captureScreen: false, focus: true, NullDesktopSection.Instance, observeOnly: false, CancellationToken.None));
 
         AssertNonBlankRenderOrInconclusive(pixels);
         Assert.IsTrue(width > 100 && height > 100, $"unexpected capture size {width}x{height}");
@@ -41,7 +43,7 @@ public partial class RealUiAutomationTests
         await ResolveAsync(svc, session, "btnInvoke");
 
         var (pixels, width, height) = await CaptureNonBlankAsync(fx,
-            () => svc.ScreenshotAsync(session, null, captureScreen: true, focus: false, CancellationToken.None));
+            () => svc.ScreenshotAsync(session, null, captureScreen: true, focus: false, NullDesktopSection.Instance, observeOnly: false, CancellationToken.None));
 
         AssertNonBlankRenderOrInconclusive(pixels);
         Assert.IsTrue(width > 100 && height > 100, $"unexpected capture size {width}x{height}");
@@ -57,7 +59,7 @@ public partial class RealUiAutomationTests
         Foreground(fx);
         var button = await ResolveAsync(svc, session, "btnInvoke");
 
-        var (pixels, width, height) = await svc.ScreenshotAsync(session, button.Selector ?? "btnInvoke", captureScreen: false, focus: true, CancellationToken.None);
+        var (pixels, width, height) = await svc.ScreenshotAsync(session, button.Selector ?? "btnInvoke", captureScreen: false, focus: true, NullDesktopSection.Instance, observeOnly: false, CancellationToken.None);
 
         // The button is ~120x30; the crop should be far smaller than the whole window.
         Assert.IsTrue(width > 10 && width < 300, $"unexpected crop width {width}");
@@ -72,7 +74,7 @@ public partial class RealUiAutomationTests
         var session = new UiSessionInfo { ProcessId = 0x7FFFFFFE, WindowHandle = 0, IsExplicitWindow = true };
 
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(
-            () => svc.ScreenshotAsync(session, null, captureScreen: false, focus: false, CancellationToken.None));
+            () => svc.ScreenshotAsync(session, null, captureScreen: false, focus: false, NullDesktopSection.Instance, observeOnly: false, CancellationToken.None));
     }
 
     [TestMethod]
@@ -90,7 +92,7 @@ public partial class RealUiAutomationTests
         fx.OnUiThread(() => fx.Form.WindowState = FormWindowState.Minimized);
         await Task.Delay(200);
 
-        var (pixels, width, height) = await svc.ScreenshotAsync(session, null, captureScreen: false, focus: true, CancellationToken.None);
+        var (pixels, width, height) = await svc.ScreenshotAsync(session, null, captureScreen: false, focus: true, NullDesktopSection.Instance, observeOnly: false, CancellationToken.None);
 
         Assert.IsTrue(width > 100 && height > 100, $"unexpected capture size {width}x{height}");
         Assert.AreEqual(width * height * 4, pixels.Length);
@@ -109,7 +111,7 @@ public partial class RealUiAutomationTests
 
         // A bare automation id (not a slug) drives CropToElement's legacy-selector branch:
         // _selectorService.Parse -> BuildCondition -> root.FindFirst, then crop to the element rect.
-        var (pixels, width, height) = await svc.ScreenshotAsync(session, "btnInvoke", captureScreen: false, focus: true, CancellationToken.None);
+        var (pixels, width, height) = await svc.ScreenshotAsync(session, "btnInvoke", captureScreen: false, focus: true, NullDesktopSection.Instance, observeOnly: false, CancellationToken.None);
 
         Assert.IsTrue(width > 10 && width < 300, $"unexpected crop width {width}");
         Assert.IsTrue(height > 5 && height < 200, $"unexpected crop height {height}");
@@ -128,8 +130,8 @@ public partial class RealUiAutomationTests
         // A selector that matches nothing makes CropToElement return null, so ScreenshotAsync falls
         // back to returning the full window frame rather than a crop.
         var full = await CaptureNonBlankAsync(fx,
-            () => svc.ScreenshotAsync(session, null, captureScreen: false, focus: true, CancellationToken.None));
-        var (pixels, width, height) = await svc.ScreenshotAsync(session, "no-such-control-zzz", captureScreen: false, focus: true, CancellationToken.None);
+            () => svc.ScreenshotAsync(session, null, captureScreen: false, focus: true, NullDesktopSection.Instance, observeOnly: false, CancellationToken.None));
+        var (pixels, width, height) = await svc.ScreenshotAsync(session, "no-such-control-zzz", captureScreen: false, focus: true, NullDesktopSection.Instance, observeOnly: false, CancellationToken.None);
 
         Assert.AreEqual(full.Width, width, "missing-element crop should yield the full-frame width");
         Assert.AreEqual(full.Height, height, "missing-element crop should yield the full-frame height");

@@ -1,0 +1,121 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+namespace WinApp.Cli.Services.InteractiveDesktop;
+
+/// <summary>
+/// Stable error codes for coordination failures. These appear in the <c>--json</c> error envelope and
+/// are mirrored in <c>UiJsonError</c> so UI commands emit one consistent shape.
+/// </summary>
+internal static class UiCoordinationErrorCodes
+{
+    /// <summary><c>WINAPP_UI_OWNER_ID</c> was set but empty/whitespace or longer than 256 UTF-16 units.</summary>
+    public const string InvalidOwnerId = "invalid_ui_owner_id";
+
+    /// <summary>
+    /// Coordination state could not be read, published, or safely recovered — for example an unknown
+    /// newer schema version, or corrupt state while a live participant may exist. Turn-participating
+    /// and mutating commands fail closed rather than acting uncoordinated.
+    /// </summary>
+    public const string Unavailable = "desktop_coordination_unavailable";
+
+    /// <summary>64 live global waiters already queued after pruning dead entries (spec §8).</summary>
+    public const string QueueCapacityExceeded = "queue_capacity_exceeded";
+
+    /// <summary>The command was cancelled while queued and never reached execution.</summary>
+    public const string Cancelled = "cancelled";
+}
+
+/// <summary>
+/// Raised when coordination cannot proceed safely. Carries the stable error code so command handlers
+/// emit the right envelope without string matching.
+/// </summary>
+internal sealed class UiCoordinationException(string code, string message, string? recoveryHint = null)
+    : Exception(message)
+{
+    /// <summary>One of <see cref="UiCoordinationErrorCodes"/>.</summary>
+    public string Code { get; } = code;
+
+    /// <summary>Optional actionable next step surfaced alongside the error.</summary>
+    public string? RecoveryHint { get; } = recoveryHint;
+}
+
+/// <summary>
+/// What happened to a command's turn, attached to command-completion telemetry in privacy-minimized
+/// bucketed form (spec §16) and used by <c>--verbose</c> waiting output.
+/// </summary>
+internal enum UiTurnAction
+{
+    /// <summary>The command started a new turn because the desktop was free.</summary>
+    New,
+
+    /// <summary>The command joined a turn its owner already held.</summary>
+    Continuation,
+
+    /// <summary>The command waited in the global queue before acquiring the turn.</summary>
+    Queued,
+
+    /// <summary>The command acquired the turn after another owner's idle grace expired.</summary>
+    HandoffAfterIdle,
+
+    /// <summary>A non-owner observation that ran concurrently without claiming the turn.</summary>
+    Detached,
+}
+
+/// <summary>How a coordinated command finished, for telemetry (spec §16).</summary>
+internal enum UiCoordinationOutcome
+{
+    /// <summary>The command reached execution and returned, including with a non-zero exit code.</summary>
+    Completed,
+
+    /// <summary>The command was cancelled while queued and never executed.</summary>
+    Cancelled,
+
+    /// <summary>Coordination failed closed (unavailable, queue capacity, invalid owner id).</summary>
+    CoordinationFailure,
+
+    /// <summary>Corrupt state was safely quarantined and rebuilt before the command proceeded.</summary>
+    CorruptionRecovery,
+}
+
+/// <summary>
+/// Privacy-minimized summary of one command's coordination, attached to existing command-completion
+/// telemetry. Contains no owner ids or hashes, no PIDs, no process/app/window/selector text, no queue
+/// entries, no command arguments and no state-file contents (spec §16).
+/// </summary>
+internal sealed record UiCoordinationSummary(
+    UiOwnerKind IdentitySource,
+    UiTurnMode Mode,
+    UiTurnAction TurnAction,
+    UiCoordinationOutcome Outcome,
+    long WaitedMs,
+    int QueueDepth,
+    long TurnAgeMs)
+{
+    /// <summary>
+    /// Coarse wait bucket. Exact durations could correlate a user's workflow timing across events, so
+    /// only the bucket is reported.
+    /// </summary>
+    public string WaitBucket => Bucket(WaitedMs, [0, 100, 1_000, 5_000, 30_000, 120_000]);
+
+    /// <summary>Coarse queue-depth bucket.</summary>
+    public string QueueDepthBucket => Bucket(QueueDepth, [0, 1, 2, 4, 8, 16]);
+
+    /// <summary>Coarse turn-age bucket.</summary>
+    public string TurnAgeBucket => Bucket(TurnAgeMs, [0, 1_000, 5_000, 30_000, 120_000, 600_000]);
+
+    private static string Bucket(long value, long[] edges)
+    {
+        for (var i = edges.Length - 1; i >= 0; i--)
+        {
+            if (value >= edges[i])
+            {
+                return i == edges.Length - 1
+                    ? $"{edges[i]}+"
+                    : $"{edges[i]}-{edges[i + 1] - 1}";
+            }
+        }
+
+        return "0";
+    }
+}

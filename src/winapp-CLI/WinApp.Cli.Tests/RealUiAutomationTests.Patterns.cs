@@ -6,6 +6,8 @@ using Windows.Win32.UI.Accessibility;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
+using WinApp.Cli.Helpers;
+
 namespace WinApp.Cli.Tests;
 
 public partial class RealUiAutomationTests
@@ -250,7 +252,7 @@ public partial class RealUiAutomationTests
     {
         using var fx = new UiaTestFixture();
         var logger = new CapturingLogger<UiAutomationService>();
-        var svc = new UiAutomationService(logger, new SelectorService());
+        var svc = new UiAutomationService(logger, new SelectorService(), new DesktopForegroundService());
         var session = SessionFor(fx);
         var spinner = await ResolveAsync(svc, session, "numSpin");
 

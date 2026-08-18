@@ -5,6 +5,8 @@ using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
+using WinApp.Cli.Services.InteractiveDesktop;
+
 namespace WinApp.Cli.Tests;
 
 [TestClass]
@@ -162,8 +164,8 @@ public class GestureTargetingTests
         public Task<UiElement[]> InspectAncestorsAsync(UiSessionInfo session, string elementId, CancellationToken ct) => throw new NotImplementedException();
         public Task<UiElement[]> SearchAsync(UiSessionInfo session, SelectorExpression selector, int maxResults, CancellationToken ct) => throw new NotImplementedException();
         public Task<Dictionary<string, object?>> GetPropertiesAsync(UiSessionInfo session, UiElement element, string? propertyName, CancellationToken ct) => throw new NotImplementedException();
-        public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, CancellationToken ct) => throw new NotImplementedException();
-        public Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action<bool>? onRecordingStarted = null) => throw new NotImplementedException();
+        public Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, IDesktopSection desktopSection, bool observeOnly, CancellationToken ct) => throw new NotImplementedException();
+        public Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, IDesktopSection desktopSection, CancellationToken ct, Action<bool>? onRecordingStarted = null) => throw new NotImplementedException();
         public Task<string> InvokeAsync(UiSessionInfo session, UiElement element, CancellationToken ct) => throw new NotImplementedException();
         public Task SetValueAsync(UiSessionInfo session, UiElement element, string text, CancellationToken ct) => throw new NotImplementedException();
         public Task FocusAsync(UiSessionInfo session, UiElement element, CancellationToken ct) => throw new NotImplementedException();

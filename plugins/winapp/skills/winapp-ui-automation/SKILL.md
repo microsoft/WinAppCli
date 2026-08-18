@@ -12,6 +12,43 @@ description: Inspect and interact with running Windows app UIs from the command 
 ## Prerequisites
 - For UIA mode (any app): No setup needed — works with any running Windows app
 - For input-injecting verbs (`click`, `hover`, `drag`, `touch`, `pen`, `scroll --wheel`, `send-keys --via send-input`): an **unlocked, interactive desktop** with the target window foregroundable. On a locked/secure desktop they fail fast with `no_interactive_desktop`. The UIA-pattern verbs (`inspect`, `search`, `get-*`, `wait-for`, `set-value`, `invoke`, `scroll --direction/--to`, `screenshot`) are headless/locked-session friendly — prefer them in CI.
+- **If other UI workflows may run at the same time**, set one owner id per logical workflow (see below). Nothing breaks without it, but your commands will not be recognized as belonging together.
+
+## Coordinating with other UI workflows
+
+Windows has one foreground window, one keyboard focus, one cursor, and one input stream. `winapp ui`
+therefore makes desktop-driving commands take **cooperative turns** so concurrent workflows cannot
+steal each other's focus or dismiss each other's menus. Read-only commands never wait.
+
+```powershell
+# Set once per logical UI workflow — same value for cooperating calls, different values for
+# independent workflows (even from the same agent).
+$env:WINAPP_UI_OWNER_ID = [guid]::NewGuid().ToString()
+```
+
+Rules that matter when driving this from an agent:
+
+- **Each tool call usually gets a fresh shell**, so parent-process grouping will NOT hold your
+  commands together. Inject the *same* `WINAPP_UI_OWNER_ID` into every cooperating call.
+- **A workflow keeps its turn for four seconds** after its last command. That covers back-to-back
+  commands in one script; it deliberately expires while you are reasoning.
+- **After a reasoning gap, replay your setup.** Another workflow may have used the desktop, so
+  reopen the menu / re-navigate, re-resolve the element, then act. Do not assume transient UI
+  survived.
+- **Prefer one tight script over many round trips** for a known sequence: `winapp ui invoke View -w
+  $hwnd; winapp ui search "Status bar" -w $hwnd; winapp ui click "Status bar" -w $hwnd`.
+- **`record` shares the turn with its own workflow**, so same-owner clicks and typing are captured
+  while it runs.
+- **Waiting is indefinite and cancellable.** A status line appears after one second; Ctrl+C exits
+  `130` with error code `cancelled` and the command never ran.
+- **There is no hard cap** — a long script, unbounded recording, or failure loop can block other
+  mutating workflows until it finishes or is stopped.
+
+Commands that never wait: `status`, `list-windows`, `inspect`, `search`, `get-*`, `wait-for`,
+`set-value`, `scroll-into-view`, `scroll --direction`/`--to`, and a plain `screenshot`.
+Commands that take a turn: `record` (shared) and `invoke`, `click`, `drag`, `hover`,
+`scroll --wheel`, `touch`, `pen`, `focus`, `send-keys`, `screenshot --focus`/`--capture-screen`
+(exclusive).
 
 ## Common patterns
 

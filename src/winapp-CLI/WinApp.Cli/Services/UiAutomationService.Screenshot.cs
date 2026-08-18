@@ -3,9 +3,28 @@
 
 using Microsoft.Extensions.Logging;
 using Windows.Win32.UI.Accessibility;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
+using WinApp.Cli.Services.InteractiveDesktop;
 
 namespace WinApp.Cli.Services;
+
+/// <summary>
+/// Raised by an observational screenshot pass when the target can only be captured by restoring or
+/// foregrounding it — a desktop-sensitive act that an <see cref="UiTurnMode.Observe"/> invocation is
+/// not entitled to perform.
+/// </summary>
+/// <remarks>
+/// The caller responds by discarding every buffered capture, escalating the <em>whole</em> invocation
+/// to <see cref="UiTurnMode.DesktopExclusive"/>, and recapturing from the beginning (spec §6.5).
+/// Escalating per-window instead would publish an image mixing pre- and post-escalation pixels.
+/// </remarks>
+internal sealed class DesktopEscalationRequiredException(string reason)
+    : Exception($"This screenshot needs the desktop: {reason}")
+{
+    /// <summary>Why the desktop is needed, for verbose diagnostics.</summary>
+    public string Reason { get; } = reason;
+}
 
 /// <summary>
 /// Screenshot capture methods: window/screen capture, pixel extraction, and element cropping.
@@ -20,6 +39,12 @@ internal sealed partial class UiAutomationService
     /// <remarks>
     /// Coverage ceiling (issue #630): this is a direct Win32 foreground request used only after a
     /// native PrintWindow blank frame. Tests cover callers through the injectable seam.
+    /// <para>
+    /// Coordination (issue #764): this bypasses <see cref="IDesktopForegroundService"/> only because it
+    /// is an established test seam with an <c>HWND</c> signature. Its single caller
+    /// (<see cref="CaptureFromWindowWithBlankRetryAsync"/>) invokes it inside a desktop section, so the
+    /// foreground change is still serialized against every other coordinated process.
+    /// </para>
     /// </remarks>
     private static void ForegroundWindowForBlankRetry(Windows.Win32.Foundation.HWND hwnd)
         => Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
@@ -30,9 +55,16 @@ internal sealed partial class UiAutomationService
     /// foreground policy transitions, WGC cancellation timing, or UIA elements without native handles
     /// that cannot be forced safely on the shared desktop.
     /// </remarks>
-    public async Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(UiSessionInfo session, string? elementId, bool captureScreen, bool focus, CancellationToken ct)
+    public async Task<(byte[] Pixels, int Width, int Height)> ScreenshotAsync(
+        UiSessionInfo session,
+        string? elementId,
+        bool captureScreen,
+        bool focus,
+        IDesktopSection desktopSection,
+        bool observeOnly,
+        CancellationToken ct)
     {
-        _logger.LogDebug("Taking screenshot of process {Pid} (captureScreen={CaptureScreen}, focus={Focus})", session.ProcessId, captureScreen, focus);
+        _logger.LogDebug("Taking screenshot of process {Pid} (captureScreen={CaptureScreen}, focus={Focus}, observeOnly={ObserveOnly})", session.ProcessId, captureScreen, focus, observeOnly);
 
         var root = GetRootElement(session);
         if (root is null)
@@ -60,10 +92,20 @@ internal sealed partial class UiAutomationService
             throw new InvalidOperationException($"No native window handle for {session.ProcessName}. Is the window visible?");
         }
 
-        // Check if window is minimized
-        if (Windows.Win32.PInvoke.IsIconic(hwnd))
+        var handle = (long)(nint)hwnd;
+
+        // Restoring a minimized window is desktop-sensitive: it changes what the user sees and can take
+        // the foreground. An observational pass reports the need and lets the caller escalate rather
+        // than quietly disturbing another workflow's desktop (spec §6.5).
+        if (_desktopForeground.IsMinimized(handle))
         {
-            Windows.Win32.PInvoke.ShowWindow(hwnd, Windows.Win32.UI.WindowsAndMessaging.SHOW_WINDOW_CMD.SW_RESTORE);
+            if (observeOnly)
+            {
+                throw new DesktopEscalationRequiredException("the target window is minimized and must be restored");
+            }
+
+            await using var restoreSection = await desktopSection.EnterAsync(ct).ConfigureAwait(false);
+            _desktopForeground.Restore(handle);
             Thread.Sleep(300);
         }
 
@@ -81,20 +123,31 @@ internal sealed partial class UiAutomationService
         var cropOriginLeft = rect.left;
         var cropOriginTop = rect.top;
 
-        // Bring window to foreground when explicitly requested or implied by --capture-screen.
-        // Done exactly once here, regardless of capture path.
+        // --focus and --capture-screen both require the foreground, so they are classified
+        // DesktopExclusive up front and never reach the observational path.
         if (focus || captureScreen)
         {
-            Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
+            if (observeOnly)
+            {
+                throw new DesktopEscalationRequiredException("the requested capture mode needs the target in the foreground");
+            }
+
+            // Bring window to foreground when explicitly requested or implied by --capture-screen.
+            // Done exactly once here, regardless of capture path. The screen-DC BitBlt below reads the
+            // live screen, so it stays inside the same section.
+            await using var foregroundSection = await desktopSection.EnterAsync(ct).ConfigureAwait(false);
+            _desktopForeground.RequestForeground(handle);
             await Task.Delay(focus ? 150 : 100, ct).ConfigureAwait(false);
+
+            if (captureScreen)
+            {
+                // Screen capture mode: BitBlt from screen DC — captures popups and overlays.
+                pixelData = CaptureFromScreen(rect.left, rect.top, width, height);
+                return CropIfRequested(pixelData, width, height, elementId, session, root, cropOriginLeft, cropOriginTop);
+            }
         }
 
-        if (captureScreen)
-        {
-            // Screen capture mode: BitBlt from screen DC — captures popups and overlays.
-            pixelData = CaptureFromScreen(rect.left, rect.top, width, height);
-        }
-        else if (WgcCapture.IsSupported())
+        if (WgcCapture.IsSupported())
         {
             try
             {
@@ -113,14 +166,21 @@ internal sealed partial class UiAutomationService
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "WGC capture failed; falling back to PrintWindow");
-                pixelData = CaptureFromWindowWithBlankRetry(hwnd, width, height);
+                pixelData = await CaptureFromWindowWithBlankRetryAsync(hwnd, width, height, desktopSection, observeOnly, ct).ConfigureAwait(false);
             }
         }
         else
         {
-            pixelData = CaptureFromWindowWithBlankRetry(hwnd, width, height);
+            pixelData = await CaptureFromWindowWithBlankRetryAsync(hwnd, width, height, desktopSection, observeOnly, ct).ConfigureAwait(false);
         }
 
+        return CropIfRequested(pixelData, width, height, elementId, session, root, cropOriginLeft, cropOriginTop);
+    }
+
+    private (byte[] Pixels, int Width, int Height) CropIfRequested(
+        byte[] pixelData, int width, int height, string? elementId,
+        UiSessionInfo session, IUIAutomationElement root, int cropOriginLeft, int cropOriginTop)
+    {
         // If a selector was provided, crop to the element's bounding rectangle
         if (!string.IsNullOrEmpty(elementId))
         {
@@ -149,16 +209,33 @@ internal sealed partial class UiAutomationService
         return hr.Succeeded ? visibleRect : fallbackRect;
     }
 
-    internal byte[] CaptureFromWindowWithBlankRetry(Windows.Win32.Foundation.HWND hwnd, int width, int height)
+    internal async Task<byte[]> CaptureFromWindowWithBlankRetryAsync(
+        Windows.Win32.Foundation.HWND hwnd, int width, int height,
+        IDesktopSection desktopSection, bool observeOnly, CancellationToken ct)
     {
         var pixels = s_captureFromWindow(hwnd, width, height);
-        if (IsBlankCapture(pixels))
+        if (!IsBlankCapture(pixels))
         {
-            _logger.LogDebug("PrintWindow returned blank frame; foregrounding and retrying");
+            return pixels;
+        }
+
+        // A blank PrintWindow frame can only be recovered by foregrounding the window, which is
+        // desktop-sensitive. An observational pass reports it so the caller can escalate the whole
+        // invocation rather than publishing a black image or stealing focus (spec §6.5).
+        if (observeOnly)
+        {
+            throw new DesktopEscalationRequiredException(
+                "the target rendered a blank frame and must be foregrounded to capture it");
+        }
+
+        _logger.LogDebug("PrintWindow returned blank frame; foregrounding and retrying");
+        await using (await desktopSection.EnterAsync(ct).ConfigureAwait(false))
+        {
             s_foregroundWindowForBlankRetry(hwnd);
             s_sleepForBlankRetry(200);
             pixels = s_captureFromWindow(hwnd, width, height);
         }
+
         return pixels;
     }
 

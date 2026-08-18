@@ -9,6 +9,8 @@ using Windows.Win32.Foundation;
 using Windows.Win32.UI.Accessibility;
 using WinApp.Cli.Models;
 
+using WinApp.Cli.Services.InteractiveDesktop;
+
 namespace WinApp.Cli.Services;
 
 /// <summary>
@@ -24,7 +26,7 @@ internal sealed partial class UiAutomationService
     /// fault arms, and cancellation timing races that require mutating real desktop windows or native
     /// WGC failures and are not safe to trigger on the shared coverage host.
     /// </remarks>
-    public async Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, CancellationToken ct, Action<bool>? onRecordingStarted = null)
+    public async Task<RecordCaptureResult> RecordAsync(UiSessionInfo session, string? elementId, RecordOptions options, IDesktopSection desktopSection, CancellationToken ct, Action<bool>? onRecordingStarted = null)
     {
         _logger.LogDebug("Recording process {Pid} (duration={Dur}s, fps={Fps}, maxEdge={MaxEdge}, captureScreen={Screen})",
             session.ProcessId, options.DurationSec, options.Fps, options.MaxEdge, options.CaptureScreen);
@@ -51,17 +53,26 @@ internal sealed partial class UiAutomationService
             throw new InvalidOperationException($"No native window handle for {session.ProcessName}. Is the window visible?");
         }
 
-        if (Windows.Win32.PInvoke.IsIconic(hwnd))
+        // Spec §6.3: recording is TurnShared, so it pins the owner for the whole capture but takes
+        // active.lock only for these desktop-sensitive moments. The capture loop below stays outside the
+        // section so same-owner clicks and typing can interleave with an in-flight recording.
+        var handle = (long)(nint)hwnd;
+        if (_desktopForeground.IsMinimized(handle) || options.CaptureScreen)
         {
-            Windows.Win32.PInvoke.ShowWindow(hwnd, Windows.Win32.UI.WindowsAndMessaging.SHOW_WINDOW_CMD.SW_RESTORE);
-            await Task.Delay(300, ct).ConfigureAwait(false);
-        }
+            await using var section = await desktopSection.EnterAsync(ct).ConfigureAwait(false);
 
-        // Bring to foreground for screen-DC capture.
-        if (options.CaptureScreen)
-        {
-            Windows.Win32.PInvoke.SetForegroundWindow(hwnd);
-            await Task.Delay(150, ct).ConfigureAwait(false);
+            if (_desktopForeground.IsMinimized(handle))
+            {
+                _desktopForeground.Restore(handle);
+                await Task.Delay(300, ct).ConfigureAwait(false);
+            }
+
+            // Bring to foreground for screen-DC capture.
+            if (options.CaptureScreen)
+            {
+                _desktopForeground.RequestForeground(handle);
+                await Task.Delay(150, ct).ConfigureAwait(false);
+            }
         }
 
         Windows.Win32.PInvoke.GetWindowRect(hwnd, out var rect);
@@ -363,7 +374,11 @@ internal sealed partial class UiAutomationService
                     }
                     else
                     {
-                        var source = CaptureFromWindowWithBlankRetry(hwnd, srcWidth, srcHeight);
+                        // The blank-frame retry foregrounds the target, so it is a desktop-sensitive
+                        // moment even mid-recording and enters the section. Blank frames are rare, so
+                        // this does not take active.lock on every frame.
+                        var source = await CaptureFromWindowWithBlankRetryAsync(
+                            hwnd, srcWidth, srcHeight, desktopSection, observeOnly: false, ct).ConfigureAwait(false);
                         frame = ProcessFrame(
                             source, srcWidth, srcHeight,
                             cropX, cropY, cropW, cropH,

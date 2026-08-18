@@ -14,6 +14,7 @@ internal static class PointerCommandSupport
     public static async Task<ResolvedPoint> ResolvePointAsync(
         IUiAutomationService uiAutomation,
         ISelectorService selectorService,
+        IDesktopForegroundService desktopForeground,
         UiSessionInfo session,
         string? selectorStr,
         PointerPoint? explicitPoint,
@@ -50,7 +51,7 @@ internal static class PointerCommandSupport
 
         if (targetHwnd != 0)
         {
-            Windows.Win32.PInvoke.SetForegroundWindow(new Windows.Win32.Foundation.HWND((nint)targetHwnd));
+            desktopForeground.RequestForeground(targetHwnd);
             await Task.Delay(100, cancellationToken);
         }
 
@@ -65,11 +66,12 @@ internal static class PointerCommandSupport
         return new ResolvedPoint(true, new PointerPoint(stable.CenterX, stable.CenterY), targetHwnd, selectorStr);
     }
 
-    public static async Task SetForegroundAsync(long targetHwnd, CancellationToken cancellationToken)
+    public static async Task SetForegroundAsync(
+        IDesktopForegroundService desktopForeground, long targetHwnd, CancellationToken cancellationToken)
     {
         if (targetHwnd != 0)
         {
-            Windows.Win32.PInvoke.SetForegroundWindow(new Windows.Win32.Foundation.HWND((nint)targetHwnd));
+            desktopForeground.RequestForeground(targetHwnd);
             await Task.Delay(100, cancellationToken);
         }
     }

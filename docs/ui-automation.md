@@ -31,6 +31,63 @@ winapp ui invoke Close -a notepad
 winapp ui screenshot -a notepad
 ```
 
+## Coordinating concurrent UI workflows
+
+Windows has only one foreground window, one keyboard focus, one cursor, and one input stream. When
+two `winapp ui` workflows run on the same signed-in desktop at once, they can steal focus from each
+other, dismiss a menu the other just opened, or move a target out from under a pending click.
+
+`winapp ui` coordinates automatically: commands that need the physical desktop take **cooperative
+turns**, and read-only commands keep running concurrently. There is nothing to enable — but set one
+environment variable per logical workflow so the CLI can tell your commands apart from someone
+else's.
+
+```powershell
+# Set once per logical UI workflow
+$env:WINAPP_UI_OWNER_ID = [guid]::NewGuid().ToString()
+```
+
+What you need to know:
+
+- **Explicit identity overrides parent identity.** `WINAPP_UI_OWNER_ID` names one logical workflow —
+  not necessarily a whole agent, and not necessarily one app. Use the *same* value for cooperating
+  processes (a recording plus the clicks it should capture); use *different* values for independent
+  workflows, even when one agent launches both.
+- **Direct scripts work automatically.** With no variable set, commands are grouped by the shell or
+  script that launched them, so a normal `.ps1` or `.cmd` needs no setup.
+- **Fresh-shell and adaptive hosts must inject the same value.** If each command runs in a new shell
+  — which is how most agent tool calls work — parent identity cannot group them. Pass the same
+  explicit `WINAPP_UI_OWNER_ID` into every cooperating call.
+- **The four-second grace protects tight bursts, not model reasoning.** A workflow keeps its turn as
+  long as the next command starts within four seconds. That covers back-to-back commands in one
+  script; it intentionally expires while a model is thinking.
+- **Adaptive workflows must reacquire, revalidate, and replay.** After a reasoning gap another
+  workflow may have used the desktop, so reopen the menu, re-resolve the element, and then act.
+  Send known end-to-end sequences as one tight script rather than holding the desktop while you think.
+- **There is no hard cap.** A live workflow can hold the desktop indefinitely, which means a long
+  script, an unbounded recording, or a failure loop can block other mutating workflows.
+- **Cancellation or process termination is the recovery** for a stuck live workflow. Waiting commands
+  print a status after one second and can be stopped with `Ctrl+C`, which exits `130`.
+- **Only compatible updated binaries cooperate.** Older `winapp` builds predate this feature and are
+  not coordinated.
+
+Which commands wait for a turn:
+
+| Behavior | Commands |
+|---|---|
+| Runs concurrently (never waits) | `status`, `list-windows`, `inspect`, `search`, `get-property`, `get-value`, `get-focused`, `wait-for`, `set-value`, `scroll-into-view`, `scroll --direction`/`--to`, plain `screenshot` |
+| Claims the turn, shares it with the same workflow | `record` |
+| Claims the turn and takes the desktop exclusively | `invoke`, `click`, `drag`, `hover`, `scroll --wheel`, `touch`, `pen`, `focus`, `send-keys`, `screenshot --focus`/`--capture-screen` |
+
+A plain `screenshot` starts as a concurrent capture and escalates to an exclusive turn only if a
+target turns out to be minimized or renders blank, in which case it re-captures everything from the
+beginning so the saved image is never a mix of before and after.
+
+Errors you may see: `invalid_ui_owner_id` (the variable is set but empty or over 256 characters),
+`desktop_coordination_unavailable` (coordination state is unreadable and cannot be safely rebuilt, or
+was written by a newer `winapp`), `queue_capacity_exceeded` (64 commands are already waiting), and
+`cancelled` (Ctrl+C while waiting, exit code `130`).
+
 ## Targeting Apps
 
 ### By process name

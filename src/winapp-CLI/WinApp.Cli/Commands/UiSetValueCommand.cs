@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
+using WinApp.Cli.Services.InteractiveDesktop;
 
 namespace WinApp.Cli.Commands;
 
@@ -36,27 +37,38 @@ internal class UiSetValueCommand : Command, IShortDescription
         IUiAutomationService uiAutomation,
         ISelectorService selectorService,
         IAnsiConsole ansiConsole,
-        ILogger<UiSetValueCommand> logger) : AsynchronousCommandLineAction
+        IInteractiveDesktopLock desktopLock,
+        ILogger<UiSetValueCommand> logger) : UiCoordinatedAction(desktopLock, logger)
     {
-        public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
+        protected override string Operation => "ui set-value";
+
+        /// <remarks>
+        /// Spec §6.1: background-safe UIA mutations stay concurrent even against the same target. This
+        /// feature prevents desktop interference; it deliberately does not provide transactional
+        /// app-state isolation.
+        /// </remarks>
+        protected override UiTurnMode ResolveMode(ParseResult parseResult) => UiTurnMode.Observe;
+
+        protected override int? Preflight(ParseResult parseResult)
         {
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var selectorStr = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
+            var value = parseResult.GetValue(SharedUiOptions.ValueArgument);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
                 UiErrors.MissingApp(logger, json);
                 return 1;
             }
-            var value = parseResult.GetValue(SharedUiOptions.ValueArgument);
 
             if (string.IsNullOrWhiteSpace(selectorStr))
             {
                 UiErrors.MissingSelector(logger, "set-value", json);
                 return 1;
             }
+
             if (value is null)
             {
                 logger.LogError("{Symbol} A value is required. Usage: winapp ui set-value <selector> <value> -a <app>", UiSymbols.Error);
@@ -64,6 +76,18 @@ internal class UiSetValueCommand : Command, IShortDescription
                     "A value is required. Usage: winapp ui set-value <selector> <value> -a <app>");
                 return 1;
             }
+
+            return null;
+        }
+
+        protected override async Task<int> ExecuteAsync(ParseResult parseResult, IUiTurn turn, CancellationToken cancellationToken)
+        {
+            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
+            // Preflight rejected a missing selector, so this is non-null by construction.
+            var selectorStr = parseResult.GetValue(SharedUiOptions.SelectorArgument)!;
+            var app = parseResult.GetValue(SharedUiOptions.AppOption);
+            var window = parseResult.GetValue(SharedUiOptions.WindowOption);
+            var value = parseResult.GetValue(SharedUiOptions.ValueArgument)!;
 
             try
             {

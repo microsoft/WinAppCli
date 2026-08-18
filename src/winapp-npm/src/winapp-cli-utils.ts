@@ -7,6 +7,19 @@ export const WINAPP_CLI_CALLER_VALUE = 'nodejs-package';
 
 export interface CallWinappCliOptions {
   exitOnError?: boolean;
+  /**
+   * Cancels the whole native invocation, not just a wait for the shared desktop.
+   *
+   * On Windows, Node force-terminates the child, so the CLI's own cleanup may not run. That is safe:
+   * Windows closes the process's coordination file handles and deletes its `DeleteOnClose` participant
+   * lease, and other `winapp ui` processes prune the entry through lease and PID/start validation.
+   * If the abort lands after the command acquired the desktop, UI side effects may already have
+   * happened, and aborting an active recording can leave partial or invalid output — this wrapper does
+   * not promise graceful MP4 finalization.
+   *
+   * Rejects with an `AbortError`.
+   */
+  signal?: AbortSignal;
 }
 
 export interface CallWinappCliResult {
@@ -16,6 +29,11 @@ export interface CallWinappCliResult {
 export interface CallWinappCliCaptureOptions {
   /** Working directory for the CLI process (defaults to process.cwd()) */
   cwd?: string;
+  /**
+   * Cancels the whole native invocation. See {@link CallWinappCliOptions.signal} for the exact
+   * contract, including what is and is not guaranteed after an abort.
+   */
+  signal?: AbortSignal;
 }
 
 export interface CallWinappCliCaptureResult {
@@ -49,7 +67,7 @@ export function getWinappCliPath(): string {
  * Always captures output and returns it along with the exit code
  */
 export async function callWinappCli(args: string[], options: CallWinappCliOptions = {}): Promise<CallWinappCliResult> {
-  const { exitOnError = false } = options;
+  const { exitOnError = false, signal } = options;
   const winappCliPath = getWinappCliPath();
 
   return new Promise((resolve, reject) => {
@@ -57,6 +75,7 @@ export async function callWinappCli(args: string[], options: CallWinappCliOption
       stdio: 'inherit',
       cwd: process.cwd(),
       shell: false,
+      signal,
       env: {
         ...process.env,
         WINAPP_CLI_CALLER: WINAPP_CLI_CALLER_VALUE,
@@ -76,6 +95,14 @@ export async function callWinappCli(args: string[], options: CallWinappCliOption
     });
 
     child.on('error', (error) => {
+      // An aborted spawn surfaces here as an AbortError. Propagate it unchanged so callers can
+      // distinguish "I cancelled this" from "the CLI could not be launched", and never call
+      // process.exit for it — cancellation is the caller's decision, not a fatal tool failure.
+      if (isAbortError(error)) {
+        reject(error);
+        return;
+      }
+
       if (exitOnError) {
         console.error(`Failed to execute winapp-cli: ${error.message}`);
         console.error(`Tried to run: ${winappCliPath}`);
@@ -95,7 +122,7 @@ export async function callWinappCliCapture(
   args: string[],
   options: CallWinappCliCaptureOptions = {}
 ): Promise<CallWinappCliCaptureResult> {
-  const { cwd = process.cwd() } = options;
+  const { cwd = process.cwd(), signal } = options;
   const winappCliPath = getWinappCliPath();
 
   return new Promise((resolve, reject) => {
@@ -106,6 +133,7 @@ export async function callWinappCliCapture(
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd,
       shell: false,
+      signal,
       env: {
         ...process.env,
         WINAPP_CLI_CALLER: WINAPP_CLI_CALLER_VALUE,
@@ -136,7 +164,13 @@ export async function callWinappCliCapture(
     });
 
     child.on('error', (error) => {
-      reject(new Error(`Failed to execute winapp-cli: ${error.message}`));
+      // Propagate an AbortError unchanged so callers can tell cancellation apart from a launch failure.
+      reject(isAbortError(error) ? error : new Error(`Failed to execute winapp-cli: ${error.message}`));
     });
   });
+}
+
+/** Whether an error came from an aborted {@link AbortSignal} rather than a real spawn failure. */
+function isAbortError(error: Error): boolean {
+  return (error as NodeJS.ErrnoException).name === 'AbortError';
 }

@@ -27,6 +27,13 @@ internal sealed partial class UiAutomationService : IUiAutomationService
     private readonly IUIAutomation _automation;
     private readonly ISelectorService _selectorService;
 
+    /// <summary>
+    /// The single sanctioned path for changing the foreground window or restoring a minimized one.
+    /// Recording and screenshot capture both need those, and both must only do them inside a desktop
+    /// section (issue #764).
+    /// </summary>
+    private readonly IDesktopForegroundService _desktopForeground;
+
     internal static Func<UiAutomationService, UiSessionInfo, IUIAutomationElement?> s_getRootElement = (service, session) => service.GetRootElementCore(session);
     internal static Func<UiAutomationService, nint, IUIAutomationElement?> s_getRootElementForHwnd = (service, hwnd) => service.GetRootElementForHwndCore(hwnd);
     internal static Func<UiAutomationService, UiSessionInfo, List<(nint Hwnd, int Pid, string Title)>> s_getAllAppWindows = (service, session) => service.GetAllAppWindowsCore(session);
@@ -58,10 +65,14 @@ internal sealed partial class UiAutomationService : IUiAutomationService
         s_sleepForBlankRetry = Thread.Sleep;
     }
 
-    public UiAutomationService(ILogger<UiAutomationService> logger, ISelectorService selectorService)
+    public UiAutomationService(
+        ILogger<UiAutomationService> logger,
+        ISelectorService selectorService,
+        IDesktopForegroundService desktopForeground)
     {
         _logger = logger;
         _selectorService = selectorService;
+        _desktopForeground = desktopForeground;
         _automation = CUIAutomation8.CreateInstance<IUIAutomation>();
     }
 

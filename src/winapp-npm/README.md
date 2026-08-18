@@ -85,6 +85,35 @@ Full programmatic API reference: [NPM API Documentation](https://github.com/micr
 
 > **Note — the programmatic API runs the CLI non-interactively.** The wrapper functions capture output and give the native process piped stdin, so commands that would normally prompt cannot do so. For `azSign` in particular this means you must pass either a `metadataFile` or a fully specified identity (`subscription`, `resourceGroup`, `account`, and `profile`), and a non-interactive Azure credential must already be available (for example `AZURE_TENANT_ID`/`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET`, OIDC, a managed identity, or an existing `az login` session). Calls that would otherwise require a selection prompt or an interactive `az login` fail instead of prompting.
 
+#### Cancelling a call
+
+Every command option object accepts a `signal`. It cancels the whole native invocation and rejects
+with an `AbortError`:
+
+```typescript
+const controller = new AbortController();
+setTimeout(() => controller.abort(), 30_000);
+
+await uiClick({ app: 'notepad', selector: 'btn-save-c3d4', signal: controller.signal });
+```
+
+On Windows the child is force-terminated, so the CLI's own cleanup may not run. That is safe —
+Windows releases the process's coordination handles and other `winapp ui` processes reclaim its queue
+entry — but if the abort lands after the command already had the desktop, UI side effects may already
+have happened, and aborting an active recording can leave partial output with no graceful MP4
+finalization.
+
+#### Driving UI from several workflows
+
+`winapp ui` commands that need the physical desktop take cooperative turns. Separate npm calls may
+run under different Node parents, so the CLI cannot infer that they belong together. Set
+`process.env.WINAPP_UI_OWNER_ID` to the same value for every cooperating call (it is forwarded to the
+child automatically); the wrapper never generates one for you. See
+[UI Automation → Coordinating concurrent UI workflows](https://github.com/microsoft/WinAppCli/blob/main/docs/ui-automation.md#coordinating-concurrent-ui-workflows).
+
+`uiRecord` still requires a finite positive `durationSec`: `signal` can only stop a recording by
+killing it, which does not produce a valid MP4.
+
 ## 🔧 Feedback
 
 - [File an issue, feature request or bug](https://github.com/microsoft/WinAppCli/issues): please ensure that you are not filing a duplicate issue

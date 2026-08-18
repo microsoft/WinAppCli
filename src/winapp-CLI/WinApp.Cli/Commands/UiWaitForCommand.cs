@@ -11,6 +11,7 @@ using Spectre.Console;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
+using WinApp.Cli.Services.InteractiveDesktop;
 
 namespace WinApp.Cli.Commands;
 
@@ -62,9 +63,18 @@ internal class UiWaitForCommand : Command, IShortDescription
         ISelectorService selectorService,
         IPollDelay pollDelay,
         IAnsiConsole ansiConsole,
-        ILogger<UiWaitForCommand> logger) : AsynchronousCommandLineAction
+        IInteractiveDesktopLock desktopLock,
+        ILogger<UiWaitForCommand> logger) : UiCoordinatedAction(desktopLock, logger)
     {
-        public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
+        protected override string Operation => "ui wait-for";
+
+        /// <remarks>
+        /// Spec §14: <c>wait-for</c> polls UIA in the background and keeps its existing timeout scope,
+        /// which starts immediately rather than after any coordination wait.
+        /// </remarks>
+        protected override UiTurnMode ResolveMode(ParseResult parseResult) => UiTurnMode.Observe;
+
+        protected override int? Preflight(ParseResult parseResult)
         {
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var selectorStr = parseResult.GetValue(SharedUiOptions.SelectorArgument);
@@ -76,11 +86,6 @@ internal class UiWaitForCommand : Command, IShortDescription
                 UiErrors.MissingApp(logger, json);
                 return 1;
             }
-            var timeout = parseResult.GetRequiredValue(SharedUiOptions.TimeoutOption);
-            var gone = parseResult.GetValue(GoneOption);
-            var property = parseResult.GetValue(SharedUiOptions.PropertyOption);
-            var value = parseResult.GetValue(ValueOption);
-            var contains = parseResult.GetValue(ContainsOption);
 
             if (string.IsNullOrWhiteSpace(selectorStr))
             {
@@ -88,11 +93,21 @@ internal class UiWaitForCommand : Command, IShortDescription
                 return 1;
             }
 
-            if (value != null && string.IsNullOrWhiteSpace(property))
-            {
-                // --value without --property: use smart get-value fallback (TextPattern → ValuePattern → Name)
-                // No error — this is the recommended usage
-            }
+            return null;
+        }
+
+        protected override async Task<int> ExecuteAsync(ParseResult parseResult, IUiTurn turn, CancellationToken cancellationToken)
+        {
+            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
+            // Preflight rejected a missing selector, so this is non-null by construction.
+            var selectorStr = parseResult.GetValue(SharedUiOptions.SelectorArgument)!;
+            var app = parseResult.GetValue(SharedUiOptions.AppOption);
+            var window = parseResult.GetValue(SharedUiOptions.WindowOption);
+            var timeout = parseResult.GetRequiredValue(SharedUiOptions.TimeoutOption);
+            var gone = parseResult.GetValue(GoneOption);
+            var property = parseResult.GetValue(SharedUiOptions.PropertyOption);
+            var value = parseResult.GetValue(ValueOption);
+            var contains = parseResult.GetValue(ContainsOption);
 
             try
             {

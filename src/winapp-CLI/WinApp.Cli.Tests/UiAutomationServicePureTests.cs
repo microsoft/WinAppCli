@@ -6,6 +6,8 @@ using Windows.Win32.Foundation;
 using Microsoft.Extensions.Logging.Abstractions;
 using WinApp.Cli.Services;
 
+using WinApp.Cli.Services.InteractiveDesktop;
+
 namespace WinApp.Cli.Tests;
 
 /// <summary>
@@ -189,7 +191,7 @@ public class UiAutomationServicePureTests
     }
 
     [TestMethod]
-    public void CaptureFromWindowWithBlankRetry_RetriesBlankFrame()
+    public async Task CaptureFromWindowWithBlankRetry_RetriesBlankFrame()
     {
         var calls = 0;
         var foregrounded = false;
@@ -198,16 +200,38 @@ public class UiAutomationServicePureTests
         UiAutomationService.s_foregroundWindowForBlankRetry = _ => foregrounded = true;
         UiAutomationService.s_sleepForBlankRetry = ms => Assert.AreEqual(200, ms);
 
-        var service = new UiAutomationService(NullLogger<UiAutomationService>.Instance, new SelectorService());
-        var pixels = service.CaptureFromWindowWithBlankRetry(new HWND(123), 1, 2);
+        var service = new UiAutomationService(
+            NullLogger<UiAutomationService>.Instance, new SelectorService(), new FakeDesktopForegroundService());
+        var section = new CountingDesktopSection();
+        var pixels = await service.CaptureFromWindowWithBlankRetryAsync(
+            new HWND(123), 1, 2, section, observeOnly: false, CancellationToken.None);
 
         Assert.AreEqual(2, calls, "blank first capture must trigger one retry");
         Assert.IsTrue(foregrounded, "blank retry must foreground the target window");
+        Assert.AreEqual(1, section.Enters, "the blank-retry foreground must happen inside a desktop section");
         CollectionAssert.AreEqual(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 }, pixels);
     }
 
     [TestMethod]
-    public void CaptureFromWindowWithBlankRetry_NonBlankDoesNotRetry()
+    public async Task CaptureFromWindowWithBlankRetry_ObserveOnlyRequestsEscalationInsteadOfForegrounding()
+    {
+        UiAutomationService.s_captureFromWindow = (_, _, _) => new byte[8];
+        UiAutomationService.s_foregroundWindowForBlankRetry =
+            _ => Assert.Fail("an observational pass must never take the foreground");
+
+        var service = new UiAutomationService(
+            NullLogger<UiAutomationService>.Instance, new SelectorService(), new FakeDesktopForegroundService());
+        var section = new CountingDesktopSection();
+
+        await Assert.ThrowsExactlyAsync<DesktopEscalationRequiredException>(
+            () => service.CaptureFromWindowWithBlankRetryAsync(
+                new HWND(123), 1, 2, section, observeOnly: true, CancellationToken.None));
+
+        Assert.AreEqual(0, section.Enters, "an observational pass must not take active.lock");
+    }
+
+    [TestMethod]
+    public async Task CaptureFromWindowWithBlankRetry_NonBlankDoesNotRetry()
     {
         var calls = 0;
         UiAutomationService.s_captureFromWindow = (_, _, _) =>
@@ -217,11 +241,32 @@ public class UiAutomationServicePureTests
         };
         UiAutomationService.s_foregroundWindowForBlankRetry = _ => Assert.Fail("non-blank capture must not foreground/retry");
 
-        var service = new UiAutomationService(NullLogger<UiAutomationService>.Instance, new SelectorService());
-        var pixels = service.CaptureFromWindowWithBlankRetry(new HWND(456), 1, 1);
+        var service = new UiAutomationService(
+            NullLogger<UiAutomationService>.Instance, new SelectorService(), new FakeDesktopForegroundService());
+        var section = new CountingDesktopSection();
+        var pixels = await service.CaptureFromWindowWithBlankRetryAsync(
+            new HWND(456), 1, 1, section, observeOnly: false, CancellationToken.None);
 
         Assert.AreEqual(1, calls);
+        Assert.AreEqual(0, section.Enters, "a clean capture must never take active.lock");
         Assert.AreEqual(1, pixels[3]);
+    }
+
+    /// <summary>Counts how many desktop sections a capture path opened.</summary>
+    private sealed class CountingDesktopSection : IDesktopSection
+    {
+        public int Enters { get; private set; }
+
+        public Task<IAsyncDisposable> EnterAsync(CancellationToken cancellationToken)
+        {
+            Enters++;
+            return Task.FromResult<IAsyncDisposable>(new Scope());
+        }
+
+        private sealed class Scope : IAsyncDisposable
+        {
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
     }
 
     [TestMethod]

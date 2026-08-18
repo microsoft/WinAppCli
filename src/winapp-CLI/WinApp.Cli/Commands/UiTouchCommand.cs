@@ -10,6 +10,7 @@ using Spectre.Console;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
+using WinApp.Cli.Services.InteractiveDesktop;
 
 namespace WinApp.Cli.Commands;
 
@@ -103,11 +104,49 @@ internal class UiTouchCommand : Command, IShortDescription
         ISelectorService selectorService,
         IPointerInput pointerInput,
         IForegroundGuard foregroundGuard,
+        IDesktopForegroundService desktopForeground,
+        ISystemUiQuery systemQuery,
+        IInteractiveDesktopLock desktopLock,
         IAnsiConsole ansiConsole,
-        ILogger<UiTouchCommand> logger) : AsynchronousCommandLineAction
+        ILogger<UiTouchCommand> logger) : UiCoordinatedAction(desktopLock, logger)
     {
-        public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
+        /// <summary>
+        /// The fully validated argument set. Produced once by <see cref="Validate"/> so
+        /// <see cref="Preflight"/> and <see cref="ExecuteAsync"/> share one parse instead of duplicating
+        /// the gesture/point/range rules.
+        /// </summary>
+        private readonly record struct TouchArgs(
+            bool Json,
+            string? SelectorStr,
+            string? App,
+            long? Window,
+            string GestureStr,
+            TouchGesture Gesture,
+            PointerPoint? At,
+            string? AtStr,
+            PointerPoint? To,
+            int Distance,
+            string? Direction,
+            int HoldMs,
+            int DurationMs,
+            int Fingers);
+
+        protected override string Operation => "ui touch";
+
+        /// <summary>Synthetic touch injection is OS-wide and lands wherever the desktop points.</summary>
+        protected override UiTurnMode ResolveMode(ParseResult parseResult) => UiTurnMode.DesktopExclusive;
+
+        protected override int? Preflight(ParseResult parseResult) => Validate(parseResult, out _);
+
+        /// <summary>
+        /// All app-independent semantic validation. Runs before the missing-app check so that malformed
+        /// argument values return <c>invalid_arguments</c>, not <c>missing_app</c> (M4 root-cause fix),
+        /// and before any coordination so a malformed command never joins the desktop queue.
+        /// </summary>
+        private int? Validate(ParseResult parseResult, out TouchArgs args)
         {
+            args = default;
+
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var selectorStr = parseResult.GetValue(SharedUiOptions.SelectorArgument);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
@@ -126,8 +165,13 @@ internal class UiTouchCommand : Command, IShortDescription
             bool durationWasSupplied = (parseResult.GetResult(DurationOption)?.Tokens.Count ?? 0) > 0;
             bool fingersWasSupplied = (parseResult.GetResult(FingersOption)?.Tokens.Count ?? 0) > 0;
 
-            // All app-independent semantic validation runs BEFORE the missing-app check so that
-            // malformed argument values return invalid_arguments, not missing_app (M4 root-cause fix).
+            int RejectInvalidArguments(string message)
+            {
+                logger.LogError("{Symbol} {Message}", UiSymbols.Error, message);
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, message,
+                    errorOut: parseResult.InvocationConfiguration.Error);
+                return 1;
+            }
 
             if (!Gestures.TryGetValue(gestureStr, out var gesture))
             {
@@ -277,45 +321,78 @@ internal class UiTouchCommand : Command, IShortDescription
                 return 1;
             }
 
+            args = new TouchArgs(json, selectorStr, app, window, gestureStr, gesture, at, atStr, to,
+                distance, direction, holdMs, durationMs, fingers);
+            return null;
+        }
+
+        protected override async Task<int> ExecuteAsync(ParseResult parseResult, IUiTurn turn, CancellationToken cancellationToken)
+        {
+            // Preflight already ran this and rejected every invalid combination, so it cannot fail here.
+            Validate(parseResult, out var args);
+            var (json, selectorStr, app, window, gestureStr, gesture, at, atStr, to,
+                 distance, direction, holdMs, durationMs, fingers) = args;
+
             try
             {
                 var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
 
-                var target = await PointerCommandSupport.ResolvePointAsync(
-                    uiAutomation, selectorService, session, selectorStr, at, atStr,
-                    "touch", "touch point", logger, json, cancellationToken);
-                if (!target.Ok)
+                PointerCommandSupport.InjectionPreparation prep;
+                long targetHwnd;
+                PointerPoint start;
+                string? targetLabel;
+                IReadOnlyList<PointerPoint> points;
+                int effectiveFingers;
+
+                // Point resolution, foreground and synthetic pointer injection all share the desktop and
+                // run in one section: ResolvePointAsync foregrounds the target during its stable read, and
+                // spec §10.5 requires the coordinates actually injected to be resolved after the queue wait.
+                // The warning composition and result formatting below stay outside.
+                await using (await turn.EnterAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    return 1;
-                }
+                    var target = await PointerCommandSupport.ResolvePointAsync(
+                        uiAutomation, selectorService, desktopForeground, session, selectorStr, at, atStr,
+                        "touch", "touch point", logger, json, cancellationToken);
+                    if (!target.Ok)
+                    {
+                        return 1;
+                    }
 
-                var targetHwnd = target.TargetHwnd;
-                var start = target.Point;
-                var targetLabel = target.TargetLabel;
+                    targetHwnd = target.TargetHwnd;
+                    start = target.Point;
+                    targetLabel = target.TargetLabel;
 
-                if (at is not null)
-                {
-                    await PointerCommandSupport.SetForegroundAsync(targetHwnd, cancellationToken);
-                }
+                    if (!DesktopTargetValidation.TryConfirmTargetWindow(
+                            systemQuery, targetHwnd, session.ProcessId, logger, json, "touch",
+                            parseResult.InvocationConfiguration.Error))
+                    {
+                        return 1;
+                    }
 
-                var (contactPaths, points, effectiveFingers) =
-                    PointerGesturePlanner.PlanTouch(gesture, start, to, distance, fingers, direction);
+                    (var contactPaths, points, effectiveFingers) =
+                        PointerGesturePlanner.PlanTouch(gesture, start, to, distance, fingers, direction);
 
-                var prep = PointerCommandSupport.TryPrepareInjection(
-                    uiAutomation, foregroundGuard, targetHwnd, points, "touch", "touch", logger, json);
-                if (!prep.Ok)
-                {
-                    return 1;
-                }
+                    if (at is not null)
+                    {
+                        await PointerCommandSupport.SetForegroundAsync(desktopForeground, targetHwnd, cancellationToken);
+                    }
 
-                // M8: narrow the injection_unsupported catch to only the actual injection call so that
-                // pre-injection failures (element not found, etc.) are NOT mis-classified as
-                // injection_unsupported. Session resolution failures surface as missing_app (outer catch).
-                if (!PointerCommandSupport.TryInject(
-                    () => pointerInput.Touch(gesture, contactPaths, holdMs, durationMs),
-                    logger, json, parseResult.InvocationConfiguration.Error))
-                {
-                    return 1;
+                    prep = PointerCommandSupport.TryPrepareInjection(
+                        uiAutomation, foregroundGuard, targetHwnd, points, "touch", "touch", logger, json);
+                    if (!prep.Ok)
+                    {
+                        return 1;
+                    }
+
+                    // M8: narrow the injection_unsupported catch to only the actual injection call so that
+                    // pre-injection failures (element not found, etc.) are NOT mis-classified as
+                    // injection_unsupported. Session resolution failures surface as missing_app (outer catch).
+                    if (!PointerCommandSupport.TryInject(
+                        () => pointerInput.Touch(gesture, contactPaths, holdMs, durationMs),
+                        logger, json, parseResult.InvocationConfiguration.Error))
+                    {
+                        return 1;
+                    }
                 }
 
                 // id27/id28: synthetic touch injection can report success without actually reaching the
@@ -393,14 +470,6 @@ internal class UiTouchCommand : Command, IShortDescription
             catch (Exception ex)
             {
                 UiErrors.GenericError(logger, ex, json, parseResult.InvocationConfiguration.Error);
-                return 1;
-            }
-
-            int RejectInvalidArguments(string message)
-            {
-                logger.LogError("{Symbol} {Message}", UiSymbols.Error, message);
-                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments, message,
-                    errorOut: parseResult.InvocationConfiguration.Error);
                 return 1;
             }
         }

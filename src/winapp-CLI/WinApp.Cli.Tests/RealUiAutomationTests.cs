@@ -6,6 +6,8 @@ using Windows.Win32.UI.Accessibility;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
+using WinApp.Cli.Helpers;
+
 namespace WinApp.Cli.Tests;
 
 /// <summary>
@@ -61,7 +63,7 @@ public partial class RealUiAutomationTests
     }
 
     private static UiAutomationService NewService()
-        => new(NullLogger<UiAutomationService>.Instance, new SelectorService());
+        => new(NullLogger<UiAutomationService>.Instance, new SelectorService(), new DesktopForegroundService());
 
     private static UiSessionInfo SessionFor(UiaTestFixture fx, bool explicitWindow = true) => new()
     {

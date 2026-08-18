@@ -21,6 +21,8 @@ public partial class UiCommandTests : BaseCommandTests
     private FakeOwnedWindowFinder _fakeWindowFinder = null!;
     private FakeSystemUiQuery _fakeSystemQuery = null!;
     private FakePollDelay _fakePollDelay = null!;
+    private FakeInteractiveDesktopLock _fakeDesktopLock = null!;
+    private FakeDesktopForegroundService _fakeDesktopForeground = null!;
 
     private void AssertJsonErrorCode(string expectedCode)
         => AssertJsonErrorCodeIn(ConsoleStdErr.ToString(), expectedCode);
@@ -45,6 +47,8 @@ public partial class UiCommandTests : BaseCommandTests
         _fakeWindowFinder = new FakeOwnedWindowFinder();
         _fakeSystemQuery = new FakeSystemUiQuery();
         _fakePollDelay = new FakePollDelay();
+        _fakeDesktopLock = new FakeInteractiveDesktopLock();
+        _fakeDesktopForeground = new FakeDesktopForegroundService();
         return services
             .AddSingleton<IUiAutomationService>(_fakeUia)
             .AddSingleton<IUiSessionService>(_fakeSession)
@@ -54,6 +58,10 @@ public partial class UiCommandTests : BaseCommandTests
             .AddSingleton<WinApp.Cli.Helpers.IPointerInput>(_fakePointer)
             .AddSingleton<WinApp.Cli.Helpers.IOwnedWindowFinder>(_fakeWindowFinder)
             .AddSingleton<ISystemUiQuery>(_fakeSystemQuery)
+            // Coordination is faked so command tests never queue against the developer's live desktop
+            // and can assert what each command asked the coordinator for (issue #764).
+            .AddSingleton<WinApp.Cli.Services.InteractiveDesktop.IInteractiveDesktopLock>(_fakeDesktopLock)
+            .AddSingleton<WinApp.Cli.Helpers.IDesktopForegroundService>(_fakeDesktopForeground)
             .AddSingleton<WinApp.Cli.Helpers.IPollDelay>(_fakePollDelay);
     }
 

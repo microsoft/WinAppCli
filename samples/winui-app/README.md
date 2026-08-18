@@ -50,6 +50,10 @@ winapp run .\bin\x64\Debug\net10.0-windows10.0.26100.0\win-x64 --detach --json
 ## Testing with winapp ui
 
 ```powershell
+# Set once per logical UI workflow, so these commands are recognized as belonging together and
+# don't interleave with another workflow driving the same desktop.
+$env:WINAPP_UI_OWNER_ID = [guid]::NewGuid().ToString()
+
 # Inspect the UI tree
 winapp ui inspect -a winui-app
 

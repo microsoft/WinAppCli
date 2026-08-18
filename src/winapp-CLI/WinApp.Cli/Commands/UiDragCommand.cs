@@ -10,6 +10,7 @@ using Spectre.Console;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
+using WinApp.Cli.Services.InteractiveDesktop;
 
 namespace WinApp.Cli.Commands;
 
@@ -75,26 +76,41 @@ internal class UiDragCommand : Command, IShortDescription
         ISelectorService selectorService,
         IMouseInput mouseInput,
         IForegroundGuard foregroundGuard,
+        IDesktopForegroundService desktopForeground,
+        ISystemUiQuery systemQuery,
+        IInteractiveDesktopLock desktopLock,
         IAnsiConsole ansiConsole,
-        ILogger<UiDragCommand> logger) : AsynchronousCommandLineAction
+        ILogger<UiDragCommand> logger) : UiCoordinatedAction(desktopLock, logger)
     {
         // Cursor-settle pause (ms) after positioning on the from-point, before the confirm read + press.
         private const int CursorSettleMs = 50;
 
-        public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
+        protected override string Operation => "ui drag";
+
+        /// <summary>A drag holds the shared cursor and mouse button across the whole gesture.</summary>
+        protected override UiTurnMode ResolveMode(ParseResult parseResult) => UiTurnMode.DesktopExclusive;
+
+        protected override int? Preflight(ParseResult parseResult)
         {
             var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
             var app = parseResult.GetValue(SharedUiOptions.AppOption);
             var window = parseResult.GetValue(SharedUiOptions.WindowOption);
             var arg0 = parseResult.GetValue(FromArgument);
             var arg1 = parseResult.GetValue(ToArgument);
-            var rightButton = parseResult.GetValue(RightButtonOption);
             var holdMs = parseResult.GetValue(HoldOption);
             var dwellMs = parseResult.GetValue(DwellOption);
 
             if (string.IsNullOrWhiteSpace(app) && window is null)
             {
                 UiErrors.MissingApp(logger, json);
+                return 1;
+            }
+
+            if (string.IsNullOrWhiteSpace(arg0) || string.IsNullOrWhiteSpace(arg1))
+            {
+                logger.LogError("{Symbol} Specify both <from> and <to> — each is an element selector or x,y coordinates.", UiSymbols.Error);
+                UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
+                    "Specify both <from> and <to> — each is an element selector or x,y coordinates.");
                 return 1;
             }
 
@@ -106,17 +122,24 @@ internal class UiDragCommand : Command, IShortDescription
                 return 1;
             }
 
+            return null;
+        }
+
+        protected override async Task<int> ExecuteAsync(ParseResult parseResult, IUiTurn turn, CancellationToken cancellationToken)
+        {
+            var json = parseResult.GetValue(WinAppRootCommand.JsonOption);
+            var app = parseResult.GetValue(SharedUiOptions.AppOption);
+            var window = parseResult.GetValue(SharedUiOptions.WindowOption);
+            // Preflight rejected empty endpoints, so both are non-null by construction.
+            var arg0 = parseResult.GetValue(FromArgument)!;
+            var arg1 = parseResult.GetValue(ToArgument)!;
+            var rightButton = parseResult.GetValue(RightButtonOption);
+            var holdMs = parseResult.GetValue(HoldOption);
+            var dwellMs = parseResult.GetValue(DwellOption);
+
             try
             {
                 var session = await sessionService.ResolveSessionAsync(app, window, cancellationToken);
-
-                if (string.IsNullOrWhiteSpace(arg0) || string.IsNullOrWhiteSpace(arg1))
-                {
-                    logger.LogError("{Symbol} Specify both <from> and <to> — each is an element selector or x,y coordinates.", UiSymbols.Error);
-                    UiJsonError.Emit(json, UiJsonError.CodeInvalidArguments,
-                        "Specify both <from> and <to> — each is an element selector or x,y coordinates.");
-                    return 1;
-                }
 
                 var from = await ResolveEndpointAsync(arg0, "from", session, json, cancellationToken);
                 if (!from.Ok)
@@ -130,84 +153,101 @@ internal class UiDragCommand : Command, IShortDescription
                     return 1;
                 }
 
-                int fromX = from.X;
-                int fromY = from.Y;
-                int toX = to.X;
-                int toY = to.Y;
-                // Prefer the HWND of whichever endpoint resolved from a real element; fall back to the
-                // session window when both endpoints are bare coordinates.
+                int fromX;
+                int fromY;
+                int toX;
+                int toY;
+                // Advisory only — refreshed from the re-resolved endpoints inside the section below.
                 long targetHwnd = from.Hwnd != 0 ? from.Hwnd : (to.Hwnd != 0 ? to.Hwnd : session.WindowHandle);
 
-                if (targetHwnd != 0)
+                // Foreground, endpoint re-resolution and the button-down…up sequence all share the desktop
+                // and run in one section; the result formatting below does not.
+                await using (await turn.EnterAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    Windows.Win32.PInvoke.SetForegroundWindow(
-                        new Windows.Win32.Foundation.HWND((nint)targetHwnd));
-                    await Task.Delay(100, cancellationToken);
-                }
-
-                // Foregrounding can shift/animate the window (restore, snap, layout settle); re-resolve any
-                // element endpoint so we drag where it is *now*, and refuse rather than hit empty space if
-                // it's still moving. Raw-coordinate endpoints can't be verified, so they pass through.
-                var fromStable = await StabilizeAsync(from, session, "from", json, cancellationToken);
-                if (!fromStable.Ok)
-                {
-                    return 1;
-                }
-
-                var toStable = await StabilizeAsync(to, session, "to", json, cancellationToken);
-                if (!toStable.Ok)
-                {
-                    return 1;
-                }
-
-                fromX = fromStable.X;
-                fromY = fromStable.Y;
-                toX = toStable.X;
-                toY = toStable.Y;
-
-                // Verify the target STILL holds the foreground as the first gate before the OS-wide drag.
-                // The stabilize re-resolve above performs awaited UIA reads (with delays); another window
-                // could steal focus during that gap, so we check here — after the awaits, not before them.
-                // Also distinguishes a locked/secure desktop from a wrong-window foreground. (For an element
-                // from-point a second, final gate runs below, after the cursor-settle confirm read.)
-                if (!foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, "drag"))
-                {
-                    return 1;
-                }
-
-                // Close the residual re-resolve→button-down race for the from-point (mirrors click's F3
-                // fix): the button-down happens at <from>, and MouseInput.Drag's own pre-press settle is an
-                // unguarded window in which a still-animating from-element could drift, so the press grabs
-                // empty space yet the drag reports success. When <from> is an element, position the cursor
-                // on it, let it settle, confirm it hasn't moved, re-check the foreground, then press with
-                // settleMs: 0 — so a reported ✅ means the button went down on the element. A raw-coordinate
-                // from-point has nothing to confirm and keeps MouseInput.Drag's internal settle.
-                int dragSettleMs = 50;
-                if (from.Selector is not null && fromStable.StableElement is not null)
-                {
-                    mouseInput.MoveCursor(fromX, fromY);
-                    await Task.Delay(CursorSettleMs, cancellationToken);
-
-                    var confirmed = await GestureTargeting.ConfirmStillAsync(
-                        uiAutomation, session, from.Selector, fromStable.StableElement, cancellationToken);
-                    if (!GestureTargeting.TryReport(confirmed, logger, json, from.Token ?? "from", "drag"))
+                    // Foregrounding can shift/animate the window (restore, snap, layout settle), and another
+                    // workflow may have moved or closed an endpoint while this command was queued. Re-resolve
+                    // any element endpoint FIRST so the HWND we foreground and validate is the current one
+                    // (spec §10.5), and refuse rather than hit empty space if it's still moving.
+                    // Raw-coordinate endpoints can't be verified, so they pass through.
+                    var fromStable = await StabilizeAsync(from, session, "from", json, cancellationToken);
+                    if (!fromStable.Ok)
                     {
                         return 1;
                     }
-                    fromX = confirmed.CenterX;
-                    fromY = confirmed.CenterY;
 
-                    // Final foreground gate after the awaited confirm read (focus could shift during it).
+                    var toStable = await StabilizeAsync(to, session, "to", json, cancellationToken);
+                    if (!toStable.Ok)
+                    {
+                        return 1;
+                    }
+
+                    fromX = fromStable.X;
+                    fromY = fromStable.Y;
+                    toX = toStable.X;
+                    toY = toStable.Y;
+
+                    // Prefer the HWND of whichever endpoint re-resolved to a real element; fall back to the
+                    // session window when both endpoints are bare coordinates.
+                    targetHwnd = fromStable.StableElement?.WindowHandle
+                        ?? toStable.StableElement?.WindowHandle
+                        ?? (from.Hwnd != 0 ? from.Hwnd : (to.Hwnd != 0 ? to.Hwnd : session.WindowHandle));
+
+                    if (!DesktopTargetValidation.TryConfirmTargetWindow(
+                            systemQuery, targetHwnd, session.ProcessId, logger, json, "drag", parseResult.InvocationConfiguration.Error))
+                    {
+                        return 1;
+                    }
+
+                    if (targetHwnd != 0)
+                    {
+                        desktopForeground.RequestForeground(targetHwnd);
+                        await Task.Delay(100, cancellationToken);
+                    }
+
+                    // Verify the target STILL holds the foreground as the first gate before the OS-wide drag.
+                    // The stabilize re-resolve above performs awaited UIA reads (with delays); another window
+                    // could steal focus during that gap, so we check here — after the awaits, not before them.
+                    // Also distinguishes a locked/secure desktop from a wrong-window foreground. (For an element
+                    // from-point a second, final gate runs below, after the cursor-settle confirm read.)
                     if (!foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, "drag"))
                     {
                         return 1;
                     }
 
-                    // Cursor already positioned on the just-confirmed from-point; press without re-settling.
-                    dragSettleMs = 0;
-                }
+                    // Close the residual re-resolve→button-down race for the from-point (mirrors click's F3
+                    // fix): the button-down happens at <from>, and MouseInput.Drag's own pre-press settle is an
+                    // unguarded window in which a still-animating from-element could drift, so the press grabs
+                    // empty space yet the drag reports success. When <from> is an element, position the cursor
+                    // on it, let it settle, confirm it hasn't moved, re-check the foreground, then press with
+                    // settleMs: 0 — so a reported ✅ means the button went down on the element. A raw-coordinate
+                    // from-point has nothing to confirm and keeps MouseInput.Drag's internal settle.
+                    int dragSettleMs = 50;
+                    if (from.Selector is not null && fromStable.StableElement is not null)
+                    {
+                        mouseInput.MoveCursor(fromX, fromY);
+                        await Task.Delay(CursorSettleMs, cancellationToken);
 
-                mouseInput.Drag(fromX, fromY, toX, toY, rightButton, holdMs, dwellMs, settleMs: dragSettleMs);
+                        var confirmed = await GestureTargeting.ConfirmStillAsync(
+                            uiAutomation, session, from.Selector, fromStable.StableElement, cancellationToken);
+                        if (!GestureTargeting.TryReport(confirmed, logger, json, from.Token ?? "from", "drag"))
+                        {
+                            return 1;
+                        }
+                        fromX = confirmed.CenterX;
+                        fromY = confirmed.CenterY;
+
+                        // Final foreground gate after the awaited confirm read (focus could shift during it).
+                        if (!foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, "drag"))
+                        {
+                            return 1;
+                        }
+
+                        // Cursor already positioned on the just-confirmed from-point; press without re-settling.
+                        dragSettleMs = 0;
+                    }
+
+                    mouseInput.Drag(fromX, fromY, toX, toY, rightButton, holdMs, dwellMs, settleMs: dragSettleMs);
+                }
 
                 var button = rightButton ? "right" : "left";
 
