@@ -71,35 +71,27 @@ internal static class ZipRangeExtractor
 
             if (cdOffset == Zip64Marker || cdSize == Zip64Marker || count == 0xFFFF)
             {
-                long recordOffset;
-                try
+                var zip64 = await TryReadZip64DirectoryAsync(
+                    reader, archiveBase, archiveSize, tail, tailStart, eocd, cancellationToken);
+                var charged = zip64.Probed;
+
+                if (zip64.Ok)
                 {
-                    (cdOffset, cdSize, recordOffset) = await ReadZip64DirectoryAsync(
-                        reader, archiveBase, archiveSize, tail, tailStart, eocd, cancellationToken);
-                }
-                catch (InvalidDataException)
-                {
-                    // A marker-bearing record planted in a comment has no usable locator or record.
-                    // Resolving it may already have cost a locator scan and a read, so it is charged
-                    // against the same budget rather than letting failures loop for free.
-                    if (++probes >= MaxDirectoryProbes)
+                    // A comment can carry a forged locator and record too, so the resolved directory
+                    // gets the same confirmation, anchored on the record rather than the EOCD.
+                    var (isZip64Directory, zip64Probed) = await IsCentralDirectoryAsync(
+                        reader, archiveBase, archiveSize, zip64.Offset, zip64.Size, zip64.RecordOffset, tail, tailStart, cancellationToken);
+                    if (isZip64Directory)
                     {
-                        break;
+                        return (archiveBase + zip64.Offset, zip64.Size);
                     }
 
-                    continue;
+                    charged |= zip64Probed;
                 }
 
-                // A comment can carry a forged locator and record too, so the resolved directory gets
-                // the same confirmation. It runs up to the record describing it rather than the EOCD.
-                var (isZip64Directory, zip64Probed) = await IsCentralDirectoryAsync(
-                    reader, archiveBase, archiveSize, cdOffset, cdSize, recordOffset, tail, tailStart, cancellationToken);
-                if (isZip64Directory)
-                {
-                    return (archiveBase + cdOffset, cdSize);
-                }
-
-                if (zip64Probed && ++probes >= MaxDirectoryProbes)
+                // Only reads that actually left the tail count, or a comment holding a handful of
+                // ZIP64-shaped records would exhaust the budget and reject a valid archive.
+                if (charged && ++probes >= MaxDirectoryProbes)
                 {
                     break;
                 }
@@ -171,30 +163,37 @@ internal static class ZipRangeExtractor
         return (BinaryPrimitives.ReadUInt32LittleEndian(bytes) == CentralHeaderSignature, true);
     }
 
-    private static async Task<(long Offset, long Size, long RecordOffset)> ReadZip64DirectoryAsync(
+    /// <summary>
+    /// Resolves the directory a marker-bearing record points at, via its ZIP64 locator and record.
+    /// </summary>
+    /// <returns>
+    /// Whether it resolved, the directory location, the record's offset, and whether resolving cost a
+    /// read outside the tail. Failures are reported rather than thrown, because a candidate drawn from
+    /// a comment failing to resolve is ordinary and the scan continues past it.
+    /// </returns>
+    private static async Task<(bool Ok, long Offset, long Size, long RecordOffset, bool Probed)> TryReadZip64DirectoryAsync(
         IRangeReader reader, long archiveBase, long archiveSize, byte[] tail, long tailStart, int eocd, CancellationToken cancellationToken)
     {
         var locator = LastIndexOfSignature(tail.AsSpan(0, eocd), Zip64LocatorSignature);
         if (locator < 0)
         {
-            throw new InvalidDataException("ZIP64 end-of-central-directory locator not found.");
+            return (false, 0, 0, 0, false);
         }
 
-        // Offset of the ZIP64 EOCD record, relative to the archive's base.
+        // Offset of the ZIP64 EOCD record, relative to the archive's base. Attacker-controlled, and
+        // passing it straight to the reader turns a malformed archive into an out-of-range or
+        // transport error instead of a rejection.
         var recordRelative = (long)BinaryPrimitives.ReadUInt64LittleEndian(tail.AsSpan(locator + 8));
-
-        // Attacker-controlled, and passing it straight to the reader turns a malformed archive into an
-        // out-of-range or transport error instead of a rejection.
         if (recordRelative < 0 || recordRelative > archiveSize - 56)
         {
-            throw new InvalidDataException(
-                $"ZIP64 locator points at offset {recordRelative}, which cannot hold a record in a {archiveSize}-byte archive.");
+            return (false, 0, 0, 0, false);
         }
 
         var recordAbsolute = archiveBase + recordRelative;
 
         byte[] record;
         int recordPos;
+        var probed = false;
         if (recordAbsolute >= tailStart && recordAbsolute + 56 <= tailStart + tail.Length)
         {
             record = tail;
@@ -204,16 +203,17 @@ internal static class ZipRangeExtractor
         {
             record = await reader.ReadAsync(recordAbsolute, 56, cancellationToken);
             recordPos = 0;
+            probed = true;
         }
 
         if (BinaryPrimitives.ReadUInt32LittleEndian(record.AsSpan(recordPos)) != Zip64EocdSignature)
         {
-            throw new InvalidDataException("ZIP64 end-of-central-directory record signature mismatch.");
+            return (false, 0, 0, 0, probed);
         }
 
         var cdSize = (long)BinaryPrimitives.ReadUInt64LittleEndian(record.AsSpan(recordPos + 40));
         var cdOffset = (long)BinaryPrimitives.ReadUInt64LittleEndian(record.AsSpan(recordPos + 48));
-        return (cdOffset, cdSize, recordAbsolute);
+        return (true, cdOffset, cdSize, recordAbsolute, probed);
     }
 
     /// <summary>

@@ -340,6 +340,39 @@ public class ZipRangeExtractorTests
         Assert.IsTrue(reader.Reads <= 12, $"Expected the scan to stop probing, but it issued {reader.Reads} reads.");
     }
 
+    [TestMethod]
+    public async Task FindCentralDirectory_CommentFullOfZip64ShapedRecords_StillParses()
+    {
+        // These resolve nothing and cost no reads, so they must not consume the probe budget - doing so
+        // would let comment bytes alone push the scan past the real record.
+        var archive = BuildZip([("a.bin", Encoding.UTF8.GetBytes("stored"), CompressionLevel.NoCompression)]);
+
+        const int fakes = 12;
+        var comment = new byte[fakes * 22];
+        var data = new byte[archive.Length + comment.Length];
+        archive.CopyTo(data, 0);
+        WriteU16(data, archive.Length - 2, (ushort)comment.Length);
+
+        for (var n = 0; n < fakes; n++)
+        {
+            var pos = archive.Length + (n * 22);
+            WriteU32(data, pos, 0x06054b50);
+            WriteU16(data, pos + 10, 0xFFFF);       // ZIP64 markers, with no locator anywhere
+            WriteU32(data, pos + 12, 0xFFFFFFFF);
+            WriteU32(data, pos + 16, 0xFFFFFFFF);
+            WriteU16(data, pos + 20, (ushort)(data.Length - pos - 22));
+        }
+
+        var reader = new MemoryRangeReader(data);
+        var (offset, size) = await ZipRangeExtractor.FindCentralDirectoryAsync(
+            reader, 0, data.Length, CancellationToken.None);
+
+        var entries = ZipRangeExtractor.ParseCentralDirectory(
+            await reader.ReadAsync(offset, (int)size, CancellationToken.None), 0);
+        Assert.AreEqual(1, entries.Count);
+        Assert.AreEqual("a.bin", entries[0].Name);
+    }
+
     private sealed class CountingRangeReader(byte[] data) : IRangeReader
     {
         private readonly MemoryRangeReader _inner = new(data);
