@@ -156,7 +156,7 @@ public class InteractiveDesktopSchedulerTests
         _scheduler.BeginParticipating(state, _probe, OwnerA, second, UiTurnMode.DesktopExclusive);
 
         _probe.Alive.Remove((first.ProcessId, first.StartTicksUtc));
-        _scheduler.CompleteCommand(state, _probe, first, UiOwnerKind.Explicit, renewGrace: true);
+        _scheduler.CompleteCommand(state, _probe, first, OwnerA, renewGrace: true);
 
         // 'third' was admitted before 'second', so it owns the smaller ticket and runs first.
         Assert.AreEqual(UiCommandStatus.Running,
@@ -188,7 +188,7 @@ public class InteractiveDesktopSchedulerTests
         var actor = Participant(100);
         _scheduler.BeginParticipating(state, _probe, OwnerA, actor, UiTurnMode.DesktopExclusive);
         _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
-        _scheduler.CompleteCommand(state, _probe, actor, UiOwnerKind.Explicit, renewGrace: true);
+        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: true);
 
         var observation = Participant(101, "ui inspect");
         var result = _scheduler.BeginObserve(state, _probe, OwnerA, observation);
@@ -211,14 +211,14 @@ public class InteractiveDesktopSchedulerTests
         var actor = Participant(100);
         _scheduler.BeginParticipating(state, _probe, OwnerA, actor, UiTurnMode.DesktopExclusive);
         _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
-        _scheduler.CompleteCommand(state, _probe, actor, UiOwnerKind.Explicit, renewGrace: true);
+        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: true);
 
         _clock.Advance(3_000);
         var observation = Participant(101, "ui inspect");
         _scheduler.BeginObserve(state, _probe, OwnerA, observation);
         _clock.Advance(5_000);
         _probe.Alive.Remove((observation.ProcessId, observation.StartTicksUtc));
-        _scheduler.CompleteCommand(state, _probe, observation, UiOwnerKind.Explicit, renewGrace: true);
+        _scheduler.CompleteCommand(state, _probe, observation, OwnerA, renewGrace: true);
 
         _clock.Advance(InteractiveDesktopScheduler.IdleGraceMs - 100);
         _scheduler.Normalize(state, _probe);
@@ -234,7 +234,7 @@ public class InteractiveDesktopSchedulerTests
         var actor = Participant(100);
         _scheduler.BeginParticipating(state, _probe, OwnerA, actor, UiTurnMode.DesktopExclusive);
         _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
-        _scheduler.CompleteCommand(state, _probe, actor, UiOwnerKind.Explicit, renewGrace: true);
+        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: true);
 
         _clock.Advance(InteractiveDesktopScheduler.IdleGraceMs - 1);
         _scheduler.Normalize(state, _probe);
@@ -284,7 +284,7 @@ public class InteractiveDesktopSchedulerTests
         _scheduler.BeginParticipating(state, _probe, OwnerB, waiterB, UiTurnMode.DesktopExclusive);
 
         _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
-        _scheduler.CompleteCommand(state, _probe, actor, UiOwnerKind.Explicit, renewGrace: true);
+        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: true);
         _clock.Advance(InteractiveDesktopScheduler.IdleGraceMs);
         _scheduler.Normalize(state, _probe);
 
@@ -310,7 +310,7 @@ public class InteractiveDesktopSchedulerTests
 
         _probe.Alive.Remove((deadWaiter.ProcessId, deadWaiter.StartTicksUtc));
         _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
-        _scheduler.CompleteCommand(state, _probe, actor, UiOwnerKind.Explicit, renewGrace: true);
+        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: true);
         _clock.Advance(InteractiveDesktopScheduler.IdleGraceMs);
         _scheduler.Normalize(state, _probe);
 
@@ -326,7 +326,7 @@ public class InteractiveDesktopSchedulerTests
         _scheduler.BeginParticipating(state, _probe, OwnerB, Participant(200), UiTurnMode.DesktopExclusive);
 
         _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
-        _scheduler.CompleteCommand(state, _probe, actor, UiOwnerKind.Explicit, renewGrace: true);
+        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: true);
         _clock.Advance(InteractiveDesktopScheduler.IdleGraceMs);
 
         var result = _scheduler.BeginParticipating(
@@ -349,7 +349,7 @@ public class InteractiveDesktopSchedulerTests
 
         // A command that ran and returned a non-zero exit code still renews: the workflow is alive and
         // its next command is likely a retry.
-        _scheduler.CompleteCommand(state, _probe, actor, UiOwnerKind.Explicit, renewGrace: true);
+        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: true);
 
         _clock.Advance(InteractiveDesktopScheduler.IdleGraceMs - 1);
         _scheduler.Normalize(state, _probe);
@@ -364,7 +364,7 @@ public class InteractiveDesktopSchedulerTests
         _scheduler.BeginParticipating(state, _probe, OwnerA, actor, UiTurnMode.DesktopExclusive);
         _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
 
-        _scheduler.CompleteCommand(state, _probe, actor, UiOwnerKind.Explicit, renewGrace: false);
+        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: false);
 
         Assert.IsNull(state.Owner, "a cancelled command leaves no reservation behind");
     }
@@ -380,7 +380,7 @@ public class InteractiveDesktopSchedulerTests
         _scheduler.BeginParticipating(state, _probe, OwnerB, waiter, UiTurnMode.DesktopExclusive);
 
         _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
-        _scheduler.CompleteCommand(state, _probe, actor, UiOwnerKind.Anonymous, renewGrace: true);
+        _scheduler.CompleteCommand(state, _probe, actor, anonymous, renewGrace: true);
 
         Assert.AreEqual(OwnerB.Key, state.Owner!.Key,
             "a one-command owner has no shell that could issue a follow-up, so it hands off at once");
@@ -394,7 +394,7 @@ public class InteractiveDesktopSchedulerTests
         var actor = Participant(100);
         _scheduler.BeginParticipating(state, _probe, parentOwner, actor, UiTurnMode.DesktopExclusive);
         _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
-        _scheduler.CompleteCommand(state, _probe, actor, UiOwnerKind.Parent, renewGrace: true);
+        _scheduler.CompleteCommand(state, _probe, actor, parentOwner, renewGrace: true);
 
         _probe.DeadParents.Add((900, 900));
         _scheduler.Normalize(state, _probe);
@@ -410,7 +410,7 @@ public class InteractiveDesktopSchedulerTests
         var actor = Participant(100);
         _scheduler.BeginParticipating(state, _probe, parentOwner, actor, UiTurnMode.DesktopExclusive);
         _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
-        _scheduler.CompleteCommand(state, _probe, actor, UiOwnerKind.Parent, renewGrace: true);
+        _scheduler.CompleteCommand(state, _probe, actor, parentOwner, renewGrace: true);
 
         _probe.UnknownParents.Add((900, 900));
         _scheduler.Normalize(state, _probe);
@@ -450,7 +450,7 @@ public class InteractiveDesktopSchedulerTests
         _scheduler.BeginParticipating(state, _probe, ownerC, Participant(300), UiTurnMode.DesktopExclusive);
 
         _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
-        _scheduler.CompleteCommand(state, _probe, actor, UiOwnerKind.Explicit, renewGrace: false);
+        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: false);
         _clock.Advance(60_000);
         _scheduler.Normalize(state, _probe);
 
@@ -528,7 +528,7 @@ public class InteractiveDesktopSchedulerTests
         _scheduler.BeginParticipating(state, _probe, OwnerB, secondB, UiTurnMode.DesktopExclusive);
 
         _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
-        _scheduler.CompleteCommand(state, _probe, actor, UiOwnerKind.Explicit, renewGrace: false);
+        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: false);
 
         Assert.AreEqual(OwnerB.Key, state.Owner!.Key);
         Assert.AreEqual(0, state.Waiters.Count,
@@ -559,7 +559,7 @@ public class InteractiveDesktopSchedulerTests
         _scheduler.BeginParticipating(state, _probe, ownerC, firstC, UiTurnMode.DesktopExclusive);
 
         _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
-        _scheduler.CompleteCommand(state, _probe, actor, UiOwnerKind.Explicit, renewGrace: false);
+        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: false);
 
         Assert.AreEqual(OwnerB.Key, state.Owner!.Key);
         Assert.IsNotNull(InteractiveDesktopScheduler.FindOwnerCommand(state, firstB));
@@ -586,7 +586,7 @@ public class InteractiveDesktopSchedulerTests
         _scheduler.BeginParticipating(state, _probe, OwnerB, secondB, UiTurnMode.DesktopExclusive);
 
         _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
-        _scheduler.CompleteCommand(state, _probe, actor, UiOwnerKind.Explicit, renewGrace: false);
+        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: false);
 
         Assert.AreEqual(OwnerB.Key, state.Owner!.Key);
         Assert.IsNotNull(InteractiveDesktopScheduler.FindOwnerCommand(state, firstB),
@@ -598,7 +598,7 @@ public class InteractiveDesktopSchedulerTests
 
         // And C really does get the turn next, ahead of B's second command.
         _probe.Alive.Remove((firstB.ProcessId, firstB.StartTicksUtc));
-        _scheduler.CompleteCommand(state, _probe, firstB, UiOwnerKind.Explicit, renewGrace: false);
+        _scheduler.CompleteCommand(state, _probe, firstB, OwnerA, renewGrace: false);
         Assert.AreEqual("cccc", state.Owner!.Key);
     }
 
@@ -611,7 +611,7 @@ public class InteractiveDesktopSchedulerTests
         var actor = Participant(100);
         _scheduler.BeginParticipating(state, _probe, OwnerA, actor, UiTurnMode.DesktopExclusive);
         _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
-        _scheduler.CompleteCommand(state, _probe, actor, UiOwnerKind.Explicit, renewGrace: true);
+        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: true);
 
         var screenshot = Participant(101, "ui screenshot");
         _scheduler.BeginObserve(state, _probe, OwnerA, screenshot);
@@ -658,6 +658,126 @@ public class InteractiveDesktopSchedulerTests
 
         CollectionAssert.AreEqual(seen.OrderBy(t => t).ToList(), seen);
         Assert.AreEqual(seen.Count, seen.Distinct().Count());
+    }
+
+    // ---------------------------------------------------------------- prior-boot deadline recovery
+
+    [TestMethod]
+    public void PriorBootDeadline_ExpiresImmediatelyInsteadOfStrandingTheTurn()
+    {
+        // Environment.TickCount64 restarts at reboot. A state file written after days of uptime carries
+        // a deadline far beyond the new uptime; without clamping, the owner that died with the previous
+        // boot would hold the desktop until the machine had been up just as long again.
+        var state = InteractiveDesktopState.CreateFresh();
+        state.Owner = new OwnerRecord { Kind = UiOwnerKind.Explicit, Key = OwnerA.Key };
+        state.TurnId = 7;
+        state.IdleExpiresTick64 = _clock.NowTicks64 + (long)TimeSpan.FromDays(5).TotalMilliseconds;
+
+        var changed = _scheduler.Normalize(state, _probe);
+
+        Assert.IsTrue(changed, "clamping a prior-boot deadline is a state change that must be published");
+        Assert.IsNull(state.Owner, "the stranded turn must be released on the very next normalization");
+    }
+
+    [TestMethod]
+    public void PriorBootDeadline_PromotesAWaitingOwnerImmediately()
+    {
+        var state = InteractiveDesktopState.CreateFresh();
+        state.Owner = new OwnerRecord { Kind = UiOwnerKind.Explicit, Key = OwnerA.Key };
+        state.TurnId = 7;
+        state.NextTicket = 1;
+        state.IdleExpiresTick64 = _clock.NowTicks64 + (long)TimeSpan.FromDays(5).TotalMilliseconds;
+
+        var waiter = Participant(300);
+        _scheduler.BeginParticipating(state, _probe, OwnerB, waiter, UiTurnMode.DesktopExclusive);
+
+        Assert.AreEqual(OwnerB.Key, state.Owner!.Key, "the waiting owner takes the abandoned turn at once");
+        Assert.AreEqual(UiCommandStatus.Running,
+            InteractiveDesktopScheduler.FindOwnerCommand(state, waiter)!.Status);
+    }
+
+    [TestMethod]
+    public void ADeadlineWithinTheGraceIsNotTreatedAsPriorBoot()
+    {
+        var state = InteractiveDesktopState.CreateFresh();
+        var actor = Participant(100);
+        _scheduler.BeginParticipating(state, _probe, OwnerA, actor, UiTurnMode.DesktopExclusive);
+        _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
+        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: true);
+
+        // Exactly the deadline a normal completion writes: now + IdleGraceMs. It must survive.
+        _scheduler.Normalize(state, _probe);
+
+        Assert.IsNotNull(state.Owner, "an ordinary in-grace deadline must never be mistaken for a stale one");
+    }
+
+    // -------------------------------------------------------- the idle deadline belongs to the owner
+
+    [TestMethod]
+    public void AForeignCompletionCannotRevokeTheCurrentOwnersGrace()
+    {
+        // An anonymous global waiter that gets cancelled or fails completes under its own identity.
+        // Setting the deadline from that path would hand owner B's turn away instantly.
+        var state = InteractiveDesktopState.CreateFresh();
+        var ownerBActor = Participant(100);
+        _scheduler.BeginParticipating(state, _probe, OwnerB, ownerBActor, UiTurnMode.DesktopExclusive);
+        _probe.Alive.Remove((ownerBActor.ProcessId, ownerBActor.StartTicksUtc));
+        _scheduler.CompleteCommand(state, _probe, ownerBActor, OwnerB, renewGrace: true);
+
+        var graceBefore = state.IdleExpiresTick64;
+        Assert.IsNotNull(state.Owner);
+
+        var anonymous = new UiOwnerIdentity(UiOwnerKind.Anonymous, "anon", null, null);
+        var stranger = Participant(200);
+        _scheduler.BeginParticipating(state, _probe, anonymous, stranger, UiTurnMode.DesktopExclusive);
+        _probe.Alive.Remove((stranger.ProcessId, stranger.StartTicksUtc));
+        _scheduler.CompleteCommand(state, _probe, stranger, anonymous, renewGrace: false);
+
+        Assert.AreEqual(OwnerB.Key, state.Owner!.Key, "owner B must still hold the turn");
+        Assert.AreEqual(graceBefore, state.IdleExpiresTick64,
+            "a non-owner completion must not touch the current owner's idle deadline");
+    }
+
+    [TestMethod]
+    public void AForeignCompletionCannotExtendTheCurrentOwnersGrace()
+    {
+        var state = InteractiveDesktopState.CreateFresh();
+        var ownerBActor = Participant(100);
+        _scheduler.BeginParticipating(state, _probe, OwnerB, ownerBActor, UiTurnMode.DesktopExclusive);
+        _probe.Alive.Remove((ownerBActor.ProcessId, ownerBActor.StartTicksUtc));
+        _scheduler.CompleteCommand(state, _probe, ownerBActor, OwnerB, renewGrace: true);
+        var graceBefore = state.IdleExpiresTick64;
+
+        _clock.Advance(1_000);
+
+        // A queued command belonging to a *different* owner finishes normally.
+        var stranger = Participant(200);
+        _scheduler.BeginParticipating(state, _probe, OwnerA, stranger, UiTurnMode.DesktopExclusive);
+        _probe.Alive.Remove((stranger.ProcessId, stranger.StartTicksUtc));
+        _scheduler.CompleteCommand(state, _probe, stranger, OwnerA, renewGrace: true);
+
+        Assert.AreEqual(graceBefore, state.IdleExpiresTick64,
+            "only the current owner's own commands may extend its grace");
+    }
+
+    [TestMethod]
+    public void TheCurrentOwnersOwnCompletionStillRenewsItsGrace()
+    {
+        var state = InteractiveDesktopState.CreateFresh();
+        var first = Participant(100);
+        _scheduler.BeginParticipating(state, _probe, OwnerA, first, UiTurnMode.DesktopExclusive);
+        _probe.Alive.Remove((first.ProcessId, first.StartTicksUtc));
+        _scheduler.CompleteCommand(state, _probe, first, OwnerA, renewGrace: true);
+        var firstDeadline = state.IdleExpiresTick64;
+
+        _clock.Advance(1_000);
+        var second = Participant(101);
+        _scheduler.BeginParticipating(state, _probe, OwnerA, second, UiTurnMode.DesktopExclusive);
+        _probe.Alive.Remove((second.ProcessId, second.StartTicksUtc));
+        _scheduler.CompleteCommand(state, _probe, second, OwnerA, renewGrace: true);
+
+        Assert.IsTrue(state.IdleExpiresTick64 > firstDeadline,
+            "a burst from the owner keeps renewing its own grace");
     }
 
     private sealed class FakeClock : IMonotonicClock

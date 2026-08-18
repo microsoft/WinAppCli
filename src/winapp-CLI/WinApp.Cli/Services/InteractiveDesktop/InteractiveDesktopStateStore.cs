@@ -128,7 +128,16 @@ internal sealed class InteractiveDesktopStateStore(
 
         if (!fileExists)
         {
-            // No file at all is the ordinary first command on this desktop: nothing to recover.
+            // Missing state is the ordinary first command on this desktop — but only when nothing on
+            // disk still proves a turn is in progress. An external deletion (AV, manual cleanup, a
+            // stray rmdir) while a recording or a queued waiter is live would otherwise mint a second
+            // owner for the same desktop and let two agents drive it at once.
+            if (HasLiveTurnEvidence())
+            {
+                logger.LogDebug("UI coordination state is missing while a participant is still live; failing closed.");
+                throw CannotRebuildState("missing");
+            }
+
             return new StateReadResult(InteractiveDesktopState.CreateFresh(), false, false);
         }
 
@@ -267,12 +276,9 @@ internal sealed class InteractiveDesktopStateStore(
     /// </summary>
     private StateReadResult RecoverCorruptState()
     {
-        if (!IsActiveLockFree() || participants.AnyLiveParticipant())
+        if (HasLiveTurnEvidence())
         {
-            throw new UiCoordinationException(
-                UiCoordinationErrorCodes.Unavailable,
-                "UI coordination state is unreadable and another winapp ui process is still active, so it cannot be safely rebuilt.",
-                "Wait for the other winapp ui commands to finish (or stop them) and retry.");
+            throw CannotRebuildState("unreadable");
         }
 
         var quarantinePath = System.IO.Path.Combine(
@@ -297,12 +303,52 @@ internal sealed class InteractiveDesktopStateStore(
         return new StateReadResult(InteractiveDesktopState.CreateFresh(), false, RecoveredFromCorruption: true);
     }
 
+    /// <summary>
+    /// Whether anything on disk still proves a turn is in progress: a held <c>active.lock</c>, or any
+    /// live participant lease. Checked before rebuilding state that is missing or unreadable, so a
+    /// rebuild can never invent a second owner alongside a running one.
+    /// </summary>
+    private bool HasLiveTurnEvidence()
+        => !IsActiveLockFree() || participants.AnyLiveParticipant();
+
+    private static UiCoordinationException CannotRebuildState(string condition)
+        => new(
+            UiCoordinationErrorCodes.Unavailable,
+            $"UI coordination state is {condition} and another winapp ui process is still active, so it cannot be safely rebuilt.",
+            "Wait for the other winapp ui commands to finish (or stop them) and retry.");
+
+    /// <summary>
+    /// Human-readable idle deadline, written for diagnostics only and never read back.
+    /// </summary>
+    /// <remarks>
+    /// The delta between the stored deadline and the current uptime is unbounded in principle — a
+    /// state file written before a reboot carries a deadline from the previous boot — and
+    /// <see cref="DateTime.AddMilliseconds(double)"/> throws once the result leaves the representable
+    /// range. A diagnostic string must never be able to fail a publish, so an unrepresentable value
+    /// is simply omitted.
+    /// </remarks>
+    private string? TryFormatIdleExpiry(InteractiveDesktopState state)
+    {
+        if (state.IdleExpiresTick64 <= 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            return clock.UtcNow
+                .AddMilliseconds(state.IdleExpiresTick64 - clock.NowTicks64)
+                .ToString("O", CultureInfo.InvariantCulture);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return null;
+        }
+    }
+
     public void Publish(InteractiveDesktopState state)
     {
-        state.DiagnosticIdleExpiresUtc = state.IdleExpiresTick64 > 0
-            ? clock.UtcNow.AddMilliseconds(state.IdleExpiresTick64 - clock.NowTicks64)
-                .ToString("O", CultureInfo.InvariantCulture)
-            : null;
+        state.DiagnosticIdleExpiresUtc = TryFormatIdleExpiry(state);
 
         var payload = JsonSerializer.SerializeToUtf8Bytes(
             state, InteractiveDesktopJsonContext.Default.InteractiveDesktopState);

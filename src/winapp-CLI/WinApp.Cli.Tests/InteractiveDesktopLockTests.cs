@@ -308,4 +308,383 @@ public class InteractiveDesktopLockTests
         Assert.IsFalse(_participants.AnyLiveParticipant(), "no lease may be left behind");
     }
 
+    // -------------------------------------------------------- queueing behind another live owner
+
+    /// <summary>
+    /// Publishes state in which a <em>different</em> owner holds the turn, and holds that owner's
+    /// participant lease so it reads as live.
+    /// </summary>
+    /// <remarks>
+    /// Participant identity is <c>(pid, processStartTicks)</c>, so a single process cannot legitimately
+    /// act as two owners. Holding the foreign lease file <c>FileShare.None</c> reproduces exactly what
+    /// the liveness probe observes for a real second process — a locked lease — without needing one,
+    /// which keeps the cancellation contract deterministically testable. (Genuine cross-process
+    /// behavior is covered separately by the multiprocess lane.)
+    /// </remarks>
+    private FileStream OccupyTurnWithAnotherOwner(int foreignPid = 424242, long foreignStart = 987654321)
+    {
+        _paths.EnsureDirectories();
+        var leaseStream = new FileStream(
+            _paths.LeasePath(foreignPid, foreignStart),
+            FileMode.Create,
+            FileAccess.ReadWrite,
+            FileShare.None,
+            bufferSize: 1,
+            FileOptions.DeleteOnClose);
+
+        using var stateLock = _store.AcquireStateLock(CancellationToken.None);
+        var state = InteractiveDesktopState.CreateFresh();
+        state.TurnId = 1;
+        state.NextTicket = 2;
+        state.Owner = new OwnerRecord { Kind = UiOwnerKind.Explicit, Key = "some-other-workflow" };
+        state.OwnerCommands.Add(new OwnerCommandEntry
+        {
+            Ticket = 1,
+            Pid = foreignPid,
+            ProcessStartTicksUtc = foreignStart,
+            Operation = "ui click",
+            Mode = UiTurnMode.DesktopExclusive,
+            Status = UiCommandStatus.Running,
+        });
+        _store.Publish(state);
+
+        return leaseStream;
+    }
+
+    [TestMethod]
+    public async Task ACommandQueuesWhileAnotherOwnerHoldsTheTurn()
+    {
+        using var foreignLease = OccupyTurnWithAnotherOwner();
+
+        using var cts = new CancellationTokenSource();
+        var ran = false;
+        var queued = RunAsyncWithToken(UiTurnMode.DesktopExclusive, "ui click", (_, _) =>
+        {
+            ran = true;
+            return Task.FromResult(0);
+        }, cts.Token);
+
+        await Task.Delay(250);
+        Assert.IsFalse(ran, "the command must wait while another owner holds the turn");
+
+        using (var stateLock = _store.AcquireStateLock(CancellationToken.None))
+        {
+            Assert.AreEqual(1, _store.Read().State!.Waiters.Count,
+                "the command must be recorded as a global waiter");
+        }
+
+        await cts.CancelAsync();
+        await queued;
+    }
+
+    [TestMethod]
+    public async Task CancellingWhileQueuedExitsOneThirtyAndRemovesTheTicket()
+    {
+        using var foreignLease = OccupyTurnWithAnotherOwner();
+
+        using var cts = new CancellationTokenSource();
+        var ran = false;
+        var queued = RunAsyncWithToken(UiTurnMode.DesktopExclusive, "ui click", (_, _) =>
+        {
+            ran = true;
+            return Task.FromResult(0);
+        }, cts.Token);
+
+        await Task.Delay(250);
+        await cts.CancelAsync();
+
+        Assert.AreEqual(InteractiveDesktopLock.CancelledExitCode, await queued,
+            "a command cancelled while queued exits 130");
+        Assert.IsFalse(ran, "it never reached execution, so it has no UI side effects");
+
+        using var stateLock = _store.AcquireStateLock(CancellationToken.None);
+        var state = _store.Read().State!;
+        Assert.AreEqual(0, state.Waiters.Count, "cancellation must remove the waiter's ticket");
+        Assert.AreEqual("some-other-workflow", state.Owner!.Key,
+            "the cancelled command must not disturb the current owner");
+    }
+
+    [TestMethod]
+    public async Task CancellingWhileQueuedEmitsTheStructuredCancelledError()
+    {
+        using var foreignLease = OccupyTurnWithAnotherOwner();
+
+        var errorWriter = new StringWriter();
+        var command = new Command("probe");
+        command.Options.Add(WinAppRootCommand.JsonOption);
+        command.Options.Add(WinAppRootCommand.QuietOption);
+        command.Options.Add(WinAppRootCommand.VerboseOption);
+        var parseResult = command.Parse(["--json"]);
+        parseResult.InvocationConfiguration.Error = errorWriter;
+
+        using var cts = new CancellationTokenSource();
+        var queued = _coordinator.RunCoordinatedAsync(
+            UiTurnMode.DesktopExclusive, "ui click", parseResult,
+            (_, _) => Task.FromResult(0), cts.Token);
+
+        await Task.Delay(250);
+        await cts.CancelAsync();
+        Assert.AreEqual(InteractiveDesktopLock.CancelledExitCode, await queued);
+
+        var payload = errorWriter.ToString();
+        StringAssert.Contains(payload, "\"code\":\"cancelled\"");
+        StringAssert.Contains(payload, "\"waitedMs\"");
+        // Owner identity must never surface, in raw or hashed form.
+        Assert.IsFalse(payload.Contains("some-other-workflow", StringComparison.Ordinal));
+        Assert.IsFalse(payload.Contains("interactive-desktop-lock-tests", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task AQueuedCommandProceedsOnceTheOtherOwnerIsGone()
+    {
+        var foreignLease = OccupyTurnWithAnotherOwner();
+
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var queued = RunAsyncWithToken(UiTurnMode.DesktopExclusive, "ui click", (_, _) =>
+        {
+            started.SetResult();
+            return Task.FromResult(0);
+        }, CancellationToken.None);
+
+        await Task.Delay(200);
+        Assert.IsFalse(started.Task.IsCompleted);
+
+        // Closing the lease is what Windows does when that process exits or is killed. A crash does not
+        // renew the grace, so the turn is released immediately and this command is promoted.
+        foreignLease.Dispose();
+
+        Assert.AreEqual(0, await queued);
+        Assert.IsTrue(started.Task.IsCompleted);
+    }
+
+    private Task<int> RunAsyncWithToken(
+        UiTurnMode mode, string operation, Func<IUiTurn, CancellationToken, Task<int>> body, CancellationToken token)
+        => _coordinator.RunCoordinatedAsync(mode, operation, Parse(), body, token);
+
+    // ------------------------------------------------------ escalation must not swallow coordination
+
+    [TestMethod]
+    public async Task EscalationCancelledWhileQueuedExitsOneThirtyAndLeavesNoTrace()
+    {
+        // Exactly what `ui screenshot` does: an observational pass discovers it needs the foreground and
+        // escalates. Here the escalation queues behind another owner and is cancelled.
+        using var foreignLease = OccupyTurnWithAnotherOwner();
+        var deadlineBefore = ReadOwnerDeadline();
+
+        var errorWriter = new StringWriter();
+        var parseResult = ParseWithWriter(errorWriter);
+
+        using var cts = new CancellationTokenSource();
+        var escalated = false;
+        var queued = _coordinator.RunCoordinatedAsync(
+            UiTurnMode.Observe, "ui screenshot", parseResult,
+            async (turn, token) =>
+            {
+                await turn.EscalateToDesktopExclusiveAsync(token);
+                escalated = true;
+                return 0;
+            },
+            cts.Token);
+
+        await Task.Delay(250);
+        await cts.CancelAsync();
+
+        Assert.AreEqual(InteractiveDesktopLock.CancelledExitCode, await queued,
+            "a cancelled escalation is a cancellation, not an internal error");
+        Assert.IsFalse(escalated, "the body never resumed, so it produced no image");
+        StringAssert.Contains(errorWriter.ToString(), "\"code\":\"cancelled\"");
+
+        using var stateLock = _store.AcquireStateLock(CancellationToken.None);
+        var state = _store.Read().State!;
+        Assert.AreEqual(0, state.Waiters.Count, "the escalation's ticket must be removed");
+        Assert.AreEqual(deadlineBefore, state.IdleExpiresTick64,
+            "a cancelled stranger must not disturb the current owner's idle deadline");
+    }
+
+    [TestMethod]
+    public async Task ABodyThatSwallowsCancellationStillDoesNotRenewTheGrace()
+    {
+        // Defence in depth for the handler catch-all: even if a body swallows its own cancellation, the
+        // coordinator must not treat that as a normal completion and extend the owner's turn.
+        Assert.AreEqual(0, await RunAsync(UiTurnMode.DesktopExclusive, "ui click", (_, _) => Task.FromResult(0)));
+        var deadlineAfterNormalCommand = ReadOwnerDeadline();
+        Assert.AreNotEqual(0, deadlineAfterNormalCommand, "an ordinary completion establishes the grace");
+
+        // Any renewal would land strictly later than the deadline captured above.
+        await Task.Delay(50);
+
+        using var cts = new CancellationTokenSource();
+        var bodyObservedCancellation = false;
+        var exitCode = await RunAsyncWithToken(UiTurnMode.DesktopExclusive, "ui click", async (_, token) =>
+        {
+            await cts.CancelAsync();
+            bodyObservedCancellation = token.IsCancellationRequested;
+            try
+            {
+                token.ThrowIfCancellationRequested();
+            }
+            catch (OperationCanceledException)
+            {
+                // Deliberately swallowed, imitating an over-broad handler catch.
+            }
+
+            return 1;
+        }, cts.Token);
+
+        Assert.AreEqual(1, exitCode, "the body's own result is preserved");
+        Assert.IsTrue(bodyObservedCancellation,
+            "the body must actually observe cancellation, or this test proves nothing");
+        Assert.AreEqual(deadlineAfterNormalCommand, ReadOwnerDeadline(),
+            "a cancelled command must not renew the owner's idle grace, however its body handled the cancellation");
+    }
+
+    [TestMethod]
+    public async Task EscalationAgainstUnknownNewerStateReportsCoordinationUnavailable()
+    {
+        _paths.EnsureDirectories();
+        using (var stateLock = _store.AcquireStateLock(CancellationToken.None))
+        {
+            var state = InteractiveDesktopState.CreateFresh();
+            state.Version = int.MaxValue;
+            _store.Publish(state);
+        }
+
+        var ex = await Assert.ThrowsExactlyAsync<UiCoordinationException>(() =>
+            RunAsync(UiTurnMode.Observe, "ui screenshot", async (turn, token) =>
+            {
+                await turn.EscalateToDesktopExclusiveAsync(token);
+                return 0;
+            }));
+
+        Assert.AreEqual(UiCoordinationErrorCodes.Unavailable, ex.Code,
+            "escalating against state written by a newer build must fail closed, not run uncoordinated");
+    }
+
+    private long ReadOwnerDeadline()
+    {
+        using var stateLock = _store.AcquireStateLock(CancellationToken.None);
+        return _store.Read().State!.IdleExpiresTick64;
+    }
+
+    private static ParseResult ParseWithWriter(TextWriter errorWriter)
+    {
+        var command = new Command("probe");
+        command.Options.Add(WinAppRootCommand.JsonOption);
+        command.Options.Add(WinAppRootCommand.QuietOption);
+        command.Options.Add(WinAppRootCommand.VerboseOption);
+        var parseResult = command.Parse(["--json"]);
+        parseResult.InvocationConfiguration.Error = errorWriter;
+        return parseResult;
+    }
+
+    // ------------------------------------------------- ownership lapsing mid-registration (observe)
+
+    /// <summary>
+    /// The turn is lost between the owner check and the admission that follows it.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="InteractiveDesktopScheduler.BeginObserve"/> normalizes again, so an owner that was
+    /// current a moment earlier can be gone by the time admission runs — here because the shell the
+    /// reservation was derived from exits in between. The observation must then run fully detached:
+    /// keeping the lease open would publish liveness for a participant with no state entry, and
+    /// completing later would adjust a different owner's turn.
+    /// </remarks>
+    [TestMethod]
+    public async Task ObserveWhoseOwnerLapsesDuringAdmissionRunsFullyDetached()
+    {
+        const int parentPid = 4242;
+        const long parentStart = 777_777;
+
+        // Parent-derived ownership, so the fake inspector controls exactly when the turn lapses.
+        Environment.SetEnvironmentVariable(UiOwnerResolver.OwnerIdVariable, null);
+        var inspector = new ParentDiesAfterFirstProbeInspector(parentPid, parentStart);
+        var paths = new InteractiveDesktopPaths(inspector);
+        var participants = new ParticipantRegistry(paths, inspector, NullLogger<ParticipantRegistry>.Instance);
+        var store = new InteractiveDesktopStateStore(
+            paths, participants, new TickCountClock(), NullLogger<InteractiveDesktopStateStore>.Instance);
+        var coordinator = new InteractiveDesktopLock(
+            store, paths, participants, new UiOwnerResolver(inspector), inspector,
+            new TickCountClock(), new FakePollDelay(), new TestConsole(),
+            NullLogger<InteractiveDesktopLock>.Instance);
+
+        paths.EnsureDirectories();
+        using (var stateLock = store.AcquireStateLock(CancellationToken.None))
+        {
+            var state = InteractiveDesktopState.CreateFresh();
+            state.TurnId = 3;
+            state.Owner = new OwnerRecord
+            {
+                Kind = UiOwnerKind.Parent,
+                Key = UiOwnerResolver.ComputeParentKey(parentPid, parentStart),
+                DiagnosticParentPid = parentPid,
+                ParentStartTicksUtc = parentStart,
+            };
+            state.IdleExpiresTick64 = new TickCountClock().NowTicks64 + InteractiveDesktopScheduler.IdleGraceMs;
+            store.Publish(state);
+        }
+
+        var leaseLiveDuringBody = true;
+        var exitCode = await coordinator.RunCoordinatedAsync(
+            UiTurnMode.Observe, "ui inspect", Parse(),
+            (_, _) =>
+            {
+                // The decisive check. By teardown the lease is closed either way, so the only moment the
+                // bug is observable is while the detached body runs: a detached observation must hold no
+                // lease at all, or other processes see liveness for a participant that has no entry.
+                leaseLiveDuringBody = participants.AnyLiveParticipant();
+                return Task.FromResult(0);
+            },
+            CancellationToken.None);
+
+        Assert.AreEqual(0, exitCode, "a detached observation still runs; it simply pins nothing");
+        Assert.IsTrue(
+            inspector.ParentProbes >= 2,
+            "the test is only meaningful if the owner check and the admission both probed the parent");
+        Assert.IsFalse(
+            leaseLiveDuringBody,
+            "the lease opened before admission must be closed as soon as the admission came back detached");
+
+        using (var stateLock = store.AcquireStateLock(CancellationToken.None))
+        {
+            var state = store.Read().State!;
+            Assert.AreEqual(0, state.OwnerCommands.Count,
+                "a detached observation must publish no owner-command entry");
+        }
+
+        Assert.IsFalse(participants.AnyLiveParticipant(),
+            "the lease must also be gone once the command has finished");
+    }
+
+    /// <summary>
+    /// Reports the owning shell as alive for the first probe and gone afterwards, so a turn lapses at a
+    /// precisely known point instead of depending on wall-clock timing.
+    /// </summary>
+    private sealed class ParentDiesAfterFirstProbeInspector(int parentPid, long parentStartTicks) : IProcessInspector
+    {
+        private readonly ProcessInspector _real = new();
+
+        public int ParentProbes { get; private set; }
+
+        public int CurrentProcessId => _real.CurrentProcessId;
+
+        public long CurrentProcessStartTicksUtc => _real.CurrentProcessStartTicksUtc;
+
+        public int CurrentSessionId => _real.CurrentSessionId;
+
+        public int? TryGetParentProcessId() => parentPid;
+
+        public long? TryGetProcessStartTicksUtc(int processId)
+            => processId == parentPid ? parentStartTicks : _real.TryGetProcessStartTicksUtc(processId);
+
+        public bool? IsProcessAlive(int processId, long startTicksUtc)
+        {
+            if (processId != parentPid || startTicksUtc != parentStartTicks)
+            {
+                return _real.IsProcessAlive(processId, startTicksUtc);
+            }
+
+            ParentProbes++;
+            return ParentProbes <= 1;
+        }
+    }
 }

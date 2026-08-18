@@ -83,13 +83,36 @@ internal sealed class InteractiveDesktopScheduler(IMonotonicClock clock)
     /// <returns><see langword="true"/> when anything changed and the state must be published.</returns>
     public bool Normalize(InteractiveDesktopState state, ICoordinationLivenessProbe probe)
     {
-        var changed = PruneDeadParticipants(state, probe);
+        var changed = ClampStaleDeadline(state);
+        changed |= PruneDeadParticipants(state, probe);
         changed |= ReleaseDeadParentReservation(state, probe);
         changed |= ExpireIdleTurn(state);
         changed |= PromoteOldestWaiter(state, probe);
         changed |= AbsorbSameOwnerWaiters(state);
         changed |= ApplyOwnerLocalEligibility(state);
         return changed;
+    }
+
+    /// <summary>
+    /// Treats an idle deadline further out than the grace itself as already expired.
+    /// </summary>
+    /// <remarks>
+    /// The only writer sets <c>now + <see cref="IdleGraceMs"/></c>, so a larger value cannot have been
+    /// produced during this boot. Windows resets <see cref="Environment.TickCount64"/> on restart, so a
+    /// state file written after days of uptime carries a deadline far beyond the new uptime and would
+    /// otherwise pin the turn to an owner that died with the previous boot — for days. Clamping to
+    /// <c>now</c> lets <see cref="ExpireIdleTurn"/> release it on the very next normalization.
+    /// </remarks>
+    private bool ClampStaleDeadline(InteractiveDesktopState state)
+    {
+        var now = clock.NowTicks64;
+        if (state.IdleExpiresTick64 <= now + IdleGraceMs)
+        {
+            return false;
+        }
+
+        state.IdleExpiresTick64 = now;
+        return true;
     }
 
     /// <summary>
@@ -221,26 +244,36 @@ internal sealed class InteractiveDesktopScheduler(IMonotonicClock clock)
     /// completion renews the grace; an anonymous owner gets none and hands off immediately;
     /// cancellation never renews.
     /// </summary>
+    /// <remarks>
+    /// The deadline belongs to whoever currently holds the turn, so it is only touched when
+    /// <paramref name="owner"/> is that owner. Without this check a process finishing under a
+    /// different identity — a global waiter that was cancelled, or a command whose owner already lost
+    /// the turn — would rewrite a stranger's grace: an anonymous completion would revoke it outright
+    /// (deadline = now) and a normal one would silently extend it.
+    /// </remarks>
     public void CompleteCommand(
         InteractiveDesktopState state,
         ICoordinationLivenessProbe probe,
         UiParticipantIdentity participant,
-        UiOwnerKind ownerKind,
+        UiOwnerIdentity owner,
         bool renewGrace)
     {
         RemoveParticipantEntries(state, participant);
 
-        if (renewGrace && ownerKind != UiOwnerKind.Anonymous)
+        if (state.Owner is not null && OwnerMatches(state.Owner, owner))
         {
-            // Stored unconditionally but only consulted once OwnerCommands is empty, so a long-running
-            // sibling command is unaffected.
-            state.IdleExpiresTick64 = clock.NowTicks64 + IdleGraceMs;
-        }
-        else if (ownerKind == UiOwnerKind.Anonymous)
-        {
-            // A one-command owner has no shell that could issue a follow-up, so holding the desktop for
-            // another four seconds would only delay everyone else.
-            state.IdleExpiresTick64 = clock.NowTicks64;
+            if (renewGrace && owner.Kind != UiOwnerKind.Anonymous)
+            {
+                // Stored unconditionally but only consulted once OwnerCommands is empty, so a long-running
+                // sibling command is unaffected.
+                state.IdleExpiresTick64 = clock.NowTicks64 + IdleGraceMs;
+            }
+            else if (owner.Kind == UiOwnerKind.Anonymous)
+            {
+                // A one-command owner has no shell that could issue a follow-up, so holding the desktop for
+                // another four seconds would only delay everyone else.
+                state.IdleExpiresTick64 = clock.NowTicks64;
+            }
         }
 
         Normalize(state, probe);

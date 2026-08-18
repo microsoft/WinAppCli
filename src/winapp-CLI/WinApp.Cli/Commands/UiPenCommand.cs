@@ -385,7 +385,7 @@ internal class UiPenCommand : Command, IShortDescription
                     errorOut: parseResult.InvocationConfiguration.Error);
                 return 1;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!UiCoordinatedAction.IsCoordinationFault(ex))
             {
                 UiErrors.GenericError(logger, ex, json, parseResult.InvocationConfiguration.Error);
                 return 1;

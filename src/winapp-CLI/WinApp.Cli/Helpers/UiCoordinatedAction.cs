@@ -48,6 +48,21 @@ internal abstract class UiCoordinatedAction(IInteractiveDesktopLock coordinator,
     /// <summary>The command's work. Runs under the workflow turn.</summary>
     protected abstract Task<int> ExecuteAsync(ParseResult parseResult, IUiTurn turn, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Whether <paramref name="ex"/> belongs to coordination and must escape a handler's catch-all.
+    /// </summary>
+    /// <remarks>
+    /// Handler bodies call into coordination — <see cref="IDesktopSection.EnterAsync"/> and
+    /// <see cref="IUiTurn.EscalateToDesktopExclusiveAsync"/> — from inside their broad
+    /// <c>catch (Exception)</c>. Letting that catch win would be doubly wrong: the user would see
+    /// <c>internal_error</c> instead of <c>cancelled</c> or the real coordination code, and the
+    /// coordinator would see a normal body completion and renew the owner's idle grace on a command
+    /// that never actually ran. Handlers therefore filter their catch-all with
+    /// <c>when (!UiCoordinatedAction.IsCoordinationFault(ex))</c>.
+    /// </remarks>
+    internal static bool IsCoordinationFault(Exception ex)
+        => ex is OperationCanceledException or UiCoordinationException;
+
     public sealed override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
     {
         if (Preflight(parseResult) is { } preflightExitCode)

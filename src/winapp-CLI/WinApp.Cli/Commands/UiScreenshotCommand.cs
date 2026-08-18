@@ -127,7 +127,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
                 UiErrors.StaleElement(logger, json);
                 return 1;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!UiCoordinatedAction.IsCoordinationFault(ex))
             {
                 UiErrors.GenericError(logger, ex, json);
                 return 1;
@@ -280,7 +280,7 @@ internal class UiScreenshotCommand : Command, IShortDescription
                     // recording a per-window failure here would publish a partially observational image.
                     throw;
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (!UiCoordinatedAction.IsCoordinationFault(ex))
                 {
                     logger.LogDebug("Failed to capture HWND {Hwnd}: {Error}", w.Hwnd, ex.Message);
                     windowDetails.Add(new UiScreenshotWindowInfo

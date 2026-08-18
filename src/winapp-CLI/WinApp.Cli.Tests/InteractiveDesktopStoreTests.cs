@@ -252,6 +252,15 @@ public class InteractiveDesktopStoreTests
         // active.lock guards the desktop, not the metadata: a queued command must still be able to read
         // and update state while another process is mid-gesture.
         _paths.EnsureDirectories();
+
+        // A process holding active.lock has necessarily registered first, so state already exists.
+        // (Missing state while active.lock is held is a different case entirely — an external deletion —
+        // and is deliberately fail-closed; see MissingStateWhileTheActiveLockIsHeldFailsClosed.)
+        using (var seedLock = _store.AcquireStateLock(CancellationToken.None))
+        {
+            _store.Publish(InteractiveDesktopState.CreateFresh());
+        }
+
         using var activeLock = new FileStream(
             _paths.ActiveLockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
 
@@ -263,8 +272,73 @@ public class InteractiveDesktopStoreTests
         Assert.IsFalse(_store.IsActiveLockFree());
     }
 
-    // --------------------------------------------------------------------------- participant leases
+    // ------------------------------------------------------- missing state must not mint a new owner
 
+    [TestMethod]
+    public void MissingStateWithNoLivenessEvidenceIsATrueFirstUse()
+    {
+        _paths.EnsureDirectories();
+        Assert.IsFalse(File.Exists(_paths.StatePath), "the test starts with no state file at all");
+
+        using var stateLock = _store.AcquireStateLock(CancellationToken.None);
+        var read = _store.Read();
+
+        Assert.IsNotNull(read.State, "the ordinary first command on a desktop starts from a fresh document");
+        Assert.IsNull(read.State!.Owner);
+        Assert.IsFalse(read.RecoveredFromCorruption, "a first use is not a recovery");
+    }
+
+    [TestMethod]
+    public void MissingStateWhileAParticipantIsLiveFailsClosed()
+    {
+        // An external deletion — AV, manual cleanup, a stray rmdir — while a recording or queued waiter
+        // is still live. Rebuilding here would mint a second owner for the same desktop.
+        _paths.EnsureDirectories();
+        using var lease = _participants.OpenLease(
+            _inspector.CurrentProcessId, _inspector.CurrentProcessStartTicksUtc);
+
+        Assert.IsFalse(File.Exists(_paths.StatePath));
+
+        using var stateLock = _store.AcquireStateLock(CancellationToken.None);
+        var ex = Assert.ThrowsExactly<UiCoordinationException>(() => _store.Read());
+        Assert.AreEqual(UiCoordinationErrorCodes.Unavailable, ex.Code);
+    }
+
+    [TestMethod]
+    public void MissingStateWhileTheActiveLockIsHeldFailsClosed()
+    {
+        _paths.EnsureDirectories();
+        using var activeLock = new FileStream(
+            _paths.ActiveLockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+
+        Assert.IsFalse(File.Exists(_paths.StatePath));
+
+        using var stateLock = _store.AcquireStateLock(CancellationToken.None);
+        var ex = Assert.ThrowsExactly<UiCoordinationException>(() => _store.Read());
+        Assert.AreEqual(UiCoordinationErrorCodes.Unavailable, ex.Code);
+    }
+
+    // ------------------------------------------------------------------ prior-boot deadline handling
+
+    [TestMethod]
+    public void PublishSurvivesAnUnrepresentableIdleDeadline()
+    {
+        // Environment.TickCount64 resets on reboot, so a state file written after long uptime can carry
+        // a deadline far beyond the current uptime. Converting that delta to a UTC diagnostic overflows
+        // DateTime; a diagnostic string must never be able to fail a publish.
+        _paths.EnsureDirectories();
+        var state = InteractiveDesktopState.CreateFresh();
+        state.IdleExpiresTick64 = long.MaxValue;
+
+        using var stateLock = _store.AcquireStateLock(CancellationToken.None);
+        _store.Publish(state);
+
+        Assert.IsNull(state.DiagnosticIdleExpiresUtc,
+            "an unrepresentable deadline is omitted from diagnostics rather than throwing");
+        Assert.IsTrue(File.Exists(_paths.StatePath), "the publish itself must still succeed");
+    }
+
+    // --------------------------------------------------------------------------- participant leases
     [TestMethod]
     public void Lease_IsHeldWhileOpenAndDeletedOnClose()
     {

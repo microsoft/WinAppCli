@@ -18,9 +18,22 @@ namespace WinApp.Cli.Services.InteractiveDesktop;
 internal interface IDesktopSection
 {
     /// <summary>
-    /// Acquires <c>active.lock</c> for the duration of the returned scope. Reentrant within a process:
-    /// a nested enter increments a refcount and releases the lock only when the outermost scope closes.
+    /// Acquires <c>active.lock</c> for the duration of the returned scope.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Not reentrant.</strong> Every enter takes <c>active.lock</c>, and concurrent enters
+    /// within one execution are serialized. A nested enter inside an already-held scope therefore
+    /// deadlocks against itself; code that needs the desktop from within a section must reuse the
+    /// enclosing scope or be refactored so the enters are sequential.
+    /// </para>
+    /// <para>
+    /// This is deliberate. A process- or execution-wide refcount would let two unrelated concurrent
+    /// tasks share one acquisition: the second would see a non-zero count and proceed <em>without</em>
+    /// holding the lock, driving the desktop outside the exclusive section. Cheap reentrancy is not
+    /// worth silently losing the guarantee the section exists to provide.
+    /// </para>
+    /// </remarks>
     Task<IAsyncDisposable> EnterAsync(CancellationToken cancellationToken);
 }
 

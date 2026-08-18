@@ -207,7 +207,12 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
                 try
                 {
                     var exitCode = await body(this, cancellationToken).ConfigureAwait(false);
-                    bodyCompletedNormally = true;
+
+                    // A body that swallowed its own cancellation must not be treated as a normal
+                    // completion: renewing the idle grace for a command that never really ran would hold
+                    // the desktop against every other owner. The handler catch-all is filtered to let
+                    // cancellation escape, and this is the backstop if one ever is not.
+                    bodyCompletedNormally = !cancellationToken.IsCancellationRequested;
                     return exitCode;
                 }
                 finally
@@ -301,6 +306,26 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
             // liveness proof (spec §9 rule 5).
             _lease = coordinator._participants.OpenLease(participant.ProcessId, participant.StartTicksUtc);
             var admission = coordinator._scheduler.BeginObserve(state, _probe, owner, participant);
+
+            if (admission.Admission == UiAdmission.Detached)
+            {
+                // BeginObserve re-normalizes, so ownership can lapse between the check above and here —
+                // an expiring grace, or a dead parent reservation being released. Nothing was added to
+                // the state, so the lease must go too: keeping it open would publish liveness for a
+                // participant with no entry, and Complete would later adjust a foreign owner's turn.
+                _lease.Dispose();
+                _lease = null;
+                _detached = true;
+                _turnAction = UiTurnAction.Detached;
+
+                if (changed || _recoveredFromCorruption)
+                {
+                    coordinator._store.Publish(state);
+                }
+
+                return;
+            }
+
             _turnAction = admission.TurnAction;
             coordinator._store.Publish(state);
         }
@@ -528,7 +553,7 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
                 var read = coordinator._store.Read();
                 if (read.State is { } state)
                 {
-                    coordinator._scheduler.CompleteCommand(state, _probe, participant, owner.Kind, renewGrace);
+                    coordinator._scheduler.CompleteCommand(state, _probe, participant, owner, renewGrace);
                     coordinator._store.Publish(state);
                 }
             }
