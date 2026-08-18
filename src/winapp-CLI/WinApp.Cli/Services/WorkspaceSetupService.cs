@@ -81,29 +81,38 @@ internal class WorkspaceSetupService(
             // no winapp.yaml to read and `dotnet restore` is what actually restores them. Run it instead of
             // failing with an instruction to run it by hand: `winapp init` leaves the project in exactly this
             // shape, so `winapp restore` immediately afterwards must not be an error.
+            //
+            // Every detected project is restored, deliberately without the interactive project picker `init`
+            // uses. Restore is routinely run non-interactively (CI, or straight after a clone) and exposes no
+            // project-selection option, so prompting here would block on redirected input; and unlike init —
+            // which configures one project — restore is just reinstalling what is already declared, so doing
+            // that for each project in the directory is both safe and what a multi-project repo needs.
             var csprojFiles = dotNetService.FindCsproj(options.BaseDirectory);
-            var projectToRestore = await SelectCsprojFileAsync(csprojFiles, cancellationToken);
 
             logger.LogInformation(
-                "{UISymbol} .NET project detected with no winapp.yaml — its SDK packages are PackageReferences in {Project}. Running 'dotnet restore'.",
+                "{UISymbol} .NET project detected with no winapp.yaml — SDK packages are PackageReferences in {Count} project(s). Running 'dotnet restore'.",
                 UiSymbols.Note,
-                projectToRestore.Name);
+                csprojFiles.Count);
 
-            var restoreExitCode = await dotNetService.RunDotnetInheritedAsync(
-                projectToRestore.Directory!,
-                $"restore \"{projectToRestore.FullName}\"",
-                cancellationToken);
-
-            if (restoreExitCode != 0)
+            foreach (var projectToRestore in csprojFiles)
             {
-                logger.LogError(
-                    "'dotnet restore' failed for {Project} (exit code {ExitCode}).",
-                    projectToRestore.Name,
-                    restoreExitCode);
-                return 1;
+                var restoreExitCode = await dotNetService.RunDotnetInheritedAsync(
+                    projectToRestore.Directory!,
+                    $"restore \"{projectToRestore.FullName}\"",
+                    cancellationToken);
+
+                if (restoreExitCode != 0)
+                {
+                    logger.LogError(
+                        "'dotnet restore' failed for {Project} (exit code {ExitCode}).",
+                        projectToRestore.Name,
+                        restoreExitCode);
+                    return 1;
+                }
+
+                logger.LogInformation("{UISymbol} Restore completed for {Project}.", UiSymbols.Check, projectToRestore.Name);
             }
 
-            logger.LogInformation("{UISymbol} Restore completed for {Project}.", UiSymbols.Check, projectToRestore.Name);
             return 0;
         }
 

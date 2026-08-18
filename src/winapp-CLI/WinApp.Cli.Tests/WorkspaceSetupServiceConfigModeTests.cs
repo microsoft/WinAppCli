@@ -93,7 +93,7 @@ public class WorkspaceSetupServiceConfigModeTests : BaseCommandTests
     [TestMethod]
     public async Task Restore_DotNetProject_WithoutYaml_DelegatesToDotnetRestore()
     {
-        await CreateCsprojAsync(_tempDirectory, "App");
+        var csproj = await CreateCsprojAsync(_tempDirectory, "App");
 
         var options = new WorkspaceSetupOptions
         {
@@ -107,5 +107,65 @@ public class WorkspaceSetupServiceConfigModeTests : BaseCommandTests
         var result = await service.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
         Assert.AreEqual(0, result);
+        // A zero exit code alone would also be produced by the "nothing to restore" no-op branch, so assert the
+        // delegation itself: exactly one dotnet restore, naming this project.
+        Assert.HasCount(1, _dotnet.InheritedCalls);
+        StringAssert.Contains(_dotnet.InheritedCalls[0], "restore", StringComparison.Ordinal);
+        StringAssert.Contains(_dotnet.InheritedCalls[0], csproj.FullName, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Restore runs non-interactively (CI, or straight after a clone) and has no project-selection option, so
+    /// a directory with several projects must restore all of them rather than opening init's picker, which
+    /// would block on redirected input.
+    /// </summary>
+    [TestMethod]
+    public async Task Restore_DotNetMultiProject_WithoutYaml_RestoresEveryProjectWithoutPrompting()
+    {
+        var first = await CreateCsprojAsync(_tempDirectory, "AppOne");
+        var second = await CreateCsprojAsync(_tempDirectory, "AppTwo");
+
+        var options = new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            RequireExistingConfig = true,
+            NoGitignore = true
+        };
+
+        var service = GetRequiredService<IWorkspaceSetupService>();
+        var result = await service.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+
+        Assert.AreEqual(0, result);
+        Assert.HasCount(2, _dotnet.InheritedCalls);
+        Assert.IsTrue(
+            _dotnet.InheritedCalls.Any(c => c.Contains(first.FullName, StringComparison.Ordinal)),
+            $"Expected a restore for {first.Name}. Calls: {string.Join(" | ", _dotnet.InheritedCalls)}");
+        Assert.IsTrue(
+            _dotnet.InheritedCalls.Any(c => c.Contains(second.FullName, StringComparison.Ordinal)),
+            $"Expected a restore for {second.Name}. Calls: {string.Join(" | ", _dotnet.InheritedCalls)}");
+    }
+
+    /// <summary>
+    /// A failing `dotnet restore` must surface as a non-zero exit rather than being reported as a success.
+    /// </summary>
+    [TestMethod]
+    public async Task Restore_DotNetProject_WhenDotnetRestoreFails_ReturnsError()
+    {
+        await CreateCsprojAsync(_tempDirectory, "App");
+        _dotnet.RunDotnetInheritedHandler = _ => 1;
+
+        var options = new WorkspaceSetupOptions
+        {
+            BaseDirectory = _tempDirectory,
+            ConfigDir = _tempDirectory,
+            RequireExistingConfig = true,
+            NoGitignore = true
+        };
+
+        var service = GetRequiredService<IWorkspaceSetupService>();
+        var result = await service.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+
+        Assert.AreNotEqual(0, result);
     }
 }

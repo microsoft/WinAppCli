@@ -16,6 +16,13 @@ namespace WinApp.Cli.Tests;
 /// These tests warm the cache from a local folder feed, then re-run the install under a nuget.config that can
 /// no longer serve the graph, and assert it still restores. The final test pins the other direction: while the
 /// sources CAN answer, the cache must not influence which version is selected.
+///
+/// The gate that confines the fallback to "the sources could not answer" is exercised here only through
+/// the last test, which pins that a reachable source's version wins over a lower cached one. A direct
+/// negative test — a reachable source answering authoritatively while a satisfying cache entry exists —
+/// was tried and removed: under the full 32-way parallel run the local folder feed query intermittently
+/// fails, which legitimately enables the fallback, so the assertion could not be made stable without
+/// masking the very condition it was checking.
 /// </summary>
 /// <remarks>
 /// Not parallelized: each test warms a real global-packages folder, rewrites the nuget.config under the same

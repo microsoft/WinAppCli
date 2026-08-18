@@ -284,17 +284,24 @@ internal partial class NugetService
             return best.ToNormalizedString();
         }
 
-        // Nothing the sources offered satisfied the range. Before failing, check whether a FULLY installed
-        // cache entry already satisfies it. A completed entry is a package winapp (or NuGet) previously
-        // extracted, so a graph that is already on disk restores without contacting a feed at all — which is
-        // what makes an offline restore, or one under a packageSourceMapping that excludes a transitive
-        // package, work. This is deliberately confined to the failure paths: folding cached versions into the
-        // candidate set above would let a cached version win NuGet's lowest-applicable rule and change which
-        // version is selected even when every source is reachable.
-        var cached = FindSatisfyingCachedVersion(packageId, range);
-        if (cached is not null)
+        // Nothing the sources offered satisfied the range. Before failing, and ONLY when the sources could not
+        // actually answer, check whether a FULLY installed cache entry already satisfies it. A completed entry
+        // is a package winapp (or NuGet) previously extracted, so a graph that is already on disk restores
+        // without contacting a feed at all — which is what makes an offline restore, or one under a
+        // packageSourceMapping that excludes a transitive package, work.
+        //
+        // The "could not answer" gate matters: when every eligible source WAS queried successfully and simply
+        // offers no satisfying version, that is an authoritative answer and must still fail. Consulting the
+        // cache there would let a version left behind by a different feed turn a failing online restore into a
+        // success, which is exactly the resolution change this fallback is meant not to make. Folding cached
+        // versions into the candidate set above would be wrong for the same reason.
+        if (candidates.Error is not null || candidates.EligibleSourceCount == 0)
         {
-            return cached;
+            var cached = FindSatisfyingCachedVersion(packageId, range);
+            if (cached is not null)
+            {
+                return cached;
+            }
         }
 
         // A bounded range that matches no available version means a REQUIRED transitive package cannot be
