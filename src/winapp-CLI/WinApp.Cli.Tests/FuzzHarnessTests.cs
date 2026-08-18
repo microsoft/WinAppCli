@@ -262,10 +262,11 @@ public class FuzzHarnessTests
             {
                 target(candidate.AsSpan(0, length));
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                // Deliberately unfiltered: anything reaching here is something the harness failed to
+                // Otherwise unfiltered: anything reaching here is something the harness failed to
                 // absorb, and narrowing it would hide the unexpected types this test exists to catch.
+                // OOM is let through instead, since looping on to allocate more after it is unsound.
                 escapes.Add(ex);
             }
         }
