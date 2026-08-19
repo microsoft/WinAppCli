@@ -1,10 +1,43 @@
 version: 2
 updates:
   - package-ecosystem: "github-actions"
-    directory: "/"
+    directories:
+      - "/"
+      - "/.github/actions/*"
     groups:
       github-actions:
         patterns: ["*"]
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: "nuget"
+    directory: "/src/winapp-CLI"
+    groups:
+      nuget:
+        patterns: ["*"]
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: "npm"
+    directory: "/src/winapp-npm"
+    groups:
+      npm:
+        patterns: ["*"]
+    ignore:
+      # TypeScript 7 (the native tsgo port) is blocked for two reasons:
+      #   1. typescript-eslint peer-requires `typescript >=4.8.4 <6.1.0` and cannot
+      #      support TS 7 until it exposes a public API.
+      #      Tracking: https://github.com/typescript-eslint/typescript-eslint/issues/10940
+      #      (see also closed https://github.com/typescript-eslint/typescript-eslint/issues/12518)
+      #   2. TS 7 removed `moduleResolution: node10`, which src/winapp-npm/tsconfig.json uses
+      #      (error TS5108), so adopting it needs a deliberate tsconfig migration.
+      # Remove this ignore once #10940 lands and the tsconfig is migrated.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     schedule:
       interval: "weekly"
     cooldown:

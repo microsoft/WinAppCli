@@ -13,6 +13,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		Directory.Packages.props = Directory.Packages.props
 	EndProjectSection
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinApp.Cli.Fuzz", "WinApp.Cli.Fuzz\WinApp.Cli.Fuzz.csproj", "{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinApp.Cli.SnapshotBaker", "WinApp.Cli.SnapshotBaker\WinApp.Cli.SnapshotBaker.csproj", "{A496B3C5-1096-4191-B479-99108C6B3CA9}"
 EndProject
 Global
@@ -49,6 +51,18 @@ Global
 		{F50B2679-8DAB-405E-9F69-E9877FB0A267}.Release|x64.Build.0 = Release|Any CPU
 		{F50B2679-8DAB-405E-9F69-E9877FB0A267}.Release|x86.ActiveCfg = Release|Any CPU
 		{F50B2679-8DAB-405E-9F69-E9877FB0A267}.Release|x86.Build.0 = Release|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Debug|x64.Build.0 = Debug|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Debug|x86.Build.0 = Debug|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Release|x64.ActiveCfg = Release|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Release|x64.Build.0 = Release|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Release|x86.ActiveCfg = Release|Any CPU
+		{9424B3C6-A8EE-4542-AAF2-3F21FDFA746D}.Release|x86.Build.0 = Release|Any CPU
 		{A496B3C5-1096-4191-B479-99108C6B3CA9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{A496B3C5-1096-4191-B479-99108C6B3CA9}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A496B3C5-1096-4191-B479-99108C6B3CA9}.Debug|x64.ActiveCfg = Debug|Any CPU

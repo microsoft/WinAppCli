@@ -636,6 +636,13 @@ Create a loose layout package from a build output folder, register it with Windo
 - **Folder mode** — the input is a build-output folder (contains a `Package.appxmanifest`/`AppxManifest.xml`).
 - **Project mode** — the input is a `.csproj`, a `.sln`/`.slnx` solution, or a directory containing one. `winapp run` builds the project and launches it, supporting both **packaged** and **unpackaged** WinUI apps. See [Project mode](#project-mode-net-sdk-projects) below.
 
+> [!TIP]
+> Mode selection is silent by default. If a directory was treated as a build-output folder when you
+> expected it to be built as a project, re-run with `--verbose` — folder mode reports why it was
+> chosen (`No .csproj/.sln/.slnx with a runnable app found in '<path>' — running it as a
+> build-output folder.`). A directory is only built as a project when a `.csproj`/`.sln`/`.slnx`
+> with a runnable app sits at its **top level**; it is not searched recursively.
+
 > **This is the preferred command for debugging with package identity** for most frameworks (.NET, C++, Rust, Flutter, Tauri). Unlike [`create-debug-identity`](#create-debug-identity) which registers a sparse package for a single exe, `winapp run` registers the entire folder as a loose layout package, just like a real MSIX install. See the [Debugging Guide](debugging.md) for common debugging workflows.
 
 ```bash
@@ -790,7 +797,23 @@ winapp run . --detach -- --my-flag value
 
 **MSBuild properties (NuGet package):**
 
-When using the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, `dotnet run` automatically invokes `winapp run`. The following MSBuild properties can be set in your `.csproj` to control behavior:
+When using the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, `dotnet run` automatically invokes `winapp run`.
+
+Everything written after `dotnet run` is passed to **your application**, exactly as it would be without the package. Configure the launcher with the MSBuild properties below:
+
+```powershell
+# Goes to your app. `--` is optional here, but required when the flag is also a
+# `dotnet run` option (--configuration, --framework, --project, -c, -f, -r, ...),
+# otherwise the SDK claims it and your app never sees it.
+dotnet run --devtools
+dotnet run -- --devtools
+dotnet run -- --configuration Release
+
+# Configures WinApp; --devtools still reaches your app
+dotnet run -p:WinAppRunDetach=true --devtools
+```
+
+The following MSBuild properties can be set in your `.csproj` to control behavior:
 
 | Property | Default | Description |
 |----------|---------|-------------|
@@ -799,6 +822,26 @@ When using the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, `dotnet 
 | `WinAppRunUseExecutionAlias` | `false` | Launch via execution alias instead of AUMID activation |
 | `WinAppRunNoLaunch` | `false` | Only register identity without launching |
 | `WinAppRunDebugOutput` | `false` | Capture `OutputDebugString` messages and first-chance exceptions. Only one debugger can attach at a time (prevents VS/VS Code). Use `WinAppRunNoLaunch` instead to attach a different debugger. |
+| `WinAppRunDetach` | `false` | Return immediately after launching instead of waiting for the app to exit. Prints the PID. |
+| `WinAppRunUnregisterOnExit` | `false` | Unregister the development package after the app exits |
+| `WinAppRunClean` | `false` | Remove the existing package's application data (LocalState, settings) before re-deploying |
+| `WinAppRunSymbols` | `false` | Download symbols from the Microsoft Symbol Server for richer native crash analysis. Only has an effect with `WinAppRunDebugOutput`. |
+| `WinAppRunExecutable` | (empty) | Executable path relative to the build-output folder. Use when the manifest contains `$targetnametoken$` and the output folder has more than one `.exe`. |
+| `WinAppRunArgs` | (empty) | Raw arguments appended to the `winapp run` command line, for options with no dedicated property (for example `--verbose`). Appended after every property above. |
+
+**Mutually exclusive settings.** `WinAppRunNoLaunch` and `WinAppRunDetach` each describe a different
+launch behavior, so they conflict with the other launch properties and with each other. Setting a
+conflicting pair fails the run with `--X and --Y cannot be used together`:
+
+| Property | Cannot be combined with |
+|----------|-------------------------|
+| `WinAppRunNoLaunch` | `WinAppRunDetach`, `WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, `WinAppRunUnregisterOnExit` |
+| `WinAppRunDetach` | `WinAppRunNoLaunch`, `WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, `WinAppRunUnregisterOnExit` |
+
+`WinAppRunUseExecutionAlias`, `WinAppRunDebugOutput`, and `WinAppRunUnregisterOnExit` can be combined
+with each other. `WinAppRunClean`, `WinAppRunSymbols`, `WinAppRunExecutable`, and `WinAppLaunchArgs`
+have no restrictions. `WinAppRunArgs` adds no restriction of its own, but a switch passed through it
+is checked like any other, so `WinAppRunArgs="--detach"` still conflicts with `WinAppRunNoLaunch`.
 
 ```xml
 <PropertyGroup>
@@ -931,26 +974,27 @@ winapp cert install ./mycert.pfx
 Sign MSIX packages and executables with certificates.
 
 ```bash
-winapp sign <file-path> [options]
+winapp sign <file-path> <cert-path> [options]
 ```
 
 **Arguments:**
 
 - `file-path` - Path to MSIX package or executable to sign
+- `cert-path` - Path to the signing certificate (.pfx)
 
 **Options:**
 
-- `--cert <path>` - Path to signing certificate
-- `--cert-password <password>` - Certificate password (default: "password")
+- `--password <password>` - Certificate password (default: "password")
+- `--timestamp <url>` - RFC 3161 timestamp server URL
 
 **Examples:**
 
 ```bash
 # Sign MSIX package
-winapp sign MyApp.msix --cert ./mycert.pfx
+winapp sign MyApp.msix ./mycert.pfx
 
-# Sign executable
-winapp sign ./bin/MyApp.exe --cert ./mycert.pfx --cert-password mypassword
+# Sign executable with a non-default certificate password
+winapp sign ./bin/MyApp.exe ./mycert.pfx --password mypassword
 ```
 
 ---
@@ -1090,6 +1134,16 @@ winapp tool <tool-name> [tool-arguments]
 # Use signtool to verify signature
 winapp tool signtool verify /pa MyApp.msix
 ```
+
+**Signature verification**
+
+Build tools are downloaded from NuGet and then executed, so winapp checks each one for a valid Microsoft Authenticode signature immediately before running it. This applies to every command that shells out to an SDK tool, including `tool`, `package`, and `sign`. A tool that fails the check is not run:
+
+```text
+'mt.exe' is not validly signed by Microsoft, so it was not run (C:\...\mt.exe).
+```
+
+A failure here means the file on disk is not what Microsoft published — most often a corrupt or partial download. Delete the package from the NuGet cache and run the command again so winapp re-downloads it.
 
 ---
 

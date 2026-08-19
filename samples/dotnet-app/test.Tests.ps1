@@ -49,7 +49,7 @@ Describe ".NET App Guide Workflow" {
             It "Should create a new .NET console project" -Skip:$script:skip {
                 Push-Location $script:tempDir
                 try {
-                    Invoke-Expression "dotnet new console -n test-dotnet-app"
+                    dotnet new console -n test-dotnet-app
                     $LASTEXITCODE | Should -Be 0
                 } finally { Pop-Location }
             }
@@ -76,7 +76,7 @@ Describe ".NET App Guide Workflow" {
             It "Should build in Debug mode" -Skip:$script:skip {
                 Push-Location $script:projectDir
                 try {
-                    Invoke-Expression "dotnet build -c Debug"
+                    dotnet build -c Debug
                     $LASTEXITCODE | Should -Be 0
                 } finally { Pop-Location }
             }
@@ -133,7 +133,7 @@ Describe ".NET App Guide Workflow" {
             It "Should build in Release mode" -Skip:$script:skip {
                 Push-Location $script:projectDir
                 try {
-                    Invoke-Expression "dotnet build -c Release"
+                    dotnet build -c Release
                     $LASTEXITCODE | Should -Be 0
                 } finally { Pop-Location }
             }
@@ -163,7 +163,7 @@ Describe ".NET App Guide Workflow" {
             It "Should publish for x64" -Skip:$script:skip {
                 Push-Location $script:projectDir
                 try {
-                    Invoke-Expression "dotnet publish -c Release -r win-x64 --self-contained false -o publish/x64"
+                    dotnet publish -c Release -r win-x64 --self-contained false -o publish/x64
                     $LASTEXITCODE | Should -Be 0
                 } finally { Pop-Location }
             }
@@ -171,7 +171,7 @@ Describe ".NET App Guide Workflow" {
             It "Should publish for arm64" -Skip:$script:skip {
                 Push-Location $script:projectDir
                 try {
-                    Invoke-Expression "dotnet publish -c Release -r win-arm64 --self-contained false -o publish/arm64"
+                    dotnet publish -c Release -r win-arm64 --self-contained false -o publish/arm64
                     $LASTEXITCODE | Should -Be 0
                 } finally { Pop-Location }
             }
@@ -195,7 +195,7 @@ Describe ".NET App Guide Workflow" {
         It "Should restore sample dependencies" -Skip:$script:skip {
             Push-Location $script:sampleDir
             try {
-                Invoke-Expression "dotnet restore"
+                dotnet restore
                 $LASTEXITCODE | Should -Be 0
             } finally { Pop-Location }
         }
@@ -203,7 +203,7 @@ Describe ".NET App Guide Workflow" {
         It "Should build sample in Debug mode" -Skip:$script:skip {
             Push-Location $script:sampleDir
             try {
-                Invoke-Expression "dotnet build -c Debug /p:ApplyDebugIdentity=false"
+                dotnet build -c Debug /p:ApplyDebugIdentity=false
                 $LASTEXITCODE | Should -Be 0
             } finally { Pop-Location }
         }

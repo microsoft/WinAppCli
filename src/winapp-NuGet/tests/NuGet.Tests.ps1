@@ -93,6 +93,58 @@ $extraProps  </PropertyGroup>
             $out = & dotnet msbuild (Join-Path $dir "test.csproj") -getProperty:_WinAppRunSupportActive -nologo 2>&1
             ($out | Select-Object -Last 1).ToString().Trim()
         }
+
+        # Builds a project that activates run support, runs _WinAppBuildRunArgs, and returns the
+        # constructed winapp command line. Targets _WinAppRunArgs rather than the final
+        # RunArguments so the assertion does not depend on a restore/build of the fake project.
+        function script:Get-ComputedRunArgs {
+            param(
+                [string]$CaseName,
+                [string]$WinAppLaunchArgs = "",
+                [string]$WinAppRunArgs = "",
+                [switch]$WinAppRunDetach,
+                [switch]$WinAppRunUnregisterOnExit,
+                [switch]$WinAppRunClean,
+                [switch]$WinAppRunSymbols,
+                [string]$WinAppRunExecutable = ""
+            )
+            $dir = Join-Path $script:tempRoot $CaseName
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            Set-Content -Path (Join-Path $dir "appxmanifest.xml") -Value '<x/>'
+
+            # _WinAppValidateRunSupport hard-errors when WinAppCliPath does not exist. These tests
+            # run against the source build\ folder rather than an installed package, so there is no
+            # ..\tools\win-x64\winapp.exe; point the property at a stub instead. Nothing is executed
+            # here -- only the argument string is evaluated.
+            $fakeCli = Join-Path $dir "winapp.exe"
+            Set-Content -Path $fakeCli -Value 'stub'
+
+            $extraProps = "    <WinAppCliPath>$fakeCli</WinAppCliPath>`n"
+            if ($WinAppLaunchArgs) { $extraProps += "    <WinAppLaunchArgs>$WinAppLaunchArgs</WinAppLaunchArgs>`n" }
+            if ($WinAppRunArgs) { $extraProps += "    <WinAppRunArgs>$WinAppRunArgs</WinAppRunArgs>`n" }
+            if ($WinAppRunDetach) { $extraProps += "    <WinAppRunDetach>true</WinAppRunDetach>`n" }
+            if ($WinAppRunUnregisterOnExit) { $extraProps += "    <WinAppRunUnregisterOnExit>true</WinAppRunUnregisterOnExit>`n" }
+            if ($WinAppRunClean) { $extraProps += "    <WinAppRunClean>true</WinAppRunClean>`n" }
+            if ($WinAppRunSymbols) { $extraProps += "    <WinAppRunSymbols>true</WinAppRunSymbols>`n" }
+            if ($WinAppRunExecutable) { $extraProps += "    <WinAppRunExecutable>$WinAppRunExecutable</WinAppRunExecutable>`n" }
+
+            $csproj = @"
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <OutputType>WinExe</OutputType>
+$extraProps  </PropertyGroup>
+  <Import Project="$($script:propsPath)" />
+  <Import Project="$($script:targetsPath)" />
+</Project>
+"@
+            Set-Content -Path (Join-Path $dir "test.csproj") -Value $csproj
+            $out = & dotnet msbuild (Join-Path $dir "test.csproj") -t:_WinAppBuildRunArgs -getProperty:_WinAppRunArgs -nologo 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to compute _WinAppRunArgs:`n$($out -join [Environment]::NewLine)"
+            }
+            ($out | Select-Object -Last 1).ToString().Trim()
+        }
     }
 
     AfterAll {
@@ -188,6 +240,118 @@ $extraProps  </PropertyGroup>
 
         It "Inactive for plain net8.0 (no Windows platform)" {
             Get-GateValue -CaseName 'plain-net8' -TargetFramework 'net8.0' -OutputType 'Exe' -ProjectDirManifest $true | Should -Be 'false'
+        }
+    }
+
+    Context "Run option properties" {
+        It "Emits no optional switches when every property is left at its default" {
+            $args = Get-ComputedRunArgs -CaseName 'run-defaults'
+
+            $args | Should -Match ' --caller nuget-package$'
+            $args | Should -Not -Match ' --detach'
+            $args | Should -Not -Match ' --unregister-on-exit'
+            $args | Should -Not -Match ' --clean'
+            $args | Should -Not -Match ' --symbols'
+            $args | Should -Not -Match ' --executable'
+        }
+
+        It "Maps WinAppLaunchArgs to --args" {
+            $args = Get-ComputedRunArgs -CaseName 'run-launch-args' -WinAppLaunchArgs '--from-property value'
+
+            $args | Should -Match ' --args "--from-property value"'
+        }
+
+        It "Maps each boolean run property to its CLI switch" {
+            $args = Get-ComputedRunArgs -CaseName 'run-bools' `
+                -WinAppRunDetach -WinAppRunUnregisterOnExit -WinAppRunClean -WinAppRunSymbols
+
+            $args | Should -Match ' --detach '
+            $args | Should -Match ' --unregister-on-exit '
+            $args | Should -Match ' --clean '
+            $args | Should -Match ' --symbols '
+        }
+
+        It "Quotes WinAppRunExecutable so a path with spaces survives" {
+            $args = Get-ComputedRunArgs -CaseName 'run-exe' -WinAppRunExecutable 'tools\My App.exe'
+
+            $args | Should -Match ' --executable "tools\\My App\.exe"'
+        }
+
+        It "Appends WinAppRunArgs after the property-derived switches" {
+            # WinAppRunArgs is the escape hatch for options with no dedicated property, so it must
+            # land last -- the same position AdditionalOptions occupies in other toolsets.
+            $args = Get-ComputedRunArgs -CaseName 'run-raw-args' -WinAppRunDetach -WinAppRunArgs '--verbose'
+
+            $args | Should -Match ' --detach .*--caller nuget-package --verbose$'
+        }
+
+        It "Omits WinAppRunArgs entirely when it is empty" {
+            $args = Get-ComputedRunArgs -CaseName 'run-raw-empty'
+
+            $args | Should -Match ' --caller nuget-package$'
+        }
+    }
+
+    Context "dotnet run argument routing" {
+        BeforeAll {
+            # RunArguments is what `dotnet run` actually launches, so this Context reads that rather
+            # than the intermediate _WinAppRunArgs the other tests assert on. The distinction matters:
+            # the trailing separator is added only on the dotnet run path, not to the shared argument
+            # list that RunPackagedApp also uses.
+            function script:Get-ComputedRunArguments {
+                param([string]$CaseName)
+                $dir = Join-Path $script:tempRoot $CaseName
+                New-Item -ItemType Directory -Path $dir -Force | Out-Null
+                Set-Content -Path (Join-Path $dir "appxmanifest.xml") -Value '<x/>'
+                $fakeCli = Join-Path $dir "winapp.exe"
+                Set-Content -Path $fakeCli -Value 'stub'
+
+                $csproj = @"
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <WinAppCliPath>$fakeCli</WinAppCliPath>
+  </PropertyGroup>
+  <Import Project="$($script:propsPath)" />
+  <Import Project="$($script:targetsPath)" />
+  <!--
+    Override _WinAppPrepareRunArguments' copy dependency with a no-op. It is declared after the
+    import, so it wins. Only the computed RunArguments string is under test here; leaving the real
+    copy in place would drag in the SDK build targets and require a restored, fully built project
+    just to read one property.
+  -->
+  <Target Name="_WinAppCopyContentToLooseLayout" />
+</Project>
+"@
+                Set-Content -Path (Join-Path $dir "test.csproj") -Value $csproj
+                $out = & dotnet msbuild (Join-Path $dir "test.csproj") -t:_WinAppPrepareRunArguments -getProperty:RunArguments -nologo 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Failed to compute RunArguments:`n$($out -join [Environment]::NewLine)"
+                }
+                ($out | Select-Object -Last 1).ToString().Trim()
+            }
+        }
+
+        It "Ends RunArguments with a separator so dotnet run arguments reach the application" {
+            # The .NET SDK appends the user's application arguments to RunArguments verbatim and drops
+            # any standalone separator they typed, so `dotnet run X` and `dotnet run -- X` arrive
+            # identically. Ending RunArguments with a separator puts everything appended after it in
+            # winapp's passthrough region, which is what makes `dotnet run` behave the same way for a
+            # project that references this package as for one that does not.
+            $runArguments = Get-ComputedRunArguments -CaseName 'run-routing'
+
+            $runArguments | Should -Match ' --caller nuget-package --$'
+        }
+
+        It "Keeps the shared argument list free of the separator (RunPackagedApp is unaffected)" {
+            # RunPackagedApp invokes the CLI directly and appends nothing, so the separator belongs
+            # only on the dotnet run path. A stray trailing separator there would be harmless but
+            # misleading, and it would show up in the logged command line.
+            $sharedArgs = Get-ComputedRunArgs -CaseName 'run-shared-no-sep'
+
+            $sharedArgs | Should -Match ' --caller nuget-package$'
+            $sharedArgs | Should -Not -Match ' --$'
         }
     }
 }

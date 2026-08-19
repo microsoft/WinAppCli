@@ -223,7 +223,18 @@
       <_WinAppRunArgs Condition="'$(WinAppRunUseExecutionAlias)' == 'true'">$(_WinAppRunArgs) --with-alias</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppRunNoLaunch)' == 'true'">$(_WinAppRunArgs) --no-launch</_WinAppRunArgs>
       <_WinAppRunArgs Condition="'$(WinAppRunDebugOutput)' == 'true'">$(_WinAppRunArgs) --debug-output</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppRunDetach)' == 'true'">$(_WinAppRunArgs) --detach</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppRunUnregisterOnExit)' == 'true'">$(_WinAppRunArgs) --unregister-on-exit</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppRunClean)' == 'true'">$(_WinAppRunArgs) --clean</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppRunSymbols)' == 'true'">$(_WinAppRunArgs) --symbols</_WinAppRunArgs>
+      <_WinAppRunArgs Condition="'$(WinAppRunExecutable)' != ''">$(_WinAppRunArgs) --executable "$(WinAppRunExecutable)"</_WinAppRunArgs>
       <_WinAppRunArgs>$(_WinAppRunArgs) --caller nuget-package</_WinAppRunArgs>
+      <!--
+        WinAppRunArgs is appended last so it lands after every property-derived switch,
+        matching the position AdditionalOptions occupies in other toolsets. It is the
+        escape hatch for options with no dedicated property, such as the verbose switch.
+      -->
+      <_WinAppRunArgs Condition="'$(WinAppRunArgs)' != ''">$(_WinAppRunArgs) $(WinAppRunArgs)</_WinAppRunArgs>
     </PropertyGroup>
   </Target>
 
@@ -322,7 +333,27 @@
     
     <PropertyGroup>
       <RunCommand>$(WinAppCliPath)</RunCommand>
-      <RunArguments>$(_WinAppRunArgs)</RunArguments>
+      <!--
+        RunArguments ends with a bare separator token so that `dotnet run` behaves the same way for a
+        project that references this package as it does for one that does not.
+
+        The .NET SDK appends the user's application arguments to RunArguments verbatim
+        (RunProperties.WithApplicationArguments -> CommonRunHelpers.CombineRunArguments with
+        appendApplicationArgumentsToBase: true), and any standalone separator the user typed is
+        consumed by System.CommandLine while parsing `dotnet run` itself and never re-emitted.
+        `dotnet run xyz` and `dotnet run [separator] xyz` therefore arrive here identically.
+
+        Without the trailing separator those tokens land in winapp's own option namespace, so an
+        argument that happens to share a name with a winapp option would configure the launcher
+        instead of reaching the application - a silent difference from an unpackaged app. The
+        trailing separator puts every appended token in winapp's passthrough region, which forwards
+        them to the launched application unchanged.
+
+        winapp itself is configured through the WinAppRun* properties above, which MSBuild consumes,
+        so they never reach this list. A trailing separator with nothing after it is valid and
+        launches with no application arguments.
+      -->
+      <RunArguments>$(_WinAppRunArgs) --</RunArguments>
       <RunWorkingDirectory>$(MSBuildProjectDirectory)</RunWorkingDirectory>
     </PropertyGroup>
     

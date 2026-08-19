@@ -1,4 +1,7 @@
+queries:
+  - uses: security-extended
 paths:
   - src
+  - .github
 paths-ignore:
   - '**/*Tests/*.cs'

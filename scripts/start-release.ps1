@@ -401,8 +401,9 @@ try {
     Write-Host "║  • Version bump PR created for $nextVersion$((' ' * (10 - $nextVersion.Length)))║" -ForegroundColor Green
     Write-Host "║                                              ║" -ForegroundColor Green
     Write-Host "║  Next steps:                                 ║" -ForegroundColor Green
-    Write-Host "║  1. Monitor the release pipeline              ║" -ForegroundColor Green
-    Write-Host "║  2. Review & merge the version bump PR       ║" -ForegroundColor Green
+    Write-Host "║  1. Monitor the release pipeline             ║" -ForegroundColor Green
+    Write-Host "║  2. Monitor the NuGet publish pipeline       ║" -ForegroundColor Green
+    Write-Host "║  3. Review & merge the version bump PR       ║" -ForegroundColor Green
     Write-Host "╚══════════════════════════════════════════════╝" -ForegroundColor Green
     Write-Host ""
 
