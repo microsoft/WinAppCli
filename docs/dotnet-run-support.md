@@ -88,7 +88,6 @@ samples/
 | `WinAppRunArgs` | (empty) | Raw arguments appended to the `winapp run` command line, for options that have no dedicated property. See [Escape hatch](#escape-hatch-winapprunargs). |
 
 #### Mutually exclusive settings
-
 `WinAppRunNoLaunch` and `WinAppRunDetach` each describe a different launch behavior — one never
 starts the app, the other starts it and stops tracking it — so neither can be combined with the
 properties that need a tracked, running process, nor with each other:
@@ -181,6 +180,52 @@ The main build script now includes NuGet packaging:
 ```
 
 ## Usage
+
+### Argument routing
+
+`dotnet run` behaves the same way whether or not a project references this package: **everything you
+write after `dotnet run` is passed to your application.**
+
+```powershell
+dotnet run --devtools          # your app receives --devtools
+dotnet run -- --devtools       # identical
+dotnet run --detach            # your app receives --detach
+```
+
+A standalone `--` is optional for arguments that do not collide with a `dotnet run` option: the .NET
+SDK consumes the separator while parsing its own command line and never re-emits it, so
+`dotnet run --devtools` and `dotnet run -- --devtools` reach winapp as exactly the same token list.
+(Mechanically, the targets end `RunArguments` with a separator, so every argument the SDK appends
+lands in winapp's passthrough region.)
+
+Use `--` when your application takes a flag that `dotnet run` itself defines — `--configuration`,
+`--framework`, `--project`, `--no-build`, `-c`, `-f`, `-r`, `-v`, and friends. Without it the SDK
+claims the token and your app never sees it:
+
+```powershell
+dotnet run --configuration Release      # the SDK builds Release; your app gets nothing
+dotnet run -- --configuration Release   # your app receives --configuration Release
+```
+
+Configure the launcher itself with the `WinAppRun*` MSBuild properties, which MSBuild consumes:
+
+```powershell
+dotnet run -p:WinAppRunDetach=true --devtools
+```
+
+Here `-p:WinAppRunDetach=true` detaches the launcher and `--devtools` goes to your app.
+
+> [!IMPORTANT]
+> **This is a breaking change introduced in this release.** Options written directly after
+> `dotnet run` used to configure WinApp, so `dotnet run --detach` detached the launcher; now it
+> reaches your application instead. Move those to the matching property (`-p:WinAppRunDetach=true`).
+> When winapp sees a forwarded argument that matches one of its own options, it prints the
+> replacement:
+>
+> ```
+> ℹ '--detach' was passed to your application, not to winapp.
+>   To configure winapp, use -p:WinAppRunDetach=true instead.
+> ```
 
 ### Customization
 

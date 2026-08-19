@@ -797,7 +797,23 @@ winapp run . --detach -- --my-flag value
 
 **MSBuild properties (NuGet package):**
 
-When using the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, `dotnet run` automatically invokes `winapp run`. The following MSBuild properties can be set in your `.csproj` to control behavior:
+When using the `Microsoft.Windows.SDK.BuildTools.WinApp` NuGet package, `dotnet run` automatically invokes `winapp run`.
+
+Everything written after `dotnet run` is passed to **your application**, exactly as it would be without the package. Configure the launcher with the MSBuild properties below:
+
+```powershell
+# Goes to your app. `--` is optional here, but required when the flag is also a
+# `dotnet run` option (--configuration, --framework, --project, -c, -f, -r, ...),
+# otherwise the SDK claims it and your app never sees it.
+dotnet run --devtools
+dotnet run -- --devtools
+dotnet run -- --configuration Release
+
+# Configures WinApp; --devtools still reaches your app
+dotnet run -p:WinAppRunDetach=true --devtools
+```
+
+The following MSBuild properties can be set in your `.csproj` to control behavior:
 
 | Property | Default | Description |
 |----------|---------|-------------|

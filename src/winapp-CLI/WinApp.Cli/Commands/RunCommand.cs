@@ -314,6 +314,8 @@ internal partial class RunCommand : Command, IShortDescription
                 appArgs = string.IsNullOrEmpty(appArgs) ? passthroughStr : $"{appArgs} {passthroughStr}";
             }
 
+            WarnIfNuGetCallerForwardedAWinAppOption(parseResult, passthroughArgs, isJson);
+
             // Validate mutually exclusive options. Route through Fail so that under --json these
             // emit the structured error envelope instead of a plain-text banner (Change 2 / L5).
             if (withAlias && noLaunch)
@@ -749,6 +751,83 @@ internal partial class RunCommand : Command, IShortDescription
             catch (Exception ex)
             {
                 logger.LogDebug("Failed to unregister package on exit: {Message}", ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Maps a <c>winapp run</c> option to the MSBuild property assignment that configures it
+        /// through the NuGet integration. Options absent from this map have no dedicated property and
+        /// are pointed at <c>WinAppRunArgs</c> instead.
+        /// </summary>
+        private static readonly Dictionary<string, string> OptionToMSBuildProperty = new(StringComparer.Ordinal)
+        {
+            ["--detach"] = "WinAppRunDetach=true",
+            ["--no-launch"] = "WinAppRunNoLaunch=true",
+            ["--debug-output"] = "WinAppRunDebugOutput=true",
+            ["--with-alias"] = "WinAppRunUseExecutionAlias=true",
+            ["--unregister-on-exit"] = "WinAppRunUnregisterOnExit=true",
+            ["--clean"] = "WinAppRunClean=true",
+            ["--symbols"] = "WinAppRunSymbols=true",
+            ["--executable"] = "WinAppRunExecutable=<path>",
+            ["--exe"] = "WinAppRunExecutable=<path>",
+            ["--args"] = "WinAppLaunchArgs=<args>",
+            ["--manifest"] = "WinAppManifestPath=<path>",
+            ["--output-appx-directory"] = "WinAppLooseLayoutPath=<path>",
+        };
+
+        /// <summary>
+        /// Migration aid for the <c>dotnet run</c> argument-routing change. The NuGet targets now end
+        /// <c>RunArguments</c> with a separator, so everything typed after <c>dotnet run</c> reaches the
+        /// application instead of configuring winapp. A project that previously relied on
+        /// <c>dotnet run --detach</c> keeps working syntactically but silently changes meaning, and
+        /// MSBuild cannot warn about it because it never sees those tokens.
+        /// </summary>
+        /// <remarks>
+        /// Only fires for the NuGet caller: a direct <c>winapp run . -- --detach</c> is an explicit,
+        /// unambiguous request to forward the token, so warning there would be noise. Suppressed under
+        /// <c>--json</c> to keep stdout a single machine-readable document.
+        /// <para>
+        /// <see cref="OptionToMSBuildProperty"/> is the whole trigger set. Notices are limited to
+        /// options that (a) actually did something on this path before the change and (b) have a
+        /// property that replaces them, so every notice carries advice that works. Matching every
+        /// option the parser knows would flag ordinary application flags -- <c>--help</c>,
+        /// <c>--configuration</c>, <c>-p</c> -- because the project-mode options are ignored in folder
+        /// mode, which is the only mode the NuGet targets use. There is deliberately no generic
+        /// fallback: it could only guess <c>WinAppRunArgs</c>, and for an option that takes a value
+        /// that guess drops the value and produces a command that fails.
+        /// </para>
+        /// </remarks>
+        private void WarnIfNuGetCallerForwardedAWinAppOption(
+            ParseResult parseResult,
+            IReadOnlyList<string> forwardedArgs,
+            bool isJson)
+        {
+            if (isJson || forwardedArgs.Count == 0 || !logger.IsEnabled(LogLevel.Information))
+            {
+                return;
+            }
+
+            if (!string.Equals(parseResult.GetValue(WinAppRootCommand.CallerOption), "nuget-package", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var alreadyReported = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var arg in forwardedArgs)
+            {
+                // An option can arrive attached to its value (--executable=foo.exe, --detach=true).
+                // Those spellings configured winapp before this change just as the separated form did,
+                // so match on the name and keep the original token in the message.
+                var name = arg.Split('=', 2)[0];
+                if (!OptionToMSBuildProperty.TryGetValue(name, out var replacement) || !alreadyReported.Add(name))
+                {
+                    continue;
+                }
+
+                // Written through ansiConsole (gated on the logger level) to match how the rest of this
+                // command emits user-facing text, so --quiet still suppresses it.
+                ansiConsole.MarkupLineInterpolated(
+                    $"{UiSymbols.Info} '{arg}' was passed to your application, not to winapp. To configure winapp, use -p:{replacement} instead.");
             }
         }
 
