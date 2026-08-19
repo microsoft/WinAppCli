@@ -17,6 +17,8 @@ public sealed class ApiQueryEngineTests
     private static readonly string[] MoodValues = ["Happy", "Sad"];
     private static readonly string[] HappyOnly = ["Happy"];
     private static readonly string[] ColorOnly = ["Color"];
+    private static readonly string[] ExpectedAlphaCandidates = ["Dup.Ns.Alpha", "Other.Ns.Alpha"];
+    private static readonly string[] DuplicatePackageIds = ["Dup.PkgA", "Dup.PkgB"];
 
     private string _cacheDir = null!;
     private ProjectManifest _manifest = null!;
@@ -340,4 +342,226 @@ public sealed class ApiQueryEngineTests
 
         return manifest;
     }
+
+    #region Duplicate collapse and ABI projection filtering
+
+    [TestMethod]
+    public void Search_SameTypeInSeveralPackages_EmitsEachFullNameOnce()
+    {
+        // Regression: Search walked every package's type files without a seen-set, so a type
+        // shipped by more than one package (the norm — e.g. Microsoft.UI.Xaml.Controls.Button
+        // lives in both WinAppSdkRuntime and Microsoft.WindowsAppSDK.WinUI) was scored and
+        // emitted once per package. Roughly 42-44% of real ambiguity candidates were dupes.
+        string cacheDir = NewCacheDir();
+        try
+        {
+            ProjectManifest manifest = BuildMultiPackageCache(cacheDir);
+
+            var result = ApiQueryEngine.Search("Alpha", 30, cacheDir, manifest);
+
+            Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+            ApiAmbiguityGroup group = result.Data!.Ambiguous!.Single(g => g.Name == "Alpha");
+            CollectionAssert.AreEquivalent(
+                ExpectedAlphaCandidates,
+                group.Candidates.Select(c => c.FullName).ToList(),
+                "Both packages ship both types, but each fully-qualified name must appear once.");
+        }
+        finally
+        {
+            TryDeleteDir(cacheDir);
+        }
+    }
+
+    [TestMethod]
+    public void Search_DuplicatePackages_DoNotCrowdOutDistinctMatches()
+    {
+        // The per-namespace match list is capped at 5. Before the dedupe, copies of one type
+        // could consume several of those slots and push genuinely different types out.
+        string cacheDir = NewCacheDir();
+        try
+        {
+            ProjectManifest manifest = BuildMultiPackageCache(cacheDir);
+
+            var result = ApiQueryEngine.Search("Alpha", 30, cacheDir, manifest);
+
+            Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+            ApiNamespaceHit hit = result.Data!.Results.Single(r => r.Namespace == "Dup.Ns");
+            var displays = hit.Matches.Select(m => m.Display).ToList();
+            CollectionAssert.AllItemsAreUnique(displays, "A capped match list must not spend slots on duplicates.");
+        }
+        finally
+        {
+            TryDeleteDir(cacheDir);
+        }
+    }
+
+    [TestMethod]
+    public void Search_AbiProjectionTwins_AreExcludedFromResults()
+    {
+        string cacheDir = NewCacheDir();
+        try
+        {
+            ProjectManifest manifest = BuildMultiPackageCache(cacheDir);
+
+            var result = ApiQueryEngine.Search("Alpha", 30, cacheDir, manifest);
+
+            Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+            Assert.IsFalse(
+                result.Data!.Results.Any(r => r.Namespace.StartsWith("ABI.", StringComparison.Ordinal)),
+                "CsWinRT ABI projection namespaces are marshalling internals and must not surface in search.");
+            Assert.IsFalse(
+                result.Data.Ambiguous!.SelectMany(g => g.Candidates).Any(c => c.FullName.StartsWith("ABI.", StringComparison.Ordinal)),
+                "ABI twins must not appear as disambiguation candidates.");
+        }
+        finally
+        {
+            TryDeleteDir(cacheDir);
+        }
+    }
+
+    [TestMethod]
+    public void Search_TypeWithOnlyAnAbiTwin_IsNotReportedAmbiguous()
+    {
+        // 'ABI.Solo.Ns' counts as a distinct namespace prefix, so before the filter a type
+        // living in exactly one real namespace was still flagged as a CS0104 collision —
+        // and the advice to "use the fully-qualified name" could not resolve it.
+        string cacheDir = NewCacheDir();
+        try
+        {
+            ProjectManifest manifest = BuildMultiPackageCache(cacheDir);
+
+            var result = ApiQueryEngine.Search("Solo", 30, cacheDir, manifest);
+
+            Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+            bool flagged = result.Data!.Ambiguous?.Any(g => g.Name == "Solo") ?? false;
+            Assert.IsFalse(flagged, "Solo.Ns.Solo exists in one real namespace; its ABI twin must not fabricate ambiguity.");
+        }
+        finally
+        {
+            TryDeleteDir(cacheDir);
+        }
+    }
+
+    [TestMethod]
+    public void Members_AbiProjectionType_StillResolvesByFullName()
+    {
+        // The filter is deliberately scoped to discovery. Exact lookups go through
+        // LoadAllTypes, which stays unfiltered so an explicitly-named ABI type is reachable.
+        string cacheDir = NewCacheDir();
+        try
+        {
+            ProjectManifest manifest = BuildMultiPackageCache(cacheDir);
+
+            var result = ApiQueryEngine.Members("ABI.Dup.Ns.Alpha", filter: null, cacheDir, manifest);
+
+            Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome, "Filtering search must not make ABI types unreachable by exact name.");
+            Assert.AreEqual("ABI.Dup.Ns.Alpha", result.Data!.FullName);
+        }
+        finally
+        {
+            TryDeleteDir(cacheDir);
+        }
+    }
+
+    private static string NewCacheDir() =>
+        Path.Combine(Path.GetTempPath(), $"ApiQueryEngineDedupe_{Guid.NewGuid():N}");
+
+    private static void TryDeleteDir(string dir)
+    {
+        try
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+        catch
+        {
+            // Best-effort cleanup.
+        }
+    }
+
+    /// <summary>
+    /// Builds a cache where two packages each ship an identical set of namespaces and types —
+    /// the real-world shape that produced duplicate search hits — plus ABI projection twins
+    /// and a type whose only "second namespace" is its ABI twin.
+    /// </summary>
+    private static ProjectManifest BuildMultiPackageCache(string cacheDir)
+    {
+        var namespaces = new Dictionary<string, List<WinMdTypeInfo>>(StringComparer.Ordinal)
+        {
+            ["Dup.Ns"] =
+            [
+                SimpleType("Dup.Ns", "Alpha"),
+                SimpleType("Dup.Ns", "AlphaOne"),
+                SimpleType("Dup.Ns", "AlphaTwo"),
+                SimpleType("Dup.Ns", "AlphaThree"),
+                SimpleType("Dup.Ns", "AlphaFour"),
+                SimpleType("Dup.Ns", "AlphaFive"),
+            ],
+            ["Other.Ns"] = [SimpleType("Other.Ns", "Alpha")],
+            ["ABI.Dup.Ns"] = [SimpleType("ABI.Dup.Ns", "Alpha")],
+            ["Solo.Ns"] = [SimpleType("Solo.Ns", "Solo")],
+            ["ABI.Solo.Ns"] = [SimpleType("ABI.Solo.Ns", "Solo")],
+        };
+
+        var packages = new List<ProjectPackageRef>();
+        foreach (string packageId in DuplicatePackageIds)
+        {
+            WriteSyntheticPackage(cacheDir, packageId, namespaces);
+            packages.Add(new ProjectPackageRef { Id = packageId, Version = "1.0.0" });
+        }
+
+        var manifest = new ProjectManifest
+        {
+            ProjectName = "DupApp",
+            ProjectDir = Path.Combine(cacheDir, "src"),
+            ProjectFile = "DupApp.csproj",
+            Packages = packages,
+            GeneratedAt = DateTime.UtcNow.ToString("o"),
+        };
+        string projectsDir = Path.Combine(cacheDir, "projects");
+        Directory.CreateDirectory(projectsDir);
+        File.WriteAllText(
+            Path.Combine(projectsDir, "DupApp.json"),
+            JsonSerializer.Serialize(manifest, ApiSearchJsonContext.Default.ProjectManifest));
+        return manifest;
+    }
+
+    private static WinMdTypeInfo SimpleType(string ns, string name) => new()
+    {
+        Namespace = ns,
+        Name = name,
+        FullName = ns + "." + name,
+        Kind = TypeKind.Class,
+        SourceFile = "dup.winmd",
+        Members = [],
+    };
+
+    private static void WriteSyntheticPackage(string cacheDir, string packageId, Dictionary<string, List<WinMdTypeInfo>> namespaces)
+    {
+        string packageDir = Path.Combine(cacheDir, "packages", packageId, "1.0.0");
+        string typesDir = Path.Combine(packageDir, "types");
+        Directory.CreateDirectory(typesDir);
+        foreach ((string ns, List<WinMdTypeInfo> types) in namespaces)
+        {
+            File.WriteAllText(
+                Path.Combine(typesDir, ns.Replace('.', '_') + ".json"),
+                JsonSerializer.Serialize(types, ApiSearchJsonContext.Default.ListWinMdTypeInfo));
+        }
+        File.WriteAllText(
+            Path.Combine(packageDir, "namespaces.json"),
+            JsonSerializer.Serialize(namespaces.Keys.ToList(), ApiSearchJsonContext.Default.ListString));
+
+        var meta = new PackageMeta
+        {
+            PackageId = packageId,
+            Version = "1.0.0",
+            WinMdFiles = ["dup.winmd"],
+            TotalTypes = namespaces.Sum(kv => kv.Value.Count),
+            TotalMembers = 0,
+            TotalNamespaces = namespaces.Count,
+            GeneratedAt = DateTime.UtcNow.ToString("o"),
+        };
+        File.WriteAllText(Path.Combine(packageDir, "meta.json"), JsonSerializer.Serialize(meta, ApiSearchJsonContext.Default.PackageMeta));
+    }
+
+    #endregion
 }

@@ -26,6 +26,14 @@ internal static class ApiQueryEngine
         // Track high-confidence type matches for namespace disambiguation.
         var typeMatches = new List<(string Name, string FullName, TypeKind Kind, int Score, string? Description, List<string>? EnumValues)>();
 
+        // The same type routinely ships in several packages in one graph (for example
+        // Microsoft.UI.Xaml.Controls.Button in both WinAppSdkRuntime and
+        // Microsoft.WindowsAppSDK.WinUI). Without this, each copy is scored and emitted
+        // separately: duplicates pad the ambiguity candidate lists and crowd real hits out
+        // of the per-namespace Matches cap below. LoadAllTypes already dedupes this way for
+        // every other verb; Search was the only path missing it.
+        var seenTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (string dir in packageCacheDirs)
         {
             string nsPath = Path.Combine(dir, "namespaces.json");
@@ -47,6 +55,20 @@ internal static class ApiQueryEngine
                 }
                 foreach (WinMdTypeInfo type in types)
                 {
+                    // CsWinRT emits an ABI.* projection twin for each WinRT type. They are
+                    // marshalling internals no one writes code against, and because
+                    // "ABI.Microsoft.UI.Xaml.Controls" is a distinct namespace prefix they can
+                    // also manufacture a bogus CS0104 ambiguity warning for a type that really
+                    // lives in only one namespace. Excluded from discovery only — LoadAllTypes
+                    // is deliberately left unfiltered so 'find-api members ABI.Foo' still resolves.
+                    if (IsProjectionInternal(type.FullName))
+                    {
+                        continue;
+                    }
+                    if (!seenTypes.Add(type.FullName))
+                    {
+                        continue;
+                    }
                     int typeScore = Scoring.GetMatchScore(type.Name, type.FullName, query);
                     int bestMemberScore = 0;
                     string? memberSignature = null;
@@ -147,6 +169,17 @@ internal static class ApiQueryEngine
         int cut = fullName.Length - name.Length - 1;
         return cut > 0 ? fullName.Substring(0, cut) : string.Empty;
     }
+
+    /// <summary>
+    /// True for CsWinRT's generated <c>ABI.*</c> projection twins, which mirror real WinRT
+    /// types purely as marshalling internals. They are filtered out of search results because
+    /// they are never something a caller writes code against, and because their distinct
+    /// namespace prefix would otherwise fabricate ambiguity warnings for types that live in a
+    /// single real namespace. Exact lookups (<c>members</c>, <c>enums</c>, <c>check-property</c>)
+    /// go through <see cref="LoadAllTypes"/> and can still reach them by fully-qualified name.
+    /// </summary>
+    private static bool IsProjectionInternal(string fullName) =>
+        fullName.StartsWith("ABI.", StringComparison.Ordinal);
 
     public static ApiQueryResult<ApiMembersOutput> Members(string typeName, string? filter, string cacheDir, ProjectManifest manifest)
     {
