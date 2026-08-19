@@ -317,21 +317,17 @@ internal static class ApiCacheBuilder
     }
 
     /// <summary>
-    /// Writes content atomically (temp file + rename) so readers never see partial writes,
-    /// falling back to a direct write if the staged rename fails.
+    /// Writes content atomically (temp file + rename) so readers never see partial writes.
+    /// There is deliberately no direct-write fallback: <see cref="File.WriteAllText(string, string)"/>
+    /// follows a symlink planted at the destination, whereas the staged rename replaces it,
+    /// and cache writes are already serialized by the cache lock — so a fallback would only
+    /// ever run in the case where it is unsafe.
     /// </summary>
     private static void WriteFileAtomic(string path, string content)
     {
         string dir = Path.GetDirectoryName(path)!;
         Directory.CreateDirectory(dir);
-        try
-        {
-            PathSafety.AtomicWriteAllText(path, content);
-        }
-        catch
-        {
-            File.WriteAllText(path, content);
-        }
+        PathSafety.AtomicWriteAllText(path, content);
     }
 
     internal static List<string> DiscoverProjectFiles(string inputPath, bool scan)
@@ -433,8 +429,12 @@ internal static class ApiCacheBuilder
                 return output;
             }
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+            or System.ComponentModel.Win32Exception or InvalidOperationException)
         {
+            // Probing for an installed WindowsAppRuntime is best-effort: if PowerShell
+            // cannot be launched or the query fails, report "not found" and let the
+            // caller fall back to the packages it already resolved.
         }
         return null;
     }

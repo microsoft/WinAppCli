@@ -43,7 +43,7 @@ internal interface IApiMetadataService
 
     ApiProjectsOutput Projects();
 
-    ApiRefreshOutput Refresh(ApiRequestScope scope, bool scan, Action<string>? onProgress = null, bool force = false);
+    ApiQueryResult<ApiRefreshOutput> Refresh(ApiRequestScope scope, bool scan, Action<string>? onProgress = null, bool force = false);
 }
 
 internal sealed class ApiMetadataService(
@@ -81,7 +81,7 @@ internal sealed class ApiMetadataService(
 
     public ApiProjectsOutput Projects() => ApiQueryEngine.Projects(GetCacheDir());
 
-    public ApiRefreshOutput Refresh(ApiRequestScope scope, bool scan, Action<string>? onProgress = null, bool force = false)
+    public ApiQueryResult<ApiRefreshOutput> Refresh(ApiRequestScope scope, bool scan, Action<string>? onProgress = null, bool force = false)
     {
         string cacheDir = GetCacheDir();
         string? runtimePath = ApiCacheBuilder.DetectWinAppSdkRuntime();
@@ -90,10 +90,28 @@ internal sealed class ApiMetadataService(
         // only way to pick up a newly installed Windows SDK / WinAppSDK runtime).
         if (scope.Project is not null && IsSdkScopeName(scope.Project))
         {
-            return ApiCacheBuilder.BuildSdkCache(cacheDir, sdkPackages.GetSdkPackages(), onProgress, force: true);
+            return ApiQueryResult<ApiRefreshOutput>.Ok(
+                ApiCacheBuilder.BuildSdkCache(cacheDir, sdkPackages.GetSdkPackages(), onProgress, force: true));
         }
 
-        string projectDir = ResolveRefreshProjectDir(scope, cacheDir);
+        string projectDir;
+        if (scope.Project is not null)
+        {
+            // A named project that resolves to nothing must fail: refreshing the
+            // current directory instead would report success for a project the
+            // caller never asked about.
+            string? named = TryResolveNamedProjectDir(scope.Project, cacheDir);
+            if (named is null)
+            {
+                return ApiQueryResult<ApiRefreshOutput>.InvalidInput(UnknownProjectMessage(scope.Project, cacheDir));
+            }
+            projectDir = named;
+        }
+        else
+        {
+            projectDir = ResolveProjectDir(scope);
+        }
+
         ApiRefreshOutput output = ApiCacheBuilder.BuildCache(projectDir, cacheDir, scan, runtimePath, onProgress, force);
 
         // Nothing to index here means there is no project in this directory, which is
@@ -101,39 +119,71 @@ internal sealed class ApiMetadataService(
         // leaving the user with an index they can't query.
         if (output.ProjectsProcessed == 0)
         {
-            return ApiCacheBuilder.BuildSdkCache(cacheDir, sdkPackages.GetSdkPackages(), onProgress, force);
+            return ApiQueryResult<ApiRefreshOutput>.Ok(
+                ApiCacheBuilder.BuildSdkCache(cacheDir, sdkPackages.GetSdkPackages(), onProgress, force));
         }
-        return output;
+        return ApiQueryResult<ApiRefreshOutput>.Ok(output);
     }
 
     /// <summary>
-    /// Resolve the directory to (re)index for a refresh. An explicit
-    /// <c>--project</c> name refreshes that indexed project's recorded directory;
-    /// otherwise the <c>--project-dir</c> (or current directory) is used.
+    /// Error text for a <c>--project</c> name that matches no indexed project, listing
+    /// what is actually indexed so the caller can correct the name.
     /// </summary>
-    private string ResolveRefreshProjectDir(ApiRequestScope scope, string cacheDir)
+    private static string UnknownProjectMessage(string projectName, string cacheDir)
     {
-        if (scope.Project is not null)
+        string projectsDir = Path.Combine(cacheDir, "projects");
+        string[] files = Directory.Exists(projectsDir) ? Directory.GetFiles(projectsDir, "*.json") : [];
+        string known = files.Length == 0
+            ? "No projects are indexed yet."
+            : $"Indexed projects: {AvailableProjects(files)}.";
+        return $"No single indexed project matches '{projectName}'. {known} " +
+            "Run 'winapp find-api refresh' in the project directory, or pass --project-dir.";
+    }
+
+    /// <summary>
+    /// Resolve an explicit <c>--project</c> name to the recorded directory of the one
+    /// indexed project it names. Returns <c>null</c> when the name matches no indexed
+    /// project or several in different directories, so callers fail loudly instead of
+    /// silently acting on the current directory.
+    /// </summary>
+    private static string? TryResolveNamedProjectDir(string projectName, string cacheDir)
+    {
+        string projectsDir = Path.Combine(cacheDir, "projects");
+        if (!Directory.Exists(projectsDir))
         {
-            string projectsDir = Path.Combine(cacheDir, "projects");
-            if (Directory.Exists(projectsDir))
+            return null;
+        }
+
+        var dirs = new List<string>();
+        foreach (string path in Directory.GetFiles(projectsDir, "*.json"))
+        {
+            if (!IsManifestForProject(path, projectName))
             {
-                foreach (string path in Directory.GetFiles(projectsDir, "*.json"))
-                {
-                    string name = Path.GetFileNameWithoutExtension(path);
-                    if (name.Equals(scope.Project, StringComparison.OrdinalIgnoreCase) ||
-                        name.StartsWith(scope.Project + "_", StringComparison.OrdinalIgnoreCase))
-                    {
-                        ProjectManifest? manifest = DeserializeManifest(path);
-                        if (manifest is not null && !string.IsNullOrEmpty(manifest.ProjectDir))
-                        {
-                            return manifest.ProjectDir;
-                        }
-                    }
-                }
+                continue;
+            }
+            ProjectManifest? manifest = DeserializeManifest(path);
+            if (manifest is not null &&
+                manifest.ProjectName.Equals(projectName, StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrEmpty(manifest.ProjectDir))
+            {
+                dirs.Add(Path.GetFullPath(manifest.ProjectDir));
             }
         }
-        return ResolveProjectDir(scope);
+
+        var distinct = dirs.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        return distinct.Count == 1 ? distinct[0] : null;
+    }
+
+    /// <summary>
+    /// Cheap pre-filter on the manifest file name, which is <c>ProjectName_hash</c>. It is a
+    /// superset test only — <c>App</c> also prefixes <c>App_Tests_hash</c> — so every caller
+    /// must still compare the deserialized <see cref="ProjectManifest.ProjectName"/>.
+    /// </summary>
+    private static bool IsManifestForProject(string manifestPath, string projectName)
+    {
+        string name = Path.GetFileNameWithoutExtension(manifestPath);
+        return name.Equals(projectName, StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith(projectName + "_", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -145,7 +195,13 @@ internal sealed class ApiMetadataService(
         where T : class
     {
         string cacheDir = GetCacheDir();
-        AutoIndexIfStale(scope, cacheDir);
+        string? indexError = AutoIndexIfStale(scope, cacheDir);
+        if (indexError is not null)
+        {
+            // Answering from a cache we know is stale or absent would look
+            // authoritative while being wrong, so surface the failure instead.
+            return ApiQueryResult<T>.NoProject(indexError);
+        }
         ResolvedScope resolved = ResolveManifest(scope, cacheDir);
         if (resolved.Manifest is null)
         {
@@ -177,15 +233,42 @@ internal sealed class ApiMetadataService(
     /// Re-index the project when its restore output (<c>project.assets.json</c>)
     /// is newer than the cached manifest, or no manifest exists yet. A file lock
     /// under the cache dir serializes concurrent winapp invocations so two
-    /// processes don't index into the same tree at once.
+    /// processes don't index into the same tree at once. Returns an error message
+    /// when indexing was required but failed, so the caller can refuse to answer
+    /// from a cache it knows is stale.
     /// </summary>
-    private void AutoIndexIfStale(ApiRequestScope scope, string cacheDir)
+    private string? AutoIndexIfStale(ApiRequestScope scope, string cacheDir)
     {
-        string projectDir = ResolveProjectDir(scope);
+        // The machine-wide SDK scope is rebuilt only by an explicit refresh; it has
+        // no project.assets.json to stale-check against.
+        if (scope.Project is not null && IsSdkScopeName(scope.Project))
+        {
+            return null;
+        }
+
+        // A named project is stale-checked against its own recorded directory. Using
+        // the current directory here would refresh an unrelated project and leave the
+        // requested one stale. An unresolvable name is left to ResolveManifest, which
+        // reports the ambiguity or the unknown name properly.
+        string projectDir;
+        if (scope.Project is not null)
+        {
+            string? named = TryResolveNamedProjectDir(scope.Project, cacheDir);
+            if (named is null)
+            {
+                return null;
+            }
+            projectDir = named;
+        }
+        else
+        {
+            projectDir = ResolveProjectDir(scope);
+        }
+
         string? assetsPath = NuGetResolver.FindProjectAssetsJson(projectDir);
         if (assetsPath is null)
         {
-            return;
+            return null;
         }
 
         DateTime assetsWriteTime = File.GetLastWriteTimeUtc(assetsPath);
@@ -214,11 +297,17 @@ internal sealed class ApiMetadataService(
 
         if (needsUpdate)
         {
-            RunIndexWithLock(scope, cacheDir);
+            return RunIndexWithLock(projectDir, cacheDir);
         }
+        return null;
     }
 
-    private void RunIndexWithLock(ApiRequestScope scope, string cacheDir)
+    /// <summary>
+    /// Runs an index pass under the cache lock. Returns an error message when the
+    /// index failed, or <c>null</c> when it succeeded (or when another process is
+    /// already indexing, which is not this caller's failure).
+    /// </summary>
+    private string? RunIndexWithLock(string projectDir, string cacheDir)
     {
         Directory.CreateDirectory(cacheDir);
         string lockPath = Path.Combine(cacheDir, ".lock");
@@ -248,7 +337,7 @@ internal sealed class ApiMetadataService(
                 {
                 }
             }
-            return;
+            return null;
         }
 
         using (lockFile)
@@ -256,15 +345,26 @@ internal sealed class ApiMetadataService(
             try
             {
                 logger.LogInformation("Indexing API metadata for this project…");
-                Refresh(scope, scan: false, onProgress: msg => logger.LogInformation("{Message}", msg));
+                // Index the directory already resolved for this scope so a named
+                // project is not re-resolved (or resolved differently) here.
+                var indexScope = new ApiRequestScope(projectDir, Project: null);
+                var result = Refresh(indexScope, scan: false, onProgress: msg => logger.LogInformation("{Message}", msg));
+                if (result.Outcome != ApiQueryOutcome.Ok)
+                {
+                    logger.LogWarning("Failed to index API metadata: {Message}", result.Message);
+                    return result.Message ?? "Failed to index API metadata for this project.";
+                }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // Auto-indexing is best-effort: log and let the caller query the
-                // existing (possibly stale/empty) cache rather than failing hard.
-                logger.LogWarning(ex, "Failed to index API metadata; continuing with the existing cache.");
+                // Cancellation is deliberately excluded so Ctrl+C is not reported
+                // as an indexing failure.
+                logger.LogWarning(ex, "Failed to index API metadata.");
+                return $"Failed to index API metadata for this project: {ex.Message}. " +
+                    "Run 'winapp find-api refresh' to see the full error.";
             }
         }
+        return null;
     }
 
     /// <summary>
@@ -312,15 +412,15 @@ internal sealed class ApiMetadataService(
             var matches = new List<ProjectManifest>();
             foreach (string path in files)
             {
-                string name = Path.GetFileNameWithoutExtension(path);
-                if (name.Equals(scope.Project, StringComparison.OrdinalIgnoreCase) ||
-                    name.StartsWith(scope.Project + "_", StringComparison.OrdinalIgnoreCase))
+                if (!IsManifestForProject(path, scope.Project))
                 {
-                    ProjectManifest? manifest = DeserializeManifest(path);
-                    if (manifest is not null)
-                    {
-                        matches.Add(manifest);
-                    }
+                    continue;
+                }
+                ProjectManifest? manifest = DeserializeManifest(path);
+                if (manifest is not null &&
+                    manifest.ProjectName.Equals(scope.Project, StringComparison.OrdinalIgnoreCase))
+                {
+                    matches.Add(manifest);
                 }
             }
 
@@ -421,8 +521,10 @@ internal sealed class ApiMetadataService(
             logger.LogInformation("No project here — indexing {Scope} metadata…", ApiCachePaths.SdkScopeName);
             ApiCacheBuilder.BuildSdkCache(cacheDir, packages, onProgress: msg => logger.LogInformation("{Message}", msg));
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            // Indexing the machine-wide SDK is best-effort; cancellation still
+            // propagates so Ctrl+C is not reported as an SDK failure.
             logger.LogWarning(ex, "Failed to index Windows SDK metadata.");
             return ResolvedScope.Failed(NoSdkMessage);
         }
@@ -440,8 +542,10 @@ internal sealed class ApiMetadataService(
         {
             return JsonSerializer.Deserialize(File.ReadAllText(path), ApiSearchJsonContext.Default.ProjectManifest);
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
+            // A missing or corrupt manifest reads as "no manifest" so the caller can
+            // report an unindexed project instead of crashing.
             return null;
         }
     }

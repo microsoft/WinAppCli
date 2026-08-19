@@ -264,6 +264,70 @@ public sealed class ApiMetadataServiceTests
     }
 
     [TestMethod]
+    public void Query_ProjectOption_DoesNotMatchLongerProjectNameByPrefix()
+    {
+        // Manifests are stored as 'ProjectName_hash', so a filename-prefix match let
+        // '--project App' resolve to a project actually named 'App_Tests' and answer
+        // confidently from the wrong index.
+        WriteManifest("App_Tests", Path.Combine(_currentDir, "App_Tests"), "App_Tests_ab12cd34");
+
+        var result = CreateService().Members("Some.Ns.Type", new ApiRequestScope(null, "App"));
+
+        Assert.AreEqual(ApiQueryOutcome.NoProject, result.Outcome);
+        StringAssert.Contains(result.Message, "not indexed");
+    }
+
+    [TestMethod]
+    public void Refresh_ProjectOption_DoesNotMatchLongerProjectNameByPrefix()
+    {
+        WriteManifest("App_Tests", Path.Combine(_currentDir, "App_Tests"), "App_Tests_ab12cd34");
+
+        var result = CreateService().Refresh(new ApiRequestScope(null, "App"), scan: false);
+
+        Assert.AreEqual(ApiQueryOutcome.InvalidInput, result.Outcome);
+    }
+
+    [TestMethod]
+    public void Refresh_UnknownProjectName_FailsInsteadOfIndexingCurrentDirectory()
+    {
+        // 'refresh --project Typo' used to fall through to the current directory and
+        // report success, so a mistyped name looked like a completed refresh of a
+        // project that was never touched.
+        WriteManifest("Alpha");
+        WriteProjectFile(_currentDir, "Unrelated");
+
+        var result = CreateService().Refresh(new ApiRequestScope(null, "DoesNotExist"), scan: false);
+
+        Assert.AreEqual(ApiQueryOutcome.InvalidInput, result.Outcome);
+        StringAssert.Contains(result.Message, "DoesNotExist");
+    }
+
+    [TestMethod]
+    public void Refresh_AmbiguousProjectName_FailsInsteadOfPickingOne()
+    {
+        string dirA = Path.Combine(_currentDir, "a", "Dup");
+        string dirB = Path.Combine(_currentDir, "b", "Dup");
+        WriteManifest("Dup", dirA, "Dup_1");
+        WriteManifest("Dup", dirB, "Dup_2");
+
+        var result = CreateService().Refresh(new ApiRequestScope(null, "Dup"), scan: false);
+
+        Assert.AreEqual(ApiQueryOutcome.InvalidInput, result.Outcome);
+    }
+
+    [TestMethod]
+    public void Refresh_KnownProjectName_IsNotRejected()
+    {
+        WriteManifest("Alpha", Path.Combine(_currentDir, "Alpha"));
+        WriteProjectFile(Path.Combine(_currentDir, "Alpha"), "Alpha");
+
+        var result = CreateService().Refresh(new ApiRequestScope(null, "Alpha"), scan: false);
+
+        Assert.AreNotEqual(ApiQueryOutcome.InvalidInput, result.Outcome,
+            "A name that resolves to exactly one indexed project must still refresh.");
+    }
+
+    [TestMethod]
     public void Query_ExplicitProjectDir_ProjectlessDir_DoesNotFallBackToLoneProject()
     {
         // Regression (C2): an explicit --project-dir that matches no indexed project

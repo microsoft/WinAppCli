@@ -79,6 +79,13 @@ Building a WinUI 3 UI and need to find the right control or a working sample?
 └─ winapp find-ui "<what you want>"   (search WinUI 3 Gallery + Community Toolkit; Reactor is opt-in via --source reactor)
    ├─ Then fetch full code for a match → winapp find-ui --id <scenario-id>
    └─ WinUI-only (not WPF/WinForms); distinct from `ui search`, which inspects a *running* app
+
+Need to know whether a Windows/WinRT API exists, or what a type/enum actually offers?
+└─ winapp find-api "<what you want>"   (search the project's real .winmd metadata — never guess an API)
+   ├─ List a type's properties/events/methods → winapp find-api members <Type> [<Type>...]
+   ├─ Check a property before writing XAML → winapp find-api check-property <Type> <Prop> [<Prop>...]
+   ├─ List an enum's values → winapp find-api enums <EnumType> [<EnumType>...]
+   └─ Batch subjects in ONE call; distinct from `find-ui`, which finds sample code rather than API surface
 ```
 
 ## Critical rules — always follow these

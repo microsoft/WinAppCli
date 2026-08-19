@@ -48,7 +48,7 @@ internal static partial class XmlDocParser
                 }
             }
         }
-        catch
+        catch (Exception ex) when (ex is XmlException or IOException or UnauthorizedAccessException)
         {
             // Malformed or unreadable XML docs are non-fatal: descriptions are an
             // enrichment on top of the metadata, so skip this file silently rather

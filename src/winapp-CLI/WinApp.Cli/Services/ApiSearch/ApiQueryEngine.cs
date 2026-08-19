@@ -190,7 +190,11 @@ internal static class ApiQueryEngine
 
         List<string> packageCacheDirs = GetPackageCacheDirs(cacheDir, manifest);
         var allTypes = LoadAllTypes(packageCacheDirs);
-        var type = ResolveType(typeName, allTypes);
+        var (type, ambiguous) = ResolveType(typeName, allTypes);
+        if (ambiguous is not null)
+        {
+            return ApiQueryResult<ApiMembersOutput>.InvalidInput(AmbiguousTypeMessage(typeName, ambiguous));
+        }
         if (type == null)
         {
             return ApiQueryResult<ApiMembersOutput>.NotFound($"Type not found: {typeName}");
@@ -289,7 +293,11 @@ internal static class ApiQueryEngine
         {
             return ApiQueryResult<ApiEnumsOutput>.InvalidInput("A type name is required.");
         }
-        var type = ResolveType(typeName, LoadAllTypes(GetPackageCacheDirs(cacheDir, manifest)));
+        var (type, ambiguous) = ResolveType(typeName, LoadAllTypes(GetPackageCacheDirs(cacheDir, manifest)));
+        if (ambiguous is not null)
+        {
+            return ApiQueryResult<ApiEnumsOutput>.InvalidInput(AmbiguousTypeMessage(typeName, ambiguous));
+        }
         if (type == null)
         {
             return ApiQueryResult<ApiEnumsOutput>.NotFound($"Type not found: {typeName}");
@@ -357,8 +365,11 @@ internal static class ApiQueryEngine
                     Status = "ok",
                 });
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                or JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
             {
+                // Unreadable or malformed meta.json is reported per package rather than
+                // failing the whole listing.
                 summaries.Add(new ApiPackageSummary { Id = package.Id, Version = package.Version, Status = "meta-unreadable" });
             }
         }
@@ -389,8 +400,11 @@ internal static class ApiQueryEngine
                     winmds += winMdFiles.GetArrayLength();
                 }
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                or JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
             {
+                // Skip a package whose meta.json cannot be read or parsed and keep
+                // accumulating totals from the rest.
             }
         }
         return ApiQueryResult<ApiStatsOutput>.Ok(new ApiStatsOutput
@@ -428,7 +442,11 @@ internal static class ApiQueryEngine
         List<string> packageCacheDirs = GetPackageCacheDirs(cacheDir, manifest);
         var allTypes = LoadAllTypes(packageCacheDirs);
 
-        var targetType = ResolveType(typeName, allTypes);
+        var (targetType, ambiguous) = ResolveType(typeName, allTypes);
+        if (ambiguous is not null)
+        {
+            return ApiQueryResult<ApiCheckPropertyOutput>.InvalidInput(AmbiguousTypeMessage(typeName, ambiguous));
+        }
         if (targetType == null)
         {
             return ApiQueryResult<ApiCheckPropertyOutput>.NotFound($"Type not found: {typeName}");
@@ -528,26 +546,80 @@ internal static class ApiQueryEngine
         };
     }
 
-    private static WinMdTypeInfo? ResolveType(string typeName, List<WinMdTypeInfo> allTypes)
+    /// <summary>
+    /// Resolve a type by fully-qualified name, or by short name when that resolves
+    /// deterministically. A short name shared by a modern <c>Microsoft.*</c> type and its
+    /// legacy <c>Windows.*</c> UWP twin resolves to the <c>Microsoft.*</c> one — that is
+    /// the projection a Windows App SDK caller means, and it is the pair almost every
+    /// duplicated name in the SDK scope forms. Anything still ambiguous after that
+    /// returns its candidates instead of a type: picking one would depend on file
+    /// enumeration order, and validating an API against the wrong type is worse than
+    /// being told to qualify it.
+    /// </summary>
+    private static (WinMdTypeInfo? Type, List<WinMdTypeInfo>? Candidates) ResolveType(string typeName, List<WinMdTypeInfo> allTypes)
     {
         var exact = allTypes.FirstOrDefault(t => t.FullName.Equals(typeName, StringComparison.OrdinalIgnoreCase));
         if (exact != null)
         {
-            return exact;
+            return (exact, null);
         }
 
         var shortMatches = allTypes.Where(t => t.Name.Equals(typeName, StringComparison.OrdinalIgnoreCase)).ToList();
-        if (shortMatches.Count == 1)
+
+        // An ABI.* twin mirrors a real type, so it must never manufacture ambiguity.
+        // Only fall back to them when they are the sole matches, which keeps a
+        // deliberate 'members ABI.Foo'-style short-name lookup working.
+        var candidates = shortMatches.Where(t => !IsProjectionInternal(t.FullName)).ToList();
+        if (candidates.Count == 0)
         {
-            return shortMatches[0];
+            candidates = shortMatches;
         }
-        if (shortMatches.Count > 1)
+
+        var distinct = candidates
+            .GroupBy(t => t.FullName, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .ToList();
+
+        if (distinct.Count > 1)
         {
-            var winuiMatch = shortMatches.FirstOrDefault(t => t.Namespace.StartsWith("Microsoft.UI.Xaml", StringComparison.OrdinalIgnoreCase));
-            return winuiMatch ?? shortMatches[0];
+            // Restricted to an actual WinUI-3-vs-UWP twin set: every candidate must be
+            // Microsoft.*/Windows.* and exactly one Microsoft.*. A broader "prefer
+            // Microsoft.*" rule would silently answer for the Microsoft type when a
+            // third-party package ships a same-named control, which is the very bug
+            // this ambiguity check exists to prevent.
+            bool twinSet = distinct.All(t =>
+                t.FullName.StartsWith("Microsoft.", StringComparison.OrdinalIgnoreCase) ||
+                t.FullName.StartsWith("Windows.", StringComparison.OrdinalIgnoreCase));
+            if (twinSet)
+            {
+                var modern = distinct
+                    .Where(t => t.FullName.StartsWith("Microsoft.", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (modern.Count == 1)
+                {
+                    return (modern[0], null);
+                }
+            }
         }
-        return null;
+
+        return distinct.Count switch
+        {
+            1 => (distinct[0], null),
+            > 1 => (null, distinct),
+            _ => (null, null),
+        };
     }
+
+    /// <summary>
+    /// Message for a short name that matches several types, listing every candidate so
+    /// the caller can re-run with a fully-qualified name.
+    /// </summary>
+    private static string AmbiguousTypeMessage(string typeName, List<WinMdTypeInfo> candidates) =>
+        $"'{typeName}' is ambiguous — {candidates.Count} indexed types share that name: " +
+        string.Join(", ", candidates
+            .Select(c => $"'{c.FullName}'")
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)) +
+        ". Re-run with the fully-qualified type name.";
 
     private static List<(WinMdMemberInfo Member, string? DeclaringType)> CollectMembersWithInheritance(
         WinMdTypeInfo type, List<WinMdTypeInfo> allTypes)
@@ -663,8 +735,10 @@ internal static class ApiQueryEngine
         {
             return JsonSerializer.Deserialize(File.ReadAllText(path), typeInfo);
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
+            // A missing or corrupt cache file reads as "no data" so the caller can
+            // fall back to reindexing instead of crashing.
             return null;
         }
     }
@@ -675,8 +749,10 @@ internal static class ApiQueryEngine
         {
             return JsonSerializer.Deserialize(File.ReadAllText(path), ApiSearchJsonContext.Default.ProjectManifest);
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
+            // A missing or corrupt manifest reads as "no manifest" so the caller can
+            // report an unindexed project instead of crashing.
             return null;
         }
     }

@@ -167,14 +167,14 @@ internal sealed class FakeApiMetadataService : IApiMetadataService
         Projects = new List<ApiProjectSummary> { new() { Name = "TestApp", PackageCount = 1 } },
     };
 
-    public ApiRefreshOutput Refresh(ApiRequestScope scope, bool scan, Action<string>? onProgress = null, bool force = false)
+    public ApiQueryResult<ApiRefreshOutput> Refresh(ApiRequestScope scope, bool scan, Action<string>? onProgress = null, bool force = false)
     {
         LastScope = scope;
         LastRefreshForce = force;
-        return new ApiRefreshOutput
+        return ApiQueryResult<ApiRefreshOutput>.Ok(new ApiRefreshOutput
         {
             ProjectsProcessed = 1, PackagesParsed = 1, PackagesReused = 0, ProjectNames = new List<string> { "TestApp" },
-        };
+        });
     }
 }
 

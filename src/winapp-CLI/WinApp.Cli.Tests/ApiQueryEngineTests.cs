@@ -463,9 +463,121 @@ public sealed class ApiQueryEngineTests
         }
     }
 
+    [TestMethod]
+    public void Members_MicrosoftTypeVersusThirdPartyType_IsStillAmbiguous()
+    {
+        // The Microsoft-wins rule is only for the WinUI-3/UWP twin pair. A third-party
+        // package shipping a same-named control must not be silently answered for by
+        // the Microsoft type — that is the original bug, not the fix.
+        string cacheDir = NewCacheDir();
+        try
+        {
+            ProjectManifest manifest = BuildMultiPackageCache(cacheDir);
+
+            var result = ApiQueryEngine.Members("Widget", filter: null, cacheDir, manifest);
+
+            Assert.AreEqual(ApiQueryOutcome.InvalidInput, result.Outcome);
+            StringAssert.Contains(result.Message, "Contoso.Controls.Widget");
+        }
+        finally
+        {
+            TryDeleteDir(cacheDir);
+        }
+    }
+
+    [TestMethod]
+    public void Members_WinUiAndUwpTwin_ResolvesToTheMicrosoftType()
+    {
+        // Every duplicated short name in the SDK scope is essentially this pair, so
+        // erroring here would break the documented 'members NavigationView' form. The
+        // earlier tiebreak recognised only Microsoft.UI.Xaml, which silently handed a
+        // Microsoft.UI.Input caller the UWP type instead.
+        string cacheDir = NewCacheDir();
+        try
+        {
+            ProjectManifest manifest = BuildMultiPackageCache(cacheDir);
+
+            var result = ApiQueryEngine.Members("Twin", filter: null, cacheDir, manifest);
+
+            Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+            Assert.AreEqual("Microsoft.UI.Input.Twin", result.Data!.FullName);
+        }
+        finally
+        {
+            TryDeleteDir(cacheDir);
+        }
+    }
+
+    [TestMethod]
+    public void Members_AmbiguousShortName_IsInvalidInputListingCandidates()
+    {
+        // Silently picking one of several same-named types answers a question the caller
+        // did not ask: the members of Dup.Ns.Alpha and Other.Ns.Alpha differ, and a wrong
+        // pick is indistinguishable from a right one in the output.
+        string cacheDir = NewCacheDir();
+        try
+        {
+            ProjectManifest manifest = BuildMultiPackageCache(cacheDir);
+
+            var result = ApiQueryEngine.Members("Alpha", filter: null, cacheDir, manifest);
+
+            Assert.AreEqual(ApiQueryOutcome.InvalidInput, result.Outcome);
+            StringAssert.Contains(result.Message, "Dup.Ns.Alpha");
+            StringAssert.Contains(result.Message, "Other.Ns.Alpha");
+            Assert.IsFalse(
+                result.Message!.Contains("ABI.", StringComparison.Ordinal),
+                "An ABI twin is the same type, not a competing candidate.");
+        }
+        finally
+        {
+            TryDeleteDir(cacheDir);
+        }
+    }
+
+    [TestMethod]
+    public void Members_ShortNameWithOnlyAnAbiTwin_StillResolves()
+    {
+        // Solo.Ns.Solo has an ABI twin but exists in exactly one real namespace, so the
+        // ambiguity check must not turn a previously-working lookup into an error.
+        string cacheDir = NewCacheDir();
+        try
+        {
+            ProjectManifest manifest = BuildMultiPackageCache(cacheDir);
+
+            var result = ApiQueryEngine.Members("Solo", filter: null, cacheDir, manifest);
+
+            Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+            Assert.AreEqual("Solo.Ns.Solo", result.Data!.FullName);
+        }
+        finally
+        {
+            TryDeleteDir(cacheDir);
+        }
+    }
+
+    [TestMethod]
+    public void CheckProperty_AmbiguousShortName_IsInvalidInput()
+    {
+        // check-property drives whether a caller writes XAML against a property; a wrong
+        // type resolution here yields a confident answer about the wrong type.
+        string cacheDir = NewCacheDir();
+        try
+        {
+            ProjectManifest manifest = BuildMultiPackageCache(cacheDir);
+
+            var result = ApiQueryEngine.CheckProperty("Alpha", "Anything", cacheDir, manifest);
+
+            Assert.AreEqual(ApiQueryOutcome.InvalidInput, result.Outcome);
+            StringAssert.Contains(result.Message, "ambiguous");
+        }
+        finally
+        {
+            TryDeleteDir(cacheDir);
+        }
+    }
+
     private static string NewCacheDir() =>
         Path.Combine(Path.GetTempPath(), $"ApiQueryEngineDedupe_{Guid.NewGuid():N}");
-
     private static void TryDeleteDir(string dir)
     {
         try
@@ -500,6 +612,15 @@ public sealed class ApiQueryEngineTests
             ["ABI.Dup.Ns"] = [SimpleType("ABI.Dup.Ns", "Alpha")],
             ["Solo.Ns"] = [SimpleType("Solo.Ns", "Solo")],
             ["ABI.Solo.Ns"] = [SimpleType("ABI.Solo.Ns", "Solo")],
+
+            // The WinUI 3 / UWP twin shape: the same short name in a modern
+            // Microsoft.* namespace and its legacy Windows.* counterpart.
+            ["Microsoft.UI.Input"] = [SimpleType("Microsoft.UI.Input", "Twin")],
+            ["Windows.UI.Input"] = [SimpleType("Windows.UI.Input", "Twin")],
+
+            // A third-party type colliding with a Microsoft one is not a twin pair.
+            ["Microsoft.UI.Xaml.Controls"] = [SimpleType("Microsoft.UI.Xaml.Controls", "Widget")],
+            ["Contoso.Controls"] = [SimpleType("Contoso.Controls", "Widget")],
         };
 
         var packages = new List<ProjectPackageRef>();

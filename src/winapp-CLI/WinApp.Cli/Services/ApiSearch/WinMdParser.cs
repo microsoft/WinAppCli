@@ -58,7 +58,9 @@ internal static class WinMdParser
                 });
             }
         }
-        catch
+        catch (Exception ex) when (ex is BadImageFormatException or IOException
+            or UnauthorizedAccessException or InvalidOperationException
+            or ArgumentException or NotSupportedException)
         {
             // A single unparseable metadata file must not fail the whole scan;
             // skip it silently (stderr writes would corrupt --json output).
@@ -185,8 +187,10 @@ internal static class WinMdParser
                     Parameters = parameters
                 });
             }
-            catch
+            catch (Exception ex) when (ex is BadImageFormatException or NotSupportedException
+                or InvalidOperationException or ArgumentException)
             {
+                // Signature blob we cannot decode — still list the method by name.
                 members.Add(new WinMdMemberInfo
                 {
                     Name = name,
@@ -220,8 +224,10 @@ internal static class WinMdParser
                     });
                 }
             }
-            catch
+            catch (Exception ex) when (ex is BadImageFormatException or NotSupportedException
+                or InvalidOperationException or ArgumentException)
             {
+                // Signature blob we cannot decode — still list the property by name.
                 members.Add(new WinMdMemberInfo
                 {
                     Name = name,
@@ -304,8 +310,10 @@ internal static class WinMdParser
         {
             return reader.GetTypeSpecification(handle).DecodeSignature(new SimpleTypeProvider(), null);
         }
-        catch
+        catch (Exception ex) when (ex is BadImageFormatException or NotSupportedException
+            or InvalidOperationException or ArgumentException)
         {
+            // An undecodable type spec renders as "unknown" rather than failing the type.
             return "unknown";
         }
     }
@@ -325,8 +333,11 @@ internal static class WinMdParser
                     return DecodeDeprecatedMessage(reader, attr);
                 }
             }
-            catch
+            catch (Exception ex) when (ex is BadImageFormatException or NotSupportedException
+                or InvalidOperationException or ArgumentException)
             {
+                // An attribute we cannot read tells us nothing about deprecation;
+                // keep scanning the remaining attributes.
             }
         }
         return null;
@@ -361,8 +372,11 @@ internal static class WinMdParser
                 return msg;
             }
         }
-        catch
+        catch (Exception ex) when (ex is BadImageFormatException or NotSupportedException
+            or InvalidOperationException or ArgumentException)
         {
+            // The attribute is present but its argument blob is undecodable, so fall
+            // through to the generic message below — the API is still deprecated.
         }
         return "This API is deprecated.";
     }

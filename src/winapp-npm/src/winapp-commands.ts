@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 1.0.0
+ * Source schema version: 0.6.1
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -282,8 +282,8 @@ export async function embedIdentity(options: EmbedIdentityOptions): Promise<Wina
 // ---------------------------------------------------------------------------
 
 export interface FindApiOptions extends CommonOptions {
-  /** What to search for, e.g. "acrylic brush" or "NavigationView". Matched lexically against type and member names across the project's indexed API metadata. */
-  query?: string;
+  /** What to search for, e.g. "acrylic brush" or "NavigationView". Matched lexically against type and member names across the project's indexed API metadata. Pass several quoted queries to run them in a single call. */
+  query?: string | string[];
   /** Format output as JSON */
   json?: boolean;
   /** Maximum number of namespace-grouped results to return. */
@@ -295,11 +295,14 @@ export interface FindApiOptions extends CommonOptions {
 }
 
 /**
- * Search and inspect the Windows/WinRT API surface (types, members, enums, namespaces) available to a project, resolved from its referenced .winmd/.dll metadata. The bare form searches; sub-verbs drill into a specific type, namespace, or the index itself. The index is built from the project's restored NuGet/SDK packages and refreshed automatically when the project is restored.
+ * Search and inspect the Windows/WinRT API surface (types, members, enums) available to a project, resolved from its referenced .winmd/.dll metadata. The bare form searches; sub-verbs drill into a specific type or the index itself. Search, members, enums, and check-property each accept several subjects in one call — batch your lookups rather than issuing one call per question. The index is built from the project's restored NuGet/SDK packages and refreshed automatically when the project is restored.
  */
 export async function findApi(options: FindApiOptions = {}): Promise<WinappResult> {
   const args: string[] = ['find-api'];
-  if (options.query) args.push(options.query);
+  if (options.query) {
+    const queryArr = Array.isArray(options.query) ? options.query : [options.query];
+    args.push(...queryArr);
+  }
   if (options.json) args.push('--json');
   if (options.max !== undefined) args.push('--max', options.max.toString());
   if (options.project) args.push('--project', options.project);
@@ -314,8 +317,8 @@ export async function findApi(options: FindApiOptions = {}): Promise<WinappResul
 export interface FindApiCheckPropertyOptions extends CommonOptions {
   /** The type to check. */
   type?: string;
-  /** The property name to validate on the type. */
-  property?: string;
+  /** One or more property names to validate on the type. Pass several to check them all in a single call. */
+  property?: string | string[];
   /** Format output as JSON */
   json?: boolean;
   /** Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. */
@@ -325,12 +328,15 @@ export interface FindApiCheckPropertyOptions extends CommonOptions {
 }
 
 /**
- * Validate that a property exists on a type before you write XAML/code against it. On a miss, suggests similar properties on the type, attached-property forms, and other types that declare the property. Exits non-zero when the property does not exist.
+ * Validate that one or more properties exist on a type before you write XAML/code against it. Pass several property names to check them in one call. On a miss, suggests similar properties on the type, attached-property forms, and other types that declare the property. Exits non-zero when any property does not exist.
  */
 export async function findApiCheckProperty(options: FindApiCheckPropertyOptions = {}): Promise<WinappResult> {
   const args: string[] = ['find-api', 'check-property'];
   if (options.type) args.push(options.type);
-  if (options.property) args.push(options.property);
+  if (options.property) {
+    const propertyArr = Array.isArray(options.property) ? options.property : [options.property];
+    args.push(...propertyArr);
+  }
   if (options.json) args.push('--json');
   if (options.project) args.push('--project', options.project);
   if (options.projectDir) args.push('--project-dir', options.projectDir);
@@ -342,8 +348,10 @@ export async function findApiCheckProperty(options: FindApiCheckPropertyOptions 
 // ---------------------------------------------------------------------------
 
 export interface FindApiEnumsOptions extends CommonOptions {
-  /** The enum type to list, e.g. Symbol or Microsoft.UI.Xaml.Controls.Symbol. */
-  type?: string;
+  /** One or more enum types to list, e.g. Symbol or Microsoft.UI.Xaml.Controls.Symbol. Pass several to list them in a single call. */
+  type?: string | string[];
+  /** Only list values whose name contains this text (case-insensitive), e.g. --filter folder. The unfiltered total is still reported. Prefer listing the whole enum once over repeated filtered calls — most enums are small enough that the full list is cheaper than several narrowed lookups. */
+  filter?: string;
   /** Format output as JSON */
   json?: boolean;
   /** Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. */
@@ -353,11 +361,15 @@ export interface FindApiEnumsOptions extends CommonOptions {
 }
 
 /**
- * List the values of an enum type. Exits non-zero when the type exists but is not an enum.
+ * List the values of one or more enum types. Pass several type names to list them in one call. Exits non-zero when a type exists but is not an enum.
  */
 export async function findApiEnums(options: FindApiEnumsOptions = {}): Promise<WinappResult> {
   const args: string[] = ['find-api', 'enums'];
-  if (options.type) args.push(options.type);
+  if (options.type) {
+    const typeArr = Array.isArray(options.type) ? options.type : [options.type];
+    args.push(...typeArr);
+  }
+  if (options.filter) args.push('--filter', options.filter);
   if (options.json) args.push('--json');
   if (options.project) args.push('--project', options.project);
   if (options.projectDir) args.push('--project-dir', options.projectDir);
@@ -369,34 +381,9 @@ export async function findApiEnums(options: FindApiEnumsOptions = {}): Promise<W
 // ---------------------------------------------------------------------------
 
 export interface FindApiMembersOptions extends CommonOptions {
-  /** The type to inspect. Accepts a short name (NavigationView) or a fully-qualified name (Microsoft.UI.Xaml.Controls.NavigationView). */
-  type?: string;
-  /** Format output as JSON */
-  json?: boolean;
-  /** Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. */
-  project?: string;
-  /** Project directory to query (defaults to the current directory). Used to locate the indexed project. */
-  projectDir?: string;
-}
-
-/**
- * List the properties, events, and methods of a type (with XML-doc descriptions and inherited members), resolved from the project's indexed API metadata.
- */
-export async function findApiMembers(options: FindApiMembersOptions = {}): Promise<WinappResult> {
-  const args: string[] = ['find-api', 'members'];
-  if (options.type) args.push(options.type);
-  if (options.json) args.push('--json');
-  if (options.project) args.push('--project', options.project);
-  if (options.projectDir) args.push('--project-dir', options.projectDir);
-  return execCommand(args, options);
-}
-
-// ---------------------------------------------------------------------------
-// find-api namespaces
-// ---------------------------------------------------------------------------
-
-export interface FindApiNamespacesOptions extends CommonOptions {
-  /** Only list namespaces starting with this prefix, e.g. --filter Microsoft.UI. */
+  /** One or more types to inspect. Accepts short names (NavigationView) or fully-qualified names (Microsoft.UI.Xaml.Controls.NavigationView). Pass several to resolve them in a single call. */
+  type?: string | string[];
+  /** Only list members whose name contains this text (case-insensitive), e.g. --filter background. Totals for the unfiltered type are still reported. Applies to every type in the call. */
   filter?: string;
   /** Format output as JSON */
   json?: boolean;
@@ -407,10 +394,14 @@ export interface FindApiNamespacesOptions extends CommonOptions {
 }
 
 /**
- * List the namespaces available to the project across its indexed API metadata, optionally filtered by prefix.
+ * List the properties, events, and methods of one or more types (with XML-doc descriptions and inherited members), resolved from the project's indexed API metadata. Pass several type names to inspect them all in one call.
  */
-export async function findApiNamespaces(options: FindApiNamespacesOptions = {}): Promise<WinappResult> {
-  const args: string[] = ['find-api', 'namespaces'];
+export async function findApiMembers(options: FindApiMembersOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['find-api', 'members'];
+  if (options.type) {
+    const typeArr = Array.isArray(options.type) ? options.type : [options.type];
+    args.push(...typeArr);
+  }
   if (options.filter) args.push('--filter', options.filter);
   if (options.json) args.push('--json');
   if (options.project) args.push('--project', options.project);
@@ -439,24 +430,6 @@ export async function findApiPackages(options: FindApiPackagesOptions = {}): Pro
   if (options.json) args.push('--json');
   if (options.project) args.push('--project', options.project);
   if (options.projectDir) args.push('--project-dir', options.projectDir);
-  return execCommand(args, options);
-}
-
-// ---------------------------------------------------------------------------
-// find-api projects
-// ---------------------------------------------------------------------------
-
-export interface FindApiProjectsOptions extends CommonOptions {
-  /** Format output as JSON */
-  json?: boolean;
-}
-
-/**
- * List every project that currently has an API index in the shared cache, with the number of packages indexed for each.
- */
-export async function findApiProjects(options: FindApiProjectsOptions = {}): Promise<WinappResult> {
-  const args: string[] = ['find-api', 'projects'];
-  if (options.json) args.push('--json');
   return execCommand(args, options);
 }
 
@@ -505,33 +478,6 @@ export interface FindApiStatsOptions extends CommonOptions {
  */
 export async function findApiStats(options: FindApiStatsOptions = {}): Promise<WinappResult> {
   const args: string[] = ['find-api', 'stats'];
-  if (options.json) args.push('--json');
-  if (options.project) args.push('--project', options.project);
-  if (options.projectDir) args.push('--project-dir', options.projectDir);
-  return execCommand(args, options);
-}
-
-// ---------------------------------------------------------------------------
-// find-api types
-// ---------------------------------------------------------------------------
-
-export interface FindApiTypesOptions extends CommonOptions {
-  /** The namespace to list, e.g. Microsoft.UI.Xaml.Controls. */
-  namespace?: string;
-  /** Format output as JSON */
-  json?: boolean;
-  /** Project name to query (matches the .csproj/.vcxproj name), or 'sdk' to query the machine-wide Windows SDK scope instead of a project. */
-  project?: string;
-  /** Project directory to query (defaults to the current directory). Used to locate the indexed project. */
-  projectDir?: string;
-}
-
-/**
- * List the types declared in a namespace (class/struct/enum/interface/delegate) with their base types.
- */
-export async function findApiTypes(options: FindApiTypesOptions = {}): Promise<WinappResult> {
-  const args: string[] = ['find-api', 'types'];
-  if (options.namespace) args.push(options.namespace);
   if (options.json) args.push('--json');
   if (options.project) args.push('--project', options.project);
   if (options.projectDir) args.push('--project-dir', options.projectDir);

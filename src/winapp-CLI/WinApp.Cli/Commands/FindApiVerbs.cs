@@ -452,7 +452,7 @@ internal sealed class FindApiRefreshCommand : Command, IShortDescription
             Action<string>? onProgress = (json || quiet) ? null : msg => console.MarkupLineInterpolated($"[grey]{msg}[/]");
             // An explicit refresh forces a full rebuild (ignoring reused caches).
             var data = service.Refresh(scope, scan, onProgress, force: true);
-            return FindApiShared.EmitRaw(
+            return FindApiShared.Emit(
                 console, json, "refresh", data, WinAppJsonContext.Default.ApiRefreshOutput,
                 d => FindApiShared.RenderRefresh(console, d),
                 d => (d.ProjectsProcessed > 0 ? 0 : 1, d.ProjectsProcessed, d.ProjectsProcessed > 0));

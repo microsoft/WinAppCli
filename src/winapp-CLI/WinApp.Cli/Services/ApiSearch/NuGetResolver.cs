@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Text.Json;
+using System.Xml;
 using System.Xml.Linq;
 
 namespace WinApp.Cli.Services.ApiSearch;
@@ -123,6 +124,29 @@ internal static class NuGetResolver
     }
 
     /// <summary>
+    /// Orders NuGet version folder names semantically rather than lexically, so
+    /// <c>1.10.x</c> sorts above <c>1.9.x</c>. Ties are broken toward the stable
+    /// release, because <see cref="NugetService.CompareVersions"/> ignores the
+    /// prerelease suffix and would otherwise leave <c>2.3.3</c> and
+    /// <c>2.3.3-experimental</c> in arbitrary directory order.
+    /// </summary>
+    private static readonly IComparer<string?> VersionOrder = Comparer<string?>.Create((a, b) =>
+    {
+        if (a is null || b is null)
+        {
+            return a is null ? (b is null ? 0 : -1) : 1;
+        }
+        int cmp = NugetService.CompareVersions(a, b);
+        if (cmp != 0)
+        {
+            return cmp;
+        }
+        bool aPre = a.Contains('-', StringComparison.Ordinal);
+        bool bPre = b.Contains('-', StringComparison.Ordinal);
+        return aPre == bPre ? 0 : (aPre ? -1 : 1);
+    });
+
+    /// <summary>
     /// Discovers XML documentation from well-known SDK NuGet packages
     /// (<c>microsoft.windows.sdk.net.ref</c>, <c>microsoft.windowsappsdk.winui</c>)
     /// that provide WinRT API docs, and attaches them to the matching package.
@@ -136,7 +160,9 @@ internal static class NuGetResolver
         {
             try
             {
-                var latest = Directory.GetDirectories(sdkRefDir).OrderByDescending(Path.GetFileName).FirstOrDefault();
+                var latest = Directory.GetDirectories(sdkRefDir)
+                    .OrderByDescending(Path.GetFileName, VersionOrder)
+                    .FirstOrDefault();
                 if (latest != null)
                 {
                     var xmlDocs = FindXmlDocsInPackageFolder(latest);
@@ -147,8 +173,9 @@ internal static class NuGetResolver
                     }
                 }
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
+                // An unreadable SDK ref folder simply contributes no XML docs.
             }
         }
 
@@ -157,7 +184,9 @@ internal static class NuGetResolver
         {
             try
             {
-                var latest = Directory.GetDirectories(winuiDir).OrderByDescending(Path.GetFileName).FirstOrDefault();
+                var latest = Directory.GetDirectories(winuiDir)
+                    .OrderByDescending(Path.GetFileName, VersionOrder)
+                    .FirstOrDefault();
                 if (latest != null)
                 {
                     var xmlDocs = FindXmlDocsInPackageFolder(latest);
@@ -171,8 +200,9 @@ internal static class NuGetResolver
                     }
                 }
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
+                // An unreadable WinUI package folder simply contributes no XML docs.
             }
         }
     }
@@ -220,8 +250,10 @@ internal static class NuGetResolver
                 }
             }
         }
-        catch
+        catch (Exception ex) when (ex is XmlException or IOException or UnauthorizedAccessException)
         {
+            // An unreadable or malformed project file yields no project references
+            // rather than failing the whole resolve.
         }
         return packages;
     }
@@ -256,8 +288,9 @@ internal static class NuGetResolver
                     newest = file;
                 }
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
+                // A file that vanished mid-scan just loses the "newest" contest.
             }
         }
         return newest;
@@ -365,8 +398,11 @@ internal static class NuGetResolver
                 packages.Add(new PackageWithWinMd(id, version, files, xmlDocs));
             }
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+            or JsonException or KeyNotFoundException or InvalidOperationException)
         {
+            // A missing or malformed project.assets.json yields no packages; the caller
+            // then falls back to packages.config / project references.
         }
         return packages;
     }
@@ -426,8 +462,10 @@ internal static class NuGetResolver
                 }
             }
         }
-        catch
+        catch (Exception ex) when (ex is XmlException or IOException or UnauthorizedAccessException)
         {
+            // An unreadable or malformed packages.config yields no packages rather
+            // than failing the whole resolve.
         }
         return packages;
     }
@@ -498,8 +536,9 @@ internal static class NuGetResolver
                 return (files, version);
             }
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            // An unreadable runtime folder reports no winmds and an unknown version.
         }
         return (new List<string>(), "unknown");
     }

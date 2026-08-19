@@ -234,9 +234,10 @@ internal static class PathSafety
                     File.Delete(tmp);
                 }
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // Best-effort cleanup; surface original error.
+                // Best-effort cleanup: a temp file we cannot delete is not worth
+                // masking the original write failure, which is rethrown below.
             }
             throw;
         }

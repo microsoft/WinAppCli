@@ -1268,7 +1268,7 @@ A query from a directory with no project is *always* answered by the `sdk` scope
 - `enums <type> [<type>...] [--filter <text>]` - List an enum's values (exits non-zero when the type is not an enum)
 - `packages` - List the indexed metadata packages, with per-package type/member counts
 - `stats` - Show aggregate index statistics (packages, namespaces, types, members, `.winmd` files)
-- `refresh [--scan]` - Rebuild the index for a project (`--scan` indexes every project under the directory)
+- `refresh [--scan]` - Rebuild the index for a project (`--scan` indexes every project under the directory). With `--project <name>`, a name that matches no single indexed project fails instead of indexing the current directory.
 
 **Batching.** `search`, `members`, `enums`, and `check-property` accept **multiple subjects in one invocation**. For an AI agent this is the single biggest cost lever: the marginal cost of a lookup is dominated by the round trip (each call re-sends the whole conversation), not by the size of the payload, so one call answering ten questions is far cheaper than ten calls.
 
@@ -1276,6 +1276,8 @@ A query from a directory with no project is *always* answered by the `sdk` scope
 - **Two or more** subjects return an envelope — `{ "count": N, "results": [ ... ] }` in `--json`, with each element being the normal single-subject payload; `check-property` adds `missingCount`. Text output renders each subject in sequence under one scope header.
 - `check-property` batches **properties on one type**: the first argument is the type, every argument after it is a property. In batch mode a property that exists prints a single ✅ line; full near-miss detail is printed only for ones that don't.
 - A batch exits `0` only if **every** subject resolved *and* was found — so a batch is still safe to gate codegen on.
+
+**Type names.** `members`, `check-property`, and `enums` accept a short name (`NavigationView`) or a fully-qualified one (`Microsoft.UI.Xaml.Controls.NavigationView`). When a short name is shared by a modern `Microsoft.*` type and its legacy `Windows.*` UWP twin, the `Microsoft.*` type answers — that is the projection a Windows App SDK app uses — and the resolved fully-qualified name is always shown. Any other collision exits non-zero and lists the candidates instead of guessing.
 
 **Options:**
 - `--max <n>` - Maximum number of namespace-grouped search results (default `30`; search only)
