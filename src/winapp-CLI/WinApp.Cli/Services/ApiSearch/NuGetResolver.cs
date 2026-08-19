@@ -107,14 +107,17 @@ internal static class NuGetResolver
                             xmlFiles.Add(xml);
                         }
                     }
-                    catch
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     {
+                        // A file that vanished or is not readable simply contributes no docs.
                     }
                 }
             }
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            // Doc discovery is best-effort: an unreadable package folder yields no docs
+            // rather than failing the whole index.
         }
         return xmlFiles;
     }
