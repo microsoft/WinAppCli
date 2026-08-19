@@ -464,7 +464,7 @@ public class EmbeddedSnapshotTests
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {
-            var candidate = Path.Combine(
+            var candidate = Path.Join(
                 dir.FullName, "src", "winapp-CLI", "WinApp.Cli", "Services", "Controls", "Data");
             if (Directory.Exists(candidate))
             {
@@ -478,14 +478,14 @@ public class EmbeddedSnapshotTests
 
     private static void BackdateCache(string root, string providerId, DateTime writtenAtUtc)
     {
-        var timestampPath = Path.Combine(root, providerId, "last-updated.txt");
+        var timestampPath = Path.Join(root, providerId, "last-updated.txt");
         Assert.IsTrue(File.Exists(timestampPath), "the priming load should have written a cache timestamp");
         File.WriteAllText(timestampPath, writtenAtUtc.ToString("o"));
     }
 
     private static string NewTempCacheRoot()
     {
-        var dir = Path.Combine(Path.GetTempPath(), "winapp-findui-snapshot-" + Guid.NewGuid().ToString("N"));
+        var dir = Path.Join(Path.GetTempPath(), "winapp-findui-snapshot-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         return dir;
     }
