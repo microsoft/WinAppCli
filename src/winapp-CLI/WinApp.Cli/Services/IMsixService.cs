@@ -91,6 +91,7 @@ internal interface IMsixService
         FileInfo? projectFile = null,
         string? framework = null,
         bool noRestore = false,
+        bool prepareWindowsAppRuntime = true,
         CancellationToken cancellationToken = default);
 
     /// <summary>

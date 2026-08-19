@@ -110,7 +110,7 @@ internal partial class MsixService
         return new MsixIdentityResult(debugIdentity.PackageName, debugIdentity.Publisher, debugIdentity.ApplicationId);
     }
 
-    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, string? executable = null, string? runtimeArch = null, FileInfo? projectFile = null, string? framework = null, bool noRestore = false, CancellationToken cancellationToken = default)
+    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, string? executable = null, string? runtimeArch = null, FileInfo? projectFile = null, string? framework = null, bool noRestore = false, bool prepareWindowsAppRuntime = true, CancellationToken cancellationToken = default)
     {
         // Validate inputs
         if (!appxManifestPath.Exists)
@@ -166,8 +166,11 @@ internal partial class MsixService
             // divergent Windows App SDK version (M2). This loose-layout pipeline is shared with folder mode
             // (which always restores) and packaged project mode (which honors the run's --no-restore), so
             // thread the caller's setting through instead of forcing a restore during discovery.
-            var msbuildPackageList = await ResolveDotNetPackageListAsync(projectFile, framework, noRestore, cancellationToken);
-            await EnsureWindowsAppRuntimeInstalledAsync(msbuildPackageList, runtimeArch, taskContext, cancellationToken);
+            if (prepareWindowsAppRuntime)
+            {
+                var msbuildPackageList = await ResolveDotNetPackageListAsync(projectFile, framework, noRestore, cancellationToken);
+                await EnsureWindowsAppRuntimeInstalledAsync(msbuildPackageList, runtimeArch, taskContext, cancellationToken);
+            }
 
             // Resolve the manifest that would be registered (issue #537 / TrySkipRegistration).
             // ManifestHelper.FindManifest already probes both canonical filenames; if it
@@ -235,7 +238,9 @@ internal partial class MsixService
         // Fetch dotnet package list once for all downstream operations. Pin to the effective built TFM
         // (M2) so a multi-targeted app resolves the runtime for the framework it was actually built for.
         // Shared loose-layout pipeline (folder + packaged project mode); discovery restores as before.
-        var dotNetPackageList = await ResolveDotNetPackageListAsync(projectFile, framework, noRestore: false, cancellationToken);
+        var dotNetPackageList = prepareWindowsAppRuntime
+            ? await ResolveDotNetPackageListAsync(projectFile, framework, noRestore: false, cancellationToken)
+            : null;
 
         // If there is a pri file named after the executable, rename it to resources.pri
         var priFilePath = Path.Combine(outputAppXDirectory.FullName, Path.GetFileNameWithoutExtension(executableMatch.Name) + ".pri");
@@ -303,7 +308,10 @@ internal partial class MsixService
             var identity = ParseAppxManifestAsync(manifestContent);
 
             // Install the Windows App Runtime framework packages if not already present
-            await EnsureWindowsAppRuntimeInstalledAsync(dotNetPackageList, runtimeArch, taskContext, cancellationToken);
+            if (prepareWindowsAppRuntime)
+            {
+                await EnsureWindowsAppRuntimeInstalledAsync(dotNetPackageList, runtimeArch, taskContext, cancellationToken);
+            }
 
             // See MSBuild branch above for the rationale (issue #537).
             var skipResult = TrySkipRegistration(
@@ -347,8 +355,8 @@ internal partial class MsixService
         var manifestEntries = recipeDoc.Descendants(msbuildNs + "AppXManifest");
         foreach (var entry in manifestEntries)
         {
-            var sourcePath = entry.Attribute("Include")?.Value;
-            var packagePath = entry.Element(msbuildNs + "PackagePath")?.Value;
+            var sourcePath = UnescapeMsBuildValue(entry.Attribute("Include")?.Value);
+            var packagePath = UnescapeMsBuildValue(entry.Element(msbuildNs + "PackagePath")?.Value);
             if (sourcePath != null && packagePath != null && File.Exists(sourcePath))
             {
                 var destPath = Path.Combine(outputDir.FullName, packagePath);
@@ -362,8 +370,8 @@ internal partial class MsixService
         var fileEntries = recipeDoc.Descendants(msbuildNs + "AppxPackagedFile");
         foreach (var entry in fileEntries)
         {
-            var sourcePath = entry.Attribute("Include")?.Value;
-            var packagePath = entry.Element(msbuildNs + "PackagePath")?.Value;
+            var sourcePath = UnescapeMsBuildValue(entry.Attribute("Include")?.Value);
+            var packagePath = UnescapeMsBuildValue(entry.Element(msbuildNs + "PackagePath")?.Value);
             if (sourcePath == null || packagePath == null || !File.Exists(sourcePath))
             {
                 continue;
@@ -389,6 +397,36 @@ internal partial class MsixService
         }
 
         taskContext.AddDebugMessage($"{UiSymbols.Check} AppX layout from recipe: {copied} copied, {skipped} unchanged");
+    }
+
+    private static string? UnescapeMsBuildValue(string? value)
+    {
+        if (value is null || !value.Contains('%', StringComparison.Ordinal))
+        {
+            return value;
+        }
+
+        var result = new StringBuilder(value.Length);
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (value[index] == '%' &&
+                index + 2 < value.Length &&
+                byte.TryParse(
+                    value.AsSpan(index + 1, 2),
+                    System.Globalization.NumberStyles.HexNumber,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var decoded))
+            {
+                result.Append((char)decoded);
+                index += 2;
+            }
+            else
+            {
+                result.Append(value[index]);
+            }
+        }
+
+        return result.ToString();
     }
 
     /// <summary>

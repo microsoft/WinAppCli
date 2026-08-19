@@ -36,6 +36,7 @@ internal sealed class FakeProjectRunService : IProjectRunService
     public List<ProjectClassificationInputs?> ResolveInputClassificationInputs { get; } = [];
     public List<FileInfo> BuildAndResolveCalls { get; } = [];
     public List<ProjectRunOptions> BuildOptions { get; } = [];
+    public int CheckSdkCallCount { get; private set; }
 
     /// <summary>Records each <see cref="IsDefinitivelyUnpackagedAsync"/> invocation (for asserting the pre-flight probe fired or was skipped).</summary>
     public List<FileInfo> IsDefinitivelyUnpackagedCalls { get; } = [];
@@ -65,7 +66,10 @@ internal sealed class FakeProjectRunService : IProjectRunService
     }
 
     public Task<string?> CheckSdkAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken)
-        => Task.FromResult(SdkError);
+    {
+        CheckSdkCallCount++;
+        return Task.FromResult(SdkError);
+    }
 
     public Task<ProjectBuildOutcome> BuildAndResolveAsync(FileInfo csproj, ProjectRunOptions options, CancellationToken cancellationToken)
     {

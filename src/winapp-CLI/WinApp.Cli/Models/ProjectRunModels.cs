@@ -117,3 +117,23 @@ internal sealed record ProjectClassificationInputs(
 /// errors have already been surfaced and <see cref="ExitCode"/> is the non-zero dotnet exit code.
 /// </summary>
 internal sealed record ProjectBuildOutcome(ProjectRunResolution? Resolution, int ExitCode);
+
+/// <summary>
+/// Build inputs for a classic, non-SDK-style C# UWP project. These projects use Visual Studio
+/// MSBuild and a platform architecture rather than <c>dotnet build</c> and a runtime identifier.
+/// </summary>
+internal sealed record LegacyUwpRunOptions(
+    string Configuration,
+    string Architecture,
+    bool NoBuild,
+    bool NoRestore,
+    IReadOnlyList<string> Properties,
+    bool Json = false);
+
+/// <summary>
+/// Result of building a classic UWP project and preparing its framework dependencies.
+/// </summary>
+internal sealed record LegacyUwpBuildOutcome(
+    DirectoryInfo? LayoutDirectory,
+    int ExitCode,
+    string? TargetPlatformVersion = null);

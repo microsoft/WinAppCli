@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.5.1
+ * Source schema version: 0.6.1
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -644,7 +644,7 @@ export interface RunOptions extends CommonOptions {
 }
 
 /**
- * Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.
+ * Builds and runs a Windows app from a .csproj/.sln or a build-output folder. Project mode uses dotnet build for modern projects or Visual Studio MSBuild for classic UWP, then launches the app; folder mode creates a debug-signed layout, registers the package, and launches it.
  */
 export async function run(options: RunOptions = {}): Promise<WinappResult> {
   const args: string[] = ['run'];
