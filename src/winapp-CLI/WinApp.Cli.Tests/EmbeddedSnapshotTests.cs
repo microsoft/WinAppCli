@@ -300,6 +300,35 @@ public class EmbeddedSnapshotTests
     }
 
     [TestMethod]
+    public async Task CacheWrittenByAnOlderSchema_IsDiscarded()
+    {
+        var root = NewTempCacheRoot();
+        try
+        {
+            const string id = "schema-probe";
+            await new StubProvider(root, id, "Schema probe", SampleData(id)).LoadAsync();
+
+            // Fresh by the clock but stamped by a superseded CacheVersion — the exact
+            // state every version bump leaves behind on an existing install. Without
+            // the stamp check the old-schema payload would deserialize into the new
+            // shape and be served as if it were current.
+            var versionPath = Path.Join(root, id, "schema-version.txt");
+            Assert.AreEqual(CacheVersion.Current, File.ReadAllText(versionPath).Trim(),
+                "priming the cache must stamp it with the current schema version");
+            File.WriteAllText(versionPath, "0");
+
+            var data = await new StubProvider(root, id, "Schema probe", SampleData(id)).LoadAsync();
+
+            Assert.AreEqual(CorpusOrigin.Network, data.Origin,
+                "a cache stamped with a superseded schema version must be re-fetched, not served");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task CacheNewerThanSnapshot_Wins()
     {
         // The steady state: a user who has fetched since the release must keep their own,
