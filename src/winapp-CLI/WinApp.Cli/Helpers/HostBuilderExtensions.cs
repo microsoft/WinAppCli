@@ -7,6 +7,8 @@ using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Diagnostics.CodeAnalysis;
 using WinApp.Cli.Commands;
+using WinApp.Cli.ExecutionTargets;
+using WinApp.Cli.ExecutionTargets.WindowsSandbox;
 using WinApp.Cli.Services;
 using WinApp.Cli.Services.Controls;
 
@@ -58,6 +60,13 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IUpdateNotificationService, UpdateNotificationService>()
             // Azure Trusted Signing services
             .AddSingleton<IProcessRunner, ProcessRunner>()
+            .AddSingleton<IExecutionTargetStateDirectoryProvider, ExecutionTargetStateDirectoryProvider>()
+            .AddSingleton<IWindowsSandboxHost, WindowsSandboxHost>()
+            .AddSingleton<IWindowsSandboxCli, WindowsSandboxCli>()
+            .AddSingleton<IWindowsSandboxMutationLock, WindowsSandboxMutationLock>()
+            .AddSingleton<IWindowsSandboxStateStore, WindowsSandboxStateStore>()
+            .AddSingleton<IExecutionTargetBackend, WindowsSandboxBackend>()
+            .AddSingleton<IExecutionTargetService, ExecutionTargetService>()
             .AddSingleton<IAzureAuthService, AzureAuthService>()
             .AddSingleton<IAzureSigningService, AzureSigningService>()
             .AddSingleton<IAzureSignToolService, AzureSignToolService>()
