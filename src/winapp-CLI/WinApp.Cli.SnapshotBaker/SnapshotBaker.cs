@@ -69,7 +69,7 @@ internal static class SnapshotBaker
         // Providers cache to disk as a side effect of loading. Point them at a throwaway
         // directory so a bake never reads from — or writes to — the developer's real
         // find-ui cache, which would let a warm local cache masquerade as a fresh fetch.
-        var scratchCache = Path.Combine(Path.GetTempPath(), $"winapp-bake-{Guid.NewGuid():N}");
+        var scratchCache = Path.Join(Path.GetTempPath(), $"winapp-bake-{Guid.NewGuid():N}");
         var failures = new List<string>();
         var counts = new SortedDictionary<string, int>(StringComparer.Ordinal);
 
@@ -101,7 +101,7 @@ internal static class SnapshotBaker
                     Keywords = new SortedDictionary<string, string[]>(data.Keywords, StringComparer.Ordinal)
                 };
 
-                var path = Path.Combine(outputDirectory, SnapshotFileName(provider.Id));
+                var path = Path.Join(outputDirectory, SnapshotFileName(provider.Id));
                 await WriteSnapshotPairAsync(
                     path,
                     JsonSerializer.Serialize(snapshot, ControlsSnapshotWriteContext.Default.ProviderSnapshot),
@@ -124,7 +124,7 @@ internal static class SnapshotBaker
             };
 
             await PathSafety.AtomicWriteAllTextAsync(
-                Path.Combine(outputDirectory, ManifestFileName),
+                Path.Join(outputDirectory, ManifestFileName),
                 JsonSerializer.Serialize(manifest, ControlsSnapshotWriteContext.Default.SnapshotManifest),
                 Utf8NoBom,
                 cancellationToken).ConfigureAwait(false);

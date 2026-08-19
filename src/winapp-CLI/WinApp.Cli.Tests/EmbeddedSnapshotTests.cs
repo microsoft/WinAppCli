@@ -107,7 +107,7 @@ public class EmbeddedSnapshotTests
 
         foreach (var descriptor in ProviderRegistry.Descriptors)
         {
-            var jsonPath = Path.Combine(dataDir, $"snapshot-{descriptor.Id}.json");
+            var jsonPath = Path.Join(dataDir, $"snapshot-{descriptor.Id}.json");
             Assert.IsTrue(File.Exists(jsonPath), $"missing committed snapshot-{descriptor.Id}.json");
 
             var fromDisk = JsonSerializer.Deserialize(
@@ -189,7 +189,7 @@ public class EmbeddedSnapshotTests
             Assert.IsTrue(data.Scenarios.Length > 0,
                 "a cold cache with no network must fall back to the corpus baked into the binary");
             Assert.AreEqual(CorpusOrigin.Embedded, data.Origin);
-            Assert.IsFalse(Directory.Exists(Path.Combine(root, "gallery")),
+            Assert.IsFalse(Directory.Exists(Path.Join(root, "gallery")),
                 "serving the embedded corpus must not write a cache — it is not a fetched result");
         }
         finally

@@ -214,7 +214,7 @@ public class ControlsFetchNoticeTests
             // Prime a cache, then backdate its timestamp well past the TTL.
             var seed = new StubProvider(root, id, "Gallery (WinUI 3)", SampleData(id));
             await seed.LoadAsync();
-            var tsPath = Path.Combine(root, id, "last-updated.txt");
+            var tsPath = Path.Join(root, id, "last-updated.txt");
             Assert.IsTrue(File.Exists(tsPath), "priming load should have written the cache");
             File.WriteAllText(tsPath, DateTime.UtcNow.AddDays(-30).ToString("o"));
 
