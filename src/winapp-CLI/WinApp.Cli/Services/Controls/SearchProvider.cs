@@ -75,7 +75,7 @@ internal interface ISearchProvider
 
 /// <summary>
 /// Boilerplate shared by every GitHub-backed provider: the on-disk cache
-/// protocol (schema-version stamp + 7-day TTL + atomic writes), the fetch flow,
+/// protocol (schema-version stamp + 24-hour TTL + atomic writes), the fetch flow,
 /// and the embedded-snapshot floor that keeps the provider usable with no
 /// network. Concrete providers only supply their identity and their GitHub
 /// fetch. The cache root is injected so it can live under the managed
@@ -93,7 +93,18 @@ internal abstract class CachedProviderBase : ISearchProvider
     public abstract string Id { get; }
     public abstract string DisplayName { get; }
 
-    private static readonly TimeSpan CacheTtl = TimeSpan.FromDays(7);
+    /// <summary>
+    /// How long a cached corpus is served before the provider re-fetches. Upstream
+    /// sample repos change daily, so a day is the longest window that still lets a
+    /// user see today's samples today. A miss is cheap by construction: every failure
+    /// path below falls back to the stale cache and then to the embedded floor, so a
+    /// shorter TTL costs a fetch, never a working command.
+    ///
+    /// Overridable so tests can pin the freshness window. Without that seam a test for
+    /// "cache is fresh but older than the bake" silently decays into a test of the
+    /// fetch path as soon as the shipped bake date ages past the TTL.
+    /// </summary>
+    protected virtual TimeSpan CacheTtl => TimeSpan.FromHours(24);
 
     private string CacheDir => Path.Combine(_cacheRoot, Id);
 
@@ -175,7 +186,7 @@ internal abstract class CachedProviderBase : ISearchProvider
     /// upstream more recently. Both timestamps mean the same thing, so they compare
     /// directly. This matters on upgrade: a newly installed binary can carry a corpus
     /// baked more recently than this machine last fetched, and without the comparison
-    /// the TTL would pin the older cached copy for up to a week.
+    /// the TTL would pin the older cached copy for the rest of its freshness window.
     /// </summary>
     private ProviderData PreferNewerOf(ProviderData cached, DateTime cacheWrittenAt)
     {

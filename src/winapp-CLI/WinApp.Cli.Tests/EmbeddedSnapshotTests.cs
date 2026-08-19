@@ -221,21 +221,77 @@ public class EmbeddedSnapshotTests
     [TestMethod]
     public async Task CacheOlderThanSnapshot_LosesToEmbeddedCorpus()
     {
-        // The upgrade case: a machine that fetched months ago installs a new CLI whose
-        // baked corpus is more recent. Without the comparison the TTL would pin the older
-        // cached copy for up to a week after the upgrade.
+        // The upgrade case: a machine that fetched before this binary's corpus was baked
+        // installs a new CLI carrying a more recent one. The cache is still inside its
+        // freshness window, so nothing else goes looking — only the bake-date comparison
+        // stops the older cached copy from being served.
+        //
+        // The TTL is pinned open deliberately. The state under test is "cache is FRESH
+        // but older than the bake", which stops being reachable in real time once the
+        // shipped bake date ages past the TTL — at which point this silently becomes a
+        // test of the fetch path instead (it did exactly that, and went red, eight days
+        // after the corpus was baked). Pinning keeps the assertion on PreferNewerOf and
+        // independent of the wall clock.
         var root = NewTempCacheRoot();
         try
         {
-            var seed = new StubProvider(root, "gallery", "Gallery (WinUI 3)", SampleData("gallery"));
+            var seed = new StubProvider(root, "gallery", "Gallery (WinUI 3)", SampleData("gallery"), TimeSpan.MaxValue);
             await seed.LoadAsync();
             BackdateCache(root, "gallery", EmbeddedSnapshot.BakedAtUtc!.Value.AddDays(-1));
 
-            var data = await new StubProvider(root, "gallery", "Gallery (WinUI 3)", SampleData("gallery"))
+            var data = await new StubProvider(root, "gallery", "Gallery (WinUI 3)", SampleData("gallery"), TimeSpan.MaxValue)
                 .LoadAsync();
 
             Assert.AreEqual(CorpusOrigin.Embedded, data.Origin,
                 "a snapshot baked more recently than the cache was written must win");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Freshness window: 24 hours (winapp CLI spec review, 2026-08-12)
+    // ------------------------------------------------------------------
+    // Uses a provider id with no baked corpus so the embedded floor can't decide the
+    // outcome — these pin the TTL boundary itself, nothing else.
+
+    [TestMethod]
+    public async Task CacheWithinOneDay_IsServedWithoutRefetching()
+    {
+        var root = NewTempCacheRoot();
+        try
+        {
+            const string id = "ttl-probe";
+            await new StubProvider(root, id, "TTL probe", SampleData(id)).LoadAsync();
+            BackdateCache(root, id, DateTime.UtcNow.AddHours(-23));
+
+            var data = await new StubProvider(root, id, "TTL probe", SampleData(id)).LoadAsync();
+
+            Assert.AreEqual(CorpusOrigin.Cache, data.Origin,
+                "a cache written less than 24h ago must be served without a re-fetch");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task CacheOlderThanOneDay_IsRefetched()
+    {
+        var root = NewTempCacheRoot();
+        try
+        {
+            const string id = "ttl-probe";
+            await new StubProvider(root, id, "TTL probe", SampleData(id)).LoadAsync();
+            BackdateCache(root, id, DateTime.UtcNow.AddHours(-25));
+
+            var data = await new StubProvider(root, id, "TTL probe", SampleData(id)).LoadAsync();
+
+            Assert.AreEqual(CorpusOrigin.Network, data.Origin,
+                "a cache older than 24h must be refreshed from upstream");
         }
         finally
         {
@@ -381,7 +437,11 @@ public class EmbeddedSnapshotTests
         {
             var candidate = Path.Combine(
                 dir.FullName, "src", "winapp-CLI", "WinApp.Cli", "Services", "Controls", "Data");
-            if (Directory.Exists(candidate)) return candidate;
+            if (Directory.Exists(candidate))
+            {
+                return candidate;
+            }
+
             dir = dir.Parent;
         }
         return null;
@@ -422,17 +482,21 @@ public class EmbeddedSnapshotTests
     private sealed class StubProvider : CachedProviderBase
     {
         private readonly ProviderData _data;
+        private readonly TimeSpan? _ttl;
 
-        public StubProvider(string cacheRoot, string id, string displayName, ProviderData data)
+        public StubProvider(string cacheRoot, string id, string displayName, ProviderData data, TimeSpan? ttl = null)
             : base(cacheRoot)
         {
             Id = id;
             DisplayName = displayName;
             _data = data;
+            _ttl = ttl;
         }
 
         public override string Id { get; }
         public override string DisplayName { get; }
+
+        protected override TimeSpan CacheTtl => _ttl ?? base.CacheTtl;
 
         protected override Task<ProviderData> FetchAsync(CancellationToken cancellationToken)
             => Task.FromResult(_data);

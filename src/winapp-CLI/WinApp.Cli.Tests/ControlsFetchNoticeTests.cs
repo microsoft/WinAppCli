@@ -211,7 +211,7 @@ public class ControlsFetchNoticeTests
             // snapshot, which is a different behaviour tested in EmbeddedSnapshotTests.
             const string id = "stale-only";
 
-            // Prime a cache, then backdate its timestamp past the 7-day TTL.
+            // Prime a cache, then backdate its timestamp well past the TTL.
             var seed = new StubProvider(root, id, "Gallery (WinUI 3)", SampleData(id));
             await seed.LoadAsync();
             var tsPath = Path.Combine(root, id, "last-updated.txt");
@@ -220,7 +220,7 @@ public class ControlsFetchNoticeTests
 
             // A NON-forced load now misses on the TTL, attempts a fetch, and the fetch
             // fails (offline). It must fall back to the stale cache rather than returning
-            // Empty — otherwise an offline user loses find-ui 7 days after their last fetch.
+            // Empty — otherwise an offline user loses find-ui a day after their last fetch.
             var offline = new ThrowingProvider(root, id, "Gallery (WinUI 3)");
             var data = await offline.LoadAsync(forceRefresh: false);
 

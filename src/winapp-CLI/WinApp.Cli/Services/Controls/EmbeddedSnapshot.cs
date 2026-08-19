@@ -80,7 +80,7 @@ internal static class EmbeddedSnapshot
     {
         // A snapshot baked by different extraction logic must not be served: its tags,
         // ids, and cleaning would silently disagree with everything else in the process.
-        // Rejecting here is defence in depth — SnapshotManifestTests fails the build if a
+        // Rejecting here is defence in depth — the manifest test fails the build if a
         // CacheVersion bump ships without a re-bake, so this should be unreachable in a
         // released binary.
         var manifest = Manifest;

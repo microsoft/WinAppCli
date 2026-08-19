@@ -20,7 +20,8 @@ namespace WinApp.Cli.Services.Controls;
 ///   3. Tag extraction / cleaning logic changes that would alter the cached
 ///      output for the same input data.
 ///
-/// A bump requires a re-bake in the same change: <c>SnapshotManifestTests</c> fails the
+/// A bump requires a re-bake in the same change:
+/// <c>EmbeddedSnapshotTests.Manifest_Ships_AndMatchesCurrentCacheVersion</c> fails the
 /// build when the committed snapshot's version doesn't match, because a mismatch would
 /// silently drop the embedded floor and restore the offline outage it exists to fix.
 ///

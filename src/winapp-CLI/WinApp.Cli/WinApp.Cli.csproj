@@ -60,8 +60,9 @@
       The baked corpus floor (see EmbeddedSnapshot.cs). ~910 KB of JSON compresses ~10x,
       so the compressed form is what ships. The hidden bake option writes BOTH forms:
       the .json is committed for review (a corpus regression has to be visible as a
-      readable diff) and the .json.br is what gets embedded. SnapshotParityTests fails
-      the build if the two ever disagree, so the compressed blob can't silently drift
+      readable diff) and the .json.br is what gets embedded.
+      EmbeddedSnapshotTests.CompressedSnapshot_MatchesCommittedJson fails the build if
+      the two ever disagree, so the compressed blob can't silently drift
       from the reviewed source.
     -->
     <EmbeddedResource Include="Services\Controls\Data\snapshot-manifest.json"

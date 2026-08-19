@@ -99,7 +99,7 @@ winapp find-ui "color picker" --json
   on a first run in a sandbox or behind a proxy that blocks
   `raw.githubusercontent.com`. When GitHub is reachable the CLI refreshes from it
   and caches per-user under `<global .winapp>/cache/find-ui` (refreshed at most
-  every 7 days, or on demand with `--refresh`); the built-in corpus is a floor,
+  every 24 hours, or on demand with `--refresh`); the built-in corpus is a floor,
   never a ceiling, so live data always wins. `--source core` searches the curated
   built-in patterns and never touches the network at all.
 - **Check the corpus provenance when it matters.** `--json` carries `"corpus"`:

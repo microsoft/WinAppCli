@@ -32,7 +32,8 @@ internal static class SnapshotBaker
     /// <summary>
     /// Write <paramref name="json"/> in both committed forms: readable text for review and
     /// diffing, and the Brotli blob that is embedded in the binary. They are written
-    /// together so they cannot diverge at the source; <c>SnapshotParityTests</c> enforces
+    /// together so they cannot diverge at the source;
+    /// <c>EmbeddedSnapshotTests.CompressedSnapshot_MatchesCommittedJson</c> enforces
     /// that they stay together in the repo.
     /// </summary>
     private static async Task WriteSnapshotPairAsync(string path, string json, CancellationToken cancellationToken)
