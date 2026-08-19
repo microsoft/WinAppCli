@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Security.Principal;
 using WinApp.Cli.ExecutionTargets.WindowsSandbox;
 
 namespace WinApp.Cli.Tests;
@@ -8,6 +9,18 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class WindowsSandboxMutationLockTests
 {
+    [TestMethod]
+    public void DefaultName_IsGlobalAndScopedToCurrentUserSid()
+    {
+        using var identity = WindowsIdentity.GetCurrent(TokenAccessLevels.Query);
+        var sid = identity.User;
+        Assert.IsNotNull(sid);
+
+        var mutationLock = new WindowsSandboxMutationLock();
+
+        Assert.AreEqual(WindowsSandboxMutationLock.DefaultNamePrefix + sid.Value, mutationLock.Name);
+    }
+
     [TestMethod]
     public void Acquire_WaitsForCurrentOwnerAndHonorsCancellation()
     {

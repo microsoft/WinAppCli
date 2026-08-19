@@ -54,6 +54,19 @@ public class WindowsSandboxCliTests
     }
 
     [TestMethod]
+    public async Task ListAsync_RejectsNullEnvironmentEntries()
+    {
+        var runner = new FakeProcessRunner(new ProcessRunResult(
+            0,
+            """{"WindowsSandboxEnvironments":[null]}""",
+            ""));
+
+        var result = await new WindowsSandboxCli(runner).ListAsync();
+
+        Assert.AreEqual(WindowsSandboxCliFailure.IncompatibleOutput, result.Failure);
+    }
+
+    [TestMethod]
     public async Task StartAsync_UsesRawOutputAndParsesId()
     {
         var runner = new FakeProcessRunner(new ProcessRunResult(

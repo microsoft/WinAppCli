@@ -21,17 +21,17 @@ internal sealed class WindowsSandboxStateStore(
     public async Task<WindowsSandboxStateReadResult> ReadAsync(CancellationToken cancellationToken = default)
     {
         var stateFile = GetStateFile();
-        if (!stateFile.Exists)
-        {
-            return new WindowsSandboxStateReadResult(WindowsSandboxStateReadStatus.Missing, null);
-        }
-
         if (IsUnsafe(stateFile))
         {
             return new WindowsSandboxStateReadResult(
                 WindowsSandboxStateReadStatus.UnsafePath,
                 null,
                 $"Windows Sandbox target state path '{stateFile.FullName}' is unsafe.");
+        }
+
+        if (!stateFile.Exists)
+        {
+            return new WindowsSandboxStateReadResult(WindowsSandboxStateReadStatus.Missing, null);
         }
 
         try
@@ -81,10 +81,14 @@ internal sealed class WindowsSandboxStateStore(
             throw new ArgumentException(error, nameof(state));
         }
 
+        var stateFile = GetStateFile();
+        if (IsUnsafe(stateFile))
+        {
+            throw new IOException($"Windows Sandbox target state path '{stateFile.FullName}' is unsafe.");
+        }
+
         var targetDirectory = directoryProvider.GetTargetDirectory(ExecutionTargetRef.WindowsSandboxDefault);
         targetDirectory.Create();
-
-        var stateFile = GetStateFile();
         if (IsUnsafe(stateFile))
         {
             throw new IOException($"Windows Sandbox target state path '{stateFile.FullName}' is unsafe.");
@@ -138,7 +142,7 @@ internal sealed class WindowsSandboxStateStore(
             return false;
         }
 
-        if (state.Revision is <= 0 or long.MaxValue)
+        if (state.Revision <= 0)
         {
             error = "Windows Sandbox target state revision is outside the supported range.";
             return false;

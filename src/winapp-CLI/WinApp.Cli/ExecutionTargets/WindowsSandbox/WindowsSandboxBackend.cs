@@ -87,11 +87,21 @@ internal sealed class WindowsSandboxBackend(
             return EnsureExisting(runningIds, stateRead);
         }
 
-        if (stateRead.Status is WindowsSandboxStateReadStatus.UnsupportedVersion
+        if (stateRead.Status is WindowsSandboxStateReadStatus.Corrupt
+            or WindowsSandboxStateReadStatus.UnsupportedVersion
             or WindowsSandboxStateReadStatus.UnsafePath)
         {
             return ExecutionTargetEnsureResult.Failure(StateDiagnostic(stateRead));
         }
+
+        var previousRevision = stateRead.State?.Revision ?? 0;
+        if (previousRevision == long.MaxValue)
+        {
+            return ExecutionTargetEnsureResult.Failure(new ExecutionTargetDiagnostic(
+                ExecutionTargetDiagnosticCode.WindowsSandboxStateUnavailable,
+                "Windows Sandbox ownership state revision cannot be advanced safely."));
+        }
+        var nextRevision = previousRevision + 1;
 
         // Without a returned ID, a post-cancellation singleton cannot be distinguished
         // from an externally started Sandbox and must not be stopped automatically.
@@ -120,12 +130,13 @@ internal sealed class WindowsSandboxBackend(
             }
 
             var epoch = ExecutionTargetEpoch.Create();
-            var previousRevision = stateRead.State?.Revision ?? 0;
             var state = new WindowsSandboxTargetState
             {
+                Schema = WindowsSandboxTargetState.CurrentSchema,
+                TargetId = ExecutionTargetRef.WindowsSandboxDefaultId,
                 ProviderInstanceId = startedId,
                 Epoch = epoch.Value,
-                Revision = checked(previousRevision + 1),
+                Revision = nextRevision,
                 CreatedAtUtc = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture),
             };
 
@@ -183,7 +194,8 @@ internal sealed class WindowsSandboxBackend(
     {
         if (runningIds.Count == 0)
         {
-            if (stateRead.Status is WindowsSandboxStateReadStatus.UnsupportedVersion
+            if (stateRead.Status is WindowsSandboxStateReadStatus.Corrupt
+                or WindowsSandboxStateReadStatus.UnsupportedVersion
                 or WindowsSandboxStateReadStatus.UnsafePath)
             {
                 return UnavailableStatus(StateDiagnostic(stateRead));

@@ -36,7 +36,7 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
             var ids = new List<string>(output.WindowsSandboxEnvironments.Count);
             foreach (var environment in output.WindowsSandboxEnvironments)
             {
-                if (!TryNormalizeId(environment.Id, out var id))
+                if (environment is null || !TryNormalizeId(environment.Id, out var id))
                 {
                     return IncompatibleList("The WSB list response contained an invalid sandbox ID.");
                 }
@@ -160,7 +160,7 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
 
 internal sealed class WindowsSandboxListOutput
 {
-    public List<WindowsSandboxEnvironmentOutput>? WindowsSandboxEnvironments { get; set; }
+    public List<WindowsSandboxEnvironmentOutput?>? WindowsSandboxEnvironments { get; set; }
 }
 
 internal sealed class WindowsSandboxEnvironmentOutput

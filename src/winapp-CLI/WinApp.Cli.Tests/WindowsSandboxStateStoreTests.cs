@@ -96,6 +96,46 @@ public class WindowsSandboxStateStoreTests
     }
 
     [TestMethod]
+    public async Task ReadAsync_WhenSchemaMetadataIsMissing_ReturnsCorrupt()
+    {
+        await WriteRawStateAsync(
+            """
+            {
+              "target_id": "windows-sandbox:default",
+              "provider_instance_id": "sandbox-1",
+              "epoch": "0123456789abcdef0123456789abcdef",
+              "revision": 1,
+              "created_at_utc": "2026-08-19T12:00:00Z"
+            }
+            """);
+
+        var result = await _store.ReadAsync(TestContext.CancellationToken);
+
+        Assert.AreEqual(WindowsSandboxStateReadStatus.Corrupt, result.Status);
+        Assert.IsNull(result.State);
+    }
+
+    [TestMethod]
+    public async Task ReadAsync_WhenTargetMetadataIsMissing_ReturnsCorrupt()
+    {
+        await WriteRawStateAsync(
+            """
+            {
+              "schema": 1,
+              "provider_instance_id": "sandbox-1",
+              "epoch": "0123456789abcdef0123456789abcdef",
+              "revision": 1,
+              "created_at_utc": "2026-08-19T12:00:00Z"
+            }
+            """);
+
+        var result = await _store.ReadAsync(TestContext.CancellationToken);
+
+        Assert.AreEqual(WindowsSandboxStateReadStatus.Corrupt, result.Status);
+        Assert.IsNull(result.State);
+    }
+
+    [TestMethod]
     public async Task ReadAsync_WhenSchemaIsNewer_ReturnsUnsupportedVersion()
     {
         var path = _store.GetStateFile();
@@ -121,7 +161,7 @@ public class WindowsSandboxStateStoreTests
     }
 
     [TestMethod]
-    public async Task ReadAsync_WhenRevisionCannotAdvance_ReturnsCorrupt()
+    public async Task ReadAsync_WhenRevisionIsMaximum_ReturnsValidForFailClosedReconciliation()
     {
         var path = _store.GetStateFile();
         path.Directory!.Create();
@@ -141,8 +181,39 @@ public class WindowsSandboxStateStoreTests
 
         var result = await _store.ReadAsync(TestContext.CancellationToken);
 
-        Assert.AreEqual(WindowsSandboxStateReadStatus.Corrupt, result.Status);
-        Assert.IsNull(result.State);
+        Assert.AreEqual(WindowsSandboxStateReadStatus.Valid, result.Status);
+        Assert.AreEqual(long.MaxValue, result.State!.Revision);
+    }
+
+    [TestMethod]
+    public async Task ReadAsync_WhenMissingThroughJunction_ReturnsUnsafePath()
+    {
+        var realDirectory = Directory.CreateDirectory(Path.Combine(_tempDirectory.FullName, "real-target"));
+        var targetDirectory = Path.Combine(_tempDirectory.FullName, "windows-sandbox-default");
+        if (!TryCreateJunction(targetDirectory, realDirectory.FullName))
+        {
+            Assert.Inconclusive("Could not create a junction.");
+            return;
+        }
+
+        try
+        {
+            var result = await _store.ReadAsync(TestContext.CancellationToken);
+
+            Assert.AreEqual(WindowsSandboxStateReadStatus.UnsafePath, result.Status);
+            Assert.IsNull(result.State);
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(targetDirectory, recursive: false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Best-effort cleanup of the test junction.
+            }
+        }
     }
 
     [TestMethod]
@@ -158,11 +229,48 @@ public class WindowsSandboxStateStoreTests
     private static WindowsSandboxTargetState CreateState(string instanceId, string epoch, long revision) =>
         new()
         {
+            Schema = WindowsSandboxTargetState.CurrentSchema,
+            TargetId = ExecutionTargetRef.WindowsSandboxDefaultId,
             ProviderInstanceId = instanceId,
             Epoch = epoch,
             Revision = revision,
             CreatedAtUtc = "2026-08-19T12:00:00Z",
         };
+
+    private async Task WriteRawStateAsync(string json)
+    {
+        var path = _store.GetStateFile();
+        path.Directory!.Create();
+        await File.WriteAllTextAsync(path.FullName, json, TestContext.CancellationToken);
+    }
+
+    private static bool TryCreateJunction(string link, string target)
+    {
+        try
+        {
+            var startInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/c mklink /J \"{link}\" \"{target}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            using var process = System.Diagnostics.Process.Start(startInfo);
+            if (process is null)
+            {
+                return false;
+            }
+
+            process.WaitForExit(5000);
+            return process.ExitCode == 0 && Directory.Exists(link);
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     private sealed class FakeStateDirectoryProvider(DirectoryInfo root) : IExecutionTargetStateDirectoryProvider
     {

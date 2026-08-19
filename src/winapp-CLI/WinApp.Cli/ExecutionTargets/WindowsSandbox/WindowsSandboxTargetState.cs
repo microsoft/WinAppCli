@@ -9,9 +9,9 @@ internal sealed class WindowsSandboxTargetState
 {
     public const int CurrentSchema = 1;
 
-    public int Schema { get; set; } = CurrentSchema;
+    public required int Schema { get; set; }
 
-    public string TargetId { get; set; } = ExecutionTargetRef.WindowsSandboxDefaultId;
+    public required string TargetId { get; set; }
 
     public string ProviderInstanceId { get; set; } = string.Empty;
 

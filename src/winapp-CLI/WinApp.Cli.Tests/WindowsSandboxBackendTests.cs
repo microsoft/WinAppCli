@@ -225,12 +225,10 @@ public class WindowsSandboxBackendTests
     }
 
     [TestMethod]
-    public async Task EnsureAsync_CorruptStateWithoutLiveInstanceIsReplaced()
+    public async Task EnsureAsync_CorruptStateWithoutLiveInstanceFailsClosed()
     {
         var fixture = new Fixture();
         fixture.Cli.ListResults.Enqueue(SuccessfulList());
-        fixture.Cli.ListResults.Enqueue(SuccessfulList(SandboxOne));
-        fixture.Cli.StartResults.Enqueue(WindowsSandboxCliResult<string>.Success(SandboxOne));
         fixture.State.ReadResult = new WindowsSandboxStateReadResult(
             WindowsSandboxStateReadStatus.Corrupt,
             null,
@@ -238,8 +236,57 @@ public class WindowsSandboxBackendTests
 
         var result = await fixture.Backend.EnsureAsync(new ExecutionTargetRequirements());
 
+        Assert.IsFalse(result.Succeeded);
+        Assert.AreEqual(ExecutionTargetDiagnosticCode.WindowsSandboxStateUnavailable, result.Diagnostics.Single().Code);
+        Assert.AreEqual(0, fixture.Cli.StartCount);
+        Assert.AreEqual(0, fixture.State.Writes.Count);
+    }
+
+    [TestMethod]
+    public async Task GetStatusAsync_CorruptStateWithoutLiveInstanceIsUnavailable()
+    {
+        var fixture = new Fixture();
+        fixture.Cli.ListResults.Enqueue(SuccessfulList());
+        fixture.State.ReadResult = new WindowsSandboxStateReadResult(
+            WindowsSandboxStateReadStatus.Corrupt,
+            null,
+            "corrupt");
+
+        var result = await fixture.Backend.GetStatusAsync();
+
+        Assert.AreEqual(ExecutionTargetStatus.Unavailable, result.Status);
+        Assert.AreEqual(ExecutionTargetDiagnosticCode.WindowsSandboxStateUnavailable, result.Diagnostics.Single().Code);
+    }
+
+    [TestMethod]
+    public async Task EnsureAsync_ExhaustedRevisionFailsBeforeStartingSandbox()
+    {
+        var fixture = new Fixture();
+        fixture.Cli.ListResults.Enqueue(SuccessfulList());
+        fixture.State.ReadResult = ValidState(SandboxOne, EpochOne, long.MaxValue);
+
+        var result = await fixture.Backend.EnsureAsync(new ExecutionTargetRequirements());
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.AreEqual(ExecutionTargetDiagnosticCode.WindowsSandboxStateUnavailable, result.Diagnostics.Single().Code);
+        Assert.AreEqual(0, fixture.Cli.StartCount);
+        Assert.AreEqual(0, fixture.State.Writes.Count);
+    }
+
+    [TestMethod]
+    public async Task EnsureAsync_PenultimateRevisionAdvancesWithoutRollback()
+    {
+        var fixture = new Fixture();
+        fixture.Cli.ListResults.Enqueue(SuccessfulList());
+        fixture.Cli.ListResults.Enqueue(SuccessfulList(SandboxTwo));
+        fixture.Cli.StartResults.Enqueue(WindowsSandboxCliResult<string>.Success(SandboxTwo));
+        fixture.State.ReadResult = ValidState(SandboxOne, EpochOne, long.MaxValue - 1);
+
+        var result = await fixture.Backend.EnsureAsync(new ExecutionTargetRequirements());
+
         Assert.IsTrue(result.Succeeded);
-        Assert.AreEqual(1, fixture.State.Writes.Single().Revision);
+        Assert.AreEqual(long.MaxValue, fixture.State.Writes.Single().Revision);
+        Assert.AreEqual(0, fixture.Cli.StopIds.Count);
     }
 
     [TestMethod]
@@ -292,6 +339,8 @@ public class WindowsSandboxBackendTests
             WindowsSandboxStateReadStatus.Valid,
             new WindowsSandboxTargetState
             {
+                Schema = WindowsSandboxTargetState.CurrentSchema,
+                TargetId = ExecutionTargetRef.WindowsSandboxDefaultId,
                 ProviderInstanceId = instanceId,
                 Epoch = epoch,
                 Revision = revision,
