@@ -48,7 +48,7 @@ jobs:
           $out = Join-Path $env:RUNNER_TEMP "corpus-drift"
           "output=$out" >> $env:GITHUB_OUTPUT
 
-          dotnet run --project src/winapp-CLI/WinApp.Cli/WinApp.Cli.csproj -c Debug -- find-ui --bake $out
+          dotnet run --project src/winapp-CLI/WinApp.Cli.SnapshotBaker/WinApp.Cli.SnapshotBaker.csproj -c Debug -- $out
           "exitCode=$LASTEXITCODE" >> $env:GITHUB_OUTPUT
 
           if ($LASTEXITCODE -ne 0) {

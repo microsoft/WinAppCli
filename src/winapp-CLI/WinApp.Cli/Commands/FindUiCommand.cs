@@ -30,7 +30,6 @@ internal sealed class FindUiCommand : Command, IShortDescription
     public static Option<string?> SourceOption { get; }
     public static Option<int> MaxOption { get; }
     public static Option<bool> RefreshOption { get; }
-    public static Option<string?> BakeOption { get; }
 
     static FindUiCommand()
     {
@@ -67,16 +66,6 @@ internal sealed class FindUiCommand : Command, IShortDescription
         {
             Description = "Bypass the local cache and re-fetch the WinUI corpus from GitHub."
         };
-
-        // Build-time only: regenerates the corpus committed under Services/Controls/Data
-        // that ships embedded in the binary. Hidden because it is a maintainer operation,
-        // not a user-facing one — CliSchema drops hidden options, so it stays out of
-        // docs/cli-schema.json and the agent-facing surface.
-        BakeOption = new Option<string?>("--bake")
-        {
-            Description = "Fetch every source fresh and write the baked snapshot set to the given directory (build-time maintenance).",
-            Hidden = true
-        };
     }
 
     public FindUiCommand()
@@ -88,7 +77,6 @@ internal sealed class FindUiCommand : Command, IShortDescription
         Options.Add(SourceOption);
         Options.Add(MaxOption);
         Options.Add(RefreshOption);
-        Options.Add(BakeOption);
         Options.Add(WinAppRootCommand.JsonOption);
     }
 
@@ -106,15 +94,6 @@ internal sealed class FindUiCommand : Command, IShortDescription
             var source = parseResult.GetValue(SourceOption);
             var max = parseResult.GetValue(MaxOption);
             var refresh = parseResult.GetValue(RefreshOption);
-            var bakeDirectory = parseResult.GetValue(BakeOption);
-
-            // Maintenance mode: regenerate the committed corpus and exit. Handled before
-            // every other check because a bake takes none of the search/fetch/browse
-            // arguments those checks require.
-            if (!string.IsNullOrWhiteSpace(bakeDirectory))
-            {
-                return await BakeAsync(bakeDirectory, json, cancellationToken).ConfigureAwait(false);
-            }
 
             if (source is not null && !ProviderRegistry.IsValidSourceFilter(source))
             {
@@ -511,38 +490,5 @@ internal sealed class FindUiCommand : Command, IShortDescription
             $"No '{source}' control data could be loaded. find-ui normally serves this source from " +
             "the corpus baked into the CLI or a per-user cache; if both are unavailable, run the " +
             $"command with --refresh while online to repopulate the '{source}' data.";
-
-        /// <summary>
-        /// Regenerate the committed corpus. Fails loudly on a partial bake: a snapshot missing a
-        /// source would ship a binary that silently can't answer for it, which is the exact
-        /// failure mode the embedded corpus exists to prevent.
-        /// </summary>
-        private async Task<int> BakeAsync(string outputDirectory, bool json, CancellationToken cancellationToken)
-        {
-            try
-            {
-                var failures = await SnapshotBaker
-                    .BakeAsync(outputDirectory, message => logger.LogInformation("{Message}", message), cancellationToken)
-                    .ConfigureAwait(false);
-
-                if (failures.Count > 0)
-                {
-                    return Fail(json,
-                        $"Bake incomplete — no fresh data fetched for: {string.Join(", ", failures)}. " +
-                        "The existing committed snapshot was left untouched.");
-                }
-
-                return 0;
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                logger.LogDebug(ex, "find-ui bake failed");
-                return Fail(json, $"Bake failed: {ex.Message}");
-            }
-        }
     }
 }

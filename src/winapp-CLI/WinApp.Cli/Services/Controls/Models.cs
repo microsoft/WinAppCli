@@ -16,7 +16,7 @@ internal partial class ControlsJsonContext : JsonSerializerContext { }
 /// <summary>
 /// Write-side context for baked snapshots: indented so the committed corpus produces a
 /// reviewable line-by-line diff instead of one unreadable mega-line. Reading goes through
-/// <see cref="ControlsJsonContext"/>; only <c>--bake</c> uses this.
+/// <see cref="ControlsJsonContext"/>; only the build-time snapshot baker uses this.
 /// </summary>
 [JsonSourceGenerationOptions(WriteIndented = true)]
 [JsonSerializable(typeof(ProviderSnapshot))]

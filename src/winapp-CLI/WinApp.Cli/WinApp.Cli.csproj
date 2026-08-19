@@ -37,6 +37,7 @@
 
     <!-- Allow test project to access internal types -->
     <InternalsVisibleTo>WinApp.Cli.Tests</InternalsVisibleTo>
+    <InternalsVisibleTo>WinApp.Cli.SnapshotBaker</InternalsVisibleTo>
 
     <!-- The *first* DefineConstants is removed during Official Release Builds (.pipelines/Unstub.ps1)-->
     <DefineConstants>TELEMETRYEVENTSOURCE_PUBLIC</DefineConstants>
@@ -102,6 +103,11 @@
   <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
       <_Parameter1>WinApp.Cli.Tests</_Parameter1>
+    </AssemblyAttribute>
+    <!-- Build-time corpus baker (not shipped). Needs ProviderRegistry, the fetchers and
+         PathSafety, which is why the bake cannot simply be a script in CI. -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>WinApp.Cli.SnapshotBaker</_Parameter1>
     </AssemblyAttribute>
   </ItemGroup>
 

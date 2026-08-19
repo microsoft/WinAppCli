@@ -7,7 +7,7 @@ namespace WinApp.Cli.Services.Controls;
 /// stamps this string into that provider's <c>schema-version.txt</c> on write
 /// and requires an exact match on read; any mismatch forces a cache miss.
 ///
-/// It also pins the corpus baked into the binary: <see cref="SnapshotBaker"/> writes
+/// It also pins the corpus baked into the binary: the build-time snapshot baker writes
 /// <see cref="Current"/> into the snapshot manifest and <see cref="EmbeddedSnapshot"/>
 /// refuses to serve a snapshot stamped with anything else, so a snapshot produced by
 /// different extraction logic can never be mixed with live or cached data.

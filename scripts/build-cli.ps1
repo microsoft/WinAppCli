@@ -115,6 +115,8 @@ try
     $CliSolutionPath = "$CliSolutionDir\winapp.sln"
     $CliProjectPath = "$CliSolutionDir\WinApp.Cli\WinApp.Cli.csproj"
     $CliTestsProjectPath = "$CliSolutionDir\WinApp.Cli.Tests\WinApp.Cli.Tests.csproj"
+    # Build-time only, never shipped: regenerates the embedded find-ui corpus.
+    $SnapshotBakerProjectPath = "$CliSolutionDir\WinApp.Cli.SnapshotBaker\WinApp.Cli.SnapshotBaker.csproj"
     $ArtifactsPath = "artifacts"
     $TestResultsPath = "TestResults"
 
@@ -217,7 +219,7 @@ try
         $PreviousSnapshots = @(Get-ChildItem -Path $SnapshotDataPath -Filter "snapshot-*" -ErrorAction SilentlyContinue)
         $PreviousSnapshots | Copy-Item -Destination $BakeBackup -Force
 
-        dotnet run --project $CliProjectPath -c Debug -- find-ui --bake $SnapshotDataPath
+        dotnet run --project $SnapshotBakerProjectPath -c Debug -- $SnapshotDataPath
         $BakeExitCode = $LASTEXITCODE
 
         if ($BakeExitCode -ne 0) {
@@ -244,7 +246,7 @@ try
             }
         )
         if ($MissingSnapshots.Count -gt 0) {
-            Write-Error "Stable build is missing the find-ui corpus: $($MissingSnapshots -join ', '). Shipping without it leaves find-ui non-functional offline (issue #704). Run: dotnet run --project $CliProjectPath -- find-ui --bake $SnapshotDataPath"
+            Write-Error "Stable build is missing the find-ui corpus: $($MissingSnapshots -join ', '). Shipping without it leaves find-ui non-functional offline (issue #704). Run: dotnet run --project $SnapshotBakerProjectPath -- $SnapshotDataPath"
             exit 1
         }
     }

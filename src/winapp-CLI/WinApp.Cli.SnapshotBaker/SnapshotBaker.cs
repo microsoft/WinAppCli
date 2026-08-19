@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft Corporation.
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
 namespace WinApp.Cli.Services.Controls;
@@ -9,10 +9,11 @@ using System.Text.Json;
 using WinApp.Cli.Helpers;
 
 /// <summary>
-/// Produces the corpus that <see cref="EmbeddedSnapshot"/> serves. Invoked by the hidden
-/// <c>winapp find-ui --bake &lt;dir&gt;</c> option from <c>build-cli.ps1</c> on the release
-/// path, writing uncompressed, indented JSON that is committed to the repo; the build
-/// Brotli-compresses it into the binary.
+/// Produces the corpus that <c>EmbeddedSnapshot</c> serves. Lives in the build-time
+/// <c>WinApp.Cli.SnapshotBaker</c> tool rather than in the CLI, so regenerating the
+/// corpus is not reachable from the shipped product. Invoked by
+/// <c>scripts/build-cli.ps1</c> on the release path, writing uncompressed, indented
+/// JSON that is committed to the repo; the build Brotli-compresses it into the binary.
 ///
 /// The committed form is deliberately uncompressed: a compressed blob in git cannot be
 /// reviewed, and the whole point of baking is that corpus regressions — malformed XAML,
@@ -135,7 +136,10 @@ internal static class SnapshotBaker
         {
             try
             {
-                if (Directory.Exists(scratchCache)) Directory.Delete(scratchCache, recursive: true);
+                if (Directory.Exists(scratchCache))
+                {
+                    Directory.Delete(scratchCache, recursive: true);
+                }
             }
             catch { /* scratch cleanup is best-effort */ }
         }
