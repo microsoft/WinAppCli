@@ -23,8 +23,8 @@ if (args.Length != 1 || string.IsNullOrWhiteSpace(args[0]))
     return 1;
 }
 
-// Ctrl+C should abandon the bake rather than leave it half-written; BakeAsync writes
-// each snapshot atomically and only writes the manifest after every source succeeds.
+// Ctrl+C should abandon the bake rather than leave it half-written; BakeAsync stages the
+// whole set and only moves it into place once every source and the manifest have succeeded.
 using var cancellation = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
 {

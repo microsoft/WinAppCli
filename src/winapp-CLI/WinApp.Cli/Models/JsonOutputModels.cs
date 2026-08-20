@@ -84,7 +84,8 @@ internal sealed class FindUiCodeJsonOutput
     /// <summary>
     /// Least-fresh origin backing this response: <c>network</c> (fetched now),
     /// <c>cache</c> (this machine's earlier fetch), or <c>embedded</c> (the corpus baked
-    /// into the CLI, meaning GitHub was unreachable and these samples may lag upstream).
+    /// into the CLI, so these samples may lag upstream — either the fetch failed or the
+    /// local cache predates the bake).
     /// Reported so an agent can tell a live answer from an offline fallback. Omitted when
     /// the result came only from the curated core patterns, which have no upstream.
     /// </summary>

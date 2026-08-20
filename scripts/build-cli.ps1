@@ -210,10 +210,11 @@ try
     if ($ShouldBake) {
         Write-Host "[BAKE] Refreshing find-ui corpus from GitHub..." -ForegroundColor Blue
 
-        # Keep the last known good set aside. A partial bake rewrites the sources that
-        # succeeded but leaves the manifest alone, so the committed set would end up
-        # internally inconsistent -- fresh scenarios stamped with a stale bake time.
-        # Restoring wholesale is the only way to keep the corpus coherent.
+        # Keep the last known good set aside. The baker stages a bake and only publishes it
+        # once every source and the manifest have succeeded, so a failed run should leave the
+        # committed corpus untouched -- this backup covers the residue of a crash or a kill
+        # partway through that publish, where restoring wholesale is the only way to get a
+        # coherent corpus back.
         $BakeBackup = Join-Path ([System.IO.Path]::GetTempPath()) "winapp-bake-backup-$([guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path $BakeBackup -Force | Out-Null
         $PreviousSnapshots = @(Get-ChildItem -Path $SnapshotDataPath -Filter "snapshot-*" -ErrorAction SilentlyContinue)

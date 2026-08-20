@@ -137,12 +137,17 @@ public class EmbeddedSnapshotTests
         // them identically on a live fetch — that is issue #716 (truncated samples), not a
         // property of baking. What this test must catch is the snapshot becoming materially
         // worse than the live corpus it stands in for.
+        // Deserialized fresh from the embedded resource rather than through
+        // EmbeddedSnapshot.TryLoad: TryLoad memoizes one ProviderData per provider for the
+        // life of the process, Scenario is a mutable class, and SanitizeAll rewrites it in
+        // place — so sanitizing a TryLoad result would permanently strip code out of the
+        // corpus every other test in this parallel assembly reads.
         var report = new List<string>();
         var regressed = new List<string>();
 
         foreach (var descriptor in ProviderRegistry.Descriptors)
         {
-            var scenarios = EmbeddedSnapshot.TryLoad(descriptor.Id)!.Scenarios;
+            var scenarios = ReadEmbeddedSnapshot(descriptor.Id)!.Scenarios;
             var before = scenarios.Count(HasCode);
 
             ScenarioSanitizer.SanitizeAll(scenarios);
@@ -425,6 +430,29 @@ public class EmbeddedSnapshotTests
         await sut.GetEngineAsync(coreOnly: true);
 
         Assert.AreEqual(CorpusOrigin.None, sut.LoadedOrigin);
+    }
+
+    [TestMethod]
+    public async Task LoadedOrigin_MemoizedEngineHit_ReportsThatEngineSOrigin()
+    {
+        // The origin has to travel with the engine it describes. A core-only request
+        // legitimately reports "no corpus", and the memoized full engine is returned
+        // without being rebuilt — so if the fast path doesn't restore its origin, the next
+        // search silently loses `"corpus"` from --json and stops warning that results came
+        // from the embedded floor.
+        var gallery = new FakeSearchProvider("gallery", DataWithOrigin("gallery", "tabview", CorpusOrigin.Embedded));
+        var sut = new ControlsSearchService([gallery]);
+
+        await sut.GetEngineAsync();
+        Assert.AreEqual(CorpusOrigin.Embedded, sut.LoadedOrigin);
+
+        await sut.GetEngineAsync(coreOnly: true);
+        Assert.AreEqual(CorpusOrigin.None, sut.LoadedOrigin);
+
+        await sut.GetEngineAsync();
+
+        Assert.AreEqual(CorpusOrigin.Embedded, sut.LoadedOrigin,
+            "a memoized engine must keep reporting the origin its corpus was loaded from");
     }
 
     // ------------------------------------------------------------------

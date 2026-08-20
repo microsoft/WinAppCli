@@ -204,6 +204,13 @@ internal sealed class FindUiCommand : Command, IShortDescription
         /// the offline path is silent and indistinguishable from a live fetch — and the
         /// "Fetching WinUI controls from GitHub..." notice has usually already been shown by
         /// the attempt that failed, which would otherwise imply the data is current.
+        /// <para>
+        /// The notice states <i>what</i> was served, never <i>why</i>. A failed fetch is only
+        /// one of the ways the embedded corpus wins: a still-fresh cache that predates the
+        /// bake is served from the snapshot too (see <c>CachedProviderBase.PreferNewerOf</c>),
+        /// with no network attempt at all, so claiming GitHub was unreachable would be a lie
+        /// on that path.
+        /// </para>
         /// Written to <b>stderr</b> on the same terms as <see cref="BuildFetchNotice"/>: a
         /// user redirecting stdout to a file keeps the results clean and still sees the
         /// staleness warning on the terminal. Under <c>--json</c> the provenance is carried
@@ -224,8 +231,8 @@ internal sealed class FindUiCommand : Command, IShortDescription
 
             AnsiConsole.Create(new AnsiConsoleSettings { Out = new AnsiConsoleOutput(Console.Error) })
                 .MarkupLine(
-                    "[grey]Using the WinUI corpus built into the CLI (GitHub was unreachable). "
-                    + "These samples may lag upstream; run with --refresh when online.[/]");
+                    "[grey]Using the WinUI corpus built into the CLI. "
+                    + "These samples may lag upstream; run with --refresh to fetch the latest.[/]");
         }
 
         private int EmitSearch(SearchEngine engine, string query, int max, string? source, bool includeReactor, bool json)

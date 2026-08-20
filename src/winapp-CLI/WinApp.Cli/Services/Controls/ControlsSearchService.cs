@@ -75,6 +75,13 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
     // with-Reactor engine, so switching between a normal search and a
     // `--source reactor` search within one process doesn't clobber either cache.
     private SearchEngine? _engineWithReactor;
+    // The origin each memoized engine was built from. Kept beside the engine rather than
+    // only in LoadedOrigin because a memoized hit returns without rebuilding: without
+    // these, a core-only call (which sets the origin to None) followed by a cache hit on
+    // the full engine would report no corpus at all, dropping the `corpus` field from
+    // --json and suppressing the embedded-corpus notice.
+    private CorpusOrigin _engineOrigin = CorpusOrigin.None;
+    private CorpusOrigin _engineWithReactorOrigin = CorpusOrigin.None;
     // A core-only engine (embedded patterns, no network) for requests satisfiable by
     // core alone (--source core, all-core --id). Deterministic embedded data, so it's
     // safe to memoize; kept separate from the network-backed engines above.
@@ -135,6 +142,7 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
         var memoized = includeReactor ? _engineWithReactor : _engine;
         if (memoized != null && !forceRefresh)
         {
+            LoadedOrigin = includeReactor ? _engineWithReactorOrigin : _engineOrigin;
             return memoized;
         }
 
@@ -144,6 +152,7 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
             memoized = includeReactor ? _engineWithReactor : _engine;
             if (memoized != null && !forceRefresh)
             {
+                LoadedOrigin = includeReactor ? _engineWithReactorOrigin : _engineOrigin;
                 return memoized;
             }
 
@@ -156,6 +165,8 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
             {
                 _engine = null;
                 _engineWithReactor = null;
+                _engineOrigin = CorpusOrigin.None;
+                _engineWithReactorOrigin = CorpusOrigin.None;
             }
 
             var allScenarios = new List<Scenario>();
@@ -240,10 +251,12 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
                 if (includeReactor)
                 {
                     _engineWithReactor = engine;
+                    _engineWithReactorOrigin = leastFreshOrigin;
                 }
                 else
                 {
                     _engine = engine;
+                    _engineOrigin = leastFreshOrigin;
                 }
             }
             return engine;
@@ -273,6 +286,8 @@ internal sealed class ControlsSearchService : IControlsSearchService, IDisposabl
         _engine = null;
         _engineWithReactor = null;
         _coreOnlyEngine = null;
+        _engineOrigin = CorpusOrigin.None;
+        _engineWithReactorOrigin = CorpusOrigin.None;
 
         var failures = new List<Exception>();
         foreach (var provider in _providers)

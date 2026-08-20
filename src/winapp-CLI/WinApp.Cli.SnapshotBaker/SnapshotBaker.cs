@@ -56,8 +56,10 @@ internal static class SnapshotBaker
     /// </summary>
     /// <returns>
     /// The ids of providers that could not be baked. Empty means a complete bake. A
-    /// partial result is never written as if it were complete — the caller decides
-    /// whether to fail or keep the previous committed corpus.
+    /// partial result is never written as if it were complete — the whole set is built in a
+    /// staging directory and only moved into <paramref name="outputDirectory"/> once every
+    /// provider and the manifest have succeeded, so a failed, cancelled, or crashed bake
+    /// leaves the previous committed corpus exactly as it was.
     /// </returns>
     public static async Task<IReadOnlyList<string>> BakeAsync(
         string outputDirectory,
@@ -70,6 +72,17 @@ internal static class SnapshotBaker
         // directory so a bake never reads from — or writes to — the developer's real
         // find-ui cache, which would let a warm local cache masquerade as a fresh fetch.
         var scratchCache = Path.Join(Path.GetTempPath(), $"winapp-bake-{Guid.NewGuid():N}");
+
+        // Snapshots land here first and are moved into place only after the whole set
+        // succeeds. Writing them straight into outputDirectory would leave a provider that
+        // succeeded next to a manifest from the previous bake if a later provider failed —
+        // fresh scenarios stamped with a stale bake time. Staged *inside* outputDirectory
+        // so the publish below is a same-volume move rather than a cross-volume copy, and
+        // dot-prefixed so it can't be picked up by the `snapshot-*` globs in the csproj or
+        // in build-cli.ps1.
+        var staging = Path.Join(outputDirectory, $".bake-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(staging);
+
         var failures = new List<string>();
         var counts = new SortedDictionary<string, int>(StringComparer.Ordinal);
 
@@ -101,7 +114,7 @@ internal static class SnapshotBaker
                     Keywords = new SortedDictionary<string, string[]>(data.Keywords, StringComparer.Ordinal)
                 };
 
-                var path = Path.Join(outputDirectory, SnapshotFileName(provider.Id));
+                var path = Path.Join(staging, SnapshotFileName(provider.Id));
                 await WriteSnapshotPairAsync(
                     path,
                     JsonSerializer.Serialize(snapshot, ControlsSnapshotWriteContext.Default.ProviderSnapshot),
@@ -124,24 +137,45 @@ internal static class SnapshotBaker
             };
 
             await PathSafety.AtomicWriteAllTextAsync(
-                Path.Join(outputDirectory, ManifestFileName),
+                Path.Join(staging, ManifestFileName),
                 JsonSerializer.Serialize(manifest, ControlsSnapshotWriteContext.Default.SnapshotManifest),
                 Utf8NoBom,
                 cancellationToken).ConfigureAwait(false);
+
+            Publish(staging, outputDirectory);
 
             report($"Baked {counts.Count} sources at cache version {Controls.CacheVersion.Current}.");
             return failures;
         }
         finally
         {
-            try
-            {
-                if (Directory.Exists(scratchCache))
-                {
-                    Directory.Delete(scratchCache, recursive: true);
-                }
-            }
-            catch { /* scratch cleanup is best-effort */ }
+            TryDeleteDirectory(scratchCache);
+            TryDeleteDirectory(staging);
         }
+    }
+
+    /// <summary>
+    /// Move a complete staged bake into its final home, overwriting the previous corpus.
+    /// Called only once every provider and the manifest have been written, so the
+    /// destination never holds a mix of the two bakes for longer than this loop.
+    /// </summary>
+    private static void Publish(string staging, string outputDirectory)
+    {
+        foreach (var staged in Directory.GetFiles(staging))
+        {
+            File.Move(staged, Path.Join(outputDirectory, Path.GetFileName(staged)), overwrite: true);
+        }
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+        catch { /* cleanup of a temp directory is best-effort */ }
     }
 }
