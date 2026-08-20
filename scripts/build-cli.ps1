@@ -30,7 +30,8 @@
 .PARAMETER SkipBake
     Skip refreshing the find-ui corpus baked into the CLI. The bake only runs on -Stable
     builds; use this to opt out of it on a release build (the committed snapshot is shipped
-    as-is).
+    as-is). This is the deliberate override for a known-transient upstream outage: without
+    it, a bake that fails on a stable build fails the build.
 .PARAMETER Bake
     Refresh the find-ui corpus even on a prerelease build. Requires network access to GitHub.
 .EXAMPLE
@@ -199,11 +200,17 @@ try
     # (or explicit -Bake): every prerelease re-baking would churn a ~930 KB committed diff
     # for no benefit, since the snapshot only reaches users when they upgrade the CLI.
     #
-    # A bake failure is never fatal. Upstream being unreachable or restructured must not
-    # block a release -- the previous committed corpus is still valid, just older. What IS
-    # fatal is having no corpus at all on a stable build: that ships a CLI whose find-ui is
-    # non-functional offline, which is the exact regression the embedded snapshot exists to
-    # prevent (issue #704).
+    # A bake failure fails a stable build. The baker fetches through the same providers
+    # `find-ui --refresh` uses at runtime and accepts nothing but CorpusOrigin.Network, so a
+    # bake that cannot complete is direct evidence that the refresh path is broken for users
+    # too. Shipping the previously committed corpus in that state would hide the breakage
+    # behind data that is already stale and that nobody in the field can update -- the
+    # release has to stop and a human has to look. -SkipBake is the deliberate override for
+    # an upstream outage known to be transient.
+    #
+    # Equally fatal is having no corpus at all on a stable build: that ships a CLI whose
+    # find-ui is non-functional offline, the exact regression the embedded snapshot exists
+    # to prevent (issue #704).
     $SnapshotDataPath = "$CliSolutionDir\WinApp.Cli\Services\Controls\Data"
     $ShouldBake = ($Stable -or $Bake) -and (-not $SkipBake)
 
@@ -224,16 +231,24 @@ try
         $BakeExitCode = $LASTEXITCODE
 
         if ($BakeExitCode -ne 0) {
-            Write-Warning "[BAKE] Corpus refresh failed (exit $BakeExitCode). Restoring the previously committed snapshot and continuing."
+            # Restore before deciding what to do about it, so a bake that died partway
+            # through its publish never leaves a half-written corpus in the working tree.
             Get-ChildItem -Path $SnapshotDataPath -Filter "snapshot-*" -ErrorAction SilentlyContinue | Remove-Item -Force
             Get-ChildItem -Path $BakeBackup -ErrorAction SilentlyContinue | Copy-Item -Destination $SnapshotDataPath -Force
+            Remove-Item $BakeBackup -Recurse -Force -ErrorAction SilentlyContinue
+
+            if ($Stable) {
+                Write-Error "Stable build aborted: the find-ui corpus refresh failed (exit $BakeExitCode). The baker fetches through the same providers 'winapp find-ui --refresh' uses, so this failure means users cannot refresh either -- shipping the previously committed corpus would hide that behind data nobody can update. Investigate upstream, then re-run. To ship the committed corpus anyway for a known-transient outage, re-run with -SkipBake."
+                exit 1
+            }
+
+            Write-Warning "[BAKE] Corpus refresh failed (exit $BakeExitCode). Restored the previously committed snapshot; not a stable build, so continuing."
         } else {
             Write-Host "[BAKE] Corpus refreshed." -ForegroundColor Green
+            Remove-Item $BakeBackup -Recurse -Force -ErrorAction SilentlyContinue
         }
-
-        Remove-Item $BakeBackup -Recurse -Force -ErrorAction SilentlyContinue
     } elseif ($Stable) {
-        Write-Host "[BAKE] Skipped (-SkipBake); shipping the committed find-ui corpus as-is." -ForegroundColor Yellow
+        Write-Warning "[BAKE] Skipped (-SkipBake); shipping the committed find-ui corpus as-is. It may be several releases behind upstream."
     }
 
     # Whether or not we just baked, a stable build must carry a complete, non-empty corpus.
