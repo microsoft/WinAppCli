@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Security.Cryptography;
+using System.Text;
+
 namespace WinApp.Cli.Services.ApiSearch;
 
 /// <summary>
@@ -11,6 +14,16 @@ namespace WinApp.Cli.Services.ApiSearch;
 /// </summary>
 internal static class ApiCachePaths
 {
+    /// <summary>
+    /// Version of the on-disk cache layout. Bump this whenever the *shape* or
+    /// *naming* of the files under a package cache directory changes: a cache
+    /// written by an older layout is otherwise reused and reads as an empty
+    /// index rather than an error. <see cref="PackageMeta.Format"/> records the
+    /// version a cache was written with, and the builder refuses to reuse a
+    /// package whose recorded version is not this one.
+    /// </summary>
+    internal const int CacheFormatVersion = 2;
+
     /// <summary>
     /// File name of the machine-wide "SDK scope" manifest, written as a sibling of
     /// the <c>projects</c> directory (never inside it) so it can never collide with
@@ -25,12 +38,25 @@ internal static class ApiCachePaths
     internal static string SdkManifestPath(string cacheDir) => Path.Combine(cacheDir, SdkManifestFileName);
 
     /// <summary>
+    /// First 8 hex characters of the SHA-256 of <paramref name="value"/>, used to
+    /// make otherwise-lossy cache file and directory names injective.
+    /// </summary>
+    internal static string ShortHash(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))[..8].ToLowerInvariant();
+
+    /// <summary>
     /// Maps a namespace (or the <c>_GlobalNamespace</c> sentinel) to its
     /// per-namespace types file name. Dots become underscores; any remaining
     /// path-significant character is neutralized so a crafted namespace such as
     /// <c>..\..\evil</c> can't traverse out of the <c>types</c> directory.
-    /// Legitimate .NET namespaces (identifier characters and dots) are
-    /// unaffected, so the write and read sides still agree.
+    /// <para>
+    /// That sanitizing is lossy — <c>A.B</c> and <c>A_B</c> both reduce to
+    /// <c>A_B</c>, and Windows file names are case-insensitive on top of that —
+    /// so a hash of the exact namespace is appended to keep the mapping
+    /// injective. Without it, two real namespaces share one file, the parallel
+    /// export overwrites one with the other, and later queries silently omit a
+    /// namespace or answer with the wrong one's types.
+    /// </para>
     /// </summary>
     internal static string NamespaceFileName(string ns)
     {
@@ -39,7 +65,14 @@ internal static class ApiCachePaths
         {
             name = name.Replace(c, '_');
         }
-        return name + ".json";
+        // The hash covers the full namespace, so truncating the readable part
+        // (which only exists to make the cache browsable) stays collision-safe
+        // while keeping the path within the file-name length limit.
+        if (name.Length > 100)
+        {
+            name = name[..100];
+        }
+        return name + "_" + ShortHash(ns) + ".json";
     }
 
     /// <summary>

@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.6.1
+ * Source schema version: 0.6.3
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -295,7 +295,7 @@ export interface FindApiOptions extends CommonOptions {
 }
 
 /**
- * Search and inspect the Windows/WinRT API surface (types, members, enums) available to a project, resolved from its referenced .winmd/.dll metadata. The bare form searches; sub-verbs drill into a specific type or the index itself. Search, members, enums, and check-property each accept several subjects in one call — batch your lookups rather than issuing one call per question. The index is built from the project's restored NuGet/SDK packages and refreshed automatically when the project is restored.
+ * Agent-first: built primarily for AI coding agents to ground code generation in the API surface a project actually references instead of guessing (pair it with --json); it works just as well typed by hand. Search and inspect the Windows/WinRT API surface (types, members, enums) available to a project, resolved from its referenced .winmd/.dll metadata. The bare form searches; sub-verbs drill into a specific type or the index itself. Search, members, enums, and check-property each accept several subjects in one call — batch your lookups rather than issuing one call per question. The index is built from the project's restored NuGet/SDK packages and refreshed automatically when the project is restored.
  */
 export async function findApi(options: FindApiOptions = {}): Promise<WinappResult> {
   const args: string[] = ['find-api'];
@@ -506,7 +506,7 @@ export interface FindUiOptions extends CommonOptions {
 }
 
 /**
- * Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery and the Windows Community Toolkit by default (plus the microsoft-ui-reactor ReactorGallery as an opt-in source via --source reactor); not WPF/WinForms. The Gallery/Toolkit/Reactor corpus is fetched from GitHub on first use and cached per-user, so the first such run needs network access; --source core searches the built-in patterns and works fully offline.
+ * Agent-first: built primarily for AI coding agents to pull a real WinUI sample into the editor instead of inventing markup (pair it with --json); it works just as well typed by hand. Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery and the Windows Community Toolkit by default (plus the microsoft-ui-reactor ReactorGallery as an opt-in source via --source reactor); not WPF/WinForms. The Gallery/Toolkit/Reactor corpus is fetched from GitHub on first use and cached per-user, so the first such run needs network access; --source core searches the built-in patterns and works fully offline.
  */
 export async function findUi(options: FindUiOptions = {}): Promise<WinappResult> {
   const args: string[] = ['find-ui'];

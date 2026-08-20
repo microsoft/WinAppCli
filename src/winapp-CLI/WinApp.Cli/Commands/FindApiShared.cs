@@ -380,6 +380,10 @@ internal static class FindApiShared
         }
 
         console.WriteLine($"\u274c {output.Type} does not have property '{output.Property}'");
+        if (output.Warning is not null)
+        {
+            console.WriteLine($"   \u26a0 {output.Warning}");
+        }
         console.WriteLine();
         if (output.SimilarOnType.Count > 0)
         {

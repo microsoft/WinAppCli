@@ -150,7 +150,7 @@ internal static class ApiCacheBuilder
                 // Already resolved for an earlier project in this run.
                 reused++;
             }
-            else if (!mustRebuild && File.Exists(Path.Combine(packageCacheDir, "meta.json")))
+            else if (!mustRebuild && IsReusableCache(packageCacheDir))
             {
                 reused++;
             }
@@ -161,6 +161,34 @@ internal static class ApiCacheBuilder
             packageRefs.Add(new ProjectPackageRef { Id = package.Id, Version = package.Version });
         }
         return packageRefs;
+    }
+
+    /// <summary>
+    /// Whether an existing package cache can be reused as-is. A cache written by an
+    /// older layout is *not* reusable: the file naming it used no longer matches what
+    /// the query side looks for, so reusing it would read as an empty index — a silent
+    /// wrong answer — rather than an error. It is also not reusable when the previous
+    /// run failed to parse one of its metadata files, so a transient read failure heals
+    /// on the next refresh instead of being cached forever.
+    /// </summary>
+    private static bool IsReusableCache(string packageCacheDir)
+    {
+        string metaPath = Path.Combine(packageCacheDir, "meta.json");
+        if (!File.Exists(metaPath))
+        {
+            return false;
+        }
+        try
+        {
+            PackageMeta? meta = JsonSerializer.Deserialize(File.ReadAllText(metaPath), ApiSearchJsonContext.Default.PackageMeta);
+            return meta is { Incomplete: false } && meta.Format == ApiCachePaths.CacheFormatVersion;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            // An unreadable or malformed meta.json reads as "no usable cache", so the
+            // package is simply re-exported.
+            return false;
+        }
     }
 
     /// <summary>
@@ -244,19 +272,29 @@ internal static class ApiCacheBuilder
         Directory.CreateDirectory(typesDir);
 
         var types = new List<WinMdTypeInfo>();
+        var parseErrors = new List<string>();
         if (package.WinMdFiles.Count == 1)
         {
-            types.AddRange(WinMdParser.ParseFile(package.WinMdFiles[0]));
+            WinMdParser.WinMdParseResult single = WinMdParser.ParseFile(package.WinMdFiles[0]);
+            types.AddRange(single.Types);
+            if (single.Error is not null)
+            {
+                parseErrors.Add($"{Path.GetFileName(package.WinMdFiles[0])}: {single.Error}");
+            }
         }
         else if (package.WinMdFiles.Count > 1)
         {
             // Parsing is CPU-bound and each metadata file is independent, so fan
             // out and reassemble in file order to keep the output deterministic.
-            var perFile = new List<WinMdTypeInfo>[package.WinMdFiles.Count];
+            var perFile = new WinMdParser.WinMdParseResult[package.WinMdFiles.Count];
             Parallel.For(0, package.WinMdFiles.Count, i => perFile[i] = WinMdParser.ParseFile(package.WinMdFiles[i]));
-            foreach (List<WinMdTypeInfo> fileTypes in perFile)
+            for (int i = 0; i < perFile.Length; i++)
             {
-                types.AddRange(fileTypes);
+                types.AddRange(perFile[i].Types);
+                if (perFile[i].Error is not null)
+                {
+                    parseErrors.Add($"{Path.GetFileName(package.WinMdFiles[i])}: {perFile[i].Error}");
+                }
             }
         }
 
@@ -293,12 +331,18 @@ internal static class ApiCacheBuilder
 
         var meta = new PackageMeta
         {
+            Format = ApiCachePaths.CacheFormatVersion,
             PackageId = package.Id,
             Version = package.Version,
             WinMdFiles = package.WinMdFiles.Select(Path.GetFileName).Where(n => n != null).Select(n => n!).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             TotalTypes = types.Count,
             TotalMembers = types.Sum(t => t.Members.Count),
             TotalNamespaces = namespaceNames.Count,
+            // Recorded so the query side can qualify a "not found" answer: a file that
+            // failed to parse contributed no types, and without this marker a missing
+            // API is indistinguishable from one that was simply never indexed.
+            Incomplete = parseErrors.Count > 0,
+            ParseErrors = parseErrors.Count > 0 ? parseErrors : null,
             GeneratedAt = DateTime.UtcNow.ToString("o"),
         };
         WriteFileAtomic(Path.Combine(cacheDir, "namespaces.json"), JsonSerializer.Serialize(namespaceNames, ApiSearchJsonContext.Default.ListString));
@@ -375,8 +419,7 @@ internal static class ApiCacheBuilder
     internal static string ManifestName(string projectFile)
     {
         string fullPath = Path.GetFullPath(projectFile);
-        string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullPath)))[..8].ToLowerInvariant();
-        return Path.GetFileNameWithoutExtension(fullPath) + "_" + hash;
+        return Path.GetFileNameWithoutExtension(fullPath) + "_" + ApiCachePaths.ShortHash(fullPath);
     }
 
     internal static string? FindProjectNameInDir(string dir)
@@ -422,8 +465,40 @@ internal static class ApiCacheBuilder
             {
                 return null;
             }
-            string output = process.StandardOutput.ReadToEnd().Trim();
-            process.WaitForExit(15000);
+
+            // Both streams are drained asynchronously *before* waiting. Reading
+            // stdout synchronously would block until the process exits — making the
+            // timeout below unreachable — and leaving stderr undrained lets a chatty
+            // or hung query fill its pipe and deadlock the very first index build.
+            var stdout = new StringBuilder();
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data != null)
+                {
+                    lock (stdout)
+                    {
+                        stdout.AppendLine(e.Data);
+                    }
+                }
+            };
+            process.ErrorDataReceived += (_, _) => { };
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            if (!process.WaitForExit(15000))
+            {
+                KillProcessTree(process);
+                return null;
+            }
+            // Second, untimed wait: it is what flushes the async output handlers, so
+            // the buffer below is complete rather than racing the last callback.
+            process.WaitForExit();
+
+            string output;
+            lock (stdout)
+            {
+                output = stdout.ToString().Trim();
+            }
             if (process.ExitCode == 0 && !string.IsNullOrEmpty(output) && Directory.Exists(output))
             {
                 return output;
@@ -437,5 +512,20 @@ internal static class ApiCacheBuilder
             // caller fall back to the packages it already resolved.
         }
         return null;
+    }
+
+    private static void KillProcessTree(Process process)
+    {
+        try
+        {
+            process.Kill(entireProcessTree: true);
+            process.WaitForExit(2000);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException
+            or System.ComponentModel.Win32Exception or AggregateException)
+        {
+            // The process already exited, or the OS refused the kill. Either way the
+            // caller only needs "no runtime detected".
+        }
     }
 }

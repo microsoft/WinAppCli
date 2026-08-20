@@ -1,7 +1,31 @@
 ---
 name: winapp-find-api
-description: Search and inspect the Windows/WinRT API surface (types, members, enums, namespaces) available to a project, resolved from its referenced .winmd/.dll metadata — or, outside any project, from the machine-wide Windows SDK. Use when an AI agent or developer needs to discover an API, list a type's properties/events/methods, validate that a property exists before writing XAML/code, enumerate an enum's values, explore the namespaces and packages a project can call, or resolve a compile error that names a type or member (CS0246, CS0117, CS1061, CS0104, XAML unknown member). Works with WinUI 3, WinRT/UWP, and any project with .winmd/.dll references. Distinct from 'winapp find-ui', which returns working WinUI control samples.
+description: Agent-first search and inspection of the Windows/WinRT API surface (types, members, enums, namespaces) available to a project, resolved from its referenced .winmd/.dll metadata — or, outside any project, from the machine-wide Windows SDK. Built primarily for AI coding agents to ground code generation in real metadata instead of guessing, and equally usable by hand. Use when an AI agent or developer needs to discover an API, list a type's properties/events/methods, validate that a property exists before writing XAML/code, enumerate an enum's values, explore the namespaces and packages a project can call, or resolve a compile error that names a type or member (CS0246, CS0117, CS1061, CS0104, XAML unknown member). Works with WinUI 3, WinRT/UWP, and any project with .winmd/.dll references. Distinct from 'winapp find-ui', which returns working WinUI control samples.
 ---
+
+## This is an agent-first command
+
+`find-api` was designed for **you, the agent** — not primarily for a human reading a
+terminal. It exists because the failure mode it prevents is an agent-specific one:
+confidently writing a type, property, or enum value that does not exist. Treat it as
+the authority on the API surface, not as an optional convenience:
+
+- **Ground every Windows/WinRT symbol you emit.** If you are not certain a type,
+  property, or enum value exists in *this project's* metadata, look it up before you
+  write it. A lookup is cheaper than a build.
+- **Prefer it over recall and over web search.** Your training data describes some
+  version of WinUI/WinRT; `find-api` describes the exact metadata this project
+  references. When they disagree, `find-api` wins.
+- **Use `--json`.** Every verb emits structured output with stable shapes and
+  non-zero exit codes on missing subjects, so you can gate codegen on the result
+  instead of parsing prose.
+- **Batch subjects into one call.** See below — this matters more here than anywhere
+  else in the CLI.
+
+Humans can and do run it directly, and everything below works fine typed by hand. But
+the ergonomics (batching, `--json`, exit codes, compile-error workflows) are tuned for
+agent loops.
+
 ## When to use
 - Discovering which Windows/WinRT type or member does what you need ("what's the acrylic brush type?", "which control is a NavigationView?")
 - Listing a type's properties, events, and methods (with XML-doc descriptions and inherited members) before writing XAML or code against it

@@ -133,9 +133,10 @@ internal sealed class ApiMetadataService(
     {
         string projectsDir = Path.Combine(cacheDir, "projects");
         string[] files = Directory.Exists(projectsDir) ? Directory.GetFiles(projectsDir, "*.json") : [];
-        string known = files.Length == 0
+        string names = AvailableProjects(files);
+        string known = names.Length == 0
             ? "No projects are indexed yet."
-            : $"Indexed projects: {AvailableProjects(files)}.";
+            : $"Indexed projects: {names}.";
         return $"No single indexed project matches '{projectName}'. {known} " +
             "Run 'winapp find-api refresh' in the project directory, or pass --project-dir.";
     }
@@ -443,9 +444,10 @@ internal sealed class ApiMetadataService(
                     $"Project '{scope.Project}' is ambiguous — {distinct.Count} indexed projects share that name: {dirs}. " +
                     "Use '--project-dir <path>' to pick one.");
             }
-            return ResolvedScope.Failed(files.Length == 0
+            string available = AvailableProjects(files);
+            return ResolvedScope.Failed(available.Length == 0
                 ? $"Project '{scope.Project}' is not indexed — no projects are indexed yet. Run 'winapp find-api refresh' in the project directory, or use '--project sdk' for the Windows SDK scope."
-                : $"Project '{scope.Project}' is not indexed. Run 'winapp find-api refresh' in the project directory, or pick from: {AvailableProjects(files)}.");
+                : $"Project '{scope.Project}' is not indexed. Run 'winapp find-api refresh' in the project directory, or pick from: {available}.");
         }
 
         if (scope.ProjectDir is not null)
@@ -463,8 +465,9 @@ internal sealed class ApiMetadataService(
                 // Do NOT quietly widen to the SDK scope — the caller asked about that
                 // project specifically, and its NuGet packages would be missing — and
                 // do NOT fall back to a same-named manifest from another directory.
+                string available = AvailableProjects(files);
                 return ResolvedScope.Failed($"No indexed API metadata was found for '{fullPath}'. Restore the project (so 'project.assets.json' exists), " +
-                    $"then run 'winapp find-api refresh' in that directory.{(files.Length == 0 ? "" : $" Indexed projects: {AvailableProjects(files)}.")}");
+                    $"then run 'winapp find-api refresh' in that directory.{(available.Length == 0 ? "" : $" Indexed projects: {available}.")}");
             }
 
             // --project-dir pointed at a directory with no project in it: same
@@ -533,8 +536,20 @@ internal sealed class ApiMetadataService(
         return manifest is not null ? ResolvedScope.Sdk(manifest) : ResolvedScope.Failed(NoSdkMessage);
     }
 
+    /// <summary>
+    /// Human-readable list of indexed project names for an error message. Manifest
+    /// *file* names carry a path hash (<c>App_ab12cd34.json</c>) to keep same-named
+    /// projects apart, but <c>--project</c> matches <see cref="ProjectManifest.ProjectName"/>,
+    /// so the file names must never be surfaced — a caller copying one back would get
+    /// "not indexed". Returns an empty string when nothing readable is indexed.
+    /// </summary>
     private static string AvailableProjects(IEnumerable<string> files) =>
-        string.Join(", ", files.Select(Path.GetFileNameWithoutExtension));
+        string.Join(", ", files
+            .Select(DeserializeManifest)
+            .Where(m => m is not null && !string.IsNullOrWhiteSpace(m.ProjectName))
+            .Select(m => m!.ProjectName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase));
 
     private static ProjectManifest? DeserializeManifest(string path)
     {

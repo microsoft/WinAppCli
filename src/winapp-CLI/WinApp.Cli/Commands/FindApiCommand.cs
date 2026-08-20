@@ -23,7 +23,7 @@ namespace WinApp.Cli.Commands;
 /// </summary>
 internal sealed class FindApiCommand : Command, IShortDescription
 {
-    public string ShortDescription => "Search a project's Windows/WinRT API surface (types, members, enums)";
+    public string ShortDescription => "Agent-first: search a project's Windows/WinRT API surface (types, members, enums)";
 
     public static Argument<string[]> QueryArgument { get; } = new("query")
     {
@@ -51,7 +51,7 @@ internal sealed class FindApiCommand : Command, IShortDescription
         FindApiStatsCommand statsCommand,
         FindApiProjectsCommand projectsCommand,
         FindApiRefreshCommand refreshCommand)
-        : base("find-api", "Search and inspect the Windows/WinRT API surface (types, members, enums) available to a project, resolved from its referenced .winmd/.dll metadata. The bare form searches; sub-verbs drill into a specific type or the index itself. Search, members, enums, and check-property each accept several subjects in one call — batch your lookups rather than issuing one call per question. The index is built from the project's restored NuGet/SDK packages and refreshed automatically when the project is restored.")
+        : base("find-api", "Agent-first: built primarily for AI coding agents to ground code generation in the API surface a project actually references instead of guessing (pair it with --json); it works just as well typed by hand. Search and inspect the Windows/WinRT API surface (types, members, enums) available to a project, resolved from its referenced .winmd/.dll metadata. The bare form searches; sub-verbs drill into a specific type or the index itself. Search, members, enums, and check-property each accept several subjects in one call — batch your lookups rather than issuing one call per question. The index is built from the project's restored NuGet/SDK packages and refreshed automatically when the project is restored.")
     {
         Arguments.Add(QueryArgument);
         Options.Add(MaxOption);

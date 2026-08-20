@@ -297,6 +297,12 @@ internal sealed class ApiCheckPropertyOutput : IApiScopedOutput
     public required List<ApiCrossTypeMember> TypesWithProperty { get; init; }
 
     public required List<ApiCrossTypeMember> TypesWithSimilar { get; init; }
+
+    /// <summary>
+    /// Set only on a miss, and only when the index behind it is known to be partial.
+    /// Tells the caller the "does not have property" answer is not authoritative.
+    /// </summary>
+    public string? Warning { get; init; }
 }
 
 // ---- types / enums / namespaces ----
@@ -379,7 +385,7 @@ internal sealed class ApiPackageSummary
 
     public int? TotalMembers { get; init; }
 
-    /// <summary>One of <c>ok</c>, <c>cache-missing</c>, or <c>meta-unreadable</c>.</summary>
+    /// <summary>One of <c>ok</c>, <c>incomplete</c>, <c>cache-missing</c>, or <c>meta-unreadable</c>.</summary>
     public required string Status { get; init; }
 }
 

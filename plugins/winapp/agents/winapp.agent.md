@@ -76,12 +76,13 @@ Want to inspect or interact with a running app's UI?
 └─ List app windows → winapp ui list-windows -a <appname> [--show-hidden]
 
 Building a WinUI 3 UI and need to find the right control or a working sample?
-└─ winapp find-ui "<what you want>"   (search WinUI 3 Gallery + Community Toolkit; Reactor is opt-in via --source reactor)
+└─ winapp find-ui "<what you want>"   (agent-first: fetch real gallery code instead of inventing XAML)
    ├─ Then fetch full code for a match → winapp find-ui --id <scenario-id>
+   ├─ Searches WinUI 3 Gallery + Community Toolkit; Reactor is opt-in via --source reactor
    └─ WinUI-only (not WPF/WinForms); distinct from `ui search`, which inspects a *running* app
 
 Need to know whether a Windows/WinRT API exists, or what a type/enum actually offers?
-└─ winapp find-api "<what you want>"   (search the project's real .winmd metadata — never guess an API)
+└─ winapp find-api "<what you want>"   (agent-first: the project's real .winmd metadata — never guess an API)
    ├─ List a type's properties/events/methods → winapp find-api members <Type> [<Type>...]
    ├─ Check a property before writing XAML → winapp find-api check-property <Type> <Prop> [<Prop>...]
    ├─ List an enum's values → winapp find-api enums <EnumType> [<EnumType>...]
@@ -270,7 +271,8 @@ Need to know whether a Windows/WinRT API exists, or what a type/enum actually of
 **Purpose:** Generate a `CodeIntegrityExternal.cat` catalog file for sparse packages with `AllowExternalContent`.
 **When to use:** When your sparse package manifest uses `TrustedLaunch` and you need to catalog external executable files.
 
-### `winapp find-api [query]` — API metadata discovery
+### `winapp find-api [query]` — API metadata discovery (agent-first)
+**Agent-first:** this command exists for *you*. It prevents the failure mode of confidently emitting a type, property, or enum value that does not exist. Ground every Windows/WinRT symbol you are not certain about here before writing it, and prefer it over recall or web search — it describes the exact metadata *this* project references. Use `--json` to gate codegen on the result.
 **Purpose:** Search a project's referenced WinRT/.NET API metadata (`.winmd`/`.dll` + XML docs) for types and members, and inspect them — without guessing API shapes. The index builds automatically after a restore; run `winapp find-api refresh` to (re)build it manually.
 **When to use:** When an AI agent or developer needs to confirm that a type/property/enum exists, discover the members of a control, or find the right API by intent (e.g. "acrylic brush") before writing WinUI/WinRT code. Add `--json` for machine-readable output.
 
@@ -292,7 +294,8 @@ before editing. Fixing compile errors one at a time costs a lookup, an edit, and
 rebuild per symbol. A single subject keeps the original payload shape; a batch returns
 `{ count, results: [...] }` and exits non-zero if *any* subject is missing.
 
-### `winapp find-ui "<query>"` — WinUI control & sample search
+### `winapp find-ui "<query>"` — WinUI control & sample search (agent-first)
+**Agent-first:** this command exists for *you*. Before hand-writing XAML for a control you have not just looked at, fetch a real scenario here — the code comes from the shipping WinUI 3 Gallery and Windows Community Toolkit, so it compiles. Prefer it over recall or a blog post, and use `--json` for a parseable result on every path.
 **Purpose:** Lexically search **WinUI** controls and samples (WinUI 3 Gallery + Windows Community Toolkit, plus curated core patterns) for a working code example. The microsoft-ui-reactor ReactorGallery is an **opt-in** source, excluded from a normal search and searched only via `--source reactor` (its C#-only declarative samples don't paste into a standard XAML app — Reactor/MVU projects only). WinUI-only — not WPF/WinForms.
 **When to use:** When building a WinUI 3 UI and you need to discover which control fits an intent and get a real code example (XAML and/or C# for Gallery/Toolkit; C#-only for Reactor), without leaving the CLI. Distinct from `winapp ui search`, which searches a *running app's* UI tree.
 **Workflow:** search compactly to find the control and its scenario ids, then fetch full code with `--id`.

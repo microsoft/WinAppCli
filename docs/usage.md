@@ -1195,6 +1195,8 @@ winapp get-winapp-path [options]
 
 ### find-ui
 
+> **Agent-first.** `find-ui` is built primarily for AI coding agents — it lets an agent pull real, compiling WinUI markup from the shipping galleries instead of inventing it, and `--json` makes every result (and every failure) machine-readable. It works just as well typed by hand.
+
 Search **WinUI** controls and samples for a working code example. WinUI-only: the corpus is the [WinUI 3 Gallery](https://github.com/microsoft/WinUI-Gallery) and the [Windows Community Toolkit](https://github.com/CommunityToolkit/Windows) (plus a few curated core patterns) — it does **not** cover WPF, WinForms, or other UI frameworks. A third source, the [microsoft-ui-reactor ReactorGallery](https://github.com/microsoft/microsoft-ui-reactor), is **opt-in**: it is excluded from a normal search and only searched when you pass `--source reactor` (its C#-only declarative samples don't paste into a standard XAML app, so reach for it only when building a Reactor/MVU project).
 
 ```bash
@@ -1242,6 +1244,8 @@ winapp find-ui "navigation view" --refresh
 ---
 
 ### find-api
+
+> **Agent-first.** `find-api` is built primarily for AI coding agents — it grounds generated code in the API surface a project actually references instead of the model's recollection of it, and `--json` plus non-zero exit codes on missing symbols let an agent gate codegen on the answer. It works just as well typed by hand.
 
 Search and inspect the Windows/WinRT API surface (types, members, enums, namespaces) available to a project, resolved from its referenced `.winmd`/`.dll` metadata. The bare form searches; sub-verbs drill into a specific type, namespace, or the index itself.
 

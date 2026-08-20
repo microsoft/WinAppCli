@@ -100,6 +100,12 @@ internal sealed class ProjectManifest
 /// <summary>The <c>meta.json</c> summary written alongside each cached package.</summary>
 internal sealed class PackageMeta
 {
+    /// <summary>
+    /// The <see cref="ApiCachePaths.CacheFormatVersion"/> this cache was written
+    /// with. A cache recording a different version is rebuilt rather than reused.
+    /// </summary>
+    public int Format { get; init; }
+
     public required string PackageId { get; init; }
 
     public required string Version { get; init; }
@@ -111,6 +117,16 @@ internal sealed class PackageMeta
     public required int TotalMembers { get; init; }
 
     public required int TotalNamespaces { get; init; }
+
+    /// <summary>
+    /// True when at least one of the package's metadata files could not be parsed,
+    /// so the indexed type list is known to be partial. Queries use this to avoid
+    /// reporting an authoritative "not found" from an index that is missing data.
+    /// </summary>
+    public bool Incomplete { get; init; }
+
+    /// <summary>Per-file parse diagnostics, present only when <see cref="Incomplete"/>.</summary>
+    public List<string>? ParseErrors { get; init; }
 
     public required string GeneratedAt { get; init; }
 }

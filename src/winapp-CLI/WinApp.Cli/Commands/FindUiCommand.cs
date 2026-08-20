@@ -22,7 +22,7 @@ namespace WinApp.Cli.Commands;
 /// </summary>
 internal sealed class FindUiCommand : Command, IShortDescription
 {
-    public string ShortDescription => "Search WinUI controls & samples for a working example";
+    public string ShortDescription => "Agent-first: search WinUI controls & samples for a working example";
 
     public static Argument<string?> QueryArgument { get; }
     public static Option<string[]> IdOption { get; }
@@ -69,7 +69,7 @@ internal sealed class FindUiCommand : Command, IShortDescription
     }
 
     public FindUiCommand()
-        : base("find-ui", "Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery and the Windows Community Toolkit by default (plus the microsoft-ui-reactor ReactorGallery as an opt-in source via --source reactor); not WPF/WinForms. The Gallery/Toolkit/Reactor corpus is fetched from GitHub on first use and cached per-user, so the first such run needs network access; --source core searches the built-in patterns and works fully offline.")
+        : base("find-ui", "Agent-first: built primarily for AI coding agents to pull a real WinUI sample into the editor instead of inventing markup (pair it with --json); it works just as well typed by hand. Search WinUI controls and samples for a working code example. WinUI-only: covers the WinUI 3 Gallery and the Windows Community Toolkit by default (plus the microsoft-ui-reactor ReactorGallery as an opt-in source via --source reactor); not WPF/WinForms. The Gallery/Toolkit/Reactor corpus is fetched from GitHub on first use and cached per-user, so the first such run needs network access; --source core searches the built-in patterns and works fully offline.")
     {
         Arguments.Add(QueryArgument);
         Options.Add(IdOption);

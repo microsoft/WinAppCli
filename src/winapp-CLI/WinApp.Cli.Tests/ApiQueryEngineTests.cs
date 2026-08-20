@@ -274,6 +274,76 @@ public sealed class ApiQueryEngineTests
         Assert.IsTrue(result.Projects.Any(p => p.Name == "TestApp" && p.PackageCount == 1));
     }
 
+    [TestMethod]
+    public void Projects_ReportsManifestProjectName_NotHashedFileName()
+    {
+        // The manifest file name carries a path hash (TestApp_ab12cd34.json) so that
+        // same-named projects in different directories don't collide. '--project'
+        // matches ProjectManifest.ProjectName, so surfacing the file name would hand
+        // callers a value that fails when they pass it back.
+        var result = ApiQueryEngine.Projects(_cacheDir);
+
+        Assert.IsFalse(
+            result.Projects.Any(p => p.Name.Contains('_', StringComparison.Ordinal)),
+            "project listings must not leak the hashed manifest file name");
+    }
+
+    [TestMethod]
+    public void CheckProperty_MissAgainstIncompleteIndex_IsFlaggedAsPossiblyFalseNegative()
+    {
+        // A package whose metadata failed to parse contributes no types, so "no such
+        // property" is indistinguishable from "never indexed" unless it is flagged.
+        MarkPackageIncomplete(_cacheDir, "Test.Pkg", "1.0.0");
+
+        var result = ApiQueryEngine.CheckProperty("My.Ns.Widget", "Nonexistent", _cacheDir, _manifest);
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.IsFalse(result.Data!.Found);
+        Assert.IsNotNull(result.Data.Warning, "a miss from a partial index must be qualified");
+        StringAssert.Contains(result.Data.Warning, "Test.Pkg");
+    }
+
+    [TestMethod]
+    public void CheckProperty_MissAgainstCompleteIndex_HasNoWarning()
+    {
+        var result = ApiQueryEngine.CheckProperty("My.Ns.Widget", "Nonexistent", _cacheDir, _manifest);
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.IsFalse(result.Data!.Found);
+        Assert.IsNull(result.Data.Warning);
+    }
+
+    [TestMethod]
+    public void Packages_ReportsIncompleteStatusWhenMetadataFailedToParse()
+    {
+        MarkPackageIncomplete(_cacheDir, "Test.Pkg", "1.0.0");
+
+        var result = ApiQueryEngine.Packages(_cacheDir, _manifest);
+
+        Assert.AreEqual("incomplete", result.Data!.Packages.Single().Status);
+    }
+
+    /// <summary>Rewrites a cached package's meta.json as if one of its files failed to parse.</summary>
+    private static void MarkPackageIncomplete(string cacheDir, string packageId, string version)
+    {
+        string metaPath = Path.Combine(cacheDir, "packages", packageId, version, "meta.json");
+        PackageMeta existing = JsonSerializer.Deserialize(File.ReadAllText(metaPath), ApiSearchJsonContext.Default.PackageMeta)!;
+        var updated = new PackageMeta
+        {
+            Format = existing.Format,
+            PackageId = existing.PackageId,
+            Version = existing.Version,
+            WinMdFiles = existing.WinMdFiles,
+            TotalTypes = existing.TotalTypes,
+            TotalMembers = existing.TotalMembers,
+            TotalNamespaces = existing.TotalNamespaces,
+            Incomplete = true,
+            ParseErrors = ["test.winmd: file contains no CLI metadata"],
+            GeneratedAt = existing.GeneratedAt,
+        };
+        File.WriteAllText(metaPath, JsonSerializer.Serialize(updated, ApiSearchJsonContext.Default.PackageMeta));
+    }
+
     private static ProjectManifest BuildSyntheticCache(string cacheDir)
     {
         const string packageId = "Test.Pkg";
@@ -315,8 +385,8 @@ public sealed class ApiQueryEngineTests
             },
         };
 
-        File.WriteAllText(Path.Combine(typesDir, "My_Ns.json"), JsonSerializer.Serialize(myNsTypes, ApiSearchJsonContext.Default.ListWinMdTypeInfo));
-        File.WriteAllText(Path.Combine(typesDir, "_GlobalNamespace.json"), JsonSerializer.Serialize(globalTypes, ApiSearchJsonContext.Default.ListWinMdTypeInfo));
+        File.WriteAllText(Path.Combine(typesDir, ApiCachePaths.NamespaceFileName("My.Ns")), JsonSerializer.Serialize(myNsTypes, ApiSearchJsonContext.Default.ListWinMdTypeInfo));
+        File.WriteAllText(Path.Combine(typesDir, ApiCachePaths.NamespaceFileName("_GlobalNamespace")), JsonSerializer.Serialize(globalTypes, ApiSearchJsonContext.Default.ListWinMdTypeInfo));
         File.WriteAllText(
             Path.Combine(packageDir, "namespaces.json"),
             JsonSerializer.Serialize(new List<string> { "My.Ns", "_GlobalNamespace" }, ApiSearchJsonContext.Default.ListString));
@@ -338,7 +408,12 @@ public sealed class ApiQueryEngineTests
         };
         string projectsDir = Path.Combine(cacheDir, "projects");
         Directory.CreateDirectory(projectsDir);
-        File.WriteAllText(Path.Combine(projectsDir, "TestApp.json"), JsonSerializer.Serialize(manifest, ApiSearchJsonContext.Default.ProjectManifest));
+        // Manifest files carry a path hash in their name, exactly as ApiCacheBuilder
+        // writes them, so anything that surfaces a project name has to read the
+        // manifest rather than the file name.
+        File.WriteAllText(
+            Path.Combine(projectsDir, ApiCacheBuilder.ManifestName(Path.Combine(cacheDir, "src", "TestApp.csproj")) + ".json"),
+            JsonSerializer.Serialize(manifest, ApiSearchJsonContext.Default.ProjectManifest));
 
         return manifest;
     }
@@ -664,7 +739,7 @@ public sealed class ApiQueryEngineTests
         foreach ((string ns, List<WinMdTypeInfo> types) in namespaces)
         {
             File.WriteAllText(
-                Path.Combine(typesDir, ns.Replace('.', '_') + ".json"),
+                Path.Combine(typesDir, ApiCachePaths.NamespaceFileName(ns)),
                 JsonSerializer.Serialize(types, ApiSearchJsonContext.Default.ListWinMdTypeInfo));
         }
         File.WriteAllText(

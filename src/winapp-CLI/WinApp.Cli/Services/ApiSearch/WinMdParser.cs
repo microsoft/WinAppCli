@@ -14,7 +14,17 @@ namespace WinApp.Cli.Services.ApiSearch;
 /// </summary>
 internal static class WinMdParser
 {
-    public static List<WinMdTypeInfo> ParseFile(string filePath)
+    /// <summary>
+    /// Outcome of parsing one metadata file: the types that were read plus, when
+    /// the file could not be read in full, a diagnostic describing why. The
+    /// diagnostic exists so the cache builder can mark the resulting package
+    /// cache as incomplete — an unreadable file that silently produced zero types
+    /// would otherwise make <c>check-property</c> and <c>members</c> report
+    /// authoritative "does not exist" answers about an API that was never indexed.
+    /// </summary>
+    internal sealed record WinMdParseResult(List<WinMdTypeInfo> Types, string? Error);
+
+    public static WinMdParseResult ParseFile(string filePath)
     {
         var results = new List<WinMdTypeInfo>();
         try
@@ -23,7 +33,7 @@ internal static class WinMdParser
             using var peReader = new PEReader(peStream);
             if (!peReader.HasMetadata)
             {
-                return results;
+                return new WinMdParseResult(results, "file contains no CLI metadata");
             }
             MetadataReader reader = peReader.GetMetadataReader();
             var typeProvider = new SimpleTypeProvider();
@@ -43,7 +53,6 @@ internal static class WinMdParser
                 List<string>? enumValues = typeKind == TypeKind.Enum ? ParseEnumValues(reader, typeDef) : null;
                 string fullName = string.IsNullOrEmpty(ns) ? name : ns + "." + name;
                 string? deprecatedMessage = GetDeprecatedMessage(reader, typeDef.GetCustomAttributes());
-                ApplyMemberDeprecation(reader, typeDef, members);
                 results.Add(new WinMdTypeInfo
                 {
                     Namespace = ns,
@@ -62,10 +71,12 @@ internal static class WinMdParser
             or UnauthorizedAccessException or InvalidOperationException
             or ArgumentException or NotSupportedException)
         {
-            // A single unparseable metadata file must not fail the whole scan;
-            // skip it silently (stderr writes would corrupt --json output).
+            // A single unparseable metadata file must not fail the whole scan, and
+            // writing to stderr would corrupt --json output — so report it to the
+            // caller instead, which records it in the package's meta.json.
+            return new WinMdParseResult(results, ex.Message);
         }
-        return results;
+        return new WinMdParseResult(results, null);
     }
 
     internal static bool ShouldSkipType(string name, TypeDefinition typeDef)
@@ -173,6 +184,9 @@ internal static class WinMdParser
             {
                 continue;
             }
+            // Read the attribute from this method's own handle. Matching by name
+            // instead would mark every overload deprecated as soon as one of them is.
+            string? deprecated = GetDeprecatedMessage(reader, method.GetCustomAttributes());
             try
             {
                 MethodSignature<string> sig = method.DecodeSignature(typeProvider, null);
@@ -184,7 +198,8 @@ internal static class WinMdParser
                     Kind = MemberKind.Method,
                     Signature = $"{sig.ReturnType} {name}({paramText})",
                     ReturnType = sig.ReturnType,
-                    Parameters = parameters
+                    Parameters = parameters,
+                    DeprecatedMessage = deprecated
                 });
             }
             catch (Exception ex) when (ex is BadImageFormatException or NotSupportedException
@@ -195,7 +210,8 @@ internal static class WinMdParser
                 {
                     Name = name,
                     Kind = MemberKind.Method,
-                    Signature = name + "(/* signature not decodable */)"
+                    Signature = name + "(/* signature not decodable */)",
+                    DeprecatedMessage = deprecated
                 });
             }
         }
@@ -204,6 +220,7 @@ internal static class WinMdParser
         {
             PropertyDefinition property = reader.GetPropertyDefinition(propertyHandle);
             string name = reader.GetString(property.Name);
+            string? deprecated = GetDeprecatedMessage(reader, property.GetCustomAttributes());
             try
             {
                 string returnType = property.DecodeSignature(typeProvider, null).ReturnType;
@@ -220,7 +237,8 @@ internal static class WinMdParser
                         Name = name,
                         Kind = MemberKind.Property,
                         Signature = $"{returnType} {name} {accessorText}",
-                        ReturnType = returnType
+                        ReturnType = returnType,
+                        DeprecatedMessage = deprecated
                     });
                 }
             }
@@ -232,7 +250,8 @@ internal static class WinMdParser
                 {
                     Name = name,
                     Kind = MemberKind.Property,
-                    Signature = "/* type not decodable */ " + name
+                    Signature = "/* type not decodable */ " + name,
+                    DeprecatedMessage = deprecated
                 });
             }
         }
@@ -255,7 +274,8 @@ internal static class WinMdParser
                     Name = name,
                     Kind = MemberKind.Event,
                     Signature = "event " + handlerType + " " + name,
-                    ReturnType = handlerType
+                    ReturnType = handlerType,
+                    DeprecatedMessage = GetDeprecatedMessage(reader, @event.GetCustomAttributes())
                 });
             }
         }
@@ -379,61 +399,5 @@ internal static class WinMdParser
             // through to the generic message below — the API is still deprecated.
         }
         return "This API is deprecated.";
-    }
-
-    private static void ApplyMemberDeprecation(MetadataReader reader, TypeDefinition typeDef, List<WinMdMemberInfo> members)
-    {
-        var memberByName = new Dictionary<string, List<WinMdMemberInfo>>(StringComparer.Ordinal);
-        foreach (var m in members)
-        {
-            if (!memberByName.TryGetValue(m.Name, out var list))
-            {
-                list = new List<WinMdMemberInfo>();
-                memberByName[m.Name] = list;
-            }
-            list.Add(m);
-        }
-
-        foreach (var methodHandle in typeDef.GetMethods())
-        {
-            var method = reader.GetMethodDefinition(methodHandle);
-            string name = reader.GetString(method.Name);
-            string? msg = GetDeprecatedMessage(reader, method.GetCustomAttributes());
-            if (msg != null && memberByName.TryGetValue(name, out var matches))
-            {
-                foreach (var m in matches)
-                {
-                    m.DeprecatedMessage ??= msg;
-                }
-            }
-        }
-
-        foreach (var propHandle in typeDef.GetProperties())
-        {
-            var prop = reader.GetPropertyDefinition(propHandle);
-            string name = reader.GetString(prop.Name);
-            string? msg = GetDeprecatedMessage(reader, prop.GetCustomAttributes());
-            if (msg != null && memberByName.TryGetValue(name, out var matches))
-            {
-                foreach (var m in matches)
-                {
-                    m.DeprecatedMessage ??= msg;
-                }
-            }
-        }
-
-        foreach (var eventHandle in typeDef.GetEvents())
-        {
-            var evt = reader.GetEventDefinition(eventHandle);
-            string name = reader.GetString(evt.Name);
-            string? msg = GetDeprecatedMessage(reader, evt.GetCustomAttributes());
-            if (msg != null && memberByName.TryGetValue(name, out var matches))
-            {
-                foreach (var m in matches)
-                {
-                    m.DeprecatedMessage ??= msg;
-                }
-            }
-        }
     }
 }

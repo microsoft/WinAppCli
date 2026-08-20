@@ -197,7 +197,7 @@ internal static class ApiQueryEngine
         }
         if (type == null)
         {
-            return ApiQueryResult<ApiMembersOutput>.NotFound($"Type not found: {typeName}");
+            return ApiQueryResult<ApiMembersOutput>.NotFound(WithIncompleteNote($"Type not found: {typeName}", cacheDir, manifest));
         }
 
         var members = CollectMembersWithInheritance(type, allTypes);
@@ -282,7 +282,7 @@ internal static class ApiQueryEngine
         }
         if (!found)
         {
-            return ApiQueryResult<ApiTypesOutput>.NotFound($"Namespace not found: {ns}");
+            return ApiQueryResult<ApiTypesOutput>.NotFound(WithIncompleteNote($"Namespace not found: {ns}", cacheDir, manifest));
         }
         return ApiQueryResult<ApiTypesOutput>.Ok(new ApiTypesOutput { Namespace = ns, Types = types });
     }
@@ -300,7 +300,7 @@ internal static class ApiQueryEngine
         }
         if (type == null)
         {
-            return ApiQueryResult<ApiEnumsOutput>.NotFound($"Type not found: {typeName}");
+            return ApiQueryResult<ApiEnumsOutput>.NotFound(WithIncompleteNote($"Type not found: {typeName}", cacheDir, manifest));
         }
         if (type.Kind != TypeKind.Enum)
         {
@@ -356,13 +356,15 @@ internal static class ApiQueryEngine
             try
             {
                 using JsonDocument doc = JsonDocument.Parse(File.ReadAllText(metaPath));
+                bool incomplete = doc.RootElement.TryGetProperty("incomplete", out var incompleteEl)
+                    && incompleteEl.ValueKind == JsonValueKind.True;
                 summaries.Add(new ApiPackageSummary
                 {
                     Id = package.Id,
                     Version = package.Version,
                     TotalTypes = doc.RootElement.GetProperty("totalTypes").GetInt32(),
                     TotalMembers = doc.RootElement.GetProperty("totalMembers").GetInt32(),
-                    Status = "ok",
+                    Status = incomplete ? "incomplete" : "ok",
                 });
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
@@ -425,8 +427,14 @@ internal static class ApiQueryEngine
         {
             foreach (string file in Directory.GetFiles(projectsDir, "*.json"))
             {
-                int count = DeserializeManifest(file)?.Packages.Count ?? 0;
-                projects.Add(new ApiProjectSummary { Name = Path.GetFileNameWithoutExtension(file), PackageCount = count });
+                // Report the manifest's own project name, not its file name: the file
+                // name carries a path hash (App_ab12cd34) that '--project' does not match.
+                ProjectManifest? manifest = DeserializeManifest(file);
+                if (manifest is null || string.IsNullOrWhiteSpace(manifest.ProjectName))
+                {
+                    continue;
+                }
+                projects.Add(new ApiProjectSummary { Name = manifest.ProjectName, PackageCount = manifest.Packages.Count });
             }
         }
         return new ApiProjectsOutput { Projects = projects };
@@ -449,7 +457,7 @@ internal static class ApiQueryEngine
         }
         if (targetType == null)
         {
-            return ApiQueryResult<ApiCheckPropertyOutput>.NotFound($"Type not found: {typeName}");
+            return ApiQueryResult<ApiCheckPropertyOutput>.NotFound(WithIncompleteNote($"Type not found: {typeName}", cacheDir, manifest));
         }
 
         var members = CollectMembersWithInheritance(targetType, allTypes);
@@ -524,6 +532,9 @@ internal static class ApiQueryEngine
             Found = false,
             Type = targetType.FullName,
             Property = propertyName,
+            // A miss is the only outcome a partial index can get wrong, so the caveat
+            // rides on the negative answer rather than on every result.
+            Warning = IncompleteIndexNote(cacheDir, manifest),
             SimilarOnType = similarOnType,
             TypesWithProperty = typesWithProperty,
             TypesWithSimilar = typesWithSimilar,
@@ -712,6 +723,45 @@ internal static class ApiQueryEngine
             }
         }
         return allTypes;
+    }
+
+    /// <summary>
+    /// Describes any packages in the scope whose index is known to be partial (a
+    /// metadata file failed to parse), or <see langword="null"/> when the index is
+    /// whole. Negative answers are qualified with this: from a partial index,
+    /// "no such type/property" would otherwise be indistinguishable from "that
+    /// package was never read", which is exactly the false negative a caller
+    /// validating an API before writing code must not act on.
+    /// </summary>
+    private static string? IncompleteIndexNote(string cacheDir, ProjectManifest manifest)
+    {
+        var incomplete = new List<string>();
+        foreach (ProjectPackageRef package in manifest.Packages)
+        {
+            string metaPath = Path.Combine(cacheDir, "packages", package.Id, package.Version, "meta.json");
+            if (!File.Exists(metaPath))
+            {
+                continue;
+            }
+            PackageMeta? meta = Deserialize(metaPath, ApiSearchJsonContext.Default.PackageMeta);
+            if (meta is { Incomplete: true })
+            {
+                incomplete.Add(package.Id);
+            }
+        }
+        if (incomplete.Count == 0)
+        {
+            return null;
+        }
+        return $"The index is incomplete — metadata for {string.Join(", ", incomplete)} could not be fully read, " +
+            "so this result may be a false negative. Run 'winapp find-api refresh' to rebuild it.";
+    }
+
+    /// <summary>Appends the incomplete-index note to a negative answer, when there is one.</summary>
+    private static string WithIncompleteNote(string message, string cacheDir, ProjectManifest manifest)
+    {
+        string? note = IncompleteIndexNote(cacheDir, manifest);
+        return note is null ? message : message + " " + note;
     }
 
     private static List<string> GetPackageCacheDirs(string cacheDir, ProjectManifest manifest)

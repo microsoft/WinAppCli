@@ -246,7 +246,13 @@ internal static class NuGetResolver
                 winmds = winmds.Where(f => seen.Add(Path.GetFileName(f))).ToList();
                 if (winmds.Count > 0)
                 {
-                    packages.Add(new PackageWithWinMd("ProjectRef." + refName, "local", winmds, new List<string>()));
+                    // The referenced project's full path is hashed into the package id
+                    // (as project manifests do) because the cache is keyed by that id:
+                    // two projects that each reference a different Lib.csproj would
+                    // otherwise share "ProjectRef.Lib/local", overwrite one another's
+                    // export, and answer from the wrong library.
+                    string packageId = "ProjectRef." + refName + "_" + ApiCachePaths.ShortHash(fullPath);
+                    packages.Add(new PackageWithWinMd(packageId, "local", winmds, new List<string>()));
                 }
             }
         }
