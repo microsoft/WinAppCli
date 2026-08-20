@@ -211,6 +211,7 @@ extends:
                 New-Item -ItemType Directory -Path "$staging/scripts" -Force | Out-Null
                 Copy-Item "$(System.DefaultWorkingDirectory)/scripts/port-mslearn-docs.ps1" "$staging/scripts/" -Force
                 Copy-Item "$(System.DefaultWorkingDirectory)/scripts/validate-mslearn-docs.ps1" "$staging/scripts/" -Force
+                Copy-Item "$(System.DefaultWorkingDirectory)/scripts/prune-date-only-doc-changes.ps1" "$staging/scripts/" -Force
                 Copy-Item "$(System.DefaultWorkingDirectory)/scripts/mslearn-doc-lib.ps1" "$staging/scripts/" -Force
                 Copy-Item "$(System.DefaultWorkingDirectory)/docs" "$staging/docs" -Recurse -Force
                 Copy-Item "$(System.DefaultWorkingDirectory)/version.json" "$staging/" -Force
@@ -644,6 +645,19 @@ extends:
                 git config user.name "winapp-cli-bot"
                 git config user.email "winapp-cli-bot@users.noreply.github.com"
                 git checkout -B $branch
+
+                # Every page is restamped with today's ms.date, so pages that did not
+                # otherwise change would show up as date-only diffs and bury the real
+                # edits for the docs-repo reviewer. Drop them before staging.
+                & "$(Pipeline.Workspace)\mslearn-source\scripts\prune-date-only-doc-changes.ps1" `
+                  -RepoPath $docsDir `
+                  -PathSpec $docsRepoBase
+                if ($LASTEXITCODE -ne 0) {
+                  Pop-Location
+                  Write-Error "Failed to prune date-only doc changes. Exit code: $LASTEXITCODE"
+                  exit $LASTEXITCODE
+                }
+
                 git add -A
                 git diff --cached --quiet
                 if ($LASTEXITCODE -eq 0) {
