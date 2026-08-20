@@ -440,4 +440,46 @@ public partial class UiCommandTests
         Assert.AreEqual(1, _fakeDesktopLock.DesktopSectionEnters,
             "revalidate, foreground, focus and send belong to one desktop section");
     }
+
+    // --------------------------------------------- coordination faults must not become internal_error
+
+    [TestMethod]
+    public async Task Record_CoordinationFailureInsideTheBody_SurfacesTheCoordinationError()
+    {
+        // `ui record` opens its desktop section from inside the handler's broad catch-all. Without the
+        // IsCoordinationFault filter, an active.lock failure was reported as `internal_error` and — worse
+        // — looked to the coordinator like a normal body return, renewing the owner's idle grace.
+        _fakeUia.RecordException = new UiCoordinationException(
+            UiCoordinationErrorCodes.Unavailable, "The UI desktop lock could not be opened.");
+
+        var outputPath = Path.Combine(_tempDirectory.FullName, "coordination-fault.mp4");
+        var command = GetRequiredService<UiRecordCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["-a", "TestApp", "--duration-sec", "1", "-o", outputPath, "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        AssertJsonErrorCode(UiCoordinationErrorCodes.Unavailable);
+    }
+
+    [TestMethod]
+    public async Task Record_OrdinaryFailureInsideTheBody_StaysWithTheHandler()
+    {
+        // The filter must be narrow: only coordination faults escape. An ordinary capture failure keeps
+        // its existing handler-owned envelope and never turns into a coordination error.
+        _fakeUia.RecordException = new InvalidOperationException("encoder blew up");
+
+        var outputPath = Path.Combine(_tempDirectory.FullName, "ordinary-fault.mp4");
+        var command = GetRequiredService<UiRecordCommand>();
+
+        // Escaping to UiCoordinatedAction would not be caught there either, so an unhandled throw here
+        // is itself the failure signal.
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["-a", "TestApp", "--duration-sec", "1", "-o", outputPath, "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        var stderr = ConsoleStdErr.ToString();
+        StringAssert.Contains(stderr, "encoder blew up");
+        Assert.IsFalse(stderr.Contains(UiCoordinationErrorCodes.Unavailable, StringComparison.Ordinal),
+            $"an ordinary failure must not be reported as a coordination error; got: {stderr}");
+    }
 }

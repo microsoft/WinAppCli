@@ -46,16 +46,20 @@ internal sealed class UiCoordinationException(string code, string message, strin
 /// </summary>
 internal enum UiTurnAction
 {
-    /// <summary>The command started a new turn because the desktop was free.</summary>
+    /// <summary>The command started a new turn because no other workflow held or wanted the desktop.</summary>
     New,
 
     /// <summary>The command joined a turn its owner already held.</summary>
     Continuation,
 
-    /// <summary>The command waited in the global queue before acquiring the turn.</summary>
+    /// <summary>The command waited in the global queue behind another owner before acquiring the turn.</summary>
     Queued,
 
-    /// <summary>The command acquired the turn after another owner's idle grace expired.</summary>
+    /// <summary>
+    /// The command claimed the turn without queueing because another owner's idle grace had already
+    /// expired when it registered (spec §10.7). Distinct from <see cref="New"/>, where the desktop was
+    /// genuinely unowned, and from <see cref="Queued"/>, where the command had to wait its turn.
+    /// </summary>
     HandoffAfterIdle,
 
     /// <summary>A non-owner observation that ran concurrently without claiming the turn.</summary>
@@ -101,7 +105,11 @@ internal sealed record UiCoordinationSummary(
     /// <summary>Coarse queue-depth bucket.</summary>
     public string QueueDepthBucket => Bucket(QueueDepth, [0, 1, 2, 4, 8, 16]);
 
-    /// <summary>Coarse turn-age bucket.</summary>
+    /// <summary>
+    /// Coarse turn-age bucket: how long the owning workflow had held the desktop when this command
+    /// finished, spanning every command in that turn. Distinct from <see cref="WaitBucket"/>, which
+    /// covers only this command's own queue wait.
+    /// </summary>
     public string TurnAgeBucket => Bucket(TurnAgeMs, [0, 1_000, 5_000, 30_000, 120_000, 600_000]);
 
     private static string Bucket(long value, long[] edges)

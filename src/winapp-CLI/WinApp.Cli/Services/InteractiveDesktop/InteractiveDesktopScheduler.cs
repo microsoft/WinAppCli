@@ -160,17 +160,28 @@ internal sealed class InteractiveDesktopScheduler(IMonotonicClock clock)
         UiParticipantIdentity participant,
         UiTurnMode mode)
     {
+        // Captured before normalization, which is what releases an expired owner: afterwards there is no
+        // way to tell "the desktop was free" from "another workflow's idle grace just ran out".
+        var previousOwnerKey = state.Owner?.Key;
+
         Normalize(state, probe);
 
         var liveWaiters = CountLiveWaiters(state, probe);
 
         if (state.Owner is null && liveWaiters == 0)
         {
-            state.Owner = ToOwnerRecord(owner);
-            state.TurnId++;
+            // A previous owner released by the normalization above means this command did not simply
+            // find a free desktop — it took over a turn whose idle grace had run out (spec §10.7).
+            var handoff = previousOwnerKey is not null
+                && !string.Equals(previousOwnerKey, owner.Key, StringComparison.Ordinal);
+
+            ClaimTurn(state, ToOwnerRecord(owner));
             AddOwnerCommand(state, participant, mode);
             ApplyOwnerLocalEligibility(state);
-            return Describe(state, participant, UiTurnAction.New);
+            return Describe(
+                state,
+                participant,
+                handoff ? UiTurnAction.HandoffAfterIdle : UiTurnAction.New);
         }
 
         if (state.Owner is not null && OwnerMatches(state.Owner, owner))
@@ -430,10 +441,11 @@ internal sealed class InteractiveDesktopScheduler(IMonotonicClock clock)
 
         state.Owner = null;
         state.IdleExpiresTick64 = 0;
+        state.TurnStartedTick64 = 0;
         return true;
     }
 
-    private static bool PromoteOldestWaiter(InteractiveDesktopState state, ICoordinationLivenessProbe probe)
+    private bool PromoteOldestWaiter(InteractiveDesktopState state, ICoordinationLivenessProbe probe)
     {
         if (state.Owner is not null)
         {
@@ -451,16 +463,27 @@ internal sealed class InteractiveDesktopScheduler(IMonotonicClock clock)
             return false;
         }
 
-        state.Owner = new OwnerRecord
+        ClaimTurn(state, new OwnerRecord
         {
             Kind = oldest.OwnerKind,
             Key = oldest.OwnerKey,
             DiagnosticParentPid = oldest.DiagnosticParentPid,
             ParentStartTicksUtc = oldest.ParentStartTicksUtc,
-        };
-        state.TurnId++;
-        state.IdleExpiresTick64 = 0;
+        });
         return true;
+    }
+
+    /// <summary>
+    /// Installs <paramref name="ownerRecord"/> as the current owner and stamps the turn. The only writer
+    /// of <see cref="InteractiveDesktopState.TurnId"/> and
+    /// <see cref="InteractiveDesktopState.TurnStartedTick64"/>, so the two can never disagree.
+    /// </summary>
+    private void ClaimTurn(InteractiveDesktopState state, OwnerRecord ownerRecord)
+    {
+        state.Owner = ownerRecord;
+        state.TurnId++;
+        state.TurnStartedTick64 = clock.NowTicks64;
+        state.IdleExpiresTick64 = 0;
     }
 
     /// <summary>

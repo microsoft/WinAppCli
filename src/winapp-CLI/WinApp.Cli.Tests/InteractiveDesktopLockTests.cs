@@ -159,6 +159,106 @@ public class InteractiveDesktopLockTests
         StringAssert.Matches(summary.WaitBucket, new System.Text.RegularExpressions.Regex(@"^\d+(-\d+|\+)?$"));
     }
 
+    [TestMethod]
+    public async Task CoordinationSummary_TurnAgeMeasuresTheHeldTurnNotTheQueueWait()
+    {
+        // Regression: turn age used to be read from the queue-wait stopwatch, so it duplicated the wait
+        // bucket and was always zero for a command that acquired the desktop immediately.
+        Assert.AreEqual(0, await RunAsync(UiTurnMode.DesktopExclusive, "ui click", (_, _) => Task.FromResult(0)));
+
+        // Still inside the four-second grace, so the second command is a continuation of the same turn.
+        await Task.Delay(150);
+
+        UiCoordinationTelemetryScope.Begin();
+        await RunAsync(UiTurnMode.DesktopExclusive, "ui click", (_, _) => Task.FromResult(0));
+
+        var summary = UiCoordinationTelemetryScope.Current;
+        Assert.IsNotNull(summary);
+        Assert.AreEqual(UiTurnAction.Continuation, summary!.TurnAction);
+        Assert.AreEqual(0, summary.WaitedMs, "nothing was queued, so this command never waited");
+        Assert.IsTrue(summary.TurnAgeMs >= 100,
+            $"the turn had been held for over 150 ms; reported age was {summary.TurnAgeMs} ms");
+    }
+
+    [TestMethod]
+    public async Task CoordinationSummary_DetachedObservationReportsNoTurnAge()
+    {
+        using var foreignLease = OccupyTurnWithAnotherOwner();
+        UiCoordinationTelemetryScope.Begin();
+
+        await RunAsync(UiTurnMode.Observe, "ui inspect", (_, _) => Task.FromResult(0));
+
+        var summary = UiCoordinationTelemetryScope.Current;
+        Assert.IsNotNull(summary);
+        Assert.AreEqual(UiTurnAction.Detached, summary!.TurnAction);
+        Assert.AreEqual(0, summary.TurnAgeMs, "a detached observation holds no turn, so it has no age");
+    }
+
+    [TestMethod]
+    public async Task CoordinationSummary_ReportsHandoffAfterIdleWhenTakingOverALapsedTurn()
+    {
+        // Spec §16 advertises `handoff-after-idle`; this proves the value is actually reachable.
+        using (var foreignLease = OccupyTurnWithAnotherOwner())
+        {
+            using var stateLock = _store.AcquireStateLock(CancellationToken.None);
+            var state = _store.Read().State!;
+            state.OwnerCommands.Clear();
+            state.IdleExpiresTick64 = 1; // already elapsed
+            _store.Publish(state);
+        }
+
+        UiCoordinationTelemetryScope.Begin();
+        await RunAsync(UiTurnMode.DesktopExclusive, "ui click", (_, _) => Task.FromResult(0));
+
+        var summary = UiCoordinationTelemetryScope.Current;
+        Assert.IsNotNull(summary);
+        Assert.AreEqual(UiTurnAction.HandoffAfterIdle, summary!.TurnAction);
+    }
+
+    [TestMethod]
+    public async Task CoordinationSummary_StateWithoutATurnStartTickReportsNoTurnAge()
+    {
+        // A state file written before the turn-start field existed deserializes it as 0, which is also
+        // the "no owner" sentinel. Measuring an age from it would report the machine's uptime.
+        _paths.EnsureDirectories();
+        using (var stateLock = _store.AcquireStateLock(CancellationToken.None))
+        {
+            var state = InteractiveDesktopState.CreateFresh();
+            state.TurnId = 7;
+            state.Owner = new OwnerRecord { Kind = UiOwnerKind.Explicit, Key = "some-other-workflow" };
+            state.TurnStartedTick64 = 0;
+            state.IdleExpiresTick64 = 1; // already elapsed, so this command takes the turn over
+            _store.Publish(state);
+        }
+
+        UiCoordinationTelemetryScope.Begin();
+        await RunAsync(UiTurnMode.DesktopExclusive, "ui click", (_, _) => Task.FromResult(0));
+
+        var summary = UiCoordinationTelemetryScope.Current;
+        Assert.IsNotNull(summary);
+        Assert.IsTrue(summary!.TurnAgeMs < 60_000,
+            $"a freshly claimed turn cannot be minutes old; reported {summary.TurnAgeMs} ms");
+    }
+
+    [TestMethod]
+    public async Task ABodyThatFailsCoordinationDoesNotRenewTheOwnersGrace()
+    {
+        // A coordination fault raised inside the body (for example active.lock I/O failing while a
+        // recording opens its desktop section) must not look like a completed command.
+        Assert.AreEqual(0, await RunAsync(UiTurnMode.TurnShared, "ui record", (_, _) => Task.FromResult(0)));
+        var deadlineBefore = ReadOwnerDeadline();
+
+        await Task.Delay(50);
+
+        var ex = await Assert.ThrowsExactlyAsync<UiCoordinationException>(() =>
+            RunAsync(UiTurnMode.TurnShared, "ui record", (_, _) => throw new UiCoordinationException(
+                UiCoordinationErrorCodes.Unavailable, "active.lock could not be opened")));
+
+        Assert.AreEqual(UiCoordinationErrorCodes.Unavailable, ex.Code);
+        Assert.AreEqual(deadlineBefore, ReadOwnerDeadline(),
+            "a command that never ran must not renew the owner's idle grace");
+    }
+
     // --------------------------------------------------------------------------- desktop sections
 
     [TestMethod]

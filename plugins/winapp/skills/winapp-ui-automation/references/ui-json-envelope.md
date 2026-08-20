@@ -116,7 +116,12 @@ appear:
 | `invalid_ui_owner_id` | `WINAPP_UI_OWNER_ID` is set but empty/whitespace or longer than 256 characters. Fails before any UI side effect. |
 | `desktop_coordination_unavailable` | Coordination state could not be read, published, or safely rebuilt — including state written by a newer `winapp`. Mutating commands fail closed rather than acting uncoordinated. |
 | `queue_capacity_exceeded` | 64 commands are already waiting for the desktop. |
-| `cancelled` | Ctrl+C (or an npm `AbortSignal`) while the command was still waiting for its turn. The command never ran, so it has no UI side effects. Exit code **130**. |
+| `cancelled` | Native Ctrl+C while the command was still waiting for its turn. The command never ran, so it has no UI side effects. Exit code **130**. |
+
+An npm `AbortSignal` is a different contract: Node force-terminates the child,
+so there is usually no envelope and no exit code 130 — the wrapper rejects with
+an `AbortError` instead, and UI side effects may already have happened if the
+abort landed after the command acquired the desktop.
 
 `cancelled` — and optionally the other coordination errors — carries an
 additive `coordination` object:

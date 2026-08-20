@@ -228,6 +228,124 @@ public class InteractiveDesktopSchedulerTests
     // ------------------------------------------------------------------------- expiry and handoff
 
     [TestMethod]
+    public void BeginParticipating_AfterAnotherOwnersGraceExpired_ReportsHandoffAfterIdle()
+    {
+        // Spec §16 advertises a `handoff-after-idle` turn action. Taking over a turn that normalization
+        // just released is not the same as finding a free desktop, and the two must stay distinguishable
+        // in telemetry.
+        var state = InteractiveDesktopState.CreateFresh();
+        var actor = Participant(100);
+        _scheduler.BeginParticipating(state, _probe, OwnerA, actor, UiTurnMode.DesktopExclusive);
+        _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
+        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: true);
+
+        _clock.Advance(InteractiveDesktopScheduler.IdleGraceMs);
+
+        var result = _scheduler.BeginParticipating(
+            state, _probe, OwnerB, Participant(200), UiTurnMode.DesktopExclusive);
+
+        Assert.AreEqual(UiAdmission.OwnerCommandRunning, result.Admission);
+        Assert.AreEqual(UiTurnAction.HandoffAfterIdle, result.TurnAction,
+            "the desktop was not free — another workflow's idle grace had just run out");
+        Assert.AreEqual(OwnerB.Key, state.Owner!.Key);
+    }
+
+    [TestMethod]
+    public void BeginParticipating_AfterItsOwnGraceExpired_ReportsNewRatherThanHandoff()
+    {
+        // The same workflow reclaiming its own lapsed turn took nothing from anybody, so it is a new
+        // turn. Reporting a handoff here would make the value meaningless.
+        var state = InteractiveDesktopState.CreateFresh();
+        var actor = Participant(100);
+        _scheduler.BeginParticipating(state, _probe, OwnerA, actor, UiTurnMode.DesktopExclusive);
+        _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
+        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: true);
+
+        _clock.Advance(InteractiveDesktopScheduler.IdleGraceMs);
+
+        var result = _scheduler.BeginParticipating(
+            state, _probe, OwnerA, Participant(101), UiTurnMode.DesktopExclusive);
+
+        Assert.AreEqual(UiTurnAction.New, result.TurnAction);
+    }
+
+    [TestMethod]
+    public void BeginParticipating_OnAGenuinelyFreeDesktop_ReportsNew()
+    {
+        var state = InteractiveDesktopState.CreateFresh();
+
+        var result = _scheduler.BeginParticipating(
+            state, _probe, OwnerB, Participant(200), UiTurnMode.DesktopExclusive);
+
+        Assert.AreEqual(UiTurnAction.New, result.TurnAction,
+            "no previous owner existed, so nothing was handed off");
+    }
+
+    // ------------------------------------------------------------------------------- turn stamping
+
+    [TestMethod]
+    public void ClaimingATurn_StampsTheTurnStartTick()
+    {
+        // The turn-age telemetry bucket measures how long the workflow has held the desktop, so the
+        // start tick must be written by whoever claims the turn, not derived from a per-command wait.
+        _clock.Advance(5_000);
+        var state = InteractiveDesktopState.CreateFresh();
+
+        _scheduler.BeginParticipating(state, _probe, OwnerA, Participant(100), UiTurnMode.DesktopExclusive);
+
+        Assert.AreEqual(_clock.NowTicks64, state.TurnStartedTick64);
+    }
+
+    [TestMethod]
+    public void JoiningAnExistingTurn_KeepsTheOriginalStartTick()
+    {
+        var state = InteractiveDesktopState.CreateFresh();
+        _scheduler.BeginParticipating(
+            state, _probe, OwnerA, Participant(100, "ui record"), UiTurnMode.TurnShared);
+        var claimedAt = state.TurnStartedTick64;
+
+        _clock.Advance(30_000);
+        _scheduler.BeginParticipating(state, _probe, OwnerA, Participant(101), UiTurnMode.DesktopExclusive);
+
+        Assert.AreEqual(claimedAt, state.TurnStartedTick64,
+            "a continuation joins the turn already in progress; its age keeps accumulating");
+    }
+
+    [TestMethod]
+    public void Handoff_RestampsTheTurnStartTickForThePromotedOwner()
+    {
+        var state = InteractiveDesktopState.CreateFresh();
+        var actor = Participant(100);
+        _scheduler.BeginParticipating(state, _probe, OwnerA, actor, UiTurnMode.DesktopExclusive);
+        _scheduler.BeginParticipating(state, _probe, OwnerB, Participant(200), UiTurnMode.DesktopExclusive);
+
+        _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
+        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: true);
+        _clock.Advance(InteractiveDesktopScheduler.IdleGraceMs);
+        _scheduler.Normalize(state, _probe);
+
+        Assert.AreEqual(OwnerB.Key, state.Owner!.Key);
+        Assert.AreEqual(_clock.NowTicks64, state.TurnStartedTick64,
+            "the promoted owner's turn starts now — it must not inherit the previous owner's age");
+    }
+
+    [TestMethod]
+    public void ExpiringAnIdleTurn_ClearsTheTurnStartTick()
+    {
+        var state = InteractiveDesktopState.CreateFresh();
+        var actor = Participant(100);
+        _scheduler.BeginParticipating(state, _probe, OwnerA, actor, UiTurnMode.DesktopExclusive);
+        _probe.Alive.Remove((actor.ProcessId, actor.StartTicksUtc));
+        _scheduler.CompleteCommand(state, _probe, actor, OwnerA, renewGrace: true);
+
+        _clock.Advance(InteractiveDesktopScheduler.IdleGraceMs);
+        _scheduler.Normalize(state, _probe);
+
+        Assert.IsNull(state.Owner);
+        Assert.AreEqual(0, state.TurnStartedTick64, "an unowned desktop has no turn to age");
+    }
+
+    [TestMethod]
     public void IdleTurn_ExpiresAfterExactlyFourSeconds()
     {
         var state = InteractiveDesktopState.CreateFresh();

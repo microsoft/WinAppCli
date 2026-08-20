@@ -46,6 +46,7 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
     private readonly IPollDelay _pollDelay;
     private readonly IAnsiConsole _console;
     private readonly ILogger<InteractiveDesktopLock> _logger;
+    private readonly IMonotonicClock _clock;
     private readonly InteractiveDesktopScheduler _scheduler;
 
     public InteractiveDesktopLock(
@@ -67,6 +68,7 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
         _pollDelay = pollDelay;
         _console = console;
         _logger = logger;
+        _clock = clock;
         _scheduler = new InteractiveDesktopScheduler(clock);
     }
 
@@ -188,6 +190,14 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
         private long? _ticket;
         private UiTurnAction _turnAction = UiTurnAction.New;
         private int _observedQueueDepth;
+
+        /// <summary>
+        /// Monotonic tick at which the turn this command runs under was claimed, copied from the state
+        /// every time this command observes the turn it belongs to. Reported as the turn-age bucket, so
+        /// it measures how long the whole workflow has held the desktop rather than how long this one
+        /// command waited (spec §16). Null for detached observations, which hold no turn.
+        /// </summary>
+        private long? _turnStartedTick64;
 
         public UiTurnMode Mode { get; private set; } = mode;
 
@@ -333,6 +343,7 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
             }
 
             _turnAction = admission.TurnAction;
+            _turnStartedTick64 = TurnStartTick(state);
             coordinator._store.Publish(state);
         }
 
@@ -356,6 +367,9 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
 
             _ticket = admission.Ticket;
             _turnAction = admission.TurnAction;
+            _turnStartedTick64 = admission.Admission == UiAdmission.GlobalWaiter
+                ? null
+                : TurnStartTick(state);
             _observedQueueDepth = InteractiveDesktopScheduler.CountLiveWaiters(state, _probe);
             coordinator._store.Publish(state);
 
@@ -409,6 +423,10 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
                         WaitedMs = _waitWatch.ElapsedMilliseconds;
                         Mode = entry.Mode;
                         _ticket = entry.Ticket;
+
+                        // A global waiter only learns its turn's start once it has been promoted into
+                        // ownerCommands, which may be many turns after it queued.
+                        _turnStartedTick64 = TurnStartTick(state);
                         return;
                     }
 
@@ -518,6 +536,9 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
                         state, _probe, owner, participant, UiTurnMode.DesktopExclusive);
                     _ticket = admission.Ticket;
                     _turnAction = admission.TurnAction;
+                    _turnStartedTick64 = admission.Admission == UiAdmission.GlobalWaiter
+                        ? null
+                        : TurnStartTick(state);
                     _detached = false;
                 }
 
@@ -629,7 +650,33 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
                 effectiveOutcome,
                 WaitedMs,
                 _observedQueueDepth,
-                _waitWatch.ElapsedMilliseconds));
+                MeasureTurnAgeMs()));
+        }
+
+        /// <summary>
+        /// The turn's claim tick, or <see langword="null"/> when it is unknown. Zero is the "no turn"
+        /// sentinel written by <c>CreateFresh</c> and by idle expiry, and is also what an older state
+        /// file that predates the field deserializes to — measuring an age from it would report the
+        /// machine's uptime.
+        /// </summary>
+        private static long? TurnStartTick(InteractiveDesktopState state)
+            => state.TurnStartedTick64 == 0 ? null : state.TurnStartedTick64;
+
+        /// <summary>
+        /// How long the turn this command ran under had been held when the command finished. Zero for a
+        /// detached observation and for a command that never acquired a turn, which have no turn to age.
+        /// </summary>
+        private long MeasureTurnAgeMs()
+        {
+            if (_turnStartedTick64 is not { } startedTick)
+            {
+                return 0;
+            }
+
+            // Clamped rather than trusted: the tick was written by whichever process claimed the turn,
+            // and a state file that survived a reboot carries pre-restart ticks.
+            var age = coordinator._clock.NowTicks64 - startedTick;
+            return age > 0 ? age : 0;
         }
 
         /// <summary>

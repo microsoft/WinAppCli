@@ -44,14 +44,7 @@ Base options shared by most commands.
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `WinappResult`
 
@@ -65,7 +58,7 @@ Result returned by every command wrapper.
 
 ## CLI command wrappers
 
-These functions wrap native `winapp` CLI commands. All accept [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).
+These functions wrap native `winapp` CLI commands. All accept [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).
 
 ### `azSign()`
 
@@ -85,16 +78,8 @@ function azSign(options: AzSignOptions): Promise<WinappResult>
 | `profile` | `string \| undefined` | No | Certificate profile name. Must be used with --account |
 | `resourceGroup` | `string \| undefined` | No | Resource group to narrow down signing accounts |
 | `subscription` | `string \| undefined` | No | Azure subscription ID to use. If not provided and multiple subscriptions exist, you will be prompted. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -119,16 +104,8 @@ function certGenerate(options?: CertGenerateOptions): Promise<WinappResult>
 | `password` | `string \| undefined` | No | Password for the generated PFX file |
 | `publisher` | `string \| undefined` | No | Publisher distinguished name (DN) for the generated certificate (e.g., CN=MyCompany or OU=Team, O=Corp, C=US). If not specified, will be inferred from manifest. Bare names are auto-wrapped as CN=<name>. |
 | `validDays` | `number \| undefined` | No | Number of days the certificate is valid |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -147,16 +124,8 @@ function certInfo(options: CertInfoOptions): Promise<WinappResult>
 | `certPath` | `string` | Yes | Path to the certificate file (PFX) |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `password` | `string \| undefined` | No | Password for the PFX file |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -175,16 +144,8 @@ function certInstall(options: CertInstallOptions): Promise<WinappResult>
 | `certPath` | `string` | Yes | Path to the certificate file (PFX or CER) |
 | `force` | `boolean \| undefined` | No | Force installation even if the certificate already exists |
 | `password` | `string \| undefined` | No | Password for the PFX file |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -204,16 +165,8 @@ function createDebugIdentity(options?: CreateDebugIdentityOptions): Promise<Wina
 | `keepIdentity` | `boolean \| undefined` | No | Keep the package identity from the manifest as-is, without appending '.debug' to the package name and application ID. |
 | `manifest` | `string \| undefined` | No | Path to the Package.appxmanifest or appxmanifest.xml |
 | `noInstall` | `boolean \| undefined` | No | Do not install the package after creation. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -235,16 +188,8 @@ function createExternalCatalog(options: CreateExternalCatalogOptions): Promise<W
 | `output` | `string \| undefined` | No | Output catalog file path. If not specified, the default CodeIntegrityExternal.cat name is used. |
 | `recursive` | `boolean \| undefined` | No | Include files from subdirectories |
 | `usePageHashes` | `boolean \| undefined` | No | Include page hashes when generating the catalog |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -262,16 +207,8 @@ function embedIdentity(options: EmbedIdentityOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `target` | `string` | Yes | Path to the .exe (embeds identity into its side-by-side manifest via mt.exe) or an .xml/.manifest side-by-side manifest file (inserts/replaces the <msix> element; created if it doesn't exist). |
 | `manifest` | `string \| undefined` | No | Path to the sparse appxmanifest.xml to read identity from. When omitted, searched in a 'sparse/' folder (where 'winapp init --exe --sparse' writes it by default) beside the target first, then in the current directory, then beside the target and in the current directory. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -294,16 +231,8 @@ function findUi(options?: FindUiOptions): Promise<WinappResult>
 | `max` | `number \| undefined` | No | Maximum number of matched controls to return. Applies to search only; ignored with --list and --id. |
 | `refresh` | `boolean \| undefined` | No | Bypass the local cache and re-fetch the WinUI corpus from GitHub. |
 | `source` | `string \| undefined` | No | Restrict results to a single source: gallery (WinUI 3 Gallery), toolkit (Windows Community Toolkit), reactor (microsoft-ui-reactor, C#-only declarative WinUI), or core (curated patterns). Reactor is opt-in — it is excluded from a normal search, so pass --source reactor to search it (only do this for a Reactor/MVU project; its C#-only samples don't paste into a standard XAML app). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -320,16 +249,8 @@ function getWinappPath(options?: GetWinappPathOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `global` | `boolean \| undefined` | No | Get the global .winapp directory instead of local |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -358,16 +279,8 @@ function init(options?: InitOptions): Promise<WinappResult>
 | `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
 | `sparse` | `boolean \| undefined` | No | Generate a sparse identity manifest (appxmanifest.xml) for an existing desktop exe instead of a full package manifest. Use with --exe. Skips SDK/package installation. |
 | `useDefaults` | `boolean \| undefined` | No | Skip interactive prompts and use default answers. Normal init targets the positional project directory if given, otherwise the current directory (e.g., winapp init . --use-defaults). Sparse init (--exe --sparse) ignores the positional directory and writes to --output-dir instead. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -386,16 +299,8 @@ function manifestAddAlias(options?: ManifestAddAliasOptions): Promise<WinappResu
 | `appId` | `string \| undefined` | No | Application Id to add the alias to (default: first Application element) |
 | `manifest` | `string \| undefined` | No | Path to Package.appxmanifest or appxmanifest.xml file (default: search current directory) |
 | `name` | `string \| undefined` | No | Alias name (e.g. 'myapp.exe'). Default: inferred from the Executable attribute in the manifest. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -420,16 +325,8 @@ function manifestGenerate(options?: ManifestGenerateOptions): Promise<WinappResu
 | `publisherName` | `string \| undefined` | No | Publisher distinguished name (DN) (default: CN=<current user>). Accepts any valid X.500 DN; bare names are auto-wrapped as CN=<name>. |
 | `template` | `ManifestTemplates \| undefined` | No | Manifest template type: 'packaged' (full MSIX app, default) or 'sparse' (desktop app with package identity for Windows APIs) |
 | `version` | `string \| undefined` | No | App version in Major.Minor.Build.Revision format (e.g., 1.0.0.0). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -448,16 +345,8 @@ function manifestUpdateAssets(options: ManifestUpdateAssetsOptions): Promise<Win
 | `imagePath` | `string` | Yes | Path to source image file (SVG, PNG, ICO, JPG, BMP, GIF) |
 | `lightImage` | `string \| undefined` | No | Path to source image for light theme variants (SVG, PNG, ICO, JPG, BMP, GIF) |
 | `manifest` | `string \| undefined` | No | Path to Package.appxmanifest or appxmanifest.xml file (default: search current directory) |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -481,16 +370,8 @@ function newCommand(options?: NewOptions): Promise<WinappResult>
 | `template` | `string \| undefined` | No | Template short name (e.g. winui, winui-navview, winui-mvvm, winui-lib, winui-unittest). Run 'winapp new --list' to see all. |
 | `templateVersion` | `string \| undefined` | No | WinUI template pack version: 'latest' (install newest), 'installed' (keep what's installed), or an explicit version. Default: install latest if none, else prompt to update a stale pack. |
 | `useDefaults` | `boolean \| undefined` | No | Do not prompt; use defaults (blank template, name from --output/--name, keep installed templates). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -518,16 +399,8 @@ function packageApp(options: PackageOptions): Promise<WinappResult>
 | `publisher` | `string \| undefined` | No | Publisher distinguished name (DN) for certificate generation (e.g., CN=MyCompany). Bare names are auto-wrapped as CN=<name>. |
 | `selfContained` | `boolean \| undefined` | No | Bundle Windows App SDK runtime for self-contained deployment |
 | `skipPri` | `boolean \| undefined` | No | Skip PRI file generation |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -545,16 +418,8 @@ function restore(options?: RestoreOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `baseDirectory` | `string \| undefined` | No | Base/root directory for the winapp workspace |
 | `configDir` | `string \| undefined` | No | Directory to read configuration from (default: current directory) |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -593,16 +458,8 @@ function run(options?: RunOptions): Promise<WinappResult>
 | `unregisterOnExit` | `boolean \| undefined` | No | Unregister the development package after the application exits. Only removes packages registered in development mode. |
 | `withAlias` | `boolean \| undefined` | No | Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. |
 | `appArgs` | `string \| string[] \| undefined` | No | Arguments to pass to the launched application (forwarded after --). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -622,16 +479,8 @@ function sign(options: SignOptions): Promise<WinappResult>
 | `certPath` | `string` | Yes | Path to the certificate file (PFX format) |
 | `password` | `string \| undefined` | No | Certificate password |
 | `timestamp` | `string \| undefined` | No | Timestamp server URL |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -648,16 +497,8 @@ function store(options?: StoreOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `storeArgs` | `string \| string[] \| undefined` | No | Arguments to pass through to the Microsoft Store Developer CLI. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -674,16 +515,8 @@ function tool(options?: ToolOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `toolArgs` | `string \| string[] \| undefined` | No | Arguments to pass to the SDK tool, e.g. ['makeappx', 'pack', '/d', './folder', '/p', './out.msix']. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -705,16 +538,8 @@ function uiClick(options?: UiClickOptions): Promise<WinappResult>
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `right` | `boolean \| undefined` | No | Perform a right-click instead of a left click |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -738,16 +563,8 @@ function uiDrag(options?: UiDragOptions): Promise<WinappResult>
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `right` | `boolean \| undefined` | No | Drag with the right mouse button instead of the left button |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -767,16 +584,8 @@ function uiFocus(options?: UiFocusOptions): Promise<WinappResult>
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -795,16 +604,8 @@ function uiGetFocused(options?: UiGetFocusedOptions): Promise<WinappResult>
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -825,16 +626,8 @@ function uiGetProperty(options?: UiGetPropertyOptions): Promise<WinappResult>
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `property` | `string \| undefined` | No | Property name to read or filter on |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -854,16 +647,8 @@ function uiGetValue(options?: UiGetValueOptions): Promise<WinappResult>
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -884,16 +669,8 @@ function uiHover(options?: UiHoverOptions): Promise<WinappResult>
 | `dwellTime` | `number \| undefined` | No | Time in milliseconds to wait after hovering for hover effects to appear (default: 800) |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -918,16 +695,8 @@ function uiInspect(options?: UiInspectOptions): Promise<WinappResult>
 | `interactive` | `boolean \| undefined` | No | Show only interactive/invokable elements (buttons, links, inputs, list items). Increases default depth to 8. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -947,16 +716,8 @@ function uiInvoke(options?: UiInvokeOptions): Promise<WinappResult>
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -975,16 +736,8 @@ function uiListWindows(options?: UiListWindowsOptions): Promise<WinappResult>
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `showHidden` | `boolean \| undefined` | No | Include untitled zero-size windows that are hidden by default |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -1011,16 +764,8 @@ function uiPen(options?: UiPenOptions): Promise<WinappResult>
 | `tiltX` | `number \| undefined` | No | Pen tilt along the x-axis in degrees (-90 to 90, default: 0). |
 | `tiltY` | `number \| undefined` | No | Pen tilt along the y-axis in degrees (-90 to 90, default: 0). |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -1043,16 +788,8 @@ function uiScreenshot(options?: UiScreenshotOptions): Promise<WinappResult>
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `output` | `string \| undefined` | No | Save output to this file path. |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -1075,16 +812,8 @@ function uiScroll(options?: UiScrollOptions): Promise<WinappResult>
 | `to` | `string \| undefined` | No | Scroll to position: top, bottom |
 | `wheel` | `number \| undefined` | No | Rotate the mouse wheel over the element by this many notches (1 = one notch up, -1 = one notch down). Synthesizes real wheel input instead of using ScrollPattern. |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -1104,16 +833,8 @@ function uiScrollIntoView(options?: UiScrollIntoViewOptions): Promise<WinappResu
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -1134,16 +855,8 @@ function uiSearch(options?: UiSearchOptions): Promise<WinappResult>
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `max` | `number \| undefined` | No | Maximum search results |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -1167,16 +880,8 @@ function uiSendKeys(options?: UiSendKeysOptions): Promise<WinappResult>
 | `verbatim` | `boolean \| undefined` | No | Type the entire keys argument as literal text — no named-key, combo, or vk= interpretation, and exact whitespace preserved. The whole-argument form of the per-token text= escape: --verbatim "down down enter" types the words instead of pressing Down, Down, Enter. |
 | `via` | `string \| undefined` | No | Transport: post-message (default, HWND-targeted, bypasses UIPI; typed text raises TextChanged but not a per-character KeyDown) or send-input (OS-wide; typed text raises a real per-character KeyDown + TextChanged). Named keys and combos raise KeyDown on both, but keyboard accelerators/shortcuts (KeyboardAccelerator, e.g. ctrl+t) only fire via send-input. post-message targets the focused child control and works for classic Win32/WinForms controls, but WinUI 3 / UWP / XAML controls are windowless and ignore posted messages — use send-input for those (a warning is emitted when the target looks like a XAML app). |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -1197,16 +902,8 @@ function uiSetValue(options?: UiSetValueOptions): Promise<WinappResult>
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -1225,16 +922,8 @@ function uiStatus(options?: UiStatusOptions): Promise<WinappResult>
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -1262,16 +951,8 @@ function uiTouch(options?: UiTouchOptions): Promise<WinappResult>
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `toPoint` | `string \| undefined` | No | End point x,y for a swipe (screen coordinates). Takes precedence over --direction. |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -1296,16 +977,8 @@ function uiWaitFor(options?: UiWaitForOptions): Promise<WinappResult>
 | `timeout` | `number \| undefined` | No | Timeout in milliseconds |
 | `value` | `string \| undefined` | No | Wait for element value to equal this string. Uses smart fallback (TextPattern -> ValuePattern -> Name). Combine with --property to check a specific property instead. |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -1324,16 +997,8 @@ function unregister(options?: UnregisterOptions): Promise<WinappResult>
 | `force` | `boolean \| undefined` | No | Skip the install-location directory check and unregister even if the package was registered from a different project tree |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to the Package.appxmanifest (default: auto-detect from current directory) |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -1350,16 +1015,8 @@ function update(options?: UpdateOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `setupSdks` | `SdkInstallMode \| undefined` | No | SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation) |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
 
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
-
-*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`, `signal`).*
 
 ---
 
@@ -1607,16 +1264,7 @@ Re-exported from Node.js for convenience. See [Node.js docs](https://nodejs.org/
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `exitOnError` | `boolean \| undefined` | No |  |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-On Windows, Node force-terminates the child, so the CLI's own cleanup may not run. That is safe:
-Windows closes the process's coordination file handles and deletes its `DeleteOnClose` participant
-lease, and other `winapp ui` processes prune the entry through lease and PID/start validation.
-If the abort lands after the command acquired the desktop, UI side effects may already have
-happened, and aborting an active recording can leave partial or invalid output — this wrapper does
-not promise graceful MP4 finalization.
-
-Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>On Windows, Node force-terminates the child, so the CLI's own cleanup may not run. That is safe: Windows closes the process's coordination file handles and deletes its `DeleteOnClose` participant lease, and other `winapp ui` processes prune the entry through lease and PID/start validation. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial or invalid output — this wrapper does not promise graceful MP4 finalization.<br><br>Rejects with an `AbortError`. |
 
 ### `CallWinappCliResult`
 
@@ -1629,8 +1277,7 @@ Rejects with an `AbortError`. |
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()) |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation. See {@link CallWinappCliOptions.signal} for the exact
-contract, including what is and is not guaranteed after an abort. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation. See {@link CallWinappCliOptions.signal} for the exact contract, including what is and is not guaranteed after an abort. |
 
 ### `CallWinappCliCaptureResult`
 
@@ -1723,14 +1370,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `CertGenerateOptions`
 
@@ -1748,14 +1388,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `CertInfoOptions`
 
@@ -1767,14 +1400,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `CertInstallOptions`
 
@@ -1786,14 +1412,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `CreateDebugIdentityOptions`
 
@@ -1806,14 +1425,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `CreateExternalCatalogOptions`
 
@@ -1828,14 +1440,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `EmbedIdentityOptions`
 
@@ -1846,14 +1451,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `FindUiOptions`
 
@@ -1869,14 +1467,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `GetWinappPathOptions`
 
@@ -1886,14 +1477,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `InitOptions`
 
@@ -1915,14 +1499,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `ManifestAddAliasOptions`
 
@@ -1934,14 +1511,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `ManifestGenerateOptions`
 
@@ -1959,14 +1529,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `ManifestUpdateAssetsOptions`
 
@@ -1978,14 +1541,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `NewOptions`
 
@@ -2002,14 +1558,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `PackageOptions`
 
@@ -2030,14 +1579,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `RestoreOptions`
 
@@ -2048,14 +1590,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `RunOptions`
 
@@ -2087,14 +1622,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `SignOptions`
 
@@ -2107,14 +1635,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `StoreOptions`
 
@@ -2124,14 +1645,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `ToolOptions`
 
@@ -2141,14 +1655,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UiClickOptions`
 
@@ -2163,14 +1670,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UiDragOptions`
 
@@ -2187,14 +1687,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UiFocusOptions`
 
@@ -2207,14 +1700,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UiGetFocusedOptions`
 
@@ -2226,14 +1712,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UiGetPropertyOptions`
 
@@ -2247,14 +1726,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UiGetValueOptions`
 
@@ -2267,14 +1739,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UiHoverOptions`
 
@@ -2288,14 +1753,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UiInspectOptions`
 
@@ -2313,14 +1771,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UiInvokeOptions`
 
@@ -2333,14 +1784,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UiListWindowsOptions`
 
@@ -2352,14 +1796,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UiPenOptions`
 
@@ -2379,14 +1816,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UiScreenshotOptions`
 
@@ -2402,14 +1832,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UiScrollOptions`
 
@@ -2425,14 +1848,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UiScrollIntoViewOptions`
 
@@ -2445,14 +1861,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UiSearchOptions`
 
@@ -2466,14 +1875,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UiSendKeysOptions`
 
@@ -2490,14 +1892,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UiSetValueOptions`
 
@@ -2511,14 +1906,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UiStatusOptions`
 
@@ -2530,14 +1918,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UiTouchOptions`
 
@@ -2558,14 +1939,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UiWaitForOptions`
 
@@ -2583,14 +1957,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UnregisterOptions`
 
@@ -2602,14 +1969,7 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 
 ### `UpdateOptions`
 
@@ -2619,12 +1979,5 @@ partial output. Rejects with an `AbortError`. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
-| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.
-
-`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another
-workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may
-not run, but Windows releases its coordination handles and deletes its participant lease, and
-other processes reclaim the queue entry. If the abort lands after the command acquired the
-desktop, UI side effects may already have happened, and aborting an active recording can leave
-partial output. Rejects with an `AbortError`. |
+| `signal` | `AbortSignal \| undefined` | No | Cancels the whole native invocation, not just a wait for the shared desktop.<br><br>`winapp ui` commands take cooperative turns on the desktop, so a command may wait for another workflow to finish. Aborting force-terminates the child on Windows; the CLI's own cleanup may not run, but Windows releases its coordination handles and deletes its participant lease, and other processes reclaim the queue entry. If the abort lands after the command acquired the desktop, UI side effects may already have happened, and aborting an active recording can leave partial output. Rejects with an `AbortError`. |
 

@@ -29,6 +29,14 @@ internal sealed class InteractiveDesktopState
     /// <summary>Incremented every time the turn is claimed by an owner. Diagnostic and test observability.</summary>
     public long TurnId { get; set; }
 
+    /// <summary>
+    /// Monotonic tick at which the current turn was claimed, written alongside every
+    /// <see cref="TurnId"/> increment. Lets any participant report how long the <em>workflow</em> turn
+    /// has been held — across all of that owner's commands — rather than how long its own command
+    /// waited (spec §16 turn-age bucket). Zero when no owner holds the turn.
+    /// </summary>
+    public long TurnStartedTick64 { get; set; }
+
     /// <summary>Next globally monotonic arrival ticket. Tickets order the barrier and the global FIFO.</summary>
     public long NextTicket { get; set; } = 1;
 
@@ -60,6 +68,7 @@ internal sealed class InteractiveDesktopState
     {
         Version = CurrentVersion,
         TurnId = 0,
+        TurnStartedTick64 = 0,
         NextTicket = 1,
         Owner = null,
         IdleExpiresTick64 = 0,
