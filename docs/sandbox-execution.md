@@ -44,6 +44,25 @@ and secret, the guest serves commands only after an authenticated and encrypted 
 carry structured argument arrays rather than interpolated command lines, and every path is
 canonicalized and confined to a managed root.
 
+### What path containment does and does not guarantee
+
+Paths crossing into the guest are canonicalized, confined to a managed root, and refused if any
+component is a reparse point — a junction or symbolic link. Managed folders are never enumerated
+through one either, so a link cannot make content outside a managed root appear to be inside it.
+
+That reliably stops a link that **already exists** in the path, which is how one realistically
+appears: left behind by an earlier deployment, an application, or an extracted archive.
+
+It is **not** proof against a co-resident guest process that replaces a verified directory with a
+junction in the moment between the check and the write. Closing that race requires handle-relative,
+no-follow file opens, which v1 does not implement.
+
+That residual race is accepted deliberately, and it is consistent with the trust model above rather
+than an exception to it: a guest process able to win it can already terminate the agent, edit the
+deployment directly, or interfere with the application, because everything in the Sandbox runs as
+the same user. It is not the weakest link. Workflows that must be isolated from one another need
+separate machines.
+
 ## Requirements
 
 - Windows 11 24H2 or newer, on a supported edition
@@ -140,6 +159,13 @@ whether you typed it locally or routed it through Sandbox.
 At startup it verifies it is not in session 0 and that its window station and input desktop are
 interactive. It publishes its status **whether or not it is ready**, so a disconnected Sandbox
 window is reported as exactly that rather than as a timeout.
+
+Every command runs inside a Job Object so that cancelling it terminates the whole process tree, not
+just the process winapp started. Because Windows cannot create a process that is already a job
+member, the agent starts a small internal barrier instead: it waits until the agent has placed it in
+the job, and only then starts the requested command — which Windows puts in the job at creation,
+because its parent is already a member. There is no window in which a spawned descendant could
+escape its operation's cancellation.
 
 Host and guest `winapp` are versioned together. When the host is newer, the replacement binary is
 staged, hash-verified, self-tested in its own process, and activated only if it passes, with the

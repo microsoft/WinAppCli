@@ -121,8 +121,8 @@ internal sealed class GuestFileService(string managedRoot)
 
         // Lexical containment is not enough on its own: a junction planted as one of the
         // intermediate directories would satisfy it while pointing the write somewhere else. Each
-        // existing ancestor is checked, and any missing ones are created here so nothing can
-        // introduce a reparse point into the path afterwards.
+        // existing ancestor is checked and any missing ones are created here. See
+        // EnsureNoReparseAncestor for exactly what this does and does not guarantee.
         EnsureNoReparseAncestor(directory, destination);
 
         // The temporary sits beside the destination so the final move stays on one volume and is
@@ -137,9 +137,26 @@ internal sealed class GuestFileService(string managedRoot)
     /// reparse point.
     /// </summary>
     /// <remarks>
-    /// Checked and created top-down so that after this returns every ancestor is a real directory
-    /// this call either verified or made. Verifying afterwards would leave a window in which the
-    /// path could be swapped between the check and the write.
+    /// Checked and created top-down, so on return every ancestor is a real directory this call
+    /// either verified or made.
+    /// <para>
+    /// <strong>The guarantee this provides is bounded and worth stating precisely.</strong> It
+    /// reliably refuses a link that <em>already exists</em> in the path — a junction left behind by
+    /// an earlier deployment, an application, or an extracted archive, which is the realistic way
+    /// one appears. It is <em>not</em> proof against a co-resident guest process replacing a
+    /// verified directory with a junction between this check and the write: that is a
+    /// time-of-check-to-time-of-use race, and closing it needs handle-relative, no-follow opens
+    /// rather than path-based ones.
+    /// </para>
+    /// <para>
+    /// That residual race is accepted for v1 and is consistent with the specification's threat
+    /// model, which states plainly that everything inside the Sandbox runs as the same user and
+    /// that co-resident applications are mutually trusted and "can observe or interfere with one
+    /// another". A guest process able to win this race can already terminate the agent, rewrite the
+    /// deployment directly, or interfere with the application — so the race is not the weakest link
+    /// it would be under an isolation model that claimed otherwise. Mutual isolation requires
+    /// separate machines or a future provider.
+    /// </para>
     /// </remarks>
     internal static void EnsureNoReparseAncestor(string scopeRoot, string destination)
     {

@@ -29,13 +29,15 @@ internal sealed class GuestProcessHost : IGuestProcessHost
     private readonly Process _process;
     private readonly GuestJobObject _job;
     private readonly Task _pumpTask;
+    private readonly EventWaitHandle? _released;
     private bool _disposed;
 
-    private GuestProcessHost(Process process, GuestJobObject job, Task pumpTask)
+    private GuestProcessHost(Process process, GuestJobObject job, Task pumpTask, EventWaitHandle? released)
     {
         _process = process;
         _job = job;
         _pumpTask = pumpTask;
+        _released = released;
     }
 
     /// <summary>The child's process ID. Meaningful only within the current target epoch.</summary>
@@ -45,17 +47,37 @@ internal sealed class GuestProcessHost : IGuestProcessHost
     public long StartTicksUtc => _process.StartTime.ToUniversalTime().Ticks;
 
     /// <summary>Starts a child process for <paramref name="request"/>.</summary>
+    /// <remarks>
+    /// The process actually started is <see cref="GuestOperationHost"/> — not the requested command
+    /// — whenever a barrier executable is supplied. It waits on an event and so provably cannot
+    /// spawn anything before this method assigns it to the job; only then is it released to start
+    /// the requested command, which Windows places in the job at creation because its parent is
+    /// already a member. That closes the window in which a descendant spawned by a directly started
+    /// child could outlive a cancellation of its own operation.
+    /// <para>
+    /// The barrier path is passed in rather than read from <see cref="Environment.ProcessPath"/>:
+    /// only the agent knows that the running binary is winapp and therefore understands the barrier
+    /// verb. Callers that do not supply one get a direct start, where containment falls back to
+    /// prompt assignment after creation.
+    /// </para>
+    /// </remarks>
     /// <exception cref="ExecutionTargetException">The process could not be started.</exception>
     public static GuestProcessHost Start(
         GuestExecRequest request,
-        Action<GuestStreamId, ReadOnlyMemory<byte>> onOutput)
+        Action<GuestStreamId, ReadOnlyMemory<byte>> onOutput,
+        string? barrierExecutable = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(onOutput);
 
+        var barrierPath = barrierExecutable;
+        var readyEventName = barrierPath is null ? null : $@"Local\winapp-op-{Guid.NewGuid():n}";
+
+        EventWaitHandle? released = null;
+
         var startInfo = new ProcessStartInfo
         {
-            FileName = request.Executable,
+            FileName = barrierPath ?? request.Executable,
             WorkingDirectory = request.WorkingDirectory ?? string.Empty,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
@@ -66,7 +88,11 @@ internal sealed class GuestProcessHost : IGuestProcessHost
 
         // Each argument stays a separate value, so quoting and spacing survive intact and nothing
         // can be reinterpreted as an extra argument.
-        foreach (var argument in request.Arguments)
+        var arguments = readyEventName is null
+            ? request.Arguments
+            : GuestOperationHost.BuildArguments(readyEventName, request);
+
+        foreach (var argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
         }
@@ -84,22 +110,30 @@ internal sealed class GuestProcessHost : IGuestProcessHost
 
         try
         {
+            if (readyEventName is not null)
+            {
+                released = new EventWaitHandle(initialState: false, EventResetMode.ManualReset, readyEventName);
+            }
+
             process = Process.Start(startInfo)
                 ?? throw ExecutionTargetException.Create(
                     ExecutionTargetErrorCodes.TransportFailed,
                     $"The guest could not start '{request.Executable}'.");
 
-            // Assign before the child gets far, so anything it spawns is already inside the job.
+            // Assigned before the barrier is released, which is the whole point: nothing the
+            // requested command spawns can exist outside the job.
             job.Assign(process);
+            released?.Set();
 
             var pump = Task.WhenAll(
                 PumpAsync(process.StandardOutput.BaseStream, GuestStreamId.StandardOutput, onOutput),
                 PumpAsync(process.StandardError.BaseStream, GuestStreamId.StandardError, onOutput));
 
-            return new GuestProcessHost(process, job, pump);
+            return new GuestProcessHost(process, job, pump, released);
         }
         catch (Exception ex) when (ex is not ExecutionTargetException)
         {
+            released?.Dispose();
             process?.Dispose();
             job.Dispose();
 
@@ -108,6 +142,13 @@ internal sealed class GuestProcessHost : IGuestProcessHost
                 $"The guest could not start '{request.Executable}'.",
                 userAction: "Check that the application deployed successfully, then retry.",
                 innerException: ex);
+        }
+        catch
+        {
+            released?.Dispose();
+            process?.Dispose();
+            job.Dispose();
+            throw;
         }
     }
 
@@ -205,6 +246,7 @@ internal sealed class GuestProcessHost : IGuestProcessHost
         // Disposing the job closes the last handle, terminating anything still running. This is what
         // guarantees no guest process outlives the agent that started it.
         _job.Dispose();
+        _released?.Dispose();
 
         try
         {

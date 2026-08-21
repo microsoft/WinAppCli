@@ -57,6 +57,25 @@ internal class GuestAgentCommand : Command, IShortDescription
         DefaultValueFactory = _ => 0,
     };
 
+    /// <summary>Runs winapp as the per-operation job containment barrier.</summary>
+    public static Option<bool> OperationHostOption { get; } = new(GuestOperationHost.OperationHostOption)
+    {
+        Description = "Wait to be placed in a job object, then run the command after '--'.",
+    };
+
+    /// <summary>Event the agent signals once the barrier is a job member.</summary>
+    public static Option<string?> ReadyEventOption { get; } = new(GuestOperationHost.ReadyEventOption)
+    {
+        Description = "Name of the event signalled once this process has been assigned to its job.",
+    };
+
+    /// <summary>The command the barrier runs once released.</summary>
+    public static Argument<string[]> BarrierCommandArgument { get; } = new("command")
+    {
+        Description = "Command to run once this process is inside its job.",
+        Arity = ArgumentArity.ZeroOrMore,
+    };
+
     /// <summary>Creates the hidden agent verb.</summary>
     public GuestAgentCommand()
         : base(
@@ -73,6 +92,9 @@ internal class GuestAgentCommand : Command, IShortDescription
         Options.Add(BootstrapDirectoryOption);
         Options.Add(ResultDirectoryOption);
         Options.Add(PortOption);
+        Options.Add(OperationHostOption);
+        Options.Add(ReadyEventOption);
+        Arguments.Add(BarrierCommandArgument);
     }
 
     /// <summary>Runs the agent, or its self-test.</summary>
@@ -93,6 +115,18 @@ internal class GuestAgentCommand : Command, IShortDescription
             if (parseResult.GetValue(SelfTestOption))
             {
                 return RunSelfTest(parseResult, identity);
+            }
+
+            if (parseResult.GetValue(OperationHostOption))
+            {
+                // The containment barrier. It must not start anything until the agent has placed it
+                // in the operation's job, which is what makes per-operation cancellation able to
+                // take the whole process tree with it.
+                return await GuestOperationHost.RunAsync(
+                    parseResult.GetValue(ReadyEventOption) ?? string.Empty,
+                    parseResult.GetValue(BarrierCommandArgument) ?? [],
+                    workingDirectory: null,
+                    cancellationToken).ConfigureAwait(false);
             }
 
             var bootstrapDirectory = parseResult.GetValue(BootstrapDirectoryOption);

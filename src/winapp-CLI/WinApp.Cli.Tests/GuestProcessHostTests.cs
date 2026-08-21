@@ -322,6 +322,118 @@ public class GuestProcessHostTests
     }
 
     [TestMethod]
+    public async Task StopAsync_KillsTheGrandchildOfOneOperationAndLeavesAnotherRunning()
+    {
+        // The property the containment barrier exists for: cancelling one operation must take its
+        // whole process tree with it, while the agent and every other operation keep running.
+        // Agent-level containment alone would leave the grandchild alive until agent teardown.
+        var barrier = FindWinappBinary();
+
+        if (barrier is null)
+        {
+            Assert.Inconclusive("The winapp binary is not built, so the containment barrier cannot be exercised.");
+            return;
+        }
+
+        var cancelledMarker = TestPaths.TempFile("cancelled-grandchild", ".pid");
+        var survivorMarker = TestPaths.TempFile("survivor-grandchild", ".pid");
+
+        var cancelled = GuestProcessHost.Start(SpawningRequest(cancelledMarker), (_, _) => { }, barrier);
+        var survivor = GuestProcessHost.Start(SpawningRequest(survivorMarker), (_, _) => { }, barrier);
+
+        try
+        {
+            var cancelledParent = cancelled.ProcessId;
+            var cancelledGrandchild = await ReadGrandchildIdAsync(
+                cancelledMarker, TestContext.CancellationTokenSource.Token);
+            var survivorGrandchild = await ReadGrandchildIdAsync(
+                survivorMarker, TestContext.CancellationTokenSource.Token);
+
+            Assert.IsTrue(IsStillRunning(cancelledGrandchild));
+            Assert.IsTrue(IsStillRunning(survivorGrandchild));
+
+            // Cancel only the first operation. The agent stays alive, so nothing here depends on
+            // agent-level containment.
+            await cancelled.StopAsync(TimeSpan.FromMilliseconds(300), TestContext.CancellationTokenSource.Token);
+            await Task.Delay(TimeSpan.FromSeconds(1), TestContext.CancellationTokenSource.Token);
+
+            Assert.IsFalse(IsStillRunning(cancelledParent), "The cancelled operation's process must exit.");
+            Assert.IsFalse(
+                IsStillRunning(cancelledGrandchild),
+                "The cancelled operation's grandchild must exit with its job, not survive until agent teardown.");
+
+            Assert.IsTrue(
+                IsStillRunning(survivorGrandchild),
+                "Cancelling one operation must not disturb another that is still running.");
+        }
+        finally
+        {
+            await cancelled.DisposeAsync();
+            await survivor.DisposeAsync();
+            TryDeleteFile(cancelledMarker);
+            TryDeleteFile(survivorMarker);
+        }
+    }
+
+    /// <summary>A request whose command spawns a grandchild and publishes its process ID.</summary>
+    private static GuestExecRequest SpawningRequest(string marker)
+    {
+        var script =
+            $"$p = Start-Process ping -ArgumentList '-n','120','127.0.0.1' -PassThru -WindowStyle Hidden; " +
+            $"Set-Content -LiteralPath '{marker}' -Value $p.Id; Start-Sleep -Seconds 120";
+
+        return new GuestExecRequest
+        {
+            Executable = TestPaths.SystemExecutable(@"WindowsPowerShell\v1.0\powershell.exe"),
+            Arguments = ["-NoProfile", "-NonInteractive", "-Command", script],
+        };
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (IOException)
+        {
+            // Temp cleanup is not worth failing a test over.
+        }
+    }
+
+    /// <summary>Locates the built winapp binary, which acts as the containment barrier.</summary>
+    /// <remarks>
+    /// The barrier is a winapp verb, so exercising it needs the real executable rather than the
+    /// test host. Returning null lets the test report inconclusive instead of passing vacuously.
+    /// </remarks>
+    private static string? FindWinappBinary()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+
+        while (directory is not null)
+        {
+            var candidate = new DirectoryInfo(Path.Join(directory.FullName, "src", "winapp-CLI", "WinApp.Cli", "bin"));
+
+            if (candidate.Exists)
+            {
+                var binary = candidate
+                    .EnumerateFiles("winapp.exe", SearchOption.AllDirectories)
+                    .OrderByDescending(f => f.LastWriteTimeUtc)
+                    .FirstOrDefault();
+
+                if (binary is not null)
+                {
+                    return binary.FullName;
+                }
+            }
+
+            directory = directory.Parent;
+        }
+
+        return null;
+    }
+
+    [TestMethod]
     public void Start_MissingExecutable_ReportsStructuredFailure()    {
         var request = new GuestExecRequest
         {
