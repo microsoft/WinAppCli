@@ -262,6 +262,13 @@ try
     # Step 5: Run tests (unless skipped)
     if (-not $SkipTests) {
         Write-Host "[TEST] Running tests..." -ForegroundColor Blue
+        # Live Windows Sandbox coverage (SandboxLiveE2ETests) is gated on WINAPP_SANDBOX_E2E=1 and
+        # reports Inconclusive otherwise. Windows permits one Sandbox at a time and creating one is
+        # a machine-wide, visible side effect, so it is opt-in rather than part of every build. Set
+        # the variable before running this script on a machine that has the optional feature:
+        #   $env:WINAPP_SANDBOX_E2E = '1'
+        # Those tests never stop a Sandbox winapp did not create; they report it and skip.
+        #
         # Measure coverage honestly. Two things distort the raw number: (1) auto-generated
         # interop (CsWin32/COM/Regex generators in obj\**) inflates the denominator -- excluded
         # via coverage.runsettings; (2) optimized Release builds report many block-brace lines as

@@ -55,7 +55,8 @@ internal partial class RunCommand
             try
             {
                 resolvedManifest = ResolveManifestForSandbox(inputFolder, manifest);
-                layout = outputAppXDirectory ?? new DirectoryInfo(Path.Combine(inputFolder.FullName, "AppX"));
+                layout = outputAppXDirectory ?? new DirectoryInfo(
+                    TargetPathSafety.CombineInsideRoot(inputFolder.FullName, "AppX"));
 
                 LongPathHelper.ValidatePathLength(resolvedManifest.FullName);
                 LongPathHelper.ValidatePathLength(layout.FullName);
@@ -250,7 +251,7 @@ internal partial class RunCommand
                 // never reformatted blind: anything that does not parse is written through exactly
                 // as the guest produced it, because corrupting a result is worse than omitting a
                 // field.
-                var capturedOutput = isJson ? new MemoryStream() : null;
+                using var capturedOutput = isJson ? new MemoryStream() : null;
 
                 var exitCode = await guestApplicationRunner.RunAsync(
                     target,

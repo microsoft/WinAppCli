@@ -255,7 +255,7 @@ internal sealed class DeploymentStateStore(ITargetStateDirectoryProvider directo
     /// <inheritdoc/>
     public IReadOnlyList<DeploymentState> List(ExecutionTargetRef target)
     {
-        var directory = Path.Combine(
+        var directory = TargetPathSafety.CombineInsideRoot(
             directoryProvider.GetTargetRoot(target, create: false).FullName, DeploymentsFolder);
 
         if (!Directory.Exists(directory))
@@ -263,20 +263,15 @@ internal sealed class DeploymentStateStore(ITargetStateDirectoryProvider directo
             return [];
         }
 
-        var states = new List<DeploymentState>();
-
-        foreach (var file in Directory.EnumerateFiles(directory, "*.json"))
-        {
-            // Read rather than a bespoke parse, so a corrupt or newer-schema record fails here
-            // exactly as it would on the path that owns it. Skipping it silently would let a
-            // command report "not deployed" for something that is in fact deployed.
-            if (Read(target, Path.GetFileNameWithoutExtension(file)) is { } state)
-            {
-                states.Add(state);
-            }
-        }
-
-        return states;
+        // Read rather than a bespoke parse, so a corrupt or newer-schema record fails here exactly
+        // as it would on the path that owns it. Skipping one silently would let a command report
+        // "not deployed" for something that is in fact deployed.
+        return
+        [
+            .. Directory.EnumerateFiles(directory, "*.json")
+                .Select(file => Read(target, Path.GetFileNameWithoutExtension(file)))
+                .OfType<DeploymentState>(),
+        ];
     }
 
     private string GetStateFile(ExecutionTargetRef target, string deploymentId, bool create)
