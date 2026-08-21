@@ -52,9 +52,7 @@ public class InteractiveDesktopMultiprocessTests
                 $"Set {GateVariable}=1 (and build the CLI) to run multiprocess UI coordination coverage.");
         }
 
-        _winappPath = FindWinappExe()
-            ?? throw new AssertInconclusiveException(
-                "winapp.exe was not found. Run scripts\\build-cli.ps1 first so artifacts\\cli\\<rid>\\winapp.exe exists.");
+        _winappPath = WinappTestBinary.Resolve();
 
         _lockDirectory = Path.Combine(Path.GetTempPath(), $"winapp-mp-{Guid.NewGuid():N}");
         _previousLockOverride = Environment.GetEnvironmentVariable(
@@ -111,27 +109,6 @@ public class InteractiveDesktopMultiprocessTests
         {
             // A leaked temp directory must never fail a test.
         }
-    }
-
-    private static string? FindWinappExe()
-    {
-        var root = AppContext.BaseDirectory;
-        for (var i = 0; i < 8 && root is not null; i++)
-        {
-            foreach (var rid in new[] { "win-arm64", "win-x64" })
-            {
-                var candidate = Path.Combine(root, "artifacts", "cli", rid, "winapp.exe");
-                if (File.Exists(candidate))
-                {
-                    return candidate;
-                }
-            }
-
-            root = Path.GetDirectoryName(root.TrimEnd(Path.DirectorySeparatorChar));
-        }
-
-        var sideBySide = Path.Combine(AppContext.BaseDirectory, "winapp.exe");
-        return File.Exists(sideBySide) ? sideBySide : null;
     }
 
     /// <summary>

@@ -90,8 +90,8 @@ public class DesktopTargetValidationTests : IDisposable
     public void CrossProcessWindowOwnedByTheExpectedProcessIsAccepted()
     {
         // Exactly what a common-item file picker looks like: a window in another process whose
-        // GW_OWNER is one of the session's own windows. This is the association GetAllAppWindows uses
-        // to surface it in the first place, so validation must accept what discovery offered.
+        // GW_OWNER is one of the session's own windows. Discovery checks exactly this one hop; the
+        // validator additionally follows longer chains, which the nested-dialog case below covers.
         _systemQuery.ProcessIdByHwnd[100] = ForeignPid;
         _systemQuery.WindowOwnerByHwnd[100] = 200;
         _systemQuery.ProcessIdByHwnd[200] = SessionPid;

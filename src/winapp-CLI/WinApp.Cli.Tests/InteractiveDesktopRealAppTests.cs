@@ -54,9 +54,7 @@ public class InteractiveDesktopRealAppTests : IDisposable
                 $"Set {GateVariable}=1 on an interactive desktop (and build the CLI) to run real-app UI coordination coverage.");
         }
 
-        _winappPath = FindWinappExe()
-            ?? throw new AssertInconclusiveException(
-                "winapp.exe was not found. Run scripts\\build-cli.ps1 first so artifacts\\cli\\<rid>\\winapp.exe exists.");
+        _winappPath = WinappTestBinary.Resolve();
 
         _lockDirectory = Path.Combine(Path.GetTempPath(), $"winapp-realapp-{Guid.NewGuid():N}");
         _scratchDirectory = Path.Combine(Path.GetTempPath(), $"winapp-realapp-out-{Guid.NewGuid():N}");
@@ -129,27 +127,6 @@ public class InteractiveDesktopRealAppTests : IDisposable
                 // A leaked temp directory must never fail a test.
             }
         }
-    }
-
-    private static string? FindWinappExe()
-    {
-        var root = AppContext.BaseDirectory;
-        for (var i = 0; i < 8 && root is not null; i++)
-        {
-            foreach (var rid in new[] { "win-arm64", "win-x64" })
-            {
-                var candidate = Path.Combine(root, "artifacts", "cli", rid, "winapp.exe");
-                if (File.Exists(candidate))
-                {
-                    return candidate;
-                }
-            }
-
-            root = Path.GetDirectoryName(root.TrimEnd(Path.DirectorySeparatorChar));
-        }
-
-        var sideBySide = Path.Combine(AppContext.BaseDirectory, "winapp.exe");
-        return File.Exists(sideBySide) ? sideBySide : null;
     }
 
     // ------------------------------------------------------------------ real winapp.exe agents

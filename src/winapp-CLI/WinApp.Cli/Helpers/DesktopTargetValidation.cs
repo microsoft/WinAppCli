@@ -93,11 +93,18 @@ internal static class DesktopTargetValidation
     /// after a queue wait.
     /// </para>
     /// <para>
-    /// This mirrors the exact association the discovery side uses (<c>GW_OWNER</c> reaching one of the
-    /// session's windows), so nothing is admitted here that discovery would not have surfaced. The
-    /// recycled-handle protection is preserved: a reused HWND belonging to an unrelated process has no
-    /// owner chain reaching the expected PID, and an owner link that leads to a dead or reused window
-    /// fails the liveness check on that link — <see cref="ISystemUiQuery.GetProcessIdForWindow"/>
+    /// The association is deliberately a <em>superset</em> of the discovery side's, not a mirror of it:
+    /// <c>GetAllAppWindows</c> checks a single <c>GW_OWNER</c> hop against the session's own windows,
+    /// whereas this walks up to <see cref="MaxOwnerChainDepth"/> hops, so it also admits a dialog owned
+    /// by a dialog. That is intentional — a picker can parent a nested dialog — and it stays safe
+    /// because the property enforced at every hop is the same one: the link must resolve to a
+    /// <em>live</em> window whose PID equals the expected process. Depth changes how far the chain is
+    /// followed, never what qualifies as a match.
+    /// </para>
+    /// <para>
+    /// The recycled-handle protection is therefore preserved at any depth: a reused HWND belonging to an
+    /// unrelated process has no owner chain reaching the expected PID, and an owner link that leads to a
+    /// dead or reused window fails the check on that link — <see cref="ISystemUiQuery.GetProcessIdForWindow"/>
     /// returns 0 for a destroyed window and the true current PID for a recycled one.
     /// </para>
     /// </remarks>
