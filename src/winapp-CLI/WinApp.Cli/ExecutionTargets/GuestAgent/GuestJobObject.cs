@@ -84,6 +84,27 @@ internal sealed class GuestJobObject : IDisposable
         _agentJob = new GuestJobObject(handle);
     }
 
+    /// <summary>Whether this process is a member of any job object.</summary>
+    /// <remarks>
+    /// A minimum-containment check, not proof of a specific assignment. Because the agent places
+    /// itself in a job, its children inherit that membership at creation, so a true result does not
+    /// distinguish "assigned to this operation's job" from "inherited the agent's". It is used as a
+    /// backstop by the containment barrier for the case where agent-level containment failed.
+    /// </remarks>
+    public static bool IsCurrentProcessInJob()
+    {
+        using var current = Process.GetCurrentProcess();
+
+        if (!PInvoke.IsProcessInJob(current.SafeHandle, null, out var inJob))
+        {
+            // Unknown means unproven, and this is the check that gates starting user code, so the
+            // safe answer is no.
+            return false;
+        }
+
+        return inJob;
+    }
+
     /// <summary>Creates a job that terminates its members when the handle closes.</summary>
     /// <exception cref="ExecutionTargetException">The job could not be created or configured.</exception>
     public static GuestJobObject Create()

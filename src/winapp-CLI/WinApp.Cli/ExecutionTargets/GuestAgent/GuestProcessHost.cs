@@ -71,7 +71,7 @@ internal sealed class GuestProcessHost : IGuestProcessHost
         ArgumentNullException.ThrowIfNull(onOutput);
 
         var barrierPath = barrierExecutable;
-        var readyEventName = barrierPath is null ? null : $@"Local\winapp-op-{Guid.NewGuid():n}";
+        var readyEventName = barrierPath is null ? null : GuestOperationHost.CreateReleaseEventName();
 
         EventWaitHandle? released = null;
 
