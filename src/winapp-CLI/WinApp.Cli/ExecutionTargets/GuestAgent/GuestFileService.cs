@@ -1,0 +1,314 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+using System.Security.Cryptography;
+using WinApp.Cli.ExecutionTargets.Abstractions;
+using WinApp.Cli.ExecutionTargets.Orchestration;
+
+namespace WinApp.Cli.ExecutionTargets.GuestAgent;
+
+/// <summary>
+/// Reconciles files between the host and managed guest-local roots
+/// (spec §"Guest winapp agent mode", §"Exact in-place reconciliation").
+/// </summary>
+/// <remarks>
+/// Every path crossing the boundary is resolved against a named managed root and proven to stay
+/// inside it. That is what makes "guest-provided paths never directly select arbitrary host
+/// destinations" hold in the other direction too: the host names a root and a relative path, and
+/// nothing it sends can address a location the guest did not offer.
+/// <para>
+/// Writes land in a sibling temporary file and are verified before the destination is replaced, so
+/// an interrupted transfer never leaves a half-written file that the next hash comparison would
+/// accept as merely "changed".
+/// </para>
+/// </remarks>
+internal sealed class GuestFileService(string managedRoot)
+{
+    /// <summary>The root every managed guest folder lives under.</summary>
+    public string ManagedRoot { get; } = Path.TrimEndingDirectorySeparator(Path.GetFullPath(managedRoot));
+
+    /// <summary>Resolves the directory a scope addresses, creating it when asked.</summary>
+    /// <exception cref="ExecutionTargetException">The root name or scope is not a safe segment.</exception>
+    public string ResolveScopeDirectory(GuestPathScope scope, bool create)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        var directory = scope.Scope is null
+            ? TargetPathSafety.CombineInsideRoot(ManagedRoot, RootFolder(scope.Root))
+            : TargetPathSafety.CombineInsideRoot(ManagedRoot, RootFolder(scope.Root), scope.Scope);
+
+        if (create)
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        return directory;
+    }
+
+    /// <summary>Enumerates the actual contents of a scope.</summary>
+    /// <remarks>
+    /// Hashes are computed here rather than trusting timestamps because a rerun must detect an edit
+    /// that preserved both size and timestamp, which build tools produce more often than one would
+    /// like. A scope that does not exist yet is empty, not an error: that is a first deployment.
+    /// </remarks>
+    public async Task<List<GuestFileInfo>> ListAsync(GuestPathScope scope, CancellationToken cancellationToken)
+    {
+        var directory = ResolveScopeDirectory(scope, create: false);
+        var files = new List<GuestFileInfo>();
+
+        if (!Directory.Exists(directory))
+        {
+            return files;
+        }
+
+        foreach (var path in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var info = new FileInfo(path);
+
+            // A reparse point inside a managed root would let a later write follow a link out of
+            // it. Reporting it as absent makes reconciliation delete it, which is the repair.
+            if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                continue;
+            }
+
+            files.Add(new GuestFileInfo(
+                info.FullName[(directory.Length + 1)..],
+                info.Length,
+                info.LastWriteTimeUtc.Ticks,
+                await ComputeHashAsync(info.FullName, cancellationToken).ConfigureAwait(false)));
+        }
+
+        files.Sort((left, right) =>
+            string.Compare(left.RelativePath, right.RelativePath, StringComparison.OrdinalIgnoreCase));
+
+        return files;
+    }
+
+    /// <summary>Opens a temporary destination for an incoming file.</summary>
+    /// <exception cref="ExecutionTargetException">The path escapes its managed root.</exception>
+    public GuestFileWrite BeginWrite(GuestPathScope scope, GuestFileInfo file)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+
+        var directory = ResolveScopeDirectory(scope, create: true);
+        var destination = DeploymentPlanner.ResolveContainedPath(directory, file.RelativePath);
+
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+
+        // The temporary sits beside the destination so the final move stays on one volume and is
+        // therefore atomic.
+        var temporary = $"{destination}.{Guid.NewGuid():n}.part";
+
+        return new GuestFileWrite(destination, temporary, file);
+    }
+
+    /// <summary>Opens a managed file for streaming back to the host.</summary>
+    /// <exception cref="ExecutionTargetException">The path escapes its root or does not exist.</exception>
+    public FileStream OpenRead(GuestPathScope scope, string relativePath)
+    {
+        var directory = ResolveScopeDirectory(scope, create: false);
+        var source = DeploymentPlanner.ResolveContainedPath(directory, relativePath);
+
+        if (!File.Exists(source))
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.ArtifactFailed,
+                $"'{relativePath}' does not exist in the guest.",
+                userAction: "Check the path, then retry.",
+                context: new Dictionary<string, string> { ["relativePath"] = relativePath });
+        }
+
+        return new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, useAsync: true);
+    }
+
+    /// <summary>Deletes managed files, then prunes the directories they leave empty.</summary>
+    /// <remarks>
+    /// Deleting files absent from the desired state is deliberate: leaving a stale binary behind is
+    /// how a rerun silently keeps executing code the developer just removed.
+    /// </remarks>
+    public void Delete(GuestPathScope scope, IReadOnlyList<string> relativePaths)
+    {
+        ArgumentNullException.ThrowIfNull(relativePaths);
+
+        var directory = ResolveScopeDirectory(scope, create: false);
+        if (!Directory.Exists(directory))
+        {
+            return;
+        }
+
+        foreach (var relativePath in relativePaths)
+        {
+            var path = DeploymentPlanner.ResolveContainedPath(directory, relativePath);
+
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+
+        PruneEmptyDirectories(directory, directory);
+    }
+
+    /// <summary>Removes an entire scope, used by a clean reinstall.</summary>
+    public void RemoveScope(GuestPathScope scope)
+    {
+        var directory = ResolveScopeDirectory(scope, create: false);
+
+        if (Directory.Exists(directory))
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    /// <summary>Lowercase hex SHA-256 of a file's contents.</summary>
+    public static async Task<string> ComputeHashAsync(string path, CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read | FileShare.Delete,
+            bufferSize: 64 * 1024,
+            useAsync: true);
+
+        var hash = await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    /// <summary>Maps a root name to its folder, rejecting anything unknown.</summary>
+    private static string RootFolder(string root) => root switch
+    {
+        GuestRootNames.Deployment => "deployments",
+        GuestRootNames.Artifacts => "artifacts",
+        GuestRootNames.Runtimes => "runtimes",
+        GuestRootNames.Work => "work",
+
+        // A closed set: an unrecognised root is refused rather than treated as a directory name,
+        // which would let the host name any folder it liked under the managed root.
+        _ => throw ExecutionTargetException.Create(
+            ExecutionTargetErrorCodes.TargetAmbiguous,
+            $"'{root}' is not a managed guest location.",
+            userAction: "Retry the command. If it keeps failing, report this with the command you ran."),
+    };
+
+    /// <summary>Removes directories left empty by deletion, without touching the scope root.</summary>
+    private static void PruneEmptyDirectories(string scopeRoot, string directory)
+    {
+        foreach (var child in Directory.EnumerateDirectories(directory))
+        {
+            PruneEmptyDirectories(scopeRoot, child);
+        }
+
+        if (!string.Equals(directory, scopeRoot, StringComparison.OrdinalIgnoreCase) &&
+            !Directory.EnumerateFileSystemEntries(directory).Any())
+        {
+            Directory.Delete(directory);
+        }
+    }
+}
+
+/// <summary>
+/// One in-progress file write: content accumulates in a temporary file and is verified before the
+/// destination is replaced.
+/// </summary>
+/// <remarks>
+/// Verifying before publishing is what makes an interrupted transfer safe. Writing straight to the
+/// destination would leave a file whose size and hash no longer match either the old or the new
+/// content, and the next reconciliation would see only "changed" — silently accepting a corrupt
+/// binary as a legitimate update.
+/// </remarks>
+internal sealed class GuestFileWrite : IAsyncDisposable
+{
+    private readonly string _destination;
+    private readonly string _temporary;
+    private readonly GuestFileInfo _expected;
+    private readonly FileStream _stream;
+    private long _written;
+    private bool _published;
+
+    internal GuestFileWrite(string destination, string temporary, GuestFileInfo expected)
+    {
+        _destination = destination;
+        _temporary = temporary;
+        _expected = expected;
+        _stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true);
+    }
+
+    /// <summary>Bytes received so far, reported when a transfer is interrupted.</summary>
+    public long BytesWritten => _written;
+
+    /// <summary>Appends a chunk, refusing to exceed the announced size.</summary>
+    /// <exception cref="ExecutionTargetException">More bytes arrived than were announced.</exception>
+    public async Task WriteAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
+    {
+        if (_written + data.Length > _expected.Size)
+        {
+            throw Interrupted("more content arrived than the transfer announced");
+        }
+
+        await _stream.WriteAsync(data, cancellationToken).ConfigureAwait(false);
+        _written += data.Length;
+    }
+
+    /// <summary>Verifies size and hash, then atomically replaces the destination.</summary>
+    /// <exception cref="ExecutionTargetException">The content did not match what was announced.</exception>
+    public async Task CompleteAsync(CancellationToken cancellationToken)
+    {
+        await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        await _stream.DisposeAsync().ConfigureAwait(false);
+
+        if (_written != _expected.Size)
+        {
+            throw Interrupted($"the transfer ended after {_written} of {_expected.Size} bytes");
+        }
+
+        var actualHash = await GuestFileService.ComputeHashAsync(_temporary, cancellationToken).ConfigureAwait(false);
+        if (!string.Equals(actualHash, _expected.Sha256, StringComparison.OrdinalIgnoreCase))
+        {
+            throw Interrupted("the transferred content did not match its hash");
+        }
+
+        File.Move(_temporary, _destination, overwrite: true);
+
+        // Preserving the source timestamp keeps guest file times meaningful, and keeps a
+        // timestamp-based comparison from reporting every file as changed on the next run.
+        File.SetLastWriteTimeUtc(_destination, new DateTime(_expected.LastWriteUtcTicks, DateTimeKind.Utc));
+        _published = true;
+    }
+
+    /// <inheritdoc/>
+    public async ValueTask DisposeAsync()
+    {
+        await _stream.DisposeAsync().ConfigureAwait(false);
+
+        if (_published)
+        {
+            return;
+        }
+
+        // An unpublished transfer leaves nothing behind. Cleanup failure must never turn an
+        // interrupted transfer into a success, so it is best-effort and silent.
+        try
+        {
+            File.Delete(_temporary);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private ExecutionTargetException Interrupted(string reason) =>
+        ExecutionTargetException.Create(
+            ExecutionTargetErrorCodes.TransferInterrupted,
+            $"Transferring '{_expected.RelativePath}' failed because {reason}.",
+            userAction: "Retry the command.",
+            context: new Dictionary<string, string>
+            {
+                ["relativePath"] = _expected.RelativePath,
+                ["expectedSize"] = _expected.Size.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["receivedBytes"] = _written.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
+}

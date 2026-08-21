@@ -79,7 +79,9 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IGuestSessionProbe, GuestSessionProbe>()
             .AddSingleton<IGuestProcessHostFactory, GuestProcessHostFactory>()
             .AddSingleton<IGuestAgentSelfTest, GuestAgentSelfTest>()
-            .AddSingleton<GuestAgentInstaller>();
+            .AddSingleton<GuestAgentInstaller>()
+            .AddSingleton<IDeploymentStateStore, DeploymentStateStore>()
+            .AddSingleton<TargetDeploymentService>();
     }
 
     public static IServiceCollection ConfigureCommands(this IServiceCollection serviceCollection)
