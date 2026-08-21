@@ -89,7 +89,8 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<GuestAgentInstaller>()
             .AddSingleton<IDeploymentStateStore, DeploymentStateStore>()
             .AddSingleton<TargetDeploymentService>()
-            .AddSingleton<IExecutionTargetBackend, WindowsSandboxBackend>();
+            .AddSingleton<IExecutionTargetBackend, WindowsSandboxBackend>()
+            .AddSingleton<ExecutionTargetOrchestrator>();
     }
 
     public static IServiceCollection ConfigureCommands(this IServiceCollection serviceCollection)
