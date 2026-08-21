@@ -15,6 +15,8 @@ import { createRequire } from 'node:module';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { tableCell } from './markdown-table-cell.mjs';
+
 const require = createRequire(import.meta.url);
 const ts = require('typescript');
 
@@ -129,21 +131,6 @@ function getSymType(sym) {
 
 function typeStr(type) {
   return checker.typeToString(type, undefined, ts.TypeFormatFlags.NoTruncation);
-}
-
-/**
- * Make arbitrary JSDoc text safe for a single Markdown table cell.
- *
- * A multi-paragraph JSDoc comment (such as `CommonOptions.signal`) otherwise ends the table row at
- * its first newline and dumps the remainder as body text, corrupting every table that renders it.
- */
-function tableCell(text) {
-  if (!text) return '';
-  return text
-    .replace(/\|/g, '\\|')
-    .replace(/\r?\n\s*\r?\n/g, '<br><br>')
-    .replace(/\r?\n\s*/g, ' ')
-    .trim();
 }
 
 // ---------------------------------------------------------------------------
