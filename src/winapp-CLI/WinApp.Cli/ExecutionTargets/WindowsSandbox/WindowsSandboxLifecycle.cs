@@ -95,8 +95,10 @@ internal sealed class WindowsSandboxLifecycle(
         var recordedId = state?.InstanceId;
         var running = await cli.ListAsync(cancellationToken).ConfigureAwait(false);
 
-        if (recordedId is { } managedId
-            && state?.BootNonce is { } bootNonce
+        // Pattern-matching both members at once removes the redundant re-test of `state` that a
+        // separate null-conditional access would need, while keeping the compiler's null analysis
+        // satisfied -- `recordedId` being non-null does not by itself prove `state` is.
+        if (state is { InstanceId: { } managedId, BootNonce: { } bootNonce }
             && running.Contains(managedId, StringComparer.OrdinalIgnoreCase))
         {
             return new SandboxInstanceLease(

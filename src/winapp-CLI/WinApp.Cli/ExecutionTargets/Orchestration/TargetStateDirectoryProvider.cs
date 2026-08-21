@@ -43,7 +43,7 @@ internal sealed class TargetStateDirectoryProvider(string? rootOverride = null) 
     {
         ArgumentNullException.ThrowIfNull(target);
 
-        var root = Path.Combine(GetTargetsRoot(), target.Slug);
+        var root = TargetPathSafety.CombineInsideRoot(GetTargetsRoot(), target.Slug);
         var directory = new DirectoryInfo(root);
         if (create && !directory.Exists)
         {
@@ -68,6 +68,6 @@ internal sealed class TargetStateDirectoryProvider(string? rootOverride = null) 
         }
 
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        return Path.Combine(localAppData, "Microsoft", "WinApp", "Targets");
+        return TargetPathSafety.CombineInsideRoot(localAppData, "Microsoft", "WinApp", "Targets");
     }
 }
