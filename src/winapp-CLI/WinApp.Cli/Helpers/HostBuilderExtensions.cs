@@ -146,6 +146,10 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<UiGetFocusedCommand, UiGetFocusedCommand.Handler>()
                 // Execution-target guest agent: hidden, internal transport endpoint
                 .UseCommandHandler<GuestAgentCommand, GuestAgentCommand.Handler>()
+                // Generic execution-target escape hatches
+                .ConfigureCommand<SandboxCommand>()
+                .UseCommandHandler<SandboxExecCommand, SandboxExecCommand.Handler>()
+                .UseCommandHandler<SandboxCopyCommand, SandboxCopyCommand.Handler>()
                 .ConfigureCommand<CompleteCommand>();
     }
 

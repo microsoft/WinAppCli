@@ -76,7 +76,8 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         CompleteCommand completeCommand,
         FindUiCommand findUiCommand,
         UiCommand uiCommand,
-        GuestAgentCommand guestAgentCommand) : base("CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows")
+        GuestAgentCommand guestAgentCommand,
+        SandboxCommand sandboxCommand) : base("CLI for Windows app development, including package identity, packaging, managing Package.appxmanifest, test certificates, Windows (App) SDK projections, and more. For use with any app framework targeting Windows")
     {
         Subcommands.Add(initCommand);
         Subcommands.Add(newCommand);
@@ -99,6 +100,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         Subcommands.Add(uiCommand);
         Subcommands.Add(completeCommand);
         Subcommands.Add(guestAgentCommand);
+        Subcommands.Add(sandboxCommand);
 
         Options.Add(CliSchemaOption);
         Options.Add(CallerOption);

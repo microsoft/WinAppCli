@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using WinApp.Cli.ExecutionTargets.Abstractions;
 
 namespace WinApp.Cli.ExecutionTargets.Orchestration;
 
@@ -56,17 +57,26 @@ internal static class GuestOwnerContext
     /// Precedence is explicit value, then immediate parent process identity, then a unique
     /// one-command owner. The parent's start time is included because a process ID alone is reused
     /// by Windows, and a reused ID would silently join an unrelated later workflow to this one.
+    /// <para>
+    /// An explicit value is taken exactly as given or rejected — never trimmed, never truncated.
+    /// Trimming would make <c>" a"</c> and <c>"a"</c> the same workflow when the guest's own
+    /// resolver treats them as different, and truncating an oversized value would silently merge
+    /// two distinct long owners into one. Both would break the property this exists to preserve:
+    /// commands that cooperate locally cooperate in the guest, and commands that do not, do not.
+    /// </para>
     /// </remarks>
+    /// <exception cref="ExecutionTargetException">
+    /// An explicit owner was set but is blank or longer than <see cref="MaximumOwnerLength"/>.
+    /// </exception>
     public static string ResolveHostOwner(IReadOnlyDictionary<string, string?>? environment = null)
     {
         var explicitOwner = environment is null
             ? Environment.GetEnvironmentVariable(OwnerVariable)
             : environment.GetValueOrDefault(OwnerVariable);
 
-        if (!string.IsNullOrWhiteSpace(explicitOwner))
+        if (explicitOwner is not null)
         {
-            var trimmed = explicitOwner.Trim();
-            return trimmed.Length > MaximumOwnerLength ? trimmed[..MaximumOwnerLength] : trimmed;
+            return ValidateExplicitOwner(explicitOwner);
         }
 
         if (TryDescribeParent(out var parent))
@@ -77,6 +87,42 @@ internal static class GuestOwnerContext
         // No explicit owner and no observable parent: this invocation owns nothing but itself, so
         // it gets an identity no other command can share.
         return $"anonymous:{Guid.NewGuid():n}";
+    }
+
+    /// <summary>
+    /// Accepts an explicit owner exactly as given, or refuses it.
+    /// </summary>
+    /// <remarks>
+    /// Matches the local Cooperative UI Turns resolver's contract rather than being lenient. A
+    /// forwarded owner that the host silently altered would group differently in the guest than the
+    /// same value used locally, which is precisely the divergence forwarding exists to prevent.
+    /// </remarks>
+    internal static string ValidateExplicitOwner(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.TargetAmbiguous,
+                $"{OwnerVariable} is set but empty, so the workflow owner cannot be determined.",
+                userAction: $"Set {OwnerVariable} to a non-empty value, or unset it to use the default owner.");
+        }
+
+        if (value.Length > MaximumOwnerLength)
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.TargetAmbiguous,
+                $"{OwnerVariable} is longer than {MaximumOwnerLength} characters.",
+                userAction: $"Use a shorter {OwnerVariable} value.",
+                context: new Dictionary<string, string>
+                {
+                    // The value itself is never reported: it is the one thing that must not reach
+                    // logs, output, or telemetry.
+                    ["length"] = value.Length.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["maximumLength"] = MaximumOwnerLength.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
+        return value;
     }
 
     /// <summary>

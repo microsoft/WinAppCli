@@ -111,10 +111,6 @@ internal sealed class GuestCommandChannel : IAsyncDisposable
         var state = Register(operationId);
         state.Callbacks = callbacks;
 
-        // Announced before the request is sent so a caller that streams standard input cannot miss
-        // the window between the guest starting the process and its first read.
-        callbacks?.OnOperationId?.Invoke(operationId);
-
         try
         {
             await SendAsync(
@@ -126,6 +122,11 @@ internal sealed class GuestCommandChannel : IAsyncDisposable
                     Exec = request,
                 },
                 cancellationToken).ConfigureAwait(false);
+
+            // Announced only after the request is on the wire. Publishing it earlier would let a
+            // caller send standard input that overtakes the request it belongs to, and the guest
+            // would drop those bytes as belonging to an operation it has not heard of.
+            callbacks?.OnOperationId?.Invoke(operationId);
 
             var exitCode = await state.Completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
             return new GuestExecResult(exitCode, state.ProcessId);
@@ -264,6 +265,17 @@ internal sealed class GuestCommandChannel : IAsyncDisposable
                 cancellationToken).ConfigureAwait(false);
 
             await state.FileCompletion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Tell the guest before unwinding. Without this the guest keeps the destination's
+            // temporary file open indefinitely, and an immediate retry of the same transfer fails
+            // on a file the caller believes was abandoned. Requested here rather than from a
+            // CancellationToken registration for the same reason execution does: registrations fire
+            // last-in-first-out, so WaitAsync's own would run first and unwinding would dispose
+            // ours before it executed.
+            await RequestCancelAsync(operationId).ConfigureAwait(false);
+            throw;
         }
         finally
         {

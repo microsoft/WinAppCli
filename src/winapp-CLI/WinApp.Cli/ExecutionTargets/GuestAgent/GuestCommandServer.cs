@@ -165,6 +165,13 @@ internal sealed class GuestCommandServer : IAsyncDisposable
                 {
                     await forCancel.CancelAsync().ConfigureAwait(false);
                 }
+                else if (_writes.TryRemove(operationId, out var abandonedWrite))
+                {
+                    // A cancelled upload must release its handle and discard the partial file here.
+                    // Leaving it would keep the destination locked, so an immediate retry of the
+                    // same transfer would fail on a file the caller believes was abandoned.
+                    await abandonedWrite.DisposeAsync().ConfigureAwait(false);
+                }
 
                 break;
 
@@ -456,6 +463,22 @@ internal sealed class GuestCommandServer : IAsyncDisposable
     private void StartOperation(Guid operationId, GuestExecRequest request)
     {
         RunningOperation operation;
+
+        // Readiness is re-verified here, immediately before the process starts, rather than taken
+        // from the capability handshake. The user can close the Sandbox window at any moment, which
+        // silently removes real input and screen capture while leaving UI Automation working -- so
+        // a command that would inject input must be refused now, not admitted on the strength of a
+        // check that was true when the channel opened.
+        if (request.RequiresRealInput)
+        {
+            var readiness = GuestAgentReadiness.Evaluate(_sessionProbe.Probe());
+
+            if (readiness != GuestReadinessFailure.None)
+            {
+                _ = SendFailureAsync(operationId, GuestAgentReadiness.Describe(readiness));
+                return;
+            }
+        }
 
         try
         {

@@ -48,15 +48,26 @@ internal sealed class GuestAgentSelfTest : IGuestAgentSelfTest
         startInfo.ArgumentList.Add(GuestAgentCommandNames.Verb);
         startInfo.ArgumentList.Add(GuestAgentCommandNames.SelfTestOption);
 
+        Process? process = null;
+
         try
         {
-            using var process = Process.Start(startInfo);
+            process = Process.Start(startInfo);
             if (process is null)
             {
                 return false;
             }
 
+            // Both streams are drained concurrently with the wait. A redirected pipe that nobody
+            // reads fills at around 4 KB and blocks the child forever, so a candidate that printed
+            // more than that would look like a hang rather than a pass.
+            var drain = Task.WhenAll(
+                process.StandardOutput.ReadToEndAsync(timeout.Token),
+                process.StandardError.ReadToEndAsync(timeout.Token));
+
             await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+            await drain.ConfigureAwait(false);
+
             return process.ExitCode == 0;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -69,6 +80,42 @@ internal sealed class GuestAgentSelfTest : IGuestAgentSelfTest
             // The candidate could not be launched at all: wrong architecture, corrupt image, or
             // blocked by policy. All are self-test failures, not host failures.
             return false;
+        }
+        finally
+        {
+            // A timed-out or cancelled candidate is still running and still holding the staged
+            // binary open, which would make the activation rename fail for a reason unrelated to
+            // the real problem. Kill the whole tree and wait for it to actually go.
+            await TerminateAsync(process).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Kills a candidate that did not exit on its own, and releases its handles.</summary>
+    private static async Task TerminateAsync(Process? process)
+    {
+        if (process is null)
+        {
+            return;
+        }
+
+        using (process)
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+
+                    // Waiting matters: the file lock is released when the process actually dies,
+                    // not when the kill is requested.
+                    await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                // Already gone, or not killable. Activation reports the real consequence if the
+                // staged file is still locked.
+            }
         }
     }
 }

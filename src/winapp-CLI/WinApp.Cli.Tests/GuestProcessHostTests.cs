@@ -218,19 +218,87 @@ public class GuestProcessHostTests
     [TestMethod]
     public async Task Dispose_KillsTheWholeProcessTree()
     {
-        // cmd.exe launches a grandchild. Killing only the tracked process ID would orphan it, and in
-        // a Sandbox an orphan keeps holding files the next deployment has to replace.
-        var (host, _) = Start("/c", "start /b ping -n 120 127.0.0.1 > nul & ping -n 120 127.0.0.1 > nul");
+        // A grandchild is what actually matters here. Killing only the tracked process ID orphans
+        // it, and in a Sandbox an orphan keeps holding files the next deployment has to replace --
+        // so the test captures the grandchild's own process ID and asserts on that, not just on the
+        // process winapp started.
+        var marker = TestPaths.TempFile("grandchild", ".pid");
 
+        var script =
+            $"$p = Start-Process ping -ArgumentList '-n','120','127.0.0.1' -PassThru -WindowStyle Hidden; " +
+            $"Set-Content -LiteralPath '{marker}' -Value $p.Id; Start-Sleep -Seconds 120";
+
+        var request = new GuestExecRequest
+        {
+            Executable = TestPaths.SystemExecutable(@"WindowsPowerShell\v1.0\powershell.exe"),
+            Arguments = ["-NoProfile", "-NonInteractive", "-Command", script],
+        };
+
+        var host = GuestProcessHost.Start(request, (_, _) => { });
         var processId = host.ProcessId;
-        await host.DisposeAsync();
 
-        // Give the kernel a moment to tear the job down.
-        await Task.Delay(TimeSpan.FromSeconds(1), TestContext.CancellationTokenSource.Token);
+        try
+        {
+            var grandchildId = await ReadGrandchildIdAsync(marker, TestContext.CancellationTokenSource.Token);
 
-        Assert.IsFalse(
-            IsStillRunning(processId),
-            "Disposing the host must terminate the job, leaving no guest process behind.");
+            Assert.IsTrue(IsStillRunning(grandchildId), "The grandchild should be running before disposal.");
+
+            await host.DisposeAsync();
+
+            // Give the kernel a moment to tear the job down.
+            await Task.Delay(TimeSpan.FromSeconds(1), TestContext.CancellationTokenSource.Token);
+
+            Assert.IsFalse(
+                IsStillRunning(processId),
+                "Disposing the host must terminate the process it started.");
+
+            Assert.IsFalse(
+                IsStillRunning(grandchildId),
+                "Disposing the host must terminate the whole job, including grandchildren.");
+        }
+        finally
+        {
+            await host.DisposeAsync();
+
+            try
+            {
+                File.Delete(marker);
+            }
+            catch (IOException)
+            {
+                // Temp cleanup is not worth failing a test over.
+            }
+        }
+    }
+
+    /// <summary>Waits for the spawned grandchild to publish its process ID.</summary>
+    private static async Task<int> ReadGrandchildIdAsync(string marker, CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+
+        while (DateTime.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                if (File.Exists(marker) &&
+                    int.TryParse(File.ReadAllText(marker).Trim(), out var id) &&
+                    id > 0)
+                {
+                    return id;
+                }
+            }
+            catch (IOException)
+            {
+                // Mid-write; the next poll sees the complete value.
+            }
+
+            await Task.Delay(100, cancellationToken);
+        }
+
+        Assert.Fail("The grandchild never reported its process ID.");
+        return 0;
     }
 
     /// <summary>Whether a process ID still names a live process.</summary>
@@ -254,8 +322,7 @@ public class GuestProcessHostTests
     }
 
     [TestMethod]
-    public void Start_MissingExecutable_ReportsStructuredFailure()
-    {
+    public void Start_MissingExecutable_ReportsStructuredFailure()    {
         var request = new GuestExecRequest
         {
             Executable = TestPaths.TempFile("does-not-exist", ".exe"),

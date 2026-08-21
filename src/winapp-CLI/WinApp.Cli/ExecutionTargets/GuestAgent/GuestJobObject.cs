@@ -17,13 +17,72 @@ namespace WinApp.Cli.ExecutionTargets.GuestAgent;
 /// holding files the next deployment needs to replace. A Job Object with
 /// <c>KILL_ON_JOB_CLOSE</c> makes the whole tree die together, including if the agent itself
 /// crashes — the kernel closes the handle and the job goes with it.
+/// <para>
+/// Containment is layered because <see cref="Process.Start(ProcessStartInfo)"/> offers no way to
+/// create a process already inside a job. Assigning immediately after start leaves a window,
+/// however brief, in which the child could spawn a descendant that is not yet a job member and can
+/// therefore outlive a per-operation kill.
+/// </para>
+/// <para>
+/// <see cref="EnsureAgentContainment"/> closes the consequential half of that: the agent puts
+/// <em>itself</em> in a job at startup, and Windows places every descendant of a job member into
+/// that job at creation time, with no window at all. So no guest process can escape the agent under
+/// any timing. The per-operation job then provides the finer-grained kill, and the residual race
+/// affects only whether a descendant spawned in those first microseconds is caught by a
+/// per-operation cancel rather than by agent teardown.
+/// </para>
 /// </remarks>
 internal sealed class GuestJobObject : IDisposable
 {
+    private static GuestJobObject? _agentJob;
+
     private readonly SafeHandle _handle;
     private bool _disposed;
 
     private GuestJobObject(SafeHandle handle) => _handle = handle;
+
+    /// <summary>
+    /// Places the agent process itself in a job, so every descendant it ever creates is contained
+    /// from the instant it exists.
+    /// </summary>
+    /// <remarks>
+    /// Idempotent, and non-fatal on failure: an environment that refuses job assignment (already
+    /// being in a job that disallows nesting, for instance) still gets per-operation containment,
+    /// which is what the previous behaviour provided on its own.
+    /// <para>
+    /// Deliberately <em>not</em> <c>KILL_ON_JOB_CLOSE</c>: this job's handle is held for the life of
+    /// the agent, and marking it kill-on-close would mean an unexpected handle close took the agent
+    /// down with it. Its job is to guarantee membership, not termination.
+    /// </para>
+    /// </remarks>
+    public static void EnsureAgentContainment()
+    {
+        if (_agentJob is not null)
+        {
+            return;
+        }
+
+        var handle = PInvoke.CreateJobObject((Windows.Win32.Security.SECURITY_ATTRIBUTES?)null, lpName: null);
+        if (handle.IsInvalid)
+        {
+            handle.Dispose();
+            return;
+        }
+
+        using var current = Process.GetCurrentProcess();
+
+        if (!PInvoke.AssignProcessToJobObject(handle, current.SafeHandle))
+        {
+            handle.Dispose();
+
+            System.Diagnostics.Trace.TraceWarning(
+                "The guest agent could not place itself in a job object (error {0}); guest processes are contained per operation only.",
+                Marshal.GetLastWin32Error());
+            return;
+        }
+
+        _agentJob = new GuestJobObject(handle);
+    }
 
     /// <summary>Creates a job that terminates its members when the handle closes.</summary>
     /// <exception cref="ExecutionTargetException">The job could not be created or configured.</exception>

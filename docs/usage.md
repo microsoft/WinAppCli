@@ -1193,6 +1193,63 @@ winapp get-winapp-path [options]
 
 ---
 
+### sandbox
+
+Run commands and copy files inside the Windows Sandbox winapp manages. These are escape hatches: reach for them when you need to prepare a dependency, inspect state, or diagnose something `winapp run --sandbox` cannot resolve on its own.
+
+Both commands start or reuse the managed Sandbox. Neither creates, stops, or otherwise manages Sandbox lifecycle — that stays with the Windows Sandbox CLI (`wsb`). See [Windows Sandbox execution](sandbox-execution.md) for the full model.
+
+> [!NOTE]
+> These commands are in development and are not available in a released build yet.
+
+#### sandbox exec
+
+Run a command inside the Sandbox, as the interactive Sandbox user.
+
+```bash
+winapp sandbox exec [--cwd <path>] [--json] -- <executable> [arguments...]
+```
+
+Everything after `--` is passed through as a structured argument array, so quoting, spacing, and non-ASCII text survive exactly, and nothing can be reinterpreted as an extra argument.
+
+```bash
+winapp sandbox exec -- dotnet --info
+winapp sandbox exec --cwd C:\Work -- powershell -File .\test.ps1
+```
+
+**Behavior:**
+
+- Streams stdin, stdout, and stderr.
+- Returns the guest process's exit code. Infrastructure failures use a distinct exit code (`70`), so "winapp could not run your command" is always distinguishable from "your command failed".
+- Forwards your Cooperative UI Turns owner context, so a script run this way can invoke guest `winapp ui` commands without losing its workflow ownership.
+- Does **not** provide a full terminal or ConPTY. Interactive console applications may observe redirected pipes.
+- Arguments, paths, environment, and stream contents are excluded from telemetry entirely.
+
+#### sandbox cp
+
+Copy files or directories between the host and the Sandbox.
+
+```bash
+winapp sandbox cp <source> <destination> [--json]
+```
+
+Exactly one endpoint must be prefixed with `sandbox:`. Requiring exactly one — rather than inferring the direction from which path happens to exist — means the command can never guess wrong about which side is being overwritten.
+
+```bash
+winapp sandbox cp .\setup.ps1 sandbox:C:\Setup\setup.ps1
+winapp sandbox cp .\build sandbox:C:\Work\build
+winapp sandbox cp sandbox:C:\Results .\results
+```
+
+**Behavior:**
+
+- Copies files and directories, preserving structure and useful timestamps.
+- Skips files whose content already matches, compared by hash rather than timestamp.
+- Replaces changed files atomically, after verifying size and hash. An interrupted copy never publishes a partial file over one that was correct.
+- Does not expose arbitrary mapped host folders to guest applications.
+
+---
+
 ### find-ui
 
 Search **WinUI** controls and samples for a working code example. WinUI-only: the corpus is the [WinUI 3 Gallery](https://github.com/microsoft/WinUI-Gallery) and the [Windows Community Toolkit](https://github.com/CommunityToolkit/Windows) (plus a few curated core patterns) — it does **not** cover WPF, WinForms, or other UI frameworks. A third source, the [microsoft-ui-reactor ReactorGallery](https://github.com/microsoft/microsoft-ui-reactor), is **opt-in**: it is excluded from a normal search and only searched when you pass `--source reactor` (its C#-only declarative samples don't paste into a standard XAML app, so reach for it only when building a Reactor/MVU project).
