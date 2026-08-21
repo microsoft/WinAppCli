@@ -72,25 +72,36 @@ public class TargetMutationLockTests
     }
 
     [TestMethod]
-    public async Task Lease_AcquiredAndReleasedOnDifferentThreads_ReleasesCleanly()
+    public void Lease_AcquiredAndReleasedOnDifferentThreads_ReleasesCleanly()
     {
         // Regression: the lock is held across awaits, so the continuation that disposes it usually
         // runs on a different thread-pool thread than the one that acquired it. A thread-affine
         // primitive fails to release there and stays held until the original thread exits, blocking
         // every other winapp process and later surfacing as a false abandonment.
-        var acquiringThread = Environment.CurrentManagedThreadId;
-        var lease = _lock.TryAcquire(_target, TimeSpan.FromSeconds(5));
+        //
+        // Acquisition runs on a dedicated thread that is then joined, rather than relying on an
+        // await to move the continuation. Neither the thread pool nor an awaited long-running task
+        // guarantees a different thread -- both resume inline on the completing thread -- so the
+        // await-based versions of this test asserted their own premise and passed only by luck.
+        int acquiringThread = 0;
+        TargetMutationLease? lease = null;
+
+        var acquirer = new Thread(() =>
+        {
+            acquiringThread = Environment.CurrentManagedThreadId;
+            lease = _lock.TryAcquire(_target, TimeSpan.FromSeconds(5));
+        });
+
+        acquirer.Start();
+        acquirer.Join();
+
         Assert.IsNotNull(lease);
-
-        await Task.Run(() => Task.Delay(50));
-
-        var releasingThread = Environment.CurrentManagedThreadId;
-        lease.Dispose();
-
         Assert.AreNotEqual(
             acquiringThread,
-            releasingThread,
-            "This regression only has meaning when the threads actually differ.");
+            Environment.CurrentManagedThreadId,
+            "The acquiring thread has exited, so it cannot be the one disposing the lease.");
+
+        lease.Dispose();
 
         // The decisive assertion: the lock is genuinely free afterwards.
         using var reacquired = _lock.TryAcquire(_target, TimeSpan.FromSeconds(5));

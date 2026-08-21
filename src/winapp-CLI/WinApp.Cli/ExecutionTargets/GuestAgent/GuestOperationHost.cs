@@ -48,6 +48,21 @@ internal static class GuestOperationHost
     /// </remarks>
     internal const int BarrierFailedExitCode = 64;
 
+    /// <summary>
+    /// Builds a per-operation release-event name that cannot be guessed.
+    /// </summary>
+    /// <remarks>
+    /// The <c>Local\</c> prefix scopes the name to the guest's own Terminal Services session, so it
+    /// is not visible to another session on the same machine. Within that session everything runs
+    /// as the same user and can therefore open any name it knows, so the suffix is
+    /// cryptographically random rather than a GUID — an early signal from another guest process
+    /// would otherwise release the barrier before assignment, which is precisely what it exists to
+    /// prevent. Membership is verified after release regardless, so guessing the name is not by
+    /// itself enough.
+    /// </remarks>
+    public static string CreateReleaseEventName() =>
+        $@"Local\winapp-op-{Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)).ToLowerInvariant()}";
+
     /// <summary>Builds the arguments that run winapp as the barrier for one request.</summary>
     public static List<string> BuildArguments(string readyEventName, GuestExecRequest request)
     {
@@ -90,6 +105,20 @@ internal static class GuestOperationHost
         {
             // Never released, so this process may not be a job member. Starting the command now
             // would create exactly the unconstrained process this barrier exists to prevent.
+            return BarrierFailedExitCode;
+        }
+
+        // A minimum-containment backstop, and worth being precise about what it proves. Because the
+        // agent places itself in a job, this process inherits that membership at creation -- so
+        // this check does not by itself prove the *per-operation* job was assigned. What actually
+        // orders the two is that the agent signals only after assigning; the unguessable event name
+        // is what stops another guest process from forging that signal. This check catches the
+        // remaining case: agent-level containment having failed and the barrier being released
+        // anyway, where starting user code would leave it in no job at all.
+        if (!GuestJobObject.IsCurrentProcessInJob())
+        {
+            Console.Error.WriteLine(
+                "The guest operation host is not contained by a job object and refused to start the command.");
             return BarrierFailedExitCode;
         }
 
