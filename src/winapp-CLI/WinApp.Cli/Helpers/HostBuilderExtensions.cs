@@ -7,6 +7,7 @@ using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Diagnostics.CodeAnalysis;
 using WinApp.Cli.Commands;
+using WinApp.Cli.ExecutionTargets.GuestAgent;
 using WinApp.Cli.ExecutionTargets.Orchestration;
 using WinApp.Cli.ExecutionTargets.WindowsSandbox;
 using WinApp.Cli.Services;
@@ -80,7 +81,11 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<ITargetStateStore, TargetStateStore>()
             .AddSingleton<ITargetMutationLock, TargetMutationLock>()
             .AddSingleton<IWindowsSandboxCli, WindowsSandboxCli>()
-            .AddSingleton<WindowsSandboxLifecycle>();
+            .AddSingleton<WindowsSandboxLifecycle>()
+            .AddSingleton<IGuestSessionProbe, GuestSessionProbe>()
+            .AddSingleton<IGuestProcessHostFactory, GuestProcessHostFactory>()
+            .AddSingleton<IGuestAgentSelfTest, GuestAgentSelfTest>()
+            .AddSingleton<GuestAgentInstaller>();
     }
 
     public static IServiceCollection ConfigureCommands(this IServiceCollection serviceCollection)
@@ -134,6 +139,8 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<UiWaitForCommand, UiWaitForCommand.Handler>()
                 .UseCommandHandler<UiListWindowsCommand, UiListWindowsCommand.Handler>()
                 .UseCommandHandler<UiGetFocusedCommand, UiGetFocusedCommand.Handler>()
+                // Execution-target guest agent: hidden, internal transport endpoint
+                .UseCommandHandler<GuestAgentCommand, GuestAgentCommand.Handler>()
                 .ConfigureCommand<CompleteCommand>();
     }
 

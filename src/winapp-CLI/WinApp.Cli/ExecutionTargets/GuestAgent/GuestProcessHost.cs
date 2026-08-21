@@ -21,7 +21,7 @@ namespace WinApp.Cli.ExecutionTargets.GuestAgent;
 /// to local behaviour.
 /// </para>
 /// </remarks>
-internal sealed class GuestProcessHost : IAsyncDisposable
+internal sealed class GuestProcessHost : IGuestProcessHost
 {
     /// <summary>How long a child gets to exit after a graceful stop before the job is terminated.</summary>
     internal static readonly TimeSpan DefaultGracefulStopTimeout = TimeSpan.FromSeconds(5);

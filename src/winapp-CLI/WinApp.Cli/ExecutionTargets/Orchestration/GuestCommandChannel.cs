@@ -7,10 +7,15 @@ using WinApp.Cli.ExecutionTargets.Abstractions;
 namespace WinApp.Cli.ExecutionTargets.Orchestration;
 
 /// <summary>Callbacks for one running guest operation.</summary>
+/// <param name="OnOperationId">
+/// Invoked with the operation's identity as soon as it is registered, before the request is sent.
+/// This is what lets a caller stream standard input into an operation the channel named itself.
+/// </param>
 /// <param name="OnStarted">Invoked once the guest reports the process ID.</param>
 /// <param name="OnStandardOutput">Invoked for each stdout chunk, in order.</param>
 /// <param name="OnStandardError">Invoked for each stderr chunk, in order.</param>
 internal sealed record GuestExecCallbacks(
+    Action<Guid>? OnOperationId = null,
     Action<int>? OnStarted = null,
     Action<ReadOnlyMemory<byte>>? OnStandardOutput = null,
     Action<ReadOnlyMemory<byte>>? OnStandardError = null);
@@ -105,6 +110,10 @@ internal sealed class GuestCommandChannel : IAsyncDisposable
         var operationId = Guid.NewGuid();
         var state = Register(operationId);
         state.Callbacks = callbacks;
+
+        // Announced before the request is sent so a caller that streams standard input cannot miss
+        // the window between the guest starting the process and its first read.
+        callbacks?.OnOperationId?.Invoke(operationId);
 
         try
         {
