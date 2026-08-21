@@ -44,6 +44,12 @@ internal class GuestAgentCommand : Command, IShortDescription
         Description = "Bounded writable folder for startup diagnostics and readiness output.",
     };
 
+    /// <summary>Read-only directory holding this boot's connection material.</summary>
+    public static Option<string?> BootstrapDirectoryOption { get; } = new("--bootstrap-dir")
+    {
+        Description = "Read-only folder holding this boot's connection material.",
+    };
+
     /// <summary>TCP port to listen on; 0 selects an ephemeral port.</summary>
     public static Option<int> PortOption { get; } = new("--port")
     {
@@ -64,12 +70,14 @@ internal class GuestAgentCommand : Command, IShortDescription
 
         Options.Add(SelfTestOption);
         Options.Add(TargetEpochOption);
+        Options.Add(BootstrapDirectoryOption);
         Options.Add(ResultDirectoryOption);
         Options.Add(PortOption);
     }
 
     /// <summary>Runs the agent, or its self-test.</summary>
-    public class Handler(IGuestSessionProbe sessionProbe) : AsynchronousCommandLineAction
+    public class Handler(IGuestSessionProbe sessionProbe, IGuestProcessHostFactory processes)
+        : AsynchronousCommandLineAction
     {
         /// <inheritdoc/>
         public override async Task<int> InvokeAsync(
@@ -87,12 +95,24 @@ internal class GuestAgentCommand : Command, IShortDescription
                 return RunSelfTest(parseResult, identity);
             }
 
+            var bootstrapDirectory = parseResult.GetValue(BootstrapDirectoryOption);
+            var resultDirectory = parseResult.GetValue(ResultDirectoryOption);
+
             // Serving is reached only through a target backend, which supplies the connection
             // material. Invoked directly there is nothing to connect to, and silently idling would
             // look like a hang.
-            parseResult.InvocationConfiguration.Error.WriteLine(
-                "winapp guest-agent is started by winapp inside an execution target and cannot be run directly.");
-            return 1;
+            if (string.IsNullOrWhiteSpace(bootstrapDirectory) || string.IsNullOrWhiteSpace(resultDirectory))
+            {
+                parseResult.InvocationConfiguration.Error.WriteLine(
+                    "winapp guest-agent is started by winapp inside an execution target and cannot be run directly.");
+                return 1;
+            }
+
+            return await new GuestAgentRunner(sessionProbe, processes).RunAsync(
+                bootstrapDirectory,
+                resultDirectory,
+                GuestAgentRunner.DefaultManagedRoot,
+                cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>

@@ -7,6 +7,7 @@ using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Diagnostics.CodeAnalysis;
 using WinApp.Cli.Commands;
+using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.GuestAgent;
 using WinApp.Cli.ExecutionTargets.Orchestration;
 using WinApp.Cli.ExecutionTargets.WindowsSandbox;
@@ -87,7 +88,8 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IGuestAgentSelfTest, GuestAgentSelfTest>()
             .AddSingleton<GuestAgentInstaller>()
             .AddSingleton<IDeploymentStateStore, DeploymentStateStore>()
-            .AddSingleton<TargetDeploymentService>();
+            .AddSingleton<TargetDeploymentService>()
+            .AddSingleton<IExecutionTargetBackend, WindowsSandboxBackend>();
     }
 
     public static IServiceCollection ConfigureCommands(this IServiceCollection serviceCollection)
