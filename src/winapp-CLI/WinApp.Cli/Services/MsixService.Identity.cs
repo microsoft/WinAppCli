@@ -110,7 +110,40 @@ internal partial class MsixService
         return new MsixIdentityResult(debugIdentity.PackageName, debugIdentity.Publisher, debugIdentity.ApplicationId);
     }
 
-    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, string? executable = null, string? runtimeArch = null, FileInfo? projectFile = null, string? framework = null, bool noRestore = false, CancellationToken cancellationToken = default)
+    public Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, string? executable = null, string? runtimeArch = null, FileInfo? projectFile = null, string? framework = null, bool noRestore = false, CancellationToken cancellationToken = default)
+        => BuildLooseLayoutAsync(appxManifestPath, inputDirectory, outputAppXDirectory, taskContext, LooseLayoutOutcome.Registered, clean, executable, runtimeArch, projectFile, framework, noRestore, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<MsixIdentityResult> MaterializeLooseLayoutAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, string? executable = null, FileInfo? projectFile = null, string? framework = null, bool noRestore = false, CancellationToken cancellationToken = default)
+        => BuildLooseLayoutAsync(appxManifestPath, inputDirectory, outputAppXDirectory, taskContext, LooseLayoutOutcome.Materialized, clean: false, executable, runtimeArch: null, projectFile, framework, noRestore, cancellationToken);
+
+    /// <summary>How far <see cref="BuildLooseLayoutAsync"/> takes a loose layout.</summary>
+    private enum LooseLayoutOutcome
+    {
+        /// <summary>Materialize, provision the runtime for this machine, and register the package.</summary>
+        Registered,
+
+        /// <summary>Materialize only. Nothing about the host machine is inspected or changed.</summary>
+        Materialized,
+    }
+
+    /// <summary>
+    /// Produces the loose layout, then — for <see cref="LooseLayoutOutcome.Registered"/> — provisions
+    /// the Windows App Runtime and registers the package on this machine.
+    /// </summary>
+    /// <remarks>
+    /// The split exists because those last two steps are the ones that must not happen when the app
+    /// is going somewhere else. An execution target needs the materialized layout and the identity
+    /// parsed out of it, and nothing more: installing a runtime on the host for an app that will run
+    /// in a guest would change the developer's machine for no reason, and registering the package
+    /// here would mean a <c>--sandbox</c> run silently deployed to the host as well.
+    /// <para>
+    /// Materialization itself is byte-for-byte the same work in both modes, deliberately: a layout
+    /// that behaves differently depending on where it is going would make a guest failure impossible
+    /// to reproduce locally.
+    /// </para>
+    /// </remarks>
+    private async Task<MsixIdentityResult> BuildLooseLayoutAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, LooseLayoutOutcome outcome, bool clean, string? executable, string? runtimeArch, FileInfo? projectFile, string? framework, bool noRestore, CancellationToken cancellationToken)
     {
         // Validate inputs
         if (!appxManifestPath.Exists)
@@ -118,8 +151,11 @@ internal partial class MsixService
             throw new FileNotFoundException($"AppX manifest not found at: {appxManifestPath}. You can generate one using 'winapp manifest generate'.");
         }
 
-        if (!devModeService.IsEnabled())
+        if (!devModeService.IsEnabled() && outcome == LooseLayoutOutcome.Registered)
         {
+            // Only registration needs Developer Mode. Requiring it to materialize a layout would
+            // make a host that never registers anything — the `--sandbox` case — fail on a
+            // prerequisite for a step it does not perform; the guest checks its own.
             throw new InvalidOperationException("Developer Mode is not enabled on this machine. Please enable Developer Mode and try again.");
         }
 
@@ -160,6 +196,11 @@ internal partial class MsixService
             }
 
             var identity = ParseAppxManifestAsync(manifestContent);
+
+            if (outcome == LooseLayoutOutcome.Materialized)
+            {
+                return new MsixIdentityResult(identity.PackageName, identity.Publisher, identity.ApplicationId);
+            }
 
             // Install the Windows App Runtime framework packages if not already present. Pin the package
             // list to the effective built TFM so a multi-targeted app doesn't pick a sibling framework's
@@ -301,6 +342,11 @@ internal partial class MsixService
 
         {
             var identity = ParseAppxManifestAsync(manifestContent);
+
+            if (outcome == LooseLayoutOutcome.Materialized)
+            {
+                return new MsixIdentityResult(identity.PackageName, identity.Publisher, identity.ApplicationId);
+            }
 
             // Install the Windows App Runtime framework packages if not already present
             await EnsureWindowsAppRuntimeInstalledAsync(dotNetPackageList, runtimeArch, taskContext, cancellationToken);

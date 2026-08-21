@@ -94,6 +94,27 @@ internal interface IMsixService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Produces exactly the loose layout <see cref="AddLooseLayoutIdentityAsync"/> would produce, and
+    /// stops there: no Windows App Runtime is installed and no package is registered on this machine.
+    /// </summary>
+    /// <remarks>
+    /// This is what an execution target deploys. Running an app somewhere else must not install a
+    /// runtime on the developer's machine or leave a host registration behind, so the steps that do
+    /// those things are not merely skipped by the caller — they are not reachable from here.
+    /// Developer Mode is likewise not required, because nothing is registered.
+    /// </remarks>
+    public Task<MsixIdentityResult> MaterializeLooseLayoutAsync(
+        FileInfo appxManifestPath,
+        DirectoryInfo inputDirectory,
+        DirectoryInfo outputAppXDirectory,
+        TaskContext taskContext,
+        string? executable = null,
+        FileInfo? projectFile = null,
+        string? framework = null,
+        bool noRestore = false,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Ensures the Windows App Runtime framework packages (Framework / DDLM / Singleton / Main) are
     /// installed for a project-mode <b>unpackaged</b> app before it is launched. The DDLM this lays down
     /// is exactly what an unpackaged WinUI app's bootstrapper resolves at startup. Reuses the same install

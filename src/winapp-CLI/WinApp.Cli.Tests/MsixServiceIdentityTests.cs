@@ -555,6 +555,134 @@ public class MsixServiceIdentityTests : BaseCommandTests
         Assert.DoesNotContain("$targetnametoken$", written, "No $targetnametoken$ placeholder should remain");
     }
 
+    // ---- MaterializeLooseLayoutAsync (execution-target seam) ----------------------
+
+    /// <summary>
+    /// Materialization must produce the identical layout, because a guest failure that cannot be
+    /// reproduced by looking at the same folder locally is not diagnosable.
+    /// </summary>
+    [TestMethod]
+    public async Task MaterializeLooseLayoutAsync_MSBuildManifest_ProducesTheSameLayoutAsRegistering()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("build-output");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "Package.appxmanifest"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(srcDir.FullName, "TestApp.exe"), "exe", TestContext.CancellationToken);
+
+        var registered = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "registered"));
+        var materialized = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "materialized"));
+
+        var registeredResult = await _msixService.AddLooseLayoutIdentityAsync(
+            srcManifest, srcDir, registered, TestTaskContext, cancellationToken: TestContext.CancellationToken);
+
+        var materializedResult = await _msixService.MaterializeLooseLayoutAsync(
+            srcManifest, srcDir, materialized, TestTaskContext, cancellationToken: TestContext.CancellationToken);
+
+        Assert.AreEqual(registeredResult.PackageName, materializedResult.PackageName);
+        Assert.AreEqual(registeredResult.Publisher, materializedResult.Publisher);
+        Assert.AreEqual(registeredResult.ApplicationId, materializedResult.ApplicationId);
+        AssertLayoutsMatch(registered, materialized);
+    }
+
+    [TestMethod]
+    public async Task MaterializeLooseLayoutAsync_RawManifest_ProducesTheSameLayoutAsRegistering()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("raw-input");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "Package.appxmanifest"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildRawManifest(), TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(srcDir.FullName, "TestApp.exe"), "not-a-real-pe", TestContext.CancellationToken);
+
+        var registered = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "registered"));
+        var materialized = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "materialized"));
+
+        await _msixService.AddLooseLayoutIdentityAsync(
+            srcManifest, srcDir, registered, TestTaskContext, cancellationToken: TestContext.CancellationToken);
+
+        var materializedResult = await _msixService.MaterializeLooseLayoutAsync(
+            srcManifest, srcDir, materialized, TestTaskContext, cancellationToken: TestContext.CancellationToken);
+
+        Assert.AreEqual("TestApp", materializedResult.PackageName);
+        AssertLayoutsMatch(registered, materialized);
+    }
+
+    /// <summary>
+    /// The whole point of the seam: running somewhere else must leave this machine alone.
+    /// </summary>
+    [TestMethod]
+    public async Task MaterializeLooseLayoutAsync_RegistersNothingAndInstallsNoRuntime()
+    {
+        var srcDir = _tempDirectory.CreateSubdirectory("build-output");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "Package.appxmanifest"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(srcDir.FullName, "TestApp.exe"), "exe", TestContext.CancellationToken);
+
+        var output = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "layout"));
+
+        await _msixService.MaterializeLooseLayoutAsync(
+            srcManifest, srcDir, output, TestTaskContext, cancellationToken: TestContext.CancellationToken);
+
+        Assert.IsEmpty(_fakeRegistration.RegisterLooseLayoutCalls, "Materializing for another target must not register on this machine");
+        Assert.IsEmpty(_fakeRegistration.UnregisterCalls, "Materializing for another target must not touch host registrations");
+        Assert.IsEmpty(_fakeWindowsAppRuntime.InstallRuntimeCalls, "Materializing for another target must not install a runtime on this machine");
+    }
+
+    /// <summary>
+    /// Developer Mode is a prerequisite for registering a package, and materialization registers
+    /// nothing — so demanding it would fail a <c>--sandbox</c> run on a step it never performs.
+    /// </summary>
+    [TestMethod]
+    public async Task MaterializeLooseLayoutAsync_DevModeDisabled_StillMaterializes()
+    {
+        _fakeDevMode.IsEnabledResult = false;
+
+        var srcDir = _tempDirectory.CreateSubdirectory("build-output");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "Package.appxmanifest"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(srcDir.FullName, "TestApp.exe"), "exe", TestContext.CancellationToken);
+
+        var output = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "layout"));
+
+        var result = await _msixService.MaterializeLooseLayoutAsync(
+            srcManifest, srcDir, output, TestTaskContext, cancellationToken: TestContext.CancellationToken);
+
+        Assert.AreEqual("TestApp", result.PackageName);
+        Assert.IsTrue(File.Exists(Path.Combine(output.FullName, "appxmanifest.xml")));
+    }
+
+    [TestMethod]
+    public async Task MaterializeLooseLayoutAsync_ManifestMissing_ThrowsFileNotFound()
+    {
+        var input = _tempDirectory.CreateSubdirectory("in");
+        var output = _tempDirectory.CreateSubdirectory("out");
+        var missingManifest = new FileInfo(Path.Combine(input.FullName, "Package.appxmanifest"));
+
+        await Assert.ThrowsExactlyAsync<FileNotFoundException>(() =>
+            _msixService.MaterializeLooseLayoutAsync(missingManifest, input, output, TestTaskContext, cancellationToken: TestContext.CancellationToken));
+    }
+
+    /// <summary>Compares two layouts by relative path and content.</summary>
+    private static void AssertLayoutsMatch(DirectoryInfo expected, DirectoryInfo actual)
+    {
+        static Dictionary<string, byte[]> Read(DirectoryInfo root) =>
+            root.EnumerateFiles("*", SearchOption.AllDirectories).ToDictionary(
+                file => Path.GetRelativePath(root.FullName, file.FullName),
+                file => File.ReadAllBytes(file.FullName),
+                StringComparer.OrdinalIgnoreCase);
+
+        var expectedFiles = Read(expected);
+        var actualFiles = Read(actual);
+
+        CollectionAssert.AreEquivalent(
+            expectedFiles.Keys.ToList(),
+            actualFiles.Keys.ToList(),
+            "Materialized layout should contain exactly the same files as the registered one");
+
+        foreach (var (relativePath, content) in expectedFiles)
+        {
+            CollectionAssert.AreEqual(content, actualFiles[relativePath], $"'{relativePath}' should be byte-identical");
+        }
+    }
+
     // ---- AddSparseIdentityAsync workflow ------------------------------------------
 
     private (FileInfo manifest, string exePath) ArrangeSparseInputs()
