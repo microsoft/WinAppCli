@@ -453,10 +453,51 @@ function run(options?: RunOptions): Promise<WinappResult>
 | `project` | `string \| undefined` | No | Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode. |
 | `property` | `string \| string[] \| undefined` | No | Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. |
 | `runtime` | `string \| undefined` | No | Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode. |
+| `sandbox` | `boolean \| undefined` | No | Deploy and run the app inside the Windows Sandbox winapp manages, instead of on this machine. The app is still built on the host; registration, launch, and debugging happen in the Sandbox, which stays running afterwards for the next run. There is no fallback to local execution. |
 | `symbols` | `boolean \| undefined` | No | Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. |
 | `unregisterOnExit` | `boolean \| undefined` | No | Unregister the development package after the application exits. Only removes packages registered in development mode. |
 | `withAlias` | `boolean \| undefined` | No | Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. |
 | `appArgs` | `string \| string[] \| undefined` | No | Arguments to pass to the launched application (forwarded after --). |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `sandboxCp()`
+
+Copy files or directories between the host and the Windows Sandbox winapp manages. Exactly one path must be prefixed with 'sandbox:'. Directory structure and useful timestamps are preserved, unchanged files are skipped, and changed files are replaced atomically.
+
+```typescript
+function sandboxCp(options: SandboxCpOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `source` | `string` | Yes | Source path. Prefix with 'sandbox:' to copy out of the Sandbox. |
+| `destination` | `string` | Yes | Destination path. Prefix with 'sandbox:' to copy into the Sandbox. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
+### `sandboxExec()`
+
+Run a command inside the Windows Sandbox winapp manages, as the interactive Sandbox user. Streams stdin, stdout, and stderr, and returns the guest process's exit code. Does not provide a full terminal, so interactive console applications may see redirected pipes.
+
+```typescript
+function sandboxExec(options?: SandboxExecOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `guestCwd` | `string \| undefined` | No | Working directory inside the Sandbox. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `command` | `string \| string[] \| undefined` | No | Executable and arguments to run inside the Sandbox, e.g. ['dotnet', '--info'] (forwarded after --). |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -996,6 +1037,7 @@ function unregister(options?: UnregisterOptions): Promise<WinappResult>
 | `force` | `boolean \| undefined` | No | Skip the install-location directory check and unregister even if the package was registered from a different project tree |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to the Package.appxmanifest (default: auto-detect from current directory) |
+| `sandbox` | `boolean \| undefined` | No | Unregister the package inside the Windows Sandbox winapp manages, instead of on this machine. Only the exact package this manifest's app was deployed as is removed; a package installed in the Sandbox by anything other than winapp is never touched. |
 
 *Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
 
@@ -1596,10 +1638,33 @@ type ManifestTemplates = "packaged" | "sparse"
 | `project` | `string \| undefined` | No | Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode. |
 | `property` | `string \| string[] \| undefined` | No | Project mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. |
 | `runtime` | `string \| undefined` | No | Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode. |
+| `sandbox` | `boolean \| undefined` | No | Deploy and run the app inside the Windows Sandbox winapp manages, instead of on this machine. The app is still built on the host; registration, launch, and debugging happen in the Sandbox, which stays running afterwards for the next run. There is no fallback to local execution. |
 | `symbols` | `boolean \| undefined` | No | Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. |
 | `unregisterOnExit` | `boolean \| undefined` | No | Unregister the development package after the application exits. Only removes packages registered in development mode. |
 | `withAlias` | `boolean \| undefined` | No | Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. |
 | `appArgs` | `string \| string[] \| undefined` | No | Arguments to pass to the launched application (forwarded after --). |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `SandboxCpOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `source` | `string` | Yes | Source path. Prefix with 'sandbox:' to copy out of the Sandbox. |
+| `destination` | `string` | Yes | Destination path. Prefix with 'sandbox:' to copy into the Sandbox. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `SandboxExecOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `guestCwd` | `string \| undefined` | No | Working directory inside the Sandbox. |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `command` | `string \| string[] \| undefined` | No | Executable and arguments to run inside the Sandbox, e.g. ['dotnet', '--info'] (forwarded after --). |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
@@ -1923,6 +1988,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `force` | `boolean \| undefined` | No | Skip the install-location directory check and unregister even if the package was registered from a different project tree |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `manifest` | `string \| undefined` | No | Path to the Package.appxmanifest (default: auto-detect from current directory) |
+| `sandbox` | `boolean \| undefined` | No | Unregister the package inside the Windows Sandbox winapp manages, instead of on this machine. Only the exact package this manifest's app was deployed as is removed; a package installed in the Sandbox by anything other than winapp is never touched. |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

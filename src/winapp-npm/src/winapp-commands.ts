@@ -633,6 +633,8 @@ export interface RunOptions extends CommonOptions {
   property?: string | string[];
   /** Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode. */
   runtime?: string;
+  /** Deploy and run the app inside the Windows Sandbox winapp manages, instead of on this machine. The app is still built on the host; registration, launch, and debugging happen in the Sandbox, which stays running afterwards for the next run. There is no fallback to local execution. */
+  sandbox?: boolean;
   /** Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. */
   symbols?: boolean;
   /** Unregister the development package after the application exits. Only removes packages registered in development mode. */
@@ -670,6 +672,7 @@ export async function run(options: RunOptions = {}): Promise<WinappResult> {
     for (const v of propertyArr) args.push('--property', v);
   }
   if (options.runtime) args.push('--runtime', options.runtime);
+  if (options.sandbox) args.push('--sandbox');
   if (options.symbols) args.push('--symbols');
   if (options.unregisterOnExit) args.push('--unregister-on-exit');
   if (options.withAlias) args.push('--with-alias');
@@ -677,6 +680,59 @@ export async function run(options: RunOptions = {}): Promise<WinappResult> {
     const appArgsArr = Array.isArray(options.appArgs) ? options.appArgs : [options.appArgs];
     if (appArgsArr.length > 0) {
       args.push('--', ...appArgsArr);
+    }
+  }
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// sandbox cp
+// ---------------------------------------------------------------------------
+
+export interface SandboxCpOptions extends CommonOptions {
+  /** Source path. Prefix with 'sandbox:' to copy out of the Sandbox. */
+  source: string;
+  /** Destination path. Prefix with 'sandbox:' to copy into the Sandbox. */
+  destination: string;
+  /** Format output as JSON */
+  json?: boolean;
+}
+
+/**
+ * Copy files or directories between the host and the Windows Sandbox winapp manages. Exactly one path must be prefixed with 'sandbox:'. Directory structure and useful timestamps are preserved, unchanged files are skipped, and changed files are replaced atomically.
+ */
+export async function sandboxCp(options: SandboxCpOptions): Promise<WinappResult> {
+  const args: string[] = ['sandbox', 'cp'];
+  args.push(options.source);
+  args.push(options.destination);
+  if (options.json) args.push('--json');
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// sandbox exec
+// ---------------------------------------------------------------------------
+
+export interface SandboxExecOptions extends CommonOptions {
+  /** Working directory inside the Sandbox. */
+  guestCwd?: string;
+  /** Format output as JSON */
+  json?: boolean;
+  /** Executable and arguments to run inside the Sandbox, e.g. ['dotnet', '--info'] (forwarded after --). */
+  command?: string | string[];
+}
+
+/**
+ * Run a command inside the Windows Sandbox winapp manages, as the interactive Sandbox user. Streams stdin, stdout, and stderr, and returns the guest process's exit code. Does not provide a full terminal, so interactive console applications may see redirected pipes.
+ */
+export async function sandboxExec(options: SandboxExecOptions = {}): Promise<WinappResult> {
+  const args: string[] = ['sandbox', 'exec'];
+  if (options.guestCwd) args.push('--cwd', options.guestCwd);
+  if (options.json) args.push('--json');
+  if (options.command !== undefined) {
+    const commandArr = Array.isArray(options.command) ? options.command : [options.command];
+    if (commandArr.length > 0) {
+      args.push('--', ...commandArr);
     }
   }
   return execCommand(args, options);
@@ -1460,6 +1516,8 @@ export interface UnregisterOptions extends CommonOptions {
   json?: boolean;
   /** Path to the Package.appxmanifest (default: auto-detect from current directory) */
   manifest?: string;
+  /** Unregister the package inside the Windows Sandbox winapp manages, instead of on this machine. Only the exact package this manifest's app was deployed as is removed; a package installed in the Sandbox by anything other than winapp is never touched. */
+  sandbox?: boolean;
 }
 
 /**
@@ -1470,6 +1528,7 @@ export async function unregister(options: UnregisterOptions = {}): Promise<Winap
   if (options.force) args.push('--force');
   if (options.json) args.push('--json');
   if (options.manifest) args.push('--manifest', options.manifest);
+  if (options.sandbox) args.push('--sandbox');
   return execCommand(args, options);
 }
 

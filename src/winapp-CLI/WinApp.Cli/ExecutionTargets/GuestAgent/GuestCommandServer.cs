@@ -30,6 +30,7 @@ internal sealed class GuestCommandServer : IAsyncDisposable
     private readonly IGuestSessionProbe _sessionProbe;
     private readonly GuestAgentIdentity _identity;
     private readonly GuestFileService? _files;
+    private readonly string? _guestWinapp;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly ConcurrentDictionary<Guid, RunningOperation> _operations = new();
     private readonly ConcurrentDictionary<Guid, GuestFileWrite> _writes = new();
@@ -42,7 +43,8 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         IGuestProcessHostFactory processes,
         IGuestSessionProbe sessionProbe,
         GuestAgentIdentity identity,
-        GuestFileService? files = null)
+        GuestFileService? files = null,
+        string? guestWinapp = null)
     {
         _transport = transport;
         _targetEpoch = targetEpoch.Value;
@@ -50,6 +52,7 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         _sessionProbe = sessionProbe;
         _identity = identity;
         _files = files;
+        _guestWinapp = guestWinapp;
     }
 
     /// <summary>How long a cancelled child gets to exit before its job is terminated.</summary>
@@ -271,6 +274,10 @@ internal sealed class GuestCommandServer : IAsyncDisposable
                     // Windows Sandbox discards everything on teardown, so deployments and runtimes
                     // must be reconciled after every new epoch.
                     PersistentStorage = false,
+
+                    // Reported rather than assumed by the host, so the guest layout stays the
+                    // guest's business and target-neutral orchestration never encodes it.
+                    ManagedRoot = _files?.ManagedRoot,
                 },
             },
             cancellationToken).ConfigureAwait(false);
@@ -480,10 +487,16 @@ internal sealed class GuestCommandServer : IAsyncDisposable
             }
         }
 
+        if (!TryResolveExecutable(request, out var resolved, out var resolutionError))
+        {
+            _ = SendFailureAsync(operationId, resolutionError);
+            return;
+        }
+
         try
         {
             var host = _processes.Start(
-                request,
+                resolved,
                 (stream, data) => _ = ForwardOutputAsync(operationId, stream, data));
 
             operation = new RunningOperation(host, GracefulStopTimeout);
@@ -504,6 +517,63 @@ internal sealed class GuestCommandServer : IAsyncDisposable
 
         _operations[operationId] = operation;
         operation.Completion = Task.Run(() => RunOperationAsync(operationId, operation));
+    }
+
+    /// <summary>
+    /// Decides which binary an operation actually starts.
+    /// </summary>
+    /// <remarks>
+    /// The guest's own winapp is named by a flag rather than a path, so a host cannot point "guest
+    /// winapp" at some other binary and have the agent run it with the agent's own privileges and
+    /// forwarded owner context. An empty executable is refused outright rather than handed to
+    /// process creation to reject with an OS error the caller cannot act on.
+    /// </remarks>
+    private bool TryResolveExecutable(
+        GuestExecRequest request,
+        out GuestExecRequest resolved,
+        out ExecutionTargetErrorInfo error)
+    {
+        error = null!;
+
+        if (request.UseGuestWinapp)
+        {
+            if (string.IsNullOrWhiteSpace(_guestWinapp))
+            {
+                resolved = request;
+                error = new ExecutionTargetErrorInfo
+                {
+                    Code = ExecutionTargetErrorCodes.AgentIncompatible,
+                    Message = "The guest agent cannot locate its own winapp binary.",
+                    UserAction = "Restart Windows Sandbox so winapp reinstalls the guest agent.",
+                };
+                return false;
+            }
+
+            resolved = new GuestExecRequest
+            {
+                Executable = _guestWinapp,
+                Arguments = request.Arguments,
+                WorkingDirectory = request.WorkingDirectory,
+                Environment = request.Environment,
+                RequiresRealInput = request.RequiresRealInput,
+            };
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Executable))
+        {
+            resolved = request;
+            error = new ExecutionTargetErrorInfo
+            {
+                Code = ExecutionTargetErrorCodes.TargetAmbiguous,
+                Message = "The request did not name an executable to run inside the guest.",
+                UserAction = "Put the executable and its arguments after '--'.",
+            };
+            return false;
+        }
+
+        resolved = request;
+        return true;
     }
 
     private async Task RunOperationAsync(Guid operationId, RunningOperation operation)

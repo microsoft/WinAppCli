@@ -105,7 +105,11 @@ internal sealed class GuestAgentRunner(
                     processes,
                     sessionProbe,
                     identity,
-                    files);
+                    files,
+
+                    // The agent is the only party that can assert which binary is guest winapp:
+                    // it is the one running it.
+                    Environment.ProcessPath);
 
                 // One host channel at a time. Accepting a second would let two hosts interleave
                 // mutation operations against one guest with nothing coordinating them.

@@ -83,6 +83,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<GuestAgentInstaller>()
             .AddSingleton<IDeploymentStateStore, DeploymentStateStore>()
             .AddSingleton<TargetDeploymentService>()
+            .AddSingleton<GuestApplicationRunner>()
             .AddSingleton<IExecutionTargetBackend, WindowsSandboxBackend>()
             .AddSingleton<ExecutionTargetOrchestrator>();
     }

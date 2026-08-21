@@ -9,6 +9,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using WinApp.Cli.Commands;
+using WinApp.Cli.ExecutionTargets.Orchestration;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
 
@@ -517,6 +518,8 @@ public class RunCommandTests : BaseCommandTests
             GetRequiredService<IStatusService>(),
             GetRequiredService<IProjectRunService>(),
             GetRequiredService<IProjectContextDetector>(),
+            GetRequiredService<ExecutionTargetOrchestrator>(),
+            GetRequiredService<GuestApplicationRunner>(),
             GetRequiredService<ILogger<RunCommand>>());
 
         // Act

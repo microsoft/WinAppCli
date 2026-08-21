@@ -99,6 +99,27 @@ internal static class GuestRootNames
 
     /// <summary>Free-form working area for <c>sandbox cp</c> and <c>sandbox exec</c>.</summary>
     public const string Work = "work";
+
+    /// <summary>
+    /// Folder name a root maps to under the guest's managed root.
+    /// </summary>
+    /// <remarks>
+    /// Defined once because both halves depend on it: the guest resolves incoming file operations
+    /// through it, and the host composes the absolute guest path of a deployed folder through it.
+    /// Two copies would be two things to keep in agreement, and a disagreement would put files
+    /// somewhere the launch could not find them.
+    /// </remarks>
+    /// <exception cref="ExecutionTargetException">The name is not a managed root.</exception>
+    public static string FolderFor(string root) => root switch
+    {
+        Deployment => "deployments",
+        Artifacts => "artifacts",
+        Runtimes => "runtimes",
+        Work => "work",
+        _ => throw ExecutionTargetException.Create(
+            ExecutionTargetErrorCodes.TargetAmbiguous,
+            $"'{root}' is not a managed guest location."),
+    };
 }
 
 /// <summary>Where a file operation applies.</summary>
@@ -129,7 +150,22 @@ internal sealed record GuestFileInfo(
 internal sealed class GuestExecRequest
 {
     /// <summary>Executable to launch inside the guest.</summary>
-    public required string Executable { get; init; }
+    /// <remarks>
+    /// Ignored when <see cref="UseGuestWinapp"/> is set, which is the only way to name the guest's
+    /// own winapp binary: the host does not know where the agent installed itself, and letting it
+    /// send a path that the guest then executes as winapp would make the agent's own identity
+    /// host-selectable.
+    /// </remarks>
+    public string? Executable { get; init; }
+
+    /// <summary>
+    /// Runs the guest's own winapp binary instead of <see cref="Executable"/>.
+    /// </summary>
+    /// <remarks>
+    /// The agent implements no application semantics of its own: <c>run</c>, <c>unregister</c>,
+    /// debugging, and UI automation are all the ordinary guest winapp commands, started this way.
+    /// </remarks>
+    public bool UseGuestWinapp { get; init; }
 
     /// <summary>Arguments, each preserved as its own value.</summary>
     public required List<string> Arguments { get; init; }

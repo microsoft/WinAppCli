@@ -11,14 +11,22 @@ namespace WinApp.Cli.ExecutionTargets.Orchestration;
 /// Invoked with the operation's identity as soon as it is registered, before the request is sent.
 /// This is what lets a caller stream standard input into an operation the channel named itself.
 /// </param>
-/// <param name="OnStarted">Invoked once the guest reports the process ID.</param>
+/// <param name="OnStarted">Invoked once the guest reports the process started.</param>
 /// <param name="OnStandardOutput">Invoked for each stdout chunk, in order.</param>
 /// <param name="OnStandardError">Invoked for each stderr chunk, in order.</param>
 internal sealed record GuestExecCallbacks(
     Action<Guid>? OnOperationId = null,
-    Action<int>? OnStarted = null,
+    Action<GuestProcessStart>? OnStarted = null,
     Action<ReadOnlyMemory<byte>>? OnStandardOutput = null,
     Action<ReadOnlyMemory<byte>>? OnStandardError = null);
+
+/// <summary>A guest process that has just started.</summary>
+/// <param name="ProcessId">Guest process ID, meaningful only within the current target epoch.</param>
+/// <param name="StartTicksUtc">
+/// UTC ticks when it started. Carried alongside the ID because process IDs are reused: without it, a
+/// later command cannot tell this process from an unrelated one that inherited its number.
+/// </param>
+internal sealed record GuestProcessStart(int ProcessId, long StartTicksUtc);
 
 /// <summary>Outcome of a completed guest operation.</summary>
 /// <param name="ExitCode">The guest process's exit code.</param>
@@ -545,7 +553,8 @@ internal sealed class GuestCommandChannel : IAsyncDisposable
 
             case GuestMessageTypes.ExecStarted when message.ProcessId is { } processId:
                 state.ProcessId = processId;
-                state.Callbacks?.OnStarted?.Invoke(processId);
+                state.Callbacks?.OnStarted?.Invoke(
+                    new GuestProcessStart(processId, message.ProcessStartTicksUtc ?? 0));
                 break;
 
             case GuestMessageTypes.ExecCompleted when message.ExitCode is { } exitCode:

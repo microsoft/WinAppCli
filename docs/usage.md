@@ -677,6 +677,7 @@ winapp run [<input>] [options]
 - `--detach` - Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with `--json`). Cannot be combined with `--no-launch`, `--debug-output`, `--with-alias`, or `--unregister-on-exit`.
 - `--clean` - Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments.
 - `--json` - Format output as JSON for programmatic consumption (e.g. CI/automation). Useful with `--detach` to capture the PID. Cannot be combined with `--with-alias` or `--debug-output`.
+- `--sandbox` - Deploy and run the app inside the Windows Sandbox winapp manages, instead of on this machine. The app is still built on the host; registration, launch, and debugging happen in the Sandbox, which stays running afterwards so a rerun transfers only what changed. Nothing is registered and no runtime is installed on your machine. Every option above keeps its meaning, because the guest runs the same `winapp run`. There is no fallback to local execution. See [Windows Sandbox execution](sandbox-execution.md).
 
 **Application data persistence:**
 
@@ -875,6 +876,7 @@ winapp unregister [options]
 
 - `--manifest <path>` - Path to Package.appxmanifest (default: auto-detect from current directory)
 - `--force` - Skip the install-location directory check and unregister even if the package was registered from a different project tree
+- `--sandbox` - Unregister the package inside the Windows Sandbox winapp manages instead of on this machine. Only the exact package the matching deployment registered is removed: winapp's own record must show it registered this identity in the current Sandbox generation, and the guest must independently confirm the registration is a development package rooted in that deployment's managed folder. A package installed in the Sandbox by anything other than winapp is never touched. See [Windows Sandbox execution](sandbox-execution.md).
 - `--json` - Format output as JSON
 
 **What it does:**
@@ -1211,7 +1213,8 @@ Run commands and copy files inside the Windows Sandbox winapp manages. These are
 Both commands start or reuse the managed Sandbox. Neither creates, stops, or otherwise manages Sandbox lifecycle — that stays with the Windows Sandbox CLI (`wsb`). See [Windows Sandbox execution](sandbox-execution.md) for the full model.
 
 > [!NOTE]
-> These commands are in development and are not available in a released build yet.
+> `winapp run --sandbox`, `winapp unregister --sandbox`, and these commands are in development and
+> are not available in a released build yet.
 
 #### sandbox exec
 

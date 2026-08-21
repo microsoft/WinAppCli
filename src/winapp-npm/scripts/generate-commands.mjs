@@ -100,6 +100,20 @@ const DEPRECATED_ARG_ALIASES = {
 };
 
 /**
+ * Option property renames, keyed by command path, for options whose natural camelCase name
+ * would collide with a `CommonOptions` member.
+ *
+ * `CommonOptions.cwd` is where the winapp *process* is spawned on this machine. A CLI option
+ * that also camelCases to `cwd` would silently make one property drive two unrelated things —
+ * setting the host spawn directory would also send `--cwd` to the guest.
+ *
+ * Map shape: `{ '<cmd path>': { '<cli option>': '<property name>' } }`.
+ */
+const OPTION_PROP_RENAMES = {
+  'sandbox exec': { '--cwd': 'guestCwd' },
+};
+
+/**
  * Nullable enum types — strip `System.Nullable<...>` wrapper.
  */
 const NULLABLE_ENUM_RE = /^System\.Nullable<(.+)>$/;
@@ -173,6 +187,10 @@ const PASSTHROUGH_COMMANDS = {
   tool: { propName: 'toolArgs', description: "Arguments to pass to the SDK tool, e.g. ['makeappx', 'pack', '/d', './folder', '/p', './out.msix'].", separator: ' -- ' },
   store: { propName: 'storeArgs', description: 'Arguments to pass through to the Microsoft Store Developer CLI.', separator: '' },
   run: { propName: 'appArgs', description: 'Arguments to pass to the launched application (forwarded after --).', separator: ' -- ' },
+  // The executable and its arguments must follow '--', or winapp would parse the command's own
+  // flags as its own. Emitting them as a plain positional produced a wrapper that could not run
+  // any command taking a flag.
+  'sandbox exec': { propName: 'command', description: "Executable and arguments to run inside the Sandbox, e.g. ['dotnet', '--info'] (forwarded after --).", separator: ' -- ' },
 };
 
 // ---------------------------------------------------------------------------
@@ -300,11 +318,12 @@ function generate(schema) {
 
     // Collect non-common options
     const opts = [];
+    const optionRenames = OPTION_PROP_RENAMES[cmdPathStr] || {};
     for (const [optName, optDef] of Object.entries(cmd.options || {})) {
       if (COMMON_OPTIONS.has(optName)) continue;
       // Skip if all aliases are common
       if (optDef.aliases?.every((a) => COMMON_OPTIONS.has(a))) continue;
-      opts.push({ cliName: optName, def: optDef, propName: kebabToCamel(optName) });
+      opts.push({ cliName: optName, def: optDef, propName: optionRenames[optName] || kebabToCamel(optName) });
     }
 
     // Collect arguments (positional)

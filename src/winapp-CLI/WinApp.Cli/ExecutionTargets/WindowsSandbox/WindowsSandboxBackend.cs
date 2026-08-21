@@ -127,6 +127,15 @@ internal sealed class WindowsSandboxBackend(
             await cli.ConnectAsync(lease.InstanceId, cancellationToken).ConfigureAwait(false);
         }
 
+        // Once per generation, before the first application is ever deployed. Registering a loose
+        // layout needs Developer Mode, and it is a machine-wide setting a guest process running as
+        // the interactive user cannot set — so it is done here, as one fixed privileged operation
+        // with a constant command, rather than by exposing SYSTEM execution.
+        if (!lease.Reused)
+        {
+            await EnableGuestDevelopmentModeAsync(lease.InstanceId, cancellationToken).ConfigureAwait(false);
+        }
+
         var material = GuestBootstrapMaterial.Create(Target, lease.Epoch, port: 0);
         await File.WriteAllTextAsync(
             Path.Join(bootstrap.HostBootstrap, GuestBootstrapMaterial.FileName),
@@ -194,6 +203,52 @@ internal sealed class WindowsSandboxBackend(
         }
 
         Directory.CreateDirectory(path);
+    }
+
+    /// <summary>
+    /// Enables loose-package registration in a fresh guest (spec §"Framework support").
+    /// </summary>
+    /// <remarks>
+    /// A fixed executable with a fixed argument string, exactly as the specification requires of the
+    /// privileged setup winapp needs: it is not a general SYSTEM escape hatch and nothing about it
+    /// is caller-influenced.
+    /// <para>
+    /// A failure is reported as a warning rather than failing the connection. Copying files and
+    /// running commands in the guest do not need this, and refusing those because a registration
+    /// prerequisite could not be set would turn one broken capability into all of them. A packaged
+    /// run then fails with guest winapp's own Developer Mode message, which names the real problem.
+    /// </para>
+    /// </remarks>
+    private async Task EnableGuestDevelopmentModeAsync(string instanceId, CancellationToken cancellationToken)
+    {
+        const string Command =
+            @"reg.exe add ""HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock"" " +
+            @"/f /v AllowDevelopmentWithoutDevLicense /t REG_DWORD /d 1";
+
+        try
+        {
+            var exitCode = await cli.ExecuteAsync(
+                instanceId,
+                Command,
+                workingDirectory: null,
+
+                // The value lives under HKLM, which the interactive guest user cannot write
+                // unelevated. This is the one operation that needs it.
+                asSystem: true,
+                cancellationToken).ConfigureAwait(false);
+
+            if (exitCode != 0)
+            {
+                System.Diagnostics.Trace.TraceWarning(
+                    "Could not enable Developer Mode in Windows Sandbox (exit code {0}); packaged runs may fail to register.",
+                    exitCode);
+            }
+        }
+        catch (ExecutionTargetException ex)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                "Could not enable Developer Mode in Windows Sandbox: {0}", ex.Message);
+        }
     }
 
     /// <summary>

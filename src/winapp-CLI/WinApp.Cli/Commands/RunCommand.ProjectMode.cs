@@ -90,6 +90,7 @@ internal partial class RunCommand
             string? selectionReason,
             string? appArgs,
             bool isJson,
+            bool sandbox,
             CancellationToken cancellationToken)
         {
             // Project-mode build inputs.
@@ -225,11 +226,11 @@ internal partial class RunCommand
                 ? await RunPackagedProjectAsync(
                     resolution, csproj, manifest, outputAppXDirectory, appArgs,
                     noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, noBuild, isJson,
-                    cancellationToken)
+                    sandbox, cancellationToken)
                 : await RunUnpackagedProjectAsync(
                     resolution, csproj, appArgs,
                     noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, manifest, outputAppXDirectory, isJson,
-                    cancellationToken);
+                    sandbox, cancellationToken);
         }
 
         /// <summary>
@@ -253,6 +254,7 @@ internal partial class RunCommand
             string? executable,
             bool noBuild,
             bool isJson,
+            bool sandbox,
             CancellationToken cancellationToken)
         {
             var targetDir = new DirectoryInfo(resolution.TargetDir);
@@ -275,7 +277,7 @@ internal partial class RunCommand
             return await ExecuteRunPipelineAsync(
                 targetDir, manifest, outputAppXDirectory, appArgs,
                 noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, isJson,
-                runtimeArch: resolution.Architecture, projectFile: csproj, framework: resolution.Framework, noRestore: resolution.NoRestore, cancellationToken);
+                runtimeArch: resolution.Architecture, projectFile: csproj, framework: resolution.Framework, noRestore: resolution.NoRestore, sandbox, cancellationToken);
         }
 
         /// <summary>
@@ -298,6 +300,7 @@ internal partial class RunCommand
             FileInfo? manifest,
             DirectoryInfo? outputAppXDirectory,
             bool isJson,
+            bool sandbox,
             CancellationToken cancellationToken)
         {
             // AUTHORITATIVE gate — rejects packaged-only options once packaging is definitively known.
@@ -307,6 +310,12 @@ internal partial class RunCommand
             if (rejected.Count > 0)
             {
                 return Fail(BuildUnpackagedIncompatibleMessage(rejected, csproj.Name), isJson);
+            }
+
+            if (sandbox)
+            {
+                return await ExecuteUnpackagedSandboxRunAsync(
+                    resolution, csproj, appArgs, debugOutput, detach, isJson, cancellationToken);
             }
 
             var exePath = resolution.RunCommand!; // guaranteed non-null for unpackaged by BuildAndResolveAsync
