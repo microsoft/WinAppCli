@@ -290,13 +290,18 @@ internal sealed class GuestFileWrite : IAsyncDisposable
         }
 
         // An unpublished transfer leaves nothing behind. Cleanup failure must never turn an
-        // interrupted transfer into a success, so it is best-effort and silent.
+        // interrupted transfer into a success, so it is best-effort and non-fatal.
         try
         {
             File.Delete(_temporary);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            // The temporary is named with a fresh GUID per transfer, so a file left behind here is
+            // never picked up as content and never collides with a retry. Reporting it would turn a
+            // harmless leftover into a failure the caller cannot act on, so it is traced instead.
+            System.Diagnostics.Trace.TraceWarning(
+                "Could not remove the incomplete transfer file '{0}': {1}", _temporary, ex.Message);
         }
     }
 
