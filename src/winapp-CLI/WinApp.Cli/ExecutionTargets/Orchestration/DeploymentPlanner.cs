@@ -88,13 +88,20 @@ internal static class DeploymentPlanner
     /// <summary>
     /// Captures the desired state of <paramref name="root"/>.
     /// </summary>
+    /// <param name="root">Host folder to capture.</param>
+    /// <param name="deploymentId">Deployment the snapshot belongs to.</param>
+    /// <param name="cancellationToken">Cancellation.</param>
+    /// <param name="exclude">
+    /// Optional predicate over the root-relative path, for content that must not be deployed.
+    /// </param>
     /// <exception cref="ExecutionTargetException">
     /// A reparse point was found, a path escaped the root, or the source changed while being read.
     /// </exception>
     public static async Task<DeploymentSnapshot> CreateSnapshotAsync(
         DirectoryInfo root,
         string deploymentId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string, bool>? exclude = null)
     {
         ArgumentNullException.ThrowIfNull(root);
 
@@ -109,6 +116,12 @@ internal static class DeploymentPlanner
             RejectReparsePoint(info);
 
             var relativePath = GetContainedRelativePath(rootPath, info.FullName);
+
+            if (exclude?.Invoke(relativePath) == true)
+            {
+                continue;
+            }
+
             var hash = await ComputeHashAsync(info.FullName, cancellationToken).ConfigureAwait(false);
 
             files.Add(new DeploymentFile(relativePath, info.Length, info.LastWriteTimeUtc, hash));

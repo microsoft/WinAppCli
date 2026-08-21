@@ -262,21 +262,14 @@ internal sealed class GuestFileService(string managedRoot)
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    /// <summary>Maps a root name to its folder, rejecting anything unknown.</summary>
-    private static string RootFolder(string root) => root switch
-    {
-        GuestRootNames.Deployment => "deployments",
-        GuestRootNames.Artifacts => "artifacts",
-        GuestRootNames.Runtimes => "runtimes",
-        GuestRootNames.Work => "work",
-
-        // A closed set: an unrecognised root is refused rather than treated as a directory name,
-        // which would let the host name any folder it liked under the managed root.
-        _ => throw ExecutionTargetException.Create(
-            ExecutionTargetErrorCodes.TargetAmbiguous,
-            $"'{root}' is not a managed guest location.",
-            userAction: "Retry the command. If it keeps failing, report this with the command you ran."),
-    };
+    /// <summary>
+    /// Maps a root name to its folder.
+    /// </summary>
+    /// <remarks>
+    /// A closed set shared with the host: an unrecognised root is refused rather than treated as a
+    /// directory name, which would let the host name any folder it liked under the managed root.
+    /// </remarks>
+    private static string RootFolder(string root) => GuestRootNames.FolderFor(root);
 
     /// <summary>Removes directories left empty by deletion, without touching the scope root.</summary>
     private static void PruneEmptyDirectories(string scopeRoot, string directory)

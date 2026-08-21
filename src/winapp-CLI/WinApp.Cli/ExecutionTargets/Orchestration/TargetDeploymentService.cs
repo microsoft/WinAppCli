@@ -135,8 +135,11 @@ internal sealed class TargetDeploymentService(IDeploymentStateStore stateStore)
     public DeploymentState CommitPackage(
         ExecutionTargetRef target,
         DeploymentState state,
-        PackageOwnership package) =>
+        PackageOwnership? package) =>
         stateStore.Commit(target, state with { Package = package }, state.Revision);
+
+    /// <summary>Every deployment recorded for a target.</summary>
+    public IReadOnlyList<DeploymentState> List(ExecutionTargetRef target) => stateStore.List(target);
 
     /// <summary>Records the process this deployment launched.</summary>
     public DeploymentState CommitProcess(

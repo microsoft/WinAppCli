@@ -84,7 +84,7 @@ public class GuestCommandServerTests
         var execution = harness.Channel.ExecuteAsync(
             Request("ui", "inspect"),
             new GuestExecCallbacks(
-                OnStarted: pid => started.TrySetResult(pid),
+                OnStarted: process => started.TrySetResult(process.ProcessId),
                 OnStandardOutput: data => standardOutput.Append(Encoding.UTF8.GetString(data.Span)),
                 OnStandardError: data => standardError.Append(Encoding.UTF8.GetString(data.Span))),
             harness.Token);

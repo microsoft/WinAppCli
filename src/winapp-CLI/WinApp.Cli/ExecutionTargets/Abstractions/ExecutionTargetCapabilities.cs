@@ -47,6 +47,17 @@ internal sealed class ExecutionTargetCapabilities
     /// deployments and runtimes must be reconciled after every new epoch.
     /// </summary>
     public required bool PersistentStorage { get; init; }
+
+    /// <summary>
+    /// Absolute guest path the managed roots live under, or null when the guest does not report one.
+    /// </summary>
+    /// <remarks>
+    /// The host needs this to name a deployed folder in an argument it hands to guest winapp — the
+    /// alternative is hard-coding the guest layout on the host, which would put a guest path in
+    /// target-neutral orchestration and silently break the moment a backend chose a different root.
+    /// Optional so a guest predating it degrades to a clear refusal instead of a wrong path.
+    /// </remarks>
+    public string? ManagedRoot { get; init; }
 }
 
 /// <summary>Source-generated serializer context for the capability payload.</summary>

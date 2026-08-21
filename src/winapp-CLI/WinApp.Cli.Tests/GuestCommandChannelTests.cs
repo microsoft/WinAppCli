@@ -119,18 +119,27 @@ public class GuestCommandChannelTests : IDisposable
     public async Task Execute_ReportsStartedProcessIdThenExitCode()
     {
         var startedPid = 0;
-        var callbacks = new GuestExecCallbacks(OnStarted: pid => startedPid = pid);
+        var startedTicks = 0L;
+        var callbacks = new GuestExecCallbacks(OnStarted: process =>
+        {
+            startedPid = process.ProcessId;
+            startedTicks = process.StartTicksUtc;
+        });
 
         var pending = _channel.ExecuteAsync(SampleRequest, callbacks, TestContext.CancellationTokenSource.Token);
         var sent = await NextRequestAsync();
 
-        PeerReply(new GuestMessage { Type = GuestMessageTypes.ExecStarted, OperationId = sent.OperationId, ProcessId = 4212 });
+        PeerReply(new GuestMessage { Type = GuestMessageTypes.ExecStarted, OperationId = sent.OperationId, ProcessId = 4212, ProcessStartTicksUtc = 99 });
         PeerReply(new GuestMessage { Type = GuestMessageTypes.ExecCompleted, OperationId = sent.OperationId, ExitCode = 3 });
 
         var result = await pending;
 
         Assert.AreEqual(4212, startedPid);
         Assert.AreEqual(4212, result.ProcessId);
+
+        // Process IDs are reused, so the start time travels with the ID or a later command cannot
+        // tell this process from an unrelated one that inherited its number.
+        Assert.AreEqual(99, startedTicks);
 
         // The guest application's exit code must survive intact and stay distinguishable from the
         // infrastructure failures reported as ExecutionTargetException.

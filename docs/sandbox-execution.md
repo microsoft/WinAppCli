@@ -6,10 +6,10 @@
 Build on your machine, then run and automate the app inside a persistent Windows Sandbox.
 
 > [!NOTE]
-> This feature is in development. The internal execution-target layers described under
-> [Architecture](#architecture) have landed; the `--sandbox` option and the `winapp sandbox`
-> commands are not available yet. This page documents the design being implemented so the
-> behaviour and its failure modes are reviewable alongside the code.
+> This feature is in development. `winapp run --sandbox`, `winapp unregister --sandbox`,
+> `winapp sandbox exec`, and `winapp sandbox cp` work. UI routing (`winapp ui ... --sandbox`)
+> and artifact copy-back are still being implemented; this page documents them as the design
+> being built so the behaviour and its failure modes are reviewable alongside the code.
 
 ## Why
 
@@ -62,6 +62,75 @@ than an exception to it: a guest process able to win it can already terminate th
 deployment directly, or interfere with the application, because everything in the Sandbox runs as
 the same user. It is not the weakest link. Workflows that must be isolated from one another need
 separate machines.
+
+## Running an app
+
+```powershell
+winapp run . --sandbox
+winapp run .\MyApp.csproj --sandbox --detach --json
+winapp run .\publish --sandbox --clean
+```
+
+The app is built and its package layout is produced on the host, exactly as a local run would
+produce it. Nothing is registered on your machine and no runtime is installed on it: the layout is
+transferred into the Sandbox, and guest `winapp` registers, launches, and — with `--debug-output` —
+debugs it there.
+
+Every existing run option keeps its meaning, because the guest runs the same `winapp run` you would
+have run locally:
+
+| Option | In Sandbox |
+|---|---|
+| `--detach` | Returns after the guest launch; the app and the Sandbox keep running |
+| `--debug-output` | Debugs inside the guest and streams its output back |
+| `--no-launch` | Deploys and registers in the Sandbox without launching |
+| `--clean` | Clears that guest package's application data, and redeploys from scratch |
+| `--unregister-on-exit` | Unregisters that guest package once its process exits; the Sandbox stays |
+| `--with-alias` | Launches the guest execution alias with forwarded standard streams |
+| `--json` | stdout stays machine-readable; progress goes to stderr |
+
+Build options — `--configuration`, `--arch`, `--framework`, `--property`, `--no-build`,
+`--no-restore` — still apply on the host, before anything is transferred.
+
+Unpackaged apps run too: there is no package to register, so the build output is deployed and the
+app's executable is started in the guest. Its working directory is the deployed folder, because the
+host directory you ran from does not exist there. `--debug-output` is not available for an
+unpackaged app in Sandbox and is refused up front rather than silently producing nothing.
+
+Under `--json`, Sandbox runs add fields to the existing document and change none of the existing
+ones:
+
+```json
+{
+  "AUMID": "Contoso.MyApp_8wekyb3d8bbwe!App",
+  "ProcessId": 4212,
+  "Sandbox": true,
+  "ProcessScope": "sandbox",
+  "AppTarget": "sandbox:4212",
+  "ExecutionTarget": {
+    "Kind": "windows-sandbox",
+    "Id": "windows-sandbox:default",
+    "Architecture": "arm64",
+    "Epoch": "..."
+  }
+}
+```
+
+`ProcessId` is a **guest** process ID and is meaningful only within `ExecutionTarget.Epoch`. A value
+from a previous generation is rejected rather than resolved against whatever Sandbox exists now.
+
+## Removing an app
+
+```powershell
+winapp unregister --sandbox
+winapp unregister --sandbox --manifest .\Package.appxmanifest
+```
+
+This removes only the package the matching deployment registered. Ownership has to hold twice
+before anything is removed: winapp's own record must say that deployment registered this identity in
+the current Sandbox generation, and the guest must then confirm the registration is a development
+package rooted in that deployment's managed folder. A package you installed in the Sandbox yourself
+satisfies neither and is never touched.
 
 ## Requirements
 
@@ -143,9 +212,10 @@ Two consequences are worth knowing:
 Package registration preserves per-user application state by default. `run --clean` is the explicit
 clean reinstall, and it clears only that deployment's own state.
 
-winapp unregisters only a package whose recorded full name **and** registered location match the
-deployment. A package you installed yourself is never adopted or removed, and a provisioned or inbox
-package that blocks development registration is reported with its exact identity rather than removed.
+winapp unregisters only a package whose registered location matches the deployment, and confirms it
+is a development-mode registration before removing it. A package you installed yourself is never
+adopted or removed, and a provisioned or inbox package that blocks development registration is
+reported with its exact identity rather than removed.
 
 ## Guest agent
 

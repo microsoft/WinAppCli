@@ -77,6 +77,11 @@ internal static class GuestOperationHost
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        var executable = request.Executable
+            ?? throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.TargetAmbiguous,
+                "The request did not name an executable to run inside the guest.");
+
         var arguments = new List<string>
         {
             GuestAgentCommandNames.Verb,
@@ -87,7 +92,7 @@ internal static class GuestOperationHost
             // Everything after the separator is the requested command, still as discrete values, so
             // argument boundaries survive this extra hop exactly as they survive the transport.
             "--",
-            request.Executable,
+            executable,
         };
 
         arguments.AddRange(request.Arguments);

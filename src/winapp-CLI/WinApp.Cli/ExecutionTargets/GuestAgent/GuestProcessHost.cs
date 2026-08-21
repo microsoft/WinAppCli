@@ -70,6 +70,13 @@ internal sealed class GuestProcessHost : IGuestProcessHost
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(onOutput);
 
+        // Resolution of which binary to run belongs to the caller, which is the only party that
+        // knows whether the request named a guest path or asked for guest winapp itself.
+        var executable = request.Executable
+            ?? throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.TargetAmbiguous,
+                "The request did not name an executable to run inside the guest.");
+
         var barrierPath = barrierExecutable;
         var readyEventName = barrierPath is null ? null : GuestOperationHost.CreateReleaseEventName();
 
@@ -77,7 +84,7 @@ internal sealed class GuestProcessHost : IGuestProcessHost
 
         var startInfo = new ProcessStartInfo
         {
-            FileName = barrierPath ?? request.Executable,
+            FileName = barrierPath ?? executable,
             WorkingDirectory = request.WorkingDirectory ?? string.Empty,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,

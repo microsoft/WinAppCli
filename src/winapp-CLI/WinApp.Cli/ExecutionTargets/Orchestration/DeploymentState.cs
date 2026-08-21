@@ -24,8 +24,18 @@ internal sealed record PackageOwnership
     /// <summary>Original publisher, preserved rather than rewritten.</summary>
     public required string Publisher { get; init; }
 
-    /// <summary>Effective package full name as registered in the guest.</summary>
-    public required string PackageFullName { get; init; }
+    /// <summary>
+    /// Effective package full name as registered in the guest, when the guest reported one.
+    /// </summary>
+    /// <remarks>
+    /// Null when the host deployed and launched through guest winapp without asking it to report
+    /// back. That is not a weakening of the "never removes an external package" rule: the operative
+    /// key is <see cref="RegisteredLocation"/>, a folder only winapp writes, and the guest's own
+    /// unregister independently refuses any registration that is not a development-mode package
+    /// rooted there. Recording a full name the host had computed rather than observed would be a
+    /// value that merely looked like proof.
+    /// </remarks>
+    public string? PackageFullName { get; init; }
 
     /// <summary>Effective package family name.</summary>
     public required string PackageFamilyName { get; init; }
@@ -40,16 +50,18 @@ internal sealed record PackageOwnership
     /// Whether <paramref name="candidate"/> is the exact package this record owns.
     /// </summary>
     /// <remarks>
-    /// Full name and registered location must both match. The full name alone would accept a
-    /// different registration of the same version, and the location alone would accept a different
-    /// package registered from a path this deployment happens to have used.
+    /// The registered location must always match: it is the folder this deployment wrote, so a
+    /// package registered from anywhere else is someone else's. The full name is compared as well
+    /// whenever one was recorded, because the location alone would accept a different package
+    /// registered from a path this deployment happens to have used.
     /// </remarks>
     public bool Owns(string packageFullName, string registeredLocation) =>
-        string.Equals(PackageFullName, packageFullName, StringComparison.OrdinalIgnoreCase) &&
         string.Equals(
             Path.TrimEndingDirectorySeparator(RegisteredLocation),
             Path.TrimEndingDirectorySeparator(registeredLocation),
-            StringComparison.OrdinalIgnoreCase);
+            StringComparison.OrdinalIgnoreCase) &&
+        (PackageFullName is null ||
+            string.Equals(PackageFullName, packageFullName, StringComparison.OrdinalIgnoreCase));
 }
 
 /// <summary>
@@ -130,6 +142,17 @@ internal interface IDeploymentStateStore
 
     /// <summary>Removes a deployment's state. Succeeds when none exists.</summary>
     void Clear(ExecutionTargetRef target, string deploymentId);
+
+    /// <summary>
+    /// Every deployment recorded for a target.
+    /// </summary>
+    /// <remarks>
+    /// Needed by commands that identify a deployment by what it registered rather than by an input
+    /// path — <c>unregister --sandbox</c> is given a manifest, not the folder a run was launched
+    /// from, so it has to find the deployment that owns that identity.
+    /// </remarks>
+    /// <exception cref="ExecutionTargetException">A record is corrupt or from a newer schema.</exception>
+    IReadOnlyList<DeploymentState> List(ExecutionTargetRef target);
 }
 
 /// <summary>
@@ -227,6 +250,33 @@ internal sealed class DeploymentStateStore(ITargetStateDirectoryProvider directo
         {
             File.Delete(file);
         }
+    }
+
+    /// <inheritdoc/>
+    public IReadOnlyList<DeploymentState> List(ExecutionTargetRef target)
+    {
+        var directory = Path.Combine(
+            directoryProvider.GetTargetRoot(target, create: false).FullName, DeploymentsFolder);
+
+        if (!Directory.Exists(directory))
+        {
+            return [];
+        }
+
+        var states = new List<DeploymentState>();
+
+        foreach (var file in Directory.EnumerateFiles(directory, "*.json"))
+        {
+            // Read rather than a bespoke parse, so a corrupt or newer-schema record fails here
+            // exactly as it would on the path that owns it. Skipping it silently would let a
+            // command report "not deployed" for something that is in fact deployed.
+            if (Read(target, Path.GetFileNameWithoutExtension(file)) is { } state)
+            {
+                states.Add(state);
+            }
+        }
+
+        return states;
     }
 
     private string GetStateFile(ExecutionTargetRef target, string deploymentId, bool create)
