@@ -57,4 +57,24 @@ public partial class UiCommandTests
         AssertJsonErrorCode(UiJsonError.CodeForegroundNotTarget);
         Assert.IsFalse(File.Exists(outputPath), "no MP4 may be published for a refused capture");
     }
+
+    [TestMethod]
+    public async Task Screenshot_MultiWindowCaptureScreenForegroundRefused_ReportsForegroundNotTarget()
+    {
+        // The multi-window path captures each window in a loop whose catch-all records per-window
+        // failures and then reports "No windows could be captured" as internal_error. A refused
+        // activation is a property of the desktop, not of one window, so it must escape that loop —
+        // otherwise --capture-screen on any app with an owned dialog still buries the real cause.
+        _fakeWindowFinder.OwnedWindowsResult = [((nint)99, 4321, "Owned Dialog")];
+        _fakeUia.ScreenshotThrow = CaptureRefusal();
+
+        var outputPath = Path.Combine(_tempDirectory.FullName, "decoy-multi.png");
+        var command = GetRequiredService<UiScreenshotCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["-a", "TestApp", "--capture-screen", "-o", outputPath, "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        AssertJsonErrorCode(UiJsonError.CodeForegroundNotTarget);
+        Assert.IsFalse(File.Exists(outputPath));
+    }
 }

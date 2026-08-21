@@ -289,6 +289,14 @@ internal class UiScreenshotCommand : Command, IShortDescription
                     // recording a per-window failure here would publish a partially observational image.
                     throw;
                 }
+                catch (CaptureForegroundNotTargetException)
+                {
+                    // The foreground is a property of the desktop, not of this one window, so a refused
+                    // activation is not a per-window failure: recording it as one and continuing would
+                    // end with "No windows could be captured" (internal_error) and bury the real,
+                    // actionable cause. Propagate to the handler that reports foreground_not_target.
+                    throw;
+                }
                 catch (Exception ex) when (!UiCoordinatedAction.IsCoordinationFault(ex))
                 {
                     logger.LogDebug("Failed to capture HWND {Hwnd}: {Error}", w.Hwnd, ex.Message);
