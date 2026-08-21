@@ -215,7 +215,20 @@ internal static class Program
             }
         }
 
-        return await RunWithTelemetryAsync(parsedArgs, isCompleteMode, () => parsedArgs.InvokeAsync());
+        return await RunWithTelemetryAsync(parsedArgs, isCompleteMode, () =>
+        {
+            // One pre-dispatch interception, before any local UI service runs. A `--sandbox` or
+            // `sandbox:` command must not perform UI Automation, window discovery, capture, or
+            // input injection on this desktop, and the only way to guarantee that for every verb
+            // is to divert before the handler exists.
+            if (SandboxUiRouter.ShouldRoute(parsedArgs))
+            {
+                var router = serviceProvider.GetRequiredService<SandboxUiRouter>();
+                return router.RouteAsync(args, effectiveJson, CancellationToken.None);
+            }
+
+            return parsedArgs.InvokeAsync();
+        });
     }
 
     /// <summary>

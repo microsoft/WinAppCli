@@ -573,6 +573,7 @@ function uiClick(options?: UiClickOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `double` | `boolean \| undefined` | No | Perform a double-click instead of a single click |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
@@ -597,6 +598,7 @@ function uiDrag(options?: UiDragOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `from` | `string \| undefined` | No | Start point — an element selector (drags from its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200). |
 | `to` | `string \| undefined` | No | End point — an element selector (drops at its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400). |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `dwellMs` | `number \| undefined` | No | Milliseconds to dwell at the destination after moving, before releasing (default: 0). Lets drop targets / merge overlays that arm from a sustained hover latch before release. |
 | `holdMs` | `number \| undefined` | No | Milliseconds to hold the button down at the start before moving (default: 0). With <from> == <to> (no movement) this performs a press-and-hold / long-press gesture. |
@@ -621,6 +623,7 @@ function uiFocus(options?: UiFocusOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
@@ -641,6 +644,7 @@ function uiGetFocused(options?: UiGetFocusedOptions): Promise<WinappResult>
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
@@ -662,6 +666,7 @@ function uiGetProperty(options?: UiGetPropertyOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `property` | `string \| undefined` | No | Property name to read or filter on |
@@ -684,6 +689,7 @@ function uiGetValue(options?: UiGetValueOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
@@ -705,6 +711,7 @@ function uiHover(options?: UiHoverOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `dwellTime` | `number \| undefined` | No | Time in milliseconds to wait after hovering for hover effects to appear (default: 800) |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
@@ -727,6 +734,7 @@ function uiInspect(options?: UiInspectOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `ancestors` | `boolean \| undefined` | No | Walk up the tree from the specified element to the root |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `depth` | `number \| undefined` | No | Tree inspection depth |
@@ -753,6 +761,7 @@ function uiInvoke(options?: UiInvokeOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
@@ -773,6 +782,7 @@ function uiListWindows(options?: UiListWindowsOptions): Promise<WinappResult>
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `showHidden` | `boolean \| undefined` | No | Include untitled zero-size windows that are hidden by default |
@@ -794,6 +804,7 @@ function uiPen(options?: UiPenOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `at` | `string \| undefined` | No | Pen contact point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. Ignored when --path is given. |
 | `durationMs` | `number \| undefined` | No | Total glide time in milliseconds distributed across the stroke path segments (default: ~10 ms per segment). |
@@ -822,6 +833,7 @@ function uiScreenshot(options?: UiScreenshotOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `captureScreen` | `boolean \| undefined` | No | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). |
 | `focus` | `boolean \| undefined` | No | Bring the target window to the foreground before capture. Already implied by --capture-screen. |
@@ -846,6 +858,7 @@ function uiScroll(options?: UiScrollOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `direction` | `string \| undefined` | No | Scroll direction: up, down, left, right |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
@@ -870,6 +883,7 @@ function uiScrollIntoView(options?: UiScrollIntoViewOptions): Promise<WinappResu
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
@@ -891,6 +905,7 @@ function uiSearch(options?: UiSearchOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `max` | `number \| undefined` | No | Maximum search results |
@@ -913,6 +928,7 @@ function uiSendKeys(options?: UiSendKeysOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `keys` | `string \| undefined` | No | Keys to send. Whitespace-separated tokens: named keys (down, enter, tab, esc, f5), modifier combos (ctrl+shift+t, alt+f4), raw virtual keys (vk=0x42), or literal text (hello). Use text=<literal> to type a single value verbatim when it would otherwise be read as a key name or combo (text=enter types "enter"; text=ctrl+a types "ctrl+a"); backslash escapes \s \t \n \r \\ are supported (text=a\s\sb types "a b"). To type the whole argument literally without escaping each token, pass --verbatim instead. Quote multi-token strings, e.g. "ctrl+a delete". |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `allowSystemKeys` | `boolean \| undefined` | No | Allow synthesizing system-/shell-reserved combos (win+<key>, alt+f4, alt+tab, ctrl+esc, …) via --via send-input, which are refused by default because they act on the OS/shell beyond the target app. Opt in to drive global hotkeys (e.g. PowerToys' win+shift+v, win+r). No effect on --via post-message (already window-scoped; a warning is emitted if set without send-input). Note: win+l and ctrl+alt+del stay blocked even with this flag — win+l locks the workstation (LockWorkStation() via the shell hook), which is unrecoverable from automation, and ctrl+alt+del is a Secure Attention Sequence (SAS) that Windows drops from injected input regardless of this flag, so it can never take effect. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
@@ -939,6 +955,7 @@ function uiSetValue(options?: UiSetValueOptions): Promise<WinappResult>
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `value` | `string \| undefined` | No | Value to set (text for TextBox/ComboBox, number for Slider) |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
@@ -959,6 +976,7 @@ function uiStatus(options?: UiStatusOptions): Promise<WinappResult>
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
@@ -980,6 +998,7 @@ function uiTouch(options?: UiTouchOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `at` | `string \| undefined` | No | Explicit start point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. |
 | `direction` | `string \| undefined` | No | Swipe direction: right (default), left, up, or down. Combined with --distance to compute the end point when --to-point is not given. |
@@ -1009,6 +1028,7 @@ function uiWaitFor(options?: UiWaitForOptions): Promise<WinappResult>
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `contains` | `boolean \| undefined` | No | Use substring matching for --value instead of exact match |
 | `gone` | `boolean \| undefined` | No | Wait for element to disappear instead of appear |
@@ -1704,6 +1724,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `double` | `boolean \| undefined` | No | Perform a double-click instead of a single click |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
@@ -1719,6 +1740,7 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `from` | `string \| undefined` | No | Start point — an element selector (drags from its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-list-d736 or 100,200). |
 | `to` | `string \| undefined` | No | End point — an element selector (drops at its center) or screen coordinates x,y as reported by 'ui inspect' (e.g. pn-target-d746 or 300,400). |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `dwellMs` | `number \| undefined` | No | Milliseconds to dwell at the destination after moving, before releasing (default: 0). Lets drop targets / merge overlays that arm from a sustained hover latch before release. |
 | `holdMs` | `number \| undefined` | No | Milliseconds to hold the button down at the start before moving (default: 0). With <from> == <to> (no movement) this performs a press-and-hold / long-press gesture. |
@@ -1734,6 +1756,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
@@ -1745,6 +1768,7 @@ type ManifestTemplates = "packaged" | "sparse"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
@@ -1757,6 +1781,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `property` | `string \| undefined` | No | Property name to read or filter on |
@@ -1770,6 +1795,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
@@ -1782,6 +1808,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `dwellTime` | `number \| undefined` | No | Time in milliseconds to wait after hovering for hover effects to appear (default: 800) |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
@@ -1795,6 +1822,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `ancestors` | `boolean \| undefined` | No | Walk up the tree from the specified element to the root |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `depth` | `number \| undefined` | No | Tree inspection depth |
@@ -1812,6 +1840,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
@@ -1823,6 +1852,7 @@ type ManifestTemplates = "packaged" | "sparse"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `showHidden` | `boolean \| undefined` | No | Include untitled zero-size windows that are hidden by default |
@@ -1835,6 +1865,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `at` | `string \| undefined` | No | Pen contact point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. Ignored when --path is given. |
 | `durationMs` | `number \| undefined` | No | Total glide time in milliseconds distributed across the stroke path segments (default: ~10 ms per segment). |
@@ -1854,6 +1885,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `captureScreen` | `boolean \| undefined` | No | Capture from screen DC via BitBlt (includes popups/overlays not owned by the target). |
 | `focus` | `boolean \| undefined` | No | Bring the target window to the foreground before capture. Already implied by --capture-screen. |
@@ -1869,6 +1901,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `direction` | `string \| undefined` | No | Scroll direction: up, down, left, right |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
@@ -1884,6 +1917,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
@@ -1896,6 +1930,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `max` | `number \| undefined` | No | Maximum search results |
@@ -1909,6 +1944,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `keys` | `string \| undefined` | No | Keys to send. Whitespace-separated tokens: named keys (down, enter, tab, esc, f5), modifier combos (ctrl+shift+t, alt+f4), raw virtual keys (vk=0x42), or literal text (hello). Use text=<literal> to type a single value verbatim when it would otherwise be read as a key name or combo (text=enter types "enter"; text=ctrl+a types "ctrl+a"); backslash escapes \s \t \n \r \\ are supported (text=a\s\sb types "a b"). To type the whole argument literally without escaping each token, pass --verbatim instead. Quote multi-token strings, e.g. "ctrl+a delete". |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `allowSystemKeys` | `boolean \| undefined` | No | Allow synthesizing system-/shell-reserved combos (win+<key>, alt+f4, alt+tab, ctrl+esc, …) via --via send-input, which are refused by default because they act on the OS/shell beyond the target app. Opt in to drive global hotkeys (e.g. PowerToys' win+shift+v, win+r). No effect on --via post-message (already window-scoped; a warning is emitted if set without send-input). Note: win+l and ctrl+alt+del stay blocked even with this flag — win+l locks the workstation (LockWorkStation() via the shell hook), which is unrecoverable from automation, and ctrl+alt+del is a Secure Attention Sequence (SAS) that Windows drops from injected input regardless of this flag, so it can never take effect. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
@@ -1926,6 +1962,7 @@ type ManifestTemplates = "packaged" | "sparse"
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
 | `value` | `string \| undefined` | No | Value to set (text for TextBox/ComboBox, number for Slider) |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
@@ -1937,6 +1974,7 @@ type ManifestTemplates = "packaged" | "sparse"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `json` | `boolean \| undefined` | No | Format output as JSON |
 | `window` | `number \| undefined` | No | Target window by HWND (stable handle from list output). Takes precedence over --app. |
@@ -1949,6 +1987,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `at` | `string \| undefined` | No | Explicit start point as screen coordinates x,y (as reported by 'ui inspect'). Defaults to the selector's element center. |
 | `direction` | `string \| undefined` | No | Swipe direction: right (default), left, up, or down. Combined with --distance to compute the end point when --to-point is not given. |
@@ -1969,6 +2008,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `selector` | `string \| undefined` | No | Semantic slug (e.g., btn-minimize-d1a0) or text to search by name/automationId |
+| `sandbox` | `boolean \| undefined` | No | Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option. |
 | `app` | `string \| undefined` | No | Target app (process name, window title, or PID). Lists windows if ambiguous. |
 | `contains` | `boolean \| undefined` | No | Use substring matching for --value instead of exact match |
 | `gone` | `boolean \| undefined` | No | Wait for element to disappear instead of appear |

@@ -84,6 +84,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IDeploymentStateStore, DeploymentStateStore>()
             .AddSingleton<TargetDeploymentService>()
             .AddSingleton<GuestApplicationRunner>()
+            .AddSingleton<SandboxUiRouter>()
             .AddSingleton<IExecutionTargetBackend, WindowsSandboxBackend>()
             .AddSingleton<ExecutionTargetOrchestrator>();
     }

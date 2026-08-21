@@ -196,7 +196,27 @@ const PASSTHROUGH_COMMANDS = {
 // ---------------------------------------------------------------------------
 // Flatten schema into leaf commands
 // ---------------------------------------------------------------------------
-function flattenCommands(node, parentPath = []) {
+/**
+ * A recursive option declared on a group applies to every command beneath it, but the schema
+ * records it only once, on the group. Without inheriting it here the generated wrapper for each
+ * leaf would silently lack an option the CLI accepts.
+ *
+ * A leaf's own declaration wins, so a command that redefines an inherited name keeps its own
+ * description and type.
+ */
+function inheritRecursiveOptions(cmd, inherited) {
+  if (Object.keys(inherited).length === 0) return cmd;
+  return { ...cmd, options: { ...inherited, ...(cmd.options || {}) } };
+}
+
+function collectRecursiveOptions(cmd, inherited) {
+  const recursive = Object.fromEntries(
+    Object.entries(cmd.options || {}).filter(([, def]) => def.recursive),
+  );
+  return { ...inherited, ...recursive };
+}
+
+function flattenCommands(node, parentPath = [], inherited = {}) {
   const results = [];
   const subs = node.subcommands || {};
 
@@ -205,9 +225,9 @@ function flattenCommands(node, parentPath = []) {
     const cmdPath = [...parentPath, name];
 
     if (cmd.subcommands && Object.keys(cmd.subcommands).length > 0) {
-      results.push(...flattenCommands(cmd, cmdPath));
+      results.push(...flattenCommands(cmd, cmdPath, collectRecursiveOptions(cmd, inherited)));
     } else {
-      results.push({ path: cmdPath, cmd });
+      results.push({ path: cmdPath, cmd: inheritRecursiveOptions(cmd, inherited) });
     }
   }
   return results;
