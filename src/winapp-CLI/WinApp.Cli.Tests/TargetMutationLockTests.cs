@@ -14,16 +14,27 @@ namespace WinApp.Cli.Tests;
 [TestClass]
 public class TargetMutationLockTests
 {
+    private DirectoryInfo _tempRoot = null!;
     private ExecutionTargetRef _target = null!;
     private TargetMutationLock _lock = null!;
 
     [TestInitialize]
     public void Setup()
     {
-        // A unique target id per test keeps the named mutex isolated from other tests and from any
-        // real winapp process running on the same machine.
-        _target = new ExecutionTargetRef("windows-sandbox", $"windows-sandbox:test-{Guid.NewGuid():N}");
-        _lock = new TargetMutationLock();
+        _tempRoot = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"MutationLock_{Guid.NewGuid():N}"));
+        _tempRoot.Create();
+
+        _target = ExecutionTargetRef.WindowsSandboxDefault;
+        _lock = new TargetMutationLock(new TargetStateDirectoryProvider(_tempRoot.FullName));
+    }
+
+    [TestCleanup]
+    public void Cleanup()
+    {
+        if (_tempRoot.Exists)
+        {
+            _tempRoot.Delete(recursive: true);
+        }
     }
 
     [TestMethod]
@@ -36,36 +47,18 @@ public class TargetMutationLockTests
     }
 
     [TestMethod]
-    public void TryAcquire_WhileHeldByAnotherThread_TimesOut()
+    public void TryAcquire_WhileHeld_TimesOut()
     {
-        using var acquired = new ManualResetEventSlim(false);
-        using var release = new ManualResetEventSlim(false);
+        using var held = _lock.TryAcquire(_target, TimeSpan.FromSeconds(5));
+        Assert.IsNotNull(held);
 
-        var holder = new Thread(() =>
-        {
-            using var lease = _lock.TryAcquire(_target, TimeSpan.FromSeconds(5));
-            acquired.Set();
-            release.Wait(TimeSpan.FromSeconds(10));
-        });
-        holder.Start();
+        var contended = _lock.TryAcquire(_target, TimeSpan.FromMilliseconds(200));
 
-        try
-        {
-            Assert.IsTrue(acquired.Wait(TimeSpan.FromSeconds(5)), "Holder thread failed to acquire.");
-
-            var contended = _lock.TryAcquire(_target, TimeSpan.FromMilliseconds(200));
-
-            Assert.IsNull(contended, "A held mutation lock must not be handed to a second caller.");
-        }
-        finally
-        {
-            release.Set();
-            holder.Join(TimeSpan.FromSeconds(10));
-        }
+        Assert.IsNull(contended, "A held mutation lock must not be handed to a second caller.");
     }
 
     [TestMethod]
-    public void TryAcquire_AfterRelease_SucceedsAgain()
+    public void TryAcquire_AfterRelease_SucceedsAndIsNotAbandoned()
     {
         using (var first = _lock.TryAcquire(_target, TimeSpan.FromSeconds(5)))
         {
@@ -79,83 +72,157 @@ public class TargetMutationLockTests
     }
 
     [TestMethod]
-    public void TryAcquire_AfterOwnerDiesWithoutReleasing_ReportsAbandonedAsRecoverySignal()
+    public async Task Lease_AcquiredAndReleasedOnDifferentThreads_ReleasesCleanly()
     {
-        // Abandon the mutex the way a crashed host process would: acquire it on a thread that
-        // exits without releasing. The next owner must be told so it can reconcile a possibly
-        // half-mutated guest rather than assuming the environment is clean.
-        var abandoner = new Thread(() =>
+        // Regression: the lock is held across awaits, so the continuation that disposes it usually
+        // runs on a different thread-pool thread than the one that acquired it. A thread-affine
+        // primitive fails to release there and stays held until the original thread exits, blocking
+        // every other winapp process and later surfacing as a false abandonment.
+        var acquiringThread = Environment.CurrentManagedThreadId;
+        var lease = _lock.TryAcquire(_target, TimeSpan.FromSeconds(5));
+        Assert.IsNotNull(lease);
+
+        await Task.Run(() => Task.Delay(50));
+
+        var releasingThread = Environment.CurrentManagedThreadId;
+        lease.Dispose();
+
+        Assert.AreNotEqual(
+            acquiringThread,
+            releasingThread,
+            "This regression only has meaning when the threads actually differ.");
+
+        // The decisive assertion: the lock is genuinely free afterwards.
+        using var reacquired = _lock.TryAcquire(_target, TimeSpan.FromSeconds(5));
+        Assert.IsNotNull(reacquired, "The lock must be released even when disposed on another thread.");
+        Assert.IsFalse(reacquired.WasAbandoned, "A cross-thread release is still a clean release.");
+    }
+
+    [TestMethod]
+    public async Task Lease_HeldAcrossManyAwaits_StillReleases()
+    {
+        var lease = _lock.TryAcquire(_target, TimeSpan.FromSeconds(5));
+        Assert.IsNotNull(lease);
+
+        for (var i = 0; i < 10; i++)
         {
-            var mutex = new Mutex(initiallyOwned: false, TargetMutationLock.GetMutexName(_target));
-            mutex.WaitOne(TimeSpan.FromSeconds(5));
-        });
-        abandoner.Start();
-        abandoner.Join(TimeSpan.FromSeconds(10));
+            await Task.Run(() => Task.Delay(5));
+        }
+
+        lease.Dispose();
+
+        using var reacquired = _lock.TryAcquire(_target, TimeSpan.FromSeconds(5));
+        Assert.IsNotNull(reacquired);
+    }
+
+    [TestMethod]
+    public void TryAcquire_AfterOwnerDiedWithoutReleasing_ReportsAbandonedAsRecoverySignal()
+    {
+        // A crashed owner leaves its record behind: the kernel closes the handle, but nothing
+        // cleared the file. The next owner must be told so it reconciles a possibly half-mutated
+        // guest rather than assuming the environment is clean.
+        var path = _lock.GetLockFilePath(_target);
+        File.WriteAllText(path, "4242 2026-08-20T00:00:00.0000000+00:00");
 
         using var lease = _lock.TryAcquire(_target, TimeSpan.FromSeconds(5));
 
         Assert.IsNotNull(lease);
-        Assert.IsTrue(lease.WasAbandoned, "An abandoned mutex must surface as a recovery signal.");
+        Assert.IsTrue(lease.WasAbandoned, "An owner record left behind must surface as a recovery signal.");
     }
 
     [TestMethod]
-    public void TryAcquire_Cancelled_ThrowsWithoutLeakingTheLock()
+    public void Lease_RecordsOwnerWhileHeldAndClearsItOnRelease()
     {
-        using var acquired = new ManualResetEventSlim(false);
-        using var release = new ManualResetEventSlim(false);
+        var path = _lock.GetLockFilePath(_target);
 
-        var holder = new Thread(() =>
-        {
-            using var lease = _lock.TryAcquire(_target, TimeSpan.FromSeconds(5));
-            acquired.Set();
-            release.Wait(TimeSpan.FromSeconds(10));
-        });
-        holder.Start();
+        var lease = _lock.TryAcquire(_target, TimeSpan.FromSeconds(5));
+        Assert.IsNotNull(lease);
 
-        try
-        {
-            Assert.IsTrue(acquired.Wait(TimeSpan.FromSeconds(5)), "Holder thread failed to acquire.");
+        // The record is what lets a later acquirer distinguish a crash from a clean handoff.
+        Assert.IsTrue(new FileInfo(path).Length > 0, "An owner record must exist while the lock is held.");
 
-            using var cancellation = new CancellationTokenSource();
-            cancellation.CancelAfter(TimeSpan.FromMilliseconds(100));
+        lease.Dispose();
 
-            Assert.ThrowsExactly<OperationCanceledException>(
-                () => _lock.TryAcquire(_target, TimeSpan.FromSeconds(30), cancellation.Token));
-        }
-        finally
-        {
-            release.Set();
-            holder.Join(TimeSpan.FromSeconds(10));
-        }
-
-        // Cancellation must not have taken ownership; the lock is free once the holder released it.
-        using var afterCancel = _lock.TryAcquire(_target, TimeSpan.FromSeconds(5));
-        Assert.IsNotNull(afterCancel);
+        Assert.AreEqual(0, new FileInfo(path).Length, "A clean release must clear the owner record.");
     }
 
     [TestMethod]
-    public void MutexName_IsPerTargetAndSessionScoped()
+    public void Dispose_IsIdempotent()
     {
-        var sandbox = TargetMutationLock.GetMutexName(ExecutionTargetRef.WindowsSandboxDefault);
-        var other = TargetMutationLock.GetMutexName(new ExecutionTargetRef("hyperv", "hyperv:winui-test"));
+        var lease = _lock.TryAcquire(_target, TimeSpan.FromSeconds(5));
+        Assert.IsNotNull(lease);
 
-        // Session-scoped so it matches the per-user state root instead of colliding across users.
-        StringAssert.StartsWith(sandbox, "Local\\", StringComparison.Ordinal);
-        Assert.AreEqual("Local\\winapp-target-windows-sandbox-default-mutation", sandbox);
+        lease.Dispose();
+        lease.Dispose();
 
-        // Per-target so future targets never serialize against each other.
-        Assert.AreNotEqual(sandbox, other);
+        using var reacquired = _lock.TryAcquire(_target, TimeSpan.FromSeconds(5));
+        Assert.IsNotNull(reacquired);
+    }
+
+    [TestMethod]
+    public void TryAcquire_Cancelled_ThrowsWithoutTakingTheLock()
+    {
+        using var held = _lock.TryAcquire(_target, TimeSpan.FromSeconds(5));
+        Assert.IsNotNull(held);
+
+        using var cancellation = new CancellationTokenSource();
+        cancellation.CancelAfter(TimeSpan.FromMilliseconds(100));
+
+        Assert.ThrowsExactly<OperationCanceledException>(
+            () => _lock.TryAcquire(_target, TimeSpan.FromSeconds(30), cancellation.Token));
     }
 
     [TestMethod]
     public void DifferentTargets_DoNotBlockEachOther()
     {
-        var otherTarget = new ExecutionTargetRef("hyperv", $"hyperv:test-{Guid.NewGuid():N}");
+        var otherTarget = new ExecutionTargetRef("hyperv", "hyperv:winui-test");
 
         using var first = _lock.TryAcquire(_target, TimeSpan.FromSeconds(5));
         using var second = _lock.TryAcquire(otherTarget, TimeSpan.FromMilliseconds(500));
 
         Assert.IsNotNull(first);
         Assert.IsNotNull(second, "Independent targets must be able to mutate concurrently.");
+    }
+
+    [TestMethod]
+    public void LockFile_LivesInTheTargetStateRoot()
+    {
+        var path = _lock.GetLockFilePath(_target);
+
+        // Scoping the lock to the same root as the state it protects keeps both per-user, and lets
+        // future targets serialize independently.
+        StringAssert.Contains(path, "windows-sandbox-default", StringComparison.OrdinalIgnoreCase);
+        Assert.AreEqual(TargetMutationLock.LockFileName, Path.GetFileName(path));
+    }
+
+    [TestMethod]
+    public async Task ConcurrentAcquirers_AreSerialized()
+    {
+        var observedConcurrency = 0;
+        var maxConcurrency = 0;
+        var gate = new Lock();
+
+        var workers = Enumerable.Range(0, 8).Select(_ => Task.Run(async () =>
+        {
+            using var lease = _lock.TryAcquire(_target, TimeSpan.FromSeconds(30));
+            Assert.IsNotNull(lease);
+
+            lock (gate)
+            {
+                observedConcurrency++;
+                maxConcurrency = Math.Max(maxConcurrency, observedConcurrency);
+            }
+
+            await Task.Delay(20);
+
+            lock (gate)
+            {
+                observedConcurrency--;
+            }
+        }));
+
+        await Task.WhenAll(workers);
+
+        Assert.AreEqual(1, maxConcurrency, "Only one holder may mutate the guest at a time.");
     }
 }

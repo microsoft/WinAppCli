@@ -50,8 +50,18 @@ internal sealed class FakeWindowsSandboxCli : IWindowsSandboxCli
         return Task.FromResult(id);
     }
 
+    /// <summary>When true, <see cref="StopAsync"/> fails, exercising compensation failure paths.</summary>
+    public bool FailStop { get; set; }
+
     public Task StopAsync(string id, CancellationToken cancellationToken)
     {
+        if (FailStop)
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.StartFailed,
+                "The Windows Sandbox command line failed to stop the instance.");
+        }
+
         Stopped.Add(id);
         _running.Remove(id);
         return Task.CompletedTask;
@@ -229,6 +239,51 @@ public class WindowsSandboxLifecycleTests
         _lifecycle.InvalidateManagedInstance();
 
         Assert.IsNull(_stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault));
+    }
+
+    [TestMethod]
+    public async Task EnsureInstance_CommitFails_StopsTheInstanceItJustCreated()
+    {
+        // Regression: if ownership is never recorded, the new Sandbox keeps running but is
+        // unowned, so every later command refuses it as unmanaged -- permanently wedging the target
+        // through no fault of the user. The one thing this call created must be undone.
+        _cli.StartIds.Enqueue("sandbox-orphan");
+        var failingStore = new FailingCommitStateStore(_stateStore);
+        var lifecycle = new WindowsSandboxLifecycle(_cli, failingStore);
+
+        await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token));
+
+        CollectionAssert.Contains(_cli.Stopped, "sandbox-orphan", "The unowned instance must be stopped.");
+        Assert.IsNull(_stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault));
+    }
+
+    [TestMethod]
+    public async Task EnsureInstance_CommitFailsAndCompensationAlsoFails_ReportsTheOriginalFailure()
+    {
+        // Compensation is best effort. If it cannot stop the instance either, the original, more
+        // informative failure is still what surfaces.
+        _cli.StartIds.Enqueue("sandbox-orphan");
+        _cli.FailStop = true;
+        var lifecycle = new WindowsSandboxLifecycle(_cli, new FailingCommitStateStore(_stateStore));
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.TargetAmbiguous, failure.Error.Code);
+    }
+
+    /// <summary>A store whose commits always fail, to exercise the compensation path.</summary>
+    private sealed class FailingCommitStateStore(ITargetStateStore inner) : ITargetStateStore
+    {
+        public TargetState? Read(ExecutionTargetRef target) => inner.Read(target);
+
+        public TargetState Commit(ExecutionTargetRef target, TargetState state, long expectedRevision) =>
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.TargetAmbiguous,
+                "Windows Sandbox state changed while this command was running.");
+
+        public void Clear(ExecutionTargetRef target) => inner.Clear(target);
     }
 
     /// <summary>MSTest injects this; used for per-test cancellation.</summary>

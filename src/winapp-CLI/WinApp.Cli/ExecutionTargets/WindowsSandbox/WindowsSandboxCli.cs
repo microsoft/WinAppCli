@@ -17,13 +17,22 @@ namespace WinApp.Cli.ExecutionTargets.WindowsSandbox;
 /// </remarks>
 internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindowsSandboxCli
 {
-    /// <summary>Executable name; resolved through PATH like the rest of winapp's tool invocations.</summary>
+    /// <summary>Executable name searched for on PATH.</summary>
     internal const string ExecutableName = "wsb.exe";
 
-    private readonly Lazy<bool> _available = new(() => ResolveExecutable() is not null);
+    /// <summary>
+    /// Fully qualified path to the trusted <c>wsb.exe</c>, resolved once from PATH.
+    /// </summary>
+    /// <remarks>
+    /// Launching by bare name would let <c>CreateProcess</c> search the application and current
+    /// directories before PATH, so a <c>wsb.exe</c> dropped into a repository a developer happens to
+    /// be sitting in would win. Resolving to an absolute path first and always executing that path
+    /// removes the ambiguity.
+    /// </remarks>
+    private readonly Lazy<string?> _executablePath = new(ResolveExecutable);
 
     /// <inheritdoc/>
-    public bool IsAvailable => _available.Value;
+    public bool IsAvailable => _executablePath.Value is not null;
 
     /// <inheritdoc/>
     public async Task<IReadOnlyList<string>> ListAsync(CancellationToken cancellationToken)
@@ -136,6 +145,24 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
         }
 
         var result = await RunAsync(arguments, cancellationToken, throwOnFailure: false).ConfigureAwait(false);
+
+        // wsb exec never relays the guest's stdout or stderr, so anything on stderr is wsb's own
+        // diagnostic, meaning the command was not dispatched. Returning that exit code as if it came
+        // from the guest process would let an infrastructure failure impersonate an application
+        // result -- exactly the confusion the failure model exists to prevent.
+        if (!string.IsNullOrWhiteSpace(result.StandardError))
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.TransportFailed,
+                $"The guest bootstrap command could not be dispatched: {Summarize(result)}",
+                userAction: "Retry the command. If it keeps failing, close the Sandbox and try again.",
+                context: new Dictionary<string, string>
+                {
+                    ["sandboxId"] = id,
+                    ["exitCode"] = result.ExitCode.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+
         return result.ExitCode;
     }
 
@@ -144,7 +171,7 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
         CancellationToken cancellationToken,
         bool throwOnFailure = true)
     {
-        if (!IsAvailable)
+        if (_executablePath.Value is not { } executable)
         {
             throw ExecutionTargetException.Create(
                 ExecutionTargetErrorCodes.Unsupported,
@@ -154,7 +181,7 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
         }
 
         var result = await processRunner
-            .RunAsync(new ProcessRunRequest(ExecutableName, arguments), cancellationToken: cancellationToken)
+            .RunAsync(new ProcessRunRequest(executable, arguments), cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         if (throwOnFailure && result.ExitCode != 0)
@@ -214,8 +241,14 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
             : text;
     }
 
-    /// <summary>Locates <c>wsb.exe</c> on PATH without launching it.</summary>
-    private static string? ResolveExecutable()
+    /// <summary>
+    /// Locates <c>wsb.exe</c> on PATH without launching it.
+    /// </summary>
+    /// <remarks>
+    /// Relative PATH entries are skipped. A relative entry resolves against the current directory,
+    /// so honouring one would reintroduce exactly the hijack that using an absolute path prevents.
+    /// </remarks>
+    internal static string? ResolveExecutable()
     {
         var pathValue = Environment.GetEnvironmentVariable("PATH");
         if (string.IsNullOrEmpty(pathValue))
@@ -227,10 +260,16 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
         {
             try
             {
-                var candidate = Path.Combine(directory.Trim(), ExecutableName);
+                var trimmed = directory.Trim().Trim('"');
+                if (trimmed.Length == 0 || !Path.IsPathFullyQualified(trimmed))
+                {
+                    continue;
+                }
+
+                var candidate = Path.Combine(trimmed, ExecutableName);
                 if (File.Exists(candidate))
                 {
-                    return candidate;
+                    return Path.GetFullPath(candidate);
                 }
             }
             catch (ArgumentException)
