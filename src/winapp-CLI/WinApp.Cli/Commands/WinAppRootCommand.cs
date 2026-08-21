@@ -121,7 +121,7 @@ internal class WinAppRootCommand : RootCommand, IShortDescription
         helpOption.Action = new CustomHelpAction(this, ansiConsole,
             ("Setup", [typeof(InitCommand), typeof(NewCommand), typeof(RestoreCommand), typeof(UpdateCommand)]),
             ("Packaging & Signing", [typeof(PackageCommand), typeof(SignCommand), typeof(AzSignCommand), typeof(CertCommand), typeof(ManifestCommand), typeof(EmbedIdentityCommand), typeof(CreateExternalCatalogCommand)]),
-            ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand), typeof(RunCommand), typeof(UnregisterCommand)]),
+            ("Development Tools", [typeof(CreateDebugIdentityCommand), typeof(MSStoreCommand), typeof(ToolCommand), typeof(GetWinappPathCommand), typeof(RunCommand), typeof(UnregisterCommand), typeof(SandboxCommand)]),
             ("Discovery", [typeof(FindUiCommand)]),
             ("UI Automation", [typeof(UiCommand)])
         );
