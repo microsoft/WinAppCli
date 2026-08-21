@@ -23,6 +23,8 @@ public class GuestCommandServerTests
 {
     private static readonly ExecutionTargetEpoch Epoch = ExecutionTargetEpoch.Create("sandbox-1", "nonce-a");
 
+    private static readonly string[] InspectArguments = ["ui", "inspect"];
+
     private static GuestSessionInfo Interactive => new(SessionId: 1, "WinSta0", HasInputDesktop: true);
 
     private static GuestAgentIdentity Identity => new(
@@ -91,7 +93,7 @@ public class GuestCommandServerTests
         var processId = await started.Task.WaitAsync(harness.Token);
 
         Assert.AreEqual(process.ProcessId, processId);
-        CollectionAssert.AreEqual(new[] { "ui", "inspect" }, process.Request.Arguments);
+        CollectionAssert.AreEqual(InspectArguments, process.Request.Arguments);
 
         process.Emit(GuestStreamId.StandardOutput, "first ");
         process.Emit(GuestStreamId.StandardOutput, "second");
@@ -226,22 +228,15 @@ public class GuestCommandServerTests
     [TestMethod]
     public async Task ServerShutdown_StopsRunningOperations()
     {
-        var harness = new Harness(Interactive);
+        using var harness = new Harness(Interactive);
 
-        try
-        {
-            _ = harness.Channel.ExecuteAsync(Request("run", "."), callbacks: null, harness.Token);
-            var process = await harness.Processes.WaitForNextAsync(harness.Token);
+        _ = harness.Channel.ExecuteAsync(Request("run", "."), callbacks: null, harness.Token);
+        var process = await harness.Processes.WaitForNextAsync(harness.Token);
 
-            await harness.StopServerAsync();
+        await harness.StopServerAsync();
 
-            // Nothing the agent started may outlive the connection that asked for it.
-            await WaitUntilAsync(() => process.StopRequested, CancellationToken.None);
-        }
-        finally
-        {
-            harness.Dispose();
-        }
+        // Nothing the agent started may outlive the connection that asked for it.
+        await WaitUntilAsync(() => process.StopRequested, CancellationToken.None);
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition, CancellationToken cancellationToken)
@@ -260,7 +255,7 @@ public class GuestCommandServerTests
     }
 
     /// <summary>A connected host channel and guest server sharing one in-memory transport.</summary>
-    private sealed class Harness : IDisposable
+    private sealed class Harness : IAsyncDisposable, IDisposable
     {
         private readonly CancellationTokenSource _cancellation = new(TimeSpan.FromSeconds(30));
         private readonly GuestCommandServer _server;
@@ -308,6 +303,17 @@ public class GuestCommandServerTests
         {
             _cancellation.Cancel();
             _cancellation.Dispose();
+
+            // The server owns the guest transport and any process hosts still running, so it must
+            // be disposed rather than merely cancelled.
+            _server.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await _cancellation.CancelAsync();
+            _cancellation.Dispose();
+            await _server.DisposeAsync();
         }
     }
 }

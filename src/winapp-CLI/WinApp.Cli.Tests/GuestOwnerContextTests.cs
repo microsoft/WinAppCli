@@ -21,8 +21,10 @@ public class GuestOwnerContextTests
     private const string TargetId = "windows-sandbox:default";
     private const string Epoch = "sandbox-1:nonce-a";
 
-    private static IReadOnlyDictionary<string, string?> WithOwnerVariable(string? value) =>
-        new Dictionary<string, string?> { [GuestOwnerContext.OwnerVariable] = value };
+    private static Dictionary<string, string?> WithOwnerVariable(string? value) =>
+        new() { [GuestOwnerContext.OwnerVariable] = value };
+
+    private static Dictionary<string, string?> NoOwnerVariable() => [];
 
     [TestMethod]
     public void ExplicitOwner_TakesPrecedence()
@@ -61,7 +63,7 @@ public class GuestOwnerContextTests
     [TestMethod]
     public void Anonymous_OwnersAreUniquePerInvocation()
     {
-        var blank = new Dictionary<string, string?>();
+        var blank = NoOwnerVariable();
 
         // Two invocations with no owner must not accidentally cooperate. Resolution can only be
         // compared when the parent fallback is unavailable, so compare derived tokens instead: for
