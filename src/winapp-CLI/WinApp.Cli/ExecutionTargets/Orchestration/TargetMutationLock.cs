@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Globalization;
+using System.Text;
 using WinApp.Cli.ExecutionTargets.Abstractions;
 
 namespace WinApp.Cli.ExecutionTargets.Orchestration;
@@ -8,13 +10,18 @@ namespace WinApp.Cli.ExecutionTargets.Orchestration;
 /// <summary>
 /// Held ownership of a target's mutation lock. Disposing releases it.
 /// </summary>
+/// <remarks>
+/// Safe to dispose from any thread. This matters because the lock is held across <c>await</c>
+/// boundaries during Sandbox creation and deployment, so acquisition and release routinely happen
+/// on different thread-pool threads.
+/// </remarks>
 internal sealed class TargetMutationLease : IDisposable
 {
-    private Mutex? _mutex;
+    private FileStream? _stream;
 
-    internal TargetMutationLease(Mutex mutex, bool wasAbandoned)
+    internal TargetMutationLease(FileStream stream, bool wasAbandoned)
     {
-        _mutex = mutex;
+        _stream = stream;
         WasAbandoned = wasAbandoned;
     }
 
@@ -31,24 +38,27 @@ internal sealed class TargetMutationLease : IDisposable
     /// <inheritdoc/>
     public void Dispose()
     {
-        var mutex = Interlocked.Exchange(ref _mutex, null);
-        if (mutex is null)
+        var stream = Interlocked.Exchange(ref _stream, null);
+        if (stream is null)
         {
             return;
         }
 
         try
         {
-            mutex.ReleaseMutex();
+            // Clearing the owner record marks this as a clean release, so the next acquirer knows
+            // the environment was left consistent.
+            stream.SetLength(0);
+            stream.Flush();
         }
-        catch (ApplicationException)
+        catch (IOException)
         {
-            // Not the owner, which can only happen if the lease was disposed on a different thread
-            // than it was acquired on. Disposing the handle below is still correct and complete.
+            // The file is going away with the handle. The next acquirer then sees a non-empty
+            // record and treats it as abandoned, which is the safe direction to fail.
         }
         finally
         {
-            mutex.Dispose();
+            stream.Dispose();
         }
     }
 }
@@ -66,30 +76,43 @@ internal interface ITargetMutationLock
 }
 
 /// <summary>
-/// Named-mutex implementation of <see cref="ITargetMutationLock"/> (spec §"Host coordination and
-/// state": "one per-target named mutation mutex").
+/// File-backed implementation of <see cref="ITargetMutationLock"/> (spec §"Host coordination and
+/// state").
 /// </summary>
 /// <remarks>
 /// There is no persistent host coordinator process, so mutual exclusion has to come from the OS.
-/// The mutex covers Sandbox creation and repair, guest winapp replacement, shared runtime
+/// The lock covers Sandbox creation and repair, guest winapp replacement, shared runtime
 /// installation, deployment synchronization, and package registration. It deliberately does
 /// <em>not</em> cover host build, running applications, or read-only UI Automation, so a long build
 /// or a running app never blocks another workflow.
 /// <para>
-/// The name is per-target, so future targets serialize independently. The <c>Local\</c> namespace
-/// scopes it to the logon session, matching the per-user state root and avoiding the cross-user
-/// collisions a <c>Global\</c> name would introduce.
+/// An exclusively opened file is used rather than a named <see cref="Mutex"/>. A Windows mutex is
+/// thread-affine: it must be released by the exact thread that acquired it. Because this lock is
+/// held across <c>await</c> boundaries, the continuation that releases it frequently runs on a
+/// different thread-pool thread, where <c>ReleaseMutex</c> throws and the mutex stays held until
+/// that original thread exits — blocking every other winapp process and eventually surfacing as a
+/// false abandonment. A file handle has no thread affinity, and the kernel closes it when the
+/// process dies, which also provides crash recovery.
+/// </para>
+/// <para>
+/// The lock is per-target, so future targets serialize independently, and it lives in that target's
+/// own state root, so it is scoped to the same user as the state it protects.
 /// </para>
 /// <para>
 /// This lock is unrelated to Cooperative UI Turns. It protects guest environment and deployment
 /// mutations, not the interactive desktop.
 /// </para>
 /// </remarks>
-internal sealed class TargetMutationLock : ITargetMutationLock
+internal sealed class TargetMutationLock(ITargetStateDirectoryProvider directoryProvider) : ITargetMutationLock
 {
-    /// <summary>Builds the kernel object name for <paramref name="target"/>.</summary>
-    internal static string GetMutexName(ExecutionTargetRef target) =>
-        $"Local\\winapp-target-{target.Slug}-mutation";
+    /// <summary>File name of the lock inside the target state root.</summary>
+    internal const string LockFileName = "mutation.lock";
+
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(25);
+
+    /// <summary>Resolves the lock file path for <paramref name="target"/>.</summary>
+    internal string GetLockFilePath(ExecutionTargetRef target) =>
+        Path.Combine(directoryProvider.GetTargetRoot(target).FullName, LockFileName);
 
     /// <inheritdoc/>
     public TargetMutationLease? TryAcquire(
@@ -99,65 +122,69 @@ internal sealed class TargetMutationLock : ITargetMutationLock
     {
         ArgumentNullException.ThrowIfNull(target);
 
-        var mutex = new Mutex(initiallyOwned: false, GetMutexName(target));
-        try
+        var path = GetLockFilePath(target);
+        var deadline = DateTimeOffset.UtcNow + timeout;
+
+        while (true)
         {
-            return WaitAndWrap(mutex, timeout, cancellationToken);
-        }
-        catch
-        {
-            mutex.Dispose();
-            throw;
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (TryOpenExclusive(path) is { } stream)
+            {
+                return Claim(stream);
+            }
+
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                return null;
+            }
+
+            // Sleeping rather than spinning: contention here means another winapp process is doing
+            // real work such as installing a runtime, which takes far longer than this interval.
+            Thread.Sleep(PollInterval);
         }
     }
 
-    private static TargetMutationLease? WaitAndWrap(
-        Mutex mutex,
-        TimeSpan timeout,
-        CancellationToken cancellationToken)
+    private static FileStream? TryOpenExclusive(string path)
     {
-        var wasAbandoned = false;
-        bool acquired;
         try
         {
-            acquired = Wait(mutex, timeout, cancellationToken);
+            return new FileStream(
+                path,
+                FileMode.OpenOrCreate,
+                FileAccess.ReadWrite,
+                FileShare.None,
+                bufferSize: 1,
+                FileOptions.WriteThrough);
         }
-        catch (AbandonedMutexException)
+        catch (IOException)
         {
-            // The previous owner died holding the lock. We now own it; the caller reconciles.
-            acquired = true;
-            wasAbandoned = true;
-        }
-
-        if (!acquired)
-        {
-            mutex.Dispose();
+            // Held by another process.
             return null;
         }
-
-        return new TargetMutationLease(mutex, wasAbandoned);
+        catch (UnauthorizedAccessException)
+        {
+            // Transiently locked, or the directory is being replaced.
+            return null;
+        }
     }
 
     /// <summary>
-    /// Waits on the mutex while remaining responsive to cancellation, which a bare
-    /// <see cref="WaitHandle.WaitOne(TimeSpan)"/> is not.
+    /// Records this process as the owner and reports whether the previous one released cleanly.
     /// </summary>
-    private static bool Wait(Mutex mutex, TimeSpan timeout, CancellationToken cancellationToken)
+    private static TargetMutationLease Claim(FileStream stream)
     {
-        if (!cancellationToken.CanBeCanceled)
-        {
-            return mutex.WaitOne(timeout);
-        }
+        var wasAbandoned = stream.Length > 0;
 
-        using var cancellationEvent = new ManualResetEventSlim(false);
-        using var registration = cancellationToken.Register(cancellationEvent.Set);
+        stream.SetLength(0);
+        stream.Seek(0, SeekOrigin.Begin);
 
-        var index = WaitHandle.WaitAny([mutex, cancellationEvent.WaitHandle], timeout);
-        if (index == 1)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-        }
+        var owner = string.Create(
+            CultureInfo.InvariantCulture,
+            $"{Environment.ProcessId} {DateTimeOffset.UtcNow:O}");
+        stream.Write(Encoding.UTF8.GetBytes(owner));
+        stream.Flush();
 
-        return index == 0;
+        return new TargetMutationLease(stream, wasAbandoned);
     }
 }

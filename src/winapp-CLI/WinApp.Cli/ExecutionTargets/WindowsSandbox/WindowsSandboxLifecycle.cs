@@ -110,20 +110,58 @@ internal sealed class WindowsSandboxLifecycle(
         var instanceId = await cli.StartAsync(configuration: null, cancellationToken).ConfigureAwait(false);
         var nonce = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
 
-        stateStore.Commit(
-            _target,
-            new TargetState
-            {
-                SchemaVersion = 0,
-                Revision = 0,
-                TargetKind = _target.Kind,
-                TargetId = _target.Id,
-                InstanceId = instanceId,
-                BootNonce = nonce,
-            },
-            revision);
+        try
+        {
+            stateStore.Commit(
+                _target,
+                new TargetState
+                {
+                    SchemaVersion = 0,
+                    Revision = 0,
+                    TargetKind = _target.Kind,
+                    TargetId = _target.Id,
+                    InstanceId = instanceId,
+                    BootNonce = nonce,
+                },
+                revision);
+        }
+        catch
+        {
+            // The Sandbox exists but ownership was never recorded. Left alone it becomes an
+            // instance winapp cannot prove it created, which every later command would refuse --
+            // permanently wedging the target through no fault of the user. Undo the one thing this
+            // call created, then report the original failure.
+            await StopUnownedInstanceAsync(instanceId).ConfigureAwait(false);
+            throw;
+        }
 
         return new SandboxInstanceLease(instanceId, ExecutionTargetEpoch.Create(instanceId, nonce), Reused: false);
+    }
+
+    /// <summary>
+    /// Best-effort stop of an instance this call created but could not record.
+    /// </summary>
+    /// <remarks>
+    /// Uses its own bounded timeout rather than the caller's token: the caller's token may already
+    /// be cancelled, and compensation still needs to run. Failures are swallowed so the original,
+    /// more informative error is what surfaces.
+    /// </remarks>
+    private async Task StopUnownedInstanceAsync(string instanceId)
+    {
+        using var compensation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        try
+        {
+            await cli.StopAsync(instanceId, compensation.Token).ConfigureAwait(false);
+        }
+        catch (ExecutionTargetException)
+        {
+            // Nothing more can be done; the original failure is the one worth reporting.
+        }
+        catch (OperationCanceledException)
+        {
+            // Compensation timed out.
+        }
     }
 
     /// <summary>
