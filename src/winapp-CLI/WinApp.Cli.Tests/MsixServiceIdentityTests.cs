@@ -565,12 +565,12 @@ public class MsixServiceIdentityTests : BaseCommandTests
     public async Task MaterializeLooseLayoutAsync_MSBuildManifest_ProducesTheSameLayoutAsRegistering()
     {
         var srcDir = _tempDirectory.CreateSubdirectory("build-output");
-        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "Package.appxmanifest"));
+        var srcManifest = new FileInfo(TestPaths.Under(srcDir.FullName, "Package.appxmanifest"));
         await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
-        await File.WriteAllTextAsync(Path.Combine(srcDir.FullName, "TestApp.exe"), "exe", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(TestPaths.Under(srcDir.FullName, "TestApp.exe"), "exe", TestContext.CancellationToken);
 
-        var registered = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "registered"));
-        var materialized = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "materialized"));
+        var registered = new DirectoryInfo(TestPaths.Under(_tempDirectory.FullName, "registered"));
+        var materialized = new DirectoryInfo(TestPaths.Under(_tempDirectory.FullName, "materialized"));
 
         var registeredResult = await _msixService.AddLooseLayoutIdentityAsync(
             srcManifest, srcDir, registered, TestTaskContext, cancellationToken: TestContext.CancellationToken);
@@ -588,12 +588,12 @@ public class MsixServiceIdentityTests : BaseCommandTests
     public async Task MaterializeLooseLayoutAsync_RawManifest_ProducesTheSameLayoutAsRegistering()
     {
         var srcDir = _tempDirectory.CreateSubdirectory("raw-input");
-        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "Package.appxmanifest"));
+        var srcManifest = new FileInfo(TestPaths.Under(srcDir.FullName, "Package.appxmanifest"));
         await File.WriteAllTextAsync(srcManifest.FullName, BuildRawManifest(), TestContext.CancellationToken);
-        await File.WriteAllTextAsync(Path.Combine(srcDir.FullName, "TestApp.exe"), "not-a-real-pe", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(TestPaths.Under(srcDir.FullName, "TestApp.exe"), "not-a-real-pe", TestContext.CancellationToken);
 
-        var registered = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "registered"));
-        var materialized = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "materialized"));
+        var registered = new DirectoryInfo(TestPaths.Under(_tempDirectory.FullName, "registered"));
+        var materialized = new DirectoryInfo(TestPaths.Under(_tempDirectory.FullName, "materialized"));
 
         await _msixService.AddLooseLayoutIdentityAsync(
             srcManifest, srcDir, registered, TestTaskContext, cancellationToken: TestContext.CancellationToken);
@@ -612,11 +612,11 @@ public class MsixServiceIdentityTests : BaseCommandTests
     public async Task MaterializeLooseLayoutAsync_RegistersNothingAndInstallsNoRuntime()
     {
         var srcDir = _tempDirectory.CreateSubdirectory("build-output");
-        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "Package.appxmanifest"));
+        var srcManifest = new FileInfo(TestPaths.Under(srcDir.FullName, "Package.appxmanifest"));
         await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
-        await File.WriteAllTextAsync(Path.Combine(srcDir.FullName, "TestApp.exe"), "exe", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(TestPaths.Under(srcDir.FullName, "TestApp.exe"), "exe", TestContext.CancellationToken);
 
-        var output = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "layout"));
+        var output = new DirectoryInfo(TestPaths.Under(_tempDirectory.FullName, "layout"));
 
         await _msixService.MaterializeLooseLayoutAsync(
             srcManifest, srcDir, output, TestTaskContext, cancellationToken: TestContext.CancellationToken);
@@ -636,17 +636,17 @@ public class MsixServiceIdentityTests : BaseCommandTests
         _fakeDevMode.IsEnabledResult = false;
 
         var srcDir = _tempDirectory.CreateSubdirectory("build-output");
-        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "Package.appxmanifest"));
+        var srcManifest = new FileInfo(TestPaths.Under(srcDir.FullName, "Package.appxmanifest"));
         await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
-        await File.WriteAllTextAsync(Path.Combine(srcDir.FullName, "TestApp.exe"), "exe", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(TestPaths.Under(srcDir.FullName, "TestApp.exe"), "exe", TestContext.CancellationToken);
 
-        var output = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "layout"));
+        var output = new DirectoryInfo(TestPaths.Under(_tempDirectory.FullName, "layout"));
 
         var result = await _msixService.MaterializeLooseLayoutAsync(
             srcManifest, srcDir, output, TestTaskContext, cancellationToken: TestContext.CancellationToken);
 
         Assert.AreEqual("TestApp", result.PackageName);
-        Assert.IsTrue(File.Exists(Path.Combine(output.FullName, "appxmanifest.xml")));
+        Assert.IsTrue(File.Exists(TestPaths.Under(output.FullName, "appxmanifest.xml")));
     }
 
     [TestMethod]
@@ -654,7 +654,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
     {
         var input = _tempDirectory.CreateSubdirectory("in");
         var output = _tempDirectory.CreateSubdirectory("out");
-        var missingManifest = new FileInfo(Path.Combine(input.FullName, "Package.appxmanifest"));
+        var missingManifest = new FileInfo(TestPaths.Under(input.FullName, "Package.appxmanifest"));
 
         await Assert.ThrowsExactlyAsync<FileNotFoundException>(() =>
             _msixService.MaterializeLooseLayoutAsync(missingManifest, input, output, TestTaskContext, cancellationToken: TestContext.CancellationToken));

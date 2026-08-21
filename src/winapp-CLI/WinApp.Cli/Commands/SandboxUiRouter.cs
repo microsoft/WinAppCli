@@ -115,7 +115,7 @@ internal sealed class SandboxUiRouter(
 
             // Buffered only when the guest path would otherwise appear in the result. Streaming is
             // the default so a long-running verb still shows progress as it happens.
-            var buffered = routed.Artifact is null ? null : new MemoryStream();
+            using var buffered = routed.Artifact is null ? null : new MemoryStream();
 
             var result = await target.Channel.ExecuteAsync(
                 new GuestExecRequest

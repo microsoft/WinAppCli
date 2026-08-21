@@ -352,7 +352,6 @@ run your app" is always distinguishable from "your app failed".
 | `sandbox_artifact_failed` | Producing, verifying, or publishing an output failed |
 
 ## Architecture
-
 Windows Sandbox is the only public target. Internally it sits behind a narrow boundary so a future
 Hyper-V, Dev Box, or remote-machine target can reuse everything above it without a rewrite.
 
@@ -380,10 +379,27 @@ or IDs. That separation is enforced by tests rather than convention: the orchest
 runs the real host channel against the real guest server over an in-memory transport, so any
 dependency on a `wsb` command would make those tests impossible to run.
 
-`wsb exec` is used for exactly one thing — launching the agent — because it takes the command as a
+`wsb exec` is used for exactly two things — launching the agent and enabling the guest development
+prerequisite — because it takes the command as a
 single string and returns only an exit code. It can carry neither argument boundaries nor guest
 output, which is why real work goes over the authenticated channel and why the agent writes its own
 startup diagnostics to a bounded, guest-writable folder the host reads once and removes.
+
+### Telemetry
+
+`winapp sandbox exec` and `winapp sandbox cp` never contribute executable or argument values,
+environment variables, host or guest paths, stream contents, or file names to telemetry. String,
+file, and directory values are recorded as a constant placeholder rather than their content, and
+tests pin that so a future change to the redaction rule cannot silently start collecting them.
+
+### Live coverage
+
+Almost everything is verified without a Sandbox: the real host channel runs against the real guest
+server over an in-memory transport, so a dependency on a `wsb` command would make those tests
+impossible to run at all. The tests that do need a real machine are gated on `WINAPP_SANDBOX_E2E=1`,
+because Windows permits one Sandbox at a time and creating one is a machine-wide, visible side
+effect. They stop only an instance they created, and skip rather than fail when an unowned one is
+already running.
 
 ## See also
 
