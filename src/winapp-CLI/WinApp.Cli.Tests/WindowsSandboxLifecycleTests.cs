@@ -102,7 +102,7 @@ public class WindowsSandboxLifecycleTests
     [TestInitialize]
     public void Setup()
     {
-        _tempRoot = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"SandboxLifecycle_{Guid.NewGuid():N}"));
+        _tempRoot = new DirectoryInfo(TestPaths.TempRoot("SandboxLifecycle"));
         _tempRoot.Create();
 
         _cli = new FakeWindowsSandboxCli();

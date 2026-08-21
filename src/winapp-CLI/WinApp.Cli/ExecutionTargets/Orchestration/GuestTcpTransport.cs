@@ -225,14 +225,26 @@ internal static class GuestTcpTransport
     }
 
     /// <summary>Binds a listener, letting the OS choose the port when none is fixed.</summary>
+    /// <remarks>
+    /// Ownership transfers to the caller on success. If <see cref="TcpListener.Start()"/> or reading
+    /// the bound endpoint fails, the listener is disposed here — otherwise a failed bind would leak
+    /// a socket, and the agent retries binding on the path that reports the failure.
+    /// </remarks>
     /// <returns>The listener and the port it actually bound.</returns>
     public static (TcpListener Listener, int Port) Listen(int requestedPort)
     {
         var listener = new TcpListener(IPAddress.Any, requestedPort);
-        listener.Start();
 
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        return (listener, port);
+        try
+        {
+            listener.Start();
+            return (listener, ((IPEndPoint)listener.LocalEndpoint).Port);
+        }
+        catch
+        {
+            listener.Dispose();
+            throw;
+        }
     }
 
     private static async Task<Socket> ConnectSocketAsync(
