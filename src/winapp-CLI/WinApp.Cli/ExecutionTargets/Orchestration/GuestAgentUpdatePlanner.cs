@@ -62,43 +62,35 @@ internal static class GuestAgentUpdatePlanner
             return new GuestAgentPlan(GuestAgentAction.Install, "No guest agent is running.");
         }
 
-        // Architecture is checked before version because a mismatched binary cannot run at all,
-        // and reporting a version decision for it would be misleading.
-        if (!string.Equals(guest.Architecture, host.Architecture, StringComparison.OrdinalIgnoreCase))
-        {
-            return new GuestAgentPlan(
-                GuestAgentAction.Install,
-                $"The guest agent is {guest.Architecture} but this host is {host.Architecture}.");
-        }
-
         if (string.Equals(guest.Version, host.Version, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(guest.BinaryHash, host.BinaryHash, StringComparison.OrdinalIgnoreCase))
+            string.Equals(guest.BinaryHash, host.BinaryHash, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(guest.Architecture, host.Architecture, StringComparison.OrdinalIgnoreCase))
         {
             return new GuestAgentPlan(GuestAgentAction.Reuse, "The guest agent already matches this host.");
         }
 
         var comparison = NuGetVersionHelper.Compare(host.Version, guest.Version);
 
+        // Version ordering is decided *before* architecture, and deliberately so. A guest can be
+        // running under emulation, or report an architecture this host spells differently, and
+        // treating that as "install the host's binary" would replace a newer guest with an older
+        // one -- a downgrade arrived at through a code path that never consulted the versions.
+        // The no-downgrade rule has no exceptions, so it is enforced first.
         if (comparison is null)
         {
-            // A version that will not parse cannot be ordered, so it cannot be proven not to be a
-            // downgrade. Replacing with the host's known-good binary is the safe resolution.
+            // An unorderable version cannot be proven older, so it cannot be safely replaced
+            // either. Failing closed is the only option that cannot silently move the guest
+            // backwards.
             return new GuestAgentPlan(
-                GuestAgentAction.StageAndActivate,
-                "The guest agent's version could not be compared, so it is replaced with this host's.");
-        }
-
-        if (comparison > 0)
-        {
-            return new GuestAgentPlan(
-                GuestAgentAction.StageAndActivate,
-                $"This host ({host.Version}) is newer than the guest agent ({guest.Version}).");
+                GuestAgentAction.FailIncompatible,
+                $"The guest agent reports a version that cannot be compared ('{guest.Version}').");
         }
 
         if (comparison < 0)
         {
-            // Guest is newer. Never downgraded — reuse it when it still speaks a protocol revision
-            // this host knows, otherwise the host is the thing that must be updated.
+            // Guest is newer. Never downgraded -- reuse it when it still speaks a protocol revision
+            // this host knows, otherwise the host is the thing that must be updated. Architecture
+            // is irrelevant here: whatever it is, replacing a newer guest is a downgrade.
             return ProtocolOverlaps(host, guest)
                 ? new GuestAgentPlan(
                     GuestAgentAction.Reuse,
@@ -106,6 +98,21 @@ internal static class GuestAgentUpdatePlanner
                 : new GuestAgentPlan(
                     GuestAgentAction.FailIncompatible,
                     $"The guest agent ({guest.Version}) requires a newer winapp than this host ({host.Version}).");
+        }
+
+        // From here the host is newer or equal, so replacing is never a downgrade.
+        if (!string.Equals(guest.Architecture, host.Architecture, StringComparison.OrdinalIgnoreCase))
+        {
+            return new GuestAgentPlan(
+                GuestAgentAction.Install,
+                $"The guest agent is {guest.Architecture} but this host is {host.Architecture}.");
+        }
+
+        if (comparison > 0)
+        {
+            return new GuestAgentPlan(
+                GuestAgentAction.StageAndActivate,
+                $"This host ({host.Version}) is newer than the guest agent ({guest.Version}).");
         }
 
         // Same version, different binary. This is a local winapp build against a released guest, or
@@ -122,7 +129,8 @@ internal static class GuestAgentUpdatePlanner
     /// <remarks>
     /// Force-repair exists for a guest that is present but broken. It is still not allowed to move
     /// the guest backwards, so a genuinely newer guest is refused even when repair was asked for
-    /// explicitly.
+    /// explicitly — and so is one whose version cannot be ordered, since that cannot be proven not
+    /// to be newer.
     /// </remarks>
     public static bool CanForceRepair(GuestAgentIdentity host, GuestAgentHeartbeat? guest)
     {
@@ -133,13 +141,8 @@ internal static class GuestAgentUpdatePlanner
             return true;
         }
 
-        if (!string.Equals(guest.Architecture, host.Architecture, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        // Null means the guest's version is unparseable, which cannot be proven newer.
-        return NuGetVersionHelper.Compare(host.Version, guest.Version) is not < 0;
+        // Architecture is not consulted: it can never make a downgrade acceptable.
+        return NuGetVersionHelper.Compare(host.Version, guest.Version) is { } comparison && comparison >= 0;
     }
 
     /// <summary>Whether the two ends share at least one protocol revision.</summary>

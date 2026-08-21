@@ -142,6 +142,18 @@ internal sealed class GuestExecRequest
     /// owner context.
     /// </summary>
     public Dictionary<string, string>? Environment { get; init; }
+
+    /// <summary>
+    /// Whether this operation will inject real input or capture the screen.
+    /// </summary>
+    /// <remarks>
+    /// Carried per request rather than assumed from the connection, because readiness is not a
+    /// property of the channel: the user can close the Sandbox window at any moment, including
+    /// between the capability handshake and this command. The guest re-verifies immediately before
+    /// starting a request that declares this, and refuses rather than starting a process that would
+    /// report input it never delivered.
+    /// </remarks>
+    public bool RequiresRealInput { get; init; }
 }
 
 /// <summary>One control message on the guest channel.</summary>

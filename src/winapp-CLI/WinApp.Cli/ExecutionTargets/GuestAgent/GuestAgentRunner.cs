@@ -45,6 +45,10 @@ internal sealed class GuestAgentRunner(
 
         Directory.CreateDirectory(resultDirectory);
 
+        // Before any child is started: every descendant of a job member joins that job at creation
+        // time, so this closes the window that assigning a child after Process.Start cannot.
+        GuestJobObject.EnsureAgentContainment();
+
         var material = ReadMaterial(bootstrapDirectory, resultDirectory);
         if (material is null)
         {

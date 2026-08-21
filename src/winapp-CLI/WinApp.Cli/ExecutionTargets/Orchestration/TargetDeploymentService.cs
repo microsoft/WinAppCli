@@ -70,19 +70,9 @@ internal sealed class TargetDeploymentService(IDeploymentStateStore stateStore)
         // resolve against a completely different Sandbox.
         var carried = existing is not null && existing.IsForEpoch(epoch) ? existing : null;
 
-        if (clean)
-        {
-            await channel.DeleteScopeAsync(scope, cancellationToken).ConfigureAwait(false);
-        }
-
-        var actual = clean
-            ? []
-            : await channel.ListFilesAsync(scope, cancellationToken).ConfigureAwait(false);
-
-        var plan = DeploymentPlanner.CreatePlan(desired, ToDeploymentFiles(actual));
-
-        // Persist the desired state and the dirty flag before the first byte moves. A host that
-        // dies after this point leaves a deployment the next run knows to reconcile completely.
+        // Persist the desired state and the dirty flag before *any* guest mutation, including a
+        // clean wipe. A crash between wiping and committing would otherwise leave state claiming a
+        // complete deployment over an empty guest folder, and the next run would launch nothing.
         var dirtyState = stateStore.Commit(
             target,
             new DeploymentState
@@ -102,15 +92,29 @@ internal sealed class TargetDeploymentService(IDeploymentStateStore stateStore)
             },
             revision);
 
+        if (clean)
+        {
+            await channel.DeleteScopeAsync(scope, cancellationToken).ConfigureAwait(false);
+        }
+
+        var actual = clean
+            ? []
+            : await channel.ListFilesAsync(scope, cancellationToken).ConfigureAwait(false);
+
+        var plan = DeploymentPlanner.CreatePlan(desired, ToDeploymentFiles(actual));
+
+        // Removals run before writes. A path that was a file and is now a directory — or the
+        // reverse — cannot be created until the old entry is gone, so writing first would fail on
+        // exactly the layout changes reconciliation exists to handle.
+        if (plan.Removed.Count > 0)
+        {
+            await channel.DeleteFilesAsync(scope, plan.Removed, cancellationToken).ConfigureAwait(false);
+        }
+
         foreach (var file in plan.Added.Concat(plan.Changed))
         {
             cancellationToken.ThrowIfCancellationRequested();
             await PutAsync(channel, scope, sourceRoot.FullName, file, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (plan.Removed.Count > 0)
-        {
-            await channel.DeleteFilesAsync(scope, plan.Removed, cancellationToken).ConfigureAwait(false);
         }
 
         await VerifyAsync(channel, scope, desired, cancellationToken).ConfigureAwait(false);

@@ -50,6 +50,12 @@ internal sealed class GuestFileService(string managedRoot)
     /// Hashes are computed here rather than trusting timestamps because a rerun must detect an edit
     /// that preserved both size and timestamp, which build tools produce more often than one would
     /// like. A scope that does not exist yet is empty, not an error: that is a first deployment.
+    /// <para>
+    /// Directories are walked manually rather than with <see cref="SearchOption.AllDirectories"/>
+    /// so a reparse point can be refused instead of followed. Skipping only reparse <em>files</em>
+    /// would still let a junction placed as a directory make the whole subtree beneath it appear to
+    /// be inside the managed root when it is somewhere else entirely.
+    /// </para>
     /// </remarks>
     public async Task<List<GuestFileInfo>> ListAsync(GuestPathScope scope, CancellationToken cancellationToken)
     {
@@ -61,30 +67,47 @@ internal sealed class GuestFileService(string managedRoot)
             return files;
         }
 
-        foreach (var path in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var info = new FileInfo(path);
-
-            // A reparse point inside a managed root would let a later write follow a link out of
-            // it. Reporting it as absent makes reconciliation delete it, which is the repair.
-            if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
-            {
-                continue;
-            }
-
-            files.Add(new GuestFileInfo(
-                info.FullName[(directory.Length + 1)..],
-                info.Length,
-                info.LastWriteTimeUtc.Ticks,
-                await ComputeHashAsync(info.FullName, cancellationToken).ConfigureAwait(false)));
-        }
+        await CollectAsync(directory, directory, files, cancellationToken).ConfigureAwait(false);
 
         files.Sort((left, right) =>
             string.Compare(left.RelativePath, right.RelativePath, StringComparison.OrdinalIgnoreCase));
 
         return files;
+    }
+
+    /// <summary>Walks one directory level, refusing to descend through reparse points.</summary>
+    private static async Task CollectAsync(
+        string scopeRoot,
+        string directory,
+        List<GuestFileInfo> files,
+        CancellationToken cancellationToken)
+    {
+        foreach (var entry in new DirectoryInfo(directory).EnumerateFileSystemInfos())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // A reparse point -- file or directory -- is reported as absent rather than followed.
+            // Reconciliation then deletes it, which is the repair: nothing inside a managed root
+            // may redirect elsewhere.
+            if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                continue;
+            }
+
+            if (entry is DirectoryInfo child)
+            {
+                await CollectAsync(scopeRoot, child.FullName, files, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            var file = (FileInfo)entry;
+
+            files.Add(new GuestFileInfo(
+                file.FullName[(scopeRoot.Length + 1)..],
+                file.Length,
+                file.LastWriteTimeUtc.Ticks,
+                await ComputeHashAsync(file.FullName, cancellationToken).ConfigureAwait(false)));
+        }
     }
 
     /// <summary>Opens a temporary destination for an incoming file.</summary>
@@ -96,13 +119,57 @@ internal sealed class GuestFileService(string managedRoot)
         var directory = ResolveScopeDirectory(scope, create: true);
         var destination = DeploymentPlanner.ResolveContainedPath(directory, file.RelativePath);
 
-        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        // Lexical containment is not enough on its own: a junction planted as one of the
+        // intermediate directories would satisfy it while pointing the write somewhere else. Each
+        // existing ancestor is checked, and any missing ones are created here so nothing can
+        // introduce a reparse point into the path afterwards.
+        EnsureNoReparseAncestor(directory, destination);
 
         // The temporary sits beside the destination so the final move stays on one volume and is
         // therefore atomic.
         var temporary = $"{destination}.{Guid.NewGuid():n}.part";
 
         return new GuestFileWrite(destination, temporary, file);
+    }
+
+    /// <summary>
+    /// Creates the directories leading to <paramref name="destination"/>, refusing any that is a
+    /// reparse point.
+    /// </summary>
+    /// <remarks>
+    /// Checked and created top-down so that after this returns every ancestor is a real directory
+    /// this call either verified or made. Verifying afterwards would leave a window in which the
+    /// path could be swapped between the check and the write.
+    /// </remarks>
+    internal static void EnsureNoReparseAncestor(string scopeRoot, string destination)
+    {
+        var relative = destination[(scopeRoot.Length + 1)..];
+        var current = scopeRoot;
+
+        foreach (var segment in relative.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries).SkipLast(1))
+        {
+            current = Path.Join(current, segment);
+
+            var info = new DirectoryInfo(current);
+
+            if (info.Exists)
+            {
+                if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    throw ExecutionTargetException.Create(
+                        ExecutionTargetErrorCodes.DeploymentDirty,
+                        "A folder inside the managed guest location is a link, so writing through it was refused.",
+                        userAction: "Retry the command to redeploy from scratch.",
+                        context: new Dictionary<string, string> { ["segment"] = segment });
+                }
+
+                continue;
+            }
+
+            info.Create();
+        }
     }
 
     /// <summary>Opens a managed file for streaming back to the host.</summary>

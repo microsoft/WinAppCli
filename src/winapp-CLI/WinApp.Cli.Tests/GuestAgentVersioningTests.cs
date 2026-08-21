@@ -117,13 +117,13 @@ public class GuestAgentVersioningTests
     }
 
     [TestMethod]
-    public void Plan_UnparseableGuestVersion_ReplacesRatherThanGuessing()
+    public void Plan_UnparseableGuestVersion_FailsClosed()
     {
         var plan = GuestAgentUpdatePlanner.Plan(Host("1.2.0"), Guest("not-a-version", GuestHash));
 
-        // A version that cannot be ordered cannot be proven newer, so it cannot be protected from
-        // replacement by the no-downgrade rule.
-        Assert.AreEqual(GuestAgentAction.StageAndActivate, plan.Action);
+        // A version that cannot be ordered cannot be proven *older*, so replacing it might be a
+        // downgrade. Failing is the only outcome that cannot silently move the guest backwards.
+        Assert.AreEqual(GuestAgentAction.FailIncompatible, plan.Action);
     }
 
     [TestMethod]

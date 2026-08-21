@@ -33,16 +33,25 @@ public class GuestOwnerContextTests
     }
 
     [TestMethod]
-    public void ExplicitOwner_IsTrimmedAndBounded()
+    public void ExplicitOwner_IsPreservedExactly()
     {
-        Assert.AreEqual("workflow-7", GuestOwnerContext.ResolveHostOwner(WithOwnerVariable("  workflow-7  ")));
+        Assert.AreEqual("workflow-7", GuestOwnerContext.ResolveHostOwner(WithOwnerVariable("workflow-7")));
 
+        // Not trimmed. Whitespace is significant to the guest's own resolver, so normalizing it here
+        // would make two values that are distinct locally into one workflow in the guest -- the
+        // exact divergence forwarding exists to prevent.
+        Assert.AreEqual("  workflow-7  ", GuestOwnerContext.ResolveHostOwner(WithOwnerVariable("  workflow-7  ")));
+    }
+
+    [TestMethod]
+    public void OversizedExplicitOwner_IsRefusedRatherThanTruncated()
+    {
         var oversized = new string('x', GuestOwnerContext.MaximumOwnerLength + 50);
-        var resolved = GuestOwnerContext.ResolveHostOwner(WithOwnerVariable(oversized));
 
-        // Bounded to what the local Cooperative UI Turns resolver accepts, so a forwarded owner can
-        // never be rejected in the guest for a reason a local command would not hit.
-        Assert.AreEqual(GuestOwnerContext.MaximumOwnerLength, resolved.Length);
+        // Truncating would silently merge two distinct long owners into one workflow, so an
+        // oversized value is refused instead.
+        Assert.ThrowsExactly<WinApp.Cli.ExecutionTargets.Abstractions.ExecutionTargetException>(
+            () => GuestOwnerContext.ResolveHostOwner(WithOwnerVariable(oversized)));
     }
 
     [TestMethod]
