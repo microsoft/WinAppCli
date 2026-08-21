@@ -148,7 +148,9 @@ internal sealed class TargetStateStore(ITargetStateDirectoryProvider directoryPr
     }
 
     private string GetStateFile(ExecutionTargetRef target, bool create) =>
-        Path.Combine(directoryProvider.GetTargetRoot(target, create).FullName, StateFileName);
+        TargetPathSafety.CombineInsideRoot(
+            directoryProvider.GetTargetRoot(target, create).FullName,
+            StateFileName);
 
     /// <summary>
     /// Writes <paramref name="contents"/> so readers observe either the previous file or the new
@@ -160,7 +162,9 @@ internal sealed class TargetStateStore(ITargetStateDirectoryProvider directoryPr
         var directory = Path.GetDirectoryName(path)!;
         Directory.CreateDirectory(directory);
 
-        var temporary = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+        var temporary = TargetPathSafety.CombineInsideRoot(
+            directory,
+            $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
         try
         {
             File.WriteAllText(temporary, contents);

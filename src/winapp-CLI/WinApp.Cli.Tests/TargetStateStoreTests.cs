@@ -49,7 +49,7 @@ public class TargetStateStoreTests
     };
 
     private string StateFilePath =>
-        Path.Combine(_tempRoot.FullName, _target.Slug, TargetStateStore.StateFileName);
+        Path.Join(_tempRoot.FullName, _target.Slug, TargetStateStore.StateFileName);
 
     [TestMethod]
     public void Read_NoState_ReturnsNull() => Assert.IsNull(_store.Read(_target));
@@ -164,7 +164,7 @@ public class TargetStateStoreTests
     {
         _store.Commit(_target, NewState(), expectedRevision: 0);
 
-        var files = Directory.GetFiles(Path.Combine(_tempRoot.FullName, _target.Slug));
+        var files = Directory.GetFiles(Path.Join(_tempRoot.FullName, _target.Slug));
 
         Assert.AreEqual(1, files.Length, "Atomic replace must not leave temporary files behind.");
         Assert.AreEqual(TargetStateStore.StateFileName, Path.GetFileName(files[0]));

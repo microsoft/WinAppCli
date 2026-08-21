@@ -240,10 +240,7 @@ public class GuestProcessHostTests
         }
         finally
         {
-            foreach (var survivor in survivors)
-            {
-                survivor.Dispose();
-            }
+            survivors.ForEach(static survivor => survivor.Dispose());
         }
     }
 

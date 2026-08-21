@@ -194,9 +194,13 @@ internal static class DeploymentPlanner
         }
 
         var rootPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
-        var combined = Path.GetFullPath(Path.Combine(rootPath, relativePath));
 
-        if (!IsContained(rootPath, combined))
+        // Path.Join rather than Path.Combine: Combine silently discards the root when the second
+        // argument is rooted. The IsPathRooted guard above already rejects that case, and Join keeps
+        // the two defences independent instead of relying on one.
+        var combined = Path.GetFullPath(Path.Join(rootPath, relativePath));
+
+        if (!TargetPathSafety.IsInsideRoot(rootPath, combined))
         {
             throw PathEscape(relativePath);
         }
@@ -205,19 +209,8 @@ internal static class DeploymentPlanner
     }
 
     /// <summary>Whether <paramref name="candidate"/> lies inside <paramref name="rootPath"/>.</summary>
-    private static bool IsContained(string rootPath, string candidate)
-    {
-        if (!candidate.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        // Guard against a sibling directory whose name merely starts with the root's name, such as
-        // C:\work-2 matching C:\work.
-        return candidate.Length == rootPath.Length
-            || candidate[rootPath.Length] == Path.DirectorySeparatorChar
-            || candidate[rootPath.Length] == Path.AltDirectorySeparatorChar;
-    }
+    private static bool IsContained(string rootPath, string candidate) =>
+        TargetPathSafety.IsInsideRoot(rootPath, candidate);
 
     private static string GetContainedRelativePath(string rootPath, string fullPath)
     {
@@ -266,7 +259,10 @@ internal static class DeploymentPlanner
     {
         foreach (var file in files)
         {
-            var info = new FileInfo(Path.Combine(rootPath, file.RelativePath));
+            // Route through the containment check rather than combining directly: these relative
+            // paths come from a snapshot, and a snapshot that had been tampered with must not be
+            // able to make this method stat a file outside the deployment root.
+            var info = new FileInfo(ResolveContainedPath(rootPath, file.RelativePath));
 
             if (!info.Exists || info.Length != file.Size || info.LastWriteTimeUtc != file.LastWriteUtc)
             {

@@ -44,21 +44,20 @@ internal sealed class TargetMutationLease : IDisposable
             return;
         }
 
-        try
+        using (stream)
         {
-            // Clearing the owner record marks this as a clean release, so the next acquirer knows
-            // the environment was left consistent.
-            stream.SetLength(0);
-            stream.Flush();
-        }
-        catch (IOException)
-        {
-            // The file is going away with the handle. The next acquirer then sees a non-empty
-            // record and treats it as abandoned, which is the safe direction to fail.
-        }
-        finally
-        {
-            stream.Dispose();
+            try
+            {
+                // Clearing the owner record marks this as a clean release, so the next acquirer
+                // knows the environment was left consistent.
+                stream.SetLength(0);
+                stream.Flush();
+            }
+            catch (IOException)
+            {
+                // The file is going away with the handle. The next acquirer then sees a non-empty
+                // record and treats it as abandoned, which is the safe direction to fail.
+            }
         }
     }
 }
@@ -112,7 +111,7 @@ internal sealed class TargetMutationLock(ITargetStateDirectoryProvider directory
 
     /// <summary>Resolves the lock file path for <paramref name="target"/>.</summary>
     internal string GetLockFilePath(ExecutionTargetRef target) =>
-        Path.Combine(directoryProvider.GetTargetRoot(target).FullName, LockFileName);
+        TargetPathSafety.CombineInsideRoot(directoryProvider.GetTargetRoot(target).FullName, LockFileName);
 
     /// <inheritdoc/>
     public TargetMutationLease? TryAcquire(
