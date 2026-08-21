@@ -7,6 +7,7 @@ using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Diagnostics.CodeAnalysis;
 using WinApp.Cli.Commands;
+using WinApp.Cli.ExecutionTargets.Orchestration;
 using WinApp.Cli.Services;
 using WinApp.Cli.Services.Controls;
 
@@ -72,7 +73,11 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<ISystemUiQuery, SystemUiQuery>()
             .AddSingleton<IUiSessionService, UiSessionService>()
             .AddSingleton<IUiAutomationService, UiAutomationService>()
-            .AddSingleton<IControlsSearchService, ControlsSearchService>();
+            .AddSingleton<IControlsSearchService, ControlsSearchService>()
+            // Execution targets (Windows Sandbox and any future target)
+            .AddSingleton<ITargetStateDirectoryProvider>(_ => new TargetStateDirectoryProvider())
+            .AddSingleton<ITargetStateStore, TargetStateStore>()
+            .AddSingleton<ITargetMutationLock, TargetMutationLock>();
     }
 
     public static IServiceCollection ConfigureCommands(this IServiceCollection serviceCollection)
