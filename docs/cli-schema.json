@@ -2493,6 +2493,21 @@
     "ui": {
       "description": "Inspect and interact with any running Windows app using UI Automation (UIA). Works with WPF, WinForms, Win32, Electron, and WinUI 3 apps.",
       "hidden": false,
+      "options": {
+        "--sandbox": {
+          "description": "Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option.",
+          "hidden": false,
+          "valueType": "System.Boolean",
+          "hasDefaultValue": true,
+          "defaultValue": false,
+          "arity": {
+            "minimum": 0,
+            "maximum": 1
+          },
+          "required": false,
+          "recursive": true
+        }
+      },
       "subcommands": {
         "click": {
           "description": "Click an element by slug or text search using mouse simulation. Works on elements that don't support InvokePattern (e.g., column headers, list items). Use --double for double-click, --right for right-click.",

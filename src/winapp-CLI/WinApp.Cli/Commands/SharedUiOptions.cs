@@ -28,6 +28,12 @@ internal static class SharedUiOptions
     public static Option<int> FpsOption { get; }
     public static Option<int> MaxEdgeOption { get; }
 
+    /// <summary>
+    /// Routes the whole command into the managed Windows Sandbox. Recursive, so it is accepted by
+    /// every <c>ui</c> verb without each one declaring it.
+    /// </summary>
+    public static Option<bool> SandboxOption { get; }
+
     static SharedUiOptions()
     {
         AppOption = new Option<string?>("--app", "-a")
@@ -121,6 +127,12 @@ internal static class SharedUiOptions
         {
             Description = "Downscale so the longest edge is at most this many pixels (0 = no downscale)",
             DefaultValueFactory = _ => 0
+        };
+
+        SandboxOption = new Option<bool>("--sandbox")
+        {
+            Description = "Run this command inside the Windows Sandbox winapp manages instead of on this desktop. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection. Output files are copied back to the path you asked for. An --app value may also opt in with a 'sandbox:' prefix; a numeric --window requires this option.",
+            Recursive = true
         };
     }
 }

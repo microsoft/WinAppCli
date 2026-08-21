@@ -7,9 +7,8 @@ Build on your machine, then run and automate the app inside a persistent Windows
 
 > [!NOTE]
 > This feature is in development. `winapp run --sandbox`, `winapp unregister --sandbox`,
-> `winapp sandbox exec`, and `winapp sandbox cp` work. UI routing (`winapp ui ... --sandbox`)
-> and artifact copy-back are still being implemented; this page documents them as the design
-> being built so the behaviour and its failure modes are reviewable alongside the code.
+> `winapp ui ... --sandbox`, `winapp sandbox exec`, and `winapp sandbox cp` work. This page
+> documents the behaviour and its failure modes so they are reviewable alongside the code.
 
 ## Why
 
@@ -131,6 +130,48 @@ before anything is removed: winapp's own record must say that deployment registe
 the current Sandbox generation, and the guest must then confirm the registration is a development
 package rooted in that deployment's managed folder. A package you installed in the Sandbox yourself
 satisfies neither and is never touched.
+
+## Automating the UI
+
+```powershell
+winapp ui inspect --sandbox -a MyApp
+winapp ui invoke --sandbox SubmitButton -a MyApp
+winapp ui screenshot --sandbox -a MyApp -o .\result.png
+winapp ui record --sandbox -a MyApp --duration-sec 5 -o .\result.mp4
+```
+
+Every `ui` verb accepts `--sandbox`. The command is intercepted once, before any local UI service
+runs, and forwarded whole to guest winapp — so the host performs no UI Automation, window discovery,
+capture, or input injection. That is the point: a Sandbox workflow cannot steal your focus, move your
+cursor, or type into your windows.
+
+A string app target can opt in by prefix instead:
+
+```powershell
+winapp ui inspect -a sandbox:MyApp
+winapp ui inspect -a sandbox:4212
+```
+
+A numeric `--window` is left alone and needs `--sandbox`, because a window handle carries no scope of
+its own — inferring one would resolve a host window against the guest, or the reverse.
+
+Targeting is unchanged: if neither `--app` nor `--window` is given, the command fails and lists guest
+targets rather than guessing. `winapp ui list-windows --sandbox` is the discovery path.
+
+Guest process IDs and window handles are valid only inside the execution target's current epoch, and
+values from a previous generation are rejected rather than resolved against a recreated Sandbox.
+
+### Output files
+
+`-o/--output` is redirected into per-command guest staging, and the file is brought back after the
+command succeeds. It reaches the path you asked for only after its size and hash match what the guest
+reported, and it is published by rename — so an interrupted transfer never leaves a shorter but
+plausible screenshot or a truncated video where a complete one is expected, and never overwrites what
+was already there. A failure names the artifact, its expected size, how much arrived, and the phase
+that failed.
+
+Transfers restart rather than resume. The result the command prints reports your path, not the guest
+staging path it was actually written to.
 
 ## Requirements
 

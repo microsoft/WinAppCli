@@ -1525,6 +1525,7 @@ winapp ui [command] [options]
 **Options:**
 - `-a, --app <app>` - Target app (name, title, or PID)
 - `-w, --window <hwnd>` - Target window by HWND (stable)
+- `--sandbox` - Run the command inside the Windows Sandbox winapp manages instead of on this desktop. Accepted by every `ui` verb. The whole command is forwarded to guest winapp: the host performs no UI Automation, window discovery, capture, or input injection, so nothing steals your focus or types into your windows. A `-o/--output` file is copied back to the path you asked for and verified before it is published, and the result reports your path rather than the guest's. An `--app` value may also opt in with a `sandbox:` prefix (`-a sandbox:MyApp`); a numeric `--window` carries no scope of its own and requires `--sandbox`. See [Windows Sandbox execution](sandbox-execution.md).
 
 #### ui record
 
