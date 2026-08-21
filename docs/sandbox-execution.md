@@ -167,6 +167,12 @@ the job, and only then starts the requested command — which Windows puts in th
 because its parent is already a member. There is no window in which a spawned descendant could
 escape its operation's cancellation.
 
+The barrier's release signal is per-operation and randomly named, but it is **not a secret**: the
+name appears on the barrier process's command line, which any same-user process can read. Randomness
+only raises the bar against blind guessing. As with path containment above, a co-resident process
+able to exploit that can already terminate the agent outright, so it is accepted under the same
+mutually-trusted model rather than defended against.
+
 Host and guest `winapp` are versioned together. When the host is newer, the replacement binary is
 staged, hash-verified, self-tested in its own process, and activated only if it passes, with the
 previous binary retained as last-known-good. A newer guest is never downgraded: it is reused when

@@ -66,7 +66,7 @@ public class WindowsSandboxCliTests
         // directories before PATH, and a relative PATH entry resolves against the current directory
         // too. Either route lets a wsb.exe dropped into a repository a developer happens to be
         // sitting in take over Sandbox control.
-        var decoyDirectory = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"wsb-decoy-{Guid.NewGuid():N}"));
+        var decoyDirectory = new DirectoryInfo(TestPaths.TempRoot("wsb-decoy"));
         decoyDirectory.Create();
 
         var originalPath = Environment.GetEnvironmentVariable("PATH");
@@ -74,7 +74,7 @@ public class WindowsSandboxCliTests
 
         try
         {
-            File.WriteAllText(Path.Combine(decoyDirectory.FullName, WindowsSandboxCli.ExecutableName), "decoy");
+            File.WriteAllText(TestPaths.Under(decoyDirectory.FullName, WindowsSandboxCli.ExecutableName), "decoy");
             Directory.SetCurrentDirectory(decoyDirectory.FullName);
 
             // A relative entry that would resolve to the decoy through the current directory.

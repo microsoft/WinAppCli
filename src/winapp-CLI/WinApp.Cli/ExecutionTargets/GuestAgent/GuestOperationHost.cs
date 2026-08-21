@@ -49,16 +49,25 @@ internal static class GuestOperationHost
     internal const int BarrierFailedExitCode = 64;
 
     /// <summary>
-    /// Builds a per-operation release-event name that cannot be guessed.
+    /// Builds a per-operation release-event name.
     /// </summary>
     /// <remarks>
     /// The <c>Local\</c> prefix scopes the name to the guest's own Terminal Services session, so it
-    /// is not visible to another session on the same machine. Within that session everything runs
-    /// as the same user and can therefore open any name it knows, so the suffix is
-    /// cryptographically random rather than a GUID — an early signal from another guest process
-    /// would otherwise release the barrier before assignment, which is precisely what it exists to
-    /// prevent. Membership is verified after release regardless, so guessing the name is not by
-    /// itself enough.
+    /// is not visible to another session on the same machine. The random suffix keeps it unique per
+    /// operation and unguessable to something that has to guess.
+    /// <para>
+    /// <strong>It is not a secret and must not be treated as one.</strong> The name is passed on
+    /// this process's command line, which any same-user process can read, and everything in the
+    /// Sandbox runs as the same user. A co-resident process with inspection rights can therefore
+    /// learn it and signal the event early. Randomness raises the bar against blind guessing and
+    /// nothing more.
+    /// </para>
+    /// <para>
+    /// That is accepted under the specification's threat model, which states that co-resident guest
+    /// applications are mutually trusted and can observe or interfere with one another. A process
+    /// able to do this can already terminate the agent outright. The ordering that matters in
+    /// normal operation comes from the agent signalling only after assignment, not from the name.
+    /// </para>
     /// </remarks>
     public static string CreateReleaseEventName() =>
         $@"Local\winapp-op-{Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)).ToLowerInvariant()}";
