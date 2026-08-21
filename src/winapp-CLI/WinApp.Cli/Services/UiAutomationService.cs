@@ -75,6 +75,28 @@ internal sealed partial class UiAutomationService : IUiAutomationService
         _automation = CUIAutomation8.CreateInstance<IUIAutomation>();
     }
 
+    /// <summary>
+    /// Confirms <paramref name="handle"/> actually reached the foreground before a screen-DC capture,
+    /// throwing <see cref="CaptureForegroundNotTargetException"/> when it did not.
+    /// </summary>
+    /// <remarks>
+    /// Shared by the screenshot and record capture-screen paths so both refuse identically, and so the
+    /// activation-then-verify pattern lives in one place rather than being re-derived per call site.
+    /// </remarks>
+    internal void EnsureForegroundForScreenCapture(long handle, string action)
+    {
+        if (_desktopForeground.IsForeground(handle))
+        {
+            return;
+        }
+
+        _logger.LogDebug("Foreground verification failed for {Action}; refusing to capture the screen.", action);
+        throw new CaptureForegroundNotTargetException(
+            $"Target window is not in the foreground — refusing to {action} because a screen capture would " +
+            "record whatever window is actually in front. Bring the window to the foreground and retry, or " +
+            "capture without --capture-screen.");
+    }
+
     public List<(nint Hwnd, int Pid, string Title)> FindWindowsByTitle(string titleQuery)
     {
         return EnumerateWindows((pid, title) =>

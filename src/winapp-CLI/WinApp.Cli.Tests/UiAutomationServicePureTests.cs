@@ -4,6 +4,7 @@
 using Windows.Win32.UI.Accessibility;
 using Windows.Win32.Foundation;
 using Microsoft.Extensions.Logging.Abstractions;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
 
 using WinApp.Cli.Services.InteractiveDesktop;
@@ -256,10 +257,40 @@ public class UiAutomationServicePureTests
         Assert.AreEqual(1, pixels[3]);
     }
 
+    // --------------------------------------- screen-capture foreground verification (re-review H6)
+
+    [TestMethod]
+    public void EnsureForegroundForScreenCapture_ForegroundHeld_Proceeds()
+    {
+        var foreground = new FakeDesktopForegroundService { ForegroundRequestSucceeds = true };
+        var service = new UiAutomationService(
+            NullLogger<UiAutomationService>.Instance, new SelectorService(), foreground);
+
+        service.EnsureForegroundForScreenCapture(123, "screenshot --capture-screen");
+
+        CollectionAssert.AreEqual(new long[] { 123 }, foreground.ForegroundChecks,
+            "the capture path must verify the foreground, not merely request it");
+    }
+
+    [TestMethod]
+    public void EnsureForegroundForScreenCapture_ActivationRefused_ThrowsRatherThanCapturing()
+    {
+        // SetForegroundWindow is advisory. Without this check a screen-DC BitBlt returns a picture of
+        // whichever window is really in front while the command reports success.
+        var foreground = new FakeDesktopForegroundService { ForegroundRequestSucceeds = false };
+        var service = new UiAutomationService(
+            NullLogger<UiAutomationService>.Instance, new SelectorService(), foreground);
+
+        var ex = Assert.ThrowsExactly<CaptureForegroundNotTargetException>(
+            () => service.EnsureForegroundForScreenCapture(123, "record --capture-screen"));
+
+        StringAssert.Contains(ex.Message, "record --capture-screen");
+        StringAssert.Contains(ex.Message, "foreground");
+    }
+
     /// <summary>Counts how many desktop sections a capture path opened.</summary>
     private sealed class CountingDesktopSection : IDesktopSection
-    {
-        public int Enters { get; private set; }
+    {        public int Enters { get; private set; }
 
         public Task<IAsyncDisposable> EnterAsync(CancellationToken cancellationToken)
         {

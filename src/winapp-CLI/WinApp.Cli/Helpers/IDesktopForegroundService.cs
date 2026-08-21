@@ -31,6 +31,18 @@ internal interface IDesktopForegroundService
     /// </summary>
     void RequestForeground(long hwnd);
 
+    /// <summary>
+    /// Whether <paramref name="hwnd"/> (or its top-level root) currently holds the foreground.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="RequestForeground"/> is advisory — Windows silently refuses it under focus-stealing
+    /// prevention, a UAC prompt, a locked session, or when another app activates itself in the same
+    /// instant. Any code that reads the <em>screen</em> rather than a specific window (a screen-DC
+    /// BitBlt) or injects OS-wide input must confirm the request actually took, immediately before it
+    /// acts, or it will silently capture/type into whatever window really is in front.
+    /// </remarks>
+    bool IsForeground(long hwnd);
+
     /// <summary>Whether <paramref name="hwnd"/> is currently minimized.</summary>
     bool IsMinimized(long hwnd);
 
@@ -54,6 +66,9 @@ internal sealed class DesktopForegroundService : IDesktopForegroundService
 
         Windows.Win32.PInvoke.SetForegroundWindow(new Windows.Win32.Foundation.HWND((nint)hwnd));
     }
+
+    public bool IsForeground(long hwnd)
+        => hwnd != 0 && ForegroundGuard.ForegroundBelongsTo(hwnd);
 
     public bool IsMinimized(long hwnd)
         => hwnd != 0 && Windows.Win32.PInvoke.IsIconic(new Windows.Win32.Foundation.HWND((nint)hwnd));

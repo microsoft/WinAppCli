@@ -72,6 +72,11 @@ internal sealed partial class UiAutomationService
             {
                 _desktopForeground.RequestForeground(handle);
                 await Task.Delay(150, ct).ConfigureAwait(false);
+
+                // Same hazard as the screenshot path: a refused activation would make every recorded
+                // frame a BitBlt of whichever window actually holds the foreground. Verify before any
+                // frame is captured rather than producing an MP4 of the wrong app.
+                EnsureForegroundForScreenCapture(handle, "record --capture-screen");
             }
         }
 

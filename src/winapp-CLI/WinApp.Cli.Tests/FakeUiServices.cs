@@ -293,10 +293,18 @@ internal class FakeUiAutomationService : IUiAutomationService
     /// </summary>
     public UiElement? LastFocusedElement { get; private set; }
 
+    /// <summary>
+    /// Runs inside <see cref="FocusAsync"/>, before it returns. Models the real hazard that setting
+    /// focus is an awaited round-trip into the target's UI thread during which the foreground can
+    /// change — a focus handler activating another window, or an unrelated app stealing focus.
+    /// </summary>
+    public Action? OnFocus { get; set; }
+
     public Task FocusAsync(UiSessionInfo session, UiElement element, CancellationToken ct)
     {
         if (FocusThrow is not null) { throw FocusThrow; }
         LastFocusedElement = element;
+        OnFocus?.Invoke();
         return Task.CompletedTask;
     }
 
@@ -545,6 +553,14 @@ internal sealed class FakeSystemUiQuery : ISystemUiQuery
     /// </summary>
     public uint ProcessIdForWindowResult { get; set; } = 1234;
 
+    /// <summary>
+    /// Per-HWND owning PIDs for <see cref="GetProcessIdForWindow"/>, consulted before
+    /// <see cref="ProcessIdForWindowResult"/>. Needed to model an owner chain, where the target HWND
+    /// and the window that owns it deliberately belong to different processes (a cross-process file
+    /// picker owned by the app's own window).
+    /// </summary>
+    public Dictionary<long, uint> ProcessIdByHwnd { get; } = [];
+
     /// <summary>Title returned by <see cref="GetWindowText"/>. Default null = "no/empty title".</summary>
     public string? WindowTextResult { get; set; }
 
@@ -580,7 +596,8 @@ internal sealed class FakeSystemUiQuery : ISystemUiQuery
 
     public nint GetForegroundWindow() => ForegroundWindowResult;
 
-    public uint GetProcessIdForWindow(long hwnd) => ProcessIdForWindowResult;
+    public uint GetProcessIdForWindow(long hwnd)
+        => ProcessIdByHwnd.TryGetValue(hwnd, out var pid) ? pid : ProcessIdForWindowResult;
 
     public string? GetWindowText(long hwnd) => WindowTextResult;
 

@@ -127,6 +127,13 @@ internal sealed partial class UiAutomationService
 
             if (captureScreen)
             {
+                // SetForegroundWindow is advisory. If it was refused (focus-stealing prevention, a UAC
+                // prompt, another app activating itself in the same instant), a screen-DC BitBlt reads
+                // whatever window is really in front and happily returns a PNG of the wrong app — a real
+                // repro produced an all-magenta image of a decoy window while exiting 0. Verify after the
+                // activation delay and immediately before the capture begins.
+                EnsureForegroundForScreenCapture(handle, "screenshot --capture-screen");
+
                 // Screen capture mode: BitBlt from screen DC — captures popups and overlays.
                 pixelData = CaptureFromScreen(rect.left, rect.top, width, height);
                 return CropIfRequested(pixelData, width, height, elementId, session, root, cropOriginLeft, cropOriginTop);

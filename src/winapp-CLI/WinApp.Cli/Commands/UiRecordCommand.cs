@@ -380,6 +380,15 @@ internal class UiRecordCommand : Command, IShortDescription
                 }
                 return 1;
             }
+            catch (CaptureForegroundNotTargetException foregroundEx)
+            {
+                // Same contract as the pre-injection foreground guard: a precise foreground_not_target
+                // refusal, never internal_error, and no recording is produced.
+                logger.LogError("{Symbol} {Message}", UiSymbols.Error, foregroundEx.Message);
+                UiJsonError.Emit(json, UiJsonError.CodeForegroundNotTarget, foregroundEx.Message,
+                    errorOut: parseResult.InvocationConfiguration.Error);
+                return 1;
+            }
             catch (UiAmbiguousSelectorException ambiguousEx)
             {
                 UiErrors.AmbiguousSelector(logger, ambiguousEx.Message, json);
@@ -397,10 +406,27 @@ internal class UiRecordCommand : Command, IShortDescription
                 UiErrors.ElementNotFound(logger, notFoundEx.Selector, json);
                 return 1;
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Native Ctrl+C / coordinator cancellation before capture ever started. There is no
+                // finalized MP4 to preserve, so this is NOT a completed command: swallowing it here made
+                // the coordinator see a normal body return and renew the owner's idle grace for a command
+                // that produced nothing. Propagating lets the coordinator emit the cancellation contract
+                // and leave the grace alone.
+                //
+                // The established finalize-on-Ctrl+C behaviour is untouched: an active recording that
+                // observes cancellation stops capturing, writes its MP4 and RETURNS success, so it never
+                // reaches this catch and still renews.
+                logger.LogDebug("Recording cancelled before capture started; propagating to coordination.");
+                throw;
+            }
             catch (OperationCanceledException) when (linkedCts.IsCancellationRequested)
             {
-                // In-loop cancellation returns a finalized recording instead.
-                logger.LogDebug("Recording cancelled before capture started.");
+                // Defensive: the stdin stop-monitor only arms after encoder readiness, so this is the
+                // narrow race where it fires between readiness and the first frame. The workflow asked
+                // its own recording to stop rather than abandoning the command, so it keeps its turn and
+                // this must not propagate.
+                logger.LogDebug("Recording stopped via stdin before capture started.");
                 return 1;
             }
             catch (System.Runtime.InteropServices.COMException comEx)

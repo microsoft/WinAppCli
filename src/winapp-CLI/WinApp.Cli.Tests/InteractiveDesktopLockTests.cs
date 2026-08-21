@@ -241,6 +241,39 @@ public class InteractiveDesktopLockTests
     }
 
     [TestMethod]
+    public async Task CancellationAfterAcquisitionEmitsTheContractAndDoesNotRenewTheGrace()
+    {
+        // A command cancelled after it took the turn produced nothing, so it must not renew the owner's
+        // idle grace — and it must report the documented `cancelled` contract rather than escaping as an
+        // "unexpected error". This is the coordinator half of the `ui record` pre-start fix: the command
+        // propagates the cancellation instead of swallowing it, and this is what receives it.
+        Assert.AreEqual(0, await RunAsync(UiTurnMode.TurnShared, "ui record", (_, _) => Task.FromResult(0)));
+        var deadlineBefore = ReadOwnerDeadline();
+
+        await Task.Delay(50);
+
+        var errorWriter = new StringWriter();
+        var parseResult = ParseWithWriter(errorWriter);
+
+        using var cts = new CancellationTokenSource();
+        var exitCode = await _coordinator.RunCoordinatedAsync(
+            UiTurnMode.TurnShared, "ui record", parseResult,
+            async (_, token) =>
+            {
+                await cts.CancelAsync();
+                token.ThrowIfCancellationRequested();
+                return 0;
+            },
+            cts.Token);
+
+        Assert.AreEqual(InteractiveDesktopLock.CancelledExitCode, exitCode,
+            "a cancelled command reports 130, not an internal error");
+        StringAssert.Contains(errorWriter.ToString(), "\"code\":\"cancelled\"");
+        Assert.AreEqual(deadlineBefore, ReadOwnerDeadline(),
+            "a command that produced nothing must not renew the owner's idle grace");
+    }
+
+    [TestMethod]
     public async Task ABodyThatFailsCoordinationDoesNotRenewTheOwnersGrace()
     {
         // A coordination fault raised inside the body (for example active.lock I/O failing while a

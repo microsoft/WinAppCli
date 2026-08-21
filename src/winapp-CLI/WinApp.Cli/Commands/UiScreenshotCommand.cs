@@ -121,6 +121,15 @@ internal class UiScreenshotCommand : Command, IShortDescription
                     }
                 }
             }
+            catch (CaptureForegroundNotTargetException foregroundEx)
+            {
+                // Same contract as the pre-injection foreground guard: a precise foreground_not_target
+                // refusal, never internal_error, and no image is written.
+                logger.LogError("{Symbol} {Message}", UiSymbols.Error, foregroundEx.Message);
+                UiJsonError.Emit(json, UiJsonError.CodeForegroundNotTarget, foregroundEx.Message,
+                    errorOut: parseResult.InvocationConfiguration.Error);
+                return 1;
+            }
             catch (System.Runtime.InteropServices.COMException comEx)
             {
                 logger.LogDebug("COM error: {HResult} {StackTrace}", comEx.HResult, comEx.StackTrace);

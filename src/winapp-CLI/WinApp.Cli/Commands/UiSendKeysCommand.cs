@@ -334,9 +334,25 @@ internal class UiSendKeysCommand : Command, IShortDescription
                     }
 
                     // Only now, with the foreground confirmed, move focus to the requested child control.
+                    var focusWasApplied = false;
                     if (targetElement is not null)
                     {
                         await uiAutomation.FocusAsync(session, targetElement, cancellationToken);
+                        focusWasApplied = true;
+                    }
+
+                    // FocusAsync is an awaited round-trip into the target's UI thread, and setting focus can
+                    // itself change the foreground: a focus/activation handler may open and activate another
+                    // window, and any unrelated app can steal focus during the await. send-input is OS-wide,
+                    // so the check that actually protects the user is the last one before injection, not the
+                    // one taken before focusing — a real repro exited 0 while the keystrokes landed in a
+                    // decoy window activated by the target's own focus event. Nothing between here and
+                    // keyboardInput.Send awaits, so this is that last check.
+                    if (focusWasApplied
+                        && transport == KeyTransport.SendInput
+                        && !foregroundGuard.TryEnsureForeground(targetHwnd, logger, json, "--via send-input"))
+                    {
+                        return 1;
                     }
 
                     // PostMessage posts to a specific HWND's message queue; a top-level window does NOT

@@ -43,7 +43,22 @@ internal sealed class FakeInteractiveDesktopLock : IInteractiveDesktopLock
     /// <summary>Milliseconds reported as queue wait, so output/telemetry paths can be exercised.</summary>
     public long WaitedMs { get; set; }
 
-    public Task<int> RunCoordinatedAsync(
+    /// <summary>
+    /// Whether the most recent coordinated body threw instead of returning an exit code.
+    /// </summary>
+    /// <remarks>
+    /// This is the exact signal the real coordinator uses to decide whether to renew the owner's idle
+    /// grace: a body that RETURNS is a completed command and renews, a body that THROWS did not produce
+    /// a result and must not. System.CommandLine flattens a propagating cancellation to exit code 1 —
+    /// the same code the old swallow path returned — so the exit code cannot distinguish the two and
+    /// tests have to observe the boundary itself.
+    /// </remarks>
+    public bool LastBodyThrew { get; private set; }
+
+    /// <summary>The exception the most recent coordinated body threw, if any.</summary>
+    public Exception? LastBodyException { get; private set; }
+
+    public async Task<int> RunCoordinatedAsync(
         UiTurnMode mode,
         string operation,
         ParseResult parseResult,
@@ -57,7 +72,18 @@ internal sealed class FakeInteractiveDesktopLock : IInteractiveDesktopLock
             throw failure;
         }
 
-        return body(new FakeTurn(this, mode), cancellationToken);
+        LastBodyThrew = false;
+        LastBodyException = null;
+        try
+        {
+            return await body(new FakeTurn(this, mode), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            LastBodyThrew = true;
+            LastBodyException = ex;
+            throw;
+        }
     }
 
     private sealed class FakeTurn(FakeInteractiveDesktopLock owner, UiTurnMode mode) : IUiTurn

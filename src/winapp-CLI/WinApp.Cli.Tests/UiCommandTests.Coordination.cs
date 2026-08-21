@@ -2,7 +2,9 @@
 // Licensed under the MIT License.
 
 using WinApp.Cli.Commands;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
+using WinApp.Cli.Services;
 using WinApp.Cli.Services.InteractiveDesktop;
 
 namespace WinApp.Cli.Tests;
@@ -481,5 +483,145 @@ public partial class UiCommandTests
         StringAssert.Contains(stderr, "encoder blew up");
         Assert.IsFalse(stderr.Contains(UiCoordinationErrorCodes.Unavailable, StringComparison.Ordinal),
             $"an ordinary failure must not be reported as a coordination error; got: {stderr}");
+    }
+
+    // ------------------------------------------- pre-start recording cancellation must not renew grace
+
+    [TestMethod]
+    public async Task Record_CancelledBeforeCaptureStarted_DoesNotReportItselfAsACompletedCommand()
+    {
+        // The coordinator decides whether to renew the owner's idle grace from whether the body RETURNED
+        // or THREW. Swallowing a native cancellation here and returning 1 made a recording that produced
+        // nothing look like a completed command, so the workflow kept the desktop reserved for four more
+        // seconds on the strength of work it never did.
+        //
+        // System.CommandLine flattens a propagating OperationCanceledException to exit code 1 — the same
+        // code the old swallow path returned — so the exit code cannot distinguish them. The observable
+        // difference, and the one the coordinator actually acts on, is that the body THREW rather than
+        // returned. The coordinator half — 130, the `cancelled` envelope and no grace renewal — is
+        // asserted against the real coordinator in InteractiveDesktopLockTests.
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        _fakeUia.RecordException = new OperationCanceledException(cts.Token);
+
+        var outputPath = Path.Combine(_tempDirectory.FullName, "cancelled-pre-start.mp4");
+        var command = GetRequiredService<UiRecordCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command,
+            ["-a", "TestApp", "--duration-sec", "1", "-o", outputPath, "--json"],
+            cts.Token);
+
+        Assert.IsTrue(_fakeDesktopLock.LastBodyThrew,
+            "the body must propagate the cancellation; returning any exit code makes the coordinator treat "
+                + "a recording that produced nothing as a completed command and renew the owner's grace");
+        Assert.IsInstanceOfType<OperationCanceledException>(_fakeDesktopLock.LastBodyException);
+        Assert.IsFalse(File.Exists(outputPath), "a recording cancelled before capture produces no artifact");
+        Assert.IsFalse(ConsoleStdErr.ToString().Contains("internal_error", StringComparison.Ordinal),
+            $"a cancellation is not an internal error (exit {exitCode})");
+    }
+
+    [TestMethod]
+    public async Task Record_ThatFinalizesOnCancellationAndReturnsSuccess_StillCompletesNormally()
+    {
+        // The positive half of the same contract, kept explicit so the fix above cannot be "simplified"
+        // into propagating every cancellation: an ACTIVE recording observes Ctrl+C, finalizes its MP4 and
+        // returns success. That is a completed command and must keep renewing the owner's grace.
+        _fakeUia.RecordResult = new RecordCaptureResult { Frames = 3, Width = 64, Height = 64, Mode = "wgc" };
+        _fakeUia.RecordShouldWaitForCancellation = true;
+
+        using var stdin = new StringReader("stop");
+        UiRecordCommand.Handler.s_isInputRedirectedOverride = () => true;
+        UiRecordCommand.Handler.s_stdinOverride = stdin;
+        try
+        {
+            var outputPath = Path.Combine(_tempDirectory.FullName, "finalized.mp4");
+            var command = GetRequiredService<UiRecordCommand>();
+
+            var exitCode = await ParseAndInvokeWithCaptureAsync(
+                command, ["-a", "TestApp", "--duration-sec", "0", "-o", outputPath, "--json"]);
+
+            Assert.AreEqual(0, exitCode, "a finalized recording reports success rather than cancellation");
+            Assert.IsTrue(File.Exists(outputPath));
+        }
+        finally
+        {
+            UiRecordCommand.Handler.s_isInputRedirectedOverride = null;
+            UiRecordCommand.Handler.s_stdinOverride = null;
+            _fakeUia.RecordShouldWaitForCancellation = false;
+        }
+    }
+
+    // --------------------------------------------- send-input must re-verify foreground after focusing
+
+    [TestMethod]
+    public async Task SendKeys_ForegroundLostDuringFocus_RefusesToSend()
+    {
+        // FocusAsync is an awaited round-trip into the target's UI thread, and setting focus can itself
+        // activate another window. A published repro exited 0 while HELLO landed in a decoy window that
+        // the target's own focus event had activated. The check before focusing is therefore not enough —
+        // the last check before injection is the one that protects the user.
+        _fakeUia.FindSingleResult = new UiElement
+        {
+            Id = "box", Selector = "box", Name = "Box", WindowHandle = 4242,
+        };
+        _fakeSystemQuery.ProcessIdForWindowResult = 1234;
+        _fakeForeground.Allow = true;
+
+        // First gate (before focus) passes; the second (after focus) denies, modelling the drift.
+        _fakeForeground.DenyOnCallNumber = 2;
+        _fakeForeground.DenyCode = UiJsonError.CodeForegroundNotTarget;
+        _fakeUia.OnFocus = () => { /* a focus handler activates a decoy window */ };
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["hello", "-a", "TestApp", "--target", "box", "--via", "send-input", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, _fakeKeyboard.SendCalls.Count,
+            "no keystrokes may be injected once the foreground drifted away from the target");
+        Assert.AreEqual(2, _fakeForeground.Calls.Count,
+            "the foreground must be verified again after focus, not only before it");
+    }
+
+    [TestMethod]
+    public async Task SendKeys_ForegroundHeldThroughFocus_Sends()
+    {
+        // The recheck must not become a false refusal on the ordinary path.
+        _fakeUia.FindSingleResult = new UiElement
+        {
+            Id = "box", Selector = "box", Name = "Box", WindowHandle = 4242,
+        };
+        _fakeSystemQuery.ProcessIdForWindowResult = 1234;
+        _fakeForeground.Allow = true;
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["hello", "-a", "TestApp", "--target", "box", "--via", "send-input", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task SendKeys_PostMessage_IsUnaffectedByTheForegroundRecheck()
+    {
+        // post-message posts straight to the target HWND's queue, so it is not foreground-sensitive and
+        // must not acquire a new refusal path.
+        _fakeUia.FindSingleResult = new UiElement
+        {
+            Id = "box", Selector = "box", Name = "Box", WindowHandle = 4242,
+        };
+        _fakeSystemQuery.ProcessIdForWindowResult = 1234;
+        _fakeForeground.Allow = false;
+
+        var command = GetRequiredService<UiSendKeysCommand>();
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, ["hello", "-a", "TestApp", "--target", "box", "--via", "post-message", "--json"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(1, _fakeKeyboard.SendCalls.Count);
+        Assert.AreEqual(0, _fakeForeground.Calls.Count, "post-message never consults the foreground guard");
     }
 }

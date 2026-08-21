@@ -57,7 +57,9 @@ internal static class DesktopTargetValidation
             return false;
         }
 
-        if (expectedProcessId > 0 && actualProcessId != (uint)expectedProcessId)
+        if (expectedProcessId > 0
+            && actualProcessId != (uint)expectedProcessId
+            && !IsOwnedByExpectedProcess(systemQuery, hwnd, expectedProcessId))
         {
             logger.LogError(
                 "{Symbol} The target window handle now belongs to a different process — refusing to {Action}.",
@@ -70,5 +72,67 @@ internal static class DesktopTargetValidation
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Maximum owner links to follow. Owner chains are short in practice (dialog → owner window); the
+    /// cap bounds the walk against a cycle produced by a torn or hostile window tree.
+    /// </summary>
+    private const int MaxOwnerChainDepth = 8;
+
+    /// <summary>
+    /// Whether <paramref name="hwnd"/> is a live window <em>owned</em> by a window belonging to
+    /// <paramref name="expectedProcessId"/>, following the <c>GW_OWNER</c> chain.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A plain PID equality check is too strict: <c>UiAutomationService.GetAllAppWindows</c> deliberately
+    /// discovers cross-process windows that the target app <em>owns</em> — common-item file pickers and
+    /// system dialogs run in another process yet are genuinely part of the app's UI, and elements found
+    /// on them are tagged with that foreign HWND. Rejecting those made every such target unreachable
+    /// after a queue wait.
+    /// </para>
+    /// <para>
+    /// This mirrors the exact association the discovery side uses (<c>GW_OWNER</c> reaching one of the
+    /// session's windows), so nothing is admitted here that discovery would not have surfaced. The
+    /// recycled-handle protection is preserved: a reused HWND belonging to an unrelated process has no
+    /// owner chain reaching the expected PID, and an owner link that leads to a dead or reused window
+    /// fails the liveness check on that link — <see cref="ISystemUiQuery.GetProcessIdForWindow"/>
+    /// returns 0 for a destroyed window and the true current PID for a recycled one.
+    /// </para>
+    /// </remarks>
+    private static bool IsOwnedByExpectedProcess(ISystemUiQuery systemQuery, long hwnd, int expectedProcessId)
+    {
+        var current = hwnd;
+        var seen = new HashSet<long>();
+
+        for (var depth = 0; depth < MaxOwnerChainDepth; depth++)
+        {
+            if (!seen.Add(current))
+            {
+                // A cycle cannot reach the expected process by any further step.
+                return false;
+            }
+
+            var owner = (long)systemQuery.GetWindowOwner(current);
+            if (owner == 0)
+            {
+                // Top of the chain: an unowned window that is not in the expected process is either a
+                // recycled handle or an unrelated window. Either way it must not be acted upon.
+                return false;
+            }
+
+            // The owner must still be alive AND still belong to the expected process. Checking the PID
+            // of the owner (rather than merely that one exists) is what keeps a recycled owner handle
+            // from laundering an unrelated window into the expected session.
+            if (systemQuery.GetProcessIdForWindow(owner) == (uint)expectedProcessId)
+            {
+                return true;
+            }
+
+            current = owner;
+        }
+
+        return false;
     }
 }

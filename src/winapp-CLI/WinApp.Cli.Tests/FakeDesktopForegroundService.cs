@@ -29,6 +29,24 @@ internal sealed class FakeDesktopForegroundService : IDesktopForegroundService
 
     public void RequestForeground(long hwnd) => ForegroundRequests.Add(hwnd);
 
+    /// <summary>
+    /// Whether <see cref="IsForeground"/> reports success. Defaults to <see langword="true"/> so the
+    /// ordinary "activation took" path is what tests get without opting in; set to
+    /// <see langword="false"/> to simulate Windows refusing the activation (focus-stealing prevention,
+    /// a decoy window grabbing focus) and prove a screen capture refuses instead of recording the
+    /// wrong window.
+    /// </summary>
+    public bool ForegroundRequestSucceeds { get; set; } = true;
+
+    /// <summary>Window handles passed to <see cref="IsForeground"/>, in order.</summary>
+    public List<long> ForegroundChecks { get; } = [];
+
+    public bool IsForeground(long hwnd)
+    {
+        ForegroundChecks.Add(hwnd);
+        return ForegroundRequestSucceeds;
+    }
+
     public bool IsMinimized(long hwnd) => AllWindowsMinimized || MinimizedWindows.Contains(hwnd);
 
     public void Restore(long hwnd) => RestoreRequests.Add(hwnd);

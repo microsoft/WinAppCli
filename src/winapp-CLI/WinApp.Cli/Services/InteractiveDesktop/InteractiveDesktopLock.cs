@@ -236,12 +236,17 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
                     await ReleaseAllSectionsAsync().ConfigureAwait(false);
                 }
             }
-            catch (OperationCanceledException) when (!bodyCompletedNormally && _waitWatch.IsRunning)
+            catch (OperationCanceledException) when (!bodyCompletedNormally)
             {
-                // Cancelled while queued: the command never reached execution, so it has no partial UI
-                // side effects and no result to preserve (spec §11.1).
+                // The body threw rather than returned, so there is no result to preserve (spec §11.1 for
+                // a queued command; §11.2 for one cancelled after acquisition, whose command semantics are
+                // "it produced nothing"). Either way the command must not renew the owner's idle grace,
+                // which the `finally` below guarantees by passing bodyCompletedNormally: false.
+                //
+                // A command that DOES have something to preserve — an active `ui record` finalizing its
+                // MP4 on Ctrl+C — returns instead of throwing, never reaches here, and still renews.
                 outcome = UiCoordinationOutcome.Cancelled;
-                EmitQueuedCancellation();
+                EmitCancellation(cancelledWhileQueued: _waitWatch.IsRunning);
                 return CancelledExitCode;
             }
             catch (UiCoordinationException)
@@ -597,7 +602,15 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
             }
         }
 
-        private void EmitQueuedCancellation()
+        /// <summary>
+        /// Emits the structured <c>cancelled</c> envelope (spec §14).
+        /// </summary>
+        /// <param name="cancelledWhileQueued">
+        /// <see langword="true"/> when the command never reached execution, which is the case that also
+        /// carries a queue position. <see langword="false"/> when it was cancelled after acquiring the
+        /// turn, where UI side effects may already have happened.
+        /// </param>
+        private void EmitCancellation(bool cancelledWhileQueued)
         {
             var waitedMs = _waitWatch.ElapsedMilliseconds;
             int? queuePosition = null;
@@ -617,10 +630,14 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
                 coordinator._logger.LogDebug("Queue position could not be read while cancelling: {Message}", ex.Message);
             }
 
+            var message = cancelledWhileQueued
+                ? "UI turn wait was cancelled."
+                : "The command was cancelled after it acquired the desktop; any UI changes it had already made remain.";
+
             UiJsonError.Emit(
                 outputMode.Json,
                 UiCoordinationErrorCodes.Cancelled,
-                "UI turn wait was cancelled.",
+                message,
                 errorOut: parseResult.InvocationConfiguration.Error,
                 coordination: new UiCoordinationInfo
                 {
@@ -630,10 +647,17 @@ internal sealed class InteractiveDesktopLock : IInteractiveDesktopLock
 
             if (!outputMode.Json && !outputMode.Quiet)
             {
-                coordinator._logger.LogWarning(
-                    "{Symbol} Cancelled while waiting {WaitedMs} ms for the desktop.",
-                    UiSymbols.Warning,
-                    waitedMs);
+                if (cancelledWhileQueued)
+                {
+                    coordinator._logger.LogWarning(
+                        "{Symbol} Cancelled while waiting {WaitedMs} ms for the desktop.",
+                        UiSymbols.Warning,
+                        waitedMs);
+                }
+                else
+                {
+                    coordinator._logger.LogWarning("{Symbol} {Message}", UiSymbols.Warning, message);
+                }
             }
         }
 

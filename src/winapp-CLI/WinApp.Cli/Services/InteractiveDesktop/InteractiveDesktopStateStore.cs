@@ -155,6 +155,18 @@ internal sealed class InteractiveDesktopStateStore(
             return RecoverCorruptState();
         }
 
+        // The schema version is read from the raw document BEFORE any typed deserialization. A newer
+        // binary may change field *shapes*, not just add fields — if `owner` became an object here and a
+        // string there, strong deserialization throws JsonException and the catch below would classify a
+        // perfectly valid newer state as corruption, quarantine it, and replace it with a version 1
+        // document. That is exactly the downgrade spec §12.4 forbids.
+        if (TryReadDeclaredVersion(raw, out var declaredVersion)
+            && declaredVersion > InteractiveDesktopState.CurrentVersion)
+        {
+            // Not corruption — a newer binary owns this file. Leave the bytes untouched.
+            return new StateReadResult(null, UnknownNewerVersion: true, RecoveredFromCorruption: false);
+        }
+
         InteractiveDesktopState? parsed;
         try
         {
@@ -173,8 +185,8 @@ internal sealed class InteractiveDesktopStateStore(
 
         if (parsed.Version > InteractiveDesktopState.CurrentVersion)
         {
-            // Not corruption — a newer binary owns this file. Never reset or downgrade it; version 1
-            // owner fields cannot be assumed to mean the same thing in a newer schema (spec §12.4).
+            // Reached when the version survived typed deserialization (an additive-only newer schema).
+            // TryReadDeclaredVersion above already caught the shape-incompatible case.
             return new StateReadResult(null, UnknownNewerVersion: true, RecoveredFromCorruption: false);
         }
 
@@ -187,6 +199,35 @@ internal sealed class InteractiveDesktopStateStore(
         parsed.OwnerCommands ??= [];
         parsed.Waiters ??= [];
         return new StateReadResult(parsed, false, false);
+    }
+
+    /// <summary>
+    /// Reads only the root <c>version</c> number, without binding any other field to a type.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately tolerant: a document that is not valid JSON, has no object root, omits
+    /// <c>version</c>, or carries a non-numeric <c>version</c> returns <see langword="false"/> so the
+    /// caller falls through to typed deserialization and the existing corruption-recovery semantics.
+    /// This method only ever *diverts* a document that positively declares a version newer than this
+    /// binary understands.
+    /// </remarks>
+    private static bool TryReadDeclaredVersion(string raw, out int version)
+    {
+        version = 0;
+
+        try
+        {
+            using var document = JsonDocument.Parse(raw);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("version", out var versionElement)
+                && versionElement.ValueKind == JsonValueKind.Number
+                && versionElement.TryGetInt32(out version);
+        }
+        catch (JsonException)
+        {
+            // Malformed JSON is genuine corruption; let the typed path report it.
+            return false;
+        }
     }
 
     /// <summary>

@@ -145,6 +145,53 @@ public class InteractiveDesktopStoreTests
         Assert.AreEqual(future, File.ReadAllText(_paths.StatePath), "the newer document must be left alone");
     }
 
+    [TestMethod]
+    public void Read_UnknownNewerVersionWithIncompatibleFieldShapes_IsNotTreatedAsCorruption()
+    {
+        // A newer schema may change field *shapes*, not merely add fields. Here `owner` is a string
+        // rather than an object, so strong deserialization throws — and the version check used to run
+        // only AFTER that, so a perfectly valid v99 document was classified as corruption, quarantined,
+        // and replaced with a v1 document. A published repro had `ui list-windows` silently downgrade
+        // the file. The version must therefore be read from the raw document first.
+        _paths.EnsureDirectories();
+        const string future = """{"version":99,"owner":"a-newer-shape","turnId":7,"nextTicket":3}""";
+        File.WriteAllText(_paths.StatePath, future);
+
+        using (var stateLock = _store.AcquireStateLock(CancellationToken.None))
+        {
+            var result = _store.Read();
+            Assert.IsTrue(result.UnknownNewerVersion, "a newer schema must be reported as such, not as corruption");
+            Assert.IsNull(result.State);
+            Assert.IsFalse(result.RecoveredFromCorruption);
+        }
+
+        Assert.AreEqual(future, File.ReadAllText(_paths.StatePath), "the newer document must be left byte-for-byte");
+        Assert.AreEqual(
+            0,
+            Directory.GetFiles(_paths.LockDirectory, "state.corrupt-*.json").Length,
+            "a newer document must never be quarantined");
+    }
+
+    [TestMethod]
+    public void Read_MalformedJson_IsStillCorruptionNotAVersionDivert()
+    {
+        // The raw version probe must not swallow genuine corruption: a document that is not JSON at all
+        // has no readable version and has to keep taking the guarded recovery path.
+        WriteRawState("{this is not json");
+
+        AssertRecovered();
+    }
+
+    [TestMethod]
+    public void Read_VersionOfTheWrongJsonType_FallsThroughToCorruptionRecovery()
+    {
+        // `version` present but not a number is malformed rather than "newer", so it must not be
+        // mistaken for a future schema and left in place forever.
+        WriteRawState("""{"version":"ninety-nine","turnId":1,"nextTicket":2}""");
+
+        AssertRecovered();
+    }
+
     // ------------------------------------------------------------------- structural validation
 
     [TestMethod]
