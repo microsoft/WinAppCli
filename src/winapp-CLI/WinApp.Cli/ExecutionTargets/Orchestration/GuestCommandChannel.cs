@@ -173,6 +173,212 @@ internal sealed class GuestCommandChannel : IAsyncDisposable
             },
             cancellationToken);
 
+    /// <summary>Lists what a managed guest location actually contains.</summary>
+    /// <remarks>
+    /// The guest's own view is authoritative. Reconciling against a host-side memory of what was
+    /// last transferred would leave a Sandbox that was restarted, or a deployment someone edited,
+    /// silently out of sync.
+    /// </remarks>
+    public async Task<IReadOnlyList<GuestFileInfo>> ListFilesAsync(
+        GuestPathScope scope,
+        CancellationToken cancellationToken)
+    {
+        var operationId = Guid.NewGuid();
+        var state = Register(operationId);
+
+        try
+        {
+            await SendAsync(
+                new GuestMessage
+                {
+                    Type = GuestMessageTypes.ListFilesRequest,
+                    OperationId = operationId.ToString(),
+                    TargetEpoch = _targetEpoch,
+                    Scope = scope,
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            return await state.Files.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _operations.TryRemove(operationId, out _);
+        }
+    }
+
+    /// <summary>Streams one file into a managed guest location and waits for it to be verified.</summary>
+    /// <remarks>
+    /// The guest verifies size and hash before publishing, so this returning successfully means the
+    /// file is present and correct — not merely that bytes were sent.
+    /// </remarks>
+    public async Task PutFileAsync(
+        GuestPathScope scope,
+        GuestFileInfo file,
+        Stream content,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(content);
+
+        var operationId = Guid.NewGuid();
+        var state = Register(operationId);
+
+        try
+        {
+            await SendAsync(
+                new GuestMessage
+                {
+                    Type = GuestMessageTypes.PutFileRequest,
+                    OperationId = operationId.ToString(),
+                    TargetEpoch = _targetEpoch,
+                    Scope = scope,
+                    File = file,
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            var buffer = new byte[GuestPayloadCodec.MaxStreamChunkSize];
+
+            while (true)
+            {
+                var read = await content.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                var payload = GuestPayloadCodec.EncodeStream(
+                    operationId,
+                    GuestStreamId.StandardInput,
+                    buffer.AsSpan(0, read));
+
+                await SendRawAsync(payload, cancellationToken).ConfigureAwait(false);
+            }
+
+            await SendAsync(
+                new GuestMessage
+                {
+                    Type = GuestMessageTypes.StdinClosed,
+                    OperationId = operationId.ToString(),
+                    TargetEpoch = _targetEpoch,
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            await state.FileCompletion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _operations.TryRemove(operationId, out _);
+        }
+    }
+
+    /// <summary>Streams one managed guest file out to <paramref name="destination"/>.</summary>
+    /// <remarks>
+    /// The caller verifies size and hash before publishing anything to a requested output path, so
+    /// an interrupted copy-back never surfaces as a partially written result.
+    /// </remarks>
+    public async Task GetFileAsync(
+        GuestPathScope scope,
+        string relativePath,
+        Stream destination,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+
+        var operationId = Guid.NewGuid();
+        var state = Register(operationId);
+        state.Callbacks = new GuestExecCallbacks(
+            OnStandardOutput: data => destination.Write(data.Span));
+
+        try
+        {
+            await SendAsync(
+                new GuestMessage
+                {
+                    Type = GuestMessageTypes.GetFileRequest,
+                    OperationId = operationId.ToString(),
+                    TargetEpoch = _targetEpoch,
+                    Scope = scope,
+                    Paths = [relativePath],
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            await state.FileCompletion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _operations.TryRemove(operationId, out _);
+        }
+    }
+
+    /// <summary>Removes paths from a managed guest location.</summary>
+    public async Task DeleteFilesAsync(
+        GuestPathScope scope,
+        IReadOnlyList<string> relativePaths,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(relativePaths);
+
+        if (relativePaths.Count == 0)
+        {
+            return;
+        }
+
+        var operationId = Guid.NewGuid();
+        var state = Register(operationId);
+
+        try
+        {
+            await SendAsync(
+                new GuestMessage
+                {
+                    Type = GuestMessageTypes.DeleteFilesRequest,
+                    OperationId = operationId.ToString(),
+                    TargetEpoch = _targetEpoch,
+                    Scope = scope,
+                    Paths = [.. relativePaths],
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            await state.FileCompletion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _operations.TryRemove(operationId, out _);
+        }
+    }
+
+    /// <summary>Discards an entire managed guest scope, for an explicit clean reinstall.</summary>
+    /// <remarks>
+    /// Scoped to one deployment's own folder. Package deployment otherwise preserves per-user
+    /// application state, so wiping anything wider would silently destroy data the user did not ask
+    /// to lose.
+    /// </remarks>
+    public async Task DeleteScopeAsync(GuestPathScope scope, CancellationToken cancellationToken)
+    {
+        var operationId = Guid.NewGuid();
+        var state = Register(operationId);
+
+        try
+        {
+            await SendAsync(
+                new GuestMessage
+                {
+                    Type = GuestMessageTypes.RemoveScopeRequest,
+                    OperationId = operationId.ToString(),
+                    TargetEpoch = _targetEpoch,
+                    Scope = scope,
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            await state.FileCompletion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _operations.TryRemove(operationId, out _);
+        }
+    }
+
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
@@ -338,6 +544,14 @@ internal sealed class GuestCommandChannel : IAsyncDisposable
                 Fail(state, error);
                 break;
 
+            case GuestMessageTypes.ListFilesResponse when message.Files is { } files:
+                state.Files.TrySetResult(files);
+                break;
+
+            case GuestMessageTypes.FileCompleted:
+                state.FileCompletion.TrySetResult(true);
+                break;
+
             default:
                 break;
         }
@@ -384,6 +598,8 @@ internal sealed class GuestCommandChannel : IAsyncDisposable
         var exception = new ExecutionTargetException(error);
         state.Completion.TrySetException(exception);
         state.Capabilities.TrySetException(exception);
+        state.Files.TrySetException(exception);
+        state.FileCompletion.TrySetException(exception);
     }
 
     /// <summary>Per-operation state owned by the receive pump.</summary>
@@ -392,6 +608,12 @@ internal sealed class GuestCommandChannel : IAsyncDisposable
         public TaskCompletionSource<int> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public TaskCompletionSource<ExecutionTargetCapabilities> Capabilities { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<IReadOnlyList<GuestFileInfo>> Files { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> FileCompletion { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public GuestExecCallbacks? Callbacks { get; set; }

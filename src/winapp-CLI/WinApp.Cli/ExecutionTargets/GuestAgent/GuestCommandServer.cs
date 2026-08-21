@@ -29,8 +29,10 @@ internal sealed class GuestCommandServer : IAsyncDisposable
     private readonly IGuestProcessHostFactory _processes;
     private readonly IGuestSessionProbe _sessionProbe;
     private readonly GuestAgentIdentity _identity;
+    private readonly GuestFileService? _files;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly ConcurrentDictionary<Guid, RunningOperation> _operations = new();
+    private readonly ConcurrentDictionary<Guid, GuestFileWrite> _writes = new();
     private bool _disposed;
 
     /// <summary>Creates a server bound to one connection and one target generation.</summary>
@@ -39,13 +41,15 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         ExecutionTargetEpoch targetEpoch,
         IGuestProcessHostFactory processes,
         IGuestSessionProbe sessionProbe,
-        GuestAgentIdentity identity)
+        GuestAgentIdentity identity,
+        GuestFileService? files = null)
     {
         _transport = transport;
         _targetEpoch = targetEpoch.Value;
         _processes = processes;
         _sessionProbe = sessionProbe;
         _identity = identity;
+        _files = files;
     }
 
     /// <summary>How long a cancelled child gets to exit before its job is terminated.</summary>
@@ -148,6 +152,11 @@ internal sealed class GuestCommandServer : IAsyncDisposable
                 {
                     forClose.Host.CloseStandardInput();
                 }
+                else if (_writes.TryRemove(operationId, out var completedWrite))
+                {
+                    // End of a file transfer: verify and publish, or report exactly how far it got.
+                    await CompleteWriteAsync(operationId, completedWrite, cancellationToken).ConfigureAwait(false);
+                }
 
                 break;
 
@@ -157,6 +166,26 @@ internal sealed class GuestCommandServer : IAsyncDisposable
                     await forCancel.CancelAsync().ConfigureAwait(false);
                 }
 
+                break;
+
+            case GuestMessageTypes.ListFilesRequest when message.Scope is { } listScope:
+                await HandleListAsync(operationId, listScope, cancellationToken).ConfigureAwait(false);
+                break;
+
+            case GuestMessageTypes.PutFileRequest when message.Scope is { } putScope && message.File is { } file:
+                BeginWrite(operationId, putScope, file);
+                break;
+
+            case GuestMessageTypes.GetFileRequest when message.Scope is { } getScope && message.Paths is [var path]:
+                await HandleGetAsync(operationId, getScope, path, cancellationToken).ConfigureAwait(false);
+                break;
+
+            case GuestMessageTypes.DeleteFilesRequest when message.Scope is { } deleteScope && message.Paths is { } paths:
+                await HandleDeleteAsync(operationId, deleteScope, paths, cancellationToken).ConfigureAwait(false);
+                break;
+
+            case GuestMessageTypes.RemoveScopeRequest when message.Scope is { } removeScope:
+                await HandleRemoveScopeAsync(operationId, removeScope, cancellationToken).ConfigureAwait(false);
                 break;
 
             default:
@@ -177,6 +206,25 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         if (stream != GuestStreamId.StandardInput)
         {
             // Output only ever flows guest to host; a host sending it is ignored.
+            return;
+        }
+
+        if (_writes.TryGetValue(operationId, out var write))
+        {
+            try
+            {
+                await write.WriteAsync(data, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ExecutionTargetException ex)
+            {
+                _writes.TryRemove(operationId, out _);
+
+                // Same ordering as the completion path: discard the partial file before reporting,
+                // so the failure the host observes is already true on disk.
+                await write.DisposeAsync().ConfigureAwait(false);
+                await SendFailureAsync(operationId, ex.Error).ConfigureAwait(false);
+            }
+
             return;
         }
 
@@ -220,6 +268,190 @@ internal sealed class GuestCommandServer : IAsyncDisposable
             },
             cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>Returns the actual contents of a managed guest location.</summary>
+    private async Task HandleListAsync(Guid operationId, GuestPathScope scope, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var files = await RequireFiles().ListAsync(scope, cancellationToken).ConfigureAwait(false);
+
+            await SendAsync(
+                new GuestMessage
+                {
+                    Type = GuestMessageTypes.ListFilesResponse,
+                    OperationId = operationId.ToString(),
+                    TargetEpoch = _targetEpoch,
+                    Files = files,
+                },
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (ExecutionTargetException ex)
+        {
+            await SendFailureAsync(operationId, ex.Error).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            await SendFailureAsync(operationId, FileFailure(ex)).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Opens a destination for an incoming file; content follows as stream frames.</summary>
+    private void BeginWrite(Guid operationId, GuestPathScope scope, GuestFileInfo file)
+    {
+        try
+        {
+            _writes[operationId] = RequireFiles().BeginWrite(scope, file);
+        }
+        catch (ExecutionTargetException ex)
+        {
+            _ = SendFailureAsync(operationId, ex.Error);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _ = SendFailureAsync(operationId, FileFailure(ex));
+        }
+    }
+
+    /// <summary>Verifies and publishes a completed transfer.</summary>
+    /// <remarks>
+    /// Cleanup happens before the outcome is reported, not in a trailing <c>finally</c>. Reporting
+    /// first would let a host that retries immediately race the temporary file it was told did not
+    /// survive — and would make "no partial file is left behind" true only eventually.
+    /// </remarks>
+    private async Task CompleteWriteAsync(Guid operationId, GuestFileWrite write, CancellationToken cancellationToken)
+    {
+        ExecutionTargetErrorInfo? failure = null;
+
+        try
+        {
+            await write.CompleteAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (ExecutionTargetException ex)
+        {
+            failure = ex.Error;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            failure = FileFailure(ex);
+        }
+
+        await write.DisposeAsync().ConfigureAwait(false);
+
+        if (failure is null)
+        {
+            await SendFileCompletedAsync(operationId, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        await SendFailureAsync(operationId, failure).ConfigureAwait(false);
+    }
+
+    /// <summary>Streams one managed guest file back to the host.</summary>
+    private async Task HandleGetAsync(
+        Guid operationId,
+        GuestPathScope scope,
+        string relativePath,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var source = RequireFiles().OpenRead(scope, relativePath);
+            var buffer = new byte[GuestPayloadCodec.MaxStreamChunkSize];
+
+            while (true)
+            {
+                var read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                var payload = GuestPayloadCodec.EncodeStream(
+                    operationId,
+                    GuestStreamId.StandardOutput,
+                    buffer.AsSpan(0, read));
+
+                await SendRawAsync(payload, cancellationToken).ConfigureAwait(false);
+            }
+
+            await SendFileCompletedAsync(operationId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ExecutionTargetException ex)
+        {
+            await SendFailureAsync(operationId, ex.Error).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            await SendFailureAsync(operationId, FileFailure(ex)).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Removes paths a reconciliation determined should no longer exist.</summary>
+    private async Task HandleDeleteAsync(
+        Guid operationId,
+        GuestPathScope scope,
+        List<string> relativePaths,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            RequireFiles().Delete(scope, relativePaths);
+            await SendFileCompletedAsync(operationId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ExecutionTargetException ex)
+        {
+            await SendFailureAsync(operationId, ex.Error).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            await SendFailureAsync(operationId, FileFailure(ex)).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Discards an entire managed scope, for an explicit clean reinstall.</summary>
+    private async Task HandleRemoveScopeAsync(
+        Guid operationId,
+        GuestPathScope scope,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            RequireFiles().RemoveScope(scope);
+            await SendFileCompletedAsync(operationId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ExecutionTargetException ex)
+        {
+            await SendFailureAsync(operationId, ex.Error).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            await SendFailureAsync(operationId, FileFailure(ex)).ConfigureAwait(false);
+        }
+    }
+
+    private Task SendFileCompletedAsync(Guid operationId, CancellationToken cancellationToken) =>        SendAsync(
+            new GuestMessage
+            {
+                Type = GuestMessageTypes.FileCompleted,
+                OperationId = operationId.ToString(),
+                TargetEpoch = _targetEpoch,
+            },
+            cancellationToken);
+
+    /// <summary>The file service, or a clear failure when this agent was built without one.</summary>
+    private GuestFileService RequireFiles() =>
+        _files ?? throw ExecutionTargetException.Create(
+            ExecutionTargetErrorCodes.TransportFailed,
+            "This guest agent was not configured with managed storage.",
+            userAction: "Retry the command.");
+
+    private static ExecutionTargetErrorInfo FileFailure(Exception ex) => new()
+    {
+        Code = ExecutionTargetErrorCodes.TransferInterrupted,
+        Message = $"A guest file operation failed: {ex.Message}",
+        UserAction = "Retry the command.",
+    };
 
     private void StartOperation(Guid operationId, GuestExecRequest request)
     {
@@ -378,6 +610,14 @@ internal sealed class GuestCommandServer : IAsyncDisposable
             {
                 // The process already died with the connection.
             }
+        }
+
+        // An unfinished transfer is discarded rather than published. A partially received file that
+        // survived would be indistinguishable from a legitimate one on the next hash comparison.
+        foreach (var (id, write) in _writes.ToArray())
+        {
+            _writes.TryRemove(id, out _);
+            await write.DisposeAsync().ConfigureAwait(false);
         }
     }
 

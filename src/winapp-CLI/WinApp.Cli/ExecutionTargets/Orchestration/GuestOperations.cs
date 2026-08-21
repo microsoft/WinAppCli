@@ -55,9 +55,70 @@ internal static class GuestMessageTypes
     /// <summary>Guest reports the process exited, with its code.</summary>
     public const string ExecCompleted = "exec-completed";
 
+    /// <summary>Host asks the guest to enumerate a managed root.</summary>
+    public const string ListFilesRequest = "list-files-request";
+
+    /// <summary>Guest returns the actual contents of a managed root.</summary>
+    public const string ListFilesResponse = "list-files-response";
+
+    /// <summary>Host announces a file it is about to stream into a managed root.</summary>
+    public const string PutFileRequest = "put-file-request";
+
+    /// <summary>Host asks the guest to stream a file out of a managed root.</summary>
+    public const string GetFileRequest = "get-file-request";
+
+    /// <summary>Host asks the guest to delete paths from a managed root.</summary>
+    public const string DeleteFilesRequest = "delete-files-request";
+
+    /// <summary>Host asks the guest to discard an entire managed scope.</summary>
+    public const string RemoveScopeRequest = "remove-scope-request";
+
+    /// <summary>Guest reports a file operation finished and verified.</summary>
+    public const string FileCompleted = "file-completed";
+
     /// <summary>Guest reports a structured failure for an operation.</summary>
     public const string OperationFailed = "operation-failed";
 }
+
+/// <summary>Managed guest roots a file operation may address.</summary>
+/// <remarks>
+/// A closed set rather than a free path is what keeps guest-provided values from selecting arbitrary
+/// destinations. The host names a root and a relative path; the guest resolves both and proves the
+/// result stays inside that root.
+/// </remarks>
+internal static class GuestRootNames
+{
+    /// <summary>Per-deployment application layout.</summary>
+    public const string Deployment = "deployment";
+
+    /// <summary>Per-operation staging for artifacts a command produced.</summary>
+    public const string Artifacts = "artifacts";
+
+    /// <summary>Staging for runtime payloads awaiting installation.</summary>
+    public const string Runtimes = "runtimes";
+
+    /// <summary>Free-form working area for <c>sandbox cp</c> and <c>sandbox exec</c>.</summary>
+    public const string Work = "work";
+}
+
+/// <summary>Where a file operation applies.</summary>
+/// <param name="Root">One of <see cref="GuestRootNames"/>.</param>
+/// <param name="Scope">
+/// Sub-identity within the root, such as a deployment ID or operation ID. Null addresses the root
+/// itself.
+/// </param>
+internal sealed record GuestPathScope(string Root, string? Scope);
+
+/// <summary>One file in a managed root.</summary>
+/// <param name="RelativePath">Path relative to the resolved root, using backslash separators.</param>
+/// <param name="Size">Length in bytes.</param>
+/// <param name="LastWriteUtcTicks">Last write time, preserved so guest timestamps stay useful.</param>
+/// <param name="Sha256">Lowercase hex content hash.</param>
+internal sealed record GuestFileInfo(
+    string RelativePath,
+    long Size,
+    long LastWriteUtcTicks,
+    string Sha256);
 
 /// <summary>A request to start one guest process.</summary>
 /// <remarks>
@@ -116,6 +177,21 @@ internal sealed class GuestMessage
 
     /// <summary>Present on <see cref="GuestMessageTypes.CapabilitiesResponse"/>.</summary>
     public ExecutionTargetCapabilities? Capabilities { get; init; }
+
+    /// <summary>Managed root and scope a file operation applies to.</summary>
+    public GuestPathScope? Scope { get; init; }
+
+    /// <summary>Present on <see cref="GuestMessageTypes.PutFileRequest"/>.</summary>
+    public GuestFileInfo? File { get; init; }
+
+    /// <summary>
+    /// Present on <see cref="GuestMessageTypes.ListFilesResponse"/>, and the paths to remove on
+    /// <see cref="GuestMessageTypes.DeleteFilesRequest"/>.
+    /// </summary>
+    public List<GuestFileInfo>? Files { get; init; }
+
+    /// <summary>Relative paths for delete and get requests.</summary>
+    public List<string>? Paths { get; init; }
 
     /// <summary>Present on <see cref="GuestMessageTypes.OperationFailed"/>.</summary>
     public ExecutionTargetErrorInfo? Error { get; init; }
