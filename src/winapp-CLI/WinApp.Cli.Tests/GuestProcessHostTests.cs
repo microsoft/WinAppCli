@@ -21,7 +21,7 @@ namespace WinApp.Cli.Tests;
 public class GuestProcessHostTests
 {
     private static string CommandInterpreter =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
+        TestPaths.SystemExecutable("cmd.exe");
 
     private sealed record Captured(StringBuilder StandardOutput, StringBuilder StandardError);
 
@@ -88,7 +88,7 @@ public class GuestProcessHostTests
         // arrived as its own value. Unicode fidelity is deliberately not asserted here: cmd's echo
         // writes in the OEM code page, so a mismatch would measure the console, not our forwarding.
         // Unicode round-tripping is covered at the protocol layer instead.
-        var script = Path.Combine(Path.GetTempPath(), $"args-{Guid.NewGuid():N}.cmd");
+        var script = TestPaths.TempFile("args", ".cmd");
         await File.WriteAllTextAsync(
             script,
             "@echo off\r\necho first=[%~1]\r\necho second=[%~2]\r\n",
@@ -170,7 +170,7 @@ public class GuestProcessHostTests
         // parse-time variable expansion getting in the way.
         var request = new GuestExecRequest
         {
-            Executable = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "findstr.exe"),
+            Executable = TestPaths.SystemExecutable("findstr.exe"),
             Arguments = ["."],
         };
 
@@ -228,19 +228,28 @@ public class GuestProcessHostTests
         // Give the kernel a moment to tear the job down.
         await Task.Delay(TimeSpan.FromSeconds(1), TestContext.CancellationTokenSource.Token);
 
-        var survivors = System.Diagnostics.Process.GetProcesses()
-            .Where(p => p.Id == processId)
-            .ToList();
+        Assert.IsFalse(
+            IsStillRunning(processId),
+            "Disposing the host must terminate the job, leaving no guest process behind.");
+    }
 
+    /// <summary>Whether a process ID still names a live process.</summary>
+    /// <remarks>
+    /// Looked up by ID rather than filtered out of <c>Process.GetProcesses()</c>: that call returns
+    /// a <see cref="System.Diagnostics.Process"/> for every process on the machine, and disposing
+    /// only the one that matched would leak the rest.
+    /// </remarks>
+    private static bool IsStillRunning(int processId)
+    {
         try
         {
-            Assert.IsTrue(
-                survivors.Count == 0 || survivors[0].HasExited,
-                "Disposing the host must terminate the job, leaving no guest process behind.");
+            using var process = System.Diagnostics.Process.GetProcessById(processId);
+            return !process.HasExited;
         }
-        finally
+        catch (ArgumentException)
         {
-            survivors.ForEach(static survivor => survivor.Dispose());
+            // No process with that ID exists, which is exactly the outcome under test.
+            return false;
         }
     }
 
@@ -249,7 +258,7 @@ public class GuestProcessHostTests
     {
         var request = new GuestExecRequest
         {
-            Executable = Path.Combine(Path.GetTempPath(), $"does-not-exist-{Guid.NewGuid():N}.exe"),
+            Executable = TestPaths.TempFile("does-not-exist", ".exe"),
             Arguments = [],
         };
 

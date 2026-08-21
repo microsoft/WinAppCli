@@ -266,10 +266,15 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
                     continue;
                 }
 
-                var candidate = Path.Combine(trimmed, ExecutableName);
+                // Route even this through the one managed-path invariant rather than combining
+                // directly. The segment is a constant here, so the check can never fire -- but the
+                // value of a central rule is that no call site is exempt from it, and a future edit
+                // that made this segment dynamic would be validated automatically instead of
+                // silently becoming the one place that was not.
+                var candidate = Orchestration.TargetPathSafety.CombineInsideRoot(trimmed, ExecutableName);
                 if (File.Exists(candidate))
                 {
-                    return Path.GetFullPath(candidate);
+                    return candidate;
                 }
             }
             catch (ArgumentException)

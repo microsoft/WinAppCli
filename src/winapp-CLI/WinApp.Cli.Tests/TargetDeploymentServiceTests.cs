@@ -23,6 +23,7 @@ public class TargetDeploymentServiceTests
 {
     private static readonly ExecutionTargetRef Target = ExecutionTargetRef.WindowsSandboxDefault;
     private static readonly ExecutionTargetEpoch Epoch = ExecutionTargetEpoch.Create("sandbox-1", "nonce-a");
+    private static readonly string[] RemovedStaleDll = ["stale.dll"];
 
     private string _root = null!;
     private string _hostSource = null!;
@@ -34,10 +35,10 @@ public class TargetDeploymentServiceTests
     [TestInitialize]
     public void Setup()
     {
-        _root = Path.Combine(Path.GetTempPath(), $"{nameof(TargetDeploymentServiceTests)}_{Guid.NewGuid():N}");
-        _hostSource = Path.Combine(_root, "host");
-        _guestManaged = Path.Combine(_root, "guest");
-        _stateRoot = Path.Combine(_root, "state");
+        _root = TestPaths.TempRoot(nameof(TargetDeploymentServiceTests));
+        _hostSource = TestPaths.Under(_root, "host");
+        _guestManaged = TestPaths.Under(_root, "guest");
+        _stateRoot = TestPaths.Under(_root, "state");
 
         Directory.CreateDirectory(_hostSource);
         Directory.CreateDirectory(_guestManaged);
@@ -61,7 +62,7 @@ public class TargetDeploymentServiceTests
     public async Task Reconcile_FirstDeployment_TransfersEverythingAndCommitsClean()
     {
         await WriteHostFileAsync("app.exe", "binary-v1");
-        await WriteHostFileAsync(Path.Combine("assets", "logo.png"), "image-v1");
+        await WriteHostFileAsync(TestPaths.Relative("assets", "logo.png"), "image-v1");
 
         await using var harness = new Harness(_guestManaged, _stateRoot);
         var result = await harness.ReconcileAsync(_hostSource, clean: false, TestContext.CancellationToken);
@@ -71,7 +72,7 @@ public class TargetDeploymentServiceTests
         Assert.IsFalse(result.State.Dirty);
 
         Assert.AreEqual("binary-v1", await ReadGuestFileAsync(result.DeploymentId, "app.exe"));
-        Assert.AreEqual("image-v1", await ReadGuestFileAsync(result.DeploymentId, Path.Combine("assets", "logo.png")));
+        Assert.AreEqual("image-v1", await ReadGuestFileAsync(result.DeploymentId, TestPaths.Relative("assets", "logo.png")));
     }
 
     [TestMethod]
@@ -86,13 +87,13 @@ public class TargetDeploymentServiceTests
         Assert.AreEqual(3, first.Plan.Added.Count);
 
         await WriteHostFileAsync("app.exe", "binary-v2");
-        File.Delete(Path.Combine(_hostSource, "stale.dll"));
+        File.Delete(TestPaths.Under(_hostSource, "stale.dll"));
 
         var second = await harness.ReconcileAsync(_hostSource, clean: false, TestContext.CancellationToken);
 
         Assert.AreEqual(0, second.Plan.Added.Count);
         Assert.AreEqual(1, second.Plan.Changed.Count);
-        CollectionAssert.AreEqual(new[] { "stale.dll" }, second.Plan.Removed.ToArray());
+        CollectionAssert.AreEqual(RemovedStaleDll, second.Plan.Removed.ToArray());
 
         Assert.AreEqual("binary-v2", await ReadGuestFileAsync(second.DeploymentId, "app.exe"));
 
@@ -106,7 +107,7 @@ public class TargetDeploymentServiceTests
     public async Task Reconcile_ContentChangeThatPreservesSizeAndTimestamp_IsStillDetected()
     {
         await WriteHostFileAsync("app.exe", "aaaa");
-        var path = Path.Combine(_hostSource, "app.exe");
+        var path = TestPaths.Under(_hostSource, "app.exe");
         var timestamp = File.GetLastWriteTimeUtc(path);
 
         await using var harness = new Harness(_guestManaged, _stateRoot);
@@ -132,7 +133,7 @@ public class TargetDeploymentServiceTests
         await using var harness = new Harness(_guestManaged, _stateRoot);
         var first = await harness.ReconcileAsync(_hostSource, clean: false, TestContext.CancellationToken);
 
-        File.Delete(Path.Combine(_hostSource, "extra.txt"));
+        File.Delete(TestPaths.Under(_hostSource, "extra.txt"));
 
         var second = await harness.ReconcileAsync(_hostSource, clean: true, TestContext.CancellationToken);
 
@@ -148,7 +149,7 @@ public class TargetDeploymentServiceTests
         await WriteHostFileAsync("app.exe", "binary-v1");
 
         await using var harness = new Harness(_guestManaged, _stateRoot);
-        var snapshot = await harness.SnapshotAsync(_hostSource, TestContext.CancellationToken);
+        var snapshot = await Harness.SnapshotAsync(_hostSource, TestContext.CancellationToken);
         var file = snapshot.Files[0];
 
         await using var content = new MemoryStream("tampered"u8.ToArray());
@@ -186,7 +187,7 @@ public class TargetDeploymentServiceTests
         // Rejecting rather than normalising is deliberate: silently rewriting an escape attempt
         // hides it.
         Assert.AreEqual(ExecutionTargetErrorCodes.DeploymentDirty, failure.Error.Code);
-        Assert.IsFalse(File.Exists(Path.Combine(_root, "escaped.txt")));
+        Assert.IsFalse(File.Exists(TestPaths.Under(_root, "escaped.txt")));
     }
 
     [TestMethod]
@@ -290,13 +291,13 @@ public class TargetDeploymentServiceTests
 
     private async Task WriteHostFileAsync(string relativePath, string contents)
     {
-        var path = Path.Combine(_hostSource, relativePath);
+        var path = TestPaths.Under(_hostSource, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await File.WriteAllTextAsync(path, contents, TestContext.CancellationToken);
     }
 
     private string GuestPath(string deploymentId, string relativePath) =>
-        Path.Combine(_guestManaged, "deployments", deploymentId, relativePath);
+        TestPaths.Under(_guestManaged, "deployments", deploymentId, relativePath);
 
     private Task<string> ReadGuestFileAsync(string deploymentId, string relativePath) =>
         File.ReadAllTextAsync(GuestPath(deploymentId, relativePath), TestContext.CancellationToken);
@@ -335,7 +336,7 @@ public class TargetDeploymentServiceTests
 
         public TargetDeploymentService Deployments { get; }
 
-        public async Task<DeploymentSnapshot> SnapshotAsync(string sourceRoot, CancellationToken cancellationToken)
+        public static async Task<DeploymentSnapshot> SnapshotAsync(string sourceRoot, CancellationToken cancellationToken)
         {
             var deploymentId = DeploymentPlanner.CreateDeploymentId(sourceRoot, originalPackageIdentity: null);
             return await DeploymentPlanner.CreateSnapshotAsync(
@@ -387,7 +388,7 @@ public class TargetDeploymentServiceTests
     {
         public DirectoryInfo GetTargetRoot(ExecutionTargetRef target, bool create)
         {
-            var directory = new DirectoryInfo(Path.Combine(root, target.Slug));
+            var directory = new DirectoryInfo(TestPaths.Under(root, target.Slug));
 
             if (create)
             {

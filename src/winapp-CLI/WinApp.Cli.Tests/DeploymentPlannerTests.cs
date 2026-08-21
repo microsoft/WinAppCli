@@ -21,7 +21,7 @@ public class DeploymentPlannerTests
     [TestInitialize]
     public void Setup()
     {
-        _root = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"Deploy_{Guid.NewGuid():N}"));
+        _root = new DirectoryInfo(TestPaths.TempRoot("Deploy"));
         _root.Create();
     }
 
@@ -36,7 +36,7 @@ public class DeploymentPlannerTests
 
     private string Write(string relativePath, string contents)
     {
-        var path = Path.Combine(_root.FullName, relativePath);
+        var path = TestPaths.Under(_root.FullName, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, contents);
         return path;

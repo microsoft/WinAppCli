@@ -21,7 +21,7 @@ public class TargetMutationLockTests
     [TestInitialize]
     public void Setup()
     {
-        _tempRoot = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"MutationLock_{Guid.NewGuid():N}"));
+        _tempRoot = new DirectoryInfo(TestPaths.TempRoot("MutationLock"));
         _tempRoot.Create();
 
         _target = ExecutionTargetRef.WindowsSandboxDefault;

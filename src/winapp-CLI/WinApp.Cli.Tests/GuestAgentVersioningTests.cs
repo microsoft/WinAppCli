@@ -201,10 +201,10 @@ public class GuestAgentInstallerTests
     [TestInitialize]
     public void Setup()
     {
-        _root = Path.Combine(Path.GetTempPath(), $"{nameof(GuestAgentInstallerTests)}_{Guid.NewGuid():N}");
+        _root = TestPaths.TempRoot(nameof(GuestAgentInstallerTests));
         Directory.CreateDirectory(_root);
 
-        _source = Path.Combine(_root, "source.bin");
+        _source = TestPaths.Under(_root, "source.bin");
         File.WriteAllText(_source, "agent-v2");
     }
 
@@ -221,7 +221,7 @@ public class GuestAgentInstallerTests
         }
     }
 
-    private string AgentRoot => Path.Combine(_root, "agent");
+    private string AgentRoot => TestPaths.Under(_root, "agent");
 
     private async Task<string> SourceHashAsync() =>
         await GuestAgentIdentity.ComputeBinaryHashAsync(_source, TestContext.CancellationToken);

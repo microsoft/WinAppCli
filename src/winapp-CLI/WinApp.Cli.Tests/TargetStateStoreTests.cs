@@ -22,7 +22,7 @@ public class TargetStateStoreTests
     {
         // An explicit per-test root keeps these tests isolated under the assembly's method-level
         // parallelism, and guarantees real state under %LOCALAPPDATA% is never touched.
-        _tempRoot = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"TargetState_{Guid.NewGuid():N}"));
+        _tempRoot = new DirectoryInfo(TestPaths.TempRoot("TargetState"));
         _tempRoot.Create();
 
         _store = new TargetStateStore(new TargetStateDirectoryProvider(_tempRoot.FullName));
