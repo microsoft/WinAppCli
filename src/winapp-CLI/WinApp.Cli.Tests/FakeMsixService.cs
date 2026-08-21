@@ -71,6 +71,29 @@ internal class FakeMsixService : IMsixService
 
     public bool EnsureRuntimeInstalledResult { get; set; } = true;
 
+    /// <summary>Records each <see cref="MaterializeLooseLayoutAsync"/> call's manifest and output folder.</summary>
+    public List<(string Manifest, string OutputDirectory)> MaterializeLooseLayoutCalls { get; } = [];
+
+    /// <inheritdoc/>
+    public Task<MsixIdentityResult> MaterializeLooseLayoutAsync(
+        FileInfo appxManifestPath,
+        DirectoryInfo inputDirectory,
+        DirectoryInfo outputAppXDirectory,
+        TaskContext taskContext,
+        string? executable = null,
+        FileInfo? projectFile = null,
+        string? framework = null,
+        bool noRestore = false,
+        CancellationToken cancellationToken = default)
+    {
+        MaterializeLooseLayoutCalls.Add((appxManifestPath.FullName, outputAppXDirectory.FullName));
+        if (ExceptionToThrow != null)
+        {
+            throw ExceptionToThrow;
+        }
+        return Task.FromResult(FakeIdentityResult);
+    }
+
     public Task<bool> EnsureWindowsAppRuntimeInstalledAsync(
         FileInfo? projectFile,
         string? architecture,
