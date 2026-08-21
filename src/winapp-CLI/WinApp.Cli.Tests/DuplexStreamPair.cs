@@ -24,15 +24,17 @@ internal static class DuplexStreamPair
 
     /// <summary>An unbounded byte queue supporting one reader and one writer.</summary>
     /// <remarks>
-    /// The semaphore is a "something changed" signal, not a byte counter. Readers always re-check
-    /// the queue under the lock after waking, so a spurious wake-up is harmless — whereas counting
-    /// bytes with permits is easy to get subtly wrong and would surface as a phantom end-of-stream.
+    /// Waiting uses a replaceable <see cref="TaskCompletionSource"/> rather than a semaphore: the
+    /// waiter captures the current signal <em>inside</em> the lock before releasing it, so a write
+    /// that lands between the emptiness check and the await cannot be missed. It also keeps this
+    /// type free of disposable state, which matters because both ends share the same pipes and
+    /// neither may dispose state the other still needs.
     /// </remarks>
     private sealed class BlockingPipe
     {
         private readonly Queue<byte> _buffer = new();
-        private readonly SemaphoreSlim _signal = new(0);
         private readonly Lock _gate = new();
+        private TaskCompletionSource _signal = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private bool _completed;
 
         public void Write(ReadOnlySpan<byte> data)
@@ -72,6 +74,7 @@ internal static class DuplexStreamPair
 
             while (true)
             {
+                Task wait;
                 lock (_gate)
                 {
                     if (_buffer.Count > 0)
@@ -87,24 +90,27 @@ internal static class DuplexStreamPair
 
                     if (_completed)
                     {
-                        // Completed and drained: report end of stream. Re-signal so every later
-                        // read observes the same result instead of blocking forever.
-                        Signal();
+                        // Completed and drained: end of stream, and every later read agrees.
                         return 0;
                     }
+
+                    wait = _signal.Task;
                 }
 
-                await _signal.WaitAsync(cancellationToken).ConfigureAwait(false);
+                await wait.WaitAsync(cancellationToken).ConfigureAwait(false);
             }
         }
 
         private void Signal()
         {
-            // At most one outstanding permit is needed; readers re-check state under the lock.
-            if (_signal.CurrentCount == 0)
+            TaskCompletionSource previous;
+            lock (_gate)
             {
-                _signal.Release();
+                previous = _signal;
+                _signal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             }
+
+            previous.TrySetResult();
         }
     }
 

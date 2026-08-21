@@ -8,6 +8,7 @@ using System.CommandLine.Invocation;
 using System.Diagnostics.CodeAnalysis;
 using WinApp.Cli.Commands;
 using WinApp.Cli.ExecutionTargets.Orchestration;
+using WinApp.Cli.ExecutionTargets.WindowsSandbox;
 using WinApp.Cli.Services;
 using WinApp.Cli.Services.Controls;
 
@@ -77,7 +78,9 @@ internal static class StoreHostBuilderExtensions
             // Execution targets (Windows Sandbox and any future target)
             .AddSingleton<ITargetStateDirectoryProvider>(_ => new TargetStateDirectoryProvider())
             .AddSingleton<ITargetStateStore, TargetStateStore>()
-            .AddSingleton<ITargetMutationLock, TargetMutationLock>();
+            .AddSingleton<ITargetMutationLock, TargetMutationLock>()
+            .AddSingleton<IWindowsSandboxCli, WindowsSandboxCli>()
+            .AddSingleton<WindowsSandboxLifecycle>();
     }
 
     public static IServiceCollection ConfigureCommands(this IServiceCollection serviceCollection)
