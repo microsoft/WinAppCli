@@ -161,22 +161,11 @@ internal static class DotNetRuntimeInstaller
         ArgumentNullException.ThrowIfNull(requirement);
         ArgumentNullException.ThrowIfNull(probeRoots);
 
-        Version? best = null;
-
-        foreach (var root in probeRoots)
-        {
-            foreach (var version in DotNetLayout
-                .InstalledVersions(root, requirement.Name)
-                .Where(requirement.IsSatisfiedBy))
-            {
-                if (best is null || version > best)
-                {
-                    best = version;
-                }
-            }
-        }
-
-        return best;
+        return probeRoots
+            .SelectMany(root => DotNetLayout.InstalledVersions(root, requirement.Name))
+            .Where(requirement.IsSatisfiedBy)
+            .OrderByDescending(version => version)
+            .FirstOrDefault();
     }
 
     /// <summary>
