@@ -68,21 +68,21 @@ internal static class DotNetLayout
     {
         // DOTNET_ROOT first, and exclusively when it is set: that is the apphost's own precedence,
         // and mirroring it is what keeps a verification result equal to what the launch will find.
-        foreach (var variable in (string[])["DOTNET_ROOT", "DOTNET_ROOT(x86)", "DOTNET_ROOT_X64", "DOTNET_ROOT_ARM64"])
+        foreach (var root in ((string[])
+            ["DOTNET_ROOT", "DOTNET_ROOT(x86)", "DOTNET_ROOT_X64", "DOTNET_ROOT_ARM64"])
+            .Select(Environment.GetEnvironmentVariable)
+            .OfType<string>()
+            .Where(value => value.Length > 0))
         {
-            if (Environment.GetEnvironmentVariable(variable) is { Length: > 0 } root)
-            {
-                yield return root;
-            }
+            yield return root;
         }
 
-        foreach (var folder in (Environment.SpecialFolder[])
+        foreach (var programFiles in ((Environment.SpecialFolder[])
             [Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86])
+            .Select(Environment.GetFolderPath)
+            .Where(value => value.Length > 0))
         {
-            if (Environment.GetFolderPath(folder) is { Length: > 0 } programFiles)
-            {
-                yield return Path.Join(programFiles, "dotnet");
-            }
+            yield return Path.Join(programFiles, "dotnet");
         }
 
         // A per-user install, which is what the dotnet-install script produces by default.
@@ -107,9 +107,9 @@ internal static class DotNetLayout
     {
         foreach (var framework in SafeDirectories(Path.Join(root, SharedFolder)))
         {
-            foreach (var version in SafeDirectories(framework))
+            foreach (var probe in SafeDirectories(framework)
+                .Select(version => Path.Join(version, "hostpolicy.dll")))
             {
-                var probe = Path.Join(version, "hostpolicy.dll");
                 if (!File.Exists(probe))
                 {
                     continue;

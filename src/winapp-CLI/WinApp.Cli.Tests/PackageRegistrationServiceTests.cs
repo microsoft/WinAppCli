@@ -408,7 +408,7 @@ public class PackageRegistrationServiceTests
         };
 
         await svc.InstallPackageAsync(
-            Path.Combine(Path.GetTempPath(), "winapp-pkg", "runtime.msix"),
+            TestPaths.Under(Path.GetTempPath(), "winapp-pkg", "runtime.msix"),
             forceApplicationShutdown: false);
 
         Assert.IsFalse(capturedForceShutdown);

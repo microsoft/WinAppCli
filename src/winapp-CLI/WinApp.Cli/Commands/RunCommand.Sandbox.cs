@@ -77,7 +77,7 @@ internal partial class RunCommand
                         {
                             throw;
                         }
-                        catch (Exception ex)
+                        catch (Exception ex) when (ex is not OperationCanceledException)
                         {
                             materializeError = ex.Message;
                             return (1, $"{UiSymbols.Error} Failed to prepare the application: {ex.Message}");
