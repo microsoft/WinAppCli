@@ -88,6 +88,17 @@ happen on the host, so it does not make an untrusted project safe to open. Every
 Sandbox is one trust boundary: apps sharing it share the user account, desktop, registry, runtimes,
 and network, and can interfere with one another.
 
+**Shared runtimes are provisioned from your caches.** Before deploying, winapp reads the app's
+package-manifest dependencies, unpackaged Windows App SDK version from `*.deps.json`, and
+`*.runtimeconfig.json`, then stages and installs what the Sandbox is missing — never on your machine,
+and never over a version already registered. A Windows App
+Runtime dependency brings its whole cached inventory (Framework, DDLM, Main, Singleton), and shared
+.NET runtimes are unpacked from official runtime packs into a per-user .NET root inside the guest,
+with the app launched against it. The complete graph is verified before every launch, because
+`sandbox exec` can change guest runtime state between runs. Anything that cannot be satisfied fails
+with `sandbox_runtime_provision_failed` naming it, before launch. Publishing self-contained avoids
+the requirement entirely.
+
 **winapp never touches a Sandbox it did not create.** If one is already running, the command reports
 its ID and stops; stopping it is the user's decision. winapp also never shuts a Sandbox down on its
 own — use `wsb list`, `wsb connect --id <id>`, `wsb stop --id <id>`.
@@ -109,6 +120,7 @@ capabilities.
 | `sandbox_deployment_dirty` | The guest copy is incomplete, so it will not launch | Run the command again to redeploy completely |
 | `sandbox_transfer_interrupted` | A transfer stopped; nothing was published | Retry. The error names the artifact, expected size, and what arrived |
 | `sandbox_agent_incompatible` | The guest agent needs a newer winapp | `winapp update` |
+| `sandbox_runtime_provision_failed` | A runtime the app requires is missing from the Sandbox | The error names it. Publish self-contained, or install it with `winapp sandbox exec` |
 
 Infrastructure failures use codes distinct from your app's exit codes, so "winapp could not run your
 app" is always distinguishable from "your app failed".

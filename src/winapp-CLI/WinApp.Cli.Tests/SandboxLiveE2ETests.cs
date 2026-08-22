@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Diagnostics;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.Orchestration;
 using WinApp.Cli.ExecutionTargets.WindowsSandbox;
@@ -29,10 +30,14 @@ namespace WinApp.Cli.Tests;
 /// </para>
 /// </remarks>
 [TestClass]
+[DoNotParallelize]
 public class SandboxLiveE2ETests
 {
     /// <summary>Set to <c>1</c> to run these tests.</summary>
     internal const string GateVariable = "WINAPP_SANDBOX_E2E";
+
+    /// <summary>Architecture-matched NativeAOT winapp binary staged into the guest.</summary>
+    internal const string BinaryVariable = "WINAPP_SANDBOX_E2E_BINARY";
 
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromMinutes(10);
 
@@ -45,6 +50,13 @@ public class SandboxLiveE2ETests
         {
             Assert.Inconclusive(
                 $"Set {GateVariable}=1 on a machine with Windows Sandbox to run live execution-target coverage.");
+        }
+
+        if (Environment.GetEnvironmentVariable(BinaryVariable) is not { Length: > 0 } binary ||
+            !File.Exists(binary))
+        {
+            Assert.Inconclusive(
+                $"Set {BinaryVariable} to the architecture-matched NativeAOT winapp.exe built for the guest.");
         }
     }
 
@@ -80,10 +92,15 @@ public class SandboxLiveE2ETests
     {
         await SkipIfUnsupportedOrOccupiedAsync();
 
-        var orchestrator = new ExecutionTargetOrchestrator(CreateBackend(), new TargetMutationLock(new TargetStateDirectoryProvider()));
+        var provider = new TargetStateDirectoryProvider();
+        var orchestrator = new ExecutionTargetOrchestrator(
+            CreateBackend(),
+            new TargetMutationLock(provider),
+            new TargetConnectionLock(provider));
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
         timeout.CancelAfter(CommandTimeout);
+        var foregroundBefore = Windows.Win32.PInvoke.GetForegroundWindow();
 
         try
         {
@@ -95,6 +112,10 @@ public class SandboxLiveE2ETests
                 Assert.IsFalse(cold.Reused, "The first prepare on an empty machine is a cold start.");
                 Assert.IsNotNull(cold.Capabilities.ManagedRoot, "The guest must report where it stores deployments.");
                 Assert.IsTrue(cold.Capabilities.SupportsInteractiveDesktop);
+                Assert.AreEqual(
+                    foregroundBefore,
+                    Windows.Win32.PInvoke.GetForegroundWindow(),
+                    "Preparing the Sandbox must not change the host foreground window.");
 
                 firstEpoch = cold.Epoch.Value;
 
@@ -131,7 +152,11 @@ public class SandboxLiveE2ETests
     {
         await SkipIfUnsupportedOrOccupiedAsync();
 
-        var orchestrator = new ExecutionTargetOrchestrator(CreateBackend(), new TargetMutationLock(new TargetStateDirectoryProvider()));
+        var provider = new TargetStateDirectoryProvider();
+        var orchestrator = new ExecutionTargetOrchestrator(
+            CreateBackend(),
+            new TargetMutationLock(provider),
+            new TargetConnectionLock(provider));
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
         timeout.CancelAfter(CommandTimeout);
@@ -177,17 +202,239 @@ public class SandboxLiveE2ETests
         }
     }
 
+    [TestMethod]
+    public async Task PackagedFrameworkDependentWinUi_RunsAndAutomatesEndToEnd()
+    {
+        await SkipIfUnsupportedOrOccupiedAsync();
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromMinutes(15));
+
+        var root = FindRepositoryRoot();
+        var project = Path.Join(root, "samples", "winui-app", "winui-app.csproj");
+        var artifacts = TestPaths.TempRoot(nameof(PackagedFrameworkDependentWinUi_RunsAndAutomatesEndToEnd));
+        var screenshot = TestPaths.Under(artifacts, "sandbox.png");
+        var recording = TestPaths.Under(artifacts, "sandbox.mp4");
+        Directory.CreateDirectory(artifacts);
+
+        var architecture = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture ==
+            System.Runtime.InteropServices.Architecture.Arm64
+                ? "arm64"
+                : "x64";
+
+        try
+        {
+            var launched = await RunCliAsync(
+                [
+                    "run", project, "--sandbox", "--arch", architecture, "--detach", "--json",
+                ],
+                timeout.Token);
+            AssertCommandSucceeded(launched, "packaged WinUI launch");
+            StringAssert.Contains(launched.StandardOutput, "\"Sandbox\": true");
+
+            var inspect = await RunCliAsync(
+                ["ui", "inspect", "--sandbox", "-a", "winui-app", "--interactive"],
+                timeout.Token);
+            AssertCommandSucceeded(inspect, "guest UI inspection");
+            StringAssert.Contains(inspect.StandardOutput, "CounterButton");
+
+            AssertCommandSucceeded(
+                await RunCliAsync(
+                    ["ui", "set-value", "--sandbox", "TextInput", "Sandbox hello", "-a", "winui-app"],
+                    timeout.Token),
+                "guest text input");
+            AssertCommandSucceeded(
+                await RunCliAsync(
+                    ["ui", "invoke", "--sandbox", "FeatureToggle", "-a", "winui-app"],
+                    timeout.Token),
+                "guest toggle input");
+            AssertCommandSucceeded(
+                await RunCliAsync(
+                    ["ui", "invoke", "--sandbox", "SubmitButton", "-a", "winui-app"],
+                    timeout.Token),
+                "guest submit input");
+            AssertCommandSucceeded(
+                await RunCliAsync(
+                    [
+                        "ui", "wait-for", "--sandbox", "ResultDisplay", "-a", "winui-app",
+                        "--property", "Name", "--value", "Submitted: Sandbox hello (Feature: On)",
+                        "--timeout", "10000",
+                    ],
+                    timeout.Token),
+                "guest UI postcondition");
+
+            var captured = await RunCliAsync(
+                ["ui", "screenshot", "--sandbox", "-a", "winui-app", "-o", screenshot, "--json"],
+                timeout.Token);
+            AssertCommandSucceeded(captured, "guest screenshot");
+            Assert.IsTrue(File.Exists(screenshot));
+            Assert.IsGreaterThan(1024L, new FileInfo(screenshot).Length);
+            StringAssert.Contains(captured.StandardOutput, screenshot.Replace(@"\", @"\\"));
+
+            var recorded = await RunCliAsync(
+                [
+                    "ui", "record", "--sandbox", "-a", "winui-app", "--duration-sec", "2",
+                    "-o", recording, "--json",
+                ],
+                timeout.Token);
+            AssertCommandSucceeded(recorded, "guest recording");
+            Assert.IsTrue(File.Exists(recording));
+            Assert.IsGreaterThan(1024L, new FileInfo(recording).Length);
+
+            var store = new TargetStateStore(new TargetStateDirectoryProvider());
+            var previous = store.Read(ExecutionTargetRef.WindowsSandboxDefault)!;
+            await CreateCli().StopAsync(previous.InstanceId!, timeout.Token);
+            await WaitForNoSandboxAsync(timeout.Token);
+
+            var recovered = await RunCliAsync(
+                ["sandbox", "exec", "--", "cmd.exe", "/c", "echo", "recovered-after-stop"],
+                timeout.Token);
+            AssertCommandSucceeded(recovered, "external-stop recovery");
+            StringAssert.Contains(recovered.StandardOutput, "recovered-after-stop");
+
+            var replacement = store.Read(ExecutionTargetRef.WindowsSandboxDefault)!;
+            Assert.AreNotEqual(previous.InstanceId, replacement.InstanceId);
+            Assert.AreNotEqual(previous.BootNonce, replacement.BootNonce);
+        }
+        finally
+        {
+            TryDeleteDirectory(artifacts);
+            await StopOwnedSandboxAsync();
+        }
+    }
+
     private static string Sha256(byte[] content) =>
         Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)).ToLowerInvariant();
 
     private static WindowsSandboxCli CreateCli() => new(new ProcessRunner());
+
+    private static async Task<ProcessRunResult> RunCliAsync(
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken)
+    {
+        var captureRoot = Path.Join(Path.GetTempPath(), "winapp-live-capture");
+        Directory.CreateDirectory(captureRoot);
+        var token = Guid.NewGuid().ToString("N");
+        var outputPath = Path.Join(captureRoot, $"{token}.out");
+        var errorPath = Path.Join(captureRoot, $"{token}.err");
+        var scriptPath = Path.Join(captureRoot, $"{token}.cmd");
+        var binary = Environment.GetEnvironmentVariable(BinaryVariable)!;
+        var command = WindowsCommandLine.JoinArguments([binary, .. arguments])!;
+        var outputArgument = WindowsCommandLine.JoinArguments([outputPath])!;
+        var errorArgument = WindowsCommandLine.JoinArguments([errorPath])!;
+        await File.WriteAllTextAsync(
+            scriptPath,
+            $"@echo off\r\n{command} 1>{outputArgument} 2>{errorArgument}\r\nexit /b %errorlevel%\r\n",
+            cancellationToken);
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = Environment.GetEnvironmentVariable("ComSpec")!,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        startInfo.ArgumentList.Add("/d");
+        startInfo.ArgumentList.Add("/c");
+        startInfo.ArgumentList.Add(scriptPath);
+
+        try
+        {
+            using var process = Process.Start(startInfo)
+                ?? throw new InvalidOperationException("Could not start the live-test winapp binary.");
+            await process.WaitForExitAsync(cancellationToken);
+            await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
+
+            return new ProcessRunResult(
+                process.ExitCode,
+                ReadSharedText(outputPath),
+                ReadSharedText(errorPath));
+        }
+        finally
+        {
+            TryDeleteFile(outputPath);
+            TryDeleteFile(errorPath);
+            TryDeleteFile(scriptPath);
+        }
+    }
+
+    private static string ReadSharedText(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return string.Empty;
+        }
+
+        using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The persistent WSB child can retain the redirected handle until target cleanup.
+        }
+    }
+
+    private static void AssertCommandSucceeded(ProcessRunResult result, string operation)
+    {
+        Assert.AreEqual(
+            0,
+            result.ExitCode,
+            $"{operation} failed.{Environment.NewLine}stdout:{Environment.NewLine}{result.StandardOutput}" +
+            $"{Environment.NewLine}stderr:{Environment.NewLine}{result.StandardError}");
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Join(directory.FullName, "scripts", "build-cli.ps1")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Could not locate the winapp repository root.");
+    }
+
+    private static async Task WaitForNoSandboxAsync(CancellationToken cancellationToken)
+    {
+        while ((await CreateCli().ListAsync(cancellationToken)).Count > 0)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
+        }
+    }
 
     private static WindowsSandboxBackend CreateBackend()
     {
         var cli = CreateCli();
         var provider = new TargetStateDirectoryProvider();
 
-        return new WindowsSandboxBackend(cli, new WindowsSandboxLifecycle(cli, new TargetStateStore(provider)), provider);
+        return new WindowsSandboxBackend(
+            cli,
+            new WindowsSandboxLifecycle(cli, new TargetStateStore(provider)),
+            provider,
+            new FixedHostBinaryProvider(
+                new FileInfo(Environment.GetEnvironmentVariable(BinaryVariable)!)),
+            new WindowsSandboxWindowController());
+    }
+
+    private sealed class FixedHostBinaryProvider(FileInfo binary) : IHostWinappBinaryProvider
+    {
+        public FileInfo GetBinary() => binary;
     }
 
     /// <summary>

@@ -2,10 +2,12 @@
 // Licensed under the MIT License.
 
 using System.Globalization;
+using System.Net;
 using System.Net.Sockets;
 using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.GuestAgent;
 using WinApp.Cli.ExecutionTargets.Orchestration;
+using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.ExecutionTargets.WindowsSandbox;
 
@@ -29,7 +31,9 @@ namespace WinApp.Cli.ExecutionTargets.WindowsSandbox;
 internal sealed class WindowsSandboxBackend(
     IWindowsSandboxCli cli,
     WindowsSandboxLifecycle lifecycle,
-    ITargetStateDirectoryProvider directoryProvider) : IExecutionTargetBackend
+    ITargetStateDirectoryProvider directoryProvider,
+    IHostWinappBinaryProvider hostBinaryProvider,
+    IWindowsSandboxWindowController windowController) : IExecutionTargetBackend
 {
     /// <summary>Guest path the read-only bootstrap folder is mapped to.</summary>
     internal const string GuestBootstrapPath = @"C:\WinAppBootstrap";
@@ -43,8 +47,14 @@ internal sealed class WindowsSandboxBackend(
     /// <summary>Host folder name for the writable bootstrap-result share.</summary>
     private const string ResultFolder = "bootstrap-result";
 
+    /// <summary>Native image encoder shipped beside the AOT CLI.</summary>
+    private const string SkiaCompanionName = "libSkiaSharp.dll";
+
     /// <summary>How long the host waits for the agent to publish a readiness heartbeat.</summary>
     internal static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromMinutes(3);
+
+    /// <summary>Delay while the connected client is still establishing the interactive login.</summary>
+    internal static readonly TimeSpan AgentLaunchRetryDelay = TimeSpan.FromMilliseconds(500);
 
     /// <summary>Most files the untrusted result folder may contain before it is refused.</summary>
     internal const int MaxResultFiles = 16;
@@ -54,6 +64,7 @@ internal sealed class WindowsSandboxBackend(
 
     private string? _instanceId;
     private string? _guestAddress;
+    private GuestBootstrapMaterial? _activeMaterial;
 
     /// <inheritdoc/>
     public ExecutionTargetRef Target => ExecutionTargetRef.WindowsSandboxDefault;
@@ -106,7 +117,37 @@ internal sealed class WindowsSandboxBackend(
         var lease = await lifecycle.EnsureInstanceAsync(cancellationToken).ConfigureAwait(false);
         _instanceId = lease.InstanceId;
 
+        if (lease.Reused &&
+            _guestAddress is { } activeAddress &&
+            _activeMaterial is { } activeMaterial &&
+            string.Equals(activeMaterial.TargetEpoch, lease.Epoch.Value, StringComparison.Ordinal))
+        {
+            try
+            {
+                var reusedTransport = await GuestTcpTransport
+                    .ConnectAsync(activeAddress, activeMaterial, cancellationToken)
+                    .ConfigureAwait(false);
+
+                return new TargetConnection(lease.Epoch, reusedTransport, Reused: true);
+            }
+            catch (ExecutionTargetException ex) when (
+                ex.Error.Code == ExecutionTargetErrorCodes.TransportFailed)
+            {
+                // The same Sandbox is alive but its agent is not. Repair only that layer below;
+                // deployment/runtime state stays fenced by the unchanged epoch.
+                _activeMaterial = null;
+            }
+        }
+
         var bootstrap = PrepareBootstrapDirectories(lease.Epoch);
+        var agentHash = await StageBootstrapBinaryAsync(bootstrap.HostBootstrap, cancellationToken)
+            .ConfigureAwait(false);
+
+        var material = GuestBootstrapMaterial.Create(Target, lease.Epoch, port: 0);
+        await File.WriteAllTextAsync(
+            Path.Join(bootstrap.HostBootstrap, GuestBootstrapMaterial.FileName),
+            material.ToJson(),
+            cancellationToken).ConfigureAwait(false);
 
         // Read-only: the guest must not be able to rewrite the connection material and redirect its
         // own agent. The result folder is the only writable path, and it is bounded and treated as
@@ -124,7 +165,11 @@ internal sealed class WindowsSandboxBackend(
         // agent is launched rather than after.
         if (options.RequireInteractiveDesktop || !lease.Reused)
         {
+            var windowSnapshot = windowController.Capture();
             await cli.ConnectAsync(lease.InstanceId, cancellationToken).ConfigureAwait(false);
+            await windowController
+                .PlaceConnectedClientAsync(windowSnapshot, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         // Once per generation, before the first application is ever deployed. Registering a loose
@@ -136,23 +181,38 @@ internal sealed class WindowsSandboxBackend(
             await EnableGuestDevelopmentModeAsync(lease.InstanceId, cancellationToken).ConfigureAwait(false);
         }
 
-        var material = GuestBootstrapMaterial.Create(Target, lease.Epoch, port: 0);
-        await File.WriteAllTextAsync(
-            Path.Join(bootstrap.HostBootstrap, GuestBootstrapMaterial.FileName),
-            material.ToJson(),
+        var heartbeat = await LaunchReadyAgentAsync(
+            lease.InstanceId,
+            bootstrap.HostResult,
+            lease.Epoch,
             cancellationToken).ConfigureAwait(false);
 
-        await LaunchAgentAsync(lease.InstanceId, cancellationToken).ConfigureAwait(false);
+        if (!string.Equals(heartbeat.BinaryHash, agentHash, StringComparison.OrdinalIgnoreCase))
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.AgentIncompatible,
+                "The Windows Sandbox agent is not the winapp binary this host staged.",
+                userAction: "Close Windows Sandbox, then retry so winapp starts a fresh guest agent.",
+                context: new Dictionary<string, string>
+                {
+                    ["expectedHash"] = agentHash,
+                    ["actualHash"] = heartbeat.BinaryHash,
+                });
+        }
 
-        var heartbeat = await WaitForHeartbeatAsync(bootstrap.HostResult, lease.Epoch, cancellationToken)
-            .ConfigureAwait(false);
+        await AllowGuestAgentConnectionAsync(
+            lease.InstanceId,
+            heartbeat.Port,
+            cancellationToken).ConfigureAwait(false);
 
         _guestAddress = await cli.GetIpAddressAsync(lease.InstanceId, cancellationToken).ConfigureAwait(false);
 
+        var connectedMaterial = material with { Port = heartbeat.Port };
         var transport = await GuestTcpTransport.ConnectAsync(
             _guestAddress,
-            material with { Port = heartbeat.Port },
+            connectedMaterial,
             cancellationToken).ConfigureAwait(false);
+        _activeMaterial = connectedMaterial;
 
         // The result folder has served its purpose and is guest-writable, so it does not survive the
         // handshake it was created for.
@@ -179,30 +239,134 @@ internal sealed class WindowsSandboxBackend(
         return description;
     }
 
-    /// <summary>Creates this generation's bootstrap folders, discarding any previous contents.</summary>
+    /// <summary>Creates this generation's bootstrap folders without replacing mapped roots.</summary>
     private (string HostBootstrap, string HostResult) PrepareBootstrapDirectories(ExecutionTargetEpoch epoch)
     {
         var root = directoryProvider.GetTargetRoot(Target, create: true).FullName;
         var bootstrap = TargetPathSafety.CombineInsideRoot(root, BootstrapFolder);
         var result = TargetPathSafety.CombineInsideRoot(root, ResultFolder);
 
-        // A fresh start per generation: material from a previous boot authenticates nothing, and
-        // leaving it around only invites a confusing failure later.
-        RecreateDirectory(bootstrap);
-        RecreateDirectory(result);
+        // WSB holds mapped folder roots open for the lifetime of the Sandbox. Keep those exact roots
+        // and replace their bounded contents instead; deleting a mapped root makes warm reuse fail
+        // with ERROR_SHARING_VIOLATION before it can reconnect to the live agent.
+        Directory.CreateDirectory(bootstrap);
+        Directory.CreateDirectory(result);
+        ClearDirectoryContents(result);
 
         _ = epoch;
         return (bootstrap, result);
     }
 
-    private static void RecreateDirectory(string path)
+    private static void ClearDirectoryContents(string path)
     {
-        if (Directory.Exists(path))
+        if (!Directory.Exists(path))
         {
-            Directory.Delete(path, recursive: true);
+            return;
         }
 
-        Directory.CreateDirectory(path);
+        foreach (var file in Directory.GetFiles(path))
+        {
+            File.Delete(file);
+        }
+
+        foreach (var directory in Directory.GetDirectories(path))
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    /// <summary>Publishes the host binary into the read-only bootstrap share and returns its hash.</summary>
+    private async Task<string> StageBootstrapBinaryAsync(
+        string bootstrapDirectory,
+        CancellationToken cancellationToken)
+    {
+        var source = hostBinaryProvider.GetBinary();
+        var expected = await StageBootstrapFileAsync(
+            source,
+            TargetPathSafety.CombineInsideRoot(bootstrapDirectory, GuestAgentInstaller.BinaryName),
+            cancellationToken).ConfigureAwait(false);
+
+        var companion = new FileInfo(Path.Join(source.DirectoryName, SkiaCompanionName));
+        if (companion.Exists)
+        {
+            await StageBootstrapFileAsync(
+                companion,
+                TargetPathSafety.CombineInsideRoot(bootstrapDirectory, SkiaCompanionName),
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        return expected;
+    }
+
+    /// <summary>Atomically stages and verifies one trusted host runtime file.</summary>
+    private static async Task<string> StageBootstrapFileAsync(
+        FileInfo source,
+        string destination,
+        CancellationToken cancellationToken)
+    {
+        var staged = $"{destination}.{Guid.NewGuid():N}.tmp";
+
+        try
+        {
+            var expected = await GuestAgentIdentity
+                .ComputeBinaryHashAsync(source.FullName, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (File.Exists(destination))
+            {
+                var existing = await GuestAgentIdentity
+                    .ComputeBinaryHashAsync(destination, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (string.Equals(expected, existing, StringComparison.OrdinalIgnoreCase))
+                {
+                    return expected;
+                }
+            }
+
+            await using (var input = new FileStream(
+                source.FullName,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read | FileShare.Delete,
+                bufferSize: 128 * 1024,
+                useAsync: true))
+            await using (var output = new FileStream(
+                staged,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 128 * 1024,
+                useAsync: true))
+            {
+                await input.CopyToAsync(output, cancellationToken).ConfigureAwait(false);
+            }
+
+            var actual = await GuestAgentIdentity
+                .ComputeBinaryHashAsync(staged, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
+            {
+                throw ExecutionTargetException.Create(
+                    ExecutionTargetErrorCodes.AgentUpgradeFailed,
+                    $"The Windows Sandbox runtime file '{source.Name}' changed while it was staged.",
+                    userAction: "Retry the command. If it keeps failing, reinstall winapp.",
+                    context: new Dictionary<string, string>
+                    {
+                        ["expectedHash"] = expected,
+                        ["actualHash"] = actual,
+                    });
+            }
+
+            File.Move(staged, destination, overwrite: true);
+            return expected;
+        }
+        catch
+        {
+            AtomicFile.DiscardStaged(staged);
+            throw;
+        }
     }
 
     /// <summary>
@@ -244,10 +408,69 @@ internal sealed class WindowsSandboxBackend(
                     exitCode);
             }
         }
+
         catch (ExecutionTargetException ex)
         {
             System.Diagnostics.Trace.TraceWarning(
                 "Could not enable Developer Mode in Windows Sandbox: {0}", ex.Message);
+        }
+    }
+
+    /// <summary>Allows inbound TCP only to the staged guest agent on its validated listening port.</summary>
+    /// <remarks>
+    /// Windows Sandbox blocks the host-to-guest connection by default. This is the second and only
+    /// other privileged bootstrap operation: the executable, direction, protocol, action, and
+    /// profile are constants; the sole dynamic value is the integer port the verified heartbeat
+    /// published. Authentication and encryption still gate every request after the socket opens.
+    /// </remarks>
+    private async Task AllowGuestAgentConnectionAsync(
+        string instanceId,
+        int port,
+        CancellationToken cancellationToken)
+    {
+        if (port is < IPEndPoint.MinPort or > IPEndPoint.MaxPort)
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.TransportFailed,
+                "The Windows Sandbox agent reported an invalid TCP port.",
+                userAction: "Close Windows Sandbox, then retry.",
+                context: new Dictionary<string, string>
+                {
+                    ["port"] = port.ToString(CultureInfo.InvariantCulture),
+                });
+        }
+
+        var portText = port.ToString(CultureInfo.InvariantCulture);
+        var agentPath = $@"{GuestBootstrapPath}\{GuestAgentInstaller.BinaryName}";
+        var command =
+            @"powershell.exe -NoProfile -NonInteractive -Command " +
+            $@"""$agent='{agentPath}'; " +
+            @"$blocked=Get-NetFirewallRule -PolicyStore ActiveStore | Where-Object { " +
+            @"$_.Action -eq 'Block' -and (($_ | Get-NetFirewallApplicationFilter).Program -eq $agent) }; " +
+            @"foreach ($rule in $blocked) { " +
+            @"Remove-NetFirewallRule -Name $rule.Name -PolicyStore PersistentStore -ErrorAction SilentlyContinue }; " +
+            $@"New-NetFirewallRule -DisplayName 'WinApp Sandbox Agent {portText}' " +
+            $@"-Direction Inbound -Action Allow -Protocol TCP -LocalPort {portText} " +
+            @"-Profile Any -EdgeTraversalPolicy Allow -PolicyStore ActiveStore -ErrorAction Stop | Out-Null""";
+
+        var exitCode = await cli.ExecuteAsync(
+            instanceId,
+            command,
+            workingDirectory: null,
+            asSystem: true,
+            cancellationToken).ConfigureAwait(false);
+
+        if (exitCode != 0)
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.TransportFailed,
+                "Windows Sandbox could not allow the authenticated guest-agent connection.",
+                userAction: "Close Windows Sandbox, then retry.",
+                context: new Dictionary<string, string>
+                {
+                    ["exitCode"] = exitCode.ToString(CultureInfo.InvariantCulture),
+                    ["port"] = port.ToString(CultureInfo.InvariantCulture),
+                });
         }
     }
 
@@ -264,26 +487,56 @@ internal sealed class WindowsSandboxBackend(
             $"\"{GuestBootstrapPath}\\{GuestAgentInstaller.BinaryName}\" {GuestAgentCommandNames.Verb} " +
             $"--bootstrap-dir \"{GuestBootstrapPath}\" --result-dir \"{GuestResultPath}\"";
 
-        var exitCode = await cli.ExecuteAsync(
-            instanceId,
-            command,
-            workingDirectory: null,
-            asSystem: false,
-            cancellationToken).ConfigureAwait(false);
+        await cli.LaunchAgentAsync(instanceId, command, cancellationToken).ConfigureAwait(false);
+    }
 
-        if (exitCode == 0)
+    /// <summary>
+    /// Starts the agent once the connected client has made the login desktop input-ready.
+    /// </summary>
+    /// <remarks>
+    /// The client process is necessarily launched without waiting for it to exit, and its window can
+    /// appear before the guest input desktop is ready. An agent started in that interval reports
+    /// <c>NoInputDesktop</c> and exits without accepting anything, so repeating that bootstrap is
+    /// safe. No other failure is retried: once a command can be dispatched, its result is
+    /// authoritative and repeating it could duplicate a side effect.
+    /// </remarks>
+    private async Task<GuestAgentHeartbeat> LaunchReadyAgentAsync(
+        string instanceId,
+        string resultDirectory,
+        ExecutionTargetEpoch epoch,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow + HeartbeatTimeout;
+
+        while (true)
         {
-            return;
-        }
+            TryClearResultFolder(resultDirectory);
 
-        throw ExecutionTargetException.Create(
-            ExecutionTargetErrorCodes.StartFailed,
-            "The Windows Sandbox agent could not be started.",
-            userAction: "Retry the command. If it keeps failing, close Windows Sandbox and try again.",
-            context: new Dictionary<string, string>
+            try
             {
-                ["exitCode"] = exitCode.ToString(CultureInfo.InvariantCulture),
-            });
+                await LaunchAgentAsync(instanceId, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ExecutionTargetException ex) when (
+                ex.Error.Code == ExecutionTargetErrorCodes.TransportFailed &&
+                DateTimeOffset.UtcNow < deadline)
+            {
+                await Task.Delay(AgentLaunchRetryDelay, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            try
+            {
+                return await WaitForHeartbeatAsync(resultDirectory, epoch, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (ExecutionTargetException ex) when (
+                ex.Error.Code == ExecutionTargetErrorCodes.NoInteractiveSession &&
+                ex.Error.Context?.GetValueOrDefault("reason") == GuestReadinessFailure.NoInputDesktop.ToString() &&
+                DateTimeOffset.UtcNow < deadline)
+            {
+                await Task.Delay(AgentLaunchRetryDelay, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     /// <summary>
@@ -417,17 +670,14 @@ internal sealed class WindowsSandboxBackend(
     {
         try
         {
-            if (Directory.Exists(resultDirectory))
-            {
-                Directory.Delete(resultDirectory, recursive: true);
-            }
+            ClearDirectoryContents(resultDirectory);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // The guest still holds it open. It is recreated from scratch next generation, so a
-            // leftover is harmless and must not fail a connection that already succeeded.
+            // The guest still holds a staged diagnostic open. A stale report is epoch-checked before
+            // use, so cleanup failure must not fail a connection that already succeeded.
             System.Diagnostics.Trace.TraceWarning(
-                "Could not remove the Sandbox bootstrap result folder '{0}': {1}", resultDirectory, ex.Message);
+                "Could not clear the Sandbox bootstrap result folder '{0}': {1}", resultDirectory, ex.Message);
         }
     }
 }

@@ -452,6 +452,21 @@ public class SandboxRunTests
         Assert.IsNull(RunCommand.Handler.TryAugmentGuestJson(oversized, TargetInfo(), agentProcessId: 0));
     }
 
+    [TestMethod]
+    public void DirectUnpackagedJsonResult_IsAlwaysAHostScopedEnvelope()
+    {
+        var result = RunCommand.Handler.CreateDirectGuestResult(
+            architecture: "arm64",
+            epoch: "epoch-1");
+
+        Assert.IsNull(result.ProcessId);
+        Assert.IsTrue(result.Sandbox);
+        Assert.AreEqual("sandbox", result.ProcessScope);
+        Assert.IsNull(result.AppTarget);
+        Assert.AreEqual("arm64", result.ExecutionTarget!.Architecture);
+        Assert.AreEqual("epoch-1", result.ExecutionTarget.Epoch);
+    }
+
     private static ExecutionTargetInfo TargetInfo() => new()
     {
         Kind = ExecutionTargetRef.WindowsSandboxDefault.Kind,

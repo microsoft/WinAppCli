@@ -33,7 +33,10 @@ public class ExecutionTargetOrchestratorTests
             Message = "Windows Sandbox is not installed.",
         }) };
 
-        var orchestrator = new ExecutionTargetOrchestrator(backend, new FakeMutationLock());
+        var orchestrator = new ExecutionTargetOrchestrator(
+            backend,
+            new FakeMutationLock(),
+            new FakeConnectionLock());
 
         var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
             () => orchestrator.PrepareAsync(PrepareTargetOptions.Mutating, TestContext.CancellationToken));
@@ -48,7 +51,10 @@ public class ExecutionTargetOrchestratorTests
     public async Task Prepare_MutatingCommand_TakesTheLock()
     {
         using var mutationLock = new FakeMutationLock();
-        var orchestrator = new ExecutionTargetOrchestrator(new FakeBackend(), mutationLock);
+        var orchestrator = new ExecutionTargetOrchestrator(
+            new FakeBackend(),
+            mutationLock,
+            new FakeConnectionLock());
 
         await using var prepared = await orchestrator.PrepareAsync(
             PrepareTargetOptions.Mutating, TestContext.CancellationToken);
@@ -64,7 +70,10 @@ public class ExecutionTargetOrchestratorTests
     public async Task Prepare_ReadOnlyCommand_DoesNotTakeTheLock()
     {
         using var mutationLock = new FakeMutationLock();
-        var orchestrator = new ExecutionTargetOrchestrator(new FakeBackend(), mutationLock);
+        var orchestrator = new ExecutionTargetOrchestrator(
+            new FakeBackend(),
+            mutationLock,
+            new FakeConnectionLock());
 
         await using var prepared = await orchestrator.PrepareAsync(
             PrepareTargetOptions.ReadOnly, TestContext.CancellationToken);
@@ -75,10 +84,34 @@ public class ExecutionTargetOrchestratorTests
     }
 
     [TestMethod]
+    public async Task Prepare_HoldsTheConnectionLeaseForThePreparedChannelLifetime()
+    {
+        var connectionLock = new FakeConnectionLock();
+        var orchestrator = new ExecutionTargetOrchestrator(
+            new FakeBackend(),
+            new FakeMutationLock(),
+            connectionLock);
+
+        var prepared = await orchestrator.PrepareAsync(
+            PrepareTargetOptions.ReadOnly,
+            TestContext.CancellationToken);
+
+        Assert.AreEqual(1, connectionLock.AcquireCalls);
+        Assert.AreEqual(0, connectionLock.ReleaseCalls);
+
+        await prepared.DisposeAsync();
+
+        Assert.AreEqual(1, connectionLock.ReleaseCalls);
+    }
+
+    [TestMethod]
     public async Task Prepare_LockHeldByAnotherProcess_FailsWithGuidance()
     {
         using var mutationLock = new FakeMutationLock { Available = false };
-        var orchestrator = new ExecutionTargetOrchestrator(new FakeBackend(), mutationLock);
+        var orchestrator = new ExecutionTargetOrchestrator(
+            new FakeBackend(),
+            mutationLock,
+            new FakeConnectionLock());
 
         var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
             () => orchestrator.PrepareAsync(PrepareTargetOptions.Mutating, TestContext.CancellationToken));
@@ -92,7 +125,10 @@ public class ExecutionTargetOrchestratorTests
     {
         using var mutationLock = new FakeMutationLock();
         var backend = new FakeBackend { SupportsInteractiveDesktop = false };
-        var orchestrator = new ExecutionTargetOrchestrator(backend, mutationLock);
+        var orchestrator = new ExecutionTargetOrchestrator(
+            backend,
+            mutationLock,
+            new FakeConnectionLock());
 
         var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
             () => orchestrator.PrepareAsync(PrepareTargetOptions.Interactive, TestContext.CancellationToken));
@@ -113,7 +149,10 @@ public class ExecutionTargetOrchestratorTests
     {
         using var mutationLock = new FakeMutationLock();
         var backend = new FakeBackend { SessionId = 0 };
-        var orchestrator = new ExecutionTargetOrchestrator(backend, mutationLock);
+        var orchestrator = new ExecutionTargetOrchestrator(
+            backend,
+            mutationLock,
+            new FakeConnectionLock());
 
         var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
             () => orchestrator.PrepareAsync(PrepareTargetOptions.Interactive, TestContext.CancellationToken));
@@ -128,7 +167,10 @@ public class ExecutionTargetOrchestratorTests
     {
         using var mutationLock = new FakeMutationLock();
         var backend = new FakeBackend { SupportsInteractiveDesktop = false };
-        var orchestrator = new ExecutionTargetOrchestrator(backend, mutationLock);
+        var orchestrator = new ExecutionTargetOrchestrator(
+            backend,
+            mutationLock,
+            new FakeConnectionLock());
 
         // A disconnected client leaves UI Automation working, so inspection must stay available in
         // exactly the state where input has to be refused.
@@ -145,7 +187,8 @@ public class ExecutionTargetOrchestratorTests
     {
         var orchestrator = new ExecutionTargetOrchestrator(
             new FakeBackend { Reused = true },
-            new FakeMutationLock());
+            new FakeMutationLock(),
+            new FakeConnectionLock());
 
         await using var prepared = await orchestrator.PrepareAsync(
             PrepareTargetOptions.ReadOnly, TestContext.CancellationToken);
@@ -249,6 +292,33 @@ public class ExecutionTargetOrchestratorTests
             {
                 stream.Dispose();
             }
+        }
+    }
+
+    private sealed class FakeConnectionLock : ITargetConnectionLock
+    {
+        private readonly List<FileStream> _streams = [];
+
+        public int AcquireCalls { get; private set; }
+
+        public int ReleaseCalls => _streams.Count(stream => !stream.CanRead);
+
+        public TargetConnectionLease? TryAcquire(
+            ExecutionTargetRef target,
+            TimeSpan timeout,
+            CancellationToken cancellationToken = default)
+        {
+            AcquireCalls++;
+            var path = TestPaths.TempFile("connection-lock", ".lock");
+            var stream = new FileStream(
+                path,
+                FileMode.Create,
+                FileAccess.ReadWrite,
+                FileShare.None,
+                bufferSize: 1,
+                FileOptions.DeleteOnClose);
+            _streams.Add(stream);
+            return new TargetConnectionLease(stream);
         }
     }
 }

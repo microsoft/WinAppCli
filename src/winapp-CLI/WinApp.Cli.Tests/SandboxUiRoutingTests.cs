@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Text;
+using WinApp.Cli.Commands;
 using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.GuestAgent;
 using WinApp.Cli.ExecutionTargets.Orchestration;
@@ -116,6 +117,23 @@ public class SandboxUiRoutingTests
         Assert.AreEqual("result.png", routed.Artifact.GuestRelativePath);
         Assert.AreEqual(TestPaths.Under(GuestArtifacts, "result.png"), routed.Artifact.GuestFullPath);
         Assert.AreEqual(routed.Artifact.GuestFullPath, routed.Arguments[^1]);
+    }
+
+    [TestMethod]
+    public void RewriteOutputPaths_RewritesJsonEscapedWindowsPaths()
+    {
+        var artifact = new RoutedArtifact(
+            "result.png",
+            @"C:\WinApp\artifacts\op1\result.png",
+            @"C:\host output\result.png");
+        const string GuestJson =
+            """{"filePath":"C:\\WinApp\\artifacts\\op1\\result.png","width":100}""";
+
+        var rewritten = SandboxUiRouter.RewriteOutputPaths(GuestJson, artifact);
+
+        Assert.AreEqual(
+            """{"filePath":"C:\\host output\\result.png","width":100}""",
+            rewritten);
     }
 
     /// <summary>

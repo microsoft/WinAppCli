@@ -15,10 +15,21 @@ internal sealed record PreparedTarget(
     GuestCommandChannel Channel,
     ExecutionTargetEpoch Epoch,
     ExecutionTargetCapabilities Capabilities,
-    bool Reused) : IAsyncDisposable
+    bool Reused,
+    TargetConnectionLease? ConnectionLease = null) : IAsyncDisposable
 {
     /// <inheritdoc/>
-    public ValueTask DisposeAsync() => Channel.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await Channel.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            ConnectionLease?.Dispose();
+        }
+    }
 }
 
 /// <summary>What a command needs from the target before it will run.</summary>
@@ -58,7 +69,8 @@ internal sealed record PrepareTargetOptions(bool RequireInteractiveDesktop, bool
 /// </remarks>
 internal sealed class ExecutionTargetOrchestrator(
     IExecutionTargetBackend backend,
-    ITargetMutationLock mutationLock)
+    ITargetMutationLock mutationLock,
+    ITargetConnectionLock connectionLock)
 {
     /// <summary>How long to wait for another winapp process to finish mutating this target.</summary>
     internal static readonly TimeSpan LockTimeout = TimeSpan.FromMinutes(10);
@@ -98,37 +110,53 @@ internal sealed class ExecutionTargetOrchestrator(
 
         await EnsureSupportedAsync(cancellationToken).ConfigureAwait(false);
 
-        using var lease = options.RequiresMutation ? AcquireLock(cancellationToken) : null;
-
-        if (lease?.WasAbandoned == true)
-        {
-            // A previous owner died mid-mutation. Nothing is assumed clean: the deployment and
-            // package records carry their own dirty and epoch checks, and this is the signal that
-            // makes them run rather than be skipped as an optimisation.
-            System.Diagnostics.Trace.TraceWarning(
-                "The previous winapp process did not release the {0} lock cleanly; reconciling.",
-                backend.Target.Id);
-        }
-
-        var connection = await backend.EnsureConnectedAsync(
-            new EnsureTargetOptions(options.RequireInteractiveDesktop),
-            cancellationToken).ConfigureAwait(false);
-
-        var channel = new GuestCommandChannel(connection.Transport, connection.Epoch);
-        channel.Start();
+        var connectionLease = AcquireConnection(cancellationToken);
+        GuestCommandChannel? channel = null;
 
         try
         {
+            var connection = await backend.EnsureConnectedAsync(
+                new EnsureTargetOptions(options.RequireInteractiveDesktop),
+                cancellationToken).ConfigureAwait(false);
+            channel = new GuestCommandChannel(connection.Transport, connection.Epoch);
+            channel.Start();
+
+            using var mutationLease = options.RequiresMutation ? AcquireLock(cancellationToken) : null;
+
+            if (mutationLease?.WasAbandoned == true)
+            {
+                System.Diagnostics.Trace.TraceWarning(
+                    "The previous winapp process did not release the {0} lock cleanly; reconciling.",
+                    backend.Target.Id);
+            }
+
             var capabilities = await channel.GetCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
 
             EnsureCapable(options, capabilities);
 
-            return new PreparedTarget(channel, connection.Epoch, capabilities, connection.Reused);
+            var prepared = new PreparedTarget(
+                channel,
+                connection.Epoch,
+                capabilities,
+                connection.Reused,
+                connectionLease);
+
+            channel = null;
+            connectionLease = null;
+            return prepared;
         }
         catch
         {
-            await channel.DisposeAsync().ConfigureAwait(false);
+            if (channel is not null)
+            {
+                await channel.DisposeAsync().ConfigureAwait(false);
+            }
+
             throw;
+        }
+        finally
+        {
+            connectionLease?.Dispose();
         }
     }
 
@@ -152,6 +180,16 @@ internal sealed class ExecutionTargetOrchestrator(
             "Another winapp command is still changing this Windows Sandbox.",
             userAction: "Wait for the other command to finish, then retry.",
             context: new Dictionary<string, string> { ["targetId"] = backend.Target.Id });
+    }
+
+    private TargetConnectionLease AcquireConnection(CancellationToken cancellationToken)
+    {
+        return connectionLock.TryAcquire(backend.Target, LockTimeout, cancellationToken)
+            ?? throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.TargetAmbiguous,
+                "Another winapp command is still using the Windows Sandbox agent.",
+                userAction: "Wait for the other command to finish, then retry.",
+                context: new Dictionary<string, string> { ["targetId"] = backend.Target.Id });
     }
 
     /// <summary>

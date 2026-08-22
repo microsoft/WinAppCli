@@ -45,6 +45,11 @@ DBG_EXCEPTION_NOT_HANDLED
 GetShortPathName
 GetForegroundWindow
 SetForegroundWindow
+GetCurrentThreadId
+SetWindowPos
+AttachThreadInput
+BringWindowToTop
+IsWindow
 MiniDumpWriteDump
 MINIDUMP_TYPE
 MINIDUMP_EXCEPTION_INFORMATION

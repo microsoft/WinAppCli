@@ -236,7 +236,7 @@ internal static class SandboxCopyService
     }
 
     /// <summary>Where one guest file lands on the host.</summary>
-    private static string ResolveHostDestination(
+    internal static string ResolveHostDestination(
         string hostPath,
         string prefix,
         string guestRelativePath,
@@ -254,7 +254,11 @@ internal static class SandboxCopyService
                 Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
             : Path.GetFileName(guestRelativePath);
 
-        return Path.Join(hostPath, relative);
+        var segments = relative.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries);
+
+        return TargetPathSafety.CombineInsideRoot(hostPath, segments);
     }
 
     /// <summary>Reduces a guest path to a relative form inside managed storage.</summary>

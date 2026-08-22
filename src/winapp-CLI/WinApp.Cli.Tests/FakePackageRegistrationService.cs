@@ -109,7 +109,15 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
     /// </summary>
     public Exception? InstallPackageThrows { get; set; }
 
-    public Task InstallPackageAsync(string packagePath, CancellationToken cancellationToken = default)
+    public Task InstallPackageAsync(
+        string packagePath,
+        CancellationToken cancellationToken = default) =>
+        InstallPackageAsync(packagePath, forceApplicationShutdown: true, cancellationToken);
+
+    public Task InstallPackageAsync(
+        string packagePath,
+        bool forceApplicationShutdown,
+        CancellationToken cancellationToken = default)
     {
         InstallPackageCalls.Add(packagePath);
         if (InstallPackageThrows is not null)
@@ -181,6 +189,38 @@ internal class FakePackageRegistrationService : IPackageRegistrationService
     /// <c>MsixService.IsExistingRegistrationUpToDate</c>.
     /// </summary>
     public Exception? FindDevPackagesThrows { get; set; }
+
+    /// <summary>
+    /// Records name lookups. Returns <see cref="FakeRegisteredPackages"/> filtered by name, or a
+    /// single entry derived from <see cref="GetInstalledVersion"/> when no explicit set was given —
+    /// so existing tests that only model a version keep working.
+    /// </summary>
+    public List<string> FindInstalledPackagesByNameCalls { get; } = [];
+
+    /// <summary>Registered identities a test wants reported, including publisher and architecture.</summary>
+    public List<RegisteredPackageIdentity> FakeRegisteredPackages { get; } = [];
+
+    public IReadOnlyList<RegisteredPackageIdentity> FindInstalledPackagesByName(string packageName)
+    {
+        FindInstalledPackagesByNameCalls.Add(packageName);
+
+        if (FakeRegisteredPackages.Count > 0)
+        {
+            return
+            [
+                .. FakeRegisteredPackages
+                    .Where(package => string.Equals(package.Name, packageName, StringComparison.OrdinalIgnoreCase)),
+            ];
+        }
+
+        var version = GetInstalledVersionFunc is not null
+            ? GetInstalledVersionFunc(packageName, null)
+            : FakeInstalledVersion;
+
+        return version is null
+            ? []
+            : [new RegisteredPackageIdentity(packageName, version, null, "neutral")];
+    }
 
     public List<DevPackageInfo> FindDevPackages(string packageName)
     {

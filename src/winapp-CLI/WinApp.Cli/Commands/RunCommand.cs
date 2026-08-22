@@ -225,6 +225,7 @@ internal partial class RunCommand : Command, IShortDescription
         IProjectContextDetector projectContextDetector,
         ExecutionTargetOrchestrator executionTargetOrchestrator,
         GuestApplicationRunner guestApplicationRunner,
+        TargetRuntimeService targetRuntimeService,
         ILogger<RunCommand> logger) : AsynchronousCommandLineAction
     {
         // Test seams for the execution-alias launch path. They isolate the two operating-system

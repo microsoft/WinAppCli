@@ -176,9 +176,10 @@ internal partial class RunCommand
                     WorkingDirectory = deployment.PayloadPath,
                     Environment = ownerEnvironment,
                     RequiresRealInput = true,
+                    Detach = detach,
                 },
                 cancellationToken,
-                detach);
+                guestProducesRunResult: false);
         }
 
         /// <summary>
@@ -192,10 +193,10 @@ internal partial class RunCommand
         /// <param name="identity">Package identity to record ownership for, when there is one.</param>
         /// <param name="buildRequest">Builds the guest request once the guest paths are known.</param>
         /// <param name="cancellationToken">Cancellation.</param>
-        /// <param name="detachAfterStart">
-        /// True to return as soon as the guest reports the process started, for an unpackaged
-        /// <c>--detach</c>. The packaged path forwards <c>--detach</c> to guest winapp instead, so
-        /// that flag keeps its exact local meaning.
+        /// <param name="guestProducesRunResult">
+        /// True when the request runs guest winapp, whose stdout is a <see cref="RunCommandResult"/>.
+        /// False for a direct unpackaged executable, whose arbitrary stdout is suppressed under JSON
+        /// and replaced with a host-built result envelope.
         /// </param>
         private async Task<int> RunInGuestAsync(
             DirectoryInfo sourceRoot,
@@ -206,7 +207,7 @@ internal partial class RunCommand
             MsixIdentityResult? identity,
             Func<GuestDeployment, Dictionary<string, string>, GuestExecRequest> buildRequest,
             CancellationToken cancellationToken,
-            bool detachAfterStart = false)
+            bool guestProducesRunResult = true)
         {
             try
             {
@@ -215,6 +216,8 @@ internal partial class RunCommand
                     cancellationToken);
 
                 WriteProgress(isJson, ExecutionTargetOrchestrator.DescribeProgress(target.Reused));
+
+                var provisioning = await ProvisionRuntimesAsync(target, sourceRoot, cancellationToken);
 
                 var deployment = await guestApplicationRunner.DeployAsync(
                     target, deploymentId, sourceRoot, clean, cancellationToken);
@@ -240,9 +243,15 @@ internal partial class RunCommand
                     GuestOwnerContext.ResolveGuestToken(
                         ExecutionTargetRef.WindowsSandboxDefault.Id, target.Epoch.Value));
 
-                using var detachSignal = new CancellationTokenSource();
-                using var linked = CancellationTokenSource.CreateLinkedTokenSource(
-                    cancellationToken, detachSignal.Token);
+                // A per-user .NET installation is discoverable to an apphost through DOTNET_ROOT and
+                // nothing else without machine-wide registration, so the root provisioning created
+                // has to reach the launched process itself. Merged rather than assigned, so the
+                // owner context this launch also depends on is not lost — and only present at all
+                // when the guest reported that the managed root is what satisfies a framework.
+                foreach (var (name, value) in provisioning.LaunchEnvironment)
+                {
+                    ownerEnvironment[name] = value;
+                }
 
                 var startedProcessId = 0;
 
@@ -251,24 +260,25 @@ internal partial class RunCommand
                 // never reformatted blind: anything that does not parse is written through exactly
                 // as the guest produced it, because corrupting a result is worse than omitting a
                 // field.
-                using var capturedOutput = isJson ? new MemoryStream() : null;
+                using var capturedOutput = isJson && guestProducesRunResult ? new MemoryStream() : null;
+                var request = buildRequest(deployment, ownerEnvironment);
 
                 var exitCode = await guestApplicationRunner.RunAsync(
                     target,
                     state,
-                    buildRequest(deployment, ownerEnvironment),
+                    request,
                     new GuestExecCallbacks(
                         OnStarted: process =>
                         {
                             startedProcessId = process.ProcessId;
-
-                            if (detachAfterStart)
-                            {
-                                detachSignal.Cancel();
-                            }
                         },
                         OnStandardOutput: data =>
                         {
+                            if (isJson && !guestProducesRunResult)
+                            {
+                                return;
+                            }
+
                             if (capturedOutput is not null)
                             {
                                 CaptureBounded(capturedOutput, data);
@@ -277,21 +287,25 @@ internal partial class RunCommand
 
                             WriteRawToConsole(Console.OpenStandardOutput(), data);
                         },
-                        OnStandardError: data => WriteRawToConsole(Console.OpenStandardError(), data)),
-                    linked.Token);
+                        OnStandardError: data =>
+                        {
+                            if (!isJson || guestProducesRunResult)
+                            {
+                                WriteRawToConsole(Console.OpenStandardError(), data);
+                            }
+                        }),
+                    cancellationToken);
 
-                if (capturedOutput is not null)
+                if (isJson && guestProducesRunResult && capturedOutput is not null)
                 {
                     PublishGuestJson(capturedOutput, target, startedProcessId);
                 }
+                else if (isJson)
+                {
+                    PublishDirectGuestJson(target);
+                }
 
                 return exitCode;
-            }
-            catch (OperationCanceledException) when (detachAfterStart && !cancellationToken.IsCancellationRequested)
-            {
-                // Detach for an unpackaged app: the guest process is running and stays running; the
-                // channel closing does not stop it, because the agent owns it, not this connection.
-                return 0;
             }
             catch (ExecutionTargetException ex)
             {
@@ -307,6 +321,99 @@ internal partial class RunCommand
             DeploymentPlanner.CreateDeploymentId(
                 Path.GetFullPath(inputFolder.FullName),
                 $"{identity.PackageName}_{identity.Publisher}");
+
+        /// <summary>
+        /// Installs and verifies the shared runtimes the deployment needs, before it is deployed.
+        /// </summary>
+        /// <remarks>
+        /// Ahead of deployment rather than after it, matching the spec's order: a guest missing the
+        /// Windows App Runtime cannot register the package that is about to be copied there, and
+        /// discovering that after transferring hundreds of megabytes helps nobody.
+        /// <para>
+        /// The structured failure is re-thrown rather than returned, because the status wrapper
+        /// swallows exceptions from its task body and only the caller's envelope knows how to render
+        /// an execution-target error under <c>--json</c>.
+        /// </para>
+        /// </remarks>
+        private async Task<RuntimeProvisionResult> ProvisionRuntimesAsync(
+            PreparedTarget target,
+            DirectoryInfo sourceRoot,
+            CancellationToken cancellationToken)
+        {
+            ExecutionTargetException? failure = null;
+            RuntimeProvisionResult? provisioned = null;
+
+            await statusService.ExecuteWithStatusAsync(
+                "Preparing shared runtimes...",
+                async (taskContext, ct) =>
+                {
+                    try
+                    {
+                        var result = await targetRuntimeService.EnsureAsync(
+                            target,
+                            ExecutionTargetRef.WindowsSandboxDefault,
+                            sourceRoot,
+                            new DirectoryInfo(currentDirectoryProvider.GetCurrentDirectory()),
+                            taskContext,
+                            ct);
+
+                        provisioned = result;
+
+                        return (0, DescribeProvisioning(result));
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        // Every failure is captured, not just the structured ones. An unexpected
+                        // exception swallowed here would let the run continue to deploy and launch
+                        // as though the runtime graph had been verified, which is the one outcome
+                        // this step exists to make impossible.
+                        failure = ex as ExecutionTargetException ?? ExecutionTargetException.Create(
+                            ExecutionTargetErrorCodes.RuntimeProvisionFailed,
+                            $"The shared runtimes the app needs could not be provisioned in Windows Sandbox: {ex.Message}",
+                            userAction: "Retry the command. If it keeps failing, close Windows Sandbox so a fresh guest is created.",
+                            innerException: ex);
+
+                        return (1, $"{UiSymbols.Error} {failure.Error.Message}");
+                    }
+                },
+                cancellationToken);
+
+            // Cancellation is swallowed by the status wrapper, so it is re-observed here rather than
+            // left to look like a successful provisioning pass.
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (failure is not null)
+            {
+                throw failure;
+            }
+
+            // A null result with no captured failure would mean the status body neither completed
+            // nor reported why. Treating that as "nothing to provision" would launch on an
+            // unverified graph, so it fails instead.
+            return provisioned ?? throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.RuntimeProvisionFailed,
+                "winapp could not verify the shared runtimes the app needs inside Windows Sandbox.",
+                userAction: "Retry the command. If it keeps failing, close Windows Sandbox so a fresh guest is created.");
+        }
+
+        /// <summary>Summarises one provisioning pass for the progress line.</summary>
+        private static string DescribeProvisioning(RuntimeProvisionResult result)
+        {
+            if (result.Requirements.IsEmpty)
+            {
+                return "No shared runtimes required";
+            }
+
+            var installed = result.Report?.Items.Count(item => item.Installed) ?? 0;
+
+            return installed == 0
+                ? "Shared runtimes verified"
+                : $"Installed {installed} shared runtime component(s)";
+        }
 
         /// <summary>Resolves the manifest for a sandbox run using the same precedence as a local one.</summary>
         private FileInfo ResolveManifestForSandbox(DirectoryInfo inputFolder, FileInfo? manifest)
@@ -425,6 +532,38 @@ internal partial class RunCommand
             }
 
             ansiConsole.Profile.Out.Writer.WriteLine(augmented);
+        }
+
+        /// <summary>Publishes the additive result for a directly launched unpackaged guest app.</summary>
+        internal void PublishDirectGuestJson(PreparedTarget target)
+        {
+            var result = CreateDirectGuestResult(
+                target.Capabilities.Architecture,
+                target.Epoch.Value);
+
+            ansiConsole.Profile.Out.Writer.WriteLine(
+                JsonSerializer.Serialize(result, RunCommandJsonContext.Default.RunCommandResult));
+        }
+
+        internal static RunCommandResult CreateDirectGuestResult(
+            string architecture,
+            string epoch)
+        {
+            // The agent starts a containment barrier first, so its ExecStarted PID is the barrier,
+            // not the app. Omitting a target is safer than publishing a copyable PID for the wrong
+            // process; discovery remains `ui list-windows --sandbox` or an explicit app name.
+            return new RunCommandResult
+            {
+                Sandbox = true,
+                ProcessScope = "sandbox",
+                ExecutionTarget = new ExecutionTargetInfo
+                {
+                    Kind = ExecutionTargetRef.WindowsSandboxDefault.Kind,
+                    Id = ExecutionTargetRef.WindowsSandboxDefault.Id,
+                    Architecture = architecture,
+                    Epoch = epoch,
+                },
+            };
         }
 
         /// <summary>

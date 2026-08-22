@@ -85,6 +85,11 @@ internal sealed class FakeWindowsSandboxCli : IWindowsSandboxCli
         string? workingDirectory,
         bool asSystem,
         CancellationToken cancellationToken) => Task.FromResult(0);
+
+    public Task LaunchAgentAsync(
+        string id,
+        string command,
+        CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
 /// <summary>

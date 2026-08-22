@@ -520,6 +520,7 @@ public class RunCommandTests : BaseCommandTests
             GetRequiredService<IProjectContextDetector>(),
             GetRequiredService<ExecutionTargetOrchestrator>(),
             GetRequiredService<GuestApplicationRunner>(),
+            GetRequiredService<TargetRuntimeService>(),
             GetRequiredService<ILogger<RunCommand>>());
 
         // Act
