@@ -440,7 +440,14 @@ internal partial class MsixService
                     var winAppSDKDeploymentDir = await PrepareRuntimeForPackagingAsync(stagingDir, dotNetPackageList, taskContext, cancellationToken, overrideArch: targetArch);
                     var resolvedDeploymentDir = Path.Combine(winAppSDKDeploymentDir.FullName, "..", "extracted");
                     var windowsAppSDKManifestPath = new FileInfo(Path.Combine(resolvedDeploymentDir, "AppxManifest.xml"));
-                    await EmbedActivationManifestToExeAsync(executablePath, winAppSDKDeploymentDir, windowsAppSDKManifestPath, dotNetPackageList, taskContext, cancellationToken);
+                    await EmbedActivationManifestToExeForArchitectureAsync(
+                        executablePath,
+                        winAppSDKDeploymentDir,
+                        windowsAppSDKManifestPath,
+                        dotNetPackageList,
+                        taskContext,
+                        targetArch,
+                        cancellationToken);
                 }
             }
 

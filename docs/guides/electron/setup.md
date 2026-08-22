@@ -195,6 +195,45 @@ This ensures Windows-specific setup only runs on Windows machines, allowing deve
 
 </details>
 
+### Prepare Windows App SDK for an unpackaged Electron process
+
+`winapp restore` restores development metadata and tools. If your Electron code directly bootstraps Windows App SDK (for example with `@microsoft/dynwinrt`), use `runtime prepare` as the explicit deployment step instead of searching the NuGet cache or copying `Microsoft.WindowsAppRuntime.Bootstrap.dll` yourself.
+
+```powershell
+# Framework-dependent: stage the bootstrap DLL, install the exact matching
+# runtime for the current user when it is missing, and emit JSON for automation.
+npx winapp runtime prepare --version 1.8.250907003 --arch x64 `
+  --output .\out\my-app-win32-x64 --install --json
+```
+
+Omit `--install` for a preflight-only check. When the exact Framework/DDLM packages are missing, the command returns exit code `2` and its JSON `guidance` property gives the installation command. Pin `--version` to the same exact `Microsoft.WindowsAppSDK` version used to generate your metadata, and set `--arch` to the Electron process architecture (not necessarily the host architecture).
+
+For a self-contained MSIX, use [`winapp package --self-contained`](packaging.md). An unpackaged self-contained Electron layout is not currently supported by this workflow: `@microsoft/dynwinrt` cannot yet resolve the app-local Windows App SDK PRI needed by that deployment model.
+
+The npm package exposes the same operation as a typed API:
+
+```javascript
+const path = require('node:path');
+const { runtimePrepare } = require('@microsoft/winappcli');
+
+async function prepareRuntime() {
+  const arch = { x64: 'x64', arm64: 'arm64', ia32: 'x86' }[process.arch];
+  if (!arch) throw new Error(`Unsupported Electron architecture: ${process.arch}`);
+
+  const { stdout } = await runtimePrepare({
+    version: '1.8.250907003',
+    arch,
+    output: path.join(__dirname, 'dist'),
+    install: true,
+    json: true,
+  });
+  const runtime = JSON.parse(stdout);
+  process.env.WINAPPSDK_BOOTSTRAP_DLL_PATH = runtime.bootstrapDllPath;
+}
+```
+
+Call and await `prepareRuntime()` during startup before initializing the Windows App SDK major/minor release through your runtime bridge (for example, `initWinappsdk(1, 8)`). `runtime prepare` makes deployment deterministic; it does not initialize the application process.
+
 ## Step 5: Understanding Debug Identity
 
 The `npm install` you ran in Step 4 triggered the `postinstall` script, which ran `winapp node add-electron-debug-identity`. This gives your app a temporary debug identity so you can test Windows APIs that require app identity during development.

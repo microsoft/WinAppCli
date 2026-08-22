@@ -462,6 +462,28 @@ function run(options?: RunOptions): Promise<WinappResult>
 
 ---
 
+### `runtimePrepare()`
+
+Prepare an exact framework-dependent Windows App SDK runtime for an unpackaged app. Stages the bootstrap DLL and preflights the matching runtime; add --install to install it for the current user. Use --json for deterministic automation output.
+
+```typescript
+function runtimePrepare(options: RuntimePrepareOptions): Promise<WinappResult>
+```
+
+**Options:**
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `arch` | `RuntimeArchitecture` | Yes | Target application architecture: x64, arm64, or x86 |
+| `install` | `boolean \| undefined` | No | Install the matching framework-dependent runtime packages for the current user when preflight finds them missing |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `output` | `string` | Yes | App output directory where the architecture-specific bootstrap DLL will be staged |
+| `version` | `string` | Yes | Exact Microsoft.WindowsAppSDK NuGet version (for example, 1.8.250907003 or 2.2.0) |
+
+*Also accepts [CommonOptions](#commonoptions) (`quiet`, `verbose`, `cwd`).*
+
+---
+
 ### `sign()`
 
 Code-sign an MSIX package or executable. Example: winapp sign ./app.msix ./devcert.pfx. Use --timestamp for production builds to remain valid after cert expires. The 'package' command can sign automatically with --cert.
@@ -1354,6 +1376,14 @@ ManifestTemplates values.
 type ManifestTemplates = "packaged" | "sparse"
 ```
 
+### `RuntimeArchitecture`
+
+RuntimeArchitecture values.
+
+```typescript
+type RuntimeArchitecture = "x64" | "arm64" | "x86"
+```
+
 ### `AzSignOptions`
 
 | Property | Type | Required | Description |
@@ -1600,6 +1630,19 @@ type ManifestTemplates = "packaged" | "sparse"
 | `unregisterOnExit` | `boolean \| undefined` | No | Unregister the development package after the application exits. Only removes packages registered in development mode. |
 | `withAlias` | `boolean \| undefined` | No | Launch the app using its execution alias instead of AUMID activation. The app runs in the current terminal with inherited stdin/stdout/stderr. Requires a uap5:ExecutionAlias in the manifest. Use "winapp manifest add-alias" to add an execution alias to the manifest. |
 | `appArgs` | `string \| string[] \| undefined` | No | Arguments to pass to the launched application (forwarded after --). |
+| `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
+| `verbose` | `boolean \| undefined` | No | Enable verbose output. |
+| `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
+### `RuntimePrepareOptions`
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `arch` | `RuntimeArchitecture` | Yes | Target application architecture: x64, arm64, or x86 |
+| `install` | `boolean \| undefined` | No | Install the matching framework-dependent runtime packages for the current user when preflight finds them missing |
+| `json` | `boolean \| undefined` | No | Format output as JSON |
+| `output` | `string` | Yes | App output directory where the architecture-specific bootstrap DLL will be staged |
+| `version` | `string` | Yes | Exact Microsoft.WindowsAppSDK NuGet version (for example, 1.8.250907003 or 2.2.0) |
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |

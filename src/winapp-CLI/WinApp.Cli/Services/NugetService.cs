@@ -62,6 +62,73 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
         return await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
     }
 
+    private static async Task<HttpResponseMessage> GetFeedResponseAsync(string url, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await HttpGetAsync(url, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            var (safeUrl, source) = SanitizeDiagnosticUrl(url);
+            var transportDetails = string.Join(
+                " -> ",
+                EnumerateExceptionChain(ex).Select(error =>
+                    $"{error.GetType().Name}: {SanitizeTransportMessage(error.Message, url, safeUrl)}"));
+
+            throw new HttpRequestException(
+                $"NuGet request failed. URL: {safeUrl}. Source: {source}. Transport details: {transportDetails}. " +
+                $"Check proxy and certificate trust, or configure {FlatContainerEnvironmentVariable} and " +
+                $"{RegistrationEnvironmentVariable} for an accessible feed.",
+                ex,
+                ex is HttpRequestException httpError ? httpError.StatusCode : null);
+        }
+    }
+
+    private static (string Url, string Source) SanitizeDiagnosticUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return ("unavailable", "unknown");
+        }
+
+        var safe = new UriBuilder(uri)
+        {
+            UserName = string.Empty,
+            Password = string.Empty,
+            Query = string.Empty,
+            Fragment = string.Empty,
+        }.Uri;
+        var source = new UriBuilder(safe)
+        {
+            Path = string.Empty,
+            Query = string.Empty,
+            Fragment = string.Empty,
+        }.Uri.GetLeftPart(UriPartial.Authority);
+        return (safe.AbsoluteUri, source);
+    }
+
+    private static string SanitizeTransportMessage(string message, string rawUrl, string safeUrl)
+    {
+        var sanitized = message.Replace(rawUrl, safeUrl, StringComparison.OrdinalIgnoreCase);
+        return CredentialBearingUrlRegex().Replace(sanitized, "$1");
+    }
+
+    [GeneratedRegex(@"(https?://)[^/\s@]+@", RegexOptions.IgnoreCase)]
+    private static partial Regex CredentialBearingUrlRegex();
+
+    private static IEnumerable<Exception> EnumerateExceptionChain(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            yield return current;
+        }
+    }
+
     internal static HttpRequestMessage CreateHttpRequest(string url)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, url);
@@ -191,10 +258,11 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
         var lowerVersion = version.ToLowerInvariant();
         var url = $"{FlatIndex}/{lowerId}/{lowerVersion}/{lowerId}.{lowerVersion}.nupkg";
 
-        using var resp = await HttpGetAsync(url, cancellationToken);
+        using var resp = await GetFeedResponseAsync(url, cancellationToken);
         if (!resp.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException($"Failed to download {package} {version} from NuGet (HTTP {resp.StatusCode})");
+            throw new InvalidOperationException(
+                $"Failed to download {package} {version} from {url} (HTTP {(int)resp.StatusCode} {resp.StatusCode}).");
         }
 
         // Extract to the NuGet global cache location
@@ -371,7 +439,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
     private static async Task<List<string>> GetListedVersionsAsync(string packageName, CancellationToken cancellationToken)
     {
         var url = $"{RegistrationIndex}/{packageName.ToLowerInvariant()}/index.json";
-        using var resp = await HttpGetAsync(url, cancellationToken);
+        using var resp = await GetFeedResponseAsync(url, cancellationToken);
         resp.EnsureSuccessStatusCode();
         using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
@@ -407,7 +475,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
                     continue;
                 }
 
-                using var pageResp = await HttpGetAsync(pageUrl, cancellationToken);
+                using var pageResp = await GetFeedResponseAsync(pageUrl, cancellationToken);
                 pageResp.EnsureSuccessStatusCode();
                 using var pageStream = await pageResp.Content.ReadAsStreamAsync(cancellationToken);
                 using var pageDoc = await JsonDocument.ParseAsync(pageStream, cancellationToken: cancellationToken);
@@ -498,7 +566,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
         var ver = version.ToLowerInvariant();
         var nuspecUrl = $"{FlatIndex}/{id}/{ver}/{id}.nuspec";
 
-        using var resp = await HttpGetAsync(nuspecUrl, cancellationToken);
+        using var resp = await GetFeedResponseAsync(nuspecUrl, cancellationToken);
         if (!resp.IsSuccessStatusCode)
         {
             return dependencies;

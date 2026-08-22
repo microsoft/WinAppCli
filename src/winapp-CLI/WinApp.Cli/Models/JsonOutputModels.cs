@@ -97,6 +97,8 @@ internal sealed class FindUiCodeEntryJson
 [JsonSerializable(typeof(FindUiSearchJsonOutput))]
 [JsonSerializable(typeof(FindUiListJsonOutput))]
 [JsonSerializable(typeof(FindUiCodeJsonOutput))]
+[JsonSerializable(typeof(WindowsAppRuntimePrepareResult))]
+[JsonSerializable(typeof(WindowsAppRuntimePackageIdentity))]
 [JsonSourceGenerationOptions(
     WriteIndented = true,
     NewLine = "\n",

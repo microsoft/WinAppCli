@@ -58,6 +58,7 @@ npx winapp --help
 
 **Development Tools:**
 
+- [`runtime prepare`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#runtime-prepare) - Stage the bootstrap DLL and preflight/install an exact framework-dependent Windows App SDK runtime
 - [`tool`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#tool) - Access Windows SDK tools
 - [`get-winapp-path`](https://github.com/microsoft/WinAppCli/blob/main/docs/usage.md#get-winapp-path) - Get paths to installed SDK components
 
@@ -74,9 +75,16 @@ The full CLI usage can be found here: [Documentation](https://github.com/microso
 The package also exports typed async functions for all CLI commands and utility helpers, so you can use them directly from TypeScript/JavaScript without spawning a CLI process:
 
 ```typescript
-import { init, packageApp, certGenerate } from '@microsoft/winappcli';
+import { init, packageApp, certGenerate, runtimePrepare } from '@microsoft/winappcli';
 
 await init({ useDefaults: true });
+await runtimePrepare({
+  version: '1.8.250907003',
+  arch: 'x64',
+  output: './dist',
+  install: true,
+  json: true,
+});
 await certGenerate({ install: true });
 await packageApp({ inputFolder: './dist', cert: './devcert.pfx' });
 ```

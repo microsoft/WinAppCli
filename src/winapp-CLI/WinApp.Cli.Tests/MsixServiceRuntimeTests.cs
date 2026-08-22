@@ -514,33 +514,54 @@ public class MsixServiceRuntimeTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task SetupSelfContainedAsync_MsixToolsDirectoryMissing_DoesNotStageRuntime()
+    public async Task SetupSelfContainedAsync_RemovesStaleRuntimeFilesBeforeStaging()
+    {
+        var arch = ArrangeRuntimeMsixPackage("1.6.0", "Microsoft.WindowsAppRuntime.1.6.msix", withInventory: true,
+            "Microsoft.Current.dll");
+        var winappDir = GetRequiredService<IWinappDirectoryService>().GetLocalWinappDirectory();
+        var deploymentDir = Directory.CreateDirectory(Path.Combine(winappDir.FullName, "self-contained", arch, "deployment"));
+        var staleFile = Path.Combine(deploymentDir.FullName, "Microsoft.Stale.dll");
+        await File.WriteAllTextAsync(staleFile, "old-runtime", TestContext.CancellationToken);
+
+        await _msixService.SetupSelfContainedAsync(
+            winappDir,
+            arch,
+            TestTaskContext,
+            PackageListWith(SdkPackageId, "1.6.0"),
+            TestContext.CancellationToken);
+
+        Assert.IsFalse(File.Exists(staleFile), "A previous runtime version must not leak into an exact self-contained stage");
+        Assert.IsTrue(File.Exists(Path.Combine(deploymentDir.FullName, "Microsoft.Current.dll")));
+    }
+
+    [TestMethod]
+    public async Task SetupSelfContainedAsync_MsixToolsDirectoryMissing_PropagatesFailure()
     {
         // Create tools/MSIX (so GetRuntimeMsixDirAsync resolves) but NOT the win10-{arch} subfolder.
-        // The internal DirectoryNotFoundException is caught by the sub-task wrapper, so nothing is staged.
         var cacheDir = GetRequiredService<INugetService>().GetNuGetGlobalPackagesDir();
         Directory.CreateDirectory(Path.Combine(cacheDir.FullName, SdkPackageId.ToLowerInvariant(), "1.6.0", "tools", "MSIX"));
         var winappDir = GetRequiredService<IWinappDirectoryService>().GetLocalWinappDirectory();
         var arch = WorkspaceSetupService.GetSystemArchitecture();
 
-        await _msixService.SetupSelfContainedAsync(winappDir, arch, TestTaskContext, PackageListWith(SdkPackageId, "1.6.0"), TestContext.CancellationToken);
+        var exception = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+            _msixService.SetupSelfContainedAsync(winappDir, arch, TestTaskContext, PackageListWith(SdkPackageId, "1.6.0"), TestContext.CancellationToken));
 
-        var deploymentDir = Path.Combine(winappDir.FullName, "self-contained", arch, "deployment");
-        Assert.IsFalse(Directory.Exists(deploymentDir), "No runtime files should be staged when the MSIX tools directory is missing");
+        StringAssert.Contains(exception.Message, $"Failed to prepare the {arch} self-contained Windows App SDK runtime");
+        Assert.IsInstanceOfType<DirectoryNotFoundException>(exception.InnerException);
     }
 
     [TestMethod]
-    public async Task SetupSelfContainedAsync_RuntimeMsixDirectoryNotFound_DoesNotStageRuntime()
+    public async Task SetupSelfContainedAsync_RuntimeMsixDirectoryNotFound_PropagatesFailure()
     {
-        // Nothing arranged in the cache → GetRuntimeMsixDirAsync returns null; the resulting
-        // DirectoryNotFoundException is caught by the sub-task wrapper.
+        // Nothing arranged in the cache → GetRuntimeMsixDirAsync returns null.
         var winappDir = GetRequiredService<IWinappDirectoryService>().GetLocalWinappDirectory();
         var arch = WorkspaceSetupService.GetSystemArchitecture();
 
-        await _msixService.SetupSelfContainedAsync(winappDir, arch, TestTaskContext, PackageListWith(SdkPackageId, "1.6.0"), TestContext.CancellationToken);
+        var exception = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+            _msixService.SetupSelfContainedAsync(winappDir, arch, TestTaskContext, PackageListWith(SdkPackageId, "1.6.0"), TestContext.CancellationToken));
 
-        var deploymentDir = Path.Combine(winappDir.FullName, "self-contained", arch, "deployment");
-        Assert.IsFalse(Directory.Exists(deploymentDir), "No runtime files should be staged when the runtime MSIX directory is not found");
+        StringAssert.Contains(exception.Message, $"Failed to prepare the {arch} self-contained Windows App SDK runtime");
+        Assert.IsInstanceOfType<DirectoryNotFoundException>(exception.InnerException);
     }
 
     // ---- PrepareRuntimeForPackagingAsync -------------------------------------------
@@ -803,19 +824,19 @@ public class MsixServiceRuntimeTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task SetupSelfContainedAsync_EmptyMsixToolsDirectory_DoesNotStageRuntime()
+    public async Task SetupSelfContainedAsync_EmptyMsixToolsDirectory_PropagatesFailure()
     {
         // tools/MSIX/win10-{arch} exists but is empty (no inventory, no .msix files), so the
-        // file-pattern fallback finds nothing and throws (swallowed by the sub-task wrapper).
+        // file-pattern fallback finds nothing and fails the setup.
         var arch = WorkspaceSetupService.GetSystemArchitecture();
         var cacheDir = GetRequiredService<INugetService>().GetNuGetGlobalPackagesDir();
         Directory.CreateDirectory(Path.Combine(cacheDir.FullName, SdkPackageId.ToLowerInvariant(), "1.6.0", "tools", "MSIX", $"win10-{arch}"));
         var winappDir = GetRequiredService<IWinappDirectoryService>().GetLocalWinappDirectory();
 
-        await _msixService.SetupSelfContainedAsync(winappDir, arch, TestTaskContext, PackageListWith(SdkPackageId, "1.6.0"), TestContext.CancellationToken);
+        var exception = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+            _msixService.SetupSelfContainedAsync(winappDir, arch, TestTaskContext, PackageListWith(SdkPackageId, "1.6.0"), TestContext.CancellationToken));
 
-        var deploymentDir = Path.Combine(winappDir.FullName, "self-contained", arch, "deployment");
-        Assert.IsFalse(Directory.Exists(deploymentDir), "No runtime files should be staged when the MSIX tools directory is empty");
+        Assert.IsInstanceOfType<FileNotFoundException>(exception.InnerException);
     }
 
     [TestMethod]

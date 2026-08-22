@@ -257,6 +257,19 @@ public class ProgramJsonBridgeTests : BaseCommandTests
             $"without --json, stdout must not be a JSON error object; got: {stdout}");
     }
 
+    [TestMethod]
+    public async Task RuntimePrepare_MissingRequiredOption_Json_EmitsFlatJsonErrorOnStdout()
+    {
+        var (stdout, stderr, exitCode) = await InvokeProgramAsync(
+            ["runtime", "prepare", "--version", "2.2.0", "--arch", "x64", "--json"]);
+
+        Assert.AreEqual(1, exitCode);
+        var error = JsonSerializer.Deserialize<JsonElement>(stdout.Trim());
+        StringAssert.Contains(error.GetProperty("error").GetString(), "--output");
+        Assert.AreEqual(string.Empty, stderr);
+        Assert.IsFalse(stdout.Contains("Usage:", StringComparison.Ordinal));
+    }
+
     // -------------------------------------------------------------------------
     // M1 — value-aware pre-scan: --json=true / --json=false spellings
     // -------------------------------------------------------------------------

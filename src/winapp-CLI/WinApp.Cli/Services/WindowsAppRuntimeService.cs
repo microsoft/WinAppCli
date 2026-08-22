@@ -14,6 +14,8 @@ internal class WindowsAppRuntimeService(
     IPackageRegistrationService packageRegistrationService,
     INugetService nugetService) : IWindowsAppRuntimeService
 {
+    private sealed record RuntimePackageCandidate(string FilePath, string PackageName, string Version, string FileName);
+
     /// <summary>Package entry information from MSIX inventory.</summary>
     public class MsixPackageEntry
     {
@@ -108,37 +110,7 @@ internal class WindowsAppRuntimeService(
         // a same-name host-arch package is present.
         var filterArch = RunArchHelper.NormalizeArchitecture(architecture);
 
-        var packageEntries = await ParseMsixInventoryAsync(taskContext, msixDir, cancellationToken, dirArch);
-        if (packageEntries == null || packageEntries.Count == 0)
-        {
-            return (0, 0, Array.Empty<(string, string)>());
-        }
-
-        var msixArchDir = Path.Join(msixDir.FullName, $"win10-{dirArch}");
-
-        var packagesToCheck = new List<(string FilePath, string PackageName, string NewVersion, string FileName)>();
-        foreach (var entry in packageEntries)
-        {
-            var msixFilePath = Path.Combine(msixArchDir, entry.FileName);
-            if (!File.Exists(msixFilePath))
-            {
-                taskContext.AddDebugMessage($"{UiSymbols.Note} MSIX file not found: {msixFilePath}");
-                continue;
-            }
-
-            // Read the real identity from the MSIX's AppxManifest.xml (the inventory's PackageIdentity can
-            // differ from the installed name).
-            var (packageName, newVersionString) = ReadMsixIdentity(msixFilePath, taskContext);
-            if (packageName == null)
-            {
-                // Fallback: parse from inventory identity string.
-                var identityParts = entry.PackageIdentity.Split('_');
-                packageName = identityParts[0];
-                newVersionString = identityParts.Length >= 2 ? identityParts[1] : "";
-            }
-
-            packagesToCheck.Add((msixFilePath, packageName, newVersionString ?? "", entry.FileName));
-        }
+        var packagesToCheck = await GetRuntimePackageCandidatesAsync(msixDir, taskContext, dirArch, cancellationToken);
 
         if (packagesToCheck.Count == 0)
         {
@@ -150,8 +122,10 @@ internal class WindowsAppRuntimeService(
         var installedCount = 0;
         var errorCount = 0;
 
-        foreach (var (filePath, packageName, newVersion, fileName) in packagesToCheck)
+        foreach (var candidate in packagesToCheck)
         {
+            var (filePath, packageName, newVersion, fileName) =
+                (candidate.FilePath, candidate.PackageName, candidate.Version, candidate.FileName);
             // Skip if already installed with same or newer version. The arch filter applies only in project
             // mode (filterArch non-null); folder mode is null → arch-agnostic match.
             var installedVersion = packageRegistrationService.GetInstalledVersion(packageName, filterArch);
@@ -200,11 +174,74 @@ internal class WindowsAppRuntimeService(
         // the app was built against (not any registered version) and reject a stale older patch.
         var runtimePackages = packagesToCheck
             .Where(p => IsRuntimeGatePackageName(p.PackageName))
-            .Select(p => (Name: p.PackageName, Version: p.NewVersion))
+            .Select(p => (Name: p.PackageName, Version: p.Version))
             .DistinctBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         return (installedCount, errorCount, runtimePackages);
+    }
+
+    public async Task<IReadOnlyList<(string Name, string Version)>> GetWindowsAppRuntimePackagesAsync(
+        DirectoryInfo msixDir,
+        TaskContext taskContext,
+        CancellationToken cancellationToken,
+        string? architecture = null)
+    {
+        var arch = RunArchHelper.NormalizeArchitecture(architecture) ?? RunArchHelper.DefaultArchitecture();
+        var candidates = await GetRuntimePackageCandidatesAsync(msixDir, taskContext, arch, cancellationToken);
+        return candidates
+            .Where(p => IsRuntimeGatePackageName(p.PackageName))
+            .Select(p => (Name: p.PackageName, Version: p.Version))
+            .DistinctBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static async Task<List<RuntimePackageCandidate>> GetRuntimePackageCandidatesAsync(
+        DirectoryInfo msixDir,
+        TaskContext taskContext,
+        string architecture,
+        CancellationToken cancellationToken)
+    {
+        var packageEntries = await ParseMsixInventoryAsync(
+            taskContext,
+            msixDir,
+            cancellationToken,
+            architecture);
+        if (packageEntries == null || packageEntries.Count == 0)
+        {
+            return [];
+        }
+
+        var msixArchDir = Path.Join(msixDir.FullName, $"win10-{architecture}");
+        var candidates = new List<RuntimePackageCandidate>();
+        foreach (var entry in packageEntries)
+        {
+            var msixFilePath = Path.Combine(msixArchDir, entry.FileName);
+            if (!File.Exists(msixFilePath))
+            {
+                taskContext.AddDebugMessage($"{UiSymbols.Note} MSIX file not found: {msixFilePath}");
+                continue;
+            }
+
+            // Read the real identity from the MSIX's AppxManifest.xml (the inventory's PackageIdentity can
+            // differ from the installed name).
+            var (packageName, version) = ReadMsixIdentity(msixFilePath, taskContext);
+            if (packageName == null)
+            {
+                // Fallback: parse from inventory identity string.
+                var identityParts = entry.PackageIdentity.Split('_');
+                packageName = identityParts[0];
+                version = identityParts.Length >= 2 ? identityParts[1] : "";
+            }
+
+            candidates.Add(new RuntimePackageCandidate(
+                msixFilePath,
+                packageName,
+                version ?? "",
+                entry.FileName));
+        }
+
+        return candidates;
     }
 
     /// <summary>

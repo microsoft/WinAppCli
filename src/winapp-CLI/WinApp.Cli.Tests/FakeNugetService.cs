@@ -15,6 +15,7 @@ internal class FakeNugetService : INugetService
     public string DefaultVersion { get; set; } = "1.6.0";
     public List<string> QueriedPackages { get; } = [];
     public List<(string Package, string Version)> InstalledPackages { get; } = [];
+    public Dictionary<string, string>? InstallPackageResult { get; set; }
 
     /// <summary>
     /// Set this to the test cache directory to enable NuGet cache path resolution in tests.
@@ -40,7 +41,10 @@ internal class FakeNugetService : INugetService
     public Task<Dictionary<string, string>> InstallPackageAsync(string package, string version, TaskContext taskContext, CancellationToken cancellationToken = default)
     {
         InstalledPackages.Add((package, version));
-        return Task.FromResult(new Dictionary<string, string> { [package] = version });
+        return Task.FromResult(
+            InstallPackageResult is null
+                ? new Dictionary<string, string> { [package] = version }
+                : new Dictionary<string, string>(InstallPackageResult, StringComparer.OrdinalIgnoreCase));
     }
 
     /// <summary>

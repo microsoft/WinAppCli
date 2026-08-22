@@ -236,6 +236,7 @@ See also: [Debugging Guide](./docs/debugging.md) — choosing between `winapp ru
 
 **Development Tools:**
 
+- [`runtime prepare`](./docs/usage.md#runtime-prepare) - Stage the bootstrap DLL and preflight/install an exact framework-dependent Windows App SDK runtime
 - [`tool`](./docs/usage.md#tool) - Access Windows SDK tools
 - [`store`](./docs/usage.md#store) - Run Microsoft Store Developer CLI commands
 - [`get-winapp-path`](./docs/usage.md#get-winapp-path) - Get paths to installed SDK components

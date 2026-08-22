@@ -2189,6 +2189,113 @@
         }
       }
     },
+    "runtime": {
+      "description": "Resolve and prepare an exact framework-dependent Windows App SDK runtime for an unpackaged desktop app. Use 'runtime prepare' to stage the bootstrap DLL and preflight or install the matching runtime.",
+      "hidden": false,
+      "subcommands": {
+        "prepare": {
+          "description": "Prepare an exact framework-dependent Windows App SDK runtime for an unpackaged app. Stages the bootstrap DLL and preflights the matching runtime; add --install to install it for the current user. Use --json for deterministic automation output.",
+          "hidden": false,
+          "options": {
+            "--arch": {
+              "description": "Target application architecture: x64, arm64, or x86",
+              "hidden": false,
+              "helpName": "x64|arm64|x86",
+              "valueType": "WinApp.Cli.Models.RuntimeArchitecture",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": true,
+              "recursive": false
+            },
+            "--install": {
+              "description": "Install the matching framework-dependent runtime packages for the current user when preflight finds them missing",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--json": {
+              "description": "Format output as JSON",
+              "hidden": false,
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--output": {
+              "description": "App output directory where the architecture-specific bootstrap DLL will be staged",
+              "hidden": false,
+              "valueType": "System.IO.DirectoryInfo",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": true,
+              "recursive": false
+            },
+            "--quiet": {
+              "description": "Suppress progress messages",
+              "hidden": false,
+              "aliases": [
+                "-q"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--verbose": {
+              "description": "Enable verbose output",
+              "hidden": false,
+              "aliases": [
+                "-v"
+              ],
+              "valueType": "System.Boolean",
+              "hasDefaultValue": true,
+              "defaultValue": false,
+              "arity": {
+                "minimum": 0,
+                "maximum": 1
+              },
+              "required": false,
+              "recursive": false
+            },
+            "--version": {
+              "description": "Exact Microsoft.WindowsAppSDK NuGet version (for example, 1.8.250907003 or 2.2.0)",
+              "hidden": false,
+              "valueType": "System.String",
+              "hasDefaultValue": false,
+              "arity": {
+                "minimum": 1,
+                "maximum": 1
+              },
+              "required": true,
+              "recursive": false
+            }
+          }
+        }
+      }
+    },
     "sign": {
       "description": "Code-sign an MSIX package or executable. Example: winapp sign ./app.msix ./devcert.pfx. Use --timestamp for production builds to remain valid after cert expires. The 'package' command can sign automatically with --cert.",
       "hidden": false,

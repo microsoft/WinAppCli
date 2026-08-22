@@ -35,13 +35,16 @@ internal partial class MsixService
     /// </summary>
     public async Task SetupSelfContainedAsync(DirectoryInfo winappDir, string architecture, TaskContext taskContext, DotNetPackageListJson? dotNetPackageList = null, CancellationToken cancellationToken = default)
     {
+        Exception? setupFailure = null;
         await taskContext.AddSubTaskAsync("Setting up Self Contained", async (taskContext, cancellationToken) =>
         {
-            // Look for the Runtime package which contains the MSIX files
-            var selfContainedDir = winappDir.CreateSubdirectory("self-contained");
-            var archSelfContainedDir = selfContainedDir.CreateSubdirectory(architecture);
+            try
+            {
+                // Look for the Runtime package which contains the MSIX files
+                var selfContainedDir = winappDir.CreateSubdirectory("self-contained");
+                var archSelfContainedDir = selfContainedDir.CreateSubdirectory(architecture);
 
-            var msixDir = await GetRuntimeMsixDirAsync(dotNetPackageList, taskContext, cancellationToken) ?? throw new DirectoryNotFoundException("Windows App SDK Runtime MSIX directory not found. Ensure Windows App SDK is installed.");
+                var msixDir = await GetRuntimeMsixDirAsync(dotNetPackageList, taskContext, cancellationToken) ?? throw new DirectoryNotFoundException("Windows App SDK Runtime MSIX directory not found. Ensure Windows App SDK is installed.");
 
             // Look for the MSIX file in the tools/MSIX folder
             var msixToolsDir = new DirectoryInfo(Path.Combine(msixDir.FullName, $"win10-{architecture}"));
@@ -54,7 +57,11 @@ internal partial class MsixService
             FileInfo? msixPath = null;
             try
             {
-                var packageEntries = await WindowsAppRuntimeService.ParseMsixInventoryAsync(taskContext, msixDir, cancellationToken);
+                var packageEntries = await WindowsAppRuntimeService.ParseMsixInventoryAsync(
+                    taskContext,
+                    msixDir,
+                    cancellationToken,
+                    architecture);
                 if (packageEntries != null)
                 {
                     // Look for the base Windows App Runtime package (not Framework, DDLM, or Singleton packages)
@@ -114,18 +121,53 @@ internal partial class MsixService
             }
 
             // Copy relevant files to deployment directory
-            var deploymentDir = archSelfContainedDir.CreateSubdirectory("deployment");
+            var deploymentDir = new DirectoryInfo(Path.Combine(archSelfContainedDir.FullName, "deployment"));
+            if (deploymentDir.Exists)
+            {
+                deploymentDir.Delete(recursive: true);
+            }
+            deploymentDir.Refresh();
+            deploymentDir.Create();
 
             // Copy DLLs, WinMD files, and other runtime assets
             await CopyRuntimeFilesAsync(extractedDir, deploymentDir, taskContext, cancellationToken);
 
-            taskContext.AddDebugMessage($"{UiSymbols.Check} Self-contained files prepared in: {archSelfContainedDir.FullName}");
+                taskContext.AddDebugMessage($"{UiSymbols.Check} Self-contained files prepared in: {archSelfContainedDir.FullName}");
 
-            return 0;
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                setupFailure = ex;
+                throw;
+            }
         }, cancellationToken);
+
+        if (setupFailure is not null)
+        {
+            throw new InvalidOperationException(
+                $"Failed to prepare the {architecture} self-contained Windows App SDK runtime: {setupFailure.Message}",
+                setupFailure);
+        }
     }
 
-    private async Task EmbedActivationManifestToExeAsync(FileInfo exePath, DirectoryInfo winAppSDKDeploymentDir, FileInfo windowsAppSDKAppXManifestPath, DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, CancellationToken cancellationToken)
+    private Task EmbedActivationManifestToExeAsync(
+        FileInfo exePath,
+        DirectoryInfo winAppSDKDeploymentDir,
+        FileInfo windowsAppSDKAppXManifestPath,
+        DotNetPackageListJson? dotNetPackageList,
+        TaskContext taskContext,
+        CancellationToken cancellationToken)
+        => EmbedActivationManifestToExeForArchitectureAsync(
+            exePath,
+            winAppSDKDeploymentDir,
+            windowsAppSDKAppXManifestPath,
+            dotNetPackageList,
+            taskContext,
+            overrideArchitecture: null,
+            cancellationToken);
+
+    private async Task EmbedActivationManifestToExeForArchitectureAsync(FileInfo exePath, DirectoryInfo winAppSDKDeploymentDir, FileInfo windowsAppSDKAppXManifestPath, DotNetPackageListJson? dotNetPackageList, TaskContext taskContext, string? overrideArchitecture, CancellationToken cancellationToken)
     {
         // Use applicationLocation for DLL content (where runtime files were copied by PrepareRuntimeForPackagingAsync)
         var exeDir = exePath.Directory!;
@@ -153,7 +195,7 @@ internal partial class MsixService
                 throw new InvalidOperationException("No Windows SDK packages found. Please install the Windows SDK or Windows App SDK.");
             }
 
-            var architecture = WorkspaceSetupService.GetSystemArchitecture();
+            var architecture = overrideArchitecture ?? WorkspaceSetupService.GetSystemArchitecture();
             IEnumerable<FileInfo> appxFragments = GetComponents(packageDependencies);
 
             // Combine all manifests: main AppxManifest.xml (Package root) + fragments (Fragment root)

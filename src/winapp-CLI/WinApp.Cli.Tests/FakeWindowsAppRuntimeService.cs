@@ -30,6 +30,10 @@ internal sealed class FakeWindowsAppRuntimeService : IWindowsAppRuntimeService
     /// <summary>Value returned by <see cref="IsWindowsAppRuntimeRegistered"/>.</summary>
     public bool IsRuntimeRegisteredResult { get; set; } = true;
 
+    public IReadOnlyList<(string Name, string Version)> RuntimePackages { get; set; } = [];
+    public Queue<bool> RuntimeRegisteredResults { get; } = new();
+    public int IsRuntimeRegisteredCallCount { get; private set; }
+
     /// <summary>Records the <c>requireExactVersion</c> argument of the last <see cref="FindWindowsAppSdkMsixDirectory"/> call.</summary>
     public bool? LastRequireExactVersion { get; private set; }
 
@@ -45,6 +49,18 @@ internal sealed class FakeWindowsAppRuntimeService : IWindowsAppRuntimeService
         return Task.FromResult((InstallRuntimeResult.InstalledCount, InstallRuntimeResult.ErrorCount, InstallRuntimePackages));
     }
 
+    public Task<IReadOnlyList<(string Name, string Version)>> GetWindowsAppRuntimePackagesAsync(
+        DirectoryInfo msixDir,
+        TaskContext taskContext,
+        CancellationToken cancellationToken,
+        string? architecture = null)
+        => Task.FromResult(RuntimePackages);
+
     public bool IsWindowsAppRuntimeRegistered(string? architecture, IReadOnlyList<(string Name, string Version)>? expectedRuntimePackages = null)
-        => IsRuntimeRegisteredResult;
+    {
+        IsRuntimeRegisteredCallCount++;
+        return RuntimeRegisteredResults.Count > 0
+            ? RuntimeRegisteredResults.Dequeue()
+            : IsRuntimeRegisteredResult;
+    }
 }

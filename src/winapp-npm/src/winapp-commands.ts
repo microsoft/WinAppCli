@@ -2,7 +2,7 @@
  * AUTO-GENERATED — DO NOT EDIT
  *
  * Regenerate with:  npm run generate-commands
- * Source schema version: 0.5.1
+ * Source schema version: 0.6.3
  *
  * Programmatic wrappers for all winapp CLI commands.
  * Each function builds the CLI arguments, invokes the native CLI,
@@ -26,6 +26,9 @@ export type SdkInstallMode = 'stable' | 'preview' | 'experimental' | 'none';
 
 /** ManifestTemplates values. */
 export type ManifestTemplates = 'packaged' | 'sparse';
+
+/** RuntimeArchitecture values. */
+export type RuntimeArchitecture = 'x64' | 'arm64' | 'x86';
 
 /** Base options shared by most commands. */
 export interface CommonOptions {
@@ -679,6 +682,36 @@ export async function run(options: RunOptions = {}): Promise<WinappResult> {
       args.push('--', ...appArgsArr);
     }
   }
+  return execCommand(args, options);
+}
+
+// ---------------------------------------------------------------------------
+// runtime prepare
+// ---------------------------------------------------------------------------
+
+export interface RuntimePrepareOptions extends CommonOptions {
+  /** Target application architecture: x64, arm64, or x86 */
+  arch: RuntimeArchitecture;
+  /** Install the matching framework-dependent runtime packages for the current user when preflight finds them missing */
+  install?: boolean;
+  /** Format output as JSON */
+  json?: boolean;
+  /** App output directory where the architecture-specific bootstrap DLL will be staged */
+  output: string;
+  /** Exact Microsoft.WindowsAppSDK NuGet version (for example, 1.8.250907003 or 2.2.0) */
+  version: string;
+}
+
+/**
+ * Prepare an exact framework-dependent Windows App SDK runtime for an unpackaged app. Stages the bootstrap DLL and preflights the matching runtime; add --install to install it for the current user. Use --json for deterministic automation output.
+ */
+export async function runtimePrepare(options: RuntimePrepareOptions): Promise<WinappResult> {
+  const args: string[] = ['runtime', 'prepare'];
+  args.push('--arch', options.arch);
+  if (options.install) args.push('--install');
+  if (options.json) args.push('--json');
+  args.push('--output', options.output);
+  args.push('--version', options.version);
   return execCommand(args, options);
 }
 

@@ -86,8 +86,19 @@ Describe "Node WinUI Sample" {
             $applicationJs | Should -Match 'getWinappsdkResourcePriPath'
             $applicationJs | Should -Match 'onResourceManagerRequested'
 
+        }
+
+        It "Should prepare the exact framework-dependent runtime through the Node SDK" -Skip:$script:skip {
+            Push-Location $script:appDir
+            try {
+                & npm run prepare-runtime
+                $LASTEXITCODE | Should -Be 0
+            } finally {
+                Pop-Location
+            }
+
             $nodeArchitecture = (& node -p 'process.arch').Trim()
-            Join-Path $script:appDir ".winapp\bin\$nodeArchitecture\Microsoft.WindowsAppRuntime.Bootstrap.dll" |
+            Join-Path $script:appDir ".winapp\runtime\$nodeArchitecture\Microsoft.WindowsAppRuntime.Bootstrap.dll" |
                 Should -Exist
         }
     }
@@ -96,6 +107,8 @@ Describe "Node WinUI Sample" {
         It "Should contain valid JavaScript" -Skip:$script:skip {
             & node --check (Join-Path $script:sampleDir 'main.js')
             $LASTEXITCODE | Should -Be 0
+            & node --check (Join-Path $script:sampleDir 'prepare-runtime.js')
+            $LASTEXITCODE | Should -Be 0
             & node --check (Join-Path $script:sampleDir 'winui-worker.js')
             $LASTEXITCODE | Should -Be 0
         }
@@ -103,6 +116,7 @@ Describe "Node WinUI Sample" {
         It "Should declare unpackaged startup and WinUI binding roots" -Skip:$script:skip {
             $package = Get-Content (Join-Path $script:sampleDir 'package.json') -Raw | ConvertFrom-Json
             $package.scripts.start | Should -Be 'node main.js'
+            $package.scripts.'prepare-runtime' | Should -Be 'node prepare-runtime.js'
             $package.imports.'#winapp/bindings'.require | Should -Be './.winapp/bindings/index.js'
             $package.dependencies.'@microsoft/dynwinrt' | Should -Be '0.1.0-preview.15'
             $package.devDependencies.'@microsoft/dynwinrt-codegen' | Should -Be '0.1.0-preview.15'
@@ -117,11 +131,18 @@ Describe "Node WinUI Sample" {
             (Join-Path $script:sampleDir 'run.ps1') | Should -Not -Exist
             (Join-Path $script:sampleDir 'Assets') | Should -Not -Exist
             $mainSource = Get-Content (Join-Path $script:sampleDir 'main.js') -Raw
+            $prepareSource = Get-Content (Join-Path $script:sampleDir 'prepare-runtime.js') -Raw
             $workerSource = Get-Content (Join-Path $script:sampleDir 'winui-worker.js') -Raw
             $mainSource |
                 Should -Match 'WINAPPSDK_BOOTSTRAP_DLL_PATH'
             $mainSource |
                 Should -Match '(?s)initWinappsdk\(2, 2\).*new Worker'
+            $prepareSource |
+                Should -Match 'runtimePrepare\('
+            $prepareSource |
+                Should -Match "version: '2\.2\.0'"
+            $prepareSource |
+                Should -Match 'install: true'
             $workerSource |
                 Should -Match "require\('#winapp/bindings'\)"
             $workerSource |

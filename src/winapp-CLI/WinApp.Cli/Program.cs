@@ -101,7 +101,7 @@ internal static class Program
                 {
                     UiJsonError.Emit(true, UiJsonError.CodeInvalidArguments, message);
                 }
-                else if (ResolveEffectiveJson(parseResult) && IsFindUi(parseResult))
+                else if (ResolveEffectiveJson(parseResult) && IsFlatJsonCommand(parseResult))
                 {
                     EmitFindUiJsonError(message);
                 }
@@ -191,7 +191,7 @@ internal static class Program
                         CommandCompletedEvent.Log(parsedArgs.CommandResult, 1);
                     }
                 }
-                else if (effectiveJson && IsFindUi(parsedArgs))
+                else if (effectiveJson && IsFlatJsonCommand(parsedArgs))
                 {
                     // find-ui emits all its JSON (results and errors) on stdout as a flat
                     // {"error":"..."} object — keep parser-level failures on that same contract.
@@ -310,7 +310,7 @@ internal static class Program
             // stdout), but a type/parser error such as `--max abc` fails before the handler
             // runs, so System.CommandLine would otherwise print human help text. Emit the same
             // flat {"error":"..."} object here so every --json path stays machine-readable (#719).
-            if (effectiveJson && parsedArgs.Errors.Count > 0 && IsFindUi(parsedArgs))
+            if (effectiveJson && parsedArgs.Errors.Count > 0 && IsFlatJsonCommand(parsedArgs))
             {
                 var errorMsg = string.Join("; ", parsedArgs.Errors.Select(e => e.Message));
                 EmitFindUiJsonError(errorMsg);
@@ -399,6 +399,18 @@ internal static class Program
     /// </summary>
     private static bool IsFindUi(System.CommandLine.ParseResult parseResult) =>
         parseResult.CommandResult.Command.Name == "find-ui";
+
+    private static bool IsFlatJsonCommand(System.CommandLine.ParseResult parseResult)
+    {
+        if (IsFindUi(parseResult))
+        {
+            return true;
+        }
+
+        var command = parseResult.CommandResult.Command;
+        return command.Name == "prepare"
+            && command.Parents.OfType<System.CommandLine.Command>().Any(parent => parent.Name == "runtime");
+    }
 
     /// <summary>
     /// Writes a flat <c>{"error":"..."}</c> object to stdout — the same schema and sink

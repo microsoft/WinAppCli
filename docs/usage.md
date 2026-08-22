@@ -266,6 +266,45 @@ winapp update --setup-sdks experimental
 
 ---
 
+### runtime prepare
+
+Prepare an exact Windows App SDK runtime for an unpackaged desktop app. This command is independent of `winapp.yaml`: pass the Microsoft.WindowsAppSDK NuGet version and target architecture explicitly.
+
+```bash
+winapp runtime prepare --version <version> --arch <x64|arm64|x86> --output <directory> [options]
+```
+
+**Required options:**
+
+- `--version <version>` - Exact `Microsoft.WindowsAppSDK` NuGet version (for example, `1.8.250907003` or `2.2.0)
+- `--arch <x64|arm64|x86>` - Architecture of the application process
+- `--output <directory>` - Application output directory in which to stage the architecture-specific bootstrap DLL
+
+**Options:**
+
+- `--install` - If the matching framework-dependent runtime is missing, install its packages for the current user
+- `--json` - Emit deterministic machine-readable output
+
+Framework-dependent mode is the default. It restores the exact dependency graph, stages `Microsoft.WindowsAppRuntime.Bootstrap.dll`, and checks that the matching Framework and DDLM packages are registered for the current user. A missing runtime returns exit code `2`; the JSON result still contains the resolved package identities and an exact command in `guidance`. Add `--install` to perform that current-user installation and recheck it.
+
+**Examples:**
+
+```powershell
+# Deterministic framework-dependent preflight; exit code 2 means installation is required
+winapp runtime prepare --version 1.8.250907003 --arch x64 --output .\dist --json
+
+# Install the exact matching framework-dependent runtime for the current user when needed
+winapp runtime prepare --version 1.8.250907003 --arch x64 --output .\dist --install --json
+```
+
+The JSON object includes `deploymentMode`, requested `version`, resolved `runtimeVersion`, canonical `architecture`, `outputPath`, `bootstrapDllPath`, `ready`, runtime registration/installation state, and the sorted `runtimePackages` identities. An unready result includes `guidance`.
+
+For JavaScript callers, the npm package exports the generated `runtimePrepare(options)` wrapper with required `version`, `arch`, and `output` properties. The process still initializes Windows App SDK through its normal bootstrap API (for example, `@microsoft/dynwinrt`'s `initWinappsdk(major, minor)`); this command prepares the files and deployment state that bootstrap requires.
+
+For self-contained MSIX deployment, use `winapp package --self-contained`. Unpackaged self-contained Electron layouts are not exposed by this command because app-local PRI resolution is not yet supported by `@microsoft/dynwinrt`.
+
+---
+
 ### pack
 
 Create MSIX packages from prepared application directories. Requires a manifest file (`Package.appxmanifest` preferred, `appxmanifest.xml` also supported) to be present in the target directory, in the current directory, or passed with the `--manifest` option. (run `init` or `manifest generate` to create a manifest)

@@ -133,6 +133,52 @@ public sealed class NugetServiceOfflineTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task InstallPackageAsync_TransportFailureIncludesSourceAndTlsDetails()
+    {
+        NugetService.HttpGetAsync = (_, _) => throw new HttpRequestException(
+            "The SSL connection could not be established.",
+            new InvalidOperationException("The remote certificate is invalid."));
+
+        var ex = await Assert.ThrowsExactlyAsync<HttpRequestException>(
+            () => _service.InstallPackageAsync("Missing.Pkg", "9.9.9", TestTaskContext, TestContext.CancellationToken));
+
+        StringAssert.Contains(ex.Message, "URL: https://api.nuget.org/v3-flatcontainer/missing.pkg/9.9.9/missing.pkg.9.9.9.nupkg");
+        StringAssert.Contains(ex.Message, "Source: https://api.nuget.org");
+        StringAssert.Contains(ex.Message, "HttpRequestException: The SSL connection could not be established.");
+        StringAssert.Contains(ex.Message, "InvalidOperationException: The remote certificate is invalid.");
+        StringAssert.Contains(ex.Message, NugetService.FlatContainerEnvironmentVariable);
+        StringAssert.Contains(ex.Message, NugetService.RegistrationEnvironmentVariable);
+    }
+
+    [TestMethod]
+    public async Task InstallPackageAsync_UserCancellationIsNotWrappedAsFeedFailure()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        NugetService.HttpGetAsync = (_, token) => Task.FromCanceled<HttpResponseMessage>(token);
+
+        await Assert.ThrowsExactlyAsync<TaskCanceledException>(
+            () => _service.InstallPackageAsync("Missing.Pkg", "9.9.9", TestTaskContext, cancellation.Token));
+    }
+
+    [TestMethod]
+    public async Task InstallPackageAsync_TransportFailureRedactsFeedCredentialsAndQuery()
+    {
+        Environment.SetEnvironmentVariable(
+            NugetService.FlatContainerEnvironmentVariable,
+            "https://feed-user:feed-password@packages.example.test/v3/flat2?token=secret");
+        NugetService.HttpGetAsync = (url, _) => throw new HttpRequestException($"TLS failure for {url}");
+
+        var ex = await Assert.ThrowsExactlyAsync<HttpRequestException>(
+            () => _service.InstallPackageAsync("Missing.Pkg", "9.9.9", TestTaskContext, TestContext.CancellationToken));
+
+        StringAssert.Contains(ex.Message, "https://packages.example.test/");
+        Assert.IsFalse(ex.Message.Contains("feed-user", StringComparison.Ordinal));
+        Assert.IsFalse(ex.Message.Contains("feed-password", StringComparison.Ordinal));
+        Assert.IsFalse(ex.Message.Contains("token=secret", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task InstallPackageAsync_MalformedNuspec_StillInstallsMainPackage()
     {
         // A nuspec that is not well-formed XML makes dependency resolution throw; that failure is

@@ -45,6 +45,9 @@ Windows integration guidance:
 - Use **JS bindings** to call Windows App SDK APIs directly from JavaScript without native addons (for example AI APIs, notifications, and file pickers). Custom WinRT components with .winmd metadata can also be added via `winapp.jsBindings.additionalWinmds` in package.json.
 - Use **native addons** when you need Win32/COM APIs, third-party C++ libraries, or .NET assemblies: `--template cpp` for C++ (node-gyp), or `--template cs` for C#.
 - Mixing JS bindings and native addons in one Electron app is fine.
+- For an **unpackaged** Electron process that bootstraps Windows App SDK, use `npx winapp runtime prepare --version <exact-version> --arch <x64|arm64|x86> --output <app-output> --json`. This stages the architecture-specific bootstrap DLL and preflights the exact Framework/DDLM packages. Add `--install` for current-user framework installation.
+- For a self-contained MSIX, use `npx winapp package <output> --self-contained`. Do not recommend unpackaged self-contained Electron deployment: `@microsoft/dynwinrt` cannot yet resolve the app-local Windows App SDK PRI required by that model.
+- `runtime prepare` does not replace process initialization: continue calling the runtime bridge (for example `@microsoft/dynwinrt`'s `initWinappsdk(major, minor)`) after using the returned `bootstrapDllPath`.
 
 Additional Electron guides:
 - [Notification JS bindings guide](https://github.com/microsoft/WinAppCli/blob/main/docs/guides/electron/js-notification.md)

@@ -319,8 +319,10 @@ function generate(schema) {
     // Sort by order
     positionalArgs.sort((a, b) => (a.def.order ?? 0) - (b.def.order ?? 0));
 
-    // Determine which positional args are required (arity minimum >= 1)
-    const hasRequiredArgs = positionalArgs.some((a) => a.def.arity?.minimum >= 1);
+    // Required positional arguments or named options make the options object itself required.
+    const hasRequiredArgs =
+      positionalArgs.some((a) => a.def.arity?.minimum >= 1) ||
+      opts.some((o) => o.def.required === true);
 
     L();
     L('// ---------------------------------------------------------------------------');
@@ -345,8 +347,9 @@ function generate(schema) {
     // then named options
     for (const opt of opts) {
       const tp = isVariadicOption(opt.def) ? 'string | string[]' : tsType(opt.def.valueType, opt.def.helpName);
+      const required = opt.def.required === true;
       L(`  /** ${cleanDesc(opt.def.description)} */`);
-      L(`  ${opt.propName}?: ${tp};`);
+      L(`  ${opt.propName}${required ? '' : '?'}: ${tp};`);
     }
     // passthrough args property
     if (passthrough) {
@@ -410,18 +413,32 @@ function generate(schema) {
 
     // Named options
     for (const opt of opts) {
+      const required = opt.def.required === true;
       if (isBoolFlag(opt.def)) {
         L(`  if (options.${opt.propName}) args.push('${opt.cliName}');`);
       } else if (isVariadicOption(opt.def)) {
         // Repeatable option: emit one flag+value pair per element (e.g. --property A=1 --property B=2, or --id x --id y).
-        L(`  if (options.${opt.propName}) {`);
-        L(`    const ${opt.propName}Arr = Array.isArray(options.${opt.propName}) ? options.${opt.propName} : [options.${opt.propName}];`);
-        L(`    for (const v of ${opt.propName}Arr) args.push('${opt.cliName}', v);`);
-        L('  }');
+        if (required) {
+          L(`  const ${opt.propName}Arr = Array.isArray(options.${opt.propName}) ? options.${opt.propName} : [options.${opt.propName}];`);
+          L(`  for (const v of ${opt.propName}Arr) args.push('${opt.cliName}', v);`);
+        } else {
+          L(`  if (options.${opt.propName}) {`);
+          L(`    const ${opt.propName}Arr = Array.isArray(options.${opt.propName}) ? options.${opt.propName} : [options.${opt.propName}];`);
+          L(`    for (const v of ${opt.propName}Arr) args.push('${opt.cliName}', v);`);
+          L('  }');
+        }
       } else if (tsType(opt.def.valueType) === 'number') {
-        L(`  if (options.${opt.propName} !== undefined) args.push('${opt.cliName}', options.${opt.propName}.toString());`);
+        if (required) {
+          L(`  args.push('${opt.cliName}', options.${opt.propName}.toString());`);
+        } else {
+          L(`  if (options.${opt.propName} !== undefined) args.push('${opt.cliName}', options.${opt.propName}.toString());`);
+        }
       } else {
-        L(`  if (options.${opt.propName}) args.push('${opt.cliName}', options.${opt.propName});`);
+        if (required) {
+          L(`  args.push('${opt.cliName}', options.${opt.propName});`);
+        } else {
+          L(`  if (options.${opt.propName}) args.push('${opt.cliName}', options.${opt.propName});`);
+        }
       }
     }
 

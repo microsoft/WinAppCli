@@ -23,17 +23,23 @@ themes and applies the same selection to the system title bar.
 ```powershell
 npm install
 npm run restore
+npm run prepare-runtime
 npm start
 ```
 
-`npm run restore` downloads the SDK metadata, installs the Windows App SDK
-runtime, copies the architecture-specific bootstrap DLL under `.winapp\bin`, and
-generates JavaScript bindings under `.winapp\bindings`. The app loads the
-bindings through the `#winapp/bindings` package import declared in
-`package.json`.
+`npm run restore` downloads the SDK metadata and generates JavaScript bindings
+under `.winapp\bindings`. The app loads the bindings through the
+`#winapp/bindings` package import declared in `package.json`.
+
+`npm run prepare-runtime` uses the typed `runtimePrepare()` Node SDK wrapper to
+resolve Windows App SDK 2.2 for the Node process architecture, install the exact
+matching framework-dependent runtime for the current user when needed, and
+stage the bootstrap DLL under `.winapp\runtime\<arch>`. The JSON result supplies
+the resolved version and deterministic bootstrap path; the sample does not
+search the NuGet cache or depend on `restore`'s internal output layout.
 
 `npm start` launches `node main.js` directly without package identity. The main
-thread locates the restored bootstrap DLL and initializes the process-wide
+thread loads the prepared bootstrap DLL and initializes the process-wide
 Windows App SDK runtime graph before creating the UI worker.
 
 ## Architecture

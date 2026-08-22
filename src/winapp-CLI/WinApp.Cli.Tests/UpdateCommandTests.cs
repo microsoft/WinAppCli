@@ -244,6 +244,13 @@ internal sealed class UpdateWorkspaceFake : IWindowsAppRuntimeService
 
     public bool IsRuntimeRegisteredResult { get; set; } = true;
 
+    public Task<IReadOnlyList<(string Name, string Version)>> GetWindowsAppRuntimePackagesAsync(
+        DirectoryInfo msixDir,
+        TaskContext taskContext,
+        CancellationToken cancellationToken,
+        string? architecture = null)
+        => Task.FromResult<IReadOnlyList<(string Name, string Version)>>([]);
+
     public Task<(int InstalledCount, int ErrorCount, IReadOnlyList<(string Name, string Version)> RuntimePackages)> InstallWindowsAppRuntimeAsync(DirectoryInfo msixDir, TaskContext taskContext, CancellationToken cancellationToken, string? architecture = null)
     {
         InstallRuntimeCalls.Add(msixDir);

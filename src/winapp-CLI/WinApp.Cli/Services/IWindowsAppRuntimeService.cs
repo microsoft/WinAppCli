@@ -27,6 +27,17 @@ internal interface IWindowsAppRuntimeService
     DirectoryInfo? FindWindowsAppSdkMsixDirectory(Dictionary<string, string>? usedVersions = null, bool requireExactVersion = false);
 
     /// <summary>
+    /// Reads the versioned runtime package identities from an exact runtime MSIX payload without
+    /// installing anything. Used by preflight callers that must compare the requested runtime with
+    /// the current user's registrations before deciding whether installation is necessary.
+    /// </summary>
+    Task<IReadOnlyList<(string Name, string Version)>> GetWindowsAppRuntimePackagesAsync(
+        DirectoryInfo msixDir,
+        TaskContext taskContext,
+        CancellationToken cancellationToken,
+        string? architecture = null);
+
+    /// <summary>
     /// Installs the Windows App Runtime framework MSIX packages (Framework / DDLM / Singleton / Main)
     /// from the given runtime MSIX directory.
     /// </summary>

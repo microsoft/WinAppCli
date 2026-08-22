@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
 
-const architecture = { arm64: 'arm64', x64: 'x64' }[process.arch];
+const architecture = { arm64: 'arm64', x64: 'x64', ia32: 'x86' }[process.arch];
 if (!architecture) {
   throw new Error(`Unsupported Node.js architecture: ${process.arch}`);
 }
@@ -12,13 +12,13 @@ const bootstrapDll =
   path.join(
     __dirname,
     '.winapp',
-    'bin',
+    'runtime',
     architecture,
     'Microsoft.WindowsAppRuntime.Bootstrap.dll'
   );
 if (!fs.existsSync(bootstrapDll)) {
   throw new Error(
-    `Windows App SDK bootstrap DLL was not found at ${bootstrapDll}. Run npm run restore first.`
+    `Windows App SDK bootstrap DLL was not found at ${bootstrapDll}. Run npm run prepare-runtime first.`
   );
 }
 process.env.WINAPPSDK_BOOTSTRAP_DLL_PATH = bootstrapDll;
