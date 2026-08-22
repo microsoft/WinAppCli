@@ -282,13 +282,8 @@ public partial class TargetRuntimeServiceTests
         {
             var matches = new List<RegisteredPackageIdentity>();
 
-            foreach (var registration in Registrations)
-            {
-                if (string.Equals(registration.Name, packageName, StringComparison.OrdinalIgnoreCase))
-                {
-                    matches.Add(registration);
-                }
-            }
+            matches.AddRange(Registrations.Where(registration =>
+                string.Equals(registration.Name, packageName, StringComparison.OrdinalIgnoreCase)));
 
             foreach (var (name, version) in Present)
             {
@@ -419,7 +414,11 @@ public partial class TargetRuntimeServiceTests
                 var exitCode = await handler.InvokeAsync(parseResult, CancellationToken.None);
                 _exit.TrySetResult(exitCode);
             }
-            catch (Exception ex)
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (SystemException ex)
             {
                 onOutput(GuestStreamId.StandardError, Encoding.UTF8.GetBytes(ex.Message));
                 _exit.TrySetResult(1);

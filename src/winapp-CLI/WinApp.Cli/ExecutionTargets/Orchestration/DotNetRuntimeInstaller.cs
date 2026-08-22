@@ -165,9 +165,11 @@ internal static class DotNetRuntimeInstaller
 
         foreach (var root in probeRoots)
         {
-            foreach (var version in DotNetLayout.InstalledVersions(root, requirement.Name))
+            foreach (var version in DotNetLayout
+                .InstalledVersions(root, requirement.Name)
+                .Where(requirement.IsSatisfiedBy))
             {
-                if (requirement.IsSatisfiedBy(version) && (best is null || version > best))
+                if (best is null || version > best)
                 {
                     best = version;
                 }
