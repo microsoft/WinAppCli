@@ -495,11 +495,12 @@ internal sealed class GuestCommandServer : IAsyncDisposable
 
         try
         {
+            var outputSends = new ConcurrentQueue<Task>();
             var host = _processes.Start(
                 resolved,
-                (stream, data) => _ = ForwardOutputAsync(operationId, stream, data));
+                (stream, data) => outputSends.Enqueue(ForwardOutputAsync(operationId, stream, data)));
 
-            operation = new RunningOperation(host, GracefulStopTimeout);
+            operation = new RunningOperation(host, outputSends, GracefulStopTimeout, request.Detach);
         }
         catch (ExecutionTargetException ex)
         {
@@ -591,17 +592,38 @@ internal sealed class GuestCommandServer : IAsyncDisposable
                 },
                 CancellationToken.None).ConfigureAwait(false);
 
+            if (operation.Detach)
+            {
+                await SendAsync(
+                    new GuestMessage
+                    {
+                        Type = GuestMessageTypes.ExecCompleted,
+                        OperationId = operationId.ToString(),
+                        TargetEpoch = _targetEpoch,
+                        ExitCode = 0,
+                    },
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+
             var exitCode = await operation.Host.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
 
-            await SendAsync(
-                new GuestMessage
-                {
-                    Type = GuestMessageTypes.ExecCompleted,
-                    OperationId = operationId.ToString(),
-                    TargetEpoch = _targetEpoch,
-                    ExitCode = exitCode,
-                },
-                CancellationToken.None).ConfigureAwait(false);
+            // GuestProcessHost has drained the child pipes at this point, so no more tasks can be
+            // enqueued. Wait for every encoded frame to cross the transport before completion makes
+            // the host remove the operation; otherwise a fast process loses its trailing output.
+            await Task.WhenAll(operation.OutputSends.ToArray()).ConfigureAwait(false);
+
+            if (!operation.Detach)
+            {
+                await SendAsync(
+                    new GuestMessage
+                    {
+                        Type = GuestMessageTypes.ExecCompleted,
+                        OperationId = operationId.ToString(),
+                        TargetEpoch = _targetEpoch,
+                        ExitCode = exitCode,
+                    },
+                    CancellationToken.None).ConfigureAwait(false);
+            }
         }
         catch (ExecutionTargetException ex)
         {
@@ -693,6 +715,11 @@ internal sealed class GuestCommandServer : IAsyncDisposable
     {
         foreach (var (id, operation) in _operations.ToArray())
         {
+            if (operation.Detach)
+            {
+                continue;
+            }
+
             _operations.TryRemove(id, out _);
 
             try
@@ -715,10 +742,20 @@ internal sealed class GuestCommandServer : IAsyncDisposable
     }
 
     /// <summary>One in-flight operation and its child process.</summary>
-    private sealed class RunningOperation(IGuestProcessHost host, TimeSpan gracefulTimeout)
+    private sealed class RunningOperation(
+        IGuestProcessHost host,
+        ConcurrentQueue<Task> outputSends,
+        TimeSpan gracefulTimeout,
+        bool detach)
     {
         /// <summary>The child process running this operation.</summary>
         public IGuestProcessHost Host { get; } = host;
+
+        /// <summary>Output frames that must be sent before completion is published.</summary>
+        public ConcurrentQueue<Task> OutputSends { get; } = outputSends;
+
+        /// <summary>Whether this process remains owned by the agent after its host channel closes.</summary>
+        public bool Detach { get; } = detach;
 
         /// <summary>Task that completes when the operation has fully reported its outcome.</summary>
         public Task? Completion { get; set; }

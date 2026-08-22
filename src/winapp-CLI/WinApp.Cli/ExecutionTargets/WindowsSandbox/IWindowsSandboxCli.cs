@@ -58,6 +58,15 @@ internal interface IWindowsSandboxCli
         string? workingDirectory,
         bool asSystem,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Launches the fixed persistent guest-agent bootstrap command without waiting for it to exit.
+    /// </summary>
+    /// <remarks>
+    /// This is separate from <see cref="ExecuteAsync"/> because a healthy agent intentionally remains
+    /// running. The agent heartbeat, not the lifetime of <c>wsb exec</c>, proves successful dispatch.
+    /// </remarks>
+    Task LaunchAgentAsync(string id, string command, CancellationToken cancellationToken);
 }
 
 /// <summary>One entry of <c>wsb list --raw</c>.</summary>

@@ -141,12 +141,12 @@ internal static class GuestOperationHost
             FileName = command[0],
             WorkingDirectory = workingDirectory ?? string.Empty,
 
-            // Deliberately no redirection: the child inherits this process's standard handles,
-            // which are the agent's pipes. Redirecting again would add a second copy of every byte
-            // and a second place for ordering to go wrong.
-            RedirectStandardInput = false,
-            RedirectStandardOutput = false,
-            RedirectStandardError = false,
+            // Explicitly bridge the barrier's redirected handles. Process.Start does not reliably
+            // inherit redirected parent pipes when the child itself requests no redirection, which
+            // made real guest commands return the right exit code with empty stdout/stderr.
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
         };
@@ -164,7 +164,33 @@ internal static class GuestOperationHost
                 return BarrierFailedExitCode;
             }
 
+            using var pumpCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+            var barrierInput = Console.OpenStandardInput();
+            var childInput = process.StandardInput.BaseStream;
+
+            var standardOutput = process.StandardOutput.BaseStream.CopyToAsync(
+                Console.OpenStandardOutput(),
+                pumpCancellation.Token);
+            var standardError = process.StandardError.BaseStream.CopyToAsync(
+                Console.OpenStandardError(),
+                pumpCancellation.Token);
+            var standardInput = CopyInputAsync(
+                barrierInput,
+                childInput,
+                pumpCancellation.Token);
+
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+
+            // Output reaches EOF when the child exits and must be fully drained before the barrier
+            // reports completion. Input may still be waiting on the host pipe, so cancel that pump
+            // once the child can no longer consume it.
+            await Task.WhenAll(standardOutput, standardError).ConfigureAwait(false);
+            barrierInput.Dispose();
+            childInput.Dispose();
+            await pumpCancellation.CancelAsync().ConfigureAwait(false);
+            ObserveInBackground(standardInput);
+
             return process.ExitCode;
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
@@ -172,6 +198,32 @@ internal static class GuestOperationHost
             Console.Error.WriteLine($"The guest could not start '{command[0]}': {ex.Message}");
             return BarrierFailedExitCode;
         }
+    }
+
+    private static async Task CopyInputAsync(
+        Stream source,
+        Stream destination,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await source.CopyToAsync(destination, cancellationToken).ConfigureAwait(false);
+            await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+            destination.Close();
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or IOException or ObjectDisposedException)
+        {
+            // The child exited or the operation was cancelled while input was idle.
+        }
+    }
+
+    private static void ObserveInBackground(Task task)
+    {
+        _ = task.ContinueWith(
+            completed => _ = completed.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     /// <summary>Waits for the agent to signal that this process is inside the job.</summary>

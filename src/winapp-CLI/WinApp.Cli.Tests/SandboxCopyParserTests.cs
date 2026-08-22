@@ -103,4 +103,20 @@ public class SandboxCopyParserTests
         Assert.AreEqual(@"Work\build", SandboxCopyService.NormalizeGuestRelative(@"Work/build"));
         Assert.AreEqual(string.Empty, SandboxCopyService.NormalizeGuestRelative(@"C:\"));
     }
+
+    [TestMethod]
+    public void ResolveHostDestination_RejectsGuestTraversalOutsideTheRequestedDirectory()
+    {
+        var destination = TestPaths.TempRoot("sandbox-copy-out");
+        Directory.CreateDirectory(destination);
+
+        var failure = Assert.ThrowsExactly<ExecutionTargetException>(() =>
+            SandboxCopyService.ResolveHostDestination(
+                destination,
+                @"Work\results",
+                @"Work\results\..\..\..\startup.cmd",
+                matchCount: 2));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.TargetAmbiguous, failure.Error.Code);
+    }
 }

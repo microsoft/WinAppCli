@@ -190,6 +190,15 @@ internal sealed class GuestExecRequest
     /// report input it never delivered.
     /// </remarks>
     public bool RequiresRealInput { get; init; }
+
+    /// <summary>
+    /// Return after process creation while the guest agent continues owning the process job.
+    /// </summary>
+    /// <remarks>
+    /// Used for direct unpackaged launches. Packaged launches keep using guest <c>winapp run
+    /// --detach</c>, so their existing semantics remain authoritative.
+    /// </remarks>
+    public bool Detach { get; init; }
 }
 
 /// <summary>One control message on the guest channel.</summary>

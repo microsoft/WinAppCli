@@ -32,6 +32,7 @@ internal sealed class RecordingProcessRunner : IProcessRunner
 /// Both behaviours here were found by independent review of PR #779 and reproduced empirically.
 /// </remarks>
 [TestClass]
+[DoNotParallelize]
 public class WindowsSandboxCliTests
 {
     private RecordingProcessRunner _runner = null!;
@@ -172,6 +173,46 @@ public class WindowsSandboxCliTests
         CollectionAssert.Contains(arguments.ToList(), "System");
         CollectionAssert.Contains(arguments.ToList(), @"C:\Work");
         CollectionAssert.Contains(arguments.ToList(), "cmd /c exit 0");
+    }
+
+    [TestMethod]
+    public async Task ConnectAsync_StartsTheLongLivedInteractiveClientWithoutWaitingForExit()
+    {
+        if (WindowsSandboxCli.ResolveExecutable() is null)
+        {
+            Assert.Inconclusive("wsb.exe is not installed on this machine.");
+            return;
+        }
+
+        System.Diagnostics.ProcessStartInfo? captured = null;
+        _cli.ConnectLauncher = startInfo => captured = startInfo;
+
+        await _cli.ConnectAsync("sandbox-1", TestContext.CancellationTokenSource.Token);
+
+        Assert.IsNotNull(captured);
+        Assert.IsTrue(captured.UseShellExecute);
+        Assert.IsFalse(captured.CreateNoWindow);
+        CollectionAssert.Contains(captured.ArgumentList.ToList(), "connect");
+        CollectionAssert.Contains(captured.ArgumentList.ToList(), "sandbox-1");
+    }
+
+    [TestMethod]
+    public async Task LaunchAgentAsync_KeepsAnAwaitedWsbOperationBehindTheHeartbeat()
+    {
+        if (WindowsSandboxCli.ResolveExecutable() is null)
+        {
+            Assert.Inconclusive("wsb.exe is not installed on this machine.");
+            return;
+        }
+
+        await _cli.LaunchAgentAsync(
+            "sandbox-1",
+            @"""C:\WinAppBootstrap\winapp.exe"" guest-agent",
+            TestContext.CancellationTokenSource.Token);
+
+        var request = _runner.Requests.Single();
+        CollectionAssert.Contains(request.Arguments.ToList(), "ExistingLogin");
+        CollectionAssert.Contains(request.Arguments.ToList(), @"""C:\WinAppBootstrap\winapp.exe"" guest-agent");
     }
 
     /// <summary>MSTest injects this; used for per-test cancellation.</summary>

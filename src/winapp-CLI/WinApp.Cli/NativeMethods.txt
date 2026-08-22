@@ -62,6 +62,7 @@ IUIAutomationScrollPattern
 IUIAutomationRangeValuePattern
 IUIAutomationLegacyIAccessiblePattern
 GetForegroundWindow
+GetCurrentThreadId
 GetWindowRect
 PrintWindow
 BitBlt
@@ -86,6 +87,10 @@ GetAncestor
 GetWindowText
 IsWindowVisible
 SetForegroundWindow
+SetWindowPos
+AttachThreadInput
+BringWindowToTop
+IsWindow
 SetCursorPos
 SendInput
 PostMessage

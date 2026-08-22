@@ -109,6 +109,34 @@ public class GuestCommandServerTests
     }
 
     [TestMethod]
+    public async Task Execute_DetachedProcessReturnsAfterStartAndSurvivesTheChannel()
+    {
+        using var harness = new Harness(Interactive);
+
+        var execution = harness.Channel.ExecuteAsync(
+            new GuestExecRequest
+            {
+                Executable = "app.exe",
+                Arguments = [],
+                Detach = true,
+            },
+            callbacks: null,
+            harness.Token);
+
+        var process = await harness.Processes.WaitForNextAsync(harness.Token);
+        var result = await execution.WaitAsync(harness.Token);
+
+        Assert.AreEqual(0, result.ExitCode);
+        Assert.IsFalse(process.StopRequested);
+        Assert.IsFalse(process.Disposed);
+
+        process.Exit(17);
+        Assert.IsTrue(
+            SpinWait.SpinUntil(() => process.Disposed, TimeSpan.FromSeconds(1)),
+            "The agent should release the detached process after it exits.");
+    }
+
+    [TestMethod]
     public async Task Execute_PreservesUnicodeAndArgumentBoundaries()
     {
         using var harness = new Harness(Interactive);

@@ -228,6 +228,88 @@ So inspection keeps working in exactly the state where input must be refused. wi
 as `sandbox_input_not_ready` rather than reporting input it did not deliver. Reconnecting with
 `wsb connect` restores the same guest session, the same running applications, and both capabilities.
 
+## Shared runtimes
+
+Before anything is deployed, winapp works out what the app needs at runtime and makes sure the
+Sandbox has it. Requirements are read from what the build already produced, not re-derived: framework
+dependencies declared in the package manifest, the exact Windows App SDK package recorded in an
+unpackaged app's `*.deps.json`, and shared .NET frameworks named in `*.runtimeconfig.json`. These are
+the same artifacts registration and apphost startup consume.
+
+They are treated as **compatible constraints** — "this package, at this version or newer" — rather
+than an exact machine snapshot. That is what lets winapp leave a runtime another app in the same
+Sandbox is already using exactly as it is.
+
+Payloads come from your caches first. The Windows App Runtime packages you already restored to build
+the app are staged into the guest over the same verified file channel the app itself uses, so a
+framework-dependent app no longer needs guest network access on first run. Only when no cached
+payload satisfies the constraint does winapp acquire one, through the same download path
+`winapp restore` uses, and cache it on the host.
+
+A Windows App Runtime dependency resolves to the **whole runtime**, not just the package a manifest
+names. A manifest declares only the Framework, but a WinUI app also needs the DDLM that lets an
+unpackaged process find the runtime, plus Main and Singleton. winapp takes the complete inventory
+from the cached runtime whose Framework satisfies the constraint, reads each package's real identity
+from its own manifest — the DDLM's name and the Singleton's version do not follow from the
+Framework's — and stages, installs, and verifies all of them.
+
+Unpackaged Windows App SDK builds declare no package dependency. For those, winapp reads the exact
+`Microsoft.WindowsAppSDK` version from the build's `*.deps.json` and selects that version's cached
+runtime inventory, so the bootstrapper finds the same Framework and DDLM the app was built against.
+
+Shared .NET runtimes are provisioned too. winapp builds a portable layout from an official payload
+it already has: a .NET installation on your machine, or the
+`Microsoft.NETCore.App.Runtime.win-{arch}` and `Microsoft.WindowsDesktop.App.Runtime.win-{arch}`
+runtime packs in your NuGet cache, restoring the exact matching pack when neither is present. The
+layout is cached on the host, staged into the guest, and unpacked side-by-side into a per-user .NET
+root winapp owns under the guest's managed folder. Nothing machine-wide is touched, no elevation is
+taken, and the app is launched with `DOTNET_ROOT` pointing at that root — but only when the managed
+root is what actually satisfies a framework. A Sandbox that already has the runtime is left alone.
+
+`DOTNET_ROOT` is exclusive: an apphost pointed at a root resolves every framework from there and
+consults nothing else. So it is all from one root or none from it. A guest that can serve part of
+the graph but not all of it gets the whole graph installed into the managed root.
+
+A desktop app's runtime configuration names only `Microsoft.WindowsDesktop.App`, which cannot load
+without `Microsoft.NETCore.App` beneath it, so the core runtime is provisioned with it. Version
+matching follows .NET's own roll-forward: a newer patch or minor of the same major is compatible, a
+different major is not.
+
+Identity is matched the way Windows matches it. A requirement carries the publisher and the exact
+architecture, and only a registered package with the same name and publisher, at or above the
+required version, in that architecture or genuinely neutral, satisfies it. An x86 package never
+satisfies an x64 dependency.
+
+Installation happens in the guest, under the same lock every other guest mutation takes, and is
+journaled before the first package is touched. A package already registered at or above the required
+version is skipped, and a shared framework already present is not unpacked over. Nothing is ever
+removed or downgraded, and nothing is installed on your machine. Each version is published by moving
+a fully unpacked staging folder into place, so an interrupted install leaves disposable temporary
+content rather than a half-populated runtime.
+
+Afterwards the whole required graph is re-read and verified. If it cannot be satisfied, the command
+fails with `sandbox_runtime_provision_failed` naming the requirement that is missing — before the
+app is deployed and launched, rather than as an unexplained startup failure:
+
+```text
+Windows Sandbox is missing a runtime the app requires: Microsoft.WindowsDesktop.App 10.0.0 or newer.
+```
+
+One dependency is fetched rather than found: the desktop VC runtime
+(`Microsoft.VCLibs.140.00.UWPDesktop`) ships in no package a build restores and is not in the
+Windows SDK, so winapp downloads it from its one official Microsoft address when no host copy
+exists. It is validated against the manifest inside the downloaded package — identity, version,
+architecture, and Microsoft publisher — before it is cached or staged, and the allowlist is a closed
+list of known packages, not a rule about names. Any other dependency with no available payload is
+verified in the guest instead; if the Sandbox already has it, the run proceeds.
+
+The complete graph is verified before **every** launch, not just the first. A clean provisioning
+record says what winapp did, not what the guest currently has — `sandbox exec` gives any caller a
+way to change package and runtime state inside the same Sandbox generation. Re-verification is
+cheap: payloads the guest already holds are not re-transferred, and nothing already satisfied is
+reinstalled. The record's job is narrower — it says whether a previous pass was interrupted, and
+therefore whether the staged copy has to be rebuilt from scratch.
+
 ## Deployment
 
 Each resolved input gets an internal deployment identity derived from its canonical path and, when
@@ -396,10 +478,12 @@ tests pin that so a future change to the redaction rule cannot silently start co
 
 Almost everything is verified without a Sandbox: the real host channel runs against the real guest
 server over an in-memory transport, so a dependency on a `wsb` command would make those tests
-impossible to run at all. The tests that do need a real machine are gated on `WINAPP_SANDBOX_E2E=1`,
-because Windows permits one Sandbox at a time and creating one is a machine-wide, visible side
-effect. They stop only an instance they created, and skip rather than fail when an unowned one is
-already running.
+impossible to run at all. The tests that do need a real machine are gated on
+`WINAPP_SANDBOX_E2E=1` and `WINAPP_SANDBOX_E2E_BINARY`, which must point to the
+architecture-matched NativeAOT `winapp.exe` produced under `artifacts\cli\win-x64` or
+`artifacts\cli\win-arm64`. Windows permits one Sandbox at a time and creating one is a machine-wide,
+visible side effect. The tests stop only an instance they created, and skip rather than fail when an
+unowned one is already running.
 
 ## See also
 

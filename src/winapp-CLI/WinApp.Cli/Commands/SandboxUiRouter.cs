@@ -227,16 +227,24 @@ internal sealed class SandboxUiRouter(
             return;
         }
 
-        var rewritten = text
+        var rewritten = RewriteOutputPaths(text, artifact);
+
+        console.Profile.Out.Writer.Write(rewritten);
+        console.Profile.Out.Writer.Flush();
+    }
+
+    /// <summary>Rewrites guest paths in human-readable or JSON-escaped command output.</summary>
+    internal static string RewriteOutputPaths(string text, RoutedArtifact artifact) =>
+        text
+            .Replace(
+                artifact.GuestFullPath.Replace(@"\", @"\\"),
+                artifact.HostDestination.Replace(@"\", @"\\"),
+                StringComparison.OrdinalIgnoreCase)
             .Replace(artifact.GuestFullPath, artifact.HostDestination, StringComparison.OrdinalIgnoreCase)
             .Replace(
                 artifact.GuestFullPath.Replace('\\', '/'),
                 artifact.HostDestination,
                 StringComparison.OrdinalIgnoreCase);
-
-        console.Profile.Out.Writer.Write(rewritten);
-        console.Profile.Out.Writer.Flush();
-    }
 
     /// <summary>Forwards this process's standard input to the guest command.</summary>
     /// <remarks>

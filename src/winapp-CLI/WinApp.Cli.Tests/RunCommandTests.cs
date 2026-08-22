@@ -519,6 +519,7 @@ public class RunCommandTests : BaseCommandTests
             GetRequiredService<IProjectRunService>(),
             GetRequiredService<ExecutionTargetOrchestrator>(),
             GetRequiredService<GuestApplicationRunner>(),
+            GetRequiredService<TargetRuntimeService>(),
             GetRequiredService<ILogger<RunCommand>>());
 
         // Act

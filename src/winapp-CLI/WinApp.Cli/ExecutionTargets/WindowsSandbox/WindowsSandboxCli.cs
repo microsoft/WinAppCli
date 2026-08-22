@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Diagnostics;
 using System.Text.Json;
 using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.Services;
@@ -30,6 +31,9 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
     /// removes the ambiguity.
     /// </remarks>
     private readonly Lazy<string?> _executablePath = new(ResolveExecutable);
+
+    /// <summary>Starts the long-lived interactive client; seamed for argument-construction tests.</summary>
+    internal Action<ProcessStartInfo> ConnectLauncher { get; set; } = LaunchConnectedClient;
 
     /// <inheritdoc/>
     public bool IsAvailable => _executablePath.Value is not null;
@@ -118,8 +122,42 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
     }
 
     /// <inheritdoc/>
-    public Task ConnectAsync(string id, CancellationToken cancellationToken) =>
-        RunAsync(["connect", "--id", id, "--raw"], cancellationToken);
+    public async Task ConnectAsync(string id, CancellationToken cancellationToken)
+    {
+        if (_executablePath.Value is not { } executable)
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.Unsupported,
+                "The Windows Sandbox command line (wsb.exe) was not found.",
+                userAction: "Install the Windows Sandbox optional feature, then retry.",
+                example: "winapp run . --sandbox");
+        }
+
+        // `wsb connect` is the interactive client, not a setup command that exits after opening one.
+        // Waiting for it would block target preparation until the user closed Sandbox. Start it as a
+        // long-lived child; `wsb stop --id` remains the only lifecycle operation that ends it.
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = executable,
+            UseShellExecute = true,
+            CreateNoWindow = false,
+        };
+        foreach (var argument in (string[])["connect", "--id", id, "--raw"])
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        ConnectLauncher(startInfo);
+        await Task.CompletedTask;
+    }
+
+    private static void LaunchConnectedClient(ProcessStartInfo startInfo)
+    {
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start the Windows Sandbox client.");
+    }
 
     /// <inheritdoc/>
     public async Task<int> ExecuteAsync(
@@ -164,6 +202,86 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
         }
 
         return result.ExitCode;
+    }
+
+    /// <inheritdoc/>
+    public async Task LaunchAgentAsync(
+        string id,
+        string command,
+        CancellationToken cancellationToken)
+    {
+        if (_executablePath.Value is null)
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.Unsupported,
+                "The Windows Sandbox command line (wsb.exe) was not found.",
+                userAction: "Install the Windows Sandbox optional feature, then retry.",
+                example: "winapp run . --sandbox");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var launch = RunAsync(
+            [
+                "exec",
+                "--id", id,
+                "--command", command,
+                "--run-as", "ExistingLogin",
+                "--raw",
+            ],
+            CancellationToken.None,
+            throwOnFailure: false);
+
+        _ = ObserveAgentLaunchAsync(launch);
+
+        var completed = await Task.WhenAny(
+            launch,
+            Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken)).ConfigureAwait(false);
+
+        if (completed == launch)
+        {
+            var result = await launch.ConfigureAwait(false);
+
+            // An immediate WSB diagnostic means ExistingLogin was not ready and the command was
+            // never dispatched. A guest exit with clean stderr is different: the agent publishes its
+            // own staged heartbeat/log, which the backend reads as the authoritative diagnosis.
+            if (!string.IsNullOrWhiteSpace(result.StandardError))
+            {
+                throw ExecutionTargetException.Create(
+                    ExecutionTargetErrorCodes.TransportFailed,
+                    $"The guest agent bootstrap could not be dispatched: {Summarize(result)}",
+                    userAction: "Retry the command once the Sandbox login session is ready.",
+                    context: new Dictionary<string, string>
+                    {
+                        ["sandboxId"] = id,
+                        ["exitCode"] = result.ExitCode.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture),
+                    });
+            }
+        }
+    }
+
+    private static async Task ObserveAgentLaunchAsync(Task<ProcessRunResult> launch)
+    {
+        try
+        {
+            var result = await launch.ConfigureAwait(false);
+            if (result.ExitCode != 0 || !string.IsNullOrWhiteSpace(result.StandardError))
+            {
+                System.Diagnostics.Trace.TraceWarning(
+                    "The persistent Windows Sandbox agent launch ended: {0}",
+                    Summarize(result));
+            }
+        }
+        catch (Exception ex) when (ex is ExecutionTargetException
+                                   or IOException
+                                   or InvalidOperationException
+                                   or System.ComponentModel.Win32Exception)
+        {
+            System.Diagnostics.Trace.TraceWarning(
+                "The persistent Windows Sandbox agent launch failed: {0}",
+                ex.Message);
+        }
     }
 
     private async Task<ProcessRunResult> RunAsync(
