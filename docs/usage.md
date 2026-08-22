@@ -276,7 +276,7 @@ winapp runtime prepare --version <version> --arch <x64|arm64|x86> --output <dire
 
 **Required options:**
 
-- `--version <version>` - Exact `Microsoft.WindowsAppSDK` NuGet version (for example, `1.8.250907003` or `2.2.0)
+- `--version <version>` - Exact `Microsoft.WindowsAppSDK` NuGet version (for example, `1.8.250907003` or `2.2.0`)
 - `--arch <x64|arm64|x86>` - Architecture of the application process
 - `--output <directory>` - Application output directory in which to stage the architecture-specific bootstrap DLL
 
