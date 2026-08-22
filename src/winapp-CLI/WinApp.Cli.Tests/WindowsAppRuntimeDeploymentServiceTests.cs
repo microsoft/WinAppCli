@@ -89,6 +89,9 @@ public sealed class WindowsAppRuntimeDeploymentServiceTests
             "Microsoft.WinAppRuntime.DDLM.2.2",
             result.RuntimePackages[0].Name,
             "Machine-readable package identities should be sorted deterministically");
+        Assert.IsEmpty(
+            _output.GetFiles($".Microsoft.WindowsAppRuntime.Bootstrap.dll.*.tmp"),
+            "Successful staging must not leave temporary files behind.");
         Assert.AreEqual(true, _runtime.LastRequireExactVersion);
         Assert.IsEmpty(_runtime.InstallRuntimeCalls);
     }
@@ -145,9 +148,12 @@ public sealed class WindowsAppRuntimeDeploymentServiceTests
     }
 
     [TestMethod]
-    public async Task FrameworkDependent_MissingRuntimeIdentitiesFailsInsteadOfCheckingAnyInstalledRuntime()
+    public async Task FrameworkDependent_MissingFrameworkIdentityFailsInsteadOfCheckingAnyInstalledRuntime()
     {
-        _runtime.RuntimePackages = [];
+        _runtime.RuntimePackages =
+        [
+            ("Microsoft.WinAppRuntime.DDLM.2.2", "6000.1.2.0"),
+        ];
 
         var exception = await Assert.ThrowsExactlyAsync<InvalidDataException>(() => _service.PrepareAsync(
             "2.2.0",
@@ -157,8 +163,48 @@ public sealed class WindowsAppRuntimeDeploymentServiceTests
             NewTaskContext(),
             CancellationToken.None));
 
-        StringAssert.Contains(exception.Message, "No framework-dependent runtime package identities");
+        StringAssert.Contains(exception.Message, "required Framework identity");
         Assert.AreEqual(0, _runtime.IsRuntimeRegisteredCallCount);
+    }
+
+    [TestMethod]
+    public async Task FrameworkDependent_MissingDdlmIdentityFailsInsteadOfCheckingAnyInstalledRuntime()
+    {
+        _runtime.RuntimePackages =
+        [
+            ("Microsoft.WindowsAppRuntime.2", "2.2.0.0"),
+        ];
+
+        var exception = await Assert.ThrowsExactlyAsync<InvalidDataException>(() => _service.PrepareAsync(
+            "2.2.0",
+            "x64",
+            _output,
+            install: false,
+            NewTaskContext(),
+            CancellationToken.None));
+
+        StringAssert.Contains(exception.Message, "required DDLM identity");
+        Assert.AreEqual(0, _runtime.IsRuntimeRegisteredCallCount);
+    }
+
+    [TestMethod]
+    public async Task FrameworkDependent_BootstrapReplacementFailurePreservesDestinationAndCleansTempFile()
+    {
+        var bootstrapPath = Path.Combine(_output.FullName, "Microsoft.WindowsAppRuntime.Bootstrap.dll");
+        Directory.CreateDirectory(bootstrapPath);
+
+        await Assert.ThrowsExactlyAsync<IOException>(() => _service.PrepareAsync(
+            "2.2.0",
+            "x64",
+            _output,
+            install: false,
+            NewTaskContext(),
+            CancellationToken.None));
+
+        Assert.IsTrue(Directory.Exists(bootstrapPath), "A failed replacement must preserve the existing destination.");
+        Assert.IsEmpty(
+            _output.GetFiles($".Microsoft.WindowsAppRuntime.Bootstrap.dll.*.tmp"),
+            "Failed staging must remove its temporary file.");
     }
 
     private void SeedBootstrap(string package, string version, string arch)

@@ -121,15 +121,40 @@ public sealed class NugetServiceOfflineTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task InstallPackageAsync_DownloadFails_ThrowsInvalidOperationWithStatusCode()
+    public async Task InstallPackageAsync_DownloadFails_ThrowsHttpRequestWithStatusCode()
     {
         NugetService.HttpGetAsync = (_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
 
-        var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+        var ex = await Assert.ThrowsExactlyAsync<HttpRequestException>(
             () => _service.InstallPackageAsync("Missing.Pkg", "9.9.9", TestTaskContext, TestContext.CancellationToken));
 
         StringAssert.Contains(ex.Message, "Missing.Pkg", StringComparison.Ordinal);
         StringAssert.Contains(ex.Message, "NotFound", StringComparison.Ordinal);
+        Assert.AreEqual(HttpStatusCode.NotFound, ex.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task InstallPackageAsync_NotFoundRedactsFeedCredentialsAndQuery()
+    {
+        var credentialedFeed = new UriBuilder("https", "packages.example.test")
+        {
+            UserName = "feed-user",
+            Password = "feed-password",
+            Path = "v3/flat2",
+            Query = "token=download-secret",
+        }.Uri.AbsoluteUri;
+        Environment.SetEnvironmentVariable(NugetService.FlatContainerEnvironmentVariable, credentialedFeed);
+        NugetService.HttpGetAsync = (_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        var ex = await Assert.ThrowsExactlyAsync<HttpRequestException>(
+            () => _service.InstallPackageAsync("Missing.Pkg", "9.9.9", TestTaskContext, TestContext.CancellationToken));
+
+        StringAssert.Contains(ex.Message, "URL: https://packages.example.test/v3/flat2");
+        StringAssert.Contains(ex.Message, "Source: https://packages.example.test");
+        StringAssert.Contains(ex.Message, "HTTP status: 404 NotFound");
+        Assert.IsFalse(ex.Message.Contains("feed-user", StringComparison.Ordinal));
+        Assert.IsFalse(ex.Message.Contains("feed-password", StringComparison.Ordinal));
+        Assert.IsFalse(ex.Message.Contains("download-secret", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -322,6 +347,34 @@ public sealed class NugetServiceOfflineTests : BaseCommandTests
         var latest = await _service.GetLatestVersionAsync("Some.Pkg", SdkInstallMode.Stable, TestContext.CancellationToken);
 
         Assert.AreEqual("4.2.0", latest, "Versions from a separately-fetched registration page must be considered.");
+    }
+
+    [TestMethod]
+    public async Task GetLatestVersionAsync_UnauthorizedPageRedactsCredentialsAndQuery()
+    {
+        var credentialedPageUrl = new UriBuilder("https", "example.test")
+        {
+            UserName = "page-user",
+            Password = "page-password",
+            Path = "registration/page.json",
+            Query = "token=page-secret",
+        }.Uri.AbsoluteUri;
+        var index = "{\"items\":[{\"@id\":\"" + credentialedPageUrl + "\"}]}";
+        NugetService.HttpGetAsync = (url, _) => Task.FromResult(
+            url.Contains("page.json", StringComparison.Ordinal)
+                ? new HttpResponseMessage(HttpStatusCode.Unauthorized)
+                : JsonResponse(index));
+
+        var ex = await Assert.ThrowsExactlyAsync<HttpRequestException>(
+            () => _service.GetLatestVersionAsync("Some.Pkg", SdkInstallMode.Stable, TestContext.CancellationToken));
+
+        StringAssert.Contains(ex.Message, "URL: https://example.test/registration/page.json");
+        StringAssert.Contains(ex.Message, "Source: https://example.test");
+        StringAssert.Contains(ex.Message, "HTTP status: 401 Unauthorized");
+        Assert.AreEqual(HttpStatusCode.Unauthorized, ex.StatusCode);
+        Assert.IsFalse(ex.Message.Contains("page-user", StringComparison.Ordinal));
+        Assert.IsFalse(ex.Message.Contains("page-password", StringComparison.Ordinal));
+        Assert.IsFalse(ex.Message.Contains("page-secret", StringComparison.Ordinal));
     }
 
     [TestMethod]

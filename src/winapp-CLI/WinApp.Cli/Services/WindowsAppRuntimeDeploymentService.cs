@@ -44,7 +44,7 @@ internal sealed class WindowsAppRuntimeDeploymentService(
 
         var bootstrapSource = FindBootstrapDll(version, arch, packages);
         var bootstrapPath = new FileInfo(Path.Combine(outputDirectory.FullName, BootstrapDllName));
-        bootstrapSource.CopyTo(bootstrapPath.FullName, overwrite: true);
+        ReplaceBootstrapDll(bootstrapSource, bootstrapPath);
         bootstrapPath.Refresh();
 
         var runtimeVersion = packages
@@ -66,10 +66,20 @@ internal sealed class WindowsAppRuntimeDeploymentService(
             .Select(p => new WindowsAppRuntimePackageIdentity(p.Name, p.Version))
             .ToList();
 
-        if (runtimePackages.Count == 0)
+        var hasFramework = runtimePackages.Any(p => WindowsAppRuntimeService.IsFrameworkGatePackageName(p.Name));
+        var hasDdlm = runtimePackages.Any(p => WindowsAppRuntimeService.IsDdlmGatePackageName(p.Name));
+        if (!hasFramework || !hasDdlm)
         {
+            var missingIdentities = string.Join(
+                " and ",
+                new[]
+                {
+                    hasFramework ? null : "Framework",
+                    hasDdlm ? null : "DDLM",
+                }.Where(name => name is not null));
             throw new InvalidDataException(
-                $"No framework-dependent runtime package identities were found for {BuildToolsService.WINAPP_SDK_PACKAGE} v{version} ({arch}).");
+                $"The exact runtime payload for {BuildToolsService.WINAPP_SDK_PACKAGE} v{version} ({arch}) " +
+                $"does not contain a required {missingIdentities} identity.");
         }
 
         var expectedPackages = runtimePackages.Select(p => (p.Name, p.Version)).ToList();
@@ -154,5 +164,30 @@ internal sealed class WindowsAppRuntimeDeploymentService(
         throw new FileNotFoundException(
             $"{BootstrapDllName} was not found for {BuildToolsService.WINAPP_SDK_PACKAGE} v{version} ({architecture}). " +
             "The selected package version may not contain a runtime for this architecture.");
+    }
+
+    private static void ReplaceBootstrapDll(FileInfo source, FileInfo destination)
+    {
+        var tempPath = Path.Combine(
+            destination.DirectoryName!,
+            $".{BootstrapDllName}.{Guid.NewGuid():N}.tmp");
+
+        try
+        {
+            source.CopyTo(tempPath, overwrite: false);
+            destination.Refresh();
+            if (destination.Exists)
+            {
+                File.Replace(tempPath, destination.FullName, destinationBackupFileName: null);
+            }
+            else
+            {
+                File.Move(tempPath, destination.FullName);
+            }
+        }
+        finally
+        {
+            File.Delete(tempPath);
+        }
     }
 }

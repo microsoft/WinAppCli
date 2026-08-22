@@ -260,9 +260,12 @@ internal class WindowsAppRuntimeService(
     /// <c>Microsoft.WindowsAppRuntime.{major.minor}</c>, excluding CBS). Its version lives in the package
     /// Version, not the name, so the gate version-compares separately.
     /// </summary>
-    private static bool IsFrameworkGatePackageName(string packageName) =>
+    internal static bool IsFrameworkGatePackageName(string packageName) =>
         packageName.StartsWith(WinAppRuntimeFrameworkPrefix, StringComparison.OrdinalIgnoreCase)
         && !packageName.Contains(WinAppRuntimeCbsInfix, StringComparison.OrdinalIgnoreCase);
+
+    internal static bool IsDdlmGatePackageName(string packageName) =>
+        packageName.StartsWith(WinAppRuntimeDdlmPrefix, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Classifies a package name as one of the framework-dependent runtime identities the gate cares
@@ -270,7 +273,7 @@ internal class WindowsAppRuntimeService(
     /// </summary>
     private static bool IsRuntimeGatePackageName(string packageName) =>
         IsFrameworkGatePackageName(packageName)
-        || packageName.StartsWith(WinAppRuntimeDdlmPrefix, StringComparison.OrdinalIgnoreCase);
+        || IsDdlmGatePackageName(packageName);
 
     /// <summary>
     /// Returns <c>true</c> when a framework-dependent Windows App Runtime is registered for

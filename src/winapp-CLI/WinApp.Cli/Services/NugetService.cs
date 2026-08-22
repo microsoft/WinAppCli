@@ -89,6 +89,21 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
         }
     }
 
+    private static void EnsureFeedSuccess(HttpResponseMessage response, string url, string operation)
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        var (safeUrl, source) = SanitizeDiagnosticUrl(url);
+        throw new HttpRequestException(
+            $"{operation} failed. URL: {safeUrl}. Source: {source}. " +
+            $"HTTP status: {(int)response.StatusCode} {response.StatusCode}.",
+            inner: null,
+            response.StatusCode);
+    }
+
     private static (string Url, string Source) SanitizeDiagnosticUrl(string url)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
@@ -259,11 +274,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
         var url = $"{FlatIndex}/{lowerId}/{lowerVersion}/{lowerId}.{lowerVersion}.nupkg";
 
         using var resp = await GetFeedResponseAsync(url, cancellationToken);
-        if (!resp.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException(
-                $"Failed to download {package} {version} from {url} (HTTP {(int)resp.StatusCode} {resp.StatusCode}).");
-        }
+        EnsureFeedSuccess(resp, url, $"NuGet package download for {package} {version}");
 
         // Extract to the NuGet global cache location
         Directory.CreateDirectory(packageDir.FullName);
@@ -440,7 +451,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
     {
         var url = $"{RegistrationIndex}/{packageName.ToLowerInvariant()}/index.json";
         using var resp = await GetFeedResponseAsync(url, cancellationToken);
-        resp.EnsureSuccessStatusCode();
+        EnsureFeedSuccess(resp, url, $"NuGet version lookup for {packageName}");
         using var stream = await resp.Content.ReadAsStreamAsync(cancellationToken);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
 
@@ -476,7 +487,7 @@ internal partial class NugetService(IWinappDirectoryService winappDirectoryServi
                 }
 
                 using var pageResp = await GetFeedResponseAsync(pageUrl, cancellationToken);
-                pageResp.EnsureSuccessStatusCode();
+                EnsureFeedSuccess(pageResp, pageUrl, $"NuGet registration page lookup for {packageName}");
                 using var pageStream = await pageResp.Content.ReadAsStreamAsync(cancellationToken);
                 using var pageDoc = await JsonDocument.ParseAsync(pageStream, cancellationToken: cancellationToken);
 
