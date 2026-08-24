@@ -327,12 +327,12 @@ public class HostSourceWalkerTests
         {
             // Links are removed first: deleting recursively through one would delete the target's
             // contents, which in these tests is the "outside" folder the test is asserting about.
-            foreach (var directory in SafeDirectories(path))
+            var links = SafeDirectories(path)
+                .Where(directory => new DirectoryInfo(directory).Attributes.HasFlag(FileAttributes.ReparsePoint));
+
+            foreach (var link in links)
             {
-                if (new DirectoryInfo(directory).Attributes.HasFlag(FileAttributes.ReparsePoint))
-                {
-                    Directory.Delete(directory);
-                }
+                Directory.Delete(link);
             }
 
             Directory.Delete(path, recursive: true);

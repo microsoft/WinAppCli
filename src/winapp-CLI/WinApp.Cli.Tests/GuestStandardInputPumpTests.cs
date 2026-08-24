@@ -39,7 +39,7 @@ public class GuestStandardInputPumpTests
         await using var harness = new Harness();
 
         // Fully buffered before the operation exists.
-        var input = new MemoryStream("hello guest"u8.ToArray());
+        using var input = new MemoryStream("hello guest"u8.ToArray());
 
         var execution = harness.Channel.ExecuteAsync(
             Request("findstr", "x"),
@@ -75,7 +75,7 @@ public class GuestStandardInputPumpTests
         await using var harness = new Harness();
 
         var payload = BuildStraddlingPayload();
-        var input = new MemoryStream(payload);
+        using var input = new MemoryStream(payload);
 
         var execution = harness.Channel.ExecuteAsync(
             Request("cmd", "/c", "more"),
@@ -105,11 +105,13 @@ public class GuestStandardInputPumpTests
     {
         await using var harness = new Harness();
 
+        using var input = new MemoryStream("done"u8.ToArray());
+
         var execution = harness.Channel.ExecuteAsync(
             Request("findstr", "x"),
             new GuestExecCallbacks(
                 OnOperationId: id => _ = GuestStandardInputPump.RunAsync(
-                    harness.Channel, id, new MemoryStream("done"u8.ToArray()), harness.Token)),
+                    harness.Channel, id, input, harness.Token)),
             harness.Token);
 
         var process = await harness.WaitForProcessAsync();
@@ -134,11 +136,13 @@ public class GuestStandardInputPumpTests
     {
         await using var harness = new Harness();
 
+        using var input = new MemoryStream([]);
+
         var execution = harness.Channel.ExecuteAsync(
             Request("dotnet", "--info"),
             new GuestExecCallbacks(
                 OnOperationId: id => _ = GuestStandardInputPump.RunAsync(
-                    harness.Channel, id, new MemoryStream([]), harness.Token)),
+                    harness.Channel, id, input, harness.Token)),
             harness.Token);
 
         var process = await harness.WaitForProcessAsync();
