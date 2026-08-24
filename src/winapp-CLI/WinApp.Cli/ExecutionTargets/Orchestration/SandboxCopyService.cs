@@ -69,11 +69,18 @@ internal static class SandboxCopyService
 
             var relativePath = CombineGuestRelativePath(request.GuestPath, sourceRoot, source.FullName);
 
-            // Re-proven immediately before the file is read, so a junction planted between the walk
-            // and the copy is refused rather than quietly sending content from outside the source.
-            if (sourceRoot.Length > 0 && Directory.Exists(sourceRoot))
+            // Re-proven immediately before the file is read, so a link planted between the walk and
+            // the copy — as an ancestor, as the source root, or as the file itself — is refused
+            // rather than quietly sending content from outside the source.
+            if (sourceRoot.Length > 0)
             {
-                HostSourceWalker.EnsureNoReparseAncestor(sourceRoot, source.FullName);
+                HostSourceWalker.EnsureNoLinkOnPath(sourceRoot, source.FullName);
+            }
+            else if (HostSourceWalker.IsLink(new FileInfo(source.FullName)))
+            {
+                // A bare filename with no directory part leaves no root to resolve against, so the
+                // file is checked on its own rather than left unchecked.
+                throw LinkRefused(source.FullName);
             }
 
             var hash = await GuestFileService.ComputeHashAsync(source.FullName, cancellationToken)
