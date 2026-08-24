@@ -121,7 +121,11 @@ internal partial class RunCommand
                     Environment = ownerEnvironment,
                     RequiresRealInput = !noLaunch,
                 },
-                cancellationToken);
+                cancellationToken,
+                // --with-alias is documented as running the app "in the current terminal with
+                // inherited stdin/stdout/stderr". Output already came back; without this, stdin did
+                // not, so a console app launched this way could never be driven.
+                forwardStandardInput: withAlias);
         }
 
         /// <summary>
@@ -198,6 +202,10 @@ internal partial class RunCommand
         /// False for a direct unpackaged executable, whose arbitrary stdout is suppressed under JSON
         /// and replaced with a host-built result envelope.
         /// </param>
+        /// <param name="forwardStandardInput">
+        /// Whether this process's standard input is streamed to the guest process. Set for
+        /// <c>--with-alias</c>, which promises an inherited-stdio console run.
+        /// </param>
         private async Task<int> RunInGuestAsync(
             DirectoryInfo sourceRoot,
             string deploymentId,
@@ -207,7 +215,8 @@ internal partial class RunCommand
             MsixIdentityResult? identity,
             Func<GuestDeployment, Dictionary<string, string>, GuestExecRequest> buildRequest,
             CancellationToken cancellationToken,
-            bool guestProducesRunResult = true)
+            bool guestProducesRunResult = true,
+            bool forwardStandardInput = false)
         {
             try
             {
@@ -268,6 +277,9 @@ internal partial class RunCommand
                     state,
                     request,
                     new GuestExecCallbacks(
+                        OnOperationId: forwardStandardInput
+                            ? GuestStandardInputPump.Attach(target.Channel, cancellationToken)
+                            : null,
                         OnStarted: process =>
                         {
                             startedProcessId = process.ProcessId;

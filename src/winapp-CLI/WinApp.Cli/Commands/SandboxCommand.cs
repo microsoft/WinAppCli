@@ -133,6 +133,10 @@ internal class SandboxExecCommand : Command, IShortDescription
                 var result = await target.Channel.ExecuteAsync(
                     request,
                     new GuestExecCallbacks(
+                        // Documented as streaming stdin as well as stdout and stderr. Started from
+                        // the operation ID so input a caller piped in before winapp began is not
+                        // sent for an operation the guest has not heard of.
+                        OnOperationId: GuestStandardInputPump.Attach(target.Channel, cancellationToken),
                         OnStandardOutput: data => WriteRaw(Console.OpenStandardOutput(), data),
                         OnStandardError: data => WriteRaw(Console.OpenStandardError(), data)),
                     cancellationToken).ConfigureAwait(false);

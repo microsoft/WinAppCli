@@ -49,8 +49,20 @@ Paths crossing into the guest are canonicalized, confined to a managed root, and
 component is a reparse point — a junction or symbolic link. Managed folders are never enumerated
 through one either, so a link cannot make content outside a managed root appear to be inside it.
 
+The same rule applies on the **host** side, to the folder a deployment or `sandbox cp` reads from.
+Those folders are walked one level at a time with every directory tested before it is descended
+into, rather than with a recursive enumeration that would follow a junction. A file-level check
+alone would not be enough there: a file reached *through* a directory junction is an ordinary file
+and carries no reparse attribute, so `build\logs` pointing at `C:\Users\you\.ssh` would otherwise be
+hashed and copied into the guest as `build\logs\id_rsa`. A junction that points back at its own
+ancestor ends the walk for the same reason, instead of recursing until the path length gives out.
+Deployment refuses such a folder outright; `sandbox cp` treats the link as absent and copies only
+what is genuinely inside the folder you named.
+
 That reliably stops a link that **already exists** in the path, which is how one realistically
-appears: left behind by an earlier deployment, an application, or an extracted archive.
+appears: left behind by an earlier deployment, an application, or an extracted archive. Each
+ancestor is also re-checked immediately before a file is opened for hashing or copying, so the
+unguarded window is the open itself rather than the whole enumerate-then-read pass.
 
 It is **not** proof against a co-resident guest process that replaces a verified directory with a
 junction in the moment between the check and the write. Closing that race requires handle-relative,
@@ -298,10 +310,16 @@ Windows Sandbox is missing a runtime the app requires: Microsoft.WindowsDesktop.
 One dependency is fetched rather than found: the desktop VC runtime
 (`Microsoft.VCLibs.140.00.UWPDesktop`) ships in no package a build restores and is not in the
 Windows SDK, so winapp downloads it from its one official Microsoft address when no host copy
-exists. It is validated against the manifest inside the downloaded package — identity, version,
-architecture, and Microsoft publisher — before it is cached or staged, and the allowlist is a closed
-list of known packages, not a rule about names. Any other dependency with no available payload is
-verified in the guest instead; if the Sandbox already has it, the run proceeds.
+exists. The downloaded bytes are staged, never written straight to the cache, and must clear two
+gates before they are published. First the staged file must carry a valid Authenticode signature
+that chains to a trusted root and is signed by Microsoft; then its manifest identity, version,
+architecture, and publisher must match what was asked for. The signature comes first because
+everything the identity check reads lives inside the downloaded package and can be written to say
+anything, so identity alone proves only that a package *claims* to be Microsoft's. A failure at
+either gate deletes the staged file and publishes nothing, so a rejected payload never becomes a
+host cache entry that a later run — or a later guest — would trust without re-deriving it. The
+allowlist is a closed list of known packages, not a rule about names. Any other dependency with no
+available payload is verified in the guest instead; if the Sandbox already has it, the run proceeds.
 
 The complete graph is verified before **every** launch, not just the first. A clean provisioning
 record says what winapp did, not what the guest currently has — `sandbox exec` gives any caller a

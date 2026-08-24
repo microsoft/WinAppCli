@@ -108,12 +108,15 @@ internal static class DeploymentPlanner
         var rootPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root.FullName));
         var files = new List<DeploymentFile>();
 
-        foreach (var path in Directory.EnumerateFiles(rootPath, "*", SearchOption.AllDirectories))
+        // Walked with the shared no-follow traversal rather than SearchOption.AllDirectories, which
+        // follows directory junctions. A per-file reparse check is not a substitute and is not kept
+        // here: files reached *through* a junction are ordinary files with no reparse attribute, so
+        // a file-only check passes every one of them while deploying content from outside the root.
+        // The walk refuses links — file or directory — before descending, so the rule lives in one
+        // place rather than being restated at each call site.
+        foreach (var info in HostSourceWalker.EnumerateFiles(rootPath, HostReparsePolicy.Reject, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
-
-            var info = new FileInfo(path);
-            RejectReparsePoint(info);
 
             var relativePath = GetContainedRelativePath(rootPath, info.FullName);
 
@@ -121,6 +124,10 @@ internal static class DeploymentPlanner
             {
                 continue;
             }
+
+            // Re-proven immediately before the read, so a junction planted after the walk is caught
+            // rather than silently hashed through.
+            HostSourceWalker.EnsureNoReparseAncestor(rootPath, info.FullName);
 
             var hash = await ComputeHashAsync(info.FullName, cancellationToken).ConfigureAwait(false);
 
@@ -233,27 +240,6 @@ internal static class DeploymentPlanner
         }
 
         return fullPath[(rootPath.Length + 1)..];
-    }
-
-    /// <summary>
-    /// Rejects reparse points rather than following them.
-    /// </summary>
-    /// <remarks>
-    /// A junction or symlink in the source would otherwise let a deployment copy content from
-    /// outside its own root, or make the guest layout depend on host-only link targets.
-    /// </remarks>
-    private static void RejectReparsePoint(FileInfo file)
-    {
-        if (!file.Attributes.HasFlag(FileAttributes.ReparsePoint))
-        {
-            return;
-        }
-
-        throw ExecutionTargetException.Create(
-            ExecutionTargetErrorCodes.DeploymentDirty,
-            $"'{file.Name}' is a symbolic link or junction, which cannot be deployed into the guest.",
-            userAction: "Replace the link with the real file, then rebuild.",
-            context: new Dictionary<string, string> { ["fileName"] = file.Name });
     }
 
     /// <summary>

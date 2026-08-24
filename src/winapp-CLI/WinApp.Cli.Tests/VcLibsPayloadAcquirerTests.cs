@@ -28,6 +28,7 @@ public class VcLibsPayloadAcquirerTests
     private string _sdkCache = null!;
     private VcLibsPayloadAcquirer _acquirer = null!;
     private List<string> _requested = null!;
+    private List<string> _verified = null!;
     private byte[]? _download;
 
     public TestContext TestContext { get; set; } = null!;
@@ -42,11 +43,21 @@ public class VcLibsPayloadAcquirerTests
         Directory.CreateDirectory(_sdkCache);
 
         _requested = [];
+        _verified = [];
         _download = null;
 
         _acquirer = new VcLibsPayloadAcquirer(new FakeWinappDirectoryService(new DirectoryInfo(_root)))
         {
             CacheDirectories = () => [new DirectoryInfo(_sdkCache)],
+
+            // These fixtures are zip files with a manifest, not signed packages. The default seam is
+            // the real Authenticode gate and would reject every one of them, so the signature verdict
+            // is supplied here and asserted on its own below.
+            SignatureVerifier = path =>
+            {
+                _verified.Add(path);
+                return true;
+            },
             Downloader = (address, _) =>
             {
                 _requested.Add(address);
@@ -174,6 +185,100 @@ public class VcLibsPayloadAcquirerTests
         // verification is grounds for refusing to launch.
         Assert.IsNull(payload);
         Assert.AreEqual(1, _requested.Count);
+    }
+
+    /// <summary>
+    /// A package that is not validly signed by Microsoft is discarded, and — critically — never
+    /// becomes a host cache entry.
+    /// </summary>
+    /// <remarks>
+    /// Everything the identity gate reads comes from <c>AppxManifest.xml</c> inside the downloaded
+    /// zip, so anyone able to put bytes in front of this code can make those strings say whatever the
+    /// check wants. Publishing on that evidence alone would poison the shared host cache: the next
+    /// run resolves from the cache without re-deriving anything, and stages it into a guest.
+    /// </remarks>
+    [TestMethod]
+    public async Task Acquire_RefusesAPackageThatIsNotValidlySignedByMicrosoft()
+    {
+        // Identity strings are exactly right. Only the signature is not.
+        _download = BuildPackage(DesktopVcLibs, "14.0.33728.0", "x64");
+        _acquirer.SignatureVerifier = _ => false;
+
+        var payload = await AcquireAsync(DesktopVcLibs, "14.0.33728.0", "x64");
+
+        Assert.IsNull(payload);
+        Assert.IsEmpty(
+            Directory.GetFiles(_root, "*.appx", SearchOption.AllDirectories),
+            "an unsigned payload must never be published into the host cache");
+    }
+
+    /// <summary>Nothing is left behind in the cache folder when the signature gate rejects.</summary>
+    [TestMethod]
+    public async Task Acquire_LeavesNoStagedFileWhenTheSignatureIsRejected()
+    {
+        _download = BuildPackage(DesktopVcLibs, "14.0.33728.0", "x64");
+        _acquirer.SignatureVerifier = _ => false;
+
+        await AcquireAsync(DesktopVcLibs, "14.0.33728.0", "x64");
+
+        var cache = Path.Join(_root, "cache", VcLibsPayloadAcquirer.CacheFolderName);
+
+        // Staged under a temporary name and discarded, so not even a partial artifact survives.
+        Assert.IsTrue(
+            !Directory.Exists(cache) || Directory.GetFiles(cache).Length == 0,
+            "the staged file must be cleaned up when verification fails");
+    }
+
+    /// <summary>
+    /// A rejected download does not poison a later run that would otherwise trust the cache.
+    /// </summary>
+    [TestMethod]
+    public async Task Acquire_RejectedPayloadIsNotServedToALaterRunFromCache()
+    {
+        _download = BuildPackage(DesktopVcLibs, "14.0.33728.0", "x64");
+        _acquirer.SignatureVerifier = _ => false;
+
+        Assert.IsNull(await AcquireAsync(DesktopVcLibs, "14.0.33728.0", "x64"));
+
+        // The second run finds no cache entry, so it goes back to the network rather than trusting
+        // something the first run refused.
+        Assert.IsNull(await AcquireAsync(DesktopVcLibs, "14.0.33728.0", "x64"));
+        Assert.AreEqual(2, _requested.Count);
+    }
+
+    /// <summary>The signature is checked on the staged file, before anything is published.</summary>
+    [TestMethod]
+    public async Task Acquire_VerifiesTheStagedFileBeforePublishing()
+    {
+        _download = BuildPackage(DesktopVcLibs, "14.0.33728.0", "x64");
+
+        var payload = await AcquireAsync(DesktopVcLibs, "14.0.33728.0", "x64");
+
+        Assert.IsNotNull(payload);
+
+        var verified = _verified.Single();
+        Assert.AreNotEqual(
+            payload.File.FullName,
+            verified,
+            "verification must happen on the staged file, not after it is published");
+        StringAssert.EndsWith(verified, ".tmp");
+    }
+
+    /// <summary>
+    /// A Microsoft-signed package that is nonetheless the wrong package is still refused.
+    /// </summary>
+    /// <remarks>
+    /// The signature gate does not replace the identity gate. Both have to hold, because a genuinely
+    /// signed package for the wrong architecture is still the wrong thing to put in a guest.
+    /// </remarks>
+    [TestMethod]
+    public async Task Acquire_StillRefusesAWrongPackageEvenWhenItIsValidlySigned()
+    {
+        _download = BuildPackage(DesktopVcLibs, "14.0.33728.0", "x86");
+        _acquirer.SignatureVerifier = _ => true;
+
+        Assert.IsNull(await AcquireAsync(DesktopVcLibs, "14.0.33728.0", "x64"));
+        Assert.IsEmpty(Directory.GetFiles(_root, "*.appx", SearchOption.AllDirectories));
     }
 
     private Task<RuntimePayload?> AcquireAsync(

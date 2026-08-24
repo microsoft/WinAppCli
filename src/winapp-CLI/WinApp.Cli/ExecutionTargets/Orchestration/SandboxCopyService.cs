@@ -54,7 +54,7 @@ internal static class SandboxCopyService
         SandboxCopyRequest request,
         CancellationToken cancellationToken)
     {
-        var sources = EnumerateHostSources(request.HostPath, out var sourceRoot);
+        var sources = EnumerateHostSources(request.HostPath, cancellationToken, out var sourceRoot);
         var existing = await channel.ListFilesAsync(WorkScope, cancellationToken).ConfigureAwait(false);
 
         var existingByPath = existing.ToDictionary(f => f.RelativePath, StringComparer.OrdinalIgnoreCase);
@@ -68,6 +68,14 @@ internal static class SandboxCopyService
             cancellationToken.ThrowIfCancellationRequested();
 
             var relativePath = CombineGuestRelativePath(request.GuestPath, sourceRoot, source.FullName);
+
+            // Re-proven immediately before the file is read, so a junction planted between the walk
+            // and the copy is refused rather than quietly sending content from outside the source.
+            if (sourceRoot.Length > 0 && Directory.Exists(sourceRoot))
+            {
+                HostSourceWalker.EnsureNoReparseAncestor(sourceRoot, source.FullName);
+            }
+
             var hash = await GuestFileService.ComputeHashAsync(source.FullName, cancellationToken)
                 .ConfigureAwait(false);
 
@@ -190,22 +198,53 @@ internal static class SandboxCopyService
     }
 
     /// <summary>Expands a host file or directory into the files to send.</summary>
-    private static List<FileInfo> EnumerateHostSources(string hostPath, out string sourceRoot)
+    /// <remarks>
+    /// The expansion is a manual no-follow walk. Following a directory junction here would copy
+    /// files the caller never named into the guest while every one of them passed a file-level
+    /// reparse check, because a file reached through a junction is an ordinary file.
+    /// <para>
+    /// Internal rather than private so the containment property can be asserted directly: what
+    /// matters is that a file behind a link is never enumerated, and a test that had to stand up a
+    /// guest transport to observe that would be testing the transport instead.
+    /// </para>
+    /// </remarks>
+    internal static List<FileInfo> EnumerateHostSources(
+        string hostPath,
+        CancellationToken cancellationToken,
+        out string sourceRoot)
     {
         if (File.Exists(hostPath))
         {
+            var file = new FileInfo(hostPath);
+
+            // A named file gets the same rule the walk applies to everything else: copying through a
+            // link would put content the caller did not name into the guest.
+            if (HostSourceWalker.IsLink(file))
+            {
+                throw LinkRefused(hostPath);
+            }
+
             sourceRoot = Path.GetDirectoryName(hostPath) ?? string.Empty;
-            return [new FileInfo(hostPath)];
+            return [file];
         }
 
         if (Directory.Exists(hostPath))
         {
+            var directory = new DirectoryInfo(hostPath);
+
+            if (HostSourceWalker.IsLink(directory))
+            {
+                throw LinkRefused(hostPath);
+            }
+
             sourceRoot = Path.TrimEndingDirectorySeparator(hostPath);
 
-            return [.. Directory
-                .EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories)
-                .Select(p => new FileInfo(p))
-                .OrderBy(f => f.FullName, StringComparer.OrdinalIgnoreCase)];
+            // Manual no-follow walk: SearchOption.AllDirectories descends through junctions, and the
+            // ordinary files behind one carry no reparse attribute, so they would be copied into the
+            // guest as if they had been inside the folder the caller asked to copy. Links are treated
+            // as absent here, matching the guest-side rule that nothing inside a managed root may
+            // redirect elsewhere.
+            return HostSourceWalker.EnumerateFiles(sourceRoot, HostReparsePolicy.Skip, cancellationToken);
         }
 
         throw ExecutionTargetException.Create(
@@ -214,6 +253,14 @@ internal static class SandboxCopyService
             userAction: "Check the path, then retry.",
             context: new Dictionary<string, string> { ["hostPath"] = hostPath });
     }
+
+    /// <summary>Refuses a source that is itself a link.</summary>
+    private static ExecutionTargetException LinkRefused(string hostPath) =>
+        ExecutionTargetException.Create(
+            ExecutionTargetErrorCodes.ArtifactFailed,
+            $"'{hostPath}' is a symbolic link or junction, so copying it into the Sandbox was refused.",
+            userAction: "Copy the real file or folder instead.",
+            context: new Dictionary<string, string> { ["hostPath"] = hostPath });
 
     /// <summary>Builds the guest-relative path one source file should land at.</summary>
     private static string CombineGuestRelativePath(string guestPath, string sourceRoot, string sourceFile)

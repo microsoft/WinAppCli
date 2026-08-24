@@ -129,7 +129,7 @@ internal sealed class SandboxUiRouter(
                     RequiresRealInput = true,
                 },
                 new GuestExecCallbacks(
-                    OnOperationId: id => _ = PumpStandardInputAsync(target.Channel, id, cancellationToken),
+                    OnOperationId: GuestStandardInputPump.Attach(target.Channel, cancellationToken),
                     OnStandardOutput: data =>
                     {
                         if (buffered is not null)
@@ -245,44 +245,6 @@ internal sealed class SandboxUiRouter(
                 artifact.GuestFullPath.Replace('\\', '/'),
                 artifact.HostDestination,
                 StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>Forwards this process's standard input to the guest command.</summary>
-    /// <remarks>
-    /// Started only once the channel has named the operation, because input sent before the request
-    /// is on the wire belongs to an operation the guest has not heard of and is dropped. Recording
-    /// with no fixed duration ends on a newline or EOF, so this is what makes that verb usable
-    /// through the router at all.
-    /// </remarks>
-    private static async Task PumpStandardInputAsync(
-        GuestCommandChannel channel,
-        Guid operationId,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            await using var input = Console.OpenStandardInput();
-            var buffer = new byte[8 * 1024];
-
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                var read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-                if (read <= 0)
-                {
-                    break;
-                }
-
-                await channel.SendStandardInputAsync(
-                    operationId, buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-            }
-
-            await channel.CloseStandardInputAsync(operationId, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException or ExecutionTargetException)
-        {
-            // The command owns the outcome; a closed stdin or a finished operation is not a failure
-            // of the command itself.
-        }
-    }
 
     private static bool IsUiCommand(Command? command)
     {
