@@ -303,6 +303,163 @@ public class SandboxLiveE2ETests
         }
     }
 
+    /// <summary>
+    /// Standard input piped into <c>winapp sandbox exec</c> reaches the guest process.
+    /// </summary>
+    /// <remarks>
+    /// The command is documented as streaming stdin as well as stdout and stderr, and this is the
+    /// only test that proves it through the real binary, a real pipe, and a real guest. The guest
+    /// command reads to end of input, so it also proves the host closes guest stdin on EOF: without
+    /// that close it would hang until the timeout rather than echo anything.
+    /// </remarks>
+    [TestMethod]
+    public async Task SandboxExec_ForwardsStandardInputToTheGuestProcess()
+    {
+        await SkipIfUnsupportedOrOccupiedAsync();
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+        timeout.CancelAfter(CommandTimeout);
+
+        var marker = $"stdin-{Guid.NewGuid():n}";
+
+        try
+        {
+            // 'sort' consumes standard input until EOF and writes it back, so an empty result means
+            // either nothing was forwarded or end of input was never signalled.
+            var result = await RunCliAsync(
+                ["sandbox", "exec", "--", "cmd", "/c", "sort"],
+                timeout.Token,
+                standardInput: marker + Environment.NewLine);
+
+            AssertCommandSucceeded(result, "sandbox exec with piped standard input");
+            StringAssert.Contains(result.StandardOutput, marker);
+        }
+        finally
+        {
+            await StopOwnedSandboxAsync();
+        }
+    }
+
+    /// <summary>
+    /// A host directory junction must not widen what <c>sandbox cp</c> sends into the guest.
+    /// </summary>
+    /// <remarks>
+    /// The file behind the junction is an ordinary file with no reparse attribute, so a check that
+    /// only looked at files would copy it while believing it was inside the folder the caller named.
+    /// Junctions need no elevation, so this runs as an ordinary user; if one cannot be created the
+    /// result is inconclusive rather than a pass that proved nothing.
+    /// </remarks>
+    [TestMethod]
+    public async Task SandboxCopy_DoesNotFollowAHostDirectoryJunction()
+    {
+        await SkipIfUnsupportedOrOccupiedAsync();
+
+        var provider = new TargetStateDirectoryProvider();
+        var orchestrator = new ExecutionTargetOrchestrator(
+            CreateBackend(),
+            new TargetMutationLock(provider),
+            new TargetConnectionLock(provider));
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+        timeout.CancelAfter(CommandTimeout);
+
+        var root = TestPaths.TempRoot(nameof(SandboxCopy_DoesNotFollowAHostDirectoryJunction));
+        var outside = TestPaths.TempRoot("live-outside");
+        var guestFolder = $"junction-{Guid.NewGuid():n}";
+        var link = TestPaths.Under(root, "linked");
+
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(outside);
+        await File.WriteAllTextAsync(TestPaths.Under(root, "included.txt"), "real", timeout.Token);
+        await File.WriteAllTextAsync(TestPaths.Under(outside, "secret.txt"), "not yours", timeout.Token);
+
+        try
+        {
+            if (!TryCreateJunction(link, outside))
+            {
+                Assert.Inconclusive("Creating a directory junction is not possible in this run.");
+                return;
+            }
+
+            await using var target = await orchestrator.PrepareAsync(
+                PrepareTargetOptions.Mutating with { RequireInteractiveDesktop = false }, timeout.Token);
+
+            var copied = await SandboxCopyService.CopyAsync(
+                target.Channel,
+                new SandboxCopyRequest(SandboxCopyDirection.ToGuest, root, $@"C:\{guestFolder}"),
+                timeout.Token);
+
+            Assert.AreEqual(1, copied.Transferred, "Only the file genuinely inside the folder may be copied.");
+
+            var guestFiles = await target.Channel.ListFilesAsync(
+                new GuestPathScope(GuestRootNames.Work, Scope: null), timeout.Token);
+
+            Assert.IsFalse(
+                guestFiles.Any(f => f.RelativePath.Contains("secret", StringComparison.OrdinalIgnoreCase)),
+                "A file behind a host junction must never reach the guest.");
+
+            Assert.IsTrue(
+                guestFiles.Any(f => f.RelativePath.Contains("included.txt", StringComparison.OrdinalIgnoreCase)),
+                "The real file must still be copied.");
+
+            await target.Channel.DeleteFilesAsync(
+                new GuestPathScope(GuestRootNames.Work, Scope: null),
+                [.. guestFiles
+                    .Where(f => f.RelativePath.Contains(guestFolder, StringComparison.OrdinalIgnoreCase))
+                    .Select(f => f.RelativePath)],
+                timeout.Token);
+        }
+        finally
+        {
+            TryRemoveJunction(link);
+            TryDeleteDirectory(root);
+            TryDeleteDirectory(outside);
+            await StopOwnedSandboxAsync();
+        }
+    }
+
+    private static bool TryCreateJunction(string linkPath, string target)
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
+                ArgumentList = { "/c", "mklink", "/J", linkPath, target },
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            });
+
+            process?.WaitForExit(milliseconds: 30_000);
+
+            return Directory.Exists(linkPath)
+                && new DirectoryInfo(linkPath).Attributes.HasFlag(FileAttributes.ReparsePoint);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Removes the link itself, never its target.</summary>
+    private static void TryRemoveJunction(string linkPath)
+    {
+        try
+        {
+            if (Directory.Exists(linkPath) &&
+                new DirectoryInfo(linkPath).Attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                Directory.Delete(linkPath);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Temp cleanup is not worth failing a test over.
+        }
+    }
+
     private static string Sha256(byte[] content) =>
         Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)).ToLowerInvariant();
 
@@ -310,21 +467,35 @@ public class SandboxLiveE2ETests
 
     private static async Task<ProcessRunResult> RunCliAsync(
         IReadOnlyList<string> arguments,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? standardInput = null)
     {
         var captureRoot = Path.Join(Path.GetTempPath(), "winapp-live-capture");
         Directory.CreateDirectory(captureRoot);
         var token = Guid.NewGuid().ToString("N");
         var outputPath = Path.Join(captureRoot, $"{token}.out");
         var errorPath = Path.Join(captureRoot, $"{token}.err");
+        var inputPath = Path.Join(captureRoot, $"{token}.in");
         var scriptPath = Path.Join(captureRoot, $"{token}.cmd");
         var binary = Environment.GetEnvironmentVariable(BinaryVariable)!;
         var command = WindowsCommandLine.JoinArguments([binary, .. arguments])!;
         var outputArgument = WindowsCommandLine.JoinArguments([outputPath])!;
         var errorArgument = WindowsCommandLine.JoinArguments([errorPath])!;
+
+        // Redirected from a real file rather than written to the child's pipe, so the bytes are
+        // already waiting before winapp starts. That is the shape that would silently fail if the
+        // pump did not begin from the published operation ID.
+        var inputRedirect = string.Empty;
+
+        if (standardInput is not null)
+        {
+            await File.WriteAllTextAsync(inputPath, standardInput, cancellationToken);
+            inputRedirect = $" 0<{WindowsCommandLine.JoinArguments([inputPath])!}";
+        }
+
         await File.WriteAllTextAsync(
             scriptPath,
-            $"@echo off\r\n{command} 1>{outputArgument} 2>{errorArgument}\r\nexit /b %errorlevel%\r\n",
+            $"@echo off\r\n{command} 1>{outputArgument} 2>{errorArgument}{inputRedirect}\r\nexit /b %errorlevel%\r\n",
             cancellationToken);
 
         var startInfo = new ProcessStartInfo
@@ -353,6 +524,7 @@ public class SandboxLiveE2ETests
         {
             TryDeleteFile(outputPath);
             TryDeleteFile(errorPath);
+            TryDeleteFile(inputPath);
             TryDeleteFile(scriptPath);
         }
     }

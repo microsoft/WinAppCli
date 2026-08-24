@@ -64,7 +64,8 @@ winapp sandbox cp sandbox:C:\Results .\results
 ```
 
 `sandbox cp` requires exactly one endpoint prefixed with `sandbox:`, so the direction is never
-guessed.
+guessed. Symbolic links and junctions in a host source are not followed — only what is genuinely
+inside the folder you named is copied.
 
 ## What to know before relying on it
 
@@ -94,7 +95,10 @@ package-manifest dependencies, unpackaged Windows App SDK version from `*.deps.j
 and never over a version already registered. A Windows App
 Runtime dependency brings its whole cached inventory (Framework, DDLM, Main, Singleton), and shared
 .NET runtimes are unpacked from official runtime packs into a per-user .NET root inside the guest,
-with the app launched against it. The complete graph is verified before every launch, because
+with the app launched against it. The one package winapp downloads — the desktop VC runtime — must
+pass an Authenticode Microsoft-signature check *and* an identity/version/architecture/publisher check
+before it is cached, so a rejected payload never poisons the host cache. The complete graph is
+verified before every launch, because
 `sandbox exec` can change guest runtime state between runs. Anything that cannot be satisfied fails
 with `sandbox_runtime_provision_failed` naming it, before launch. Publishing self-contained avoids
 the requirement entirely.

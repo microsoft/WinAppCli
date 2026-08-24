@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using Microsoft.Extensions.Logging.Abstractions;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
@@ -82,6 +83,17 @@ internal sealed class VcLibsPayloadAcquirer(IWinappDirectoryService winappDirect
     /// </summary>
     internal Func<IEnumerable<DirectoryInfo>> CacheDirectories { get; set; } = DefaultCacheDirectories;
 
+    /// <summary>
+    /// Proves a staged payload really is Microsoft-signed, seamed so both verdicts are testable
+    /// without a signed fixture.
+    /// </summary>
+    /// <remarks>
+    /// Matches the seam <see cref="Services.WinDbgJsProviderAcquirer"/> uses for the same job. The
+    /// default is the real fail-closed Authenticode gate; a test substitutes a verdict.
+    /// </remarks>
+    internal Func<string, bool> SignatureVerifier { get; set; } =
+        path => AuthenticodeVerifier.IsTrustedMicrosoftSigned(path, NullLogger.Instance);
+
     /// <inheritdoc/>
     public async Task<RuntimePayload?> TryAcquireAsync(
         RuntimePackageRequirement requirement,
@@ -139,13 +151,30 @@ internal sealed class VcLibsPayloadAcquirer(IWinappDirectoryService winappDirect
     }
 
     /// <summary>
-    /// Validates downloaded bytes and, only if they are the package that was asked for, caches them.
+    /// Validates downloaded bytes and, only if they prove to be Microsoft's copy of the package that
+    /// was asked for, caches them.
     /// </summary>
     /// <remarks>
-    /// Written to a staging name first and identified there, so a payload that turns out to be
-    /// something else is never published under a name a later run would trust without re-checking.
+    /// <para>
+    /// Two gates, in this order, on a staged file that is never published until both pass.
+    /// </para>
+    /// <para>
+    /// <b>First, the signature.</b> Everything the identity gate reads — name, version,
+    /// architecture, publisher — comes from <c>AppxManifest.xml</c> <em>inside</em> the downloaded
+    /// zip, and anyone who can put bytes in front of this code can write those strings to say
+    /// whatever the check wants to see. On their own they prove the package claims to be
+    /// Microsoft's, not that it is. Authenticode is the only part of the payload that cannot be
+    /// forged that way, so it is checked first and a failure means nothing is published: the poisoned
+    /// bytes never become a host cache entry that later runs, and later guests, would trust without
+    /// re-deriving anything.
+    /// </para>
+    /// <para>
+    /// <b>Then the identity.</b> Kept as a second gate rather than replaced by the signature: a
+    /// genuinely Microsoft-signed package that is the wrong package, wrong architecture, or wrong
+    /// version is still the wrong thing to stage into a guest.
+    /// </para>
     /// </remarks>
-    private static async Task<RuntimePayload?> PublishAsync(
+    private async Task<RuntimePayload?> PublishAsync(
         RuntimePackageRequirement requirement,
         byte[] payload,
         DirectoryInfo hostCache,
@@ -156,6 +185,16 @@ internal sealed class VcLibsPayloadAcquirer(IWinappDirectoryService winappDirect
 
         var destination = Path.Join(hostCache.FullName, StagedName(requirement));
         var staged = await AtomicFile.WriteStagedAsync(destination, payload, cancellationToken).ConfigureAwait(false);
+
+        if (!SignatureVerifier(staged))
+        {
+            AtomicFile.DiscardStaged(staged);
+
+            taskContext.AddDebugMessage(
+                $"{UiSymbols.Note} The downloaded {requirement.Name} package is not validly signed by Microsoft and was discarded.");
+
+            return null;
+        }
 
         var identity = RuntimePayloadIdentity.TryRead(new FileInfo(staged));
 
