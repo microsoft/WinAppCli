@@ -299,12 +299,16 @@ public class HostSourceWalkerTests
                 return;
             }
 
-            foreach (var policy in (HostReparsePolicy[])[HostReparsePolicy.Reject, HostReparsePolicy.Skip])
-            {
-                var failure = Assert.ThrowsExactly<ExecutionTargetException>(
+            // Materialised rather than left lazy: these projections perform the assertions, so a
+            // deferred sequence that nobody enumerated would silently test nothing.
+            var failures = ((HostReparsePolicy[])[HostReparsePolicy.Reject, HostReparsePolicy.Skip])
+                .Select(policy => Assert.ThrowsExactly<ExecutionTargetException>(
                     () => HostSourceWalker.EnumerateFiles(linkedRoot, policy, TestContext.CancellationToken),
-                    $"A linked root must be refused under {policy}.");
+                    $"A linked root must be refused under {policy}."))
+                .ToList();
 
+            foreach (var failure in failures)
+            {
                 Assert.AreEqual(ExecutionTargetErrorCodes.DeploymentDirty, failure.Error.Code);
             }
         }
@@ -403,7 +407,7 @@ public class HostSourceWalkerTests
                 "Content from outside the deployment root was hashed into the snapshot.");
 
             Assert.IsNotNull(failure, "A file that became a link must be refused, not silently deployed.");
-            Assert.AreEqual(ExecutionTargetErrorCodes.DeploymentDirty, failure.Error.Code);
+            Assert.AreEqual(ExecutionTargetErrorCodes.DeploymentDirty, failure!.Error.Code);
         }
         finally
         {
