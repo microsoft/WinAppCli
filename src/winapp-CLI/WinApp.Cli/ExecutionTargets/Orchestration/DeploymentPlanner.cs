@@ -125,9 +125,9 @@ internal static class DeploymentPlanner
                 continue;
             }
 
-            // Re-proven immediately before the read, so a junction planted after the walk is caught
-            // rather than silently hashed through.
-            HostSourceWalker.EnsureNoReparseAncestor(rootPath, info.FullName);
+            // Re-proven immediately before the read, so a link planted after the walk — as an
+            // ancestor or as the file itself — is caught rather than silently hashed through.
+            HostSourceWalker.EnsureNoLinkOnPath(rootPath, info.FullName);
 
             var hash = await ComputeHashAsync(info.FullName, cancellationToken).ConfigureAwait(false);
 

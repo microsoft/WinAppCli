@@ -51,22 +51,30 @@ through one either, so a link cannot make content outside a managed root appear 
 
 The same rule applies on the **host** side, to the folder a deployment or `sandbox cp` reads from.
 Those folders are walked one level at a time with every directory tested before it is descended
-into, rather than with a recursive enumeration that would follow a junction. A file-level check
-alone would not be enough there: a file reached *through* a directory junction is an ordinary file
-and carries no reparse attribute, so `build\logs` pointing at `C:\Users\you\.ssh` would otherwise be
-hashed and copied into the guest as `build\logs\id_rsa`. A junction that points back at its own
-ancestor ends the walk for the same reason, instead of recursing until the path length gives out.
-Deployment refuses such a folder outright; `sandbox cp` treats the link as absent and copies only
-what is genuinely inside the folder you named.
+into, **starting with the root itself** — the per-entry check never sees the root, because the walk
+begins by enumerating the root's contents rather than by looking at it, so a root that is a junction
+would otherwise be followed wholesale. A file-level check alone would not be enough either: a file
+reached *through* a directory junction is an ordinary file and carries no reparse attribute, so
+`build\logs` pointing at `C:\Users\you\.ssh` would otherwise be hashed and copied into the guest as
+`build\logs\id_rsa`. A junction that points back at its own ancestor ends the walk for the same
+reason, instead of recursing until the path length gives out. Deployment refuses such a folder
+outright; `sandbox cp` treats a link inside the folder as absent and copies only what is genuinely
+inside the folder you named. A linked *root* is refused by both, because copying nothing while
+reporting success is a worse answer than saying so.
 
 That reliably stops a link that **already exists** in the path, which is how one realistically
-appears: left behind by an earlier deployment, an application, or an extracted archive. Each
-ancestor is also re-checked immediately before a file is opened for hashing or copying, so the
-unguarded window is the open itself rather than the whole enumerate-then-read pass.
+appears: left behind by an earlier deployment, an application, or an extracted archive. Every
+component is also re-checked immediately before a file is opened for hashing or copying —
+**including the file itself**, not just the directories above it. That last part is load-bearing:
+enumeration checks a file's reparse state, but the read does not repeat it, because opening a
+symbolic link follows it to its target like any other open. Without it, a file replaced by a link
+between the walk and the read would be read straight out of the tree — and a zero-byte file whose
+replacement keeps its timestamp would not be caught afterwards by the "changed while preparing"
+guard either, since that one stats without following and would see a matching length and time.
 
-It is **not** proof against a co-resident guest process that replaces a verified directory with a
-junction in the moment between the check and the write. Closing that race requires handle-relative,
-no-follow file opens, which v1 does not implement.
+It is **not** proof against a co-resident guest process that replaces a verified component with a
+link in the moment between that final check and the open. Closing that race requires
+handle-relative, no-follow file opens on every component, which v1 does not implement.
 
 That residual race is accepted deliberately, and it is consistent with the trust model above rather
 than an exception to it: a guest process able to win it can already terminate the agent, edit the

@@ -37,17 +37,19 @@ internal enum HostReparsePolicy
 /// </para>
 /// <para>
 /// So the walk is manual and one level at a time, and every directory is tested <em>before</em> it
-/// is descended into. That also makes a self-referencing junction terminate immediately rather than
-/// recursing until the path length or the stack gives out: the loop edge is itself a reparse point,
-/// so it is refused at the point it would have been followed.
+/// is descended into — starting with the root itself, which the per-entry check never sees because
+/// the walk begins by enumerating the root's contents rather than by looking at it. That also makes
+/// a self-referencing junction terminate immediately rather than recursing until the path length or
+/// the stack gives out: the loop edge is itself a reparse point, so it is refused at the point it
+/// would have been followed.
 /// </para>
 /// <para>
 /// <b>Threat model.</b> This is containment against links that exist, and against a link planted
-/// between the walk and the read — <see cref="EnsureNoReparseAncestor"/> re-checks the chain
-/// immediately before each file is opened. It is not a handle-relative TOCTOU proof: a mutually
-/// trusted same-user process that wins a race in the window between that re-check and the open can
-/// still swap a directory. Closing that completely needs handle-relative opens
-/// (<c>FILE_FLAG_OPEN_REPARSE_POINT</c> on every component), which is out of scope here and
+/// between the walk and the read — <see cref="EnsureNoLinkOnPath"/> re-checks every component,
+/// including the file itself, immediately before each file is opened. It is not a handle-relative
+/// TOCTOU proof: a mutually trusted same-user process that wins a race in the window between that
+/// re-check and the open can still swap a component. Closing that completely needs handle-relative
+/// opens (<c>FILE_FLAG_OPEN_REPARSE_POINT</c> on every component), which is out of scope here and
 /// documented as a known limit in <c>docs/sandbox-execution.md</c>.
 /// </para>
 /// </remarks>
@@ -57,12 +59,12 @@ internal static class HostSourceWalker
     /// Enumerates every ordinary file beneath <paramref name="rootPath"/> without following links.
     /// </summary>
     /// <param name="rootPath">Canonical, separator-trimmed root. Never descended out of.</param>
-    /// <param name="policy">What to do with a reparse point.</param>
+    /// <param name="policy">What to do with a reparse point found <em>inside</em> the root.</param>
     /// <param name="cancellationToken">Cancellation.</param>
     /// <returns>Files in a stable, case-insensitive full-path order.</returns>
     /// <exception cref="ExecutionTargetException">
-    /// <paramref name="policy"/> is <see cref="HostReparsePolicy.Reject"/> and a link was found, or
-    /// an entry resolved outside the root.
+    /// The root itself is a link, <paramref name="policy"/> is <see cref="HostReparsePolicy.Reject"/>
+    /// and a link was found inside it, or an entry resolved outside the root.
     /// </exception>
     public static List<FileInfo> EnumerateFiles(
         string rootPath,
@@ -72,6 +74,21 @@ internal static class HostSourceWalker
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
 
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
+
+        // The root is checked before anything is walked, and independently of the policy. Descending
+        // into a linked root would make the entire tree beneath it appear to be inside the folder
+        // that was named while it is somewhere else, which is the same defect the per-entry check
+        // prevents one level down — the entry check never sees the root, because the walk starts by
+        // enumerating its contents rather than by looking at it.
+        //
+        // This is a hard failure even under Skip. "Treat the link as absent" applied to the root
+        // would mean silently copying nothing while reporting success, and a silent wrong answer is
+        // worse here than refusing.
+        if (IsReparsePoint(root))
+        {
+            throw LinkRejected(new DirectoryInfo(root));
+        }
+
         var files = new List<FileInfo>();
 
         Collect(root, root, policy, files, cancellationToken);
@@ -125,19 +142,35 @@ internal static class HostSourceWalker
     }
 
     /// <summary>
-    /// Re-proves that no directory between <paramref name="rootPath"/> and
-    /// <paramref name="fullPath"/> became a link since the walk.
+    /// Re-proves that no component of <paramref name="fullPath"/> — root, intermediate directory, or
+    /// the file itself — became a link since the walk.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Called immediately before the file is opened for hashing or copying, so the window in which a
-    /// planted junction goes unnoticed is the open itself rather than the whole enumerate-then-read
-    /// pass. Deliberately re-stats instead of reusing enumeration attributes, which would defeat the
-    /// point.
+    /// planted link goes unnoticed is the open itself rather than the whole enumerate-then-read pass.
+    /// Deliberately re-stats every component instead of reusing the attributes enumeration already
+    /// read, which would defeat the point entirely.
+    /// </para>
+    /// <para>
+    /// <b>The leaf is included, and that is load-bearing.</b> Enumeration checks the file's reparse
+    /// state, but that check happened earlier — it is exactly what this method exists to redo — and
+    /// the read does not repeat it: <see cref="FileStream"/> follows a symbolic link to its target
+    /// like any other open. So a file swapped for a link after enumeration would otherwise be
+    /// hashed and copied straight out of the tree, which is the same escape as a linked directory,
+    /// one level down.
+    /// </para>
+    /// <para>
+    /// This narrows the exposure to the check-to-open interval; it does not eliminate it. A
+    /// same-user process that wins that race can still swap a component, because closing it
+    /// completely requires handle-relative no-follow opens on every component. See
+    /// <c>docs/sandbox-execution.md</c>.
+    /// </para>
     /// </remarks>
     /// <exception cref="ExecutionTargetException">
-    /// An ancestor is a link, or the path is not inside the root.
+    /// A component is a link, or the path is not inside the root.
     /// </exception>
-    public static void EnsureNoReparseAncestor(string rootPath, string fullPath)
+    public static void EnsureNoLinkOnPath(string rootPath, string fullPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(fullPath);
@@ -149,22 +182,47 @@ internal static class HostSourceWalker
             throw Escaped(fullPath);
         }
 
+        // The root is re-checked too: it is as swappable as anything beneath it, and the walk's
+        // own root check ran before the enumeration rather than before this read.
+        if (IsReparsePoint(root))
+        {
+            throw LinkRejected(new DirectoryInfo(root));
+        }
+
         var current = root;
 
-        // The final segment is the file itself; its own reparse state is checked by the caller's
-        // enumeration and again by the read, so only the directories leading to it are walked here.
         foreach (var segment in fullPath[root.Length..].Split(
             [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
-            StringSplitOptions.RemoveEmptyEntries).SkipLast(1))
+            StringSplitOptions.RemoveEmptyEntries))
         {
             current = Path.Join(current, segment);
 
-            var info = new DirectoryInfo(current);
-
-            if (info.Exists && info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            if (IsReparsePoint(current))
             {
-                throw LinkRejected(info);
+                throw LinkRejected(new FileInfo(current));
             }
+        }
+    }
+
+    /// <summary>
+    /// Whether a path exists and is a reparse point, without following it.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="File.GetAttributes(string)"/> reports the attributes of the link itself rather
+    /// than its target, and works for a file and a directory alike, so one probe covers every
+    /// component of a path. A component that does not exist cannot redirect anything; the open that
+    /// follows will fail on its own terms and produce a better error than this method could.
+    /// </remarks>
+    private static bool IsReparsePoint(string path)
+    {
+        try
+        {
+            return File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
+        }
+        catch (Exception ex) when (
+            ex is FileNotFoundException or DirectoryNotFoundException or UnauthorizedAccessException or IOException)
+        {
+            return false;
         }
     }
 
