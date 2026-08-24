@@ -1,0 +1,183 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+namespace WinApp.Cli.Services.Controls;
+
+using System.Text.Json;
+
+/// <summary>
+/// Reads a WinUI sample index (<c>docs/winui-sample-index.schema.json</c>) and maps it onto
+/// the internal <see cref="Scenario"/> model. This is the whole cost of consuming a source
+/// that publishes an index — contrast the per-repository scrapers, which reconstruct the
+/// same data from folder layout.
+///
+/// <para>Generalized from <see cref="ReactorFetcher"/>'s parser, which now delegates here.
+/// Reactor is the one source with a published index today, so its already-shipping file is
+/// the proof that this reader works against real upstream data rather than only against a
+/// shape we invented.</para>
+///
+/// <para>Parsed with <see cref="JsonDocument"/> (AOT-safe, no reflection). Every element is
+/// kind-checked before use: this runs on untrusted network content, so a document whose
+/// <c>controls</c> or <c>samples</c> arrays hold non-objects skips those entries rather than
+/// throwing.</para>
+/// </summary>
+internal static class SampleIndexParser
+{
+    /// <summary>
+    /// Map an index document to <see cref="Scenario"/>[] plus the per-control curated tag
+    /// dictionary. <paramref name="source"/> is stamped onto every scenario
+    /// (<see cref="Scenario.Source"/>) rather than read from the document, so a source can
+    /// never mislabel its samples as another's.
+    /// </summary>
+    /// <remarks>
+    /// Throws <see cref="JsonException"/> on malformed JSON — callers treat that as a fetch
+    /// failure. A structurally valid document that simply carries nothing we understand
+    /// (wrong <c>schemaVersion</c>, missing <c>controls</c>) yields an empty result instead.
+    /// </remarks>
+    internal static (Scenario[] scenarios, Dictionary<string, string[]> tags) Parse(string json, string source)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        var scenarios = new List<Scenario>();
+        var tags = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+
+        if (root.ValueKind != JsonValueKind.Object || !IsSupportedVersion(root)) return ([], tags);
+
+        if (!root.TryGetProperty(SampleIndexSchema.Controls, out var controls)
+            || controls.ValueKind != JsonValueKind.Array)
+        {
+            return ([], tags);
+        }
+
+        foreach (var control in controls.EnumerateArray())
+        {
+            if (control.ValueKind != JsonValueKind.Object) continue;
+
+            var controlId = GetString(control, SampleIndexSchema.Id);
+            if (string.IsNullOrEmpty(controlId)) continue;
+
+            var controlName = GetString(control, SampleIndexSchema.Name);
+            var summary = GetString(control, SampleIndexSchema.Description);
+            var details = GetString(control, SampleIndexSchema.Details);
+            var apiNamespace = GetString(control, SampleIndexSchema.ApiNamespace);
+            var nugetPackage = GetString(control, SampleIndexSchema.NuGetPackage);
+            var relatedControls = GetStringArray(control, SampleIndexSchema.RelatedControls);
+            var xmlnsImports = GetStringArray(control, SampleIndexSchema.XmlnsImports);
+            var usings = GetStringArray(control, SampleIndexSchema.Usings);
+            var keywords = GetStringArray(control, SampleIndexSchema.Keywords);
+            var docs = GetDocLinks(control);
+
+            // Curated keywords -> 3.0-weighted enrichment tag field, verbatim (not
+            // stop-word cleaned) so multi-word intent terms like "css layout" survive.
+            if (keywords.Length > 0) tags[controlId] = keywords;
+
+            // Control-level usings are prepended to EACH sample's code so a snippet
+            // compiles standalone. Sources are asked not to repeat them inside samples.
+            var usingsPrefix = usings.Length > 0
+                ? string.Concat(usings.Select(u => $"using {u};\n")) + "\n"
+                : "";
+
+            if (!control.TryGetProperty(SampleIndexSchema.Samples, out var samples)
+                || samples.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            var index = 0;
+            foreach (var sample in samples.EnumerateArray())
+            {
+                if (sample.ValueKind != JsonValueKind.Object) continue;
+
+                var header = GetString(sample, SampleIndexSchema.Header);
+                var xaml = GetString(sample, SampleIndexSchema.Xaml);
+                var code = GetString(sample, SampleIndexSchema.Code);
+
+                // A sample with neither XAML nor code has no usable content. Guard on the
+                // raw code (before the usings prefix) so a control that declares only
+                // control-level usings can't slip a using-only stub through.
+                var hasXaml = !string.IsNullOrWhiteSpace(xaml);
+                var hasCode = !string.IsNullOrWhiteSpace(code);
+                if (!hasXaml && !hasCode) continue;
+
+                // Ids are positional over KEPT samples, so they stay contiguous from 1.
+                index++;
+                scenarios.Add(new Scenario
+                {
+                    Id = $"{controlId}-{index}",
+                    ControlId = controlId,
+                    ControlName = controlName,
+                    HeaderText = header,
+                    Xaml = hasXaml ? xaml : null,
+                    CSharp = hasCode ? usingsPrefix + code : null,
+                    Source = source,
+                    NuGetPackage = NullIfEmpty(nugetPackage),
+                    ApiNamespace = NullIfEmpty(apiNamespace),
+                    Description = NullIfEmpty(details),
+                    ControlDescription = NullIfEmpty(summary),
+                    RelatedControls = relatedControls,
+                    XmlnsImports = xmlnsImports,
+                    Docs = docs,
+                });
+            }
+        }
+
+        return (scenarios.ToArray(), tags);
+    }
+
+    /// <summary>
+    /// True when this reader understands the document's <c>schemaVersion</c>. An absent
+    /// version is accepted as version 1: the contract was extracted from an index that
+    /// predates it, and refusing that file would break the one source already publishing
+    /// one. A version we don't know is refused rather than guessed at — reading a future
+    /// document with today's field meanings is how a consumer silently ships wrong samples.
+    /// </summary>
+    private static bool IsSupportedVersion(JsonElement root)
+    {
+        if (!root.TryGetProperty(SampleIndexSchema.SchemaVersion, out var version)) return true;
+        if (version.ValueKind != JsonValueKind.Number) return false;
+        return version.TryGetInt32(out var value) && value == SampleIndexSchema.Version;
+    }
+
+    private static string? NullIfEmpty(string value) => string.IsNullOrEmpty(value) ? null : value;
+
+    private static DocLink[] GetDocLinks(JsonElement control)
+    {
+        if (!control.TryGetProperty(SampleIndexSchema.Docs, out var docs)
+            || docs.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var list = new List<DocLink>();
+        foreach (var doc in docs.EnumerateArray())
+        {
+            if (doc.ValueKind != JsonValueKind.Object) continue;
+
+            var uri = GetString(doc, SampleIndexSchema.Uri);
+            if (string.IsNullOrEmpty(uri)) continue;
+
+            list.Add(new DocLink { Title = GetString(doc, SampleIndexSchema.Title), Uri = uri });
+        }
+        return [.. list];
+    }
+
+    private static string GetString(JsonElement el, string prop)
+        => el.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String
+            ? v.GetString() ?? ""
+            : "";
+
+    private static string[] GetStringArray(JsonElement el, string prop)
+    {
+        if (!el.TryGetProperty(prop, out var v) || v.ValueKind != JsonValueKind.Array) return [];
+
+        var list = new List<string>();
+        foreach (var item in v.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String) continue;
+            var s = item.GetString();
+            if (!string.IsNullOrEmpty(s)) list.Add(s);
+        }
+        return [.. list];
+    }
+}
