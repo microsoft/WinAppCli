@@ -47,5 +47,5 @@ reproduce gets ignored, and one that gets reproduced gets fixed.
 
 - Security findings are **never** suppressed for low confidence. Emit them.
 - If the dangerous sink is in the diff but the input source is not, use
-  `Confidence: medium` and say so in the Evidence.
+  `Confidence: medium` and say so in `Show me`.
 - Do not flag what the CA-series analyzers already catch.

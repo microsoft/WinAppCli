@@ -16,8 +16,9 @@ rounds/IDs, resolved blockers, and defenses of the implementation out of user
 documentation. State each user-facing fact once on its canonical surface and link
 to it elsewhere instead of copying it.
 
-Example: "For .NET projects, `winapp restore` runs `dotnet restore` and uses the
-project's standard `nuget.config` hierarchy."
+Example: "After cloning a project with `winapp.yaml`, run `winapp restore` to
+reinstall its pinned SDK packages and projections without changing versions. For
+a .NET project without `winapp.yaml`, run `dotnet restore` instead."
 
 ### Reviews and author communication
 
