@@ -196,6 +196,18 @@ resolving the repo as a plugin; adding `$schema` there would make its nested
 `skills`/`agents` paths unknown fields that clients must ignore.
 `generate-llm-docs.ps1` keeps every manifest's `version` field in sync with the CLI version.
 
+`scripts/validate-plugin-package.ps1` enforces all of the above: the closed manifest
+schema, the plugin name constraints, `SKILL.md` presence and frontmatter for every
+immediate child of `skills/`, the Copilot agent's location, the Claude `agents` pointer
+resolving to a real file, and the repo-root shim staying legacy. It needs no build
+output, so run it directly while editing plugin files:
+
+```powershell
+.\scripts\validate-plugin-package.ps1
+```
+
+`validate-llm-docs.ps1` also invokes it, so CI fails on any conformance regression.
+
 ## C# service architecture guidelines
 
 ### File size limits
