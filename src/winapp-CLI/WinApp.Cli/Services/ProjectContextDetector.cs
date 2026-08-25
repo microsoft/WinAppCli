@@ -277,7 +277,7 @@ internal sealed class ProjectContextDetector : IProjectContextDetector
 
             return Known(ProjectFamily.Node, ProjectAppFramework.Unknown);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
         {
             return Known(ProjectFamily.Node, ProjectAppFramework.Unknown, ProjectContextConfidence.Medium);
         }

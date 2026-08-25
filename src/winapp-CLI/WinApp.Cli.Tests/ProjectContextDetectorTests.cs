@@ -123,6 +123,22 @@ public sealed class ProjectContextDetectorTests
     }
 
     [TestMethod]
+    [DataRow("[]")]
+    [DataRow("""{"winapp":true}""")]
+    [DataRow("""{"winapp":{"jsBindings":true}}""")]
+    public void DetectDirectory_NonObjectPackageMetadata_DegradesToUnknown(string packageJson)
+    {
+        var directory = CreateDirectory($"invalid-shape-{Guid.NewGuid():N}");
+        File.WriteAllText(Path.Combine(directory.FullName, "package.json"), packageJson);
+
+        var context = _detector.DetectDirectory(directory);
+
+        Assert.AreEqual(ProjectFamily.Node, context.Family);
+        Assert.AreEqual(ProjectAppFramework.Unknown, context.Framework);
+        Assert.AreEqual(ProjectContextConfidence.Medium, context.Confidence);
+    }
+
+    [TestMethod]
     public void DetectDirectory_ClassifiesNativeFlutterAndTauriMarkers()
     {
         var cpp = CreateDirectory("cpp");

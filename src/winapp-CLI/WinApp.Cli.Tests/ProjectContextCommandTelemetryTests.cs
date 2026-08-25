@@ -80,6 +80,22 @@ public sealed class ProjectContextCommandTelemetryTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task Restore_NonObjectPackageMetadata_DoesNotFailCommand()
+    {
+        File.WriteAllText(Path.Combine(_tempDirectory.FullName, "package.json"), "[]");
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            GetRequiredService<RestoreCommand>(),
+            [_tempDirectory.FullName]);
+
+        Assert.AreEqual(0, exitCode);
+        var context = GetProjectContextEvent();
+        Assert.AreEqual("node", context.ProjectFamily);
+        Assert.AreEqual("unknown", context.AppFramework);
+        Assert.AreEqual("medium", context.Confidence);
+    }
+
+    [TestMethod]
     public async Task Update_EmitsCurrentWorkspaceProjectContext()
     {
         CreateWpfProject();
