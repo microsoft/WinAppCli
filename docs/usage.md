@@ -224,7 +224,7 @@ winapp restore [options]
 - Stores shareable files in the global cache directory
 
 > [!NOTE]
-> For .NET projects initialized with `winapp init`, there is no `winapp.yaml` — the SDK package versions are recorded as `PackageReference` entries in the `.csproj`. `winapp restore` detects this and runs `dotnet restore` for you, so the command works the same way from either kind of project.
+> For .NET projects there is no `winapp.yaml` — the SDK versions live as `PackageReference` entries in the `.csproj` — so `winapp restore` runs `dotnet restore` for you.
 
 **Examples:**
 
@@ -235,14 +235,7 @@ winapp restore
 
 **Custom and private NuGet feeds:**
 
-`winapp init`, `restore`, and `update` download the Windows SDK and Windows App SDK packages through NuGet, honoring your standard [`nuget.config`](https://learn.microsoft.com/nuget/reference/nuget-config-file) hierarchy (project, user, and machine level). This lets you:
-
-- **Use a private feed or mirror** — add it under `<packageSources>` (for example, an internal Azure Artifacts feed that mirrors the SDK packages). winapp queries every enabled source — over HTTPS, or a local folder path — and, for `init`/`update`, selects the highest listed version across all of them. A plain-**HTTP** feed is refused unless it explicitly opts in with `allowInsecureConnections="true"` on the `<add>` entry, because the SDK packages are executables and an unencrypted feed is a code-substitution vector; switch the mirror to HTTPS or set that attribute. If your `nuget.config` defines a [`<packageSourceMapping>`](https://learn.microsoft.com/nuget/consume-packages/package-source-mapping), only the sources mapped to a given package are queried for it — an enabled feed that the mapping excludes is intentionally skipped, so a package that is not mapped to any source fails to resolve rather than falling back to an unmapped feed. To make winapp use *only* your feed (e.g., an air-gapped mirror), `<clear />` the inherited sources and add just yours.
-- **Authenticate to private feeds** — credentials stored in `nuget.config` (`<packageSourceCredentials>`), environment-based credentials, and NuGet credential-provider plugins (such as the Azure Artifacts provider) are all used automatically. Interactive prompts appear only on interactive terminals; CI and other non-interactive runs rely on pre-configured or environment credentials.
-- **Control the package cache location** — the global packages folder is resolved from the `NUGET_PACKAGES` environment variable or the `globalPackagesFolder` setting in `nuget.config`, falling back to `~/.nuget/packages`.
-- **Restore an already-cached graph without a reachable feed** — when a package and its transitive dependencies are already fully extracted in the global packages folder, `restore` resolves them from there if the configured sources cannot answer. So a warm cache restores offline, or under a `<packageSourceMapping>` that no longer maps a transitive package to any source. This is a fallback only: whenever a configured source *can* serve a dependency, it decides the version, so the cache never changes what an online restore selects.
-
-Example `nuget.config` that restores the SDK packages exclusively from a private mirror:
+`winapp init`, `restore`, and `update` download the Windows SDK and Windows App SDK packages through NuGet, honoring your standard [`nuget.config`](https://learn.microsoft.com/nuget/reference/nuget-config-file) hierarchy. Private feeds and mirrors, feed credentials (including credential providers), and a custom `globalPackagesFolder` all work as they do for `dotnet restore`. To restore exclusively from your own mirror, `<clear />` the inherited sources and add just yours:
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
@@ -254,12 +247,8 @@ Example `nuget.config` that restores the SDK packages exclusively from a private
 </configuration>
 ```
 
-> **Security note:** winapp honors the `nuget.config` in the selected project/config directory — the working directory by default, or the directory you pass to `winapp init <dir>` / `restore --config-dir <dir>` — so it restores SDK packages from whatever feeds, and into whatever `globalPackagesFolder`, that config specifies. Only run `winapp init`/`restore`/`update` against directories you trust, the same caution that applies to `dotnet restore`/`dotnet build`. When more than one source is configured, use [Package Source Mapping](https://learn.microsoft.com/nuget/consume-packages/package-source-mapping) (`<packageSourceMapping>`) to pin each package to a specific feed and mitigate dependency-confusion attacks. Note that mapping governs where a package is *downloaded from*, not one already present in the global packages folder: NuGet — and winapp's cache check that reuses a completed package — restores an already-cached package regardless of which feed first populated it. If you rely on mapping for source *trust*, restore into a clean or repository-scoped global packages folder (set `NUGET_PACKAGES` or `globalPackagesFolder`) so a package can't be reused from a copy a different feed populated earlier.
-
-> **Resolution limitations:** winapp targets the curated Windows App SDK dependency graphs and resolves them as it installs, so it does **not** implement NuGet's full graph unification. Two consequences to be aware of when pointing it at arbitrary private feeds:
->
-> - **Diamond dependencies keep the first-selected version.** When two branches of the graph require the same package at *different lower bounds* (for example `[1.0,)` on one path and `[2.0,)` on another), winapp keeps the version chosen by the first branch it resolved rather than upgrading to a version that satisfies both. A graph whose ranges are genuinely *incompatible* (for example `[1.0,2.0)` and `[2.0,3.0)`, which no single version can satisfy) still fails the restore.
-> - **Flat-container-only feeds can't hide unlisted versions.** A v3 feed that exposes only a `PackageBaseAddress` (flat container) resource with **no** registration resource carries no listed/unlisted flag, so `init`/`update` may select an unlisted version as "latest". Registration-backed feeds — nuget.org and most Azure Artifacts feeds — are unaffected.
+> [!NOTE]
+> winapp reads the `nuget.config` for the selected project directory, so run `init`/`restore`/`update` only against directories you trust — the same caution that applies to `dotnet restore`. When several sources are configured, use [Package Source Mapping](https://learn.microsoft.com/nuget/consume-packages/package-source-mapping) to pin each package to a feed.
 
 ---
 

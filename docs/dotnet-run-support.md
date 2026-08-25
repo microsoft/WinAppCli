@@ -274,31 +274,14 @@ Capture OutputDebugString messages and first-chance exceptions:
 
 ## Production Blockers
 
-### 1. CLI AOT Build Issues (RESOLVED)
-
-Earlier prototypes of the CLI hit NativeAOT compilation errors from Newtonsoft.Json (reflection-heavy
-serialization) and NuGet.Protocol (dynamic code generation), which blocked shipping the CLI binaries in
-the NuGet package.
-
-**Resolution (shipped):**
-- The CLI consumes the NuGet client libraries (`NuGet.Protocol`/`Packaging`/`Configuration`/`Credentials`)
-  and opts into their AOT-friendly JSON path with the runtime feature switch
-  `NuGet.UseSystemTextJsonDeserialization=true` (`Trim=true`) in `WinApp.Cli.csproj`.
-- With System.Text.Json deserialization enabled, Newtonsoft.Json is fully trimmed out of the native image,
-  so the DynamicProxy code paths that produced the trim/AOT warnings are no longer reachable.
-- `dotnet publish -c Release -r <rid> -p:PublishAot=true` now completes with **0 warnings** under
-  `TreatWarningsAsErrors` for both `win-x64` and `win-arm64`.
-
-See the [NuGet AOT tracking issue](https://github.com/NuGet/Home/issues/14408) (now closed) for background.
-
-### 2. Developer Mode Requirement
+### 1. Developer Mode Requirement
 
 Running packaged apps requires Developer Mode enabled on Windows. The solution should:
 - Detect when Developer Mode is disabled
 - Provide clear error messages
 - Consider documenting this requirement prominently
 
-### 3. First-run Experience
+### 2. First-run Experience
 
 On first `dotnet run`, the CLI needs to:
 - Download Windows SDK Build Tools (if not cached)
@@ -306,7 +289,7 @@ On first `dotnet run`, the CLI needs to:
 
 Consider pre-caching or documenting this.
 
-### 4. Platform Detection
+### 3. Platform Detection
 
 The current implementation defaults to x64. For ARM64 machines, the targets correctly detect architecture, but the default Platform may need adjustment.
 

@@ -123,11 +123,11 @@ winapp restore
 winapp restore ./my-project
 ```
 
-Use `restore` when you clone a repo that already has `winapp.yaml` but no `.winapp/` folder. For a .NET project that `init` configured, there is no `winapp.yaml` — the SDK packages are `PackageReference` entries in the `.csproj` — and `restore` detects that and runs `dotnet restore` for you, so the same command works from either project shape.
+Use `restore` when you clone a repo that already has `winapp.yaml` but no `.winapp/` folder. For a .NET project there is no `winapp.yaml`, so `restore` runs `dotnet restore` instead.
 
 ### Private or custom NuGet feeds
 
-`init`, `restore`, and `update` download the Windows SDK and Windows App SDK packages through NuGet, honoring your standard `nuget.config` hierarchy (project, user, and machine level). To restore the SDK packages from an internal feed or mirror, add it under `<packageSources>`; winapp queries every enabled source — over HTTPS, or a local folder path — and picks the highest listed version for `init`/`update` (excluding versions the publisher has *unlisted* — except on a v3 feed that exposes only a flat-container `PackageBaseAddress` with no registration resource, which carries no listed/unlisted flag, so an unlisted version could be selected there; registration-backed feeds such as nuget.org and most Azure Artifacts feeds are unaffected). A plain-**HTTP** feed is refused unless it opts in with `allowInsecureConnections="true"` on the `<add>` entry (the SDK packages are executables, so an unencrypted feed is a code-substitution vector) — switch the mirror to HTTPS or set that attribute. If your `nuget.config` defines a `<packageSourceMapping>`, only the sources mapped to a given package are queried for it, so an enabled feed excluded by the mapping is skipped (and an unmapped package fails to resolve rather than falling back to another feed). To use *only* your feed, `<clear />` the inherited sources first:
+`init`, `restore`, and `update` download the SDK packages through NuGet, honoring your standard `nuget.config` hierarchy. Private feeds and mirrors, feed credentials (including credential providers), and a custom `globalPackagesFolder` all work as they do for `dotnet restore`. To use only your feed, `<clear />` the inherited sources first:
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
@@ -139,9 +139,7 @@ Use `restore` when you clone a repo that already has `winapp.yaml` but no `.wina
 </configuration>
 ```
 
-Authentication uses credentials from `nuget.config` (`<packageSourceCredentials>`), environment-based credentials, and NuGet credential-provider plugins automatically — interactive prompts only appear on interactive terminals, so CI relies on pre-configured/environment credentials. The package cache location follows `NUGET_PACKAGES` / `globalPackagesFolder`, falling back to `~/.nuget/packages`. A dependency graph that is already fully extracted in that folder restores from it when the configured sources cannot answer, so a warm cache works offline; a source that *can* answer always decides the version.
-
-> **Security note:** winapp honors the `nuget.config` in the selected project/config directory — the working directory by default, or the directory passed to `init <dir>` / `restore --config-dir <dir>` — so it restores from the feeds (and into the `globalPackagesFolder`) that config specifies. Run `init`/`restore`/`update` only against directories you trust, the same as `dotnet restore`. Use `<packageSourceMapping>` to pin packages to specific feeds when more than one source is configured.
+> **Security note:** winapp reads the `nuget.config` for the selected project directory, so run `init`/`restore`/`update` only against directories you trust, the same as `dotnet restore`. Use `<packageSourceMapping>` to pin packages to specific feeds when more than one source is configured.
 
 ### Update SDK versions
 
