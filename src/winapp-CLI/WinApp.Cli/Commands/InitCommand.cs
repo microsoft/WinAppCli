@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
+using WinApp.Cli.Telemetry.Events;
 
 namespace WinApp.Cli.Commands;
 
@@ -109,6 +110,7 @@ internal class InitCommand : Command, IShortDescription
     public class Handler(
         IWorkspaceSetupService workspaceSetupService,
         IProjectDetectionService projectDetectionService,
+        IProjectContextDetector projectContextDetector,
         ICurrentDirectoryProvider currentDirectoryProvider,
         IManifestService manifestService,
         IStatusService statusService,
@@ -194,6 +196,16 @@ internal class InitCommand : Command, IShortDescription
                     return 1;
                 }
 
+                ProjectContextEvent.Log("init", () =>
+                {
+                    return projectContextDetector.DetectDirectory(
+                        exe?.Directory ?? currentDirectoryProvider.GetCurrentDirectoryInfo(),
+                        ProjectTargetKind.BuildOutput) with
+                    {
+                        Packaging = ProjectContextPackaging.Sparse,
+                    };
+                });
+
                 return await RunSparseInitAsync(exe, name, publisher, outputDir, useDefaults, force, cancellationToken);
             }
 
@@ -227,6 +239,23 @@ internal class InitCommand : Command, IShortDescription
                 // User declined to init in a directory with no compatible projects
                 return 1;
             }
+
+            ProjectContextEvent.Log("init", () =>
+            {
+                var projectContext = projectContextDetector.DetectDirectory(
+                    selectedDirectory,
+                    ProjectTargetKind.Workspace);
+                if (projectContext.IsKnown)
+                {
+                    projectContext = projectContext with
+                    {
+                        Source = ProjectContextSource.SelectedProject,
+                        Confidence = ProjectContextConfidence.High,
+                    };
+                }
+
+                return projectContext;
+            });
 
             // If --config-dir was not explicitly set, use the selected/init directory
             // so winapp.yaml is co-located with the project
