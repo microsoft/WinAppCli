@@ -194,7 +194,7 @@ experiments stay in temp directories. State each conclusion once.
 # Spec Review — <spec title or path>
 
 ## Decision
-<proceed | proceed with changes | reconsider> — <plain rationale grounded in evidence>
+<proceed | proceed-with-changes | reconsider> — <plain rationale grounded in evidence>
 
 <Only when it changes confidence or the decision: one sentence about independent
 model agreement or disagreement and the experiment/source that resolved it.>
