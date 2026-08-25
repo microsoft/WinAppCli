@@ -1,0 +1,66 @@
+# Fuzzing runs on demand, not per-build: OneFuzz jobs are long-running (hours) and file bugs, so
+# they are triggered manually against a chosen branch.
+trigger: none
+pr: none
+
+parameters:
+  - name: configuration
+    type: string
+    default: Release
+
+resources:
+  repositories:
+    - repository: 1esPipelines
+      type: git
+      name: 1ESPipelineTemplates/1ESPipelineTemplates
+      ref: refs/tags/release
+
+extends:
+  template: v1/1ES.Unofficial.PipelineTemplate.yml@1esPipelines
+  parameters:
+    settings:
+      networkIsolationPolicy: Permissive,CFSClean
+    sdl:
+      sourceAnalysisPool:
+        name: Azure-Pipelines-1ESPT-ExDShared
+        image: windows-latest
+        os: windows
+    stages:
+      - stage: Fuzz
+        jobs:
+          - job: OneFuzz
+            timeoutInMinutes: 120
+            pool:
+              name: Azure-Pipelines-1ESPT-ExDShared
+              image: windows-latest
+              os: windows
+              hostArchitecture: amd64
+            steps:
+              - checkout: self
+                fetchDepth: 1
+                fetchTags: false
+
+              - task: UseDotNet@2
+                displayName: Setup .NET 10
+                inputs:
+                  version: 10.0.x
+
+              - script: |
+                  if not exist "%APPDATA%\NuGet" mkdir "%APPDATA%\NuGet"
+                  copy /Y $(Build.SourcesDirectory)\.pipelines\release-nuget.config "%APPDATA%\NuGet\NuGet.Config"
+                displayName: Add release package source
+
+              - task: NuGetAuthenticate@1
+
+              # Built here rather than downloaded from the CI drop: the fuzz harness is not part of
+              # the shipping artifacts, so there is nothing to download.
+              - script: dotnet build src\winapp-CLI\WinApp.Cli.Fuzz\WinApp.Cli.Fuzz.csproj -c ${{ parameters.configuration }}
+                displayName: Build fuzz harness
+
+              - task: onefuzz-task@0
+                displayName: Submit OneFuzz job
+                inputs:
+                  onefuzzOSes: Windows
+                env:
+                  onefuzzDropDirectory: $(Build.SourcesDirectory)\src\winapp-CLI\WinApp.Cli.Fuzz\bin\${{ parameters.configuration }}\net10.0-windows10.0.19041.0
+                  SYSTEM_ACCESSTOKEN: $(System.AccessToken)
