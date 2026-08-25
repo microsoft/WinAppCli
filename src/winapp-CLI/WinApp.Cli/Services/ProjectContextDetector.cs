@@ -15,6 +15,8 @@ internal sealed class ProjectContextDetector : IProjectContextDetector
     private const int MaxAncestorDepth = 8;
     private const int MaxProjectFilesPerDirectory = 8;
     private const long MaxMetadataFileBytes = 512 * 1024;
+    private static readonly string[] DependencySections =
+        ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"];
 
     public ProjectContext DetectProject(FileInfo projectFile)
     {
@@ -154,7 +156,7 @@ internal sealed class ProjectContextDetector : IProjectContextDetector
         }
 
         ProjectContext? nodeContext = null;
-        var packageJson = new FileInfo(Path.Combine(directory.FullName, "package.json"));
+        var packageJson = new FileInfo(Path.Join(directory.FullName, "package.json"));
         if (packageJson.Exists)
         {
             nodeContext = DetectNodeProject(packageJson);
@@ -164,7 +166,7 @@ internal sealed class ProjectContextDetector : IProjectContextDetector
             }
         }
 
-        if (File.Exists(Path.Combine(directory.FullName, "pubspec.yaml")))
+        if (File.Exists(Path.Join(directory.FullName, "pubspec.yaml")))
         {
             return Known(ProjectFamily.Dart, ProjectAppFramework.Flutter);
         }
@@ -180,12 +182,12 @@ internal sealed class ProjectContextDetector : IProjectContextDetector
             return DetectCppProject(directory);
         }
 
-        if (File.Exists(Path.Combine(directory.FullName, "Cargo.toml")))
+        if (File.Exists(Path.Join(directory.FullName, "Cargo.toml")))
         {
             return Known(ProjectFamily.Rust, ProjectAppFramework.Unknown);
         }
 
-        if (File.Exists(Path.Combine(directory.FullName, "CMakeLists.txt")))
+        if (File.Exists(Path.Join(directory.FullName, "CMakeLists.txt")))
         {
             return DetectCppProject(directory);
         }
@@ -283,7 +285,7 @@ internal sealed class ProjectContextDetector : IProjectContextDetector
 
     private static ProjectContext DetectCppProject(DirectoryInfo directory)
     {
-        var configFile = new FileInfo(Path.Combine(directory.FullName, "winapp.yaml"));
+        var configFile = new FileInfo(Path.Join(directory.FullName, "winapp.yaml"));
         if (!CanReadMetadata(configFile))
         {
             return Known(ProjectFamily.Cpp, ProjectAppFramework.Unknown);
@@ -336,20 +338,11 @@ internal sealed class ProjectContextDetector : IProjectContextDetector
             ProjectContextSource.ExactMarker,
             confidence);
 
-    private static bool HasDependency(JsonElement root, string dependencyName)
-    {
-        foreach (var sectionName in new[] { "dependencies", "devDependencies", "peerDependencies", "optionalDependencies" })
-        {
-            if (root.TryGetProperty(sectionName, out var dependencies)
-                && dependencies.ValueKind == JsonValueKind.Object
-                && dependencies.TryGetProperty(dependencyName, out _))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    private static bool HasDependency(JsonElement root, string dependencyName) =>
+        DependencySections.Any(sectionName =>
+            root.TryGetProperty(sectionName, out var dependencies)
+            && dependencies.ValueKind == JsonValueKind.Object
+            && dependencies.TryGetProperty(dependencyName, out _));
 
     private static bool UsesWinUiBindings(JsonElement root)
     {
@@ -361,17 +354,14 @@ internal sealed class ProjectContextDetector : IProjectContextDetector
             return false;
         }
 
-        foreach (var winmd in winmds.EnumerateArray())
-        {
-            if (winmd.TryGetProperty("namespace", out var namespaceElement)
-                && namespaceElement.ValueKind == JsonValueKind.String
-                && namespaceElement.GetString()?.StartsWith("Microsoft.UI.Xaml", StringComparison.Ordinal) == true)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return winmds
+            .EnumerateArray()
+            .Where(winmd =>
+                winmd.TryGetProperty("namespace", out var namespaceElement)
+                && namespaceElement.ValueKind == JsonValueKind.String)
+            .Any(winmd =>
+                winmd.GetProperty("namespace").GetString()
+                    ?.StartsWith("Microsoft.UI.Xaml", StringComparison.Ordinal) == true);
     }
 
     private static bool IsTrue(Dictionary<string, string> properties, string name) =>
@@ -386,8 +376,8 @@ internal sealed class ProjectContextDetector : IProjectContextDetector
 
     private static bool HasManifest(DirectoryInfo? directory) =>
         directory is not null
-        && (File.Exists(Path.Combine(directory.FullName, "Package.appxmanifest"))
-            || File.Exists(Path.Combine(directory.FullName, "appxmanifest.xml")));
+        && (File.Exists(Path.Join(directory.FullName, "Package.appxmanifest"))
+            || File.Exists(Path.Join(directory.FullName, "appxmanifest.xml")));
 
     private static bool HasTauriConfig(DirectoryInfo directory)
     {
@@ -397,7 +387,7 @@ internal sealed class ProjectContextDetector : IProjectContextDetector
                 .EnumerateDirectories()
                 .Where(subdirectory => !subdirectory.Attributes.HasFlag(FileAttributes.ReparsePoint))
                 .Take(32)
-                .Any(subdirectory => File.Exists(Path.Combine(subdirectory.FullName, "tauri.conf.json")));
+                .Any(subdirectory => File.Exists(Path.Join(subdirectory.FullName, "tauri.conf.json")));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -434,6 +424,6 @@ internal sealed class ProjectContextDetector : IProjectContextDetector
     }
 
     private static bool IsRepositoryBoundary(DirectoryInfo directory) =>
-        Directory.Exists(Path.Combine(directory.FullName, ".git"))
-        || File.Exists(Path.Combine(directory.FullName, ".git"));
+        Directory.Exists(Path.Join(directory.FullName, ".git"))
+        || File.Exists(Path.Join(directory.FullName, ".git"));
 }
