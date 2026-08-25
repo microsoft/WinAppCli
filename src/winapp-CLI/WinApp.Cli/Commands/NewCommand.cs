@@ -681,7 +681,7 @@ internal class NewCommand : Command, IShortDescription
             var verb = entry.IsItem ? "Adding" : "Creating";
             var (exitCode, stdout, stderr) = await WithSpinnerAsync(
                 $"{verb} {name} from {entry.ShortName}...",
-                "Still setting up the project; missing NuGet packages may be downloading or restoring…",
+                "Setting up the project; missing NuGet packages are restoring…",
                 ScaffoldStatusDelay,
                 () => dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken: cancellationToken));
             LogDotnetOutput(args, exitCode, stdout, stderr);
