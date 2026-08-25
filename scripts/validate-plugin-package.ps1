@@ -77,7 +77,7 @@ else {
         }
 
         # The schema is closed: any other top-level field is a conformance violation.
-        $unknown = @($manifest.PSObject.Properties.Name | Where-Object { $AllowedFields -notcontains $_ })
+        $unknown = @($manifest.PSObject.Properties.Name | Where-Object { $AllowedFields -cnotcontains $_ })
         if ($unknown.Count -gt 0) {
             Add-Failure "plugins/winapp/plugin.json has non-portable top-level field(s): $($unknown -join ', '). Component paths are auto-discovered; host-specific data belongs under 'extensions'."
         }
@@ -96,7 +96,7 @@ else {
             }
             else {
                 $badAuthor = @($author.Value.PSObject.Properties |
-                    Where-Object { @('name', 'email', 'url') -notcontains $_.Name -or $_.Value -isnot [string] })
+                    Where-Object { @('name', 'email', 'url') -cnotcontains $_.Name -or $_.Value -isnot [string] })
                 if ($badAuthor.Count -gt 0) {
                     Add-Failure "plugins/winapp/plugin.json 'author' allows only string 'name', 'email', and 'url'"
                 }
@@ -104,7 +104,8 @@ else {
         }
 
         $keywords = $manifest.PSObject.Properties['keywords']
-        if ($keywords -and @($keywords.Value | Where-Object { $_ -isnot [string] }).Count -gt 0) {
+        if ($keywords -and ($keywords.Value -isnot [array] -or
+                @($keywords.Value | Where-Object { $_ -isnot [string] }).Count -gt 0)) {
             Add-Failure "plugins/winapp/plugin.json 'keywords' must be an array of strings"
         }
 
@@ -157,7 +158,7 @@ else {
 
         $front = $lines[1..($closing - 1)]
         foreach ($key in @('name', 'description')) {
-            if (@($front | Where-Object { $_ -match "^$key\s*:\s*\S" }).Count -eq 0) {
+            if (@($front | Where-Object { $_ -cmatch "^$key\s*:\s*\S" }).Count -eq 0) {
                 Add-Failure "skills/$($skillDir.Name)/SKILL.md frontmatter is missing required '$key'"
             }
         }
@@ -183,7 +184,7 @@ if (Test-Path $McpPath -PathType Leaf) {
         if (-not $mcp.PSObject.Properties['mcpServers']) {
             Add-Failure "plugins/winapp/mcp.json must contain 'mcpServers'"
         }
-        $extraMcp = @($mcp.PSObject.Properties.Name | Where-Object { @('$schema', 'mcpServers') -notcontains $_ })
+        $extraMcp = @($mcp.PSObject.Properties.Name | Where-Object { @('$schema', 'mcpServers') -cnotcontains $_ })
         if ($extraMcp.Count -gt 0) {
             Add-Failure "plugins/winapp/mcp.json has unsupported top-level field(s): $($extraMcp -join ', ')"
         }
