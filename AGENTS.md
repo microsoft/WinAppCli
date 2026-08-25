@@ -140,6 +140,20 @@ Sample & guide tests run via `.github/workflows/test-samples.yml` using a GitHub
 | Plugin (Copilot + Claude) | `plugins/winapp/` |
 | Plugin marketplaces | `.github/plugin/marketplace.json`, `.claude-plugin/marketplace.json` |
 | Samples | `samples/` (electron, cpp-app, dotnet-app, etc.) |
+| ADO pipelines | `.pipelines/` — see [`.pipelines/README.md`](.pipelines/README.md) |
+
+### Editing the ADO pipelines
+
+Agent setup (.NET, Node, internal feeds and their auth) is shared via
+`.pipelines/templates/build-env.yaml`. Change it there, not in each pipeline.
+
+1ES **release jobs cannot check out the repo**, so any step inside a `templateContext.type:
+releaseJob` job must either be inline or read its scripts from a pipeline artifact. That is why
+the asset renames in `release.yml` are duplicated in `scripts/stage-release-assets.ps1` rather
+than shared; keep the two in sync.
+
+`.pipelines/dryrun.yml` rehearses a full release weekly without signing or publishing, so a
+change to the release path should usually be reflected there too.
 
 ## CLI command semantics
 

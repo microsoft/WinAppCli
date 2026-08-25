@@ -374,5 +374,7 @@ elseif ($SkipAI) {
 $rawNotes | Set-Content -Path $OutputPath -Encoding UTF8 -NoNewline
 Write-Host "[RELEASENOTES] Release notes written to: $OutputPath" -ForegroundColor Green
 
-# Also output to stdout for pipeline consumption
-Write-Output $rawNotes
+# Deliberately NOT echoed to stdout. These notes are built from PR titles and bodies and, when AI
+# summarization runs, from model output - all attacker-influenceable. Azure Pipelines interprets
+# any stdout line beginning with ##vso[...] as a logging command, so echoing them would let a PR
+# title set pipeline variables or fail tasks. Both release.yml and dryrun.yml read $OutputPath.

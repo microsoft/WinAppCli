@@ -1,0 +1,489 @@
+#!/usr/bin/env pwsh
+<#
+.SYNOPSIS
+    Read-only validation of the credentials and service connections a release depends on.
+
+.DESCRIPTION
+    Releases have been blocked more than once by a credential that was still configured but
+    no longer usable: an expired PAT, a token that lost push rights on a fork, a service
+    connection that was rotated or de-authorized. None of that is visible until the release
+    is already running.
+
+    This script checks all of it without publishing anything. It performs GET requests only:
+    it never syncs or pushes to a fork, never creates a GitHub release, and never signs.
+
+    Every check reports PASS, WARN, or FAIL. WARN means "could not determine" (usually a
+    permission gap in the checker itself, not the credential); FAIL means the credential is
+    definitively unusable and the next release would break. The exit code is non-zero only
+    when there is at least one FAIL, unless -TreatWarningsAsErrors is set.
+
+.PARAMETER GitHubToken
+    The PAT used by the release for release-notes generation, WinGet submission and the
+    MS Learn docs PR (GITHUB_TOKEN_2). Falls back to $env:GH_TOKEN.
+
+.PARAMETER WingetPkgsFork
+    owner/repo of the winget-pkgs fork wingetcreate pushes through.
+
+.PARAMETER MSLearnDocsFork
+    owner/repo of the windows-dev-docs-pr fork the docs PR is pushed to.
+
+.PARAMETER RepoOwner
+    Owner of the product repo. Default: microsoft.
+
+.PARAMETER RepoName
+    Product repo name. Default: winappcli.
+
+.PARAMETER AdoOrganizationUri
+    Collection URI, e.g. https://dev.azure.com/microsoft/. Falls back to
+    $env:SYSTEM_COLLECTIONURI. Skipped when absent (i.e. when running locally).
+
+.PARAMETER AdoProject
+    ADO project holding the service connections. Falls back to $env:SYSTEM_TEAMPROJECT.
+
+.PARAMETER AdoAccessToken
+    Token used to read service endpoints. Falls back to $env:SYSTEM_ACCESSTOKEN.
+
+.PARAMETER ServiceConnections
+    Names of the service connections the release requires.
+
+.PARAMETER ModelsToken
+    Token for the GitHub Models API used by release-notes generation (GH_MODELS_TOKEN).
+    Falls back to $env:GH_MODELS_TOKEN.
+
+.PARAMETER ModelsModel
+    Model to probe with. Must match the model generate-release-notes.ps1 uses.
+
+.PARAMETER SkipModelsCheck
+    Skip the GitHub Models probe. Use when running offline.
+
+.PARAMETER MinimumTokenLifetimeDays
+    Warn when the PAT expires within this many days. Default: 21, so a warning shows up at
+    least three weekly runs before the token actually dies.
+
+.PARAMETER TreatWarningsAsErrors
+    Exit non-zero on WARN as well as FAIL.
+
+.EXAMPLE
+    $env:GH_TOKEN = 'ghp_...'
+    .\scripts\check-release-credentials.ps1 -WingetPkgsFork me/winget-pkgs -MSLearnDocsFork me/windows-dev-docs-pr
+#>
+
+param(
+    [string]$GitHubToken = '',
+    [string]$WingetPkgsFork = '',
+    [string]$MSLearnDocsFork = '',
+    [string]$RepoOwner = 'microsoft',
+    [string]$RepoName = 'winappcli',
+    [string]$AdoOrganizationUri = '',
+    [string]$AdoProject = '',
+    [string]$AdoAccessToken = '',
+    [string[]]$ServiceConnections = @(),
+    [string]$ModelsToken = '',
+    [string]$ModelsModel = 'openai/gpt-4o-mini',
+    [switch]$SkipModelsCheck,
+    [int]$MinimumTokenLifetimeDays = 21,
+    [switch]$TreatWarningsAsErrors
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$script:Results = [System.Collections.Generic.List[object]]::new()
+
+function Add-Result {
+    param(
+        [ValidateSet('PASS', 'WARN', 'FAIL')][string]$Status,
+        [string]$Check,
+        [string]$Detail
+    )
+
+    $script:Results.Add([pscustomobject]@{
+            Status = $Status
+            Check  = $Check
+            Detail = $Detail
+        })
+
+    $color = switch ($Status) {
+        'PASS' { 'Green' }
+        'WARN' { 'Yellow' }
+        'FAIL' { 'Red' }
+    }
+    Write-Host ("[{0}] {1}: {2}" -f $Status, $Check, $Detail) -ForegroundColor $color
+}
+
+function Invoke-GitHubApi {
+    <#
+        Returns a hashtable with Ok/StatusCode/Content/Headers instead of throwing, so a 404
+        on one repo does not abort the remaining checks.
+    #>
+    param(
+        [string]$Path,
+        [string]$Token
+    )
+
+    $headers = @{
+        'Accept'               = 'application/vnd.github+json'
+        'User-Agent'           = 'winappcli-release-dryrun'
+        'X-GitHub-Api-Version' = '2022-11-28'
+    }
+    if ($Token) {
+        $headers['Authorization'] = "Bearer $Token"
+    }
+
+    try {
+        $response = Invoke-WebRequest -Uri "https://api.github.com$Path" -Headers $headers -Method Get -UseBasicParsing
+        return @{
+            Ok         = $true
+            StatusCode = [int]$response.StatusCode
+            Content    = ($response.Content | ConvertFrom-Json)
+            Headers    = $response.Headers
+        }
+    }
+    catch {
+        $status = 0
+        if ($_.Exception.PSObject.Properties.Name -contains 'Response' -and $_.Exception.Response) {
+            $status = [int]$_.Exception.Response.StatusCode
+        }
+        return @{
+            Ok         = $false
+            StatusCode = $status
+            Content    = $null
+            Headers    = $null
+            Message    = $_.Exception.Message
+        }
+    }
+}
+
+function Get-HeaderValue {
+    param($Headers, [string]$Name)
+
+    if (-not $Headers) { return $null }
+
+    # Invoke-WebRequest surfaces headers as string[] on pwsh and string on Windows PowerShell.
+    foreach ($key in $Headers.Keys) {
+        if ($key -ieq $Name) {
+            $value = $Headers[$key]
+            if ($value -is [array]) { return ($value -join ', ') }
+            return [string]$value
+        }
+    }
+    return $null
+}
+
+# ---------------------------------------------------------------------------
+# GitHub PAT
+# ---------------------------------------------------------------------------
+
+Write-Host ''
+Write-Host '=== GitHub token ===' -ForegroundColor Cyan
+
+if (-not $GitHubToken) {
+    $GitHubToken = if ($env:GH_TOKEN) { $env:GH_TOKEN } elseif ($env:GITHUB_TOKEN) { $env:GITHUB_TOKEN } else { '' }
+}
+
+$tokenScopes = $null
+
+if (-not $GitHubToken) {
+    Add-Result -Status 'FAIL' -Check 'GitHub token' -Detail 'No token supplied. Pass -GitHubToken or set GH_TOKEN.'
+}
+else {
+    $user = Invoke-GitHubApi -Path '/user' -Token $GitHubToken
+
+    if (-not $user.Ok) {
+        if ($user.StatusCode -eq 401) {
+            Add-Result -Status 'FAIL' -Check 'GitHub token' -Detail 'Token was rejected (401). It has expired or been revoked - regenerate it and update the variable group.'
+        }
+        else {
+            Add-Result -Status 'FAIL' -Check 'GitHub token' -Detail "GET /user failed with status $($user.StatusCode): $($user.Message)"
+        }
+    }
+    else {
+        Add-Result -Status 'PASS' -Check 'GitHub token' -Detail "Authenticated as '$($user.Content.login)'."
+
+        $tokenScopes = Get-HeaderValue -Headers $user.Headers -Name 'X-OAuth-Scopes'
+        if ($null -ne $tokenScopes) {
+            $scopeList = @($tokenScopes -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+            Add-Result -Status 'PASS' -Check 'GitHub token scopes' -Detail "Scopes: $(if ($scopeList) { $scopeList -join ', ' } else { '(none)' })"
+
+            # wingetcreate forks and pushes; the docs job pushes a branch. Both need repo write.
+            $hasRepoWrite = ($scopeList -contains 'repo') -or ($scopeList -contains 'public_repo')
+            if (-not $hasRepoWrite) {
+                Add-Result -Status 'FAIL' -Check 'GitHub token scopes' -Detail "Neither 'repo' nor 'public_repo' is granted. WinGet submission and the MS Learn docs PR both push branches and will fail."
+            }
+        }
+        else {
+            # Fine-grained PATs and GitHub App tokens do not return this header.
+            Add-Result -Status 'WARN' -Check 'GitHub token scopes' -Detail 'No X-OAuth-Scopes header (fine-grained PAT or app token). Per-repository permissions are checked below instead.'
+        }
+
+        $expiry = Get-HeaderValue -Headers $user.Headers -Name 'github-authentication-token-expiration'
+        if ($expiry) {
+            $parsed = [datetime]::MinValue
+            # Header format is "2026-01-30 15:04:05 UTC".
+            if ([datetime]::TryParse(($expiry -replace ' UTC$', 'Z'), [cultureinfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AdjustToUniversal, [ref]$parsed)) {
+                $daysLeft = [int][math]::Floor(($parsed - [datetime]::UtcNow).TotalDays)
+                if ($daysLeft -lt 0) {
+                    Add-Result -Status 'FAIL' -Check 'GitHub token expiry' -Detail "Token expired on $expiry."
+                }
+                elseif ($daysLeft -le $MinimumTokenLifetimeDays) {
+                    Add-Result -Status 'WARN' -Check 'GitHub token expiry' -Detail "Token expires in $daysLeft day(s) on $expiry. Regenerate it before the next release."
+                }
+                else {
+                    Add-Result -Status 'PASS' -Check 'GitHub token expiry' -Detail "Expires in $daysLeft day(s) on $expiry."
+                }
+            }
+            else {
+                Add-Result -Status 'WARN' -Check 'GitHub token expiry' -Detail "Could not parse expiration header value '$expiry'."
+            }
+        }
+        else {
+            Add-Result -Status 'WARN' -Check 'GitHub token expiry' -Detail 'No expiration header returned. The token may be non-expiring, which is worth reviewing.'
+        }
+
+        $rate = Invoke-GitHubApi -Path '/rate_limit' -Token $GitHubToken
+        if ($rate.Ok) {
+            $core = $rate.Content.resources.core
+            if ($core.remaining -lt 100) {
+                Add-Result -Status 'WARN' -Check 'GitHub rate limit' -Detail "Only $($core.remaining)/$($core.limit) core requests remaining."
+            }
+            else {
+                Add-Result -Status 'PASS' -Check 'GitHub rate limit' -Detail "$($core.remaining)/$($core.limit) core requests remaining."
+            }
+        }
+        else {
+            Add-Result -Status 'WARN' -Check 'GitHub rate limit' -Detail "Could not read rate limit (status $($rate.StatusCode))."
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Repository access
+# ---------------------------------------------------------------------------
+
+function Test-RepoAccess {
+    param(
+        [string]$Repo,
+        [string]$Label,
+        [switch]$RequirePush
+    )
+
+    if (-not $Repo) {
+        Add-Result -Status 'WARN' -Check $Label -Detail 'Not configured - skipping. Set the corresponding pipeline variable to enable this check.'
+        return
+    }
+
+    # Format is validated even without a token: a malformed variable group value is a real
+    # configuration error, and it must not be masked by an unrelated token failure.
+    if ($Repo -notmatch '^[\w.-]+/[\w.-]+$') {
+        Add-Result -Status 'FAIL' -Check $Label -Detail "'$Repo' is not in owner/repo form."
+        return
+    }
+
+    if (-not $GitHubToken) {
+        Add-Result -Status 'WARN' -Check $Label -Detail "'$Repo' is well-formed, but access could not be checked without a token."
+        return
+    }
+
+    $result = Invoke-GitHubApi -Path "/repos/$Repo" -Token $GitHubToken
+    if (-not $result.Ok) {
+        if ($result.StatusCode -eq 404) {
+            Add-Result -Status 'FAIL' -Check $Label -Detail "'$Repo' was not found, or the token cannot see it. If the fork was deleted, recreate it - wingetcreate and the docs PR both depend on it."
+        }
+        else {
+            Add-Result -Status 'FAIL' -Check $Label -Detail "GET /repos/$Repo failed with status $($result.StatusCode)."
+        }
+        return
+    }
+
+    if (-not $RequirePush) {
+        Add-Result -Status 'PASS' -Check $Label -Detail "'$Repo' is reachable."
+        return
+    }
+
+    $permissions = $result.Content.permissions
+    if (-not $permissions) {
+        Add-Result -Status 'WARN' -Check $Label -Detail "'$Repo' is reachable but the response carried no permissions block, so push access could not be confirmed."
+        return
+    }
+
+    if ($permissions.push) {
+        Add-Result -Status 'PASS' -Check $Label -Detail "'$Repo' is reachable and the token has push access."
+    }
+    else {
+        Add-Result -Status 'FAIL' -Check $Label -Detail "The token cannot push to '$Repo'. The release job that pushes a branch there will fail."
+    }
+}
+
+if ($GitHubToken) {
+    Write-Host ''
+    Write-Host '=== GitHub repository access ===' -ForegroundColor Cyan
+
+    Test-RepoAccess -Repo "$RepoOwner/$RepoName" -Label 'Product repo access'
+}
+else {
+    Write-Host ''
+    Write-Host '=== GitHub repository access ===' -ForegroundColor Cyan
+}
+
+# Runs with or without a token: the format check below is token-independent.
+Test-RepoAccess -Repo $WingetPkgsFork -Label 'winget-pkgs fork push access' -RequirePush
+Test-RepoAccess -Repo $MSLearnDocsFork -Label 'MS Learn docs fork push access' -RequirePush
+
+# ---------------------------------------------------------------------------
+# GitHub Models
+# ---------------------------------------------------------------------------
+
+Write-Host ''
+Write-Host '=== GitHub Models ===' -ForegroundColor Cyan
+
+if (-not $ModelsToken) {
+    $ModelsToken = if ($env:GH_MODELS_TOKEN) { $env:GH_MODELS_TOKEN } else { '' }
+}
+
+if ($SkipModelsCheck) {
+    Add-Result -Status 'WARN' -Check 'GitHub Models token' -Detail 'Skipped by -SkipModelsCheck.'
+}
+elseif (-not $ModelsToken) {
+    # generate-release-notes.ps1 silently falls back to non-AI notes when this is missing, and
+    # release.yml runs it with continueOnError, so nothing else would ever surface this.
+    Add-Result -Status 'FAIL' -Check 'GitHub Models token' -Detail 'No models token supplied. Release notes would silently fall back to a raw commit list.'
+}
+else {
+    # Smallest possible inference call: it is the only way to prove the token carries the
+    # models permission, and it creates no persistent state.
+    $body = @{
+        model      = $ModelsModel
+        messages   = @(@{ role = 'user'; content = 'ping' })
+        max_tokens = 1
+    } | ConvertTo-Json -Depth 5 -Compress
+
+    try {
+        Invoke-RestMethod -Uri 'https://models.github.ai/inference/chat/completions' `
+            -Method Post `
+            -Headers @{ Authorization = "Bearer $ModelsToken"; 'Content-Type' = 'application/json' } `
+            -Body $body | Out-Null
+        Add-Result -Status 'PASS' -Check 'GitHub Models token' -Detail "Inference succeeded against '$ModelsModel'."
+    }
+    catch {
+        $status = 0
+        if ($_.Exception.PSObject.Properties.Name -contains 'Response' -and $_.Exception.Response) {
+            $status = [int]$_.Exception.Response.StatusCode
+        }
+
+        if ($status -eq 401 -or $status -eq 403) {
+            Add-Result -Status 'FAIL' -Check 'GitHub Models token' -Detail "Rejected with status $status. AI release notes would silently degrade to a raw commit list."
+        }
+        elseif ($status -eq 410) {
+            # Observed with a classic PAT: models.github.ai returns 410 for both /catalog and
+            # /inference. It is not transient - either the token type is no longer accepted or
+            # the model was retired. Either way release notes are already degrading silently.
+            Add-Result -Status 'FAIL' -Check 'GitHub Models token' -Detail "Endpoint returned 410 Gone for model '$ModelsModel'. The token type may no longer be accepted (GitHub Models needs a fine-grained PAT with the Models permission) or the model was retired. AI release notes are silently falling back to a raw commit list."
+        }
+        elseif ($status -eq 404) {
+            Add-Result -Status 'FAIL' -Check 'GitHub Models token' -Detail "Model '$ModelsModel' was not found. Update the -Model default in scripts/generate-release-notes.ps1."
+        }
+        elseif ($status -eq 429) {
+            Add-Result -Status 'WARN' -Check 'GitHub Models token' -Detail 'Rate limited (429). The token is valid but quota is exhausted right now.'
+        }
+        else {
+            Add-Result -Status 'WARN' -Check 'GitHub Models token' -Detail "Inference call failed (status $status): $($_.Exception.Message)"
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# ADO service connections
+# ---------------------------------------------------------------------------
+
+Write-Host ''
+Write-Host '=== Azure DevOps service connections ===' -ForegroundColor Cyan
+
+if (-not $AdoOrganizationUri) { $AdoOrganizationUri = $env:SYSTEM_COLLECTIONURI }
+if (-not $AdoProject) { $AdoProject = $env:SYSTEM_TEAMPROJECT }
+if (-not $AdoAccessToken) { $AdoAccessToken = $env:SYSTEM_ACCESSTOKEN }
+
+if (-not $ServiceConnections) {
+    Add-Result -Status 'WARN' -Check 'Service connections' -Detail 'No connection names supplied - skipping.'
+}
+elseif (-not $AdoOrganizationUri -or -not $AdoProject) {
+    Add-Result -Status 'WARN' -Check 'Service connections' -Detail 'Not running in Azure Pipelines (no collection URI/project) - skipping.'
+}
+elseif (-not $AdoAccessToken) {
+    Add-Result -Status 'WARN' -Check 'Service connections' -Detail 'SYSTEM_ACCESSTOKEN is not available. Map it into the step env to enable this check.'
+}
+else {
+    $encodedProject = [uri]::EscapeDataString($AdoProject)
+    $baseUri = "$($AdoOrganizationUri.TrimEnd('/'))/$encodedProject/_apis/serviceendpoint/endpoints"
+    $adoHeaders = @{
+        Authorization = "Bearer $AdoAccessToken"
+        Accept        = 'application/json'
+    }
+
+    foreach ($name in $ServiceConnections) {
+        if (-not $name) { continue }
+
+        $uri = "$baseUri`?endpointNames=$([uri]::EscapeDataString($name))&api-version=7.1"
+        try {
+            $response = Invoke-RestMethod -Uri $uri -Headers $adoHeaders -Method Get
+            if ($response.count -gt 0) {
+                $endpoint = $response.value[0]
+                $isReady = $true
+                if ($endpoint.PSObject.Properties.Name -contains 'isReady') {
+                    $isReady = [bool]$endpoint.isReady
+                }
+
+                if ($isReady) {
+                    Add-Result -Status 'PASS' -Check "Service connection '$name'" -Detail "Present and ready (type: $($endpoint.type))."
+                }
+                else {
+                    Add-Result -Status 'FAIL' -Check "Service connection '$name'" -Detail 'Present but not ready. It is likely mid-rotation or misconfigured.'
+                }
+            }
+            else {
+                Add-Result -Status 'FAIL' -Check "Service connection '$name'" -Detail "Not found in project '$AdoProject'. It was renamed or deleted, or this pipeline is not authorized to use it."
+            }
+        }
+        catch {
+            $status = 0
+            if ($_.Exception.PSObject.Properties.Name -contains 'Response' -and $_.Exception.Response) {
+                $status = [int]$_.Exception.Response.StatusCode
+            }
+
+            if ($status -eq 401 -or $status -eq 403) {
+                # The build identity cannot read endpoints. That says nothing about whether the
+                # connection works, so it must not fail the run.
+                Add-Result -Status 'WARN' -Check "Service connection '$name'" -Detail "The build identity is not allowed to read service endpoints (status $status), so this could not be verified."
+            }
+            else {
+                Add-Result -Status 'WARN' -Check "Service connection '$name'" -Detail "Query failed (status $status): $($_.Exception.Message)"
+            }
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
+
+$passed = @($script:Results | Where-Object { $_.Status -eq 'PASS' }).Count
+$warned = @($script:Results | Where-Object { $_.Status -eq 'WARN' }).Count
+$failed = @($script:Results | Where-Object { $_.Status -eq 'FAIL' }).Count
+
+Write-Host ''
+Write-Host '=== Summary ===' -ForegroundColor Cyan
+Write-Host "PASS: $passed  WARN: $warned  FAIL: $failed"
+
+if ($failed -gt 0) {
+    Write-Host ''
+    Write-Host 'Failing checks:' -ForegroundColor Red
+    foreach ($r in $script:Results | Where-Object { $_.Status -eq 'FAIL' }) {
+        Write-Host "  - $($r.Check): $($r.Detail)" -ForegroundColor Red
+    }
+    throw "$failed release credential check(s) failed."
+}
+
+if ($TreatWarningsAsErrors -and $warned -gt 0) {
+    throw "$warned release credential check(s) warned and -TreatWarningsAsErrors is set."
+}
+
+Write-Host 'All release credential checks passed.' -ForegroundColor Green

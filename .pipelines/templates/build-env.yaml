@@ -1,0 +1,47 @@
+# Agent setup shared by ci.yml, release.yml and dryrun.yml.
+#
+# ES policy changes land here more than anywhere else (feed sources, auth tasks, isolation
+# requirements). Keeping the setup in one template means such a change is a single edit
+# instead of the same edit repeated in every pipeline, which is what the weekly dry run is
+# meant to catch early.
+
+parameters:
+  # Installs the .NET 6 runtime the ESRP task needs. Only the real release signs.
+  #
+  # Declared and compared exactly like DoEsrp in templates/build.yaml: an untyped parameter
+  # with a boolean default, tested against the string 'true'. release.yml already passes its
+  # boolean DoEsrp parameter into build.yaml this way, so this is the proven form here.
+  dotnetSixForEsrp: false
+
+steps:
+  - task: UseDotNet@2
+    displayName: Setup .NET 10
+    inputs:
+      version: 10.0.x
+
+  - ${{ if eq(parameters['dotnetSixForEsrp'], 'true') }}:
+      - task: UseDotNet@2
+        displayName: Setup .NET 6.0 (For ESRP Task)
+        inputs:
+          packageType: runtime
+          version: 6.0.x
+
+  - task: UseNode@1
+    displayName: Setup Node.js 24
+    inputs:
+      version: '24.x'
+
+  - script: |
+      if not exist "%APPDATA%\NuGet" mkdir "%APPDATA%\NuGet"
+      copy /Y $(Build.SourcesDirectory)\.pipelines\release-nuget.config "%APPDATA%\NuGet\NuGet.Config"
+      move /Y $(Build.SourcesDirectory)\.pipelines\release-nuget.config $(Build.SourcesDirectory)\nuget.config
+    displayName: Add release package source
+
+  - task: NuGetAuthenticate@1
+
+  - script: move /Y $(Build.SourcesDirectory)\.pipelines\release-npmrc $(Build.SourcesDirectory)\.npmrc
+    displayName: Add release npm source
+
+  - task: npmAuthenticate@0
+    inputs:
+      workingFile: $(Build.SourcesDirectory)\.npmrc

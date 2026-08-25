@@ -1,0 +1,452 @@
+# WinDevCLI - Release Dry Run
+#
+# Why this exists
+# ---------------
+# ES/1ES policy changes land continuously, and today we only discover the ones that break us
+# while a release is in flight - which is the worst possible time. This pipeline rehearses a
+# release every week so a policy change shows up as a red weekly build days before anyone cuts
+# rel/v*, instead of as a blocked release.
+#
+# It is deliberately NOT another CI run. ci.yml builds a prerelease with -SkipMsix, no telemetry
+# unstubbing, and never touches a single release credential. This pipeline does the full stable
+# build with telemetry unstubbed, produces every shipping artifact, runs the release-only steps
+# (release notes, MS Learn doc porting, asset staging), and verifies every credential and service
+# connection the release depends on.
+#
+# What it deliberately does NOT do
+# --------------------------------
+#   * No ESRP signing or ESRP release. Artifacts are unsigned.
+#   * No GitHub release. Creating and deleting one would notify watchers for no reason.
+#   * No fork mutations. The winget-pkgs and windows-dev-docs-pr forks are never synced,
+#     cloned or pushed to; the token's scopes and push permission are checked over the API.
+#   * No symbol publication, no nuget.org push, no npm publish, no WinGet submission.
+#
+# Because it produces no shippable output it extends the Unofficial 1ES template. That is also a
+# limitation worth knowing: Unofficial runs a weaker SDL subset than Official, so a policy change
+# confined to TSA, SBOM or signing enforcement will NOT be caught here. See docs/release-dry-run.md.
+
+trigger: none
+pr: none
+
+schedules:
+  # Monday 09:00 UTC - early in the week, so there is time to react before a release is cut.
+  # `always: true` matters: without it a quiet week means no run, and a quiet week is exactly
+  # when an external policy change would slip in unnoticed.
+  - cron: '0 9 * * Mon'
+    displayName: Weekly release dry run
+    branches:
+      include:
+        - main
+    always: true
+
+parameters:
+  - name: RunCredentialChecks
+    displayName: Verify release credentials and service connections
+    type: boolean
+    default: true
+  - name: RunWinGetManifestCheck
+    displayName: Rehearse WinGet manifest generation against the last published release
+    type: boolean
+    default: true
+  - name: TreatWarningsAsErrors
+    displayName: Fail the run on credential warnings (e.g. a token nearing expiry)
+    type: boolean
+    default: false
+  - name: RunEsrpCertificateCheck
+    # Off by default: $(SigningServiceName) may be an ESRP-typed endpoint that AzurePowerShell@5
+    # cannot consume, and a step that warns every single week trains people to ignore the run.
+    # Enable it once a manual run confirms the task binds, then it becomes a real gate.
+    displayName: Probe ESRP Key Vault certificate expiry (requires an AzureRM-typed connection)
+    type: boolean
+    default: false
+
+resources:
+  repositories:
+    - repository: 1esPipelines
+      type: git
+      name: 1ESPipelineTemplates/1ESPipelineTemplates
+      ref: refs/tags/release
+
+variables:
+  # Mirrors release.yml so the dry run validates the same gh download the release performs.
+  # To bump: take the version and its SHA-256 from the gh_<version>_checksums.txt asset published
+  # with the release at https://github.com/cli/cli/releases.
+  - name: GhCliUrl
+    value: https://github.com/cli/cli/releases/download/v2.97.0/gh_2.97.0_windows_amd64.zip
+  - name: GhCliSha256
+    value: 35D7FE05C4DD1411FFDA1E73DFC7C6F44B75C936CA51FA6595C657FDC0350CEC
+
+extends:
+  template: v1/1ES.Unofficial.PipelineTemplate.yml@1esPipelines
+  parameters:
+    settings:
+      # Identical to release.yml. Feed reachability under CFSClean is one of the things that
+      # breaks releases, so the dry run has to restore under the same isolation policy.
+      networkIsolationPolicy: Permissive,CFSClean
+    sdl:
+      policheck:
+        enabled: true
+        break: true
+        severity: 'Warning'
+      sourceAnalysisPool:
+        name: Azure-Pipelines-1ESPT-ExDShared
+        image: windows-latest
+        os: windows
+    stages:
+      - stage: Build
+        displayName: Full Release Build (unsigned)
+        jobs:
+          - job: Build
+            # Matches release.yml: NativeAOT for two architectures plus the full test suite.
+            timeoutInMinutes: 120
+            pool:
+              name: Azure-Pipelines-1ESPT-ExDShared
+              image: windows-latest
+              os: windows
+              hostArchitecture: amd64
+            steps:
+              - checkout: self
+
+              - template: ./.pipelines/templates/build-env.yaml@self
+                parameters:
+                  # The release installs the .NET 6 runtime for the ESRP task. Installing a runtime
+                  # signs nothing, and doing it here means a policy or download failure affecting it
+                  # surfaces weekly instead of during a release.
+                  dotnetSixForEsrp: true
+
+              # Release-only step that ci.yml never exercises: it rewrites the csproj to pull the
+              # internal Microsoft.Telemetry.Inbox.Managed package. If that package or the feed
+              # policy changes, the release build breaks and nothing else would tell us.
+              - task: PowerShell@2
+                displayName: Replace Stubbed Files
+                inputs:
+                  filePath: '.pipelines/Unstub.ps1'
+                  arguments: '-TelemetryProviderGuid "$(TelemetryProviderGuid)"'
+
+              # stable: 'true' so versioning, packaging and naming match a real release rather
+              # than a prerelease CI build. DoEsrp is false - nothing here is signed.
+              - template: ./.pipelines/templates/build.yaml@self
+                parameters:
+                  stable: 'true'
+                  DoEsrp: false
+                  signingIdentity: {}
+
+              - task: PowerShell@2
+                name: SetMeta
+                displayName: Export version
+                inputs:
+                  targetType: inline
+                  script: |
+                    $versionJson = Get-Content "version.json" | ConvertFrom-Json
+                    $fullVersion = $versionJson.version
+                    Write-Host "Version: $fullVersion"
+                    Write-Host "##vso[task.setvariable variable=version;isOutput=true]$fullVersion"
+
+              # release.yml runs this with continueOnError, so a broken GITHUB_TOKEN_2 or
+              # GH_MODELS_TOKEN degrades a real release silently. Here it is a hard gate - the
+              # whole point is to surface that failure a week early.
+              - task: PowerShell@2
+                displayName: Generate Release Notes (hard gate)
+                env:
+                  GH_TOKEN: $(GITHUB_TOKEN_2)
+                  GH_MODELS_TOKEN: $(GH_MODELS_TOKEN)
+                inputs:
+                  pwsh: true
+                  filePath: '$(System.DefaultWorkingDirectory)/scripts/generate-release-notes.ps1'
+                  arguments: '-CurrentTag "v$(SetMeta.version)" -CurrentRef "$(Build.SourceVersion)" -OutputPath "$(Build.ArtifactStagingDirectory)/release-notes/release-notes.md"'
+
+              - task: PowerShell@2
+                displayName: Verify release notes were actually produced
+                inputs:
+                  pwsh: true
+                  targetType: inline
+                  errorActionPreference: stop
+                  script: |
+                    $notes = "$(Build.ArtifactStagingDirectory)/release-notes/release-notes.md"
+                    if (-not (Test-Path $notes)) {
+                      throw "Release notes were not generated at $notes. Check GITHUB_TOKEN_2 and GH_MODELS_TOKEN."
+                    }
+                    $content = Get-Content $notes -Raw
+                    if ([string]::IsNullOrWhiteSpace($content)) {
+                      throw "Release notes file is empty. The GitHub Models call likely failed."
+                    }
+                    Write-Host "Release notes generated ($($content.Length) chars)."
+
+              # Exercises the exact renames the release performs on its assets and asserts the
+              # resulting names WinGet URLs and the install instructions hardcode. Rename drift
+              # has broken releases before (#201, #568). Works on a copy: the staging directory
+              # has already been published by the time this runs.
+              - task: PowerShell@2
+                displayName: Rehearse release asset staging
+                inputs:
+                  pwsh: true
+                  errorActionPreference: stop
+                  targetType: inline
+                  script: |
+                    $staging = "$(Agent.TempDirectory)\release-staging"
+                    if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
+
+                    foreach ($name in 'msix-packages', 'npmpackage', 'nuget-packages') {
+                      $source = "$(Build.ArtifactStagingDirectory)\$name"
+                      $target = Join-Path $staging $name
+                      New-Item -ItemType Directory -Path $target -Force | Out-Null
+                      if (Test-Path $source) {
+                        Copy-Item "$source\*" $target -Recurse -Force -ErrorAction SilentlyContinue
+                      }
+                    }
+
+                    & "$(System.DefaultWorkingDirectory)\scripts\stage-release-assets.ps1" `
+                      -MsixPath (Join-Path $staging 'msix-packages') `
+                      -NpmPath (Join-Path $staging 'npmpackage') `
+                      -NuGetPath (Join-Path $staging 'nuget-packages') `
+                      -Verify
+
+                    # The release also archives the CLI binaries into winappcli-<arch>.zip, and the
+                    # WinGet manifest and the documented download URLs both hardcode those names.
+                    # Nothing else would notice if an architecture stopped being produced.
+                    foreach ($arch in 'x64', 'arm64') {
+                      $binDir = "$(Build.ArtifactStagingDirectory)\cli\win-$arch"
+                      if (-not (Test-Path $binDir)) {
+                        throw "CLI binaries for '$arch' are missing at $binDir. The release would publish an incomplete asset set."
+                      }
+                      if (-not (Test-Path (Join-Path $binDir 'winapp.exe'))) {
+                        throw "winapp.exe is missing from $binDir."
+                      }
+
+                      $zip = Join-Path $staging "winappcli-$arch.zip"
+                      Compress-Archive -Path "$binDir\*" -DestinationPath $zip -Force
+                      $sizeMb = [math]::Round((Get-Item $zip).Length / 1MB, 2)
+                      if ($sizeMb -le 0) { throw "winappcli-$arch.zip is empty." }
+                      Write-Host "[STAGE] ZIP: winappcli-$arch.zip ($sizeMb MB)"
+                    }
+
+              # The docs port is a release job that only ever runs during a release, against docs
+              # that changed all week. Running it here catches breakage (see #685, #777) before it
+              # blocks a release.
+              #
+              # It runs from a staged copy rather than the checkout on purpose: the release job
+              # cannot check out the repo and instead consumes a hand-maintained file list copied
+              # into the mslearn-source artifact. Mirroring that list here means a script added to
+              # port-mslearn-docs.ps1's dependencies but forgotten in the copy list fails now,
+              # rather than during the release.
+              - task: PowerShell@2
+                displayName: Rehearse MS Learn doc porting (from staged artifact layout)
+                inputs:
+                  pwsh: true
+                  errorActionPreference: stop
+                  targetType: inline
+                  script: |
+                    # Keep this list identical to the "Stage MS Learn doc source" step in release.yml.
+                    $staging = "$(Build.ArtifactStagingDirectory)/mslearn-source"
+                    New-Item -ItemType Directory -Path "$staging/scripts" -Force | Out-Null
+                    Copy-Item "$(System.DefaultWorkingDirectory)/scripts/port-mslearn-docs.ps1" "$staging/scripts/" -Force
+                    Copy-Item "$(System.DefaultWorkingDirectory)/scripts/validate-mslearn-docs.ps1" "$staging/scripts/" -Force
+                    Copy-Item "$(System.DefaultWorkingDirectory)/scripts/prune-date-only-doc-changes.ps1" "$staging/scripts/" -Force
+                    Copy-Item "$(System.DefaultWorkingDirectory)/scripts/mslearn-doc-lib.ps1" "$staging/scripts/" -Force
+                    Copy-Item "$(System.DefaultWorkingDirectory)/docs" "$staging/docs" -Recurse -Force
+                    Copy-Item "$(System.DefaultWorkingDirectory)/version.json" "$staging/" -Force
+
+                    $out = "$(Agent.TempDirectory)\mslearn-docs"
+
+                    # Both scripts signal failure with Write-Error/exit. Reset first: on the very
+                    # first native-free call $LASTEXITCODE is $null, and `$null -ne 0` would throw
+                    # a spurious failure.
+                    $global:LASTEXITCODE = 0
+                    & "$staging\scripts\port-mslearn-docs.ps1" -OutputPath $out -Version "$(SetMeta.version)"
+                    if ($LASTEXITCODE -ne 0) { throw "port-mslearn-docs.ps1 failed with exit code $LASTEXITCODE." }
+
+                    $global:LASTEXITCODE = 0
+                    & "$staging\scripts\validate-mslearn-docs.ps1" -DocsRoot $out
+                    if ($LASTEXITCODE -ne 0) { throw "validate-mslearn-docs.ps1 failed with exit code $LASTEXITCODE." }
+
+                    Write-Host "MS Learn docs ported and validated from the staged artifact layout."
+
+              - task: 1ES.PublishPipelineArtifact@1
+                displayName: Upload Artifact - Dry Run Release Notes
+                inputs:
+                  path: '$(Build.ArtifactStagingDirectory)/release-notes'
+                  artifactName: dryrun-release-notes
+
+      - stage: Verify_Release_Readiness
+        displayName: Verify Release Credentials
+        dependsOn: Build
+        # Runs even when the build fails: a credential problem is independent of build health and
+        # we want both signals from a single weekly run.
+        condition: succeededOrFailed()
+        jobs:
+          - job: verify
+            displayName: Credentials and Service Connections
+            timeoutInMinutes: 60
+            pool:
+              name: Azure-Pipelines-1ESPT-ExDShared
+              image: windows-latest
+              os: windows
+              hostArchitecture: amd64
+            steps:
+              - checkout: self
+
+              - ${{ if eq(parameters.RunCredentialChecks, true) }}:
+                  # Read-only: GETs against the GitHub API and the ADO service endpoint API.
+                  # No fork is synced, cloned or pushed to.
+                  - task: PowerShell@2
+                    displayName: Check release credentials and service connections
+                    env:
+                      GH_TOKEN: $(GITHUB_TOKEN_2)
+                      GH_MODELS_TOKEN: $(GH_MODELS_TOKEN)
+                      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+                    inputs:
+                      pwsh: true
+                      errorActionPreference: stop
+                      filePath: '$(System.DefaultWorkingDirectory)/scripts/check-release-credentials.ps1'
+                      arguments: >-
+                        -WingetPkgsFork "$(WingetPkgsFork)"
+                        -MSLearnDocsFork "$(MSLearnDocsFork)"
+                        -ServiceConnections "github-service-connection","$(SigningServiceName)","$(SymbolPublishingServiceConnection)","NuGet-WinAppCLI"
+                        -TreatWarningsAsErrors:$${{ parameters.TreatWarningsAsErrors }}
+
+                  # Acquiring this token is exactly what release.yml's symbol stage does before
+                  # publishing. Getting it proves the federated identity still works; we simply
+                  # never call the publish API with it.
+                  - task: AzurePowerShell@5
+                    displayName: Verify symbol publishing identity (token only)
+                    inputs:
+                      azureSubscription: $(SymbolPublishingServiceConnection)
+                      azurePowerShellVersion: LatestVersion
+                      pwsh: true
+                      ScriptType: InlineScript
+                      Inline: |-
+                        $ErrorActionPreference = 'Stop'
+                        $token = (Get-AzAccessToken -AsSecureString -ResourceUrl api://30471ccf-0966-45b9-a979-065dbedb24c1).Token |
+                            ConvertFrom-SecureString -AsPlainText
+                        if ([string]::IsNullOrWhiteSpace($token)) {
+                          throw "Acquired an empty symbol service token."
+                        }
+                        Write-Host "Symbol service token acquired ($($token.Length) chars). Not publishing."
+
+                  # ESRP breaks most often because the Key Vault certificates it authenticates
+                  # with expired or the identity lost access - both readable without signing.
+                  # Opt-in via RunEsrpCertificateCheck: see the parameter comment for why.
+                  - ${{ if eq(parameters.RunEsrpCertificateCheck, true) }}:
+                      - task: AzurePowerShell@5
+                        displayName: Verify ESRP signing certificates (metadata only)
+                        inputs:
+                          azureSubscription: $(SigningServiceName)
+                          azurePowerShellVersion: LatestVersion
+                          pwsh: true
+                          ScriptType: InlineScript
+                          Inline: |-
+                            $ErrorActionPreference = 'Stop'
+                            $vault = "$(SigningAKVName)"
+                            $failures = @()
+
+                            foreach ($certName in @("$(SigningAuthCertName)", "$(SigningSignCertName)")) {
+                              if ([string]::IsNullOrWhiteSpace($certName)) { continue }
+                              try {
+                                $cert = Get-AzKeyVaultCertificate -VaultName $vault -Name $certName
+                                if (-not $cert) {
+                                  $failures += "Certificate '$certName' was not found in vault '$vault'."
+                                  continue
+                                }
+                                $expires = $cert.Expires
+                                if ($null -eq $expires) {
+                                  Write-Host "[PASS] '$certName' exists (no expiry reported)."
+                                }
+                                elseif ($expires -lt [datetime]::UtcNow) {
+                                  $failures += "Certificate '$certName' EXPIRED on $expires."
+                                }
+                                elseif ($expires -lt [datetime]::UtcNow.AddDays(30)) {
+                                  Write-Host "##vso[task.logissue type=warning]Certificate '$certName' expires on $expires."
+                                }
+                                else {
+                                  Write-Host "[PASS] '$certName' valid until $expires."
+                                }
+                              }
+                              catch {
+                                # Read access to the vault is not required for ESRP to work, so a
+                                # denial here is inconclusive rather than a failure.
+                                Write-Host "##vso[task.logissue type=warning]Could not read '$certName' from '$vault': $($_.Exception.Message)"
+                              }
+                            }
+
+                            if ($failures) {
+                              $failures | ForEach-Object { Write-Host "##vso[task.logissue type=error]$_" }
+                              throw "ESRP certificate verification found $($failures.Count) problem(s)."
+                            }
+
+              # The gh download is pinned by URL and SHA-256 in both release stages. A retagged
+              # asset or a stale hash fails the release at the very last step; this catches it.
+              - task: PowerShell@2
+                displayName: Verify pinned gh CLI download
+                inputs:
+                  pwsh: true
+                  errorActionPreference: stop
+                  targetType: inline
+                  script: |
+                    $zip = "$(Agent.TempDirectory)\gh.zip"
+                    Invoke-WebRequest -Uri "$(GhCliUrl)" -OutFile $zip
+                    $actual = (Get-FileHash $zip -Algorithm SHA256).Hash
+                    if ($actual -ne "$(GhCliSha256)") {
+                      throw "SHA-256 mismatch for gh.zip. Expected $(GhCliSha256), got $actual. Update GhCliUrl/GhCliSha256 in release.yml AND dryrun.yml."
+                    }
+                    Expand-Archive $zip -DestinationPath "$(Agent.TempDirectory)\gh" -Force
+                    & "$(Agent.TempDirectory)\gh\bin\gh.exe" --version
+                    if ($LASTEXITCODE -ne 0) { throw "gh.exe failed to run." }
+
+              - ${{ if eq(parameters.RunWinGetManifestCheck, true) }}:
+                  # Generates the WinGet manifest for the LAST published release without --submit.
+                  # That exercises wingetcreate, the installer downloads and the manifest schema
+                  # (all of which have broken submissions before) while creating no PR and
+                  # touching no fork. It needs no token: only --submit does.
+                  - task: PowerShell@2
+                    displayName: Rehearse WinGet manifest generation (no submit)
+                    continueOnError: true
+                    env:
+                      GH_TOKEN: $(GITHUB_TOKEN_2)
+                    inputs:
+                      pwsh: true
+                      errorActionPreference: stop
+                      targetType: inline
+                      script: |
+                        Write-Host "Installing VCLibs dependency..."
+                        $vcLibs = "$(Agent.TempDirectory)\Microsoft.VCLibs.x64.14.00.Desktop.appx"
+                        Invoke-WebRequest https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx -OutFile $vcLibs
+                        Add-AppxPackage $vcLibs
+
+                        Write-Host "Installing wingetcreate..."
+                        $bundle = "$(Agent.TempDirectory)\wingetcreate.msixbundle"
+                        Invoke-WebRequest https://aka.ms/wingetcreate/latest/msixbundle -OutFile $bundle
+                        Add-AppxPackage $bundle
+
+                        # Resolve the most recent published release so the installer URLs exist.
+                        $headers = @{
+                          'Accept'     = 'application/vnd.github+json'
+                          'User-Agent' = 'winappcli-release-dryrun'
+                        }
+                        if ($env:GH_TOKEN) { $headers['Authorization'] = "Bearer $env:GH_TOKEN" }
+                        $latest = Invoke-RestMethod -Uri 'https://api.github.com/repos/microsoft/winappcli/releases/latest' -Headers $headers
+                        $tag = $latest.tag_name
+                        $version = $tag.TrimStart('v')
+                        Write-Host "Rehearsing against published release $tag"
+
+                        $base = "https://github.com/microsoft/winappcli/releases/download/$tag"
+                        # Order must match the winget manifest: x64 MSIX, arm64 MSIX, x64 zip, arm64 zip.
+                        $x64Msix = "$base/winappcli_x64.msix"
+                        $arm64Msix = "$base/winappcli_arm64.msix"
+                        $x64Zip = "$base/winappcli-x64.zip"
+                        $arm64Zip = "$base/winappcli-arm64.zip"
+
+                        $manifestDir = "$(Agent.TempDirectory)\winget-manifests"
+
+                        # No --submit: manifests are written locally and thrown away. Only --submit
+                        # needs a token, so nothing is pushed and no PR is opened.
+                        wingetcreate update Microsoft.WinAppCli `
+                          --version $version `
+                          --urls $x64Msix $arm64Msix $x64Zip $arm64Zip `
+                          --out $manifestDir
+                        if ($LASTEXITCODE -ne 0) {
+                          throw "wingetcreate manifest generation failed with exit code $LASTEXITCODE."
+                        }
+
+                        $manifests = Get-ChildItem $manifestDir -Recurse -Filter '*.yaml' -ErrorAction SilentlyContinue
+                        if (-not $manifests) { throw "wingetcreate produced no manifest files." }
+                        Write-Host "Generated $($manifests.Count) manifest file(s). Nothing was submitted."
