@@ -364,15 +364,17 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
     // loose files. Officially: "Reinstallation of the package was blocked."
     internal const int ERROR_INSTALL_PACKAGE_ALREADY_EXISTS = unchecked((int)0x80073CFB);
 
-    // HRESULT 0x80073CF9 — ERROR_INSTALL_REGISTRATION_FAILURE. Surfaces with no error text
+    // HRESULT 0x80073CF9 — ERROR_INSTALL_FAILED (winerror.h: 15609), the *generic* deployment
+    // failure. It is not the registration-specific code, which is 0x80073CF6
+    // (ERROR_INSTALL_REGISTRATION_FAILURE). WinRT surfaces it with no error text
     // ("Unknown error"), so callers get an opaque HRESULT and no way to act on it.
     //
-    // The dominant cause in practice is a layout entry that exceeds MAX_PATH. Note that
-    // LongPathHelper.ValidatePathLength only guards the *manifest* path; a manifest can sit
-    // comfortably under 260 characters while a nested payload file (deep TFM/RID output
-    // folders are typical: bin/x64/Debug/net10.0-windows10.0.x/win-x64/...) does not. The
-    // registration then fails inside the WinRT PackageManager with this HRESULT.
-    internal const int ERROR_INSTALL_REGISTRATION_FAILURE = unchecked((int)0x80073CF9);
+    // One recurring cause is a layout entry that exceeds MAX_PATH: LongPathHelper
+    // .ValidatePathLength only guards the *manifest* path, so a manifest can sit comfortably
+    // under 260 characters while a nested payload file (deep TFM/RID output folders are
+    // typical: bin/x64/Debug/net10.0-windows10.0.x/win-x64/...) does not. Because the HRESULT
+    // is generic, the hint below offers that cause rather than asserting it.
+    internal const int ERROR_INSTALL_FAILED = unchecked((int)0x80073CF9);
 
     /// <summary>
     /// Builds a user-facing exception describing a failed package registration.
@@ -408,16 +410,18 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
             sb.AppendLine();
             sb.Append("  Get-AppxPackage ").Append(identityToken).Append(" | Remove-AppxPackage");
         }
-        else if (hresult == ERROR_INSTALL_REGISTRATION_FAILURE)
+        else if (hresult == ERROR_INSTALL_FAILED)
         {
+            // Kept flow-agnostic on purpose: this builder also serves the sparse path
+            // (winapp create-debug-identity), which has no --output-appx-directory and no
+            // staged layout, so the remediation is scoped rather than issued as a command.
             sb.AppendLine();
             sb.Append(
-                "Hint: this usually means a file inside the package layout exceeds the Windows " +
-                "MAX_PATH limit of 260 characters. The manifest path itself is validated before " +
-                "registration, but a nested payload file in a deep build-output folder can still " +
-                "exceed it. Re-run with the layout staged somewhere short:");
-            sb.AppendLine();
-            sb.Append("  winapp run --output-appx-directory C:\\Tmp\\<AppName>");
+                "Hint: one common cause is a file inside the package layout exceeding the " +
+                "Windows MAX_PATH limit of 260 characters. The manifest path itself is " +
+                "validated before registration, but a nested payload file in a deep " +
+                "build-output folder can still exceed it. Try staging the layout under a " +
+                "shorter path; with winapp run, use --output-appx-directory.");
             sb.AppendLine();
             sb.Append(
                 "Enabling system long-path support may also help: " +
