@@ -82,7 +82,7 @@ public sealed class ProjectContextCommandTelemetryTests : BaseCommandTests
     [TestMethod]
     public async Task Restore_NonObjectPackageMetadata_DoesNotFailCommand()
     {
-        File.WriteAllText(Path.Combine(_tempDirectory.FullName, "package.json"), "[]");
+        File.WriteAllText(Path.Join(_tempDirectory.FullName, "package.json"), "[]");
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(
             GetRequiredService<RestoreCommand>(),
@@ -169,7 +169,7 @@ public sealed class ProjectContextCommandTelemetryTests : BaseCommandTests
     private void CreateWpfProject()
     {
         File.WriteAllText(
-            Path.Combine(_tempDirectory.FullName, "App.csproj"),
+            Path.Join(_tempDirectory.FullName, "App.csproj"),
             """
             <Project Sdk="Microsoft.NET.Sdk">
               <PropertyGroup>

@@ -14,7 +14,7 @@ public sealed class ProjectContextDetectorTests
     [TestInitialize]
     public void Initialize()
     {
-        _root = Directory.CreateDirectory(Path.Combine(
+        _root = Directory.CreateDirectory(Path.Join(
             Path.GetTempPath(),
             $"{nameof(ProjectContextDetectorTests)}_{Guid.NewGuid():N}"));
         _detector = new ProjectContextDetector();
@@ -94,17 +94,17 @@ public sealed class ProjectContextDetectorTests
     {
         var electron = CreateDirectory("electron");
         File.WriteAllText(
-            Path.Combine(electron.FullName, "package.json"),
+            Path.Join(electron.FullName, "package.json"),
             """{"devDependencies":{"electron":"1.0.0"}}""");
 
         var reactNative = CreateDirectory("react-native");
         File.WriteAllText(
-            Path.Combine(reactNative.FullName, "package.json"),
+            Path.Join(reactNative.FullName, "package.json"),
             """{"dependencies":{"react-native-windows":"1.0.0"}}""");
 
         var nodeWinUi = CreateDirectory("node-winui");
         File.WriteAllText(
-            Path.Combine(nodeWinUi.FullName, "package.json"),
+            Path.Join(nodeWinUi.FullName, "package.json"),
             """
             {
               "winapp": {
@@ -129,7 +129,7 @@ public sealed class ProjectContextDetectorTests
     public void DetectDirectory_NonObjectPackageMetadata_DegradesToUnknown(string packageJson)
     {
         var directory = CreateDirectory($"invalid-shape-{Guid.NewGuid():N}");
-        File.WriteAllText(Path.Combine(directory.FullName, "package.json"), packageJson);
+        File.WriteAllText(Path.Join(directory.FullName, "package.json"), packageJson);
 
         var context = _detector.DetectDirectory(directory);
 
@@ -142,9 +142,9 @@ public sealed class ProjectContextDetectorTests
     public void DetectDirectory_ClassifiesNativeFlutterAndTauriMarkers()
     {
         var cpp = CreateDirectory("cpp");
-        File.WriteAllText(Path.Combine(cpp.FullName, "CMakeLists.txt"), "project(app)");
+        File.WriteAllText(Path.Join(cpp.FullName, "CMakeLists.txt"), "project(app)");
         File.WriteAllText(
-            Path.Combine(cpp.FullName, "winapp.yaml"),
+            Path.Join(cpp.FullName, "winapp.yaml"),
             """
             packages:
               - name: Microsoft.WindowsAppSDK
@@ -152,14 +152,14 @@ public sealed class ProjectContextDetectorTests
             """);
 
         var rust = CreateDirectory("rust");
-        File.WriteAllText(Path.Combine(rust.FullName, "Cargo.toml"), "[package]");
+        File.WriteAllText(Path.Join(rust.FullName, "Cargo.toml"), "[package]");
 
         var flutter = CreateDirectory("flutter");
-        File.WriteAllText(Path.Combine(flutter.FullName, "pubspec.yaml"), "name: app");
+        File.WriteAllText(Path.Join(flutter.FullName, "pubspec.yaml"), "name: app");
 
         var tauri = CreateDirectory("tauri");
-        var tauriSource = Directory.CreateDirectory(Path.Combine(tauri.FullName, "src-tauri"));
-        File.WriteAllText(Path.Combine(tauriSource.FullName, "tauri.conf.json"), "{}");
+        var tauriSource = Directory.CreateDirectory(Path.Join(tauri.FullName, "src-tauri"));
+        File.WriteAllText(Path.Join(tauriSource.FullName, "tauri.conf.json"), "{}");
 
         var cppContext = _detector.DetectDirectory(cpp);
         Assert.AreEqual(ProjectFamily.Cpp, cppContext.Family);
@@ -175,9 +175,9 @@ public sealed class ProjectContextDetectorTests
     [TestMethod]
     public void DetectDirectory_WalksOnlyBoundedAncestorsAndStopsAtRepositoryBoundary()
     {
-        File.WriteAllText(Path.Combine(_root.FullName, ".git"), "gitdir: elsewhere");
+        File.WriteAllText(Path.Join(_root.FullName, ".git"), "gitdir: elsewhere");
         CreateProject("app", "<UseWPF>true</UseWPF>", directory: _root);
-        var output = Directory.CreateDirectory(Path.Combine(_root.FullName, "bin", "Debug", "net10.0", "win-x64"));
+        var output = Directory.CreateDirectory(Path.Join(_root.FullName, "bin", "Debug", "net10.0", "win-x64"));
 
         var context = _detector.DetectDirectory(output, ProjectTargetKind.BuildOutput);
 
@@ -187,9 +187,9 @@ public sealed class ProjectContextDetectorTests
         Assert.AreEqual(ProjectContextSource.AncestorMarker, context.Source);
         Assert.AreEqual(ProjectContextConfidence.Medium, context.Confidence);
 
-        var nestedRepository = Directory.CreateDirectory(Path.Combine(_root.FullName, "nested-repo"));
-        File.WriteAllText(Path.Combine(nestedRepository.FullName, ".git"), "gitdir: nested");
-        var nestedOutput = Directory.CreateDirectory(Path.Combine(nestedRepository.FullName, "bin"));
+        var nestedRepository = Directory.CreateDirectory(Path.Join(_root.FullName, "nested-repo"));
+        File.WriteAllText(Path.Join(nestedRepository.FullName, ".git"), "gitdir: nested");
+        var nestedOutput = Directory.CreateDirectory(Path.Join(nestedRepository.FullName, "bin"));
 
         var nestedContext = _detector.DetectDirectory(nestedOutput, ProjectTargetKind.BuildOutput);
 
@@ -205,7 +205,7 @@ public sealed class ProjectContextDetectorTests
         CreateProject("app", "<UseWPF>true</UseWPF>", directory: wpf);
         var electron = CreateDirectory("electron-mixed");
         File.WriteAllText(
-            Path.Combine(electron.FullName, "package.json"),
+            Path.Join(electron.FullName, "package.json"),
             """{"dependencies":{"electron":"1.0.0"}}""");
 
         var context = _detector.DetectDirectories(
@@ -253,7 +253,7 @@ public sealed class ProjectContextDetectorTests
         DirectoryInfo? directory = null)
     {
         directory ??= CreateDirectory(directoryName);
-        var path = Path.Combine(directory.FullName, $"{directoryName}.csproj");
+        var path = Path.Join(directory.FullName, $"{directoryName}.csproj");
         File.WriteAllText(
             path,
             $"""
@@ -271,5 +271,5 @@ public sealed class ProjectContextDetectorTests
     }
 
     private DirectoryInfo CreateDirectory(string name) =>
-        Directory.CreateDirectory(Path.Combine(_root.FullName, name));
+        Directory.CreateDirectory(Path.Join(_root.FullName, name));
 }
