@@ -10,8 +10,9 @@ merely different from what you would have designed is not a finding.
 
 - **Naming.** kebab-case (`--use-defaults`), `--no-<flag>` for negation. `-a` and
   `-w` are reserved for app / window targeting — do not let a new command take
-  them for anything else. Honor existing aliases (`--use-defaults` ≡
-  `--no-prompt`).
+  them for anything else. Preserve an alias only when it passes the shared
+  compatibility gate; an alias introduced only during development is not
+  precedent.
 - **Defaults over required options.** `--cert-password` defaults to `password`
   for dev certs; `--manifest` auto-detects. A new **required** option that could
   have had a default breaks scripted use — that is `high`.

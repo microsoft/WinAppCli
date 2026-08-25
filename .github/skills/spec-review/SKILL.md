@@ -13,10 +13,10 @@ than trusting the spec's claims — and consolidating their judgments into a
 single decision-oriented recommendation.
 
 This is the **pre-code companion to the `pr-review` skill.** `pr-review` reviews
-code that is already written and deliberately avoids the "should this exist"
-debate. `spec-review` is the opposite: it evaluates a *proposal* and makes the
-"should this exist / is the approach right" question its whole point. If the
-work is already implemented, use `pr-review` instead.
+code that is already written. `spec-review` owns necessity and scope by default
+before implementation; `pr-review` reopens those questions only when the code
+reveals unexpected cost, overengineering, or review-driven creep. If the work is
+already implemented, use `pr-review`.
 
 ## When to activate
 
@@ -55,8 +55,8 @@ Do **not** activate when:
    the review.
 
 The shared contract (`dimensions/_shared-contract.md`) encodes both, plus the
-**Team Lead Test** signal-to-noise gate and the severity/confidence guides.
-Every sub-agent applies it.
+junior-reader and signal-to-noise gate and the severity/confidence guides. Every
+sub-agent applies it.
 
 ## Workflow
 
@@ -116,8 +116,8 @@ families**. Before fanning out:
      own family. This directly serves the skill's purpose.
    The remaining dimensions may run on your family.
 4. **Degrade gracefully.** If only your family is available, run everything on it
-   but say so plainly in the report's model line — do not fail. Record every
-   family that actually ran.
+   and record that internally. Mention it in the final report only if the missing
+   diversity changes confidence or the decision.
 
 ### 4. Fan out the dimension sub-agents
 
@@ -146,35 +146,37 @@ Collect all outputs. Then:
 1. **Dedupe.** Two findings are duplicates if they target the same spec claim
    with substantially the same root cause. Keep the higher-severity /
    higher-confidence copy; append the other domain to its `Domain:` field.
-2. **Assign IDs.** `C1, C2, …` critical, `H1, …` high, `M1, …` medium,
-   `L1, …` low.
-3. **Sort.** critical → high → medium → low; within a severity, group by domain.
+2. **Keep bookkeeping internal.** IDs, severity, confidence, domain, model, and
+   coverage help consolidation but do not belong in the final report.
+3. **Sort internally.** critical → high → medium → low; within a severity, group
+   by user impact.
 4. **Record cross-model agreement — the strongest signal.** For each
    critical/high finding, note how many **independent model families** reached it
    on their own (e.g. "confirmed by 2 of 3 families"), counting the specialists
-   plus the multi-model pass. Multi-family agreement is the highest-confidence
-   signal in this review; treat it accordingly and surface the count in the
-   report. Also carry the multi-model verdict
+   plus the multi-model pass. Keep the matrix internal; surface at most one
+   sentence when agreement or disagreement changes confidence or the decision.
+   Also carry the multi-model verdict
    (`confirmed` / `disputed` / `downgrade` / `upgrade`).
 5. **Resolve factual disagreements with evidence, not seniority.** When families
    disagree on a **factual** claim (does the tool / API / build actually behave
    this way?), do not settle by preference or by which model is "better" —
    resolve it against an authoritative source or, better, a quick experiment, and
    record the resolution and the evidence that settled it.
-6. **Collect open questions** (design decisions still to be made) from every
+6. **Collect open decisions** (design decisions still to be made) from every
    dimension into one deduped list.
-7. **Collect "must prove before ship" items** — load-bearing technical
+7. **Collect proofs required** — load-bearing technical
    assumptions that neither research nor experiment could fully close. These are
-   pre-implementation spikes/proofs, and are **distinct** from open questions
+   pre-implementation spikes/proofs, and are **distinct** from open decisions
    (which are design decisions).
-8. **Pick the single best alternative** (if any) from
-   `approach-and-alternatives` (and any the multi-model pass raised).
+8. **Describe the leanest design** using the best supported alternative from
+   `approach-and-alternatives` and any smaller scope from `necessity-and-scope`.
 9. **Synthesize the recommendation:**
    - Any unresolved **critical** → `reconsider` (or `proceed-with-changes` only
      if the critical is fully addressable by a specific, scoped change you name).
    - One or more **high**, no critical → `proceed-with-changes`.
-   - Only **medium/low**, or none → `proceed` (note the mediums).
-   - A load-bearing assumption left **unproven** (on the must-prove list) should
+   - Only **medium/low**, or none → `proceed`; fold only decision-relevant items
+     into `Leanest design` or `Open decisions`.
+   - A load-bearing assumption left **unproven** (under `Proofs required`) should
      pull the recommendation toward `proceed-with-changes` at least, since it
      gates a safe build.
    - If your synthesized recommendation **diverges from the multi-model pass's
@@ -184,82 +186,50 @@ Collect all outputs. Then:
 
 ### 6. Report to stdout
 
-Print exactly the structure below. **Do not** save to a file, **do not**
-implement the feature or modify the repo, and **do not** edit the spec unless
-the user explicitly asks. (Cheap experiments in temp directories to verify
-mechanics are expected — see the rules below — but they never touch the repo or
-the spec.) Your job ends at the recommendation.
+Print exactly the structure below. **Do not** save to a file, implement the
+feature, modify the repo, or edit the spec unless explicitly asked. Cheap
+experiments stay in temp directories. State each conclusion once.
 
-```
-Spec Review — <spec title or path>   (models: <fam A>, <fam B>, <fam C>)
+```markdown
+# Spec Review — <spec title or path>
 
-Recommendation: <proceed | proceed-with-changes | reconsider>
-  <2-4 sentence rationale grounded in the strongest findings>
+## Decision
+<proceed | proceed-with-changes | reconsider> — <plain rationale grounded in evidence>
 
-Summary
-  Critical: <n>   High: <n>   Medium: <n>   Low: <n>
+<Only when it changes confidence or the decision: one sentence about independent
+model agreement or disagreement and the experiment/source that resolved it.>
 
-Top risks
-  1. <highest-impact concern, one line>
-  2. ...
-  (omit the section if there are genuinely none)
+## User journey
+- **Today:** <current command/input -> observable result>
+- **Proposed:** <new command/input -> observable result>
+- **Problem demonstrated:** <smallest experiment or real example proving the gap>
 
-Best alternative
-  <the single best alternative approach with its key tradeoff, or
-   "none — the proposed approach is the simplest reasonable one">
+## Must change before implementation
+### <plain finding title>
+- **What is wrong:** <the design defect>
+- **Show me:** <independent input -> actual -> expected evidence>
+- **Why it matters:** <concrete user, delivery, or maintenance consequence>
+- **Smallest fix:** <least-complex design change>
+- **Location:** <spec section and supporting path/doc when useful>
 
-Open questions (design decisions to resolve before implementation)
-  Q1. <...>
-  Q2. <...>
-  (omit if none)
+<Repeat only for decision-affecting findings, or write "None.">
 
-Must prove before ship (load-bearing assumptions not yet closed)
-  P1. <assumption> — <the spike/experiment that would close it>
-  P2. ...
-  (omit if none)
+## Leanest design
+<smallest design that serves the demonstrated journey, plus its key tradeoff>
 
-Coverage
-  necessity-and-scope        <✓ sound | ⚠ N findings | ✗ n/a + reason>
-  approach-and-alternatives  ...
-  feasibility-vs-reality     ...
-  risks-unknowns-edge-cases  ...
-  dx-and-user-impact         ...
-  multi-model                <✓ family <X>, indep. rec: <proceed|...>>
+## Open decisions
+- <decision the author must make before implementation>
+<Or "None.">
 
-Findings
-  C1  <spec anchor>   <domain>       <one-line>
-  H1  ...
-  M1  ...
-
-Agreement matrix (load-bearing critical/high findings only; omit if none)
-              <fam-A> <fam-B> <fam-C>   experiment
-  C1           ✓       ✓       –        <what an experiment showed, or —>
-  H1           ...
-
-Details
-## C1  <spec anchor>
-- Severity: critical
-- Confidence: high
-- Domain: feasibility-vs-reality
-- Agreement: confirmed by <N> of <M> families
-- Multi-model: confirmed
-- Finding: <one-line>
-- Evidence: <independent research — prefer an experiment you ran ("built a
-  throwaway <app> in a temp dir and observed …", "invoked <tool> and its output
-  was …"); otherwise real file:line, authoritative vendor docs, or ecosystem
-  fact. Never the spec asserting itself.>
-- Recommendation: <concrete next step>
-
-## H1 ...
-
-Coverage notes
-  necessity-and-scope: <the dimension's Bottom line + what it checked>
-  ...
+## Proofs required
+- <unclosed load-bearing assumption> — <specific cheap experiment that closes it>
+<Or "None.">
 ```
 
-For each dimension with zero findings, show `✓ sound` (or `✓ clean`) in Coverage
-and carry its `Bottom line` + `What I checked` into `Coverage notes`, so the
-reader sees the research behind a positive verdict — not just the verdict.
+Fold medium/low suggestions into `Leanest design` or `Open decisions` only when
+they affect the recommendation; otherwise drop them. Do not repeat findings in a
+summary, risk list, details section, agreement matrix, or coverage notes. Keep
+paths as support, not titles.
 
 ## Rules the orchestrator must enforce
 
@@ -267,7 +237,7 @@ reader sees the research behind a positive verdict — not just the verdict.
 - **Independent research, not spec-trust.** Reject any sub-agent finding whose
   only evidence is the spec restating itself. Evidence must come from reality.
 - **No quotas.** Accept and surface clean verdicts. Reject manufactured or
-  padded concerns (Team Lead Test).
+  padded concerns using the shared junior-reader and signal-to-noise gate.
 - **No feature implementation. No repo or spec edits.** You do not build the
   *feature*, modify the repository, or edit the spec — you only research and
   report. "Read-only" means the repo and the spec stay untouched.
@@ -281,7 +251,7 @@ reader sees the research behind a positive verdict — not just the verdict.
   (never the repo working tree). Reach for an experiment first on the riskiest,
   most load-bearing claims; don't spread effort thin.
 - **Decision-oriented.** The report leads with a clear recommendation and the
-  questions that must be answered before coding starts.
+  user journey, changes, decisions, and proofs needed before coding starts.
 
 ## Sub-agent prompt template
 
@@ -319,92 +289,14 @@ yours**.
    the spec's load-bearing mechanics)               → wait for all
 5. Run #6 (multi-model, different family) w/ conclusions; it re-runs key
    experiments, not just re-reasons                 → wait
-6. Dedupe, sort, count cross-family agreement, collect open questions +
-   must-prove items, pick best alternative, synthesize rec
+6. Dedupe, sort, resolve cross-family disagreement, collect open decisions +
+   proofs, identify the leanest design, synthesize the recommendation
 7. Print the decision-oriented stdout report
-```
-
-## Example consolidated stdout
-
-```
-Spec Review — docs/proposals/share-target.md   (models: Opus, GPT, Gemini)
-
-Recommendation: proceed-with-changes
-  The feature fits winapp's platform-integration mission and fills a real need,
-  but it should ship as a smaller first stage, and one load-bearing assumption
-  (that identity is optional for Share Target) is false and must be addressed
-  before implementation.
-
-Summary
-  Critical: 0   High: 2   Medium: 2   Low: 1
-
-Top risks
-  1. Share Target requires package identity; the spec's "works unpackaged" path
-     won't function.
-  2. Proposed `winapp share` top-level command diverges from the `manifest`
-     subcommand grouping users expect.
-
-Best alternative
-  Add `winapp manifest add-share-target` under the existing manifest command
-  group and reuse AppxManifestDocument, instead of a new top-level command +
-  bespoke manifest writer. Tradeoff: slightly less discoverable, far less code.
-
-Open questions (design decisions to resolve before implementation)
-  Q1. Which frameworks must be supported at launch (all six, or MSIX-only)?
-  Q2. Is enabling identity in-scope, or a prerequisite the user must do first?
-
-Must prove before ship (load-bearing assumptions not yet closed)
-  P1. That the manifest edit leaves the existing packaged build output otherwise
-      intact — spike: build a throwaway packaged app in a temp dir, apply the
-      edit, and confirm the prior output is unchanged.
-
-Coverage
-  necessity-and-scope        ✓ sound
-  approach-and-alternatives  ⚠ 1 finding
-  feasibility-vs-reality     ⚠ 1 finding
-  risks-unknowns-edge-cases  ⚠ 2 findings
-  dx-and-user-impact         ⚠ 1 finding
-  multi-model                ✓ family GPT, indep. rec: proceed-with-changes
-
-Findings
-  H1  §Approach — "works unpackaged"        feasibility-vs-reality  Share Target needs package identity; unpackaged path is not supported
-  H2  §CLI — new `winapp share` command     approach-and-alternatives  Reuse manifest command group + AppxManifestDocument instead
-  M1  §Scope — "all six frameworks day one" necessity-and-scope     Stage to MSIX-first; broad framework matrix is unproven need
-  M2  §Errors (unspecified)                 risks-unknowns-edge-cases  No behavior defined when identity is absent
-  L1  §CLI — `--target` naming              dx-and-user-impact      Prefer `--share-target` for consistency
-
-Agreement matrix (load-bearing critical/high findings only)
-             Opus  GPT  Gemini   experiment
-  H1          ✓     ✓     ✓      built throwaway app; share entry activated only when packaged
-  H2          ✓     ✓     –      —
-
-Details
-## H1  §Approach — "works unpackaged"
-- Severity: high
-- Confidence: high
-- Domain: feasibility-vs-reality
-- Agreement: confirmed by 3 of 3 families
-- Multi-model: confirmed
-- Finding: The spec assumes Share Target activation works without package identity; it does not.
-- Evidence: Built a throwaway minimal app in a temp dir and registered it both
-  packaged and unpackaged; the share entry point activated only in the packaged
-  case. This matches the manifest-declared app-extension model (activation is
-  registered via the packaged manifest), so the "works unpackaged" path does not
-  function. Reproduced independently by all three model families.
-- Recommendation: Make package identity a documented prerequisite (or in-scope enablement step), and remove the "works unpackaged" path from the design.
-
-## H2 ...
-
-Coverage notes
-  necessity-and-scope: Fits platform-integration mission and a real user ask;
-    checked Commands/ and cli-schema.json for overlap — none. Recommend staging.
-  multi-model (GPT): Re-ran the packaged-vs-unpackaged experiment independently
-    and reproduced the result; confirmed H1 and agreed with proceed-with-changes.
 ```
 
 ## Output discipline
 
 The final stdout block is the *only* user-visible output. Do not narrate the
-process, do not summarize what each sub-agent did outside the Coverage section,
-and do not apologize for a short findings list — a clean, confident
-recommendation is the goal, not a long list of concerns.
+process, expose model/domain/coverage bookkeeping, repeat a finding in multiple
+sections, or apologize for a short list. A clean, confident recommendation is the
+goal.
