@@ -415,6 +415,10 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
             // Kept flow-agnostic on purpose: this builder also serves the sparse path
             // (winapp create-debug-identity), which has no --output-appx-directory and no
             // staged layout, so the remediation is scoped rather than issued as a command.
+            // Deliberately does not suggest enabling system long-path support: that only
+            // relaxes our own ValidatePathLength gate. PackageManager still cannot open a
+            // >MAX_PATH payload file (see the 8.3 shortening at the top of this file), so
+            // the policy change costs an admin round-trip and fixes nothing here.
             sb.AppendLine();
             sb.Append(
                 "Hint: one common cause is a file inside the package layout exceeding the " +
@@ -422,10 +426,6 @@ internal sealed class PackageRegistrationService(ILogger<PackageRegistrationServ
                 "validated before registration, but a nested payload file in a deep " +
                 "build-output folder can still exceed it. Try staging the layout under a " +
                 "shorter path; with winapp run, use --output-appx-directory.");
-            sb.AppendLine();
-            sb.Append(
-                "Enabling system long-path support may also help: " +
-                "https://aka.ms/enable-long-paths-on-windows");
         }
 
         return inner is null
