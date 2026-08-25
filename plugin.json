@@ -62,6 +62,6 @@
     "certificate",
     "distribution"
   ],
-  "agents": "plugins/winapp/agents/",
+  "agents": "plugins/winapp/com.github.copilot/agents/",
   "skills": "plugins/winapp/skills/"
 }
