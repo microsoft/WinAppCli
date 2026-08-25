@@ -682,6 +682,8 @@ internal class NewCommand : Command, IShortDescription
             var verb = entry.IsItem ? "Adding" : "Creating";
             var (exitCode, stdout, stderr) = await WithSpinnerAsync(
                 $"{verb} {name} from {entry.ShortName}...",
+                "Setting up the project; missing NuGet packages are restoring…",
+                ScaffoldStatusDelay,
                 () => dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken: cancellationToken));
             LogDotnetOutput(args, exitCode, stdout, stderr);
             if (exitCode != 0)
@@ -897,6 +899,47 @@ internal class NewCommand : Command, IShortDescription
                 .Spinner(Spinner.Known.Dots)
                 .SpinnerStyle(Style.Parse("blue"))
                 .StartAsync(message, async _ => await operation());
+        }
+
+        private async Task<T> WithSpinnerAsync<T>(
+            string message,
+            string delayedMessage,
+            TimeSpan delay,
+            Func<Task<T>> operation)
+        {
+            if (!ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger))
+            {
+                return await operation();
+            }
+
+            return await ansiConsole.Status()
+                .AutoRefresh(true)
+                .Spinner(Spinner.Known.Dots)
+                .SpinnerStyle(Style.Parse("blue"))
+                .StartAsync(message, async context =>
+                {
+                    var operationTask = operation();
+                    return await AwaitWithDelayedActionAsync(
+                        operationTask,
+                        Task.Delay(delay),
+                        () => context.Status(delayedMessage));
+                });
+        }
+
+        internal static TimeSpan ScaffoldStatusDelay => TimeSpan.FromSeconds(10);
+
+        internal static async Task<T> AwaitWithDelayedActionAsync<T>(
+            Task<T> operationTask,
+            Task delayTask,
+            Action delayedAction)
+        {
+            if (await Task.WhenAny(operationTask, delayTask) == delayTask
+                && !operationTask.IsCompleted)
+            {
+                delayedAction();
+            }
+
+            return await operationTask;
         }
 
         /// <summary>Returns the installed WinUI pack version, or <c>null</c> when the pack isn't installed.</summary>
