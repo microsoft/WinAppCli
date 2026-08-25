@@ -15,7 +15,7 @@ internal and user-invisible, none of it applies — say so and return clean.
 | Native CLI | `src/winapp-CLI/` | Built by `scripts/build-cli.ps1` |
 | npm package | `src/winapp-npm/` | Wraps the CLI; `npm run build` rebuilds + copies binaries |
 | NuGet package | `src/winapp-NuGet/` | MSBuild targets (manifest auto-detect, etc.) |
-| Copilot + Claude plugin | `plugins/winapp/` | Shared skills + `agents/winapp.agent.md` |
+| Copilot + Claude plugin | `plugins/winapp/` | Agent Plugins 1.0 package: shared `skills/` + `com.github.copilot/agents/winapp.agent.md` |
 
 ## Generated and hand-authored surfaces
 
@@ -25,7 +25,10 @@ internal and user-invisible, none of it applies — say so and return clean.
 - `src/winapp-npm/src/winapp-commands.ts` regenerates via
   `npm run generate-commands`.
 - Copilot and Claude consume the same content from `plugins/winapp/`;
-  only their manifests are host-specific.
+  only their manifests are host-specific. `plugins/winapp/plugin.json` is the
+  portable Agent Plugins 1.0 manifest and its schema is **closed** — flag any PR
+  that adds a top-level field outside `$schema`, `name`, `version`, `description`,
+  `author`, `homepage`, `repository`, `license`, `keywords`, `extensions`.
 
 If `Commands/` changed and the generated schema or npm command types did not,
 flag the mismatch. Review hand-authored skills only when the command changes a
@@ -37,7 +40,7 @@ yourself.
 - `docs/usage.md`.
 - The relevant shipped skill in `plugins/winapp/skills/winapp-<area>/SKILL.md`
   when its workflow, examples, or troubleshooting changed.
-- `plugins/winapp/agents/winapp.agent.md` — it has both a decision tree **and** a
+- `plugins/winapp/com.github.copilot/agents/winapp.agent.md` — it has both a decision tree **and** a
   command reference; a new command must appear in both. A behavior change that
   contradicts its "Critical rules" means that rule needs updating.
 - Forwarding in `src/winapp-npm/cli.js` for a new **top-level** command.

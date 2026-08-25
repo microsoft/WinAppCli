@@ -81,7 +81,7 @@ When adding or changing public facing features, ensure all documentation is also
 - plugins\winapp\skills\
 - README.md
 - .github\plugin\marketplace.json (and .claude-plugin\marketplace.json)
-- plugins\winapp\agents\
+- plugins\winapp\com.github.copilot\agents\
 
 If a feature is big enough and requires its own docs page, add it under docs\
 
@@ -138,6 +138,7 @@ Sample & guide tests run via `.github/workflows/test-samples.yml` using a GitHub
 | CLI schema | `docs/cli-schema.json` |
 | Shipped agent skills | `plugins/winapp/skills/` |
 | Plugin (Copilot + Claude) | `plugins/winapp/` |
+| Copilot-specific plugin components | `plugins/winapp/com.github.copilot/` |
 | Plugin marketplaces | `.github/plugin/marketplace.json`, `.claude-plugin/marketplace.json` |
 | Samples | `samples/` (electron, cpp-app, dotnet-app, etc.) |
 
@@ -167,7 +168,45 @@ Do not edit it directly; run `scripts/build-cli.ps1` to regenerate it.
 The files under `plugins/winapp/skills/` are the hand-authored, shipped plugin
 skills shared by GitHub Copilot and Claude Code. Edit these files directly.
 
-The single plugin under `plugins/winapp/` is consumed by both hosts via their per-host manifests (`plugin.json` for Copilot, `.claude-plugin/plugin.json` for Claude) and marketplaces (`.github/plugin/marketplace.json`, `.claude-plugin/marketplace.json`). The repo-root `plugin.json` is a thin shim that keeps `copilot plugin install microsoft/WinAppCli` and the awesome-copilot listing resolving the repo as a plugin. `generate-llm-docs.ps1` keeps every manifest's `version` field in sync with the CLI version.
+The single plugin under `plugins/winapp/` conforms to the
+[Agent Plugins 1.0 specification](https://agent-plugins.org/specification):
+
+```text
+plugins/winapp/
+├── plugin.json                 # portable Agent Plugins 1.0 manifest ($schema + metadata only)
+├── skills/<skill>/SKILL.md     # portable Agent Skills (fixed location)
+├── com.github.copilot/
+│   └── agents/winapp.agent.md  # Copilot-specific component
+└── .claude-plugin/plugin.json  # Claude Code manifest (Claude is not an Agent Plugins client)
+```
+
+`plugin.json` uses the closed Agent Plugins schema, so it must contain **only**
+`$schema`, `name`, `version`, `description`, `author`, `homepage`, `repository`,
+`license`, `keywords`, and `extensions`. Component paths are auto-discovered and
+must not be declared there — adding fields like `agents` or `skills` back to it
+breaks schema conformance. Claude Code has no `com.github.copilot/` awareness, so
+`.claude-plugin/plugin.json` points its `agents` field at the same file rather than
+duplicating it.
+
+Both hosts are listed through their marketplaces (`.github/plugin/marketplace.json`,
+`.claude-plugin/marketplace.json`). The repo-root `plugin.json` is deliberately kept in
+the **legacy** Copilot manifest format (no `$schema`) so that
+`copilot plugin install microsoft/WinAppCli` and the awesome-copilot listing keep
+resolving the repo as a plugin; adding `$schema` there would make its nested
+`skills`/`agents` paths unknown fields that clients must ignore.
+`generate-llm-docs.ps1` keeps every manifest's `version` field in sync with the CLI version.
+
+`scripts/validate-plugin-package.ps1` enforces all of the above: the closed manifest
+schema, the plugin name constraints, `SKILL.md` presence and frontmatter for every
+immediate child of `skills/`, the Copilot agent's location, the Claude `agents` pointer
+resolving to a real file, and the repo-root shim staying legacy. It needs no build
+output, so run it directly while editing plugin files:
+
+```powershell
+.\scripts\validate-plugin-package.ps1
+```
+
+`validate-llm-docs.ps1` also invokes it, so CI fails on any conformance regression.
 
 ## C# service architecture guidelines
 

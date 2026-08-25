@@ -50,5 +50,8 @@
     "uwp",
     "desktop app",
     "win32"
+  ],
+  "agents": [
+    "./com.github.copilot/agents/winapp.agent.md"
   ]
 }
