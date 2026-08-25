@@ -2,6 +2,61 @@
 
 This file provides focused, actionable information to help an AI coding agent be immediately productive in this repo.
 
+## Audience contracts
+
+### User documentation
+
+Write for someone using winapp. Lead with the smallest command or input that
+demonstrates the behavior, then answer: what can I do, what do I type, what
+happens, and what action should I take if it fails. Describe observable behavior,
+not implementation machinery.
+
+Keep internal deliberation, review provenance, rejected alternatives, review
+rounds/IDs, resolved blockers, and defenses of the implementation out of user
+documentation. State each user-facing fact once on its canonical surface and link
+to it elsewhere instead of copying it.
+
+Example: "For .NET projects, `winapp restore` runs `dotnet restore` and uses the
+project's standard `nuget.config` hierarchy."
+
+### Reviews and author communication
+
+Assume the reader has no prior codebase or conversation context. A junior
+developer should understand each finding after one read. Use a plain title, then:
+
+- **What is wrong:** the behavior or design defect.
+- **Show me:** the smallest concrete command, input, tree, or code path, preferably
+  as input -> actual result -> expected result.
+- **Why it matters:** the user, build, or maintenance consequence.
+- **Smallest fix:** the least-complex change that resolves it.
+
+Define unavoidable jargon at first use. Put paths and lines in supporting detail,
+not in a title the reader must decode. If the issue cannot be demonstrated
+concretely, lower its confidence or drop it.
+
+Example:
+
+- **What is wrong:** `--setup-sdks none` fails instead of skipping SDK updates.
+- **Show me:** `winapp init --setup-sdks none` -> exits nonzero in the package
+  update loop; expected: succeeds without updating SDKs.
+- **Why it matters:** documented automation stops before initialization.
+- **Smallest fix:** skip the package-update loop when the value is `none`.
+
+## Compatibility boundary
+
+Backward compatibility starts at the latest supported published release, not an
+earlier commit, review round, current PR implementation, or unreleased release
+work. Before adding or requesting an alias, fallback, migration path, legacy
+branch, or compatibility abstraction, name all three:
+
+1. The supported published version that contains the behavior.
+2. The public contract or persisted user data that depends on it.
+3. A real external consumer that would break.
+
+If any cannot be named, replace the unreleased behavior cleanly instead of
+preserving it with a shim. The only exception is a preview contract the project
+has publicly committed to support.
+
 ## Big picture
 
 Two main components:
@@ -72,8 +127,12 @@ More generally: if something fails locally but passes in CI, the difference is c
 not luck. Check `.pipelines/templates/build.yaml` for the environment CI provides before
 concluding a failure is environmental.
 
-## Always update documentation and samples
-When adding or changing public facing features, ensure all documentation is also updated. Places to update (but not limited to):
+## Update affected user-facing documentation
+
+When observable behavior changes, update only the surfaces that teach or expose
+that behavior. Internal refactors do not require user documentation. Never use
+documentation to explain internal implementation details or review history.
+Choose affected surfaces from:
 
 - docs\usage.md
 - docs\guides\
@@ -83,7 +142,8 @@ When adding or changing public facing features, ensure all documentation is also
 - .github\plugin\marketplace.json (and .claude-plugin\marketplace.json)
 - plugins\winapp\com.github.copilot\agents\
 
-If a feature is big enough and requires its own docs page, add it under docs\
+Add a page under `docs\` only when users need a new workflow or reference that
+does not fit an existing canonical page.
 
 ## Sample & guide testing
 
@@ -211,24 +271,33 @@ output, so run it directly while editing plugin files:
 ## C# service architecture guidelines
 
 ### File size limits
-- **Target**: ≤500 lines per file
-- **Soft limit**: ~800 lines — if approaching this, look for extraction opportunities
-- **Hard limit**: Do not let any single file exceed ~1,000 lines. Split into partial classes or extract services.
+
+Line counts are signals to inspect cohesion, not extraction requirements. Around
+500 lines is a useful prompt to check readability; around 800-1,000 lines deserves
+an explicit cohesion review. Never extract solely to hit a line target. Keep one
+cohesive implementation together when splitting it would create wrappers,
+indirection, or scattered state.
 
 ### Service patterns
 Use the appropriate pattern for new code:
 
 | Pattern | When to use | Example |
 |---------|------------|---------|
-| **Interface + DI service** | Stateful logic, needs dependencies | `IPriService` / `PriService` |
+| **DI service** | Stateful logic or logic with dependencies; a concrete class can be registered directly | `PriService` |
+| **Interface** | Multiple implementations, an established contract, or a necessary substitution/test boundary | `IPriService` |
 | **Static helper** | Pure functions, no DI needed | `PeHelper`, `MrtAssetHelper` |
 | **Data document** | Wraps a file/data format with typed access | `AppxManifestDocument` |
 | **Partial class** | Splitting a large service with tight internal coupling | `MsixService.Runtime.cs` |
 
 ### Separation of concerns
-- One responsibility per service/helper file
-- Extract shared logic into helpers rather than duplicating across services
-- If a method group only uses 1-2 of a service's 10+ dependencies, it's a candidate for extraction
+
+- Organize around cohesive responsibilities, not one-caller layers.
+- Prefer one cohesive implementation over several wrappers that only forward to
+  one another.
+- Extract shared logic when it creates a real reusable boundary or prevents
+  meaningful duplication.
+- Do not extract a method group merely because it uses only a few of a service's
+  dependencies.
 
 ### XML handling
 - **Use `XDocument` / `XElement`** (System.Xml.Linq) for structured XML manipulation — never regex

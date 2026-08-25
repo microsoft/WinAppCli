@@ -54,23 +54,11 @@ confidently, and do not stop at "the code looks like it does X"; where you can
    it with the effort available). Cite the evidence: quote the experiment output
    you saw, the doc, or the `path:line`. An **unproven** load-bearing claim is a
    finding in its own right — surface it and recommend the specific spike that
-   would close it (the orchestrator routes these into "Must prove before ship").
+   would close it (the orchestrator routes these into `Proofs required`).
 
-## Backward-compatibility is a load-bearing assumption
-
-When the spec **modifies existing behavior**, treat any "this won't change
-existing behavior" / "X stays untouched" / "fully backward-compatible" claim as
-a load-bearing assumption and verify it **specifically**, not by trust:
-
-- Find the **exact shared code path / tool / artifact** the change and the
-  existing behavior both go through.
-- Confirm the new path is genuinely **disjoint** from the existing one (or, if
-  shared, that existing callers hit identical behavior).
-- Look for the concrete **regression surface** — the inputs, configs, or
-  callers that could be affected.
-- Where feasible, **prove it empirically**: exercise the existing behavior
-  before and after the proposed mechanic on a throwaway input and confirm it is
-  unchanged. If you cannot, tag the compat claim **unproven** and flag it.
+For compatibility claims, apply the shared published-release boundary first.
+When it passes, treat unchanged behavior as load-bearing: identify the shared
+code path and real consumer, then prefer a before/after experiment.
 
 ## What to flag
 
@@ -98,8 +86,8 @@ a load-bearing assumption and verify it **specifically**, not by trust:
   critical.
 - An **unproven** assumption the approach depends on, needing a spike before
   commitment → high (medium if there's a clear fallback).
-- A refuted/unproven **backward-compat** claim (the change may disturb existing
-  behavior) → high, or critical if it would silently break existing users.
+- A refuted/unproven compatibility claim that passes the shared gate → high, or
+  critical if it would silently break existing users.
 - A secondary assumption that's off but easily worked around → medium.
 - A minor factual imprecision with no design impact → low (often just drop it).
 
