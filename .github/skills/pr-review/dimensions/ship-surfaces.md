@@ -1,7 +1,7 @@
 # Ship surfaces (docs, samples, packaging)
 
-You own one question for the `microsoft/winappcli` repo: **this repo ships
-several artifacts and several docs surfaces — did they all get updated?**
+You own one question for the `microsoft/winappcli` repo: **which shipped surfaces
+does this observable change affect, and were those surfaces updated?**
 
 Apply `_shared-contract.md`. Set `Domain: ship-surfaces`.
 
@@ -35,20 +35,25 @@ flag the mismatch. Review hand-authored skills only when the command changes a
 documented workflow, example, or troubleshooting path. Do not run the scripts
 yourself.
 
-## A new or changed command needs
+## Match the change to affected surfaces
 
-- `docs/usage.md`.
+- CLI syntax or help changes regenerate `docs/cli-schema.json` through the build;
+  update `docs/usage.md` when it is the canonical hand-authored reference.
 - The relevant shipped skill in `plugins/winapp/skills/winapp-<area>/SKILL.md`
   when its workflow, examples, or troubleshooting changed.
-- `plugins/winapp/com.github.copilot/agents/winapp.agent.md` — it has both a decision tree **and** a
-  command reference; a new command must appear in both. A behavior change that
-  contradicts its "Critical rules" means that rule needs updating.
+- Update `plugins/winapp/com.github.copilot/agents/winapp.agent.md` when its
+  decision tree, command reference, or critical rules are affected.
 - Forwarding in `src/winapp-npm/cli.js` for a new **top-level** command.
 - Hand-written lists that are *not* generated: `docs/usage.md`'s `### ui`
   Commands list, and `winapp.agent.md`'s "Key subcommands". A new `winapp ui`
   subcommand also needs a `### <name>` section in `docs/ui-automation.md`.
 - A new top-level command that warrants its own shipped skill needs a new
   `plugins/winapp/skills/winapp-<area>/SKILL.md` and plugin installation smoke test.
+
+Internal refactors need none of these. User documentation explains what to type,
+what happens, and how to recover from failure; it never narrates implementation
+details, review history, or review-round identifiers. Keep each fact on one
+canonical surface and link to it elsewhere.
 
 ## A new sample needs
 
@@ -60,8 +65,9 @@ finding — do not double-report).
 
 - **`version.json`** drives native CLI and NuGet versioning. A version bumped on
   one artifact but not the sibling that ships with it is `high`.
-- **Breaking changes** — renamed command, removed option, changed default — are
-  `high`: npm and NuGet consumers break.
+- **Breaking changes** — apply the shared compatibility gate first. A published
+  command/default/output contract with a real npm or NuGet consumer may be
+  `high`; behavior introduced only on this branch should be replaced cleanly.
 - `WinAppManifestPath` auto-detect in the NuGet targets must stay consistent with
   the CLI's `ManifestHelper`.
 - New NuGet `.csproj` needs `<Copyright>© Microsoft Corporation. All rights

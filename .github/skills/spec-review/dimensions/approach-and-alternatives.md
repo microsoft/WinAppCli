@@ -31,15 +31,10 @@ Before endorsing a new mechanism, check whether one of these already covers it:
 - **PE / MRT / PRI → `PeHelper`, `MrtAssetHelper`, `PriService`.**
 - **UI selectors → `SelectorService`.**
 - **CLI parser config → `WinAppParserConfiguration.Default`.**
-- **Service shape** (from the repo's architecture guide):
-  | Pattern | When |
-  |---------|------|
-  | Interface + DI service | stateful, needs deps |
-  | Static helper | pure functions |
-  | Data document | wraps a file/data format |
-  | Partial class | splitting a large tightly-coupled service |
-  Flag a proposal that picks the wrong shape (e.g., a stateless 3-line helper as
-  a DI service, or a stateful thing as a static).
+- **Service shape** (from `AGENTS.md`): DI does not require an interface. Add an
+  interface only for multiple implementations, an established contract, or a
+  necessary substitution/test boundary. Prefer one cohesive implementation over
+  several one-caller wrappers, and never split solely to meet a line target.
 - **Build orchestration → `scripts/build-cli.ps1`** is canonical; flag new build
   steps that bypass or duplicate it.
 
