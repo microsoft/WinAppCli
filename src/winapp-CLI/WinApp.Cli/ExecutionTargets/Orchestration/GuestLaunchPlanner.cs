@@ -34,9 +34,12 @@ internal static class GuestLaunchPlanner
     /// </param>
     /// <param name="payloadPath">Guest folder holding the deployed application files.</param>
     /// <param name="options">
-    /// Run options to forward. <see cref="GuestRunOptions.NoLaunch"/> and
-    /// <see cref="GuestRunOptions.Clean"/> do not apply to this verb and are ignored: there is
-    /// nothing here that ever registers, so neither has a code path to affect.
+    /// Run options to forward. <see cref="GuestRunOptions.NoLaunch"/>, <see cref="GuestRunOptions.Clean"/>,
+    /// and <see cref="GuestRunOptions.UnregisterOnExit"/> do not apply to this verb and are ignored:
+    /// there is nothing here that ever registers or unregisters, so none of the three has a code path
+    /// to affect. <c>--unregister-on-exit</c> is instead honored by the host as its own separate,
+    /// locked, exact-layout-verified phase after this verb returns -- see
+    /// <c>RunCommand.Sandbox.cs</c>'s <c>UnregisterDeploymentAfterExitAsync</c>.
     /// </param>
     public static List<string> BuildLaunchArguments(
         string packageName,
@@ -73,10 +76,9 @@ internal static class GuestLaunchPlanner
             arguments.Add("--debug-output");
         }
 
-        if (options.UnregisterOnExit)
-        {
-            arguments.Add("--unregister-on-exit");
-        }
+        // No --unregister-on-exit: GuestLaunchCommand does not accept it at all. Forwarding it
+        // here would have no effect other than a parse error, since the verb has no option, and
+        // no code path, for it.
 
         if (options.Detach)
         {

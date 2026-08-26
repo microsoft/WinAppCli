@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using Microsoft.Extensions.DependencyInjection;
+using System.Text.Json;
 using WinApp.Cli.Commands;
 using WinApp.Cli.Services;
 
@@ -51,7 +52,6 @@ public class GuestLaunchCommandTests : BaseCommandTests
         string payload,
         bool withAlias = false,
         bool debugOutput = false,
-        bool unregisterOnExit = false,
         bool detach = true,
         bool json = false,
         string? appArgs = null)
@@ -75,11 +75,6 @@ public class GuestLaunchCommandTests : BaseCommandTests
         if (debugOutput)
         {
             arguments.Add("--debug-output");
-        }
-
-        if (unregisterOnExit)
-        {
-            arguments.Add("--unregister-on-exit");
         }
 
         if (detach)
@@ -258,10 +253,13 @@ public class GuestLaunchCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task MismatchedLayout_WithUnregisterOnExit_StillNeverCallsUnregister()
+    public async Task MismatchedLayout_RefusesToLaunch_RegardlessOfHostSideUnregisterOnExit()
     {
-        // --unregister-on-exit only ever fires after a successful launch's process exits. A
-        // mismatch must refuse before that point is ever reached, regardless of this flag.
+        // --unregister-on-exit is no longer accepted by this verb at all: the host orchestrates it
+        // separately as its own third, exact-layout-verified, mutation-locked phase after this verb
+        // returns (see RunCommand.Sandbox.cs's UnregisterDeploymentAfterExitAsync). This test only
+        // confirms a mismatch still refuses exactly as it does without that (removed) flag, so the
+        // refusal behavior is not accidentally coupled to it.
         var layoutA = Path.Combine(_tempDirectory.FullName, "layoutA");
         var layoutB = Path.Combine(_tempDirectory.FullName, "layoutB");
 
@@ -273,12 +271,79 @@ public class GuestLaunchCommandTests : BaseCommandTests
         var handler = GetRequiredService<RunCommand.Handler>();
         var parsed = Parse(
             "Pkg", "CN=Test", "App", layoutA,
-            Path.Combine(_tempDirectory.FullName, "payload"),
-            unregisterOnExit: true);
+            Path.Combine(_tempDirectory.FullName, "payload"));
 
         var exitCode = await handler.InvokeAsync(parsed.Value, TestContext.CancellationToken);
 
         Assert.AreNotEqual(0, exitCode);
+        AssertNoMutationCalls();
+    }
+
+    /// <summary>
+    /// H3: an AUMID activation failure must not crash unhandled -- it must produce the same
+    /// structured <c>--json</c> error envelope (a valid <see cref="RunCommand"/> JSON result, with
+    /// <c>AUMID</c> populated and <c>Error</c> carrying the activation failure) every other launch
+    /// failure in this command family already does, with the failure logged to stderr only so
+    /// stdout stays pure JSON.
+    /// </summary>
+    [TestMethod]
+    public async Task ActivationThrows_UnderJson_ProducesValidErrorEnvelope_AndKeepsStdoutPure()
+    {
+        var layout = Path.Combine(_tempDirectory.FullName, "layout");
+        var payload = Path.Combine(_tempDirectory.FullName, "payload");
+
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+            new DevPackageInfo("Pkg_1.0.0.0_x64__fff", "Pkg", "1.0.0.0", layout, IsDevelopmentMode: true),
+        ];
+        _fakeAppLauncherService.LaunchByAumidThrows = new InvalidOperationException("activation refused");
+
+        var handler = GetRequiredService<RunCommand.Handler>();
+        var parsed = Parse("Pkg", "CN=Test", "App", layout, payload, json: true, detach: false);
+
+        var exitCode = await handler.InvokeAsync(parsed.Value, TestContext.CancellationToken);
+
+        Assert.AreEqual(1, exitCode, "An activation failure must surface as a normal, structured failure, not a crash.");
+        AssertNoMutationCalls();
+
+        var stdout = TestAnsiConsole.Output.Trim();
+        using var document = JsonDocument.Parse(stdout);
+        var root = document.RootElement;
+
+        StringAssert.EndsWith(root.GetProperty("AUMID").GetString(), "!App");
+        Assert.AreEqual("activation refused", root.GetProperty("Error").GetString());
+        Assert.IsFalse(root.TryGetProperty("ProcessId", out _), "A failed activation must never report a process ID.");
+
+        // The failure is logged too, but to stderr only -- proving the earlier successful parse of
+        // TestAnsiConsole.Output as a single JSON document is not an accident of ordering; the
+        // logger genuinely never writes to the same sink --json callers read.
+        StringAssert.Contains(ConsoleStdErr.ToString(), "Failed to launch application");
+        StringAssert.Contains(ConsoleStdErr.ToString(), "activation refused");
+    }
+
+    /// <summary>
+    /// H3 parity, non-JSON: an activation failure without <c>--json</c> must still be a normal,
+    /// human-readable failure (non-zero exit, no unhandled exception), matching how every other
+    /// launch failure in this verb already behaves.
+    /// </summary>
+    [TestMethod]
+    public async Task ActivationThrows_WithoutJson_FailsCleanly_WithNoUnhandledException()
+    {
+        var layout = Path.Combine(_tempDirectory.FullName, "layout");
+        var payload = Path.Combine(_tempDirectory.FullName, "payload");
+
+        _fakePackageRegistrationService.FakeDevPackages =
+        [
+            new DevPackageInfo("Pkg_1.0.0.0_x64__ggg", "Pkg", "1.0.0.0", layout, IsDevelopmentMode: true),
+        ];
+        _fakeAppLauncherService.LaunchByAumidThrows = new InvalidOperationException("activation refused");
+
+        var handler = GetRequiredService<RunCommand.Handler>();
+        var parsed = Parse("Pkg", "CN=Test", "App", layout, payload, detach: false);
+
+        var exitCode = await handler.InvokeAsync(parsed.Value, TestContext.CancellationToken);
+
+        Assert.AreEqual(1, exitCode);
         AssertNoMutationCalls();
     }
 }

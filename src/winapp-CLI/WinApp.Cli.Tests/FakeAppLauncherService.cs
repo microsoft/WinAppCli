@@ -26,8 +26,20 @@ internal class FakeAppLauncherService : IAppLauncherService
 
     public string? FakePackageFullName { get; set; } = "FakePackage_1.0.0.0_x64__fakefamily";
 
+    /// <summary>
+    /// When set, <see cref="LaunchByAumid"/> throws this instead of returning a process ID. Used to
+    /// exercise the AUMID activation-failure path (e.g. RunCommand's own catch around it, and
+    /// GuestLaunchCommand's equivalent guard).
+    /// </summary>
+    public Exception? LaunchByAumidThrows { get; set; }
+
     public uint LaunchByAumid(string aumid, string? arguments = null)
     {
+        if (LaunchByAumidThrows is not null)
+        {
+            throw LaunchByAumidThrows;
+        }
+
         LaunchCalls.Add((aumid, arguments));
         return FakeProcessId;
     }

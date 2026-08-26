@@ -3,6 +3,7 @@
 
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.Orchestration;
@@ -114,8 +115,12 @@ internal partial class RunCommand
             // registers or unregisters anything, so a mismatch is refused outright instead of
             // "repaired". See GuestLaunchPlanner/GuestLaunchCommand.
             //
-            // When noLaunch is requested there is no launch phase to split off, so the single,
-            // already-fully-locked general `run --no-launch` call below is the whole operation.
+            // --unregister-on-exit is likewise never forwarded to guest-launch (it has no such
+            // option at all): it is instead honored as a third, separate, host-orchestrated phase
+            // after the guest-launch call returns -- see UnregisterDeploymentAfterExitAsync.
+            //
+            // When noLaunch is requested there is no launch phase to split off, so registration
+            // (still under the same locked call inside RunInGuestAsync) is the whole operation.
             return await RunInGuestAsync(
                 layout,
                 DeploymentIdFor(inputFolder, identity),
@@ -124,18 +129,17 @@ internal partial class RunCommand
                 requiresRealInput: !noLaunch,
                 identity,
                 noLaunch,
+                unregisterOnExit,
                 (deployment, ownerEnvironment) => new GuestExecRequest
                 {
                     UseGuestWinapp = true,
-                    Arguments = noLaunch
-                        ? GuestRunPlanner.BuildRunArguments(deployment.PayloadPath, deployment.LayoutPath, options)
-                        : GuestLaunchPlanner.BuildLaunchArguments(
-                            identity.PackageName,
-                            identity.Publisher,
-                            identity.ApplicationId,
-                            deployment.LayoutPath,
-                            deployment.PayloadPath,
-                            options),
+                    Arguments = GuestLaunchPlanner.BuildLaunchArguments(
+                        identity.PackageName,
+                        identity.Publisher,
+                        identity.ApplicationId,
+                        deployment.LayoutPath,
+                        deployment.PayloadPath,
+                        options),
 
                     // The payload folder, so a guest app that resolves files relative to its working
                     // directory sees its own deployment rather than the agent's location.
@@ -196,8 +200,9 @@ internal partial class RunCommand
                 requiresRealInput: true,
                 identity: null,
 
-                // No package, so no registration phase applies regardless of this value.
+                // No package, so no registration phase applies regardless of these two values.
                 noLaunch: false,
+                unregisterOnExit: false,
                 (deployment, ownerEnvironment) => new GuestExecRequest
                 {
                     Executable = TargetPathSafety.CombineInsideRoot(deployment.PayloadPath, executableRelativePath),
@@ -222,10 +227,22 @@ internal partial class RunCommand
         /// <param name="identity">Package identity to record ownership for, when there is one.</param>
         /// <param name="noLaunch">
         /// True when the caller asked only to deploy and register, never to launch. Irrelevant when
-        /// <paramref name="identity"/> is null (an unpackaged run has no registration phase to
-        /// split), but for a packaged run this decides whether <paramref name="buildRequest"/> is
-        /// the whole operation (true) or only its launch half, with registration pulled out into
-        /// its own locked call first (false) -- see <see cref="RegisterPackageAsync"/>.
+        /// <paramref name="identity"/> is null (an unpackaged run has no registration phase at all).
+        /// For a packaged run, registration (see <see cref="RegisterPackageAsync"/>) always happens
+        /// first, under the mutation lease, regardless of this value -- it is the only guest package
+        /// mutation any packaged run performs, so it can never be skipped or deferred to an unlocked
+        /// call. This flag only decides what happens *after* registration succeeds: true means
+        /// registration was the whole operation and its own result is published as final; false
+        /// means <paramref name="buildRequest"/> builds a further, unlocked launch-only call.
+        /// </param>
+        /// <param name="unregisterOnExit">
+        /// True when the caller asked the deployment unregistered once its application exits.
+        /// Applies only when <paramref name="identity"/> is not null and <paramref name="noLaunch"/>
+        /// is false (the combination with <paramref name="noLaunch"/> is already rejected before
+        /// this method is reached). Honored as a third, separate, host-orchestrated phase after
+        /// <paramref name="buildRequest"/>'s call returns -- see
+        /// <see cref="UnregisterDeploymentAfterExitAsync"/> -- never inside the unlocked launch call
+        /// itself, which has no unregister capability at all.
         /// </param>
         /// <param name="buildRequest">Builds the guest request once the guest paths are known.</param>
         /// <param name="cancellationToken">Cancellation.</param>
@@ -246,6 +263,7 @@ internal partial class RunCommand
             bool requiresRealInput,
             MsixIdentityResult? identity,
             bool noLaunch,
+            bool unregisterOnExit,
             Func<GuestDeployment, Dictionary<string, string>, GuestExecRequest> buildRequest,
             CancellationToken cancellationToken,
             bool guestProducesRunResult = true,
@@ -284,32 +302,57 @@ internal partial class RunCommand
                         Aumid = $"{familyName}!{identity.ApplicationId}",
                     });
 
-                    // A packaged run's own guest `winapp run` registers AND launches in one call, so
-                    // when this run also launches, registration -- the actual guest package mutation
-                    // -- is pulled out into its own locked call first. Otherwise the mutation lease
-                    // would have to keep covering the launch/wait that comes after registration
-                    // inside that single call, which is exactly the window it must never span. When
-                    // noLaunch was requested there is nothing to launch, so the single call below
-                    // already is the whole (locked) operation and no split is needed.
-                    if (!noLaunch)
+                    // Registration is the only guest package mutation any packaged sandbox run ever
+                    // performs, and it always happens here, under the mutation lease, whether or not
+                    // the caller also asked to launch. A --no-launch run has no further guest call to
+                    // make at all -- registration IS the whole operation -- so it must never be sent
+                    // unlocked "because nothing else needs the lock afterward": the registration
+                    // mutation itself is exactly what the lock exists to protect.
+                    WriteProgress(isJson, "Registering the application in the Windows Sandbox...");
+
+                    var registration = await RegisterPackageAsync(target, deployment, clean, isJson, cancellationToken);
+
+                    try
                     {
-                        WriteProgress(isJson, "Registering the application in the Windows Sandbox...");
-
-                        var registrationFailure = await RegisterPackageAsync(
-                            target, deployment, clean, isJson, cancellationToken);
-
-                        if (registrationFailure is { } failureExitCode)
+                        if (registration.ExitCode != 0)
                         {
-                            return failureExitCode;
+                            // Registration itself failed, so there is no launch phase to follow --
+                            // whether or not one was requested -- and this call's own result is the
+                            // only one the caller gets.
+                            if (isJson && registration.CapturedOutput is not null)
+                            {
+                                PublishGuestJson(registration.CapturedOutput, target, registration.ProcessId);
+                            }
+
+                            return registration.ExitCode;
                         }
+
+                        if (noLaunch)
+                        {
+                            // Registration succeeded and there is no launch phase to follow: release
+                            // the lease now and publish this call's own result as the final one,
+                            // exactly as an unsplit call's success would have been.
+                            target.ReleaseMutationLease();
+
+                            if (isJson && registration.CapturedOutput is not null)
+                            {
+                                PublishGuestJson(registration.CapturedOutput, target, registration.ProcessId);
+                            }
+
+                            return registration.ExitCode;
+                        }
+                    }
+                    finally
+                    {
+                        registration.CapturedOutput?.Dispose();
                     }
                 }
 
                 // Every guest mutation this run needed -- runtime provisioning, deployment
-                // reconciliation, and (for a packaged, launching run) package registration -- is
-                // done. What is left is starting and running the application, which the mutation
-                // lock must never cover: a long-running app would otherwise block every other
-                // winapp workflow against this target.
+                // reconciliation, and (for a packaged run) package registration -- is done. What is
+                // left is starting and running the application, which the mutation lock must never
+                // cover: a long-running app would otherwise block every other winapp workflow
+                // against this target.
                 target.ReleaseMutationLease();
 
                 var ownerEnvironment = GuestOwnerContext.WithOwner(
@@ -377,6 +420,15 @@ internal partial class RunCommand
                         }),
                     cancellationToken);
 
+                // The application has now fully exited (the guest-launch call above does not
+                // return until it does). --unregister-on-exit is honored only now, as a third,
+                // separate, host-orchestrated phase -- never inside the launch call itself, and
+                // never covering any part of the application's own lifetime.
+                if (identity is not null && unregisterOnExit)
+                {
+                    await UnregisterDeploymentAfterExitAsync(target, deployment.LayoutPath, state, cancellationToken);
+                }
+
                 if (isJson && guestProducesRunResult && capturedOutput is not null)
                 {
                     PublishGuestJson(capturedOutput, target, startedProcessId);
@@ -395,46 +447,50 @@ internal partial class RunCommand
         }
 
         /// <summary>
-        /// Registers the packaged application in the guest without launching it, so registration --
-        /// the only guest package mutation a launching packaged run performs -- happens while the
-        /// mutation lease from <see cref="ExecutionTargetOrchestrator.PrepareAsync"/> is still held.
+        /// Registers the packaged application in the guest without launching it -- the only guest
+        /// package mutation any packaged sandbox run performs -- while the mutation lease from
+        /// <see cref="ExecutionTargetOrchestrator.PrepareAsync"/> is still held.
         /// </summary>
         /// <param name="target">Prepared target whose mutation lease this call relies on.</param>
         /// <param name="deployment">The deployment just reconciled into the guest.</param>
         /// <param name="clean">
         /// Whether to clear the guest package's application data, forwarded from the run's own
-        /// <c>--clean</c>. Applied here, in the locked phase, and never again in the launch call
-        /// that follows once the lease is released.
+        /// <c>--clean</c>. Applied here, in the locked phase, only.
         /// </param>
         /// <param name="isJson">Whether the invoking command is in machine-readable mode.</param>
         /// <param name="cancellationToken">Cancellation.</param>
         /// <returns>
-        /// Null when registration succeeded and the caller should proceed to launch. Otherwise the
-        /// guest's own exit code, which the caller returns immediately without attempting to launch.
+        /// The outcome. Ownership of <see cref="GuestPackagePhaseResult.CapturedOutput"/> passes to
+        /// the caller, which must dispose it once done with it -- whether or not it was published.
         /// </returns>
         /// <remarks>
-        /// This is phase 1 of a two-phase launching packaged run: guest <c>winapp run --no-launch</c>,
-        /// the same production code every local registration-only run already uses, never a bespoke
-        /// reimplementation. Phase 2 (unlocked, after <see cref="PreparedTarget.ReleaseMutationLease"/>)
-        /// is deliberately <em>not</em> the general guest <c>run</c> -- that command registers and
-        /// launches inseparably, and if a different deployment sharing this package identity
-        /// registers in the gap between phase 1 and phase 2, the general <c>run</c> would see the
-        /// now-mismatched install location and silently fall through to an unlocked
-        /// unregister+register, disturbing the other deployment's registration. Phase 2 is instead
-        /// the hidden guest-launch verb (<see cref="GuestLaunchPlanner"/>/<see cref="GuestLaunchCommand"/>),
-        /// which has no code path that registers or unregisters anything: it verifies the currently
-        /// registered package is installed from exactly this call's layout and refuses to launch
-        /// otherwise, rather than "repairing" the mismatch.
+        /// Guest <c>winapp run --no-launch</c>: the same production code every local
+        /// registration-only run already uses, never a bespoke reimplementation. This call always
+        /// happens, whether or not the caller also asked to launch -- a <c>--no-launch</c> run has no
+        /// further guest call to make at all, so its registration cannot be sent unlocked "because
+        /// nothing else needs the lock afterward"; the registration mutation itself is exactly what
+        /// the lock exists to protect, and the caller publishes this call's own result as final in
+        /// that case.
         /// <para>
-        /// Output handling mirrors the ordinary run exactly: a <c>--json</c> result is captured and
-        /// published only on failure (on success this call's own result is never the one the caller
-        /// sees -- the launch call's is), and non-JSON output streams live precisely as a single,
-        /// unsplit call already would. The started guest process here is the short-lived
-        /// registration-only <c>winapp.exe</c>, not the application, so it is never committed as the
-        /// deployment's running process.
+        /// When the caller also launches, a further call follows once registration succeeds and the
+        /// lease is released -- deliberately <em>not</em> the general guest <c>run</c>, which
+        /// registers and launches inseparably: if a different deployment sharing this package
+        /// identity registers in the gap after this call returns, the general <c>run</c> would see
+        /// the now-mismatched install location and silently fall through to an unlocked
+        /// unregister+register, disturbing the other deployment's registration. That further call is
+        /// instead the hidden guest-launch verb (<see cref="GuestLaunchPlanner"/>/
+        /// <see cref="GuestLaunchCommand"/>), which has no code path that registers or unregisters
+        /// anything: it verifies the currently registered package is installed from exactly this
+        /// call's layout and refuses to launch otherwise, rather than "repairing" the mismatch. In
+        /// that case this call's own success result is not published -- the launch call's is.
+        /// </para>
+        /// <para>
+        /// Non-JSON output streams live exactly as a single, unsplit call already would. The started
+        /// guest process here is the short-lived registration-only <c>winapp.exe</c>, not the
+        /// application, so it is never committed as the deployment's running process.
         /// </para>
         /// </remarks>
-        private async Task<int?> RegisterPackageAsync(
+        private async Task<GuestPackagePhaseResult> RegisterPackageAsync(
             PreparedTarget target,
             GuestDeployment deployment,
             bool clean,
@@ -453,7 +509,7 @@ internal partial class RunCommand
                 WorkingDirectory = deployment.PayloadPath,
             };
 
-            using var capturedOutput = isJson ? new MemoryStream() : null;
+            var capturedOutput = isJson ? new MemoryStream() : null;
 
             var result = await target.Channel.ExecuteAsync(
                 request,
@@ -471,20 +527,113 @@ internal partial class RunCommand
                     OnStandardError: data => WriteRawToConsole(Console.OpenStandardError(), data)),
                 cancellationToken).ConfigureAwait(false);
 
-            if (result.ExitCode == 0)
-            {
-                return null;
-            }
+            return new GuestPackagePhaseResult(result.ExitCode, result.ProcessId, capturedOutput);
+        }
 
-            // Registration itself failed, so the launch call never runs and this call's own result
-            // is the only one the caller gets -- relayed exactly as an unsplit call's failure
-            // would have been.
-            if (isJson && capturedOutput is not null)
-            {
-                PublishGuestJson(capturedOutput, target, result.ProcessId);
-            }
+        /// <summary>Outcome of the locked, register-only guest call.</summary>
+        /// <param name="ExitCode">The guest's own exit code for the register-only call.</param>
+        /// <param name="ProcessId">The short-lived registration-only <c>winapp.exe</c>'s process ID.</param>
+        /// <param name="CapturedOutput">
+        /// The guest's captured stdout, present only under <c>--json</c>. Ownership passes to the
+        /// caller, which must dispose it once done -- whether it publishes it (on failure, or on a
+        /// <c>--no-launch</c> success) or not (a launching success, whose own final result comes
+        /// from the launch phase instead).
+        /// </param>
+        private readonly record struct GuestPackagePhaseResult(int ExitCode, int ProcessId, MemoryStream? CapturedOutput);
 
-            return result.ExitCode;
+        /// <summary>
+        /// Honors <c>--unregister-on-exit</c> for a packaged sandbox run as a third, separate,
+        /// host-orchestrated phase -- run only after the application has fully exited.
+        /// </summary>
+        /// <param name="target">
+        /// This run's own prepared target. Still connected (its connection lease is held for the
+        /// whole run, per <see cref="ExecutionTargetOrchestrator.PrepareAsync"/>'s contract) even
+        /// though this run's own mutation lease was already released before the launch phase -- this
+        /// phase reacquires only a fresh mutation lease, over that same live connection.
+        /// </param>
+        /// <param name="layoutPath">
+        /// This deployment's own registration layout -- the exact location the guest's install
+        /// location must still match for anything to be unregistered.
+        /// </param>
+        /// <param name="state">This deployment's current host-side record, cleared on success.</param>
+        /// <param name="cancellationToken">Cancellation.</param>
+        /// <remarks>
+        /// The hidden guest-launch verb (the unlocked launch phase) has no unregister capability at
+        /// all, by design (see <see cref="GuestLaunchCommand"/>/<see cref="GuestLaunchPlanner"/>): if
+        /// a different deployment sharing this package identity registered from a different layout
+        /// while this run's application was still executing, unregistering by name alone -- the
+        /// guest's original, pre-existing <c>UnregisterDevPackageAsync</c> behavior that the local
+        /// (non-sandbox) run still uses -- would remove that OTHER deployment's registration instead.
+        /// This phase closes that gap by reusing the exact same production guest
+        /// <c>winapp unregister --manifest &lt;layout&gt;/appxmanifest.xml</c> verb the standalone
+        /// <c>winapp unregister --sandbox</c> command already sends (see
+        /// <c>UnregisterCommand.Sandbox.cs</c>): its own install-location check unregisters only when
+        /// the currently registered package's location is still exactly this deployment's layout, and
+        /// safely skips -- without failing -- when it is not.
+        /// <para>
+        /// A fresh mutation lease is acquired here rather than reusing the one this run already
+        /// released: by the time the application exits, an unbounded amount of time may have passed,
+        /// and the lease must never be held across that window. Acquiring, using, and releasing it
+        /// only now -- strictly after the wait -- is what keeps this phase from reintroducing the
+        /// hazard the registration/launch split exists to avoid.
+        /// </para>
+        /// <para>
+        /// Deliberately <see cref="ExecutionTargetOrchestrator.AcquireMutationLease"/> rather than a
+        /// second <see cref="ExecutionTargetOrchestrator.PrepareAsync"/> call: <paramref name="target"/>
+        /// itself is still alive at this point (its own <c>await using</c> scope has not exited yet)
+        /// and so is still holding its own connection lease -- a second <c>PrepareAsync</c> would try
+        /// to acquire that same, single-holder connection lease again and deadlock against itself.
+        /// Reusing <paramref name="target"/>'s own live channel and acquiring only a fresh mutation
+        /// lease sidesteps that entirely.
+        /// </para>
+        /// <para>
+        /// Best-effort and silent on the primary output: its outcome is never published to stdout
+        /// (the guest's reply is discarded entirely, matching how a mismatch is meant to be silently
+        /// skipped rather than surfaced) and never affects this run's own exit code, matching the
+        /// pre-existing local <c>UnregisterDevPackageAsync</c>'s behavior exactly -- the application
+        /// already ran to completion, and a failed best-effort cleanup afterward is not a reason to
+        /// report the run itself as failed.
+        /// </para>
+        /// </remarks>
+        private async Task UnregisterDeploymentAfterExitAsync(
+            PreparedTarget target,
+            string layoutPath,
+            DeploymentState state,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                using var mutationLease = executionTargetOrchestrator.AcquireMutationLease(cancellationToken);
+
+                var result = await target.Channel.ExecuteAsync(
+                    new GuestExecRequest
+                    {
+                        UseGuestWinapp = true,
+                        Arguments = GuestRunPlanner.BuildUnregisterArguments(layoutPath, json: false),
+
+                        // The guest's own install-location check compares against its working
+                        // directory, which is what makes it refuse -- rather than blindly obey -- a
+                        // request to unregister a package that is no longer this exact deployment.
+                        WorkingDirectory = layoutPath,
+                    },
+                    callbacks: null,
+                    cancellationToken).ConfigureAwait(false);
+
+                if (result.ExitCode == 0)
+                {
+                    // Cleared only after the guest reported success, so a failed or skipped
+                    // unregister leaves the record that a later command needs to find the package
+                    // again.
+                    guestApplicationRunner.ClearPackage(state);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Best-effort, matching the pre-existing local UnregisterDevPackageAsync: the
+                // application already ran to completion, so a failed cleanup here -- including
+                // cancellation -- is not a reason to report the run itself as failed.
+                logger.LogDebug("Could not unregister the sandbox deployment on exit: {Message}", ex.Message);
+            }
         }
 
         /// <summary>
