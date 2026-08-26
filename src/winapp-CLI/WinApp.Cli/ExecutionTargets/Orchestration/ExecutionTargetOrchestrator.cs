@@ -250,6 +250,28 @@ internal sealed class ExecutionTargetOrchestrator(
     /// <summary>Provider diagnostics for a failure envelope.</summary>
     public IReadOnlyDictionary<string, string> DescribeForDiagnostics() => backend.DescribeForDiagnostics();
 
+    /// <summary>
+    /// Acquires a fresh mutation lease against this target's own connection, without going through
+    /// <see cref="PrepareAsync"/> again.
+    /// </summary>
+    /// <remarks>
+    /// For a caller that already holds a live, still-connected <see cref="PreparedTarget"/> whose
+    /// own mutation lease it already released (because the mutating work it was protecting has
+    /// finished) but that later needs a second, independent mutating window against the very same
+    /// target -- for example, a host-orchestrated cleanup phase that must run only after a launched
+    /// application has fully exited, an unbounded time later. Calling <see cref="PrepareAsync"/>
+    /// again in that situation would try to acquire a second connection lease while the first
+    /// <see cref="PreparedTarget"/> is still alive and still holding its own -- a self-deadlock on
+    /// the very same, single-holder connection lock, since nothing has released it yet. Reusing the
+    /// existing connection and acquiring only a new mutation lease avoids that: the connection lock
+    /// is not re-entered at all, only the mutation lock -- which is exactly the lock this second
+    /// window needs to be exclusive against every other mutating command, and does not conflict
+    /// with the connection this method itself does not touch.
+    /// </remarks>
+    /// <exception cref="ExecutionTargetException">Another command is still mutating this target.</exception>
+    public TargetMutationLease AcquireMutationLease(CancellationToken cancellationToken) =>
+        AcquireLock(cancellationToken);
+
     private TargetMutationLease AcquireLock(CancellationToken cancellationToken)
     {
         var lease = mutationLock.TryAcquire(backend.Target, LockTimeout, cancellationToken);

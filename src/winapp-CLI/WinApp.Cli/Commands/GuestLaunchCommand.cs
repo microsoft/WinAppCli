@@ -21,6 +21,13 @@ namespace WinApp.Cli.Commands;
 /// makes that structurally impossible: it has no code path that calls register or unregister at
 /// all, so there is nothing for a mismatch to fall through to. A mismatch is refused outright.
 /// <para>
+/// This has no <c>--unregister-on-exit</c> option at all, deliberately: unregistering by name alone
+/// after the app exits would reintroduce exactly the hazard above, since a different deployment
+/// sharing this identity could have registered while this app was running. <c>--unregister-on-exit</c>
+/// is instead honored by the host as its own separate, locked, exact-layout-verified phase after this
+/// verb returns -- see <c>RunCommand.Sandbox.cs</c>'s <c>UnregisterDeploymentAfterExitAsync</c>.
+/// </para>
+/// <para>
 /// Hidden, like the other guest verbs (<c>guest-agent</c>, <c>guest-runtime</c>): it is an internal
 /// step of a host-driven workflow, launched only by <c>RunCommand.Sandbox</c>'s guest exec requests,
 /// never something to run by hand, and carries no public schema/docs surface.
@@ -56,8 +63,6 @@ internal class GuestLaunchCommand : Command, IShortDescription
 
     public static Option<bool> DebugOutputOption { get; } = new("--debug-output");
 
-    public static Option<bool> UnregisterOnExitOption { get; } = new("--unregister-on-exit");
-
     public static Option<bool> DetachOption { get; } = new("--detach");
 
     public static Option<bool> SymbolsOption { get; } = new("--symbols");
@@ -78,7 +83,6 @@ internal class GuestLaunchCommand : Command, IShortDescription
         Options.Add(ArgsOption);
         Options.Add(WithAliasOption);
         Options.Add(DebugOutputOption);
-        Options.Add(UnregisterOnExitOption);
         Options.Add(DetachOption);
         Options.Add(SymbolsOption);
         Options.Add(WinAppRootCommand.JsonOption);
