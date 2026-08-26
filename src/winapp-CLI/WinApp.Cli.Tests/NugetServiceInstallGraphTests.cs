@@ -392,6 +392,71 @@ public class NugetServiceInstallGraphTests : BaseCommandTests
         }
     }
 
+    /// <summary>
+    /// A conflict is a snapshot of one moment in an order-dependent walk, so it can stop being true. Here Q
+    /// requires X [2.0.0] while X is pinned to 1.0.0 by P, which records a conflict against Q. A later branch
+    /// then upgrades A, orphaning P and removing that pin, and pulls X up to 2.0.0 — satisfying the very
+    /// requirement Q was rejected for. Q itself is still selected and reachable, so retracting failures by
+    /// declaring package alone cannot catch this; the requirement has to be re-checked against the final
+    /// selection.
+    /// </summary>
+    [TestMethod]
+    public async Task InstallPackageAsync_ConflictLaterSatisfiedByAnotherBranch_DoesNotFailTheInstall()
+    {
+        // NUGET_PACKAGES takes precedence over the globalPackagesFolder written by WriteLocalFeedConfig.
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NUGET_PACKAGES")))
+        {
+            Assert.Inconclusive("NUGET_PACKAGES is set in the environment; it overrides the config's globalPackagesFolder, so the local feed would not be exercised.");
+        }
+
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
+            feed.Create();
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
+
+            // Chained so the walk order is fixed: Root -> A 1.0 -> P -> X 1.0 -> Q. Q then asks for X [2.0.0]
+            // while P still pins X [1.0.0], which is the conflict. Q also pulls in Z, which requires A >= 2.0.0
+            // and so replaces A 1.0 with an A 2.0 that drops P entirely and requires X [2.0.0] itself.
+            WriteNupkgToFeed(feed, "Late.Root", "1.0.0", ("Late.A", "[1.0.0, )"));
+            WriteNupkgToFeed(feed, "Late.A", "1.0.0", ("Late.P", "[1.0.0, )"));
+            WriteNupkgToFeed(feed, "Late.A", "2.0.0", ("Late.X", "[2.0.0]"));
+            WriteNupkgToFeed(feed, "Late.P", "1.0.0", ("Late.X", "[1.0.0]"));
+            WriteNupkgToFeed(feed, "Late.X", "1.0.0", ("Late.Q", "[1.0.0, )"));
+            // X 2.0.0 keeps requiring Q so Q stays reachable and selected in the FINAL graph — otherwise the
+            // stale conflict would be retracted just by Q disappearing, and the requirement re-check this test
+            // exists for would never be exercised.
+            WriteNupkgToFeed(feed, "Late.X", "2.0.0", ("Late.Q", "[1.0.0, )"));
+            WriteNupkgToFeed(feed, "Late.Q", "1.0.0", ("Late.X", "[2.0.0]"), ("Late.Z", "[1.0.0, )"));
+            WriteNupkgToFeed(feed, "Late.Z", "1.0.0", ("Late.A", "[2.0.0, )"));
+
+            WriteLocalFeedConfig(root, feed, packages);
+
+            var service = CreateServiceRootedAt(root);
+
+            Dictionary<string, string> installed;
+            try
+            {
+                installed = await service.InstallPackageAsync("Late.Root", "1.0.0", TestTaskContext, TestContext.CancellationToken);
+            }
+            catch (InvalidOperationException ex)
+            {
+                Assert.Fail($"Every requirement in the final graph is satisfied, but install reported a failure: {ex.Message}");
+                return;
+            }
+
+            Assert.AreEqual("2.0.0", installed.GetValueOrDefault("Late.A"));
+            Assert.AreEqual("2.0.0", installed.GetValueOrDefault("Late.X"), "X must end up at the version Q asked for.");
+            Assert.AreEqual("1.0.0", installed.GetValueOrDefault("Late.Q"), "Q must still be part of the final graph, so its stale conflict is retired by re-checking the requirement rather than by Q disappearing.");
+            Assert.IsFalse(installed.ContainsKey("Late.P"), "P was required only by the replaced A 1.0.0.");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
     [TestMethod]
     public async Task InstallPackageAsync_CacheFolderExistsWithoutCompletionMarker_ReDownloadsInsteadOfTrustingIt()
     {

@@ -176,32 +176,58 @@ internal partial class NugetService : INugetService
         /// <summary>The selected version of each package id, and the value returned to callers.</summary>
         public Dictionary<string, string> Installed { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        public List<(string Package, string Version, string Message)> Failures { get; } = [];
-
         /// <summary>
-        /// Records a dependency failure against the package version that hit it, so it can be retracted if that
-        /// version later leaves the graph.
+        /// A recorded failure, tagged with the package version that hit it and, when it concerns a specific
+        /// dependency, that dependency's identity and required range. Both are needed to decide later whether
+        /// the failure still describes the resolved graph.
         /// </summary>
-        public void AddFailure(string package, string version, string message) => Failures.Add((package, version, message));
+        public sealed record FailureRecord(string Package, string Version, string? DependencyId, VersionRange? DependencyRange, string Message);
+
+        public List<FailureRecord> Failures { get; } = [];
 
         /// <summary>
-        /// Failures that still belong to the resolved graph. A failure recorded while walking a version that was
-        /// later replaced describes a branch that no longer exists, and counting it would fail an install whose
-        /// final graph is complete: with C 1.0 -> Missing and a C 2.0 that needs nothing, upgrading C resolves
-        /// cleanly, so C 1.0's missing dependency must not still be fatal. Matched on version as well as id, so
-        /// only the failures of the version actually selected survive.
+        /// Records a dependency failure against the package version that hit it. <paramref name="dependencyId"/>
+        /// and <paramref name="dependencyRange"/> are supplied whenever the failure is about one dependency, so
+        /// it can be dropped if that requirement is later satisfied.
+        /// </summary>
+        public void AddFailure(string package, string version, string message, string? dependencyId = null, VersionRange? dependencyRange = null) =>
+            Failures.Add(new FailureRecord(package, version, dependencyId, dependencyRange, message));
+
+        /// <summary>
+        /// Failures that still describe the resolved graph. Two things can retire one.
+        ///
+        /// The version that recorded it may have been replaced or orphaned, in which case the failure belongs
+        /// to a branch that no longer exists: with C 1.0 -> Missing and a C 2.0 that needs nothing, upgrading C
+        /// resolves cleanly and C 1.0's missing dependency must not still be fatal.
+        ///
+        /// Or the requirement itself may have been met since. Resolution is order-dependent, so a branch can be
+        /// blocked by a constraint that a later upgrade removes — a conflict on X [2] recorded while a
+        /// since-orphaned package pinned X [1] is moot once another branch pulls X up to 2. The declaring
+        /// package is still selected there, so only re-checking the requirement against the final selection
+        /// catches it.
         /// </summary>
         public IEnumerable<string> GetActiveFailures()
         {
             var reachable = GetReachablePackages();
-            foreach (var (package, version, message) in Failures)
+            foreach (var failure in Failures)
             {
-                if (reachable.Contains(package)
-                    && Installed.TryGetValue(package, out var selectedVersion)
-                    && string.Equals(selectedVersion, version, StringComparison.OrdinalIgnoreCase))
+                if (!reachable.Contains(failure.Package)
+                    || !Installed.TryGetValue(failure.Package, out var selectedVersion)
+                    || !string.Equals(selectedVersion, failure.Version, StringComparison.OrdinalIgnoreCase))
                 {
-                    yield return message;
+                    continue;
                 }
+
+                if (failure.DependencyId is not null
+                    && failure.DependencyRange is not null
+                    && Installed.TryGetValue(failure.DependencyId, out var dependencyVersion)
+                    && NuGetVersion.TryParse(dependencyVersion, out var parsedDependencyVersion)
+                    && RangeSatisfiesWithFloat(failure.DependencyRange, parsedDependencyVersion))
+                {
+                    continue;
+                }
+
+                yield return failure.Message;
             }
         }
 
@@ -432,7 +458,7 @@ internal partial class NugetService : INugetService
                 catch (Exception ex)
                 {
                     taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not re-resolve dependency {depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
-                    graph.AddFailure(package, version, $"{depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
+                    graph.AddFailure(package, version, $"{depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}", depName, depVersionRange);
                     continue;
                 }
 
@@ -451,7 +477,7 @@ internal partial class NugetService : INugetService
                 var rangeText = depVersionRange.OriginalString ?? depVersionRange.ToNormalizedString();
                 var conflict = $"{depName} cannot be resolved to a single version: already selected {installedDepVersion}, but {package} {version} requires '{rangeText}' and no available version satisfies every requirement";
                 taskContext.AddStatusMessage($"{UiSymbols.Warning} Dependency version conflict: {conflict}");
-                graph.AddFailure(package, version, conflict);
+                graph.AddFailure(package, version, conflict, depName, depVersionRange);
                 continue;
             }
 
@@ -482,7 +508,7 @@ internal partial class NugetService : INugetService
                 // behind verbose-only logging) AND fail the overall operation. Record it so InstallPackageAsync
                 // exits non-zero rather than reporting an incomplete install as success.
                 taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not install dependency {depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
-                graph.AddFailure(package, version, $"{depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
+                graph.AddFailure(package, version, $"{depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}", depName, depVersionRange);
             }
         }
     }
