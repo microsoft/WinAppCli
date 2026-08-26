@@ -120,8 +120,12 @@ public class ProjectRunServiceSingleFileTests : IDisposable
         string configuration = "Debug",
         bool noBuild = false,
         bool noRestore = false,
+        string? injectedRid = null,
         params string[] properties) =>
-        new(configuration, noBuild, noRestore, properties);
+        new(configuration, "x64", ArchitectureIsExplicit: false, noBuild, noRestore, properties)
+        {
+            InjectedRuntimeIdentifier = injectedRid,
+        };
 
     [TestMethod]
     public void BuildPassArguments_UseDotnetBuildWithConfigurationOnly()
@@ -267,4 +271,5 @@ public class ProjectRunServiceSingleFileTests : IDisposable
 
     public TestContext TestContext { get; set; } = null!;
 }
+
 

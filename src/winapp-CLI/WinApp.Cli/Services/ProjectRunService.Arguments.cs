@@ -225,6 +225,8 @@ internal sealed partial class ProjectRunService
             options.Configuration,
         };
 
+        AppendSingleFileRuntimeIdentifier(tokens, options);
+
         if (options.NoRestore)
         {
             tokens.Add("--no-restore");
@@ -276,6 +278,8 @@ internal sealed partial class ProjectRunService
             options.Configuration,
         };
 
+        AppendSingleFileRuntimeIdentifier(tokens, options);
+
         foreach (var property in SingleFileForwardableProperties(options.Properties))
         {
             tokens.Add($"-p:{property}");
@@ -287,6 +291,48 @@ internal sealed partial class ProjectRunService
         }
 
         return WindowsCommandLine.JoinArguments(tokens) ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Builds a cheap, side-effect-free probe that reads ONE evaluated property from a file-based app.
+    /// Deliberately omits the injected RuntimeIdentifier, since the probe exists to discover whether the
+    /// app declares one of its own.
+    /// </summary>
+    internal static string BuildSingleFileProbeArguments(FileInfo singleFile, SingleFileRunOptions options, string propertyName)
+    {
+        var tokens = new List<string>
+        {
+            "build",
+            singleFile.FullName,
+            "-c",
+            options.Configuration,
+        };
+
+        foreach (var property in SingleFileForwardableProperties(options.Properties))
+        {
+            tokens.Add($"-p:{property}");
+        }
+
+        tokens.Add($"--getProperty:{propertyName}");
+
+        return WindowsCommandLine.JoinArguments(tokens) ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Conveys the target architecture to a single-file pass as <c>-r win-&lt;arch&gt;</c>, matching what
+    /// project mode injects. Both single-file passes call this with the same options, so the evaluate
+    /// reads back the same RID-qualified output directory the build wrote. No-op when the app declares
+    /// its own <c>RuntimeIdentifier</c> (see <c>ResolveSingleFileRuntimeIdentifierAsync</c>).
+    /// </summary>
+    private static void AppendSingleFileRuntimeIdentifier(List<string> tokens, SingleFileRunOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(options.InjectedRuntimeIdentifier))
+        {
+            return;
+        }
+
+        tokens.Add("-r");
+        tokens.Add(options.InjectedRuntimeIdentifier);
     }
 
     /// <summary>

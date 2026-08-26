@@ -29,15 +29,12 @@ internal partial class RunCommand
         /// <summary>
         /// Options that describe how to build a <c>.csproj</c> and have no meaning for a file-based app,
         /// mapped to the <c>#:</c> directive that replaces them. A file-based app declares its own target
-        /// framework and platform inline, and winapp must not inject a RuntimeIdentifier or Platform
-        /// because either would relocate the build output away from the path the evaluate pass reads back.
+        /// framework inline, and it is itself the project.
         /// </summary>
         private static readonly (Option Option, string Name, string Replacement)[] SingleFileRejectedOptions =
         [
             (ProjectOption, "--project", "A .cs file-based app IS the project; omit --project."),
             (FrameworkOption, "--framework", "Declare the target framework in the file instead, e.g. '#:property TargetFramework=net10.0-windows10.0.22621.0'."),
-            (ArchOption, "--arch", "Declare the architecture in the file instead, e.g. '#:property RuntimeIdentifier=win-x64'."),
-            (RuntimeOption, "--runtime", "Declare the architecture in the file instead, e.g. '#:property RuntimeIdentifier=win-x64'."),
         ];
 
         /// <summary>
@@ -52,6 +49,8 @@ internal partial class RunCommand
             CancellationToken cancellationToken)
         {
             var configuration = parseResult.GetValue(ConfigurationOption) ?? "Debug";
+            var archOption = parseResult.GetValue(ArchOption);
+            var runtimeOption = parseResult.GetValue(RuntimeOption);
             var noBuild = parseResult.GetValue(NoBuildOption);
             var noRestore = parseResult.GetValue(NoRestoreOption);
             var properties = parseResult.GetValue(PropertyOption) ?? [];
@@ -81,9 +80,17 @@ internal partial class RunCommand
                 return propertyError;
             }
 
+            // Same resolution project mode uses: --runtime's arch beats --arch, else the process arch.
+            if (!TryResolveArchitecture(archOption, runtimeOption, out var architecture, out var archError))
+            {
+                return Fail(archError!, isJson);
+            }
+
+            var architectureIsExplicit = !string.IsNullOrWhiteSpace(archOption) || !string.IsNullOrWhiteSpace(runtimeOption);
+
             if (!isJson && logger.IsEnabled(LogLevel.Information))
             {
-                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Search} {singleFile.Name}  ·  {configuration}  ·  file-based app");
+                ansiConsole.MarkupLineInterpolated($"{UiSymbols.Search} {singleFile.Name}  ·  {configuration} | {architecture}  ·  file-based app");
             }
 
             // Building a bare .cs through a virtual project requires .NET 10 — a higher floor than the
@@ -100,7 +107,7 @@ internal partial class RunCommand
             {
                 outcome = await projectRunService.BuildAndResolveSingleFileAsync(
                     singleFile,
-                    new SingleFileRunOptions(configuration, noBuild, noRestore, properties, isJson),
+                    new SingleFileRunOptions(configuration, architecture, architectureIsExplicit, noBuild, noRestore, properties, isJson),
                     cancellationToken);
             }
             catch (ProjectRunException ex)
@@ -120,6 +127,30 @@ internal partial class RunCommand
 
             var resolution = outcome.Resolution;
             var outputFolder = new DirectoryInfo(resolution.OutputDirectory);
+
+            // Unpackaged: reuse the shared project-mode path so a .cs behaves exactly like a .csproj with
+            // WindowsPackageType=None — runtime provisioning, direct apphost launch, and the same
+            // rejection of packaged-only options. The .cs stands in for the project file; its package list
+            // resolves through `dotnet package list --file`.
+            if (resolution.Packaging == ProjectPackaging.Unpackaged)
+            {
+                var unpackaged = new ProjectRunResolution(
+                    singleFile,
+                    resolution.OutputDirectory,
+                    resolution.RunCommand,
+                    ProjectPackaging.Unpackaged,
+                    resolution.SelfContained,
+                    resolution.Architecture,
+                    resolution.TargetFramework,
+                    noRestore,
+                    resolution.RunArguments);
+
+                return await RunUnpackagedProjectAsync(
+                    unpackaged, singleFile, appArgs,
+                    noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols,
+                    executable, manifest, outputAppXDirectory, isJson,
+                    cancellationToken);
+            }
 
             // Resolve the effective executable ONCE, before the manifest is generated. Generation writes a
             // concrete Executable attribute, so an explicit --executable has to be known here — passing it

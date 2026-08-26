@@ -209,9 +209,9 @@ Describe the package with `#:property` directives in the file. All are optional:
 | `WinAppDescription` | Install/Settings description | the display name |
 
 - **Bring your own manifest** with `--manifest`, `#:property WinAppManifestPath=…`, or a manifest next to the `.cs` named `<filename>.appxmanifest`. Only that per-file name is auto-detected — a shared `Package.appxmanifest` in the folder is ignored, since several `.cs` files can live together. Otherwise one is generated into the build output (with default assets) and refreshed each run.
-- **Always packaged.** `#:property WindowsPackageType=None` is rejected — use `dotnet run` to run without identity.
+- **Packaged and unpackaged both work**, from the effective `WindowsPackageType` — same as project mode. `None` builds, installs the Windows App Runtime, and launches the `.exe` directly; identity options apply to packaged apps only.
 - **`--with-alias` needs an authored manifest.** The generated manifest declares no `uap5:ExecutionAlias`, so alias launch reports `No execution alias found`.
-- **Rejected options** (the file configures itself): `--arch`/`-r` ⇒ `#:property RuntimeIdentifier=win-x64`; `-f` ⇒ `#:property TargetFramework=…`; `--project` ⇒ not applicable. Everything else — `-c`, `-p`, `--no-build`, `--no-restore`, and all the launch/identity options — works as usual.
+- **Rejected options** (the file configures itself): `-f` ⇒ `#:property TargetFramework=…`; `--project` ⇒ not applicable. `--arch`/`-r` work as in project mode and default to the **machine architecture** — required for self-contained WinAppSDK apps, which fail as `AnyCPU`. Everything else works as usual.
 - Requires **.NET SDK 10.0.300+**.
 
 > Two `counter.cs` files in different folders share the default identity `counter`, so the second replaces the first (winapp warns). Set `WinAppPackageName` on one to keep both.
@@ -266,5 +266,6 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 ## CLI reference
 
 Run `winapp <command> --help` for current command options, or `winapp --cli-schema` for the complete machine-readable command schema.
+
 
 

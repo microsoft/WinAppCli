@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using System.Text.Json;
 using System.Xml.Linq;
 using WinApp.Cli.Commands;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
 using WinApp.Cli.Services;
 
@@ -76,7 +77,8 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
 
         _fakeProjectRunService.SingleFileBuildOutcome = new SingleFileBuildOutcome(
             new SingleFileRunResolution(
-                singleFile, outputDirectory.FullName, executableName, "x64", "net10.0-windows10.0.19041.0", selfContained, props), 0);
+                singleFile, outputDirectory.FullName, executableName, "x64", "net10.0-windows10.0.19041.0", selfContained,
+                ProjectPackaging.Packaged, null, null, props), 0);
     }
 
     private static XDocument LoadGeneratedManifest(DirectoryInfo outputDirectory)
@@ -170,12 +172,9 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
     [TestMethod]
     [DataRow("--project", "MyApp", DisplayName = "--project")]
     [DataRow("--framework", "net10.0-windows10.0.22621.0", DisplayName = "--framework")]
-    [DataRow("--arch", "arm64", DisplayName = "--arch")]
-    [DataRow("--runtime", "win-arm64", DisplayName = "--runtime")]
     public async Task SingleFileMode_ProjectOnlyBuildOptions_AreRejectedBeforeBuilding(string option, string value)
     {
-        // A file-based app declares its own TFM/Platform via #:property, and injecting a RID would move
-        // the build output away from the path the evaluate pass reads back.
+        // A file-based app declares its own target framework inline, and it IS the project.
         var (singleFile, outputDir) = CreateSingleFileApp();
         SetOutcome(singleFile, outputDir);
         var command = GetRequiredService<RunCommand>();
@@ -187,20 +186,57 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
     }
 
     [TestMethod]
+    [DataRow("--arch", "arm64", "arm64", DisplayName = "--arch")]
+    [DataRow("--runtime", "win-arm64", "arm64", DisplayName = "--runtime")]
+    public async Task SingleFileMode_ArchitectureOptions_AreHonored(string option, string value, string expected)
+    {
+        // winapp conveys the architecture to the build for a .cs exactly as it does for a .csproj, so
+        // these are supported rather than rejected.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, option, value, "--detach"]);
+
+        Assert.AreEqual(0, exitCode);
+        var options = _fakeProjectRunService.SingleFileBuildOptions.Single();
+        Assert.AreEqual(expected, options.Architecture);
+        Assert.IsTrue(options.ArchitectureIsExplicit, "An explicit request must override a RuntimeIdentifier declared in the file");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_NoArchitectureOption_UsesTheMachineArchitecture()
+    {
+        // Without this a .cs builds AnyCPU, and the Windows App SDK self-contained targets fail with
+        // "WindowsAppSDKSelfContained requires a supported Windows architecture" — so a plain
+        // `winapp run app.cs` could not build a WinUI app at all. Project mode has always injected the RID.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
+
+        Assert.AreEqual(0, exitCode);
+        var options = _fakeProjectRunService.SingleFileBuildOptions.Single();
+        Assert.AreEqual(RunArchHelper.DefaultArchitecture(), options.Architecture);
+        Assert.IsFalse(options.ArchitectureIsExplicit, "The default must defer to a RuntimeIdentifier declared in the file");
+    }
+
+    [TestMethod]
     public async Task SingleFileMode_RejectedOption_EmitsAStructuredErrorUnderJson()
     {
         var (singleFile, outputDir) = CreateSingleFileApp();
         SetOutcome(singleFile, outputDir);
         var command = GetRequiredService<RunCommand>();
 
-        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--arch", "arm64", "--json"]);
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--framework", "net10.0", "--json"]);
 
         Assert.AreEqual(1, exitCode);
         var stdout = TestAnsiConsole.Output.Trim();
         using var document = JsonDocument.Parse(stdout);
         var error = document.RootElement.GetProperty("Error").GetString();
-        StringAssert.Contains(error, "--arch", "The JSON error should name the rejected option");
-        StringAssert.Contains(error, "#:property RuntimeIdentifier", "The JSON error should point at the replacement directive");
+        StringAssert.Contains(error, "--framework", "The JSON error should name the rejected option");
+        StringAssert.Contains(error, "#:property TargetFramework", "The JSON error should point at the replacement directive");
     }
 
     [TestMethod]
@@ -416,7 +452,7 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
         var (singleFile, outputDir) = CreateSingleFileApp();
         _fakeProjectRunService.SingleFileBuildOutcome = new SingleFileBuildOutcome(
             new SingleFileRunResolution(
-                singleFile, outputDir.FullName, "counter.exe", "arm64", "net10.0-windows10.0.22621.0", false,
+                singleFile, outputDir.FullName, "counter.exe", "arm64", "net10.0-windows10.0.22621.0", false, ProjectPackaging.Packaged, null, null,
                 new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)), 0);
         var command = GetRequiredService<RunCommand>();
 
@@ -520,5 +556,6 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
 
     #endregion
 }
+
 
 

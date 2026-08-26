@@ -53,6 +53,7 @@ internal sealed partial class ProjectRunService
         "TargetDir",
         "OutputPath",
         "RunCommand",
+        "RunArguments",
         "AssemblyName",
         "OutputType",
         "WindowsPackageType",
@@ -94,6 +95,95 @@ internal sealed partial class ProjectRunService
             tooOldReason: "cannot resolve packages for .NET file-based apps",
             cancellationToken);
 
+    /// <summary>
+    /// Decides whether to convey the target architecture to both single-file passes as
+    /// <c>-r win-&lt;arch&gt;</c>, and records the decision on the returned options.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Project mode always injects the RID (defaulting to the machine's architecture), which is what
+    /// lets <c>winapp run App.csproj</c> build a self-contained Windows App SDK app with no extra
+    /// switches. Single-file mode has to do the same: without a RID the SDK builds <c>AnyCPU</c>, and the
+    /// Windows App SDK self-contained targets fail with <c>WindowsAppSDKSelfContained requires a
+    /// supported Windows architecture</c> — so a plain <c>winapp run app.cs</c> could not build a WinUI
+    /// app at all.
+    /// </para>
+    /// <para>
+    /// Injecting is safe because BOTH passes receive the identical token, so the evaluate reads back the
+    /// same RID-qualified output directory the build wrote (<c>bin\debug_win-x64\</c>).
+    /// </para>
+    /// <para>
+    /// A command-line <c>-p</c> is a global property that would silently override a
+    /// <c>#:property RuntimeIdentifier</c> in the file, so a cheap pre-evaluate (no build, well under a
+    /// second) checks for one first: an app that declares its own architecture keeps it, unless the user
+    /// asked for a specific one with <c>--arch</c>/<c>--runtime</c>, which wins as it does in project mode.
+    /// </para>
+    /// </remarks>
+    private async Task<SingleFileRunOptions> ResolveSingleFileRuntimeIdentifierAsync(
+        FileInfo singleFile,
+        SingleFileRunOptions options,
+        DirectoryInfo workingDir,
+        CancellationToken cancellationToken)
+    {
+        var requested = RunArchHelper.ToRuntimeIdentifier(options.Architecture);
+
+        // An explicit --arch/--runtime is authoritative; no need to ask what the file declares.
+        if (options.ArchitectureIsExplicit)
+        {
+            return options with { InjectedRuntimeIdentifier = requested };
+        }
+
+        // A user -p:RuntimeIdentifier is theirs to own; never inject over it.
+        if (options.Properties.Any(p => p.StartsWith("RuntimeIdentifier=", StringComparison.OrdinalIgnoreCase)))
+        {
+            return options with { InjectedRuntimeIdentifier = null };
+        }
+
+        var declared = await TryEvaluateSingleFilePropertyAsync(singleFile, options, workingDir, "RuntimeIdentifier", cancellationToken);
+        if (!string.IsNullOrEmpty(declared))
+        {
+            logger.LogDebug(
+                "{UISymbol} '{File}' declares RuntimeIdentifier '{Rid}'; not injecting -r {Requested}.",
+                UiSymbols.Note, singleFile.Name, declared, requested);
+            return options with { InjectedRuntimeIdentifier = null };
+        }
+
+        return options with { InjectedRuntimeIdentifier = requested };
+    }
+
+    /// <summary>
+    /// Reads a single evaluated MSBuild property from a file-based app without building. Returns
+    /// <see langword="null"/> when the evaluation fails, so a probe can never block the run.
+    /// </summary>
+    private async Task<string?> TryEvaluateSingleFilePropertyAsync(
+        FileInfo singleFile,
+        SingleFileRunOptions options,
+        DirectoryInfo workingDir,
+        string propertyName,
+        CancellationToken cancellationToken)
+    {
+        var args = BuildSingleFileProbeArguments(singleFile, options, propertyName);
+        logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(args));
+
+        try
+        {
+            var (exitCode, stdout, _) = await dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken);
+            if (exitCode != 0)
+            {
+                return null;
+            }
+
+            // A single --getProperty returns the raw value rather than JSON; the reader handles both.
+            return MsBuildPropertyReader.Parse(stdout, [propertyName]).TryGetValue(propertyName, out var value)
+                ? value.Trim()
+                : null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+    }
+
     /// <inheritdoc />
     public async Task<SingleFileBuildOutcome> BuildAndResolveSingleFileAsync(
         FileInfo singleFile,
@@ -103,6 +193,8 @@ internal sealed partial class ProjectRunService
         // MSBuildProjectDirectory for a file-based app is the .cs file's OWN directory (not the temp
         // output), so building from there keeps any Directory.Build.props next to the file in scope.
         var workingDir = singleFile.Directory ?? new DirectoryInfo(Directory.GetCurrentDirectory());
+
+        options = await ResolveSingleFileRuntimeIdentifierAsync(singleFile, options, workingDir, cancellationToken);
 
         if (!options.NoBuild)
         {
@@ -150,16 +242,12 @@ internal sealed partial class ProjectRunService
                 $"'{singleFile.Name}' is not a runnable app (OutputType='{outputType}'). Add '#:property OutputType=WinExe' (or 'Exe') to the file.");
         }
 
-        // Single-file mode registers MSIX identity — that is the whole point of running a .cs through
-        // winapp. An explicitly unpackaged app has no identity to register, and the unpackaged launch path
-        // resolves the Windows App Runtime through 'dotnet list package' against a PROJECT file, which a
-        // .cs has none of. Reject clearly rather than fall into a path that cannot work.
-        if (string.Equals(GetProp(props, "WindowsPackageType"), "None", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ProjectRunException(
-                $"'{singleFile.Name}' declares WindowsPackageType=None, but 'winapp run' builds a .cs file-based app as a PACKAGED app with identity. " +
-                "Remove '#:property WindowsPackageType=None' (and any -p:WindowsPackageType=None), or run the app without identity using 'dotnet run'.");
-        }
+        // Packaged vs unpackaged is read from the effective WindowsPackageType, exactly as project mode
+        // determines it. An unpackaged app has no identity to register, so it launches its apphost
+        // directly through the shared unpackaged path.
+        var packaging = string.Equals(GetProp(props, "WindowsPackageType"), "None", StringComparison.OrdinalIgnoreCase)
+            ? ProjectPackaging.Unpackaged
+            : ProjectPackaging.Packaged;
 
         // TargetDir and OutputPath both evaluate to the same absolute, trailing-slash path for a
         // file-based app. Prefer TargetDir (matching project mode) and fall back to OutputPath.
@@ -186,7 +274,24 @@ internal sealed partial class ProjectRunService
                 $"The build output directory for '{singleFile.Name}' does not exist ({outputDirectory}). {reason}");
         }
 
-        var executableName = ResolveSingleFileExecutableName(props, singleFile, outputDirectory);
+        var runCommand = GetProp(props, "RunCommand");
+        var runArguments = GetProp(props, "RunArguments");
+
+        if (packaging == ProjectPackaging.Unpackaged && !RunCommandIsLaunchable(runCommand))
+        {
+            var reason = options.NoBuild
+                ? $"The runnable executable was not found under '{outputDirectory}'. Remove --no-build so the app is built first."
+                : "The build did not produce a runnable executable (RunCommand).";
+            throw new ProjectRunException(
+                $"'{singleFile.Name}' resolves to an unpackaged app but no launchable executable is available. {reason}");
+        }
+
+        // Only a packaged app needs a concrete Executable for its manifest; an unpackaged one launches
+        // RunCommand directly, and probing for an apphost that a non-apphost build never produces would
+        // fail the run for no reason.
+        var executableName = packaging == ProjectPackaging.Packaged
+            ? ResolveSingleFileExecutableName(props, singleFile, outputDirectory)
+            : Path.GetFileName(runCommand);
 
         return new SingleFileBuildOutcome(
             new SingleFileRunResolution(
@@ -196,6 +301,9 @@ internal sealed partial class ProjectRunService
                 ResolveSingleFileArchitecture(props),
                 GetProp(props, "TargetFramework") is { Length: > 0 } tfm ? tfm : null,
                 string.Equals(GetProp(props, "WindowsAppSDKSelfContained"), "true", StringComparison.OrdinalIgnoreCase),
+                packaging,
+                string.IsNullOrEmpty(runCommand) ? null : runCommand,
+                string.IsNullOrEmpty(runArguments) ? null : runArguments,
                 props),
             0);
     }

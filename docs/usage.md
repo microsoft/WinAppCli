@@ -877,17 +877,25 @@ assets, and refreshed on every run.
 > declare — it reports `No execution alias found`. Author your own manifest with an alias (see below)
 > to use it.
 
-The project-mode build options do **not** apply, because a file-based app configures itself. They are
+Two project-mode options do **not** apply, because a file-based app configures itself. They are
 rejected with a message naming the directive to use instead:
 
 | Option | Use instead |
 |--------|-------------|
-| `--arch`, `-r/--runtime` | `#:property RuntimeIdentifier=win-x64` |
 | `-f/--framework` | `#:property TargetFramework=net10.0-windows10.0.22621.0` |
 | `--project` | nothing — the `.cs` file *is* the project |
 
-Single-file mode always runs the app **packaged**. `#:property WindowsPackageType=None` is rejected;
-use `dotnet run` if you want to run the file without identity.
+`--arch` and `-r/--runtime` work as they do in project mode. When you don't pass either, winapp builds
+for **your machine's architecture** — which is what a self-contained Windows App SDK app needs, since
+without it the SDK builds `AnyCPU` and fails with `WindowsAppSDKSelfContained requires a supported
+Windows architecture`. A `#:property RuntimeIdentifier=win-arm64` in the file is respected; an explicit
+`--arch`/`--runtime` overrides it.
+
+**Packaged and unpackaged both work**, detected from the effective `WindowsPackageType` exactly as in
+project mode: the default registers a loose layout and launches via AUMID, while
+`#:property WindowsPackageType=None` builds the app, installs the matching Windows App Runtime, and
+launches the `.exe` directly. The identity options (`--no-launch`, `--with-alias`, `--clean`,
+`--unregister-on-exit`, `--manifest`, `--output-appx-directory`) apply to packaged apps only.
 
 Single-file mode requires the **.NET SDK 10.0.300 or newer**.
 

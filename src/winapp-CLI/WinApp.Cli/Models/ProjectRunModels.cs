@@ -138,16 +138,35 @@ internal sealed record ProjectBuildOutcome(ProjectRunResolution? Resolution, int
 /// </para>
 /// </summary>
 /// <param name="Configuration">Build configuration (default <c>Debug</c>). File-based apps write to <c>bin\debug</c>/<c>bin\release</c>.</param>
+/// <param name="Architecture">
+/// The target architecture winapp conveys as <c>-r win-&lt;arch&gt;</c> when the app does not declare a
+/// <c>RuntimeIdentifier</c> of its own. Resolved from <c>--arch</c>/<c>--runtime</c>, else the current
+/// process architecture.
+/// </param>
+/// <param name="ArchitectureIsExplicit">
+/// True when <see cref="Architecture"/> came from <c>--arch</c>/<c>--runtime</c> rather than the process
+/// default. An explicit request overrides a <c>#:property RuntimeIdentifier</c> in the file (matching
+/// project mode, where a dedicated switch beats an in-project value); the default defers to it.
+/// </param>
 /// <param name="NoBuild">Skip the build and evaluate the existing output only.</param>
 /// <param name="NoRestore">Pass <c>--no-restore</c> to the build.</param>
 /// <param name="Properties">Raw repeatable <c>-p Name=Value</c> passthrough, mirrored across the build and evaluate passes.</param>
 /// <param name="Json">When true, suppress human-readable stdout and route build diagnostics to stderr so stdout stays pure JSON.</param>
 internal sealed record SingleFileRunOptions(
     string Configuration,
+    string Architecture,
+    bool ArchitectureIsExplicit,
     bool NoBuild,
     bool NoRestore,
     IReadOnlyList<string> Properties,
-    bool Json = false);
+    bool Json = false)
+{
+    /// <summary>
+    /// The <c>RuntimeIdentifier</c> to inject into both passes, or <see langword="null"/> to inject none
+    /// because the app declares its own. Resolved by the build service after a cheap pre-evaluate.
+    /// </summary>
+    public string? InjectedRuntimeIdentifier { get; init; }
+}
 
 /// <summary>
 /// The build-and-resolve result for a <c>.cs</c> file-based app: the evaluated output folder, the
@@ -160,6 +179,9 @@ internal sealed record SingleFileRunOptions(
 /// <param name="Architecture">The architecture the app was built for (<c>x64</c>/<c>arm64</c>/<c>x86</c>), resolved from the app's own <c>RuntimeIdentifier</c>/<c>Platform</c>. Threaded into Windows App Runtime provisioning so a cross-architecture app gets matching runtime packages.</param>
 /// <param name="TargetFramework">The TFM the app was built for, threaded into runtime provisioning so the Windows App SDK version resolves from the right framework; null when unresolved.</param>
 /// <param name="SelfContained">True when <c>WindowsAppSDKSelfContained=true</c> — the app carries its own Windows App SDK, so no framework dependency is added and no runtime is provisioned.</param>
+/// <param name="Packaging">Packaged (register a loose layout and launch via AUMID) vs unpackaged (launch the apphost directly), from the effective <c>WindowsPackageType</c>.</param>
+/// <param name="RunCommand">The launcher for an unpackaged launch: an apphost <c>.exe</c>, or a bare command (e.g. <c>dotnet</c>) paired with <see cref="RunArguments"/>; null when not produced.</param>
+/// <param name="RunArguments">Leading launch arguments MSBuild pairs with a non-apphost <see cref="RunCommand"/>; prepended before the user's app args.</param>
 /// <param name="Properties">Every evaluated MSBuild property from the <c>--getProperty</c> pass, keyed case-insensitively.</param>
 internal sealed record SingleFileRunResolution(
     FileInfo SingleFile,
@@ -168,6 +190,9 @@ internal sealed record SingleFileRunResolution(
     string Architecture,
     string? TargetFramework,
     bool SelfContained,
+    ProjectPackaging Packaging,
+    string? RunCommand,
+    string? RunArguments,
     IReadOnlyDictionary<string, string> Properties);
 
 /// <summary>
