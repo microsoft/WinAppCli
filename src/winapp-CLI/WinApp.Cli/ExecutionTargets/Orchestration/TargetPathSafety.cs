@@ -116,6 +116,22 @@ internal static class TargetPathSafety
             || candidate[rootPath.Length] == Path.AltDirectorySeparatorChar;
     }
 
+    /// <summary>
+    /// Whether two paths name the same location, after canonicalizing case, trailing separators,
+    /// and relative segments.
+    /// </summary>
+    /// <remarks>
+    /// For comparing two values this code already trusts — for example a location it resolved and
+    /// persisted itself against a value an OS query just reported — never for validating an
+    /// untrusted path, which is what <see cref="CombineInsideRoot"/> and
+    /// <see cref="EnsureSafeSegment"/> are for. Ordinal and case-insensitive to match NTFS.
+    /// </remarks>
+    public static bool PathsEqual(string a, string b) =>
+        string.Equals(
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(a)),
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(b)),
+            StringComparison.OrdinalIgnoreCase);
+
     private static ExecutionTargetException Rejected(string? segment, string reason) =>
         ExecutionTargetException.Create(
             ExecutionTargetErrorCodes.TargetAmbiguous,

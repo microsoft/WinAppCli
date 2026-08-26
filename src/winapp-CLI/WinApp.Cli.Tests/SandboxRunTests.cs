@@ -419,6 +419,10 @@ public class SandboxRunTests
 
         harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
 
+        // The guest's simulated live registration: genuinely this deployment's own layout, so its
+        // own redeploy below is allowed to stop it.
+        harness.AppLauncher.FakeRegisteredLocation = deployment.LayoutPath;
+
         // Unchanged rerun: this used to leave the previous instance running unstopped, which is
         // exactly what let a second one launch alongside it.
         await harness.Runner.DeployAsync(
@@ -438,6 +442,13 @@ public class SandboxRunTests
             harness.AppLauncher.StopPackageCalls);
     }
 
+    /// <summary>
+    /// Two deployments built from different source paths (so different deployment IDs) can share
+    /// a package identity. Deployment B recording ownership under the same family as deployment A
+    /// -- because, for example, its own registration attempt failed after B optimistically
+    /// committed the ownership record -- must never let B's retry terminate A's genuinely running,
+    /// unrelated application.
+    /// </summary>
     [TestMethod]
     public async Task Deploy_NeverStopsAnUnrelatedDeploymentsPackage()
     {
@@ -445,16 +456,33 @@ public class SandboxRunTests
 
         await using var harness = new Harness(_guestManaged, _stateRoot);
 
+        // Deployment A: registered and genuinely running from its own layout.
         var depA = await harness.Runner.DeployAsync(
             harness.Target, "dep-a", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
         harness.Runner.CommitPackage(depA.State, Ownership(depA.LayoutPath));
+        harness.AppLauncher.FakeRegisteredLocation = depA.LayoutPath;
 
-        // A completely different deployment redeploying must never touch dep-a's package: unrelated
-        // applications must survive untouched.
-        await harness.Runner.DeployAsync(
+        // Deployment B: a different source path, same package identity (Ownership() always uses
+        // the same family name), recording ownership from *its own* layout -- not A's -- exactly
+        // as it would if B's own registration attempt had failed after this optimistic commit.
+        var depB = await harness.Runner.DeployAsync(
             harness.Target, "dep-b", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+        harness.Runner.CommitPackage(depB.State, Ownership(depB.LayoutPath));
 
+        await WriteHostFileAsync("app.exe", "v2");
+
+        // B's retry must refuse -- the family is currently registered from A's layout, not B's --
+        // rather than resolve the collision by terminating whatever currently holds the name.
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
+            harness.Runner.DeployAsync(
+                harness.Target, "dep-b", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.StaleHandle, failure.Error.Code);
+
+        // A's legitimate registration was never touched, and B never mutated its own payload either.
         Assert.AreEqual(0, harness.AppLauncher.StopPackageCalls.Count);
+        Assert.AreEqual("v1", await File.ReadAllTextAsync(
+            TestPaths.Under(_guestManaged, "deployments", "dep-b", "app.exe"), TestContext.CancellationToken));
     }
 
     [TestMethod]
@@ -468,6 +496,7 @@ public class SandboxRunTests
             harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
 
         harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
+        harness.AppLauncher.FakeRegisteredLocation = deployment.LayoutPath;
 
         await WriteHostFileAsync("app.exe", "v2");
         harness.AppLauncher.StopPackageProcessesFailure = new InvalidOperationException("still running");
@@ -604,6 +633,7 @@ public class SandboxRunTests
 
         var owned = harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
         Assert.IsFalse(owned.Dirty);
+        harness.AppLauncher.FakeRegisteredLocation = deployment.LayoutPath;
 
         // A registration layout the first run produced, with more than one entry so a partial,
         // non-transactional delete has something to prove: one file survives the interrupted
@@ -699,7 +729,7 @@ public class SandboxRunTests
 
         // A query failure (transient COM error, denied inventory read) is not the same as a query
         // that ran and confirmed nothing is registered. It must never be read as "safe to proceed".
-        harness.AppLauncher.GetPackageFullNameFailure = new InvalidOperationException("inventory unavailable");
+        harness.AppLauncher.GetRegisteredPackageFailure = new InvalidOperationException("inventory unavailable");
 
         var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
             harness.Runner.DeployAsync(

@@ -113,6 +113,15 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
     /// reused by an unrelated process. The process-ID path exists for the unpackaged direct-launch
     /// case, where PID plus start time is the only identity available, and is verified the same way
     /// on the guest side before anything is touched.
+    /// <para>
+    /// This deployment's own recorded <see cref="PackageOwnership.RegisteredLocation"/> is sent
+    /// alongside the family name, because the family name alone does not prove this deployment owns
+    /// what is currently registered under it: two deployments built from different source paths can
+    /// share the same package identity, and only one of them can be genuinely registered at a time.
+    /// The guest verifies the currently registered package's own install location against this
+    /// value before terminating anything, refusing rather than stopping a different deployment's
+    /// legitimately running application.
+    /// </para>
     /// </remarks>
     private static async Task StopPreviousInstanceAsync(
         PreparedTarget target,
@@ -126,9 +135,11 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
             return;
         }
 
-        if (existing.Package is { PackageFamilyName: { } familyName })
+        if (existing.Package is { PackageFamilyName: { } familyName, RegisteredLocation: { } registeredLocation })
         {
-            await target.Channel.StopPackageProcessesAsync(familyName, cancellationToken).ConfigureAwait(false);
+            await target.Channel
+                .StopPackageProcessesAsync(familyName, registeredLocation, cancellationToken)
+                .ConfigureAwait(false);
             return;
         }
 
