@@ -13,99 +13,58 @@ project in a temp directory, or test a command's real behavior. You do not
 implement the feature or touch the repo/spec — but running cheap, scoped
 experiments in temp directories to confirm how things actually work is expected.
 
-## Header line
+## Internal output
 
-Start with exactly one line:
+Sub-agent output is synthesis input. Metadata may stay internal, but the
+orchestrator must rewrite surviving findings for a reader with no prior context.
 
-```
-# <dimension name>: <N> findings
-```
-
-Where `<dimension name>` is one of: `necessity-and-scope`,
-`approach-and-alternatives`, `feasibility-vs-reality`,
-`risks-unknowns-edge-cases`, `dx-and-user-impact`, `multi-model`.
-
-## Bottom line
-
-Immediately after the header, emit exactly one line:
-
-```
-Bottom line: <one-sentence assessment for this dimension>
-```
-
-This is required **even when you have zero findings** — a design review's job is
-to reach a judgment, and "the approach is the simplest reasonable one; no better
-alternative found" is a complete, valuable result. Do not manufacture a finding
-just to fill space (see *No quotas* below).
-
-## Per-finding block
-
-Each finding is a level-2 heading anchored to the **part of the spec** it is
-about, followed by labeled bullets:
+Start with `# <dimension name>: <N> findings`, then
+`Bottom line: <one-sentence assessment>`. Use this block for each finding:
 
 ```markdown
-## <spec section / heading / quoted claim>
+## <plain finding title>
 - **Severity**: critical | high | medium | low
 - **Confidence**: high | medium | low
 - **Domain**: <dimension name>
-- **Finding**: <one-line statement of the concern>
-- **Evidence**: <what your INDEPENDENT research found. Prefer an experiment you
-  ran ("invoked <tool> on a throwaway input and its output was …", "built a
-  throwaway project in a temp dir and observed …"); otherwise cite real files as
-  `path:line`, authoritative vendor docs, repo patterns, or ecosystem facts.
-  Do NOT cite the spec as evidence for itself.>
-- **Recommendation**: <concrete next step — e.g. descope, stage, use existing
-  helper X, prototype Y first, adopt alternative Z, answer question Q>
+- **Spec location**: <section or quoted claim>
+- **What is wrong**: <the design defect>
+- **Show me**: <smallest independent example; prefer input -> actual -> expected>
+- **Why it matters**: <concrete user, delivery, or maintenance consequence>
+- **Smallest fix**: <least-complex design change>
 ```
 
-Notes:
+`Show me` must come from independent research, not the spec asserting itself.
+Prefer an experiment you ran; otherwise cite authoritative docs or real
+`path:line` evidence. The hierarchy is **experiment > authoritative vendor docs
+> code-read > spec assertion (never sufficient alone)**. Keep experiments cheap,
+scoped, and outside the repo tree. Define unavoidable jargon at first use. If a
+claim is load-bearing but still unproven, show what is unknown and put the exact
+closing experiment under `## Proofs required`; otherwise lower confidence or drop
+an issue that cannot be demonstrated.
 
-- The anchor identifies the spec claim/section under review (e.g.
-  `§Approach — "shell out to makeappx with --foo"`). Keep it short.
-- **Evidence must come from reality, not the spec**, and for *mechanical* claims
-  (tool output, API/command behavior, file/artifact format, build step) a cheap
-  **experiment you ran** is the strongest evidence — reach for it before a
-  code-read. Evidence hierarchy: **experiment > authoritative vendor docs >
-  code-read > spec assertion (never sufficient alone).** If you could not verify
-  a load-bearing claim, that is itself a finding (mark `Confidence: low` or
-  `medium` and say what you could not confirm) — see `feasibility-vs-reality`.
-- Experiments are expected but must stay **cheap, scoped, and confined to temp
-  directories** — never modify the repo working tree or the spec.
-- Emit discontiguous concerns as separate findings.
-
-## Open questions
-
-After the findings, include a section listing questions the spec does **not**
-answer that must be resolved **before** implementation starts:
+After findings, add only these internal sections when they have content:
 
 ```markdown
-## Open questions
-- <a decision or unknown that blocks or materially shapes the build>
-- <e.g., "Does Windows App SDK expose an API for X, or is a P/Invoke required?">
-```
+## Open decisions
+- <decision that blocks or materially shapes implementation>
 
-Omit the bullets if there are genuinely none. Do not pad.
+## Proofs required
+- <unclosed assumption> — <specific experiment that would close it>
 
-## Trailing "what I checked" note
-
-After the open questions, include:
-
-```markdown
 ## What I checked
-- <one bullet per area you independently researched, e.g. "Read
-  MsixService.cs pack path to confirm makeappx invocation">
-- <e.g., "Grepped Commands/ for an existing `store` subcommand">
-- <e.g., "Checked Windows App SDK docs for a Share Target API">
+- <repo area, vendor source, or experiment independently examined>
 ```
 
-This appears in the orchestrator's `Coverage notes` section so the reader can
-see the depth of research behind the verdict — not just the verdict.
+## Junior-reader and signal-to-noise gate
 
-## The Team Lead Test (mandatory signal-to-noise gate)
+Before emitting a finding, ask:
 
-Before emitting a finding, ask: *"Would a senior maintainer of this repo raise
-this in a design review, or wave it off as noise?"* If you would wave it off,
-do not emit it.
+> Could a junior developer with no prior conversation understand what is wrong,
+> see the evidence, understand the consequence, and apply the smallest fix after
+> one read?
+
+Also ask whether a senior maintainer would raise it in a design review or wave it
+off as noise. If either test fails, rewrite it concretely or drop it.
 
 Specifically, **drop**:
 
@@ -125,6 +84,21 @@ Specifically, **drop**:
 - Real risks: compat/migration breakage, missing edge cases, release blockers.
 - CLI UX / API incoherence users will trip over, or breaking changes.
 - Unanswered questions that genuinely block implementation.
+
+## Compatibility boundary
+
+Backward compatibility starts at the latest supported published release, not an
+earlier commit, review round, current PR implementation, or unreleased release
+work. Before reporting a compatibility problem or proposing an alias, fallback,
+migration path, legacy branch, or compatibility abstraction, identify:
+
+1. The supported published version containing the behavior.
+2. The public contract or persisted user data involved.
+3. A real external consumer that would break.
+
+If any is missing, prefer a clean replacement and do not emit a compatibility
+finding. A preview contract counts only when the project publicly committed to
+support it.
 
 ## No quotas — a clean result is a valid result
 

@@ -2,10 +2,9 @@
 
 Apply `_shared-contract.md`. Set `Domain: necessity-and-simplicity`.
 
-You ask the question the other dimensions skip: **should this exist at all, and
-is it as small as it could be?** *Can merge* ≠ *should merge*. You are the one
-sub-agent whose job is to say "this is well-built but shouldn't ship as-is" when
-that is genuinely true.
+`spec-review` owns feature necessity and scope before implementation. Reopen that
+question here only when the implementation reveals unexpected cost,
+overengineering, or review-driven creep. *Can merge* does not mean *should merge*.
 
 ## When you apply
 
@@ -52,6 +51,10 @@ additions — and the next reviewer treats all nine as settled design.
 - **Say when to stop.** If what remains is medium/low polish, state in
   `## What I checked` that the PR is converged and further rounds will add
   complexity rather than quality.
+
+Describe the unnecessary surface and its cost, not the review round or comment
+that introduced it. Review provenance does not belong in production comments or
+documentation.
 
 ## State a conclusion either way
 

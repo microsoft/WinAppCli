@@ -281,7 +281,7 @@ Install it from the [Visual Studio Marketplace](https://marketplace.visualstudio
 
 ## 🤖 Using with AI Coding Agents
 
-winapp ships a single plugin (at [`plugins/winapp/`](./plugins/winapp/)) — an agent plus skills — distributed to GitHub Copilot and Claude Code through their respective plugin marketplaces.
+winapp ships a single plugin (at [`plugins/winapp/`](./plugins/winapp/)) — an agent plus skills — that conforms to the [Agent Plugins 1.0](https://agent-plugins.org/) specification and is distributed to GitHub Copilot and Claude Code through their respective plugin marketplaces.
 
 **GitHub Copilot CLI** (global — works across all projects)
 ```bash
