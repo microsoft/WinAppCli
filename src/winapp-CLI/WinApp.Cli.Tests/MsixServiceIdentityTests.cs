@@ -529,8 +529,32 @@ public class MsixServiceIdentityTests : BaseCommandTests
         Assert.DoesNotContain("x-generate", written, "x-generate language token should be resolved");
     }
 
-    // ---- AddSparseIdentityAsync workflow ------------------------------------------
+    [TestMethod]
+    public async Task AddLooseLayoutIdentityAsync_NonCanonicalManifestName_IsRenamedToAppxManifestXml()
+    {
+        // Windows rejects a registered loose layout whose manifest is not named AppxManifest.xml
+        // ("An invalid manifest file name was passed to this function"), so ANY authoring-side
+        // *.appxmanifest — not only the conventional Package.appxmanifest — must be normalized on copy.
+        // A per-file name like counter.appxmanifest is what a .NET file-based app authors next to its .cs.
+        var srcDir = _tempDirectory.CreateSubdirectory("perfile-input");
+        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "counter.appxmanifest"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildRawManifest(), TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(srcDir.FullName, "TestApp.exe"), "not-a-real-pe", TestContext.CancellationToken);
 
+        var output = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "perfile-layout"));
+
+        var result = await _msixService.AddLooseLayoutIdentityAsync(
+            srcManifest, srcDir, output, TestTaskContext, cancellationToken: TestContext.CancellationToken);
+
+        Assert.AreEqual("TestApp", result.PackageName);
+        Assert.IsTrue(File.Exists(Path.Combine(output.FullName, "appxmanifest.xml")),
+            "A per-file *.appxmanifest must land in the layout as appxmanifest.xml");
+        Assert.IsFalse(File.Exists(Path.Combine(output.FullName, "counter.appxmanifest")),
+            "The non-canonical name must not survive in the layout");
+        Assert.HasCount(1, _fakeRegistration.RegisterLooseLayoutCalls);
+    }
+
+    // ---- AddSparseIdentityAsync workflow ------------------------------------------
     private (FileInfo manifest, string exePath) ArrangeSparseInputs()
     {
         // Manifest + assets live in one directory; the executable in another, so the

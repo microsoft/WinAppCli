@@ -1864,11 +1864,11 @@
       }
     },
     "run": {
-      "description": "Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.",
+      "description": "Builds and runs a Windows app from a .cs file-based app, a .csproj/.sln, or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in single-file mode, builds the .cs, generates a manifest from its #:property directives, and launches it with package identity; in folder mode, creates a debug-signed layout, registers the package, and launches it.",
       "hidden": false,
       "arguments": {
         "input": {
-          "description": "Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory).",
+          "description": "Path to the app to run: a build-output folder, a .cs .NET file-based app, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory).",
           "order": 0,
           "hidden": false,
           "valueType": "System.IO.FileSystemInfo",

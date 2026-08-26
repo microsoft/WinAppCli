@@ -1,0 +1,318 @@
+// Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
+// Licensed under the MIT License.
+
+using System.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Spectre.Console;
+using WinApp.Cli.Helpers;
+using WinApp.Cli.Models;
+
+namespace WinApp.Cli.Services;
+
+/// <summary>
+/// Single-file mode for <see cref="ProjectRunService" />: building and evaluating a .NET
+/// <b>file-based app</b> — a single <c>.cs</c> the SDK compiles through a virtual
+/// <c>&lt;stem&gt;.cs.csproj</c> configured by <c>#:</c> directives.
+/// </summary>
+/// <remarks>
+/// <para>
+/// This deliberately does NOT reuse the <c>.csproj</c> build/evaluate passes, for two reasons that are
+/// both properties of the SDK rather than style choices:
+/// </para>
+/// <list type="number">
+///   <item>
+///   <b>The evaluate pass must be <c>dotnet build</c>, not <c>dotnet msbuild</c>.</b> MSBuild has no
+///   <c>.cs</c> project loader — the virtual-project synthesis lives in the <c>dotnet build</c>/
+///   <c>dotnet run</c> CLI path — so <c>dotnet msbuild counter.cs --getProperty:X</c> fails with
+///   <c>MSB4025: The project file could not be loaded</c>. <c>dotnet build counter.cs --getProperty:X</c>
+///   evaluates WITHOUT building, so the evaluate stays as cheap as the <c>.csproj</c> one.
+///   </item>
+///   <item>
+///   <b>No RuntimeIdentifier or Platform is injected.</b> A file-based app declares its own
+///   <c>TargetFramework</c>/<c>Platform</c> via <c>#:property</c>. Injecting <c>-r win-&lt;arch&gt;</c>
+///   would move the build output away from the path the evaluate reports, so the two passes could
+///   disagree about where the app is. The run handler rejects <c>--arch</c>/<c>--runtime</c>/
+///   <c>--framework</c> and points at the equivalent <c>#:property</c> instead.
+///   </item>
+/// </list>
+/// <para>
+/// Both passes are otherwise fed IDENTICAL tokens (Configuration + user <c>-p</c>) so the evaluate reads
+/// the output the build wrote.
+/// </para>
+/// </remarks>
+internal sealed partial class ProjectRunService
+{
+    /// <summary>
+    /// MSBuild properties requested from the single-file evaluate pass (always ≥2 → JSON output).
+    /// Beyond the launch/packaging properties, this requests the five <c>WinApp*</c> manifest-inference
+    /// properties plus <c>Version</c> and <c>WinAppManifestPath</c>. Undeclared properties evaluate to an
+    /// empty string rather than being omitted, so the inference only needs null-or-empty checks.
+    /// </summary>
+    internal static readonly string[] SingleFileRequestedProperties =
+    [
+        "TargetDir",
+        "OutputPath",
+        "RunCommand",
+        "AssemblyName",
+        "OutputType",
+        "WindowsPackageType",
+        "WindowsAppSDKSelfContained",
+        // Manifest inference. WinAppManifestPath mirrors the NuGet targets' escape hatch so a consumer can
+        // point single-file mode at a hand-authored manifest from the .cs itself.
+        "WinAppManifestPath",
+        "WinAppPackageName",
+        "WinAppDisplayName",
+        "WinAppPublisher",
+        "WinAppVersion",
+        "WinAppDescription",
+        // Read $(Version) — NOT $(VersionPrefix). Setting Version explicitly leaves VersionPrefix EMPTY,
+        // so reading VersionPrefix first would silently discard the user's version.
+        "Version",
+    ];
+
+    /// <inheritdoc />
+    public async Task<string?> CheckSingleFileSdkAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken)
+    {
+        const string upgradeHint =
+            "Running a .NET file-based app (a single .cs) requires .NET SDK 10.0.100 or newer. Install or update it from https://aka.ms/dotnet/download.";
+
+        int exitCode;
+        string output;
+        try
+        {
+            (exitCode, output, _) = await dotNetService.RunDotnetCommandAsync(workingDirectory, "--version", cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Honor Ctrl+C during the SDK probe instead of reporting it as a missing SDK.
+            throw;
+        }
+        catch (Exception)
+        {
+            // dotnet not on PATH → Process.Start throws.
+            return $"The .NET SDK was not found. {upgradeHint}";
+        }
+
+        if (exitCode != 0)
+        {
+            return $"Could not determine the .NET SDK version ('dotnet --version' failed). {upgradeHint}";
+        }
+
+        var versionLine = output
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault();
+
+        if (!string.IsNullOrEmpty(versionLine) && TryParseSdkVersion(versionLine, out var major, out var minor, out var patch))
+        {
+            var capable = major > 10 || (major == 10 && (minor > 0 || (minor == 0 && patch >= 100)));
+            if (!capable)
+            {
+                return $"The .NET SDK {versionLine} cannot build .NET file-based apps. {upgradeHint}";
+            }
+        }
+
+        // Present but unparseable version → assume a modern SDK; the build surfaces a real error if the
+        // installed SDK genuinely cannot build a bare .cs.
+        return null;
+    }
+
+    /// <inheritdoc />
+    public async Task<SingleFileBuildOutcome> BuildAndResolveSingleFileAsync(
+        FileInfo singleFile,
+        SingleFileRunOptions options,
+        CancellationToken cancellationToken)
+    {
+        // MSBuildProjectDirectory for a file-based app is the .cs file's OWN directory (not the temp
+        // output), so building from there keeps any Directory.Build.props next to the file in scope.
+        var workingDir = singleFile.Directory ?? new DirectoryInfo(Directory.GetCurrentDirectory());
+
+        if (!options.NoBuild)
+        {
+            var buildExit = await RunSingleFileBuildPassAsync(singleFile, options, workingDir, cancellationToken);
+            if (buildExit != 0)
+            {
+                // dotnet's diagnostics were already streamed live; log the summary and propagate the code.
+                logger.LogError("{UISymbol} Build failed for {File} (exit code {ExitCode}).", UiSymbols.Error, singleFile.Name, buildExit);
+                return new SingleFileBuildOutcome(null, buildExit);
+            }
+        }
+
+        var evaluateArgs = BuildSingleFileEvaluateArguments(singleFile, options);
+        logger.LogDebug("{UISymbol} dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(evaluateArgs));
+
+        var (exitCode, stdout, stderr) = await dotNetService.RunDotnetCommandAsync(workingDir, evaluateArgs, cancellationToken);
+
+        if (exitCode != 0)
+        {
+            logger.LogError("{UISymbol} Could not evaluate properties for {File} (exit code {ExitCode}).", UiSymbols.Error, singleFile.Name, exitCode);
+            var combined = string.Join(Environment.NewLine,
+                new[] { stdout, stderr }.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.TrimEnd()));
+            if (!string.IsNullOrWhiteSpace(combined))
+            {
+                // Keep stdout clean for --json consumers; route diagnostics to stderr instead.
+                if (options.Json)
+                {
+                    Console.Error.WriteLine(combined);
+                }
+                else
+                {
+                    ansiConsole.WriteLine(combined);
+                }
+            }
+
+            return new SingleFileBuildOutcome(null, exitCode);
+        }
+
+        var props = MsBuildPropertyReader.Parse(stdout, SingleFileRequestedProperties);
+
+        var outputType = GetProp(props, "OutputType");
+        if (!string.IsNullOrEmpty(outputType) && !ProjectDetectionService.IsExecutableOutputType(outputType))
+        {
+            throw new ProjectRunException(
+                $"'{singleFile.Name}' is not a runnable app (OutputType='{outputType}'). Add '#:property OutputType=WinExe' (or 'Exe') to the file.");
+        }
+
+        // Single-file mode registers MSIX identity — that is the whole point of running a .cs through
+        // winapp. An explicitly unpackaged app has no identity to register, and the unpackaged launch path
+        // resolves the Windows App Runtime through 'dotnet list package' against a PROJECT file, which a
+        // .cs has none of. Reject clearly rather than fall into a path that cannot work.
+        if (string.Equals(GetProp(props, "WindowsPackageType"), "None", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ProjectRunException(
+                $"'{singleFile.Name}' declares WindowsPackageType=None, but 'winapp run' builds a .cs file-based app as a PACKAGED app with identity. " +
+                "Remove '#:property WindowsPackageType=None' (and any -p:WindowsPackageType=None), or run the app without identity using 'dotnet run'.");
+        }
+
+        // TargetDir and OutputPath both evaluate to the same absolute, trailing-slash path for a
+        // file-based app. Prefer TargetDir (matching project mode) and fall back to OutputPath.
+        var outputDirectory = GetProp(props, "TargetDir");
+        if (string.IsNullOrEmpty(outputDirectory))
+        {
+            outputDirectory = GetProp(props, "OutputPath");
+        }
+
+        if (string.IsNullOrEmpty(outputDirectory))
+        {
+            throw new ProjectRunException(
+                $"Could not resolve the build output directory for '{singleFile.Name}'. Ensure it builds successfully with 'dotnet build {singleFile.Name}'.");
+        }
+
+        outputDirectory = Path.GetFullPath(outputDirectory);
+
+        if (!Directory.Exists(outputDirectory))
+        {
+            var reason = options.NoBuild
+                ? "Remove --no-build so the app is built first."
+                : $"Build it manually with 'dotnet build {singleFile.Name}' to see why.";
+            throw new ProjectRunException(
+                $"The build output directory for '{singleFile.Name}' does not exist ({outputDirectory}). {reason}");
+        }
+
+        var executableName = ResolveSingleFileExecutableName(props, singleFile, outputDirectory);
+
+        return new SingleFileBuildOutcome(
+            new SingleFileRunResolution(singleFile, outputDirectory, executableName, props), 0);
+    }
+
+    /// <summary>
+    /// Resolves the app executable's bare file name, written CONCRETELY into the generated manifest.
+    /// <para>
+    /// A <c>$targetnametoken$.exe</c> placeholder would be unusable here: every WinAppSDK self-contained
+    /// output ships a <c>RestartAgent.exe</c> next to the app exe, so the token form always trips the
+    /// "multiple .exe files found" ambiguity and would force <c>--executable</c> on every single run.
+    /// </para>
+    /// <c>RunCommand</c> is the authoritative apphost path when <c>UseAppHost</c> is on; otherwise fall
+    /// back to <c>AssemblyName</c>.exe, and finally to the file stem.
+    /// </summary>
+    private static string ResolveSingleFileExecutableName(
+        IReadOnlyDictionary<string, string> props,
+        FileInfo singleFile,
+        string outputDirectory)
+    {
+        var runCommand = GetProp(props, "RunCommand");
+        if (!string.IsNullOrEmpty(runCommand) &&
+            runCommand.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) &&
+            Path.IsPathRooted(runCommand))
+        {
+            return Path.GetFileName(runCommand);
+        }
+
+        var assemblyName = GetProp(props, "AssemblyName");
+        var candidate = !string.IsNullOrEmpty(assemblyName)
+            ? assemblyName + ".exe"
+            : Path.GetFileNameWithoutExtension(singleFile.Name) + ".exe";
+
+        if (!File.Exists(Path.Combine(outputDirectory, candidate)))
+        {
+            throw new ProjectRunException(
+                $"Could not find the application executable '{candidate}' in the build output ({outputDirectory}). " +
+                $"Ensure '{singleFile.Name}' declares '#:property OutputType=WinExe' (or 'Exe') and builds an apphost.");
+        }
+
+        return candidate;
+    }
+
+    /// <summary>
+    /// Runs the single-file BUILD pass. Mirrors <see cref="RunBuildPassAsync"/>'s output regime exactly —
+    /// stderr under <c>--json</c>/<c>--quiet</c>, inherited stdio (native terminal logger) on a real TTY,
+    /// live line streaming otherwise — so a <c>.cs</c> build looks and behaves like a <c>.csproj</c> build.
+    /// </summary>
+    private async Task<int> RunSingleFileBuildPassAsync(
+        FileInfo singleFile,
+        SingleFileRunOptions options,
+        DirectoryInfo workingDir,
+        CancellationToken cancellationToken)
+    {
+        var verbosity = ResolveBuildVerbosity(logger, options.Json);
+        var banner = $"Building {singleFile.Name} ({options.Configuration})...";
+        var stopwatch = Stopwatch.StartNew();
+
+        if (options.Json || !logger.IsEnabled(LogLevel.Information))
+        {
+            var redirectedArgs = BuildSingleFileBuildPassArguments(singleFile, options, verbosity);
+            if (options.Json)
+            {
+                Console.Error.WriteLine($"dotnet {RedactSecretsForDisplay(redirectedArgs)}");
+            }
+            return await dotNetService.RunDotnetStreamingAsync(
+                workingDir, redirectedArgs,
+                onOutputLine: static line => Console.Error.WriteLine(line),
+                onErrorLine: static line => Console.Error.WriteLine(line),
+                cancellationToken);
+        }
+
+        var nativeTerminal = NativeTerminalGateOverrideForTests?.Invoke()
+            ?? ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger);
+        var buildArgs = BuildSingleFileBuildPassArguments(singleFile, options, verbosity, nativeTerminal);
+        ansiConsole.MarkupLineInterpolated($"{UiSymbols.Wrench} {banner}");
+        ansiConsole.MarkupLineInterpolated($"[dim]   dotnet {Markup.Escape(RedactSecretsForDisplay(buildArgs))}[/]");
+
+        int streamedExit;
+        if (nativeTerminal)
+        {
+            streamedExit = await dotNetService.RunDotnetInheritedAsync(workingDir, buildArgs, cancellationToken);
+        }
+        else
+        {
+            var writeLock = new object();
+            void WriteLive(string line)
+            {
+                lock (writeLock)
+                {
+                    ansiConsole.WriteLine(line);
+                }
+            }
+
+            streamedExit = await dotNetService.RunDotnetStreamingAsync(
+                workingDir, buildArgs, WriteLive, WriteLive, cancellationToken);
+        }
+
+        if (streamedExit == 0)
+        {
+            ansiConsole.MarkupLineInterpolated(
+                $"{UiSymbols.Check} Built {Path.GetFileNameWithoutExtension(singleFile.Name)} in {stopwatch.Elapsed.TotalSeconds:0.0}s");
+        }
+
+        return streamedExit;
+    }
+}

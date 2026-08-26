@@ -4,8 +4,9 @@
 namespace WinApp.Cli.Models;
 
 /// <summary>
-/// Whether <c>winapp run</c> operates on a pre-built output folder (folder mode, unchanged)
-/// or builds a <c>.csproj</c> from source (project mode).
+/// Whether <c>winapp run</c> operates on a pre-built output folder (folder mode, unchanged),
+/// builds a <c>.csproj</c> from source (project mode), or builds a .NET file-based app — a single
+/// <c>.cs</c> file configured by <c>#:</c> directives (single-file mode).
 /// </summary>
 internal enum WinAppRunMode
 {
@@ -14,6 +15,12 @@ internal enum WinAppRunMode
 
     /// <summary>Input is a <c>.csproj</c> (or a directory containing exactly one buildable one).</summary>
     Project,
+
+    /// <summary>
+    /// Input is an explicitly-specified <c>.cs</c> file-based app. Single-file mode NEVER results from
+    /// directory inference — only from a <c>.cs</c> path the user typed — so folder mode is untouched.
+    /// </summary>
+    SingleFile,
 }
 
 /// <summary>
@@ -39,12 +46,14 @@ internal enum ProjectPackaging
 /// <param name="ProjectDirectory">The directory containing the project (project mode) or the input folder.</param>
 /// <param name="Solution">The solution the project was resolved from (defines <c>$(SolutionDir)</c> and siblings for the build/evaluate passes); null for a bare <c>.csproj</c>/directory input.</param>
 /// <param name="SelectionReason">Why this project was chosen for an ambiguous input (shown in the context line); null if unambiguous.</param>
+/// <param name="SingleFile">The resolved <c>.cs</c> file-based app, when <see cref="Mode"/> is <see cref="WinAppRunMode.SingleFile"/>.</param>
 internal sealed record RunInputResolution(
     WinAppRunMode Mode,
     FileInfo? Csproj,
     DirectoryInfo ProjectDirectory,
     FileInfo? Solution = null,
-    string? SelectionReason = null);
+    string? SelectionReason = null,
+    FileInfo? SingleFile = null);
 
 /// <summary>
 /// The build-and-resolve result for a project-mode target: the evaluated output
@@ -117,3 +126,47 @@ internal sealed record ProjectClassificationInputs(
 /// errors have already been surfaced and <see cref="ExitCode"/> is the non-zero dotnet exit code.
 /// </summary>
 internal sealed record ProjectBuildOutcome(ProjectRunResolution? Resolution, int ExitCode);
+
+/// <summary>
+/// User-provided build inputs for single-file mode (a <c>.cs</c> file-based app).
+/// <para>
+/// Deliberately a much smaller set than <see cref="ProjectRunOptions"/>. A file-based app declares its
+/// own <c>TargetFramework</c> and <c>Platform</c> through <c>#:property</c> directives, so winapp does
+/// NOT inject a RuntimeIdentifier or Platform: doing so would move the build output away from the path
+/// <c>--getProperty:OutputPath</c> reports for the evaluate pass. <c>--arch</c>/<c>--runtime</c>/
+/// <c>--framework</c>/<c>--project</c> are rejected by the run handler for the same reason.
+/// </para>
+/// </summary>
+/// <param name="Configuration">Build configuration (default <c>Debug</c>). File-based apps write to <c>bin\debug</c>/<c>bin\release</c>.</param>
+/// <param name="NoBuild">Skip the build and evaluate the existing output only.</param>
+/// <param name="NoRestore">Pass <c>--no-restore</c> to the build.</param>
+/// <param name="Properties">Raw repeatable <c>-p Name=Value</c> passthrough, mirrored across the build and evaluate passes.</param>
+/// <param name="Json">When true, suppress human-readable stdout and route build diagnostics to stderr so stdout stays pure JSON.</param>
+internal sealed record SingleFileRunOptions(
+    string Configuration,
+    bool NoBuild,
+    bool NoRestore,
+    IReadOnlyList<string> Properties,
+    bool Json = false);
+
+/// <summary>
+/// The build-and-resolve result for a <c>.cs</c> file-based app: the evaluated output folder, the
+/// concrete executable to reference from the generated manifest, and the raw evaluated MSBuild
+/// properties the manifest inference reads.
+/// </summary>
+/// <param name="SingleFile">The <c>.cs</c> file that was built/evaluated.</param>
+/// <param name="OutputDirectory">Absolute build-output directory (under <c>%TEMP%\dotnet\runfile\…</c>). Stable across edits, so package identity and <c>LocalState</c> survive code changes.</param>
+/// <param name="ExecutableName">The app executable's bare file name (e.g. <c>counter.exe</c>), written concretely into the generated manifest.</param>
+/// <param name="Properties">Every evaluated MSBuild property from the <c>--getProperty</c> pass, keyed case-insensitively.</param>
+internal sealed record SingleFileRunResolution(
+    FileInfo SingleFile,
+    string OutputDirectory,
+    string ExecutableName,
+    IReadOnlyDictionary<string, string> Properties);
+
+/// <summary>
+/// Outcome of <see cref="Services.IProjectRunService.BuildAndResolveSingleFileAsync"/>. Mirrors
+/// <see cref="ProjectBuildOutcome"/>: on success <see cref="Resolution"/> is set and
+/// <see cref="ExitCode"/> is 0; on a build failure dotnet already surfaced its diagnostics.
+/// </summary>
+internal sealed record SingleFileBuildOutcome(SingleFileRunResolution? Resolution, int ExitCode);

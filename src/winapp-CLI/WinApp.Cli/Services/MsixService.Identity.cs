@@ -205,8 +205,8 @@ internal partial class MsixService
 
         SyncFilesToOutputDirectory(inputDirectory, outputAppXDirectory, appxManifestPath, taskContext);
 
-        // SyncFilesToOutputDirectory renames Package.appxmanifest → appxmanifest.xml
-        var copiedManifestName = string.Equals(appxManifestPath.Name, "Package.appxmanifest", StringComparison.OrdinalIgnoreCase)
+        // SyncFilesToOutputDirectory normalizes any *.appxmanifest → appxmanifest.xml
+        var copiedManifestName = string.Equals(appxManifestPath.Extension, ".appxmanifest", StringComparison.OrdinalIgnoreCase)
             ? "appxmanifest.xml"
             : appxManifestPath.Name;
         var copiedAppxManifestPath = new FileInfo(Path.Combine(outputAppXDirectory.FullName, copiedManifestName));
@@ -419,13 +419,17 @@ internal partial class MsixService
         // Copy the appxmanifest to the output directory
         appxManifestPath.CopyTo(Path.Combine(outputAppXDirectory.FullName, appxManifestPath.Name), overwrite: true);
 
-        // If its Package.appxmanifest, rename to appxmanifest.xml
-        if (string.Equals(appxManifestPath.Name, "Package.appxmanifest", StringComparison.OrdinalIgnoreCase))
+        // Windows requires the manifest in a registered loose layout to be named appxmanifest.xml, so
+        // normalize ANY authoring-side *.appxmanifest name — Package.appxmanifest, but also a per-file
+        // name like counter.appxmanifest — rather than only the conventional one. Copying a differently
+        // named manifest verbatim can never register: PackageManager rejects it with "An invalid manifest
+        // file name was passed to this function. This file must be named AppxManifest.xml".
+        if (string.Equals(appxManifestPath.Extension, ".appxmanifest", StringComparison.OrdinalIgnoreCase))
         {
             var renamedPath = Path.Combine(outputAppXDirectory.FullName, "appxmanifest.xml");
             var originalPath = Path.Combine(outputAppXDirectory.FullName, appxManifestPath.Name);
             File.Move(originalPath, renamedPath, true);
-            taskContext.AddDebugMessage($"{UiSymbols.Files} Renamed Package.appxmanifest to appxmanifest.xml");
+            taskContext.AddDebugMessage($"{UiSymbols.Files} Renamed {appxManifestPath.Name} to appxmanifest.xml");
         }
     }
 

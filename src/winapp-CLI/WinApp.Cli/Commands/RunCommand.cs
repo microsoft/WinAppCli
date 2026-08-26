@@ -18,7 +18,7 @@ namespace WinApp.Cli.Commands;
 
 internal partial class RunCommand : Command, IShortDescription
 {
-    public string ShortDescription => "Run a Windows app: build and launch from a .csproj/.sln, or launch an existing build-output folder.";
+    public string ShortDescription => "Run a Windows app: build and launch from a .cs file-based app, a .csproj/.sln, or launch an existing build-output folder.";
 
     public static Argument<FileSystemInfo> InputArgument { get; }
     public static Option<FileInfo> ManifestOption { get; }
@@ -54,7 +54,7 @@ internal partial class RunCommand : Command, IShortDescription
     {
         InputArgument = new Argument<FileSystemInfo>("input")
         {
-            Description = "Path to the app to run: a build-output folder, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory).",
+            Description = "Path to the app to run: a build-output folder, a .cs .NET file-based app, a .csproj project, a .sln/.slnx solution, or a directory containing one of those at its top level (default: current directory).",
             Arity = ArgumentArity.ZeroOrOne
         };
 
@@ -175,7 +175,7 @@ internal partial class RunCommand : Command, IShortDescription
         };
     }
 
-    public RunCommand() : base("run", "Builds and runs a Windows app from a .csproj/.sln or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in folder mode, creates a debug-signed layout, registers the package, and launches it.")
+    public RunCommand() : base("run", "Builds and runs a Windows app from a .cs file-based app, a .csproj/.sln, or a build-output folder. In project mode, invokes dotnet build then launches the app (packaged or unpackaged); in single-file mode, builds the .cs, generates a manifest from its #:property directives, and launches it with package identity; in folder mode, creates a debug-signed layout, registers the package, and launches it.")
     {
         Arguments.Add(InputArgument);
         Arguments.Add(PassthroughArgument);
@@ -210,6 +210,7 @@ internal partial class RunCommand : Command, IShortDescription
         IAnsiConsole ansiConsole,
         IStatusService statusService,
         IProjectRunService projectRunService,
+        IManifestTemplateService manifestTemplateService,
         ILogger<RunCommand> logger) : AsynchronousCommandLineAction
     {
         // Test seams for the execution-alias launch path. They isolate the two operating-system
@@ -430,6 +431,11 @@ internal partial class RunCommand : Command, IShortDescription
             catch (ProjectRunException ex)
             {
                 return Fail(ex.Message, isJson);
+            }
+
+            if (inputResolution.Mode == WinAppRunMode.SingleFile)
+            {
+                return await RunSingleFileModeAsync(parseResult, inputResolution.SingleFile!, appArgs, isJson, cancellationToken);
             }
 
             if (inputResolution.Mode == WinAppRunMode.Project)

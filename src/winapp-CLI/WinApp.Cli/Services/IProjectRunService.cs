@@ -13,9 +13,9 @@ namespace WinApp.Cli.Services;
 internal interface IProjectRunService
 {
     /// <summary>
-    /// Classifies the run input into folder mode (existing behavior) or project mode.
+    /// Classifies the run input into folder mode (existing behavior), project mode, or single-file mode.
     /// </summary>
-    /// <param name="input">The positional argument: a <c>.csproj</c>/<c>.sln</c>/<c>.slnx</c> file or a directory.</param>
+    /// <param name="input">The positional argument: a <c>.cs</c> file-based app, a <c>.csproj</c>/<c>.sln</c>/<c>.slnx</c> file, or a directory.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="projectSelector">
     /// Optional <c>--project</c> selector used to pick the runnable project when the input is a
@@ -32,6 +32,8 @@ internal interface IProjectRunService
     /// </param>
     /// <returns>The resolved mode + project file (when project mode).</returns>
     /// <remarks>
+    /// An explicitly-specified <c>.cs</c> resolves to single-file mode. That is the ONLY way to reach it —
+    /// a directory is never scanned for loose <c>.cs</c> files, so folder-mode classification is unchanged.
     /// A <c>.sln</c>/<c>.slnx</c> file (or a directory containing exactly one) resolves to project
     /// mode against its single runnable app project, and the resolution records the solution so the
     /// build defines <c>$(SolutionDir)</c>. When a directory contains multiple <c>.csproj</c> files,
@@ -56,6 +58,14 @@ internal interface IProjectRunService
     /// </summary>
     /// <returns>An actionable error message if the SDK is missing/too old, otherwise <c>null</c>.</returns>
     Task<string?> CheckSdkAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Verifies that an SDK capable of building .NET <b>file-based apps</b> (≥ 10.0.100) is available.
+    /// Single-file mode's floor is higher than <see cref="CheckSdkAsync"/>'s because building a bare
+    /// <c>.cs</c> through a virtual project only exists from .NET 10.
+    /// </summary>
+    /// <returns>An actionable error message if the SDK is missing/too old, otherwise <c>null</c>.</returns>
+    Task<string?> CheckSingleFileSdkAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken);
 
     /// <summary>
     /// Builds the project (unless <see cref="ProjectRunOptions.NoBuild"/>) and resolves the evaluated
@@ -84,6 +94,22 @@ internal interface IProjectRunService
     Task<bool> IsDefinitivelyUnpackagedAsync(
         FileInfo csproj,
         ProjectRunOptions options,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Builds a .NET file-based app (a single <c>.cs</c>, unless <see cref="SingleFileRunOptions.NoBuild"/>)
+    /// and resolves the evaluated MSBuild properties needed to synthesize a manifest and launch it.
+    /// </summary>
+    /// <remarks>
+    /// Unlike the <c>.csproj</c> passes, BOTH passes shell out to <c>dotnet build</c>: MSBuild has no
+    /// <c>.cs</c> project loader, so <c>dotnet msbuild &lt;file&gt;.cs</c> fails with MSB4025 and cannot be
+    /// used for the evaluate. <c>dotnet build &lt;file&gt;.cs --getProperty:…</c> evaluates <b>without</b>
+    /// building, so the evaluate pass stays as cheap as the <c>.csproj</c> one.
+    /// </remarks>
+    /// <exception cref="ProjectRunException">Thrown on a guardrail violation (e.g. a non-executable or unpackaged app).</exception>
+    Task<SingleFileBuildOutcome> BuildAndResolveSingleFileAsync(
+        FileInfo singleFile,
+        SingleFileRunOptions options,
         CancellationToken cancellationToken);
 }
 

@@ -202,6 +202,91 @@ internal sealed partial class ProjectRunService
     }
 
     /// <summary>
+    /// Builds the arguments for the single-file BUILD pass: <c>dotnet build &lt;file&gt;.cs</c>.
+    /// <para>
+    /// No <c>-r win-&lt;arch&gt;</c> and no <c>-p:Platform</c> are injected. A file-based app declares its
+    /// own <c>TargetFramework</c>/<c>Platform</c> through <c>#:property</c> directives, and injecting a RID
+    /// would relocate the build output away from the path the evaluate pass reads back, so the two passes
+    /// could disagree about where the app is. Only Configuration and the user's <c>-p</c> flow through, and
+    /// <see cref="BuildSingleFileEvaluateArguments"/> emits the SAME set.
+    /// </para>
+    /// </summary>
+    internal static string BuildSingleFileBuildPassArguments(
+        FileInfo singleFile,
+        SingleFileRunOptions options,
+        string verbosity,
+        bool nativeTerminal = false)
+    {
+        var tokens = new List<string>
+        {
+            "build",
+            singleFile.FullName,
+            "-c",
+            options.Configuration,
+        };
+
+        if (options.NoRestore)
+        {
+            tokens.Add("--no-restore");
+        }
+
+        tokens.Add("-v");
+        tokens.Add(verbosity);
+
+        // Same terminal-logger regime as the .csproj build pass: pin -tl:off when winapp redirects the
+        // output, omit it on a real TTY so dotnet's native live display renders.
+        if (!nativeTerminal)
+        {
+            tokens.Add("-tl:off");
+        }
+
+        // Drop dedicated-switch dupes so the build and evaluate passes cannot resolve a different
+        // Configuration. RuntimeIdentifier/TargetFramework are filtered too: winapp never injects them here,
+        // so a user -p for them would apply to only one of the two passes and desynchronize the output path.
+        foreach (var property in ForwardableProperties(options.Properties))
+        {
+            tokens.Add($"-p:{property}");
+        }
+
+        return WindowsCommandLine.JoinArguments(tokens) ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Builds the arguments for the single-file EVALUATE pass.
+    /// <para>
+    /// This uses <c>dotnet build … --getProperty:…</c> rather than <c>dotnet msbuild</c> — which the
+    /// <c>.csproj</c> evaluate pass uses — because MSBuild has no <c>.cs</c> project loader and rejects a
+    /// file-based app with <c>MSB4025: The project file could not be loaded</c>. The virtual-project
+    /// synthesis only exists inside the <c>dotnet build</c>/<c>dotnet run</c> CLI path. Passing
+    /// <c>--getProperty</c> makes the invocation evaluate WITHOUT building, so this stays cheap.
+    /// </para>
+    /// Fed the SAME Configuration + user <c>-p</c> as the build pass so the properties it reads describe
+    /// the output that was actually written.
+    /// </summary>
+    internal static string BuildSingleFileEvaluateArguments(FileInfo singleFile, SingleFileRunOptions options)
+    {
+        var tokens = new List<string>
+        {
+            "build",
+            singleFile.FullName,
+            "-c",
+            options.Configuration,
+        };
+
+        foreach (var property in ForwardableProperties(options.Properties))
+        {
+            tokens.Add($"-p:{property}");
+        }
+
+        foreach (var name in SingleFileRequestedProperties)
+        {
+            tokens.Add($"--getProperty:{name}");
+        }
+
+        return WindowsCommandLine.JoinArguments(tokens) ?? string.Empty;
+    }
+
+    /// <summary>
     /// Appends the <c>Solution*</c> MSBuild properties a solution build normally sets — most importantly
     /// <c>$(SolutionDir)</c> — when the target was resolved from a solution, so projects referencing them
     /// build as they do under <c>dotnet build &lt;sln&gt;</c> / VS. No-op for a bare <c>.csproj</c>.

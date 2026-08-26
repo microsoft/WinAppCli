@@ -185,6 +185,36 @@ Project mode supports both **packaged** and **unpackaged** WinUI apps, detected 
 - **Packaged-only options:** `--manifest`, `--no-launch`, `--with-alias`, `--clean`, `--unregister-on-exit`, `--output-appx-directory`, `--executable` — rejected for unpackaged apps.
 - **Output:** winapp prints the exact `dotnet build …` invocation, then streams build output live (warnings included on success). Under `--json`/`--quiet` both go to **stderr** so stdout stays clean.
 
+#### Single-file mode: `winapp run` on a `.cs` file-based app
+
+A .NET 10 file-based app is a single `.cs` file configured by `#:` directives, with no project file. Point `winapp run` at it and the app builds and launches **with package identity** — no hand-written manifest:
+
+```powershell
+# Build and run a file-based app with identity
+winapp run counter.cs
+
+# Register identity without launching, or run a Release build detached
+winapp run counter.cs --no-launch
+winapp run counter.cs -c Release --detach --json
+```
+
+Describe the package with `#:property` directives in the file. All are optional:
+
+| Property | Sets | Default |
+|---|---|---|
+| `WinAppPackageName` | `Identity/@Name` | file name (sanitized) |
+| `WinAppDisplayName` | Start/Settings name | file name |
+| `WinAppPublisher` | `Identity/@Publisher` | `CN=<current user>`; a bare name is wrapped as `CN=` |
+| `WinAppVersion` | `Identity/@Version` | `$(Version)`, normalized to four 0–65535 parts (`1.2.3-preview.4` ⇒ `1.2.3.0`) |
+| `WinAppDescription` | Install/Settings description | the display name |
+
+- **Bring your own manifest** with `--manifest`, `#:property WinAppManifestPath=…`, or a manifest next to the `.cs` named `<filename>.appxmanifest`, `Package.appxmanifest`, or `appxmanifest.xml`. Otherwise one is generated into the build output (with default assets) and refreshed each run.
+- **Always packaged.** `#:property WindowsPackageType=None` is rejected — use `dotnet run` to run without identity.
+- **Rejected options** (the file configures itself): `--arch`/`-r` ⇒ `#:property Platform=x64`; `-f` ⇒ `#:property TargetFramework=…`; `--project` ⇒ not applicable. Everything else — `-c`, `-p`, `--no-build`, `--no-restore`, and all the launch/identity options — works as usual.
+- Requires **.NET SDK 10.0.100+**.
+
+> Two `counter.cs` files in different folders share the default identity `counter`, so the second replaces the first (winapp warns). Set `WinAppPackageName` on one to keep both.
+
 #### Choosing between `run` and `create-debug-identity`
 
 | | `winapp run` | `create-debug-identity` |

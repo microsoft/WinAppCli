@@ -633,10 +633,11 @@ winapp manifest update-assets mylogo.png --verbose
 
 Create a loose layout package from a build output folder, register it with Windows using the `Windows.Management.Deployment.PackageManager` API, and launch the application — simulating a full MSIX install for debugging. Returns the process ID for debugger attachment.
 
-`winapp run` operates in one of two modes, chosen automatically from the input:
+`winapp run` operates in one of three modes, chosen automatically from the input:
 
 - **Folder mode** — the input is a build-output folder (contains a `Package.appxmanifest`/`AppxManifest.xml`).
 - **Project mode** — the input is a `.csproj`, a `.sln`/`.slnx` solution, or a directory containing one. `winapp run` builds the project and launches it, supporting both **packaged** and **unpackaged** WinUI apps. See [Project mode](#project-mode-net-sdk-projects) below.
+- **Single-file mode** — the input is a `.cs` [.NET file-based app](#single-file-mode-net-file-based-apps). `winapp run` builds it, generates a manifest from its `#:property` directives, and launches it with package identity.
 
 > [!TIP]
 > Mode selection is silent by default. If a directory was treated as a build-output folder when you
@@ -653,7 +654,7 @@ winapp run [<input>] [options]
 
 **Arguments:**
 
-- `input` - The app to run: a build-output folder (folder mode), a `.csproj` project, a `.sln`/`.slnx` solution, or a directory containing one of those at its top level (project mode; the directory is not searched recursively). Use `.` to build/run the project in the current directory. **Optional — defaults to the current directory when omitted** (matches `dotnet run`).
+- `input` - The app to run: a build-output folder (folder mode), a `.cs` .NET file-based app (single-file mode), a `.csproj` project, a `.sln`/`.slnx` solution, or a directory containing one of those at its top level (project mode; the directory is not searched recursively). Use `.` to build/run the project in the current directory. **Optional — defaults to the current directory when omitted** (matches `dotnet run`).
 
 **Options:**
 
@@ -796,6 +797,111 @@ winapp run . --verbose
 # Launch and detach (prints PID), forwarding args to the app
 winapp run . --detach -- --my-flag value
 ```
+
+#### Single-file mode (.NET file-based apps)
+
+.NET 10 lets you run a single `.cs` file with no project file, configuring it with `#:` directives at
+the top. Point `winapp run` at that file and it builds the app, generates an appxmanifest for it, and
+launches it **with package identity** — so `Windows.ApplicationModel.Package.Current` works, the app
+gets a real AUMID and a Start-menu entry, and APIs that require identity (notifications, protocol
+handlers, on-device AI, shell integration) all work.
+
+```bash
+winapp run counter.cs
+```
+
+You do not author a manifest. Describe the package with `#:property` directives instead:
+
+```csharp
+#:package Microsoft.UI.Reactor@0.1.0-preview.13
+#:property OutputType=WinExe
+#:property TargetFramework=net10.0-windows10.0.22621.0
+#:property UseWinUI=true
+#:property Platform=x64
+
+#:property WinAppPackageName=com.contoso.counter
+#:property WinAppDisplayName=Contoso Counter
+#:property WinAppDescription=Counts things, one click at a time
+#:property Version=1.2.3
+
+using static Microsoft.UI.Reactor.Factories;
+ReactorApp.Run<MyApp>("Hello");
+```
+
+**Manifest properties.** All five are optional; each falls back to a sensible default:
+
+| Property | Sets | Default |
+|----------|------|---------|
+| `WinAppPackageName` | `Identity/@Name` (the package identity) | the file name without its extension, sanitized to `[-.A-Za-z0-9]` |
+| `WinAppDisplayName` | The name shown in Start and Settings | the file name without its extension |
+| `WinAppPublisher` | `Identity/@Publisher` | `CN=<your Windows user name>`. A bare name is wrapped as `CN=<name>`. |
+| `WinAppVersion` | `Identity/@Version` | `$(Version)`, normalized (see below) |
+| `WinAppDescription` | The description shown during install and in Settings | the display name |
+
+**Version.** A package version must be exactly four numbers, each 0–65535. `WinAppVersion` (or, if you
+don't set it, the standard `Version` property) is normalized to fit: any `-preview`/`-rc` suffix is
+dropped and missing components are filled with zeros, so `#:property Version=1.2.3-preview.4` becomes
+`1.2.3.0` and sets your assembly version and package version together. A value that can't be made to
+fit — a component above 65535, or more than four components — is **rejected with an error** rather
+than silently changed.
+
+**Bring your own manifest.** If you need something the five properties don't cover, author a manifest
+and `winapp run` will use it verbatim instead of generating one. It is picked up from, in order:
+
+1. `--manifest <path>` on the command line.
+2. `#:property WinAppManifestPath=<path>` in the `.cs` file.
+3. A manifest sitting next to the `.cs` file, named `<filename>.appxmanifest` (preferred, so `foo.cs`
+   and `bar.cs` can live in one folder), `Package.appxmanifest`, or `appxmanifest.xml`.
+
+Otherwise a `Package.appxmanifest` is generated into the build output, along with the default image
+assets, and refreshed on every run.
+
+**Options.** Every folder-mode option works: `--no-launch`, `--with-alias`, `--detach`, `--clean`,
+`--debug-output`, `--symbols`, `--unregister-on-exit`, `--args`/`--`, `--json`, `--executable`,
+`--manifest`, `--output-appx-directory`, plus `-c/--configuration`, `--no-build`, `--no-restore`, and
+`-p/--property`.
+
+The project-mode build options do **not** apply, because a file-based app configures itself. They are
+rejected with a message naming the directive to use instead:
+
+| Option | Use instead |
+|--------|-------------|
+| `--arch`, `-r/--runtime` | `#:property Platform=x64` |
+| `-f/--framework` | `#:property TargetFramework=net10.0-windows10.0.22621.0` |
+| `--project` | nothing — the `.cs` file *is* the project |
+
+Single-file mode always runs the app **packaged**. `#:property WindowsPackageType=None` is rejected;
+use `dotnet run` if you want to run the file without identity.
+
+Single-file mode requires the **.NET SDK 10.0.100 or newer**.
+
+**Single-file examples:**
+
+```bash
+# Build and run a file-based app with package identity
+winapp run counter.cs
+
+# Register identity without launching (e.g. to attach Visual Studio)
+winapp run counter.cs --no-launch
+
+# Release build, detached, printing the PID as JSON
+winapp run counter.cs -c Release --detach --json
+
+# Capture OutputDebugString output and crash diagnostics
+winapp run counter.cs --debug-output
+
+# Forward arguments to the app
+winapp run counter.cs -- --verbose --input data.json
+
+# Wipe the app's LocalState and start fresh
+winapp run counter.cs --clean
+```
+
+> [!NOTE]
+> Two `counter.cs` files in different folders both default to the package identity `counter`, so
+> running the second replaces the first (`winapp` warns when this happens). Give one of them its own
+> `#:property WinAppPackageName=<name>` to keep both registered. Identity is always scoped to your
+> user account, so it never collides with another user on the same machine.
 
 **MSBuild properties (NuGet package):**
 

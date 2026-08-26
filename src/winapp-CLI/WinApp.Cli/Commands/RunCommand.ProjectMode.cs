@@ -78,6 +78,45 @@ internal partial class RunCommand
                $"'{csprojName}' resolves to an unpackaged WinUI app (WindowsPackageType=None). Remove them, or make the app packaged to use them.";
 
         /// <summary>
+        /// Validates every repeatable <c>-p Name=Value</c> before it becomes an MSBuild argument. Shared by
+        /// project and single-file mode so both reject the exact same malformed input with the same message.
+        /// </summary>
+        /// <param name="errorExitCode">The exit code to return when validation fails; meaningless otherwise.</param>
+        /// <returns><see langword="true"/> when every property is well-formed.</returns>
+        private bool TryValidateProperties(IReadOnlyList<string> properties, bool isJson, out int errorExitCode)
+        {
+            foreach (var property in properties)
+            {
+                // MSBuild splits a -p token on ';' into MULTIPLE properties, which would smuggle a
+                // dedicated-flag property (e.g. RuntimeIdentifier) past the name-only ForwardableProperties
+                // filter and override the arch winapp conveys via the RID. Reject packing; '%3B' escapes a
+                // literal ';' in a value.
+                if (property.Contains(';'))
+                {
+                    // Show the name only — the value may hold a secret.
+                    var name = property[..property.IndexOfAny(['=', ';'])];
+                    errorExitCode = Fail(
+                        $"Invalid --property '{name}'. A single -p cannot pack multiple properties with ';'. " +
+                        "Pass one property per repeatable -p (for example: -p A=1 -p B=2), or escape a literal ';' in a value as '%3B'.",
+                        isJson);
+                    return false;
+                }
+
+                var separator = property.IndexOf('=');
+                if (separator <= 0 || string.IsNullOrWhiteSpace(property[..separator]))
+                {
+                    // Show the name only — the value may hold a secret.
+                    var shown = separator > 0 ? property[..separator] : (separator == 0 ? "(empty)" : property);
+                    errorExitCode = Fail($"Invalid --property '{shown}'. Expected Name=Value (for example: -p WindowsPackageType=None).", isJson);
+                    return false;
+                }
+            }
+
+            errorExitCode = 0;
+            return true;
+        }
+
+        /// <summary>
         /// Project-mode entry point: build the <c>.csproj</c>, resolve its MSBuild
         /// output properties, then launch it as packaged (loose-layout register + AUMID, reusing the
         /// shared folder pipeline) or unpackaged (launch the apphost <c>.exe</c> directly). Folder
@@ -107,29 +146,9 @@ internal partial class RunCommand
             var framework = ProjectRunService.ResolveExplicitFramework(parseResult.GetValue(FrameworkOption), properties);
 
             // Reject malformed -p values early so they never become a nonsensical MSBuild argument.
-            foreach (var property in properties)
+            if (!TryValidateProperties(properties, isJson, out var propertyError))
             {
-                // MSBuild splits a -p token on ';' into MULTIPLE properties, which would smuggle a
-                // dedicated-flag property (e.g. RuntimeIdentifier) past the name-only ForwardableProperties
-                // filter and override the arch winapp conveys via the RID. Reject packing; '%3B' escapes a
-                // literal ';' in a value.
-                if (property.Contains(';'))
-                {
-                    // Show the name only — the value may hold a secret.
-                    var name = property[..property.IndexOfAny(['=', ';'])];
-                    return Fail(
-                        $"Invalid --property '{name}'. A single -p cannot pack multiple properties with ';'. " +
-                        "Pass one property per repeatable -p (for example: -p A=1 -p B=2), or escape a literal ';' in a value as '%3B'.",
-                        isJson);
-                }
-
-                var separator = property.IndexOf('=');
-                if (separator <= 0 || string.IsNullOrWhiteSpace(property[..separator]))
-                {
-                    // Show the name only — the value may hold a secret.
-                    var shown = separator > 0 ? property[..separator] : (separator == 0 ? "(empty)" : property);
-                    return Fail($"Invalid --property '{shown}'. Expected Name=Value (for example: -p WindowsPackageType=None).", isJson);
-                }
+                return propertyError;
             }
 
             // Shared launch/identity options (validity depends on packaging, checked below).
