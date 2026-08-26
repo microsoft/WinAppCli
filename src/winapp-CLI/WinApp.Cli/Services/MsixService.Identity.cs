@@ -178,11 +178,13 @@ internal partial class MsixService
                 await EnsureWindowsAppRuntimeInstalledAsync(msbuildPackageList, runtimeArch, taskContext, cancellationToken);
             }
 
-            // Resolve the manifest that would be registered (issue #537 / TrySkipRegistration).
-            // ManifestHelper.FindManifest already probes both canonical filenames; if it
-            // returns a non-existent FileInfo, downstream RegisterLooseLayoutPackageAsync
-            // will surface the missing-manifest error.
-            var registrationManifest = ManifestHelper.FindManifest(outputAppXDirectory.FullName);
+            // Resolve the manifest that will be registered (issue #537 / TrySkipRegistration).
+            // Prefer the canonical appxmanifest.xml directly rather than probing: the staging cleanup that
+            // removes a stale Package.appxmanifest is best-effort, so a locked leftover would otherwise win
+            // ManifestHelper.FindManifest's name preference and register the wrong manifest. Fall back to
+            // the probe when the canonical file is absent, so a genuinely missing manifest still surfaces
+            // through RegisterLooseLayoutPackageAsync's error.
+            var registrationManifest = ResolveLayoutRegistrationManifest(outputAppXDirectory);
 
             var skipResult = TrySkipRegistration(
                 identity.PackageName, identity.Publisher, identity.ApplicationId,
@@ -450,6 +452,23 @@ internal partial class MsixService
         }
 
         RemoveCompetingLayoutManifests(outputAppXDirectory, taskContext);
+    }
+
+    /// <summary>
+    /// Picks the manifest to register from a staged loose layout, preferring the canonical
+    /// <c>appxmanifest.xml</c> that Windows requires over whatever
+    /// <see cref="ManifestHelper.FindManifest"/>'s name preference would select.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="RemoveCompetingLayoutManifests"/> normally deletes a stale
+    /// <c>Package.appxmanifest</c> from the layout, but that cleanup is best-effort — a locked leftover
+    /// survives, and the probe prefers exactly that name. Selecting the canonical file directly means a
+    /// failed cleanup can no longer change which manifest gets registered.
+    /// </remarks>
+    private static FileInfo ResolveLayoutRegistrationManifest(DirectoryInfo outputAppXDirectory)
+    {
+        var canonical = new FileInfo(Path.Join(outputAppXDirectory.FullName, "appxmanifest.xml"));
+        return canonical.Exists ? canonical : ManifestHelper.FindManifest(outputAppXDirectory.FullName);
     }
 
     /// <summary>
