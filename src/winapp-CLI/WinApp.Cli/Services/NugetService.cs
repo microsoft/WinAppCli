@@ -167,8 +167,11 @@ internal partial class NugetService : INugetService
         NugetSourceProvider.EnsureCredentialService();
         var packages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var dependencyFailures = new List<string>();
+        // Every declared range seen for a dependency id, so a later branch can be validated against the full
+        // set when deciding whether an upgrade satisfies every requirement.
+        var dependencyConstraints = new Dictionary<string, List<VersionRange>>(StringComparer.OrdinalIgnoreCase);
         using var cacheContext = new SourceCacheContext();
-        await InstallPackageRecursiveAsync(package, version, packages, dependencyFailures, taskContext, cacheContext, cancellationToken);
+        await InstallPackageRecursiveAsync(package, version, packages, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
 
         // A downloaded root package with unresolvable/uninstallable REQUIRED transitive dependencies is an
         // incomplete install, not a success. Each gap was surfaced as a warning above (and the rest of the
@@ -186,7 +189,7 @@ internal partial class NugetService : INugetService
     /// <summary>
     /// Downloads and extracts a NuGet package to the global packages cache, then recursively installs dependencies.
     /// </summary>
-    private async Task InstallPackageRecursiveAsync(string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
+    private async Task InstallPackageRecursiveAsync(string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, Dictionary<string, List<VersionRange>> dependencyConstraints, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         // Already processed this package?
         if (installed.ContainsKey(package))
@@ -212,7 +215,7 @@ internal partial class NugetService : INugetService
             taskContext.AddDebugMessage($"{UiSymbols.Skip} {package} {normalizedVersion} already present");
             installed[package] = normalizedVersion;
             // Still resolve dependencies to populate installed dictionary
-            await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, taskContext, cacheContext, cancellationToken);
+            await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
             return;
         }
 
@@ -226,13 +229,13 @@ internal partial class NugetService : INugetService
         taskContext.AddStatusMessage($"{UiSymbols.Check} Installed {package} {normalizedVersion}");
 
         // Recursively install dependencies
-        await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, taskContext, cacheContext, cancellationToken);
+        await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
     }
 
     /// <summary>
     /// Reads the .nuspec from an extracted package and recursively installs dependencies.
     /// </summary>
-    private async Task ResolveDependenciesAsync(DirectoryInfo packageDir, string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
+    private async Task ResolveDependenciesAsync(DirectoryInfo packageDir, string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, Dictionary<string, List<VersionRange>> dependencyConstraints, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         Dictionary<string, VersionRange> deps;
         try
@@ -253,25 +256,67 @@ internal partial class NugetService : INugetService
 
         foreach (var (depName, depVersionRange) in deps)
         {
+            // Every range seen for this dependency id is accumulated so a later branch can be validated
+            // against the full set. This is a plain list of ranges checked with the point test
+            // RangeSatisfiesWithFloat — not the interval-intersection machinery that previously existed only
+            // to justify keeping an unsatisfying version.
+            if (!dependencyConstraints.TryGetValue(depName, out var accumulatedRanges))
+            {
+                accumulatedRanges = [];
+                dependencyConstraints[depName] = accumulatedRanges;
+            }
+            accumulatedRanges.Add(depVersionRange);
+
             if (installed.TryGetValue(depName, out var installedDepVersion))
             {
-                // The dependency id was already installed earlier in this operation, which fixed its version.
-                // A package-id match alone is not enough: in a diamond graph a later branch can require a range
-                // the selected version does not satisfy. Fail in that case rather than keeping the selected
-                // version, which would report a successful install of a graph that does not actually satisfy
-                // every declared requirement (leaving consumers with missing APIs, headers or runtime files).
-                //
-                // winapp resolves as it installs and does not perform NuGet's global graph unification, so it
-                // cannot upgrade the earlier branch to a version satisfying both. Failing loudly is the honest
-                // outcome; real unification would mean adopting NuGet's resolver, which is separate work.
-                if (!(NuGetVersion.TryParse(installedDepVersion, out var installedNuGetVersion)
-                        && RangeSatisfiesWithFloat(depVersionRange, installedNuGetVersion)))
+                if (NuGetVersion.TryParse(installedDepVersion, out var selectedVersion)
+                    && RangeSatisfiesWithFloat(depVersionRange, selectedVersion))
                 {
-                    var rangeText = depVersionRange.OriginalString ?? depVersionRange.ToNormalizedString();
-                    var conflict = $"{depName} cannot be resolved to a single version: already selected {installedDepVersion}, but {package} {version} requires '{rangeText}'";
-                    taskContext.AddStatusMessage($"{UiSymbols.Warning} Dependency version conflict: {conflict}");
-                    dependencyFailures.Add(conflict);
+                    // The version fixed by an earlier branch already satisfies this one.
+                    continue;
                 }
+
+                // It does not. winapp resolves as it installs, so an earlier branch can fix a lower version
+                // than a later branch requires — the real Windows App SDK graph does exactly this (a branch
+                // selects InteractiveExperiences 2.1.3 while WindowsAppSDK requires 2.1.6). Keeping the lower
+                // version would report success for a graph that does not satisfy every requirement, leaving
+                // consumers without APIs a package declared it needs.
+                //
+                // Resolve this branch's range and, when the result also satisfies every range seen so far for
+                // this id, upgrade to it. Versions only ever move up, so this terminates. If no such version
+                // exists (e.g. two conflicting exact pins) it is a genuine conflict and fails loudly.
+                string? candidate;
+                try
+                {
+                    candidate = await ResolveDependencyVersionAsync(depName, depVersionRange, cacheContext, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not re-resolve dependency {depName} (required by {package} {version}): {ex.Message}");
+                    dependencyFailures.Add($"{depName} (required by {package} {version}): {ex.Message}");
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(candidate)
+                    && NuGetVersion.TryParse(candidate, out var candidateVersion)
+                    && accumulatedRanges.All(r => RangeSatisfiesWithFloat(r, candidateVersion)))
+                {
+                    taskContext.AddDebugMessage($"{UiSymbols.Rocket} {depName}: {installedDepVersion} → {candidate} (required by {package} {version})");
+                    // Drop the earlier selection so the recursive install re-walks the upgraded version's own
+                    // dependency graph rather than short-circuiting on the package id.
+                    installed.Remove(depName);
+                    await InstallPackageRecursiveAsync(depName, candidate, installed, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
+                    continue;
+                }
+
+                var rangeText = depVersionRange.OriginalString ?? depVersionRange.ToNormalizedString();
+                var conflict = $"{depName} cannot be resolved to a single version: already selected {installedDepVersion}, but {package} {version} requires '{rangeText}' and no available version satisfies every requirement";
+                taskContext.AddStatusMessage($"{UiSymbols.Warning} Dependency version conflict: {conflict}");
+                dependencyFailures.Add(conflict);
                 continue;
             }
 
@@ -287,7 +332,7 @@ internal partial class NugetService : INugetService
                     continue;
                 }
 
-                await InstallPackageRecursiveAsync(depName, depVersion, installed, dependencyFailures, taskContext, cacheContext, cancellationToken);
+                await InstallPackageRecursiveAsync(depName, depVersion, installed, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
