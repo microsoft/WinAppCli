@@ -211,12 +211,16 @@ winapp new --use-defaults --name MyApp --json
 Restore packages and regenerate files based on existing `winapp.yaml` configuration.
 
 ```bash
-winapp restore [options]
+winapp restore [base-directory] [options]
 ```
+
+**Arguments:**
+
+- `base-directory` - Directory to restore (default: current directory). Also selects where `winapp.yaml` and `nuget.config` are read from unless `--config-dir` overrides it.
 
 **Options:**
 
-- `--config-dir <path>` - Directory containing winapp.yaml (default: current directory)
+- `--config-dir <path>` - Directory containing winapp.yaml (default: base-directory)
 
 **What it does:**
 
@@ -233,6 +237,9 @@ winapp restore [options]
 ```bash
 # Restore from winapp.yaml in current directory
 winapp restore
+
+# Restore a specific project directory (reads ./my-project/winapp.yaml)
+winapp restore ./my-project
 ```
 
 **Custom and private NuGet feeds:**

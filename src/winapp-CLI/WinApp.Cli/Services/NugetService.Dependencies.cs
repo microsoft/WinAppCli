@@ -220,9 +220,12 @@ internal partial class NugetService
         // message because top-level command handlers print only ex.Message.
         if (lastError != null)
         {
+            // The source exception is deliberately NOT attached as the inner exception: its message carries
+            // the raw feed URL, and sinks that unwrap a chain (UpdateCommand's GetBaseException().Message, the
+            // telemetry exception event) would reprint the signed query string this redaction just removed.
+            // The redacted text keeps everything actionable — which source failed, and why.
             throw new InvalidOperationException(
-                $"Could not reliably determine the versions of {packageName}: source '{lastErrorSource}' could not be queried: {NugetErrorMessage.Redact(lastError.Message)}",
-                lastError);
+                $"Could not reliably determine the versions of {packageName}: source '{lastErrorSource}' could not be queried: {NugetErrorMessage.Redact(lastError.Message)}");
         }
 
         // No source was eligible at all: give the same actionable guidance as the download/dependency
@@ -311,9 +314,12 @@ internal partial class NugetService
         {
             // A source that could have satisfied the range could not be queried (feed/auth/network error);
             // surface it rather than masking a real failure as a missing dependency.
+            // The source exception is deliberately NOT attached as the inner exception: its message carries
+            // the raw feed URL, and sinks that unwrap a chain (UpdateCommand's GetBaseException().Message, the
+            // telemetry exception event) would reprint the signed query string this redaction just removed.
+            // The redacted text keeps everything actionable — which source failed, and why.
             throw new InvalidOperationException(
-                $"Could not resolve a version for dependency '{packageId}' satisfying '{range}': source '{candidates.ErrorSource}' could not be queried: {NugetErrorMessage.Redact(candidates.Error.Message)}",
-                candidates.Error);
+                $"Could not resolve a version for dependency '{packageId}' satisfying '{range}': source '{candidates.ErrorSource}' could not be queried: {NugetErrorMessage.Redact(candidates.Error.Message)}");
         }
 
         if (candidates.EligibleSourceCount == 0)
@@ -652,9 +658,12 @@ internal partial class NugetService
         // packages. An empty result is only returned when every source cleanly reported the package absent.
         if (lastError != null)
         {
+            // The source exception is deliberately NOT attached as the inner exception: its message carries
+            // the raw feed URL, and sinks that unwrap a chain (UpdateCommand's GetBaseException().Message, the
+            // telemetry exception event) would reprint the signed query string this redaction just removed.
+            // The redacted text keeps everything actionable — which source failed, and why.
             throw new InvalidOperationException(
-                $"Failed to resolve dependencies for {packageName} {version} from the configured NuGet sources. Last error from source '{lastErrorSource}': {NugetErrorMessage.Redact(lastError.Message)}",
-                lastError);
+                $"Failed to resolve dependencies for {packageName} {version} from the configured NuGet sources. Last error from source '{lastErrorSource}': {NugetErrorMessage.Redact(lastError.Message)}");
         }
 
         // No source was even eligible. Fail closed (matching the download path) instead of reporting a

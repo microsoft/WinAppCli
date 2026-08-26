@@ -160,7 +160,7 @@ internal sealed class NugetPackageDownloader(NugetSourceProvider sourceProvider)
 
         if (lastError is not null)
         {
-            throw new InvalidOperationException($"{baseMessage} Last error from source '{lastErrorSource}': {NugetErrorMessage.Redact(lastError.Message)}", lastError);
+            throw new InvalidOperationException($"{baseMessage} Last error from source '{lastErrorSource}': {NugetErrorMessage.Redact(lastError.Message)}");
         }
 
         throw new InvalidOperationException($"{baseMessage} The package/version was not found on any configured source.");

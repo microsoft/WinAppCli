@@ -296,6 +296,102 @@ public class NugetServiceInstallGraphTests : BaseCommandTests
         }
     }
 
+    /// <summary>
+    /// A dependency failure recorded while walking a version that a later upgrade replaced describes a branch
+    /// that is no longer in the graph, so it must not fail the install. Here C 1.0.0 requires a package the
+    /// feed does not have, and C is then upgraded to a version that needs nothing — the final graph is
+    /// complete, so the walk-order artifact of having tried C 1.0.0 first must not be fatal.
+    /// </summary>
+    [TestMethod]
+    public async Task InstallPackageAsync_FailureUnderReplacedVersion_DoesNotFailTheInstall()
+    {
+        // NUGET_PACKAGES takes precedence over the globalPackagesFolder written by WriteLocalFeedConfig.
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NUGET_PACKAGES")))
+        {
+            Assert.Inconclusive("NUGET_PACKAGES is set in the environment; it overrides the config's globalPackagesFolder, so the local feed would not be exercised.");
+        }
+
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
+            feed.Create();
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
+
+            // A single chain, so the walk order is fixed regardless of how dependency sets enumerate:
+            // Root -> A -> C 1.0.0, which records the failure for the absent Stale.Missing and also pulls in D;
+            // D then requires C >= 2.0.0, upgrading C to a version that needs nothing. The final graph is
+            // Root -> A -> C 2.0.0, which is complete.
+            WriteNupkgToFeed(feed, "Stale.Root", "1.0.0", ("Stale.A", "[1.0.0, )"));
+            WriteNupkgToFeed(feed, "Stale.A", "1.0.0", ("Stale.C", "[1.0.0, )"));
+            // Stale.Missing is never published to the feed, so walking C 1.0.0 records a dependency failure.
+            WriteNupkgToFeed(feed, "Stale.C", "1.0.0", ("Stale.Missing", "[5.0.0, )"), ("Stale.D", "[1.0.0, )"));
+            WriteNupkgToFeed(feed, "Stale.C", "2.0.0");
+            WriteNupkgToFeed(feed, "Stale.D", "1.0.0", ("Stale.C", "[2.0.0, )"));
+
+            WriteLocalFeedConfig(root, feed, packages);
+
+            var service = CreateServiceRootedAt(root);
+
+            Dictionary<string, string> installed;
+            try
+            {
+                installed = await service.InstallPackageAsync("Stale.Root", "1.0.0", TestTaskContext, TestContext.CancellationToken);
+            }
+            catch (InvalidOperationException ex)
+            {
+                Assert.Fail($"The resolved graph (C 2.0.0) has no missing dependency, but install failed: {ex.Message}");
+                return;
+            }
+
+            Assert.AreEqual("2.0.0", installed.GetValueOrDefault("Stale.C"));
+            Assert.IsFalse(installed.ContainsKey("Stale.Missing"));
+            Assert.IsFalse(installed.ContainsKey("Stale.D"), "D was required only by the replaced C 1.0.0.");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
+    /// <summary>
+    /// The companion to the test above: a failure under the version that IS selected must still fail the
+    /// install, so retracting stale failures cannot be used to hide a genuinely incomplete graph.
+    /// </summary>
+    [TestMethod]
+    public async Task InstallPackageAsync_FailureUnderSelectedVersion_StillFailsTheInstall()
+    {
+        // NUGET_PACKAGES takes precedence over the globalPackagesFolder written by WriteLocalFeedConfig.
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NUGET_PACKAGES")))
+        {
+            Assert.Inconclusive("NUGET_PACKAGES is set in the environment; it overrides the config's globalPackagesFolder, so the local feed would not be exercised.");
+        }
+
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
+            feed.Create();
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
+
+            WriteNupkgToFeed(feed, "Live.Root", "1.0.0", ("Live.C", "[1.0.0, )"));
+            WriteNupkgToFeed(feed, "Live.C", "1.0.0", ("Live.Missing", "[5.0.0, )"));
+
+            WriteLocalFeedConfig(root, feed, packages);
+
+            var service = CreateServiceRootedAt(root);
+
+            var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                () => service.InstallPackageAsync("Live.Root", "1.0.0", TestTaskContext, TestContext.CancellationToken));
+
+            StringAssert.Contains(ex.Message, "Live.Missing", StringComparison.Ordinal);
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
     [TestMethod]
     public async Task InstallPackageAsync_CacheFolderExistsWithoutCompletionMarker_ReDownloadsInsteadOfTrustingIt()
     {

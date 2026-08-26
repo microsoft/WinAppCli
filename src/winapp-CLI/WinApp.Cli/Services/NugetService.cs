@@ -176,7 +176,34 @@ internal partial class NugetService : INugetService
         /// <summary>The selected version of each package id, and the value returned to callers.</summary>
         public Dictionary<string, string> Installed { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        public List<string> Failures { get; } = [];
+        public List<(string Package, string Version, string Message)> Failures { get; } = [];
+
+        /// <summary>
+        /// Records a dependency failure against the package version that hit it, so it can be retracted if that
+        /// version later leaves the graph.
+        /// </summary>
+        public void AddFailure(string package, string version, string message) => Failures.Add((package, version, message));
+
+        /// <summary>
+        /// Failures that still belong to the resolved graph. A failure recorded while walking a version that was
+        /// later replaced describes a branch that no longer exists, and counting it would fail an install whose
+        /// final graph is complete: with C 1.0 -> Missing and a C 2.0 that needs nothing, upgrading C resolves
+        /// cleanly, so C 1.0's missing dependency must not still be fatal. Matched on version as well as id, so
+        /// only the failures of the version actually selected survive.
+        /// </summary>
+        public IEnumerable<string> GetActiveFailures()
+        {
+            var reachable = GetReachablePackages();
+            foreach (var (package, version, message) in Failures)
+            {
+                if (reachable.Contains(package)
+                    && Installed.TryGetValue(package, out var selectedVersion)
+                    && string.Equals(selectedVersion, version, StringComparison.OrdinalIgnoreCase))
+                {
+                    yield return message;
+                }
+            }
+        }
 
         /// <summary>
         /// The ranges declared by each package's SELECTED version, keyed by the DECLARING package id. Keying by
@@ -269,10 +296,13 @@ internal partial class NugetService : INugetService
         // incomplete install, not a success. Each gap was surfaced as a warning above (and the rest of the
         // tree was still installed best-effort); now fail the operation so callers such as `restore` exit
         // non-zero instead of reporting a partial install as complete.
-        if (graph.Failures.Count > 0)
+        // Failures recorded against a package version that a later upgrade replaced describe a branch that is
+        // no longer in the graph, so only the ones still reachable make this install incomplete.
+        var activeFailures = graph.GetActiveFailures().ToList();
+        if (activeFailures.Count > 0)
         {
             throw new InvalidOperationException(
-                $"Installed {package} {version} but {graph.Failures.Count} required dependency(ies) could not be installed: {string.Join("; ", graph.Failures)}.");
+                $"Installed {package} {version} but {activeFailures.Count} required dependency(ies) could not be installed: {string.Join("; ", activeFailures)}.");
         }
 
         graph.PruneUnreachablePackages();
@@ -356,7 +386,7 @@ internal partial class NugetService : INugetService
             // silently missing. Record it as a failure — like the dependency resolution/install errors below —
             // so the overall install fails loudly instead of reporting success with an incomplete graph.
             taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not read dependencies for {package} {version}: {NugetErrorMessage.Redact(ex.Message)}");
-            graph.Failures.Add($"{package} {version}: dependency manifest could not be read: {NugetErrorMessage.Redact(ex.Message)}");
+            graph.AddFailure(package, version, $"{package} {version}: dependency manifest could not be read: {NugetErrorMessage.Redact(ex.Message)}");
             return;
         }
 
@@ -397,7 +427,7 @@ internal partial class NugetService : INugetService
                 catch (Exception ex)
                 {
                     taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not re-resolve dependency {depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
-                    graph.Failures.Add($"{depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
+                    graph.AddFailure(package, version, $"{depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
                     continue;
                 }
 
@@ -416,7 +446,7 @@ internal partial class NugetService : INugetService
                 var rangeText = depVersionRange.OriginalString ?? depVersionRange.ToNormalizedString();
                 var conflict = $"{depName} cannot be resolved to a single version: already selected {installedDepVersion}, but {package} {version} requires '{rangeText}' and no available version satisfies every requirement";
                 taskContext.AddStatusMessage($"{UiSymbols.Warning} Dependency version conflict: {conflict}");
-                graph.Failures.Add(conflict);
+                graph.AddFailure(package, version, conflict);
                 continue;
             }
 
@@ -447,7 +477,7 @@ internal partial class NugetService : INugetService
                 // behind verbose-only logging) AND fail the overall operation. Record it so InstallPackageAsync
                 // exits non-zero rather than reporting an incomplete install as success.
                 taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not install dependency {depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
-                graph.Failures.Add($"{depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
+                graph.AddFailure(package, version, $"{depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
             }
         }
     }
