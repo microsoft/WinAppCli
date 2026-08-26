@@ -240,15 +240,17 @@ internal partial class NugetService : INugetService
                     continue;
                 }
 
-                // Only the membership test is lifted into Where. `reachable.Add` stays in the body on purpose:
-                // it mutates the set this traversal is simultaneously reading, and hiding that behind a lazily
-                // evaluated LINQ predicate would make the visit-once guarantee depend on enumeration timing.
-                foreach (var depName in deps.Keys.Where(Installed.ContainsKey))
+                // Materialized before the loop mutates `reachable`: the filter reads the same set the body
+                // writes, so a lazily evaluated sequence would be deciding membership against a set that is
+                // changing underneath it. deps.Keys is already distinct, so one pass cannot yield a duplicate.
+                var newlyReached = deps.Keys
+                    .Where(depName => Installed.ContainsKey(depName) && !reachable.Contains(depName))
+                    .ToList();
+
+                foreach (var depName in newlyReached)
                 {
-                    if (reachable.Add(depName))
-                    {
-                        pending.Enqueue(depName);
-                    }
+                    reachable.Add(depName);
+                    pending.Enqueue(depName);
                 }
             }
 
