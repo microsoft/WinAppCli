@@ -4,6 +4,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using WinApp.Cli.ExecutionTargets.Abstractions;
+using WinApp.Cli.Helpers;
 using WinApp.Cli.Services;
 
 namespace WinApp.Cli.ExecutionTargets.WindowsSandbox;
@@ -140,8 +141,11 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
 
         var startInfo = new ProcessStartInfo
         {
-            FileName = executable,
+            // ShellExecute does not inherit handles, so the client cannot hold the caller's captured
+            // stdout/stderr open. That is load-bearing, not incidental: this child outlives winapp.
+            // The suppression scope below keeps the guarantee even if this flag is ever changed.
             UseShellExecute = true,
+            FileName = executable,
             CreateNoWindow = false,
         };
         foreach (var argument in (string[])["connect", "--id", id, "--raw"])
@@ -149,7 +153,11 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
             startInfo.ArgumentList.Add(argument);
         }
 
-        ConnectLauncher(startInfo);
+        using (StandardHandleInheritance.Suppress())
+        {
+            ConnectLauncher(startInfo);
+        }
+
         await Task.CompletedTask;
     }
 
@@ -221,6 +229,10 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
 
         cancellationToken.ThrowIfCancellationRequested();
 
+        // `wsb exec` hosting the persistent guest agent runs for the life of the Sandbox, which is
+        // far longer than this command. It must therefore not inherit the caller's standard handles:
+        // a caller capturing winapp's output would otherwise wait for end of stream until the whole
+        // Sandbox went away.
         var launch = RunAsync(
             [
                 "exec",
@@ -230,7 +242,8 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
                 "--raw",
             ],
             CancellationToken.None,
-            throwOnFailure: false);
+            throwOnFailure: false,
+            outlivesCaller: true);
 
         _ = ObserveAgentLaunchAsync(launch);
 
@@ -287,7 +300,8 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
     private async Task<ProcessRunResult> RunAsync(
         List<string> arguments,
         CancellationToken cancellationToken,
-        bool throwOnFailure = true)
+        bool throwOnFailure = true,
+        bool outlivesCaller = false)
     {
         if (_executablePath.Value is not { } executable)
         {
@@ -299,7 +313,9 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
         }
 
         var result = await processRunner
-            .RunAsync(new ProcessRunRequest(executable, arguments), cancellationToken: cancellationToken)
+            .RunAsync(
+                new ProcessRunRequest(executable, arguments) { OutlivesCaller = outlivesCaller },
+                cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         if (throwOnFailure && result.ExitCode != 0)
