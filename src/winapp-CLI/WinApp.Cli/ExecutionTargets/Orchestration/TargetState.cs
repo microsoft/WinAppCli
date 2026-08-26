@@ -52,6 +52,17 @@ internal sealed record TargetState
     /// <summary>Hash of the guest agent binary last known to be installed.</summary>
     public string? AgentBinaryHash { get; init; }
 
+    /// <summary>
+    /// IP address the managed instance last answered on.
+    /// </summary>
+    /// <remarks>
+    /// A cache, not a source of truth: it saves a <c>wsb</c> query when the next command reconnects
+    /// to an agent that is already running, and is ignored whenever it does not belong to the
+    /// current <see cref="InstanceId"/>. Nothing secret lives here — the pre-shared key stays in the
+    /// bootstrap material, which the guest already has to be able to read.
+    /// </remarks>
+    public string? GuestAddress { get; init; }
+
     /// <summary>UTC timestamp of the last commit, for diagnostics only.</summary>
     public DateTimeOffset? UpdatedUtc { get; init; }
 }

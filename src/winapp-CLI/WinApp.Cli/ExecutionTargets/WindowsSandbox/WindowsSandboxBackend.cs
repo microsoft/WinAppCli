@@ -4,6 +4,7 @@
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.GuestAgent;
 using WinApp.Cli.ExecutionTargets.Orchestration;
@@ -33,8 +34,12 @@ internal sealed class WindowsSandboxBackend(
     WindowsSandboxLifecycle lifecycle,
     ITargetStateDirectoryProvider directoryProvider,
     IHostWinappBinaryProvider hostBinaryProvider,
-    IWindowsSandboxWindowController windowController) : IExecutionTargetBackend
+    IWindowsSandboxWindowController windowController,
+    ITargetStateStore? stateStore = null,
+    ITargetProgress? progress = null) : IExecutionTargetBackend
 {
+    private readonly ITargetProgress _progress = progress ?? NullTargetProgress.Instance;
+
     /// <summary>Guest path the read-only bootstrap folder is mapped to.</summary>
     internal const string GuestBootstrapPath = @"C:\WinAppBootstrap";
 
@@ -62,9 +67,33 @@ internal sealed class WindowsSandboxBackend(
     /// <summary>Largest total size the untrusted result folder may reach before it is refused.</summary>
     internal const long MaxResultBytes = 1024 * 1024;
 
+    /// <summary>
+    /// Lowest port the guest agent is asked to listen on.
+    /// </summary>
+    /// <remarks>
+    /// The IANA dynamic/private range. The host picks the port rather than letting the agent bind
+    /// port 0, because the inbound firewall rule has to exist <em>before</em> the listener starts —
+    /// see <see cref="AllowGuestAgentConnectionAsync"/> — and a rule cannot name a port nobody has
+    /// chosen yet.
+    /// </remarks>
+    internal const int MinAgentPort = 49152;
+
+    /// <summary>Highest port the guest agent is asked to listen on.</summary>
+    internal const int MaxAgentPort = 65535;
+
     private string? _instanceId;
     private string? _guestAddress;
     private GuestBootstrapMaterial? _activeMaterial;
+
+    /// <summary>Picks a listening port for the guest agent from the dynamic range.</summary>
+    /// <remarks>
+    /// Random rather than fixed so two unrelated guests do not collide on a well-known number, and
+    /// so a stale rule from a previous boot does not silently authorise a new agent. A collision
+    /// inside the guest is handled by retrying the bootstrap with a fresh port rather than by
+    /// falling back to port 0, which would reintroduce the ordering problem.
+    /// </remarks>
+    internal static int NextAgentPort() =>
+        RandomNumberGenerator.GetInt32(MinAgentPort, MaxAgentPort + 1);
 
     /// <inheritdoc/>
     public ExecutionTargetRef Target => ExecutionTargetRef.WindowsSandboxDefault;
@@ -117,33 +146,30 @@ internal sealed class WindowsSandboxBackend(
         var lease = await lifecycle.EnsureInstanceAsync(cancellationToken).ConfigureAwait(false);
         _instanceId = lease.InstanceId;
 
+        // Reconnecting to an agent that is already serving is the whole point of a persistent
+        // Sandbox: it costs one TCP connect instead of a client reconnect, an agent relaunch, and a
+        // runtime re-verification. It is attempted before anything else touches the instance.
         if (lease.Reused &&
-            _guestAddress is { } activeAddress &&
-            _activeMaterial is { } activeMaterial &&
-            string.Equals(activeMaterial.TargetEpoch, lease.Epoch.Value, StringComparison.Ordinal))
+            await TryReconnectAsync(lease, cancellationToken).ConfigureAwait(false) is { } reused)
         {
-            try
-            {
-                var reusedTransport = await GuestTcpTransport
-                    .ConnectAsync(activeAddress, activeMaterial, cancellationToken)
-                    .ConfigureAwait(false);
-
-                return new TargetConnection(lease.Epoch, reusedTransport, Reused: true);
-            }
-            catch (ExecutionTargetException ex) when (
-                ex.Error.Code == ExecutionTargetErrorCodes.TransportFailed)
-            {
-                // The same Sandbox is alive but its agent is not. Repair only that layer below;
-                // deployment/runtime state stays fenced by the unchanged epoch.
-                _activeMaterial = null;
-            }
+            _progress.Report("Reusing the running Windows Sandbox agent...");
+            return reused;
         }
+
+        _progress.Report(lease.Reused
+            ? "Repairing the Windows Sandbox agent..."
+            : "Starting Windows Sandbox...");
 
         var bootstrap = PrepareBootstrapDirectories(lease.Epoch);
         var agentHash = await StageBootstrapBinaryAsync(bootstrap.HostBootstrap, cancellationToken)
             .ConfigureAwait(false);
 
-        var material = GuestBootstrapMaterial.Create(Target, lease.Epoch, port: 0);
+        // The port is chosen here, by the host, and written into the material the agent reads. That
+        // ordering is what removes the Windows Security consent dialog: the inbound rule below can
+        // only be created for a port that is already known, and Windows prompts the moment a
+        // listener starts without a matching rule.
+        var agentPort = NextAgentPort();
+        var material = GuestBootstrapMaterial.Create(Target, lease.Epoch, agentPort);
         await File.WriteAllTextAsync(
             Path.Join(bootstrap.HostBootstrap, GuestBootstrapMaterial.FileName),
             material.ToJson(),
@@ -163,8 +189,13 @@ internal sealed class WindowsSandboxBackend(
         // Real input and Windows Graphics Capture need a connected client. Connecting is also what
         // establishes the interactive user session the agent must run in, so it happens before the
         // agent is launched rather than after.
+        //
+        // Only ever on a bootstrap. Calling this against an instance whose client is already up
+        // tears that client's session down and shows the user "the connection was lost, reconnect?",
+        // which is why the reuse path above must be tried first.
         if (options.RequireInteractiveDesktop || !lease.Reused)
         {
+            _progress.Report("Connecting the Windows Sandbox window...");
             var windowSnapshot = windowController.Capture();
             await cli.ConnectAsync(lease.InstanceId, cancellationToken).ConfigureAwait(false);
             await windowController
@@ -180,6 +211,15 @@ internal sealed class WindowsSandboxBackend(
         {
             await EnableGuestDevelopmentModeAsync(lease.InstanceId, cancellationToken).ConfigureAwait(false);
         }
+
+        // Before the agent starts listening, not after. This is the fix for the firewall consent
+        // prompt: the rule has to be in place when the socket opens, or Windows asks the user.
+        await AllowGuestAgentConnectionAsync(
+            lease.InstanceId,
+            agentPort,
+            cancellationToken).ConfigureAwait(false);
+
+        _progress.Report("Preparing the Windows Sandbox agent...");
 
         var heartbeat = await LaunchReadyAgentAsync(
             lease.InstanceId,
@@ -200,25 +240,168 @@ internal sealed class WindowsSandboxBackend(
                 });
         }
 
-        await AllowGuestAgentConnectionAsync(
-            lease.InstanceId,
-            heartbeat.Port,
-            cancellationToken).ConfigureAwait(false);
+        if (heartbeat.Port != agentPort)
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.TransportFailed,
+                "The Windows Sandbox agent is listening on a port the host did not authorise.",
+                userAction: "Close Windows Sandbox, then retry.",
+                context: new Dictionary<string, string>
+                {
+                    ["expectedPort"] = agentPort.ToString(CultureInfo.InvariantCulture),
+                    ["actualPort"] = heartbeat.Port.ToString(CultureInfo.InvariantCulture),
+                });
+        }
 
         _guestAddress = await cli.GetIpAddressAsync(lease.InstanceId, cancellationToken).ConfigureAwait(false);
 
-        var connectedMaterial = material with { Port = heartbeat.Port };
+        _progress.Report("Connecting to the Windows Sandbox agent...");
+
         var transport = await GuestTcpTransport.ConnectAsync(
             _guestAddress,
-            connectedMaterial,
+            material,
             cancellationToken).ConfigureAwait(false);
-        _activeMaterial = connectedMaterial;
+        _activeMaterial = material;
+
+        RememberConnection(lease, _guestAddress);
 
         // The result folder has served its purpose and is guest-writable, so it does not survive the
         // handshake it was created for.
         TryClearResultFolder(bootstrap.HostResult);
 
         return new TargetConnection(lease.Epoch, transport, lease.Reused);
+    }
+
+    /// <summary>
+    /// Reconnects to an agent that is already serving this epoch, or returns null.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every CLI invocation constructs a fresh backend, so in-process fields alone can never make
+    /// the second command reuse the first one's agent — the material has to come off disk. It is
+    /// read back from the same read-only bootstrap file the agent itself was given, so host and
+    /// guest cannot disagree about the key, and the epoch inside it is checked against the lease so
+    /// material from a previous boot is never used against a new one.
+    /// </para>
+    /// <para>
+    /// Returning null means "reconnect was not possible", never "the Sandbox is unusable": the
+    /// caller falls through to a full bootstrap, which repairs the agent without recreating the
+    /// instance. A failure here must not be reported as an error, because a stopped agent is an
+    /// ordinary state after the guest reboots or the agent is killed.
+    /// </para>
+    /// </remarks>
+    private async Task<TargetConnection?> TryReconnectAsync(
+        SandboxInstanceLease lease,
+        CancellationToken cancellationToken)
+    {
+        var material = _activeMaterial ?? TryReadPersistedMaterial();
+
+        // Port 0 is what an older build wrote before the host assigned ports, and it is also what
+        // "bind anywhere" means — never a port anything is listening on. Treated as no material at
+        // all so a stale file makes this repair rather than attempt a meaningless connect.
+        if (material is null ||
+            !string.Equals(material.TargetEpoch, lease.Epoch.Value, StringComparison.Ordinal) ||
+            material.Port is <= 0 or > IPEndPoint.MaxPort)
+        {
+            return null;
+        }
+
+        var address = _guestAddress ?? TryReadPersistedAddress(lease);
+
+        if (string.IsNullOrWhiteSpace(address))
+        {
+            try
+            {
+                address = await cli.GetIpAddressAsync(lease.InstanceId, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ExecutionTargetException)
+            {
+                return null;
+            }
+        }
+
+        try
+        {
+            var transport = await GuestTcpTransport
+                .ConnectAsync(address, material, cancellationToken)
+                .ConfigureAwait(false);
+
+            _guestAddress = address;
+            _activeMaterial = material;
+            RememberConnection(lease, address);
+
+            return new TargetConnection(lease.Epoch, transport, Reused: true);
+        }
+        catch (ExecutionTargetException)
+        {
+            // The Sandbox is alive but its agent is not answering. Repair only that layer; the
+            // unchanged epoch keeps deployment and runtime state valid across the repair.
+            _activeMaterial = null;
+            return null;
+        }
+    }
+
+    /// <summary>Reads the connection material this target last bootstrapped with.</summary>
+    private GuestBootstrapMaterial? TryReadPersistedMaterial()
+    {
+        try
+        {
+            var path = Path.Join(
+                directoryProvider.GetTargetRoot(Target, create: false).FullName,
+                BootstrapFolder,
+                GuestBootstrapMaterial.FileName);
+
+            return File.Exists(path) ? GuestBootstrapMaterial.TryParse(File.ReadAllText(path)) : null;
+        }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or ExecutionTargetException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The guest address recorded alongside this instance, when it is still the same one.</summary>
+    private string? TryReadPersistedAddress(SandboxInstanceLease lease)
+    {
+        var state = stateStore?.Read(Target);
+
+        return string.Equals(state?.InstanceId, lease.InstanceId, StringComparison.OrdinalIgnoreCase)
+            ? state?.GuestAddress
+            : null;
+    }
+
+    /// <summary>
+    /// Records the guest address so the next process can reconnect without re-querying it.
+    /// </summary>
+    /// <remarks>
+    /// Best effort and never fatal. The address is a cache, not a source of truth — losing it costs
+    /// one <c>wsb</c> call on the next command, while failing the command over it would trade a
+    /// working Sandbox for an error.
+    /// </remarks>
+    private void RememberConnection(SandboxInstanceLease lease, string address)
+    {
+        if (stateStore is null || string.IsNullOrWhiteSpace(address))
+        {
+            return;
+        }
+
+        try
+        {
+            var state = stateStore.Read(Target);
+
+            if (state is null ||
+                !string.Equals(state.InstanceId, lease.InstanceId, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(state.GuestAddress, address, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            stateStore.Commit(Target, state with { GuestAddress = address }, state.Revision);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ExecutionTargetException)
+        {
+            // A stale or contended state file costs a re-query next time, nothing more.
+        }
     }
 
     /// <inheritdoc/>
@@ -276,23 +459,63 @@ internal sealed class WindowsSandboxBackend(
     }
 
     /// <summary>Publishes the host binary into the read-only bootstrap share and returns its hash.</summary>
+    /// <remarks>
+    /// Staging is skipped entirely when the bytes already match, which is the ordinary case: the
+    /// same build reconnecting or repairing does not rewrite the share at all. Replacing the file is
+    /// therefore only attempted when the host binary genuinely changed — and that is exactly when
+    /// the running agent may still hold the old one open.
+    /// </remarks>
     private async Task<string> StageBootstrapBinaryAsync(
         string bootstrapDirectory,
         CancellationToken cancellationToken)
     {
         var source = hostBinaryProvider.GetBinary();
-        var expected = await StageBootstrapFileAsync(
-            source,
-            TargetPathSafety.CombineInsideRoot(bootstrapDirectory, GuestAgentInstaller.BinaryName),
-            cancellationToken).ConfigureAwait(false);
+
+        string expected;
+        try
+        {
+            expected = await StageBootstrapFileAsync(
+                source,
+                TargetPathSafety.CombineInsideRoot(bootstrapDirectory, GuestAgentInstaller.BinaryName),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (IOException ex)
+        {
+            // The agent already serving this Sandbox is running from this exact file, so a newer
+            // winapp cannot replace it in place. Reported as the actionable thing it is: the raw
+            // exception surfaces as "IO_SharingViolation_NoFileName", which tells the user nothing
+            // and looks like a winapp defect rather than a running-agent conflict.
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.AgentIncompatible,
+                "A different version of winapp is already running the Windows Sandbox agent, " +
+                "so this one could not replace it.",
+                userAction: "Close Windows Sandbox, then run the command again to start a fresh agent.",
+                nextCommand: new ExecutionTargetNextCommand
+                {
+                    Command = "wsb stop",
+
+                    // Stopping discards whatever is running in the guest, so it stays the user's call.
+                    Advisory = true,
+                },
+                innerException: ex);
+        }
 
         var companion = new FileInfo(Path.Join(source.DirectoryName, SkiaCompanionName));
         if (companion.Exists)
         {
-            await StageBootstrapFileAsync(
-                companion,
-                TargetPathSafety.CombineInsideRoot(bootstrapDirectory, SkiaCompanionName),
-                cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await StageBootstrapFileAsync(
+                    companion,
+                    TargetPathSafety.CombineInsideRoot(bootstrapDirectory, SkiaCompanionName),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (IOException)
+            {
+                // The companion is only needed for image encoding, and a locked one is byte-identical
+                // to what a running agent already loaded. Failing the whole command over it would
+                // turn a working Sandbox into an error.
+            }
         }
 
         return expected;
@@ -416,23 +639,38 @@ internal sealed class WindowsSandboxBackend(
         }
     }
 
-    /// <summary>Allows inbound TCP only to the staged guest agent on its validated listening port.</summary>
+    /// <summary>Allows inbound TCP only to the staged guest agent on its pre-assigned port.</summary>
     /// <remarks>
+    /// <para>
     /// Windows Sandbox blocks the host-to-guest connection by default. This is the second and only
     /// other privileged bootstrap operation: the executable, direction, protocol, action, and
-    /// profile are constants; the sole dynamic value is the integer port the verified heartbeat
-    /// published. Authentication and encryption still gate every request after the socket opens.
+    /// profile are constants; the sole dynamic value is the integer port the host chose.
+    /// Authentication and encryption still gate every request after the socket opens.
+    /// </para>
+    /// <para>
+    /// <b>This must run before the agent starts listening.</b> Windows raises the "Windows Firewall
+    /// has blocked some features of this app" consent dialog at the moment a program binds a
+    /// listening socket with no matching rule — so a rule created afterwards, however correct,
+    /// arrives too late to prevent the prompt and leaves the user staring at a dialog inside the
+    /// Sandbox window. That ordering is why the port is chosen by the host rather than by binding
+    /// port 0 and reading back what the agent got.
+    /// </para>
+    /// <para>
+    /// The rule is scoped to the agent program <em>and</em> the single port it was told to use, so
+    /// nothing else in the guest gains inbound reachability. Stale allow rules from earlier boots
+    /// are removed first, so a port this guest is no longer using does not stay open.
+    /// </para>
     /// </remarks>
     private async Task AllowGuestAgentConnectionAsync(
         string instanceId,
         int port,
         CancellationToken cancellationToken)
     {
-        if (port is < IPEndPoint.MinPort or > IPEndPoint.MaxPort)
+        if (port is <= 0 or > IPEndPoint.MaxPort)
         {
             throw ExecutionTargetException.Create(
                 ExecutionTargetErrorCodes.TransportFailed,
-                "The Windows Sandbox agent reported an invalid TCP port.",
+                "The Windows Sandbox agent was assigned an invalid TCP port.",
                 userAction: "Close Windows Sandbox, then retry.",
                 context: new Dictionary<string, string>
                 {
@@ -445,12 +683,17 @@ internal sealed class WindowsSandboxBackend(
         var command =
             @"powershell.exe -NoProfile -NonInteractive -Command " +
             $@"""$agent='{agentPath}'; " +
-            @"$blocked=Get-NetFirewallRule -PolicyStore ActiveStore | Where-Object { " +
-            @"$_.Action -eq 'Block' -and (($_ | Get-NetFirewallApplicationFilter).Program -eq $agent) }; " +
-            @"foreach ($rule in $blocked) { " +
+
+            // Any existing rule for this program is removed first, block or allow: a block rule
+            // would defeat the new allow, and a stale allow would leave a port open that this boot
+            // is not using.
+            @"$existing=Get-NetFirewallRule -PolicyStore ActiveStore -ErrorAction SilentlyContinue | Where-Object { " +
+            @"($_ | Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue).Program -eq $agent }; " +
+            @"foreach ($rule in $existing) { " +
+            @"Remove-NetFirewallRule -Name $rule.Name -PolicyStore ActiveStore -ErrorAction SilentlyContinue; " +
             @"Remove-NetFirewallRule -Name $rule.Name -PolicyStore PersistentStore -ErrorAction SilentlyContinue }; " +
             $@"New-NetFirewallRule -DisplayName 'WinApp Sandbox Agent {portText}' " +
-            $@"-Direction Inbound -Action Allow -Protocol TCP -LocalPort {portText} " +
+            $@"-Direction Inbound -Action Allow -Protocol TCP -LocalPort {portText} -Program $agent " +
             @"-Profile Any -EdgeTraversalPolicy Allow -PolicyStore ActiveStore -ErrorAction Stop | Out-Null""";
 
         var exitCode = await cli.ExecuteAsync(

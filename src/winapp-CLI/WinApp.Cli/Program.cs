@@ -224,7 +224,11 @@ internal static class Program
             if (SandboxUiRouter.ShouldRoute(parsedArgs))
             {
                 var router = serviceProvider.GetRequiredService<SandboxUiRouter>();
-                return router.RouteAsync(args, effectiveJson, CancellationToken.None);
+                return router.RouteAsync(
+                    args,
+                    SandboxUiRequirements.For(parsedArgs),
+                    effectiveJson,
+                    CancellationToken.None);
             }
 
             return parsedArgs.InvokeAsync();
