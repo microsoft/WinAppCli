@@ -126,8 +126,6 @@ internal sealed class ExecutionTargetOrchestrator(
                 new EnsureTargetOptions(options.RequireInteractiveDesktop),
                 cancellationToken).ConfigureAwait(false);
 
-            _progress.Report("Connecting to the Windows Sandbox agent...");
-
             channel = new GuestCommandChannel(connection.Transport, connection.Epoch);
             channel.Start();
 
@@ -143,8 +141,6 @@ internal sealed class ExecutionTargetOrchestrator(
             var capabilities = await channel.GetCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
 
             EnsureCapable(options, capabilities);
-
-            _progress.Report(DescribeProgress(connection.Reused));
 
             var prepared = new PreparedTarget(
                 channel,
@@ -176,6 +172,12 @@ internal sealed class ExecutionTargetOrchestrator(
     /// <remarks>
     /// No Sandbox ID or lifecycle guidance is printed during successful normal use: it is noise the
     /// user cannot act on, and printing it would train them to expect it in failures too.
+    /// <para>
+    /// Retained for callers that render their own status. The orchestrator itself does not print
+    /// this, because the backend already reports the specific phase it is in — announcing
+    /// "Preparing Windows Sandbox..." after preparation has finished describes the past as if it
+    /// were the present.
+    /// </para>
     /// </remarks>
     public static string DescribeProgress(bool reused) =>
         reused ? "Reusing Windows Sandbox..." : "Preparing Windows Sandbox...";

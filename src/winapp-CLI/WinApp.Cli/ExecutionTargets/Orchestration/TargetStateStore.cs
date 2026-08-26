@@ -117,6 +117,10 @@ internal sealed class TargetStateStore(ITargetStateDirectoryProvider directoryPr
                 });
         }
 
+        // Every persisted field is listed explicitly rather than copied with `with`, so the
+        // committed record cannot inherit a revision or schema version from the caller. That does
+        // mean a new field must be added here as well as to the record — omitting it silently
+        // discards the caller's value on every commit.
         var committed = new TargetState
         {
             SchemaVersion = CurrentSchemaVersion,
@@ -127,6 +131,7 @@ internal sealed class TargetStateStore(ITargetStateDirectoryProvider directoryPr
             BootNonce = state.BootNonce,
             AgentVersion = state.AgentVersion,
             AgentBinaryHash = state.AgentBinaryHash,
+            GuestAddress = state.GuestAddress,
             UpdatedUtc = DateTimeOffset.UtcNow,
         };
 
