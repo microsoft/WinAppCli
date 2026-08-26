@@ -93,15 +93,67 @@ public class SandboxCopyParserTests
     }
 
     [TestMethod]
-    public void GuestPathsAreReducedToRelativeFormForContainment()
+    public void GuestPathsAreRelativeToTheManagedWorkRoot()
     {
-        // Users write guest paths the way they think of them, including drive letters. Reducing
-        // them here is what lets the guest resolve them against a managed root and prove
-        // containment, instead of a guest-provided path selecting an arbitrary location.
-        Assert.AreEqual(@"Work\build", SandboxCopyService.NormalizeGuestRelative(@"C:\Work\build"));
-        Assert.AreEqual(@"Work\build", SandboxCopyService.NormalizeGuestRelative(@"\Work\build"));
+        // Relative paths are the contract: the guest resolves them against a root it owns, which is
+        // what makes containment provable.
+        Assert.AreEqual(@"Work\build", SandboxCopyService.NormalizeGuestRelative(@"Work\build"));
         Assert.AreEqual(@"Work\build", SandboxCopyService.NormalizeGuestRelative(@"Work/build"));
-        Assert.AreEqual(string.Empty, SandboxCopyService.NormalizeGuestRelative(@"C:\"));
+        Assert.AreEqual(@"Setup\setup.ps1", SandboxCopyService.NormalizeGuestRelative(@"Setup\setup.ps1"));
+
+        // Spaces and non-ASCII names survive untouched; only the root is at issue.
+        Assert.AreEqual(@"My Tools\ünïcode.ps1", SandboxCopyService.NormalizeGuestRelative(@"My Tools/ünïcode.ps1"));
+    }
+
+    /// <summary>
+    /// A rooted guest path is refused rather than silently re-rooted.
+    /// </summary>
+    /// <remarks>
+    /// Stripping the drive and continuing looks helpful and is not: the file lands somewhere the
+    /// caller never named, the copy reports success, and the command they run next — using the path
+    /// they actually typed — cannot find it.
+    /// </remarks>
+    [TestMethod]
+    [DataRow(@"C:\Setup\setup.ps1", DisplayName = "drive-absolute")]
+    [DataRow(@"\Setup\setup.ps1", DisplayName = "rooted")]
+    [DataRow(@"/Setup/setup.ps1", DisplayName = "rooted, forward slashes")]
+    [DataRow(@"\\server\share\setup.ps1", DisplayName = "UNC")]
+    [DataRow(@"C:\", DisplayName = "bare drive")]
+    public void RootedGuestPaths_AreRefusedWithTheWorkRootNamed(string guestPath)
+    {
+        var failure = Assert.ThrowsExactly<ExecutionTargetException>(
+            () => SandboxCopyService.NormalizeGuestRelative(guestPath));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.TargetAmbiguous, failure.Error.Code);
+
+        // The message has to name where paths actually resolve, or the user cannot act on it.
+        StringAssert.Contains(failure.Error.Message, SandboxCopyService.GuestWorkRoot);
+    }
+
+    /// <summary>Traversal out of the managed folder is refused.</summary>
+    [TestMethod]
+    [DataRow(@"..\escape.ps1")]
+    [DataRow(@"Setup\..\..\escape.ps1")]
+    [DataRow(@"Setup/../../escape.ps1")]
+    public void TraversingGuestPaths_AreRefused(string guestPath)
+    {
+        var failure = Assert.ThrowsExactly<ExecutionTargetException>(
+            () => SandboxCopyService.NormalizeGuestRelative(guestPath));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.TargetAmbiguous, failure.Error.Code);
+    }
+
+    /// <summary>The reported destination is the path a following command should use.</summary>
+    [TestMethod]
+    public void ResolvedGuestPath_IsReportedFullyQualified()
+    {
+        Assert.AreEqual(
+            $@"{SandboxCopyService.GuestWorkRoot}\Setup\setup.ps1",
+            SandboxCopyService.DescribeGuestPath(@"Setup\setup.ps1"));
+
+        Assert.AreEqual(
+            SandboxCopyService.GuestWorkRoot,
+            SandboxCopyService.DescribeGuestPath(string.Empty));
     }
 
     [TestMethod]

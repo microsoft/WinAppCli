@@ -1219,7 +1219,7 @@ Everything after `--` is passed through as a structured argument array, so quoti
 
 ```bash
 winapp sandbox exec -- dotnet --info
-winapp sandbox exec --cwd C:\Work -- powershell -File .\test.ps1
+winapp sandbox exec --cwd C:\WinApp\work -- powershell -File .\test.ps1
 ```
 
 **Behavior:**
@@ -1240,14 +1240,27 @@ winapp sandbox cp <source> <destination> [--json]
 
 Exactly one endpoint must be prefixed with `sandbox:`. Requiring exactly one — rather than inferring the direction from which path happens to exist — means the command can never guess wrong about which side is being overwritten.
 
+**Guest paths are relative to `C:\WinApp\work`**, the folder winapp manages inside the Sandbox. That is what makes containment provable: a path you pass can only ever resolve inside a root the guest owns. A drive-absolute, rooted, or UNC guest path is refused with a message naming the work root, rather than silently re-rooted — silently accepting `sandbox:C:\Setup\setup.ps1` would place the file somewhere you never named while reporting success.
+
 ```bash
-winapp sandbox cp .\setup.ps1 sandbox:C:\Setup\setup.ps1
-winapp sandbox cp .\build sandbox:C:\Work\build
-winapp sandbox cp sandbox:C:\Results .\results
+winapp sandbox cp .\setup.ps1 sandbox:Setup\setup.ps1
+winapp sandbox cp .\build sandbox:build
+winapp sandbox cp sandbox:Results .\results
+```
+
+Each copy into the Sandbox reports where the file actually landed, which is the path to use next:
+
+```bash
+winapp sandbox cp .\setup.ps1 sandbox:Setup\setup.ps1
+# Copied 1 file(s), skipped 0 unchanged, to C:\WinApp\work\Setup\setup.ps1 in the Sandbox.
+
+winapp sandbox exec --cwd C:\WinApp\work\Setup -- powershell -File .\setup.ps1
 ```
 
 **Behavior:**
 
+- A single file lands at exactly the destination you name — `sandbox:Setup\setup.ps1` is that file, not a folder to put it in.
+- A directory preserves its structure beneath the destination.
 - Copies files and directories, preserving structure and useful timestamps.
 - Skips files whose content already matches, compared by hash rather than timestamp.
 - Replaces changed files atomically, after verifying size and hash. An interrupted copy never publishes a partial file over one that was correct.

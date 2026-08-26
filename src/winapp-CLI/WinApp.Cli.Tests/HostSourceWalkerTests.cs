@@ -586,7 +586,7 @@ public class HostSourceWalkerTests
             var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
                 () => SandboxCopyService.CopyAsync(
                     harness.Channel,
-                    new SandboxCopyRequest(SandboxCopyDirection.ToGuest, root, @"C:\Work\leaf"),
+                    new SandboxCopyRequest(SandboxCopyDirection.ToGuest, root, @"Work\leaf"),
                     TestContext.CancellationToken));
 
             if (!swapped)
@@ -609,6 +609,141 @@ public class HostSourceWalkerTests
         {
             TryDeleteDirectory(root);
             TryDeleteDirectory(outside);
+            TryDeleteDirectory(guestManaged);
+        }
+    }
+
+    /// <summary>
+    /// A single named file lands at exactly the destination it was given.
+    /// </summary>
+    /// <remarks>
+    /// The defect: the destination kind was re-derived by asking <c>File.Exists</c> about the
+    /// source root, which for a named file is its <em>parent directory</em> — always false. The
+    /// copy then treated the file as a folder member and appended its name, so
+    /// <c>cp .\setup.ps1 sandbox:Setup\setup.ps1</c> produced
+    /// <c>Setup\setup.ps1\setup.ps1</c>: the command exited 0, and the file was not where the
+    /// caller asked for it, so the next command failed.
+    /// </remarks>
+    [TestMethod]
+    [DataRow(@"Setup\setup.ps1", @"Setup\setup.ps1", DisplayName = "nested destination")]
+    [DataRow("setup.ps1", "setup.ps1", DisplayName = "root destination")]
+    [DataRow(@"Setup\renamed.ps1", @"Setup\renamed.ps1", DisplayName = "renamed on arrival")]
+    [DataRow(@"My Tools\setup.ps1", @"My Tools\setup.ps1", DisplayName = "spaces")]
+    [DataRow(@"Ünïcode\sétup.ps1", @"Ünïcode\sétup.ps1", DisplayName = "non-ASCII")]
+    public async Task SingleFileCopy_LandsExactlyWhereItWasPointed(string guestPath, string expected)
+    {
+        var root = TestPaths.TempRoot(nameof(SingleFileCopy_LandsExactlyWhereItWasPointed));
+        var guestManaged = TestPaths.TempRoot("guest-single-file");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(guestManaged);
+
+        var source = TestPaths.Under(root, "setup.ps1");
+        await File.WriteAllTextAsync(source, "Write-Output hi", TestContext.CancellationToken);
+
+        try
+        {
+            await using var harness = new CopyHarness(guestManaged, onFirstSend: () => { });
+
+            var result = await SandboxCopyService.CopyAsync(
+                harness.Channel,
+                new SandboxCopyRequest(SandboxCopyDirection.ToGuest, source, guestPath),
+                TestContext.CancellationToken);
+
+            Assert.AreEqual(1, result.Transferred);
+
+            var guestFiles = await harness.Channel.ListFilesAsync(
+                new GuestPathScope(GuestRootNames.Work, Scope: null), TestContext.CancellationToken);
+
+            // The exact guest listing is the assertion: a path that merely *contains* the name
+            // would still be satisfied by the buggy nested form.
+            CollectionAssert.AreEqual(
+                (string[])[expected],
+                guestFiles.Select(f => f.RelativePath).ToArray());
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+            TryDeleteDirectory(guestManaged);
+        }
+    }
+
+    /// <summary>A folder source still preserves its structure beneath the destination.</summary>
+    /// <remarks>
+    /// The counterpart to the fix: making a single file land exactly must not flatten a directory
+    /// copy onto one path.
+    /// </remarks>
+    [TestMethod]
+    public async Task DirectoryCopy_StillPreservesItsStructure()
+    {
+        var root = TestPaths.TempRoot(nameof(DirectoryCopy_StillPreservesItsStructure));
+        var guestManaged = TestPaths.TempRoot("guest-directory");
+        Directory.CreateDirectory(Path.Join(root, "nested"));
+        Directory.CreateDirectory(guestManaged);
+
+        await File.WriteAllTextAsync(TestPaths.Under(root, "a.txt"), "a", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(
+            TestPaths.Under(root, "nested", "b.txt"), "b", TestContext.CancellationToken);
+
+        try
+        {
+            await using var harness = new CopyHarness(guestManaged, onFirstSend: () => { });
+
+            var result = await SandboxCopyService.CopyAsync(
+                harness.Channel,
+                new SandboxCopyRequest(SandboxCopyDirection.ToGuest, root, "Payload"),
+                TestContext.CancellationToken);
+
+            Assert.AreEqual(2, result.Transferred);
+
+            var guestFiles = await harness.Channel.ListFilesAsync(
+                new GuestPathScope(GuestRootNames.Work, Scope: null), TestContext.CancellationToken);
+
+            CollectionAssert.AreEquivalent(
+                (string[])[@"Payload\a.txt", @"Payload\nested\b.txt"],
+                guestFiles.Select(f => f.RelativePath).ToArray());
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
+            TryDeleteDirectory(guestManaged);
+        }
+    }
+
+    /// <summary>Copying the same file twice overwrites in place and reports it as unchanged.</summary>
+    [TestMethod]
+    public async Task RepeatedSingleFileCopy_IsANoOpAtTheSamePath()
+    {
+        var root = TestPaths.TempRoot(nameof(RepeatedSingleFileCopy_IsANoOpAtTheSamePath));
+        var guestManaged = TestPaths.TempRoot("guest-repeat");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(guestManaged);
+
+        var source = TestPaths.Under(root, "setup.ps1");
+        await File.WriteAllTextAsync(source, "Write-Output hi", TestContext.CancellationToken);
+
+        try
+        {
+            await using var harness = new CopyHarness(guestManaged, onFirstSend: () => { });
+            var request = new SandboxCopyRequest(SandboxCopyDirection.ToGuest, source, @"Setup\setup.ps1");
+
+            var first = await SandboxCopyService.CopyAsync(harness.Channel, request, TestContext.CancellationToken);
+            var second = await SandboxCopyService.CopyAsync(harness.Channel, request, TestContext.CancellationToken);
+
+            Assert.AreEqual(1, first.Transferred);
+            Assert.AreEqual(0, second.Transferred, "Identical content must not be re-sent.");
+            Assert.AreEqual(1, second.Skipped);
+
+            var guestFiles = await harness.Channel.ListFilesAsync(
+                new GuestPathScope(GuestRootNames.Work, Scope: null), TestContext.CancellationToken);
+
+            // Still exactly one file: a second copy must not nest another level.
+            CollectionAssert.AreEqual(
+                (string[])[@"Setup\setup.ps1"],
+                guestFiles.Select(f => f.RelativePath).ToArray());
+        }
+        finally
+        {
+            TryDeleteDirectory(root);
             TryDeleteDirectory(guestManaged);
         }
     }
