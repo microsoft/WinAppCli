@@ -51,15 +51,21 @@ internal sealed record PreparedTarget(
     /// error of a guest mutation running without the lock rather than letting it run unprotected.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// This target was not prepared with <see cref="PrepareTargetOptions.RequiresMutation"/> set.
+    /// This target was not prepared with <see cref="PrepareTargetOptions.RequiresMutation"/> set,
+    /// or the lease was already released (via <see cref="ReleaseMutationLease"/> or
+    /// <see cref="DisposeAsync"/>).
     /// </exception>
     internal void RequireMutationLease()
     {
-        if (MutationLease is null)
+        // Checked for release, not just presence: a reference to a disposed lease is not proof of
+        // exclusive access, and asserting only non-null would let a mutation run unprotected the
+        // instant it happened to execute after the caller's own ReleaseMutationLease() call.
+        if (MutationLease is not { IsReleased: false })
         {
             throw new InvalidOperationException(
                 "This operation mutates the guest and requires a target prepared with " +
-                $"{nameof(PrepareTargetOptions)}.{nameof(PrepareTargetOptions.Mutating)}.");
+                $"{nameof(PrepareTargetOptions)}.{nameof(PrepareTargetOptions.Mutating)}, whose " +
+                "mutation lease has not already been released.");
         }
     }
 

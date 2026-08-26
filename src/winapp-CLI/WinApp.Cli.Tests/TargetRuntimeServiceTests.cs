@@ -112,6 +112,34 @@ public partial class TargetRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task Ensure_WhenCallerAlreadyReleasedTheMutationLease_ThrowsRatherThanMutateUnprotected()
+    {
+        // EnsureAsync no longer acquires its own mutation lock: it trusts the caller's held lease
+        // from ExecutionTargetOrchestrator.PrepareAsync(Mutating). If a caller released that lease
+        // early (a programming error) and then, for a non-empty requirement set, still asked this
+        // to provision runtimes, it must fail fast via RequireMutationLease() rather than either
+        // deadlocking on a lock it no longer owns (the old per-call acquisition would have,
+        // reacquiring against its own now-outer caller) or silently mutating the guest with no
+        // lock held at all.
+        await WriteManifestAsync();
+        var payload = await WritePayloadAsync(RuntimePackage, RequiredVersion);
+
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+        harness.Resolver.Payloads[RuntimePackage] = payload;
+        harness.GuestPackages.Installs(RuntimePackage, RequiredVersion);
+
+        harness.Prepared.ReleaseMutationLease();
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => harness.EnsureAsync(_hostSource, TestContext.CancellationToken));
+
+        // Confirms this failed before touching anything: no guest child was started and no
+        // provisioning record was written.
+        Assert.AreEqual(0, harness.GuestInvocations);
+        Assert.IsNull(harness.ReadState());
+    }
+
+    [TestMethod]
     public async Task Ensure_WhenTheGuestAlreadyHasANewerRuntime_InstallsNothing()
     {
         await WriteManifestAsync();

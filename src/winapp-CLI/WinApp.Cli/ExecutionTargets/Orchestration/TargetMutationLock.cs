@@ -35,6 +35,18 @@ internal sealed class TargetMutationLease : IDisposable
     /// </remarks>
     public bool WasAbandoned { get; }
 
+    /// <summary>
+    /// True once this lease has been released (by any thread), so a caller that captured the
+    /// lease before release cannot go on believing it still holds exclusive access.
+    /// </summary>
+    /// <remarks>
+    /// Backed by the same field <see cref="Dispose"/> already clears atomically, rather than a
+    /// second flag, so the two can never disagree about whether the lease is still held.
+    /// <see cref="Interlocked.Exchange(ref FileStream?, FileStream?)"/> in <see cref="Dispose"/>
+    /// is a full fence, so a plain volatile read here is enough to observe it from any thread.
+    /// </remarks>
+    internal bool IsReleased => Volatile.Read(ref _stream) is null;
+
     /// <inheritdoc/>
     public void Dispose()
     {
