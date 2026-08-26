@@ -100,7 +100,7 @@ have run locally:
 
 | Option | In Sandbox |
 |---|---|
-| `--detach` | Returns after the guest launch; the app and the Sandbox keep running |
+| `--detach` | Returns after the guest launch; the app and the Sandbox keep running. For an *unpackaged* app the launched process is tied to the guest agent's lifetime — see [Detached apps and the agent's lifetime](#detached-apps-and-the-agents-lifetime) |
 | `--debug-output` | Debugs inside the guest and streams its output back |
 | `--no-launch` | Deploys and registers in the Sandbox without launching |
 | `--clean` | Clears that guest package's application data, and redeploys from scratch |
@@ -110,6 +110,38 @@ have run locally:
 
 Build options — `--configuration`, `--arch`, `--framework`, `--property`, `--no-build`,
 `--no-restore` — still apply on the host, before anything is transferred.
+
+### Detached apps and the agent's lifetime
+
+`--detach` returns as soon as the app is running, and the Sandbox is not shut down afterwards. For an
+**unpackaged** app there is one limit worth knowing before you rely on it:
+
+```powershell
+winapp run .\publish --sandbox --detach   # returns; app is running in the Sandbox
+```
+
+That process runs for as long as the **current guest agent** does. winapp starts it as a child of the
+agent, and the agent contains every process it starts so that cancelling a command cannot leave
+orphaned grandchildren holding files the next deployment has to replace. The same containment means
+that when the agent goes away, the processes it started go with it.
+
+The agent goes away when the Sandbox is closed or restarted, and also when winapp repairs it — which
+happens automatically, without asking, if a later command finds it unresponsive or needs to replace it
+after a winapp upgrade. So a detached unpackaged app can be gone by the time you come back to it, with
+no error at the moment it stopped, because nothing was waiting on it.
+
+If a later command reports the app is no longer running, rerun it:
+
+```powershell
+winapp run .\publish --sandbox --detach
+```
+
+A **packaged** app is launched through Windows' own activation rather than as a child of the agent, and
+was observed to keep running across an agent repair that ended an unpackaged one. Closing or restarting
+the Sandbox still ends everything inside it, packaged included.
+
+This is a property of what the launched process is a child of, not of how the run was reported, so
+`--json` does not change it.
 
 ### Progress, and why the terminal is never silent
 
@@ -441,6 +473,14 @@ member, the agent starts a small internal barrier instead: it waits until the ag
 the job, and only then starts the requested command — which Windows puts in the job at creation,
 because its parent is already a member. There is no window in which a spawned descendant could
 escape its operation's cancellation.
+
+The agent also places *itself* in a job, which is what makes that guarantee hold under any timing:
+Windows puts every descendant of a job member into the job at creation, so nothing the agent starts
+can escape it. The cost of that is the detached-app limit described in
+[Detached apps and the agent's lifetime](#detached-apps-and-the-agents-lifetime) — a process the agent
+started does not outlive the agent. Both follow from the same rule, and containment is the half worth
+keeping: without it, a cancelled or repaired command could leave guest processes behind holding the
+files the next deployment must replace.
 
 The barrier's release signal is per-operation and randomly named, but it is **not a secret**: the
 name appears on the barrier process's command line, which any same-user process can read. Randomness

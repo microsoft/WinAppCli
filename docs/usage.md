@@ -677,7 +677,7 @@ winapp run [<input>] [options]
 - `--detach` - Launch the application and return immediately without waiting for it to exit. Useful for CI/automation where you need to interact with the app after launch. Prints the PID to stdout (or in JSON with `--json`). Cannot be combined with `--no-launch`, `--debug-output`, `--with-alias`, or `--unregister-on-exit`.
 - `--clean` - Remove the existing package's application data (LocalState, settings, etc.) before re-deploying. By default, application data is preserved across re-deployments.
 - `--json` - Format output as JSON for programmatic consumption (e.g. CI/automation). Useful with `--detach` to capture the PID. Cannot be combined with `--with-alias` or `--debug-output`.
-- `--sandbox` - Deploy and run the app inside the Windows Sandbox winapp manages, instead of on this machine. The app is still built on the host; registration, launch, and debugging happen in the Sandbox, which stays running afterwards so a rerun transfers only what changed. Nothing is registered and no runtime is installed on your machine. Every option above keeps its meaning, because the guest runs the same `winapp run`. There is no fallback to local execution. See [Windows Sandbox execution](sandbox-execution.md).
+- `--sandbox` - Deploy and run the app inside the Windows Sandbox winapp manages, instead of on this machine. The app is still built on the host; registration, launch, and debugging happen in the Sandbox, which stays running afterwards so a rerun transfers only what changed. Nothing is registered and no runtime is installed on your machine. Every option above keeps its meaning, because the guest runs the same `winapp run`. There is no fallback to local execution. One limit applies to `--detach`: an unpackaged app launched this way runs only for the lifetime of the current guest agent, so it stops if the Sandbox closes or if winapp automatically repairs the agent — rerun the command to bring it back. See [Detached apps and the agent's lifetime](sandbox-execution.md#detached-apps-and-the-agents-lifetime) and [Windows Sandbox execution](sandbox-execution.md).
 
 **Application data persistence:**
 
@@ -1228,7 +1228,7 @@ Everything after `--` is passed through as a structured argument array, so quoti
 
 ```bash
 winapp sandbox exec -- dotnet --info
-winapp sandbox exec --cwd C:\WinApp\work -- powershell -File .\test.ps1
+winapp sandbox exec --cwd C:\WinApp\work -- powershell -ExecutionPolicy Bypass -File .\test.ps1
 ```
 
 **Behavior:**
@@ -1263,8 +1263,10 @@ Each copy into the Sandbox reports where the file actually landed, which is the 
 winapp sandbox cp .\setup.ps1 sandbox:Setup\setup.ps1
 # Copied 1 file(s), skipped 0 unchanged, to C:\WinApp\work\Setup\setup.ps1 in the Sandbox.
 
-winapp sandbox exec --cwd C:\WinApp\work\Setup -- powershell -File .\setup.ps1
+winapp sandbox exec --cwd C:\WinApp\work\Setup -- powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
+
+`-ExecutionPolicy Bypass` is part of the sequence, not an optional extra: a fresh Sandbox starts with the execution policy at `Restricted`, so a script you just copied in is refused with `UnauthorizedAccess` until you pass it.
 
 **Behavior:**
 
