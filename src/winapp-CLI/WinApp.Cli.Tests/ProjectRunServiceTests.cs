@@ -2955,7 +2955,7 @@ public class ProjectRunServiceTests
         };
         var service = NewServiceWith(dotnet, LogLevel.None, out var console);
 
-        var stderr = new StringWriter();
+        using var stderr = new StringWriter();
         var originalError = Console.Error;
         Console.SetError(stderr);
         int exit;
@@ -2999,7 +2999,7 @@ public class ProjectRunServiceTests
         };
         var service = NewServiceWith(dotnet, LogLevel.Warning, out var console);
 
-        var stderr = new StringWriter();
+        using var stderr = new StringWriter();
         var originalError = Console.Error;
         Console.SetError(stderr);
         int exit;
