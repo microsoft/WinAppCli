@@ -175,6 +175,9 @@ internal class AppLauncherService(ILogger<AppLauncherService> logger) : IAppLaun
         }
     }
 
+    /// <inheritdoc />
+    public string? GetPackageFullNameOrThrow(string packageFamilyName) => FindPackageFullNameImpl(packageFamilyName);
+
     /// <summary>
     /// Package-manager lookup seam. Defaults to the real <see cref="PackageManager"/> query;
     /// overridable in tests to exercise the not-found and error fallbacks.

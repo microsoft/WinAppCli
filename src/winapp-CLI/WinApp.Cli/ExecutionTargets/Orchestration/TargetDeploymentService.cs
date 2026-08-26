@@ -43,6 +43,17 @@ internal sealed class TargetDeploymentService(IDeploymentStateStore stateStore)
     /// operation, which may clear only this deployment's own state.
     /// </param>
     /// <param name="cancellationToken">Cancellation.</param>
+    /// <param name="cleanRegisteredLayoutAsync">
+    /// When <paramref name="clean"/> is true, an additional guest-side cleanup to run before the
+    /// deployment is committed clean — used for the registration layout a deployment's package was
+    /// registered from, which is guest-derived from the payload reconciled here and must not survive
+    /// a clean redeploy either. Deliberately run inside the same dirty-to-clean window as the payload
+    /// reconciliation above: a failure here must leave the deployment dirty for exactly the same
+    /// reason a failed payload delete or write does, so a state that already claims "clean" can never
+    /// describe a layout a partial cleanup left damaged. This service accepts an arbitrary callback
+    /// rather than a layout path so it stays target-neutral — it has no notion of a registration
+    /// layout of its own.
+    /// </param>
     /// <remarks>
     /// Callers must already hold the target mutation lock: deployment synchronization mutates the
     /// guest.
@@ -55,7 +66,8 @@ internal sealed class TargetDeploymentService(IDeploymentStateStore stateStore)
         DeploymentSnapshot desired,
         DirectoryInfo sourceRoot,
         bool clean,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task>? cleanRegisteredLayoutAsync = null)
     {
         ArgumentNullException.ThrowIfNull(channel);
         ArgumentNullException.ThrowIfNull(desired);
@@ -118,6 +130,14 @@ internal sealed class TargetDeploymentService(IDeploymentStateStore stateStore)
         }
 
         await VerifyAsync(channel, scope, desired, cancellationToken).ConfigureAwait(false);
+
+        if (clean && cleanRegisteredLayoutAsync is not null)
+        {
+            // Still inside the dirty window committed above: an interrupted cleanup here (a locked
+            // file, for instance) throws before the commit below runs, so the persisted state keeps
+            // telling the truth -- dirty -- rather than a "clean" that a damaged layout contradicts.
+            await cleanRegisteredLayoutAsync(cancellationToken).ConfigureAwait(false);
+        }
 
         var cleanState = stateStore.Commit(
             target,
