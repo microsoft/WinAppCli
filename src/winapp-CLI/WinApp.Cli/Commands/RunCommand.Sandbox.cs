@@ -490,7 +490,7 @@ internal partial class RunCommand
         /// application, so it is never committed as the deployment's running process.
         /// </para>
         /// </remarks>
-        private async Task<GuestPackagePhaseResult> RegisterPackageAsync(
+        private static async Task<GuestPackagePhaseResult> RegisterPackageAsync(
             PreparedTarget target,
             GuestDeployment deployment,
             bool clean,
