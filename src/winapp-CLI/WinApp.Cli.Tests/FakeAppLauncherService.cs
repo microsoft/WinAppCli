@@ -54,9 +54,13 @@ internal class FakeAppLauncherService : IAppLauncherService
     /// The install location <see cref="GetRegisteredPackageOrThrow"/> reports alongside
     /// <see cref="FakePackageFullName"/> — the fake's simulated ground truth for "where this
     /// family is actually registered from right now". Tests set this to whichever deployment's
-    /// layout the fake should pretend genuinely owns the current registration.
+    /// layout the fake should pretend genuinely owns the current registration. A path set here
+    /// need not exist on disk: the real implementation reads the location the package manager
+    /// itself recorded (<c>Package.InstalledPath</c>), never one this fake or the real
+    /// implementation verifies against the filesystem. Left <c>null</c> to simulate an inventory
+    /// that could not report a location at all.
     /// </summary>
-    public string FakeRegisteredLocation { get; set; } = string.Empty;
+    public string? FakeRegisteredLocation { get; set; } = string.Empty;
 
     /// <summary>
     /// When set, <see cref="GetRegisteredPackageOrThrow"/> throws this instead of returning a
