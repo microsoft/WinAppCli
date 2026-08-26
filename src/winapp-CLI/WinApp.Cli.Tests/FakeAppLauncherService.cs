@@ -54,6 +54,22 @@ internal class FakeAppLauncherService : IAppLauncherService
     {
         TerminateCalls.Add((packageFullName, processId));
     }
+
+    /// <summary>Recorded calls to <see cref="StopPackageProcessesOrThrow"/>, in order.</summary>
+    public List<string> StopPackageCalls { get; } = [];
+
+    /// <summary>When set, <see cref="StopPackageProcessesOrThrow"/> throws this instead of recording a call.</summary>
+    public Exception? StopPackageProcessesFailure { get; set; }
+
+    public void StopPackageProcessesOrThrow(string packageFullName)
+    {
+        if (StopPackageProcessesFailure is { } failure)
+        {
+            throw failure;
+        }
+
+        StopPackageCalls.Add(packageFullName);
+    }
 }
 
 /// <summary>

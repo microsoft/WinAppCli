@@ -298,6 +298,15 @@ internal class AppLauncherService(ILogger<AppLauncherService> logger) : IAppLaun
         process.Kill(entireProcessTree: true);
     }
 
+    /// <inheritdoc />
+    [SupportedOSPlatform("windows8.0")]
+    public void StopPackageProcessesOrThrow(string packageFullName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageFullName);
+
+        TerminateAllProcessesImpl(packageFullName);
+    }
+
     /// <summary>
     /// COM package-termination seam. Defaults to the real <see cref="IPackageDebugSettings"/>;
     /// overridable in tests to exercise both the success and failure-fallback branches.

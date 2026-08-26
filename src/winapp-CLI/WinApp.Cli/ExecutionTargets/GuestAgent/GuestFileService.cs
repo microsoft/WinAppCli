@@ -227,9 +227,18 @@ internal sealed class GuestFileService(string managedRoot)
         {
             var path = DeploymentPlanner.ResolveContainedPath(directory, relativePath);
 
-            if (File.Exists(path))
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            try
             {
                 File.Delete(path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw LockedFileFailure(relativePath, ex);
             }
         }
 
@@ -241,10 +250,48 @@ internal sealed class GuestFileService(string managedRoot)
     {
         var directory = ResolveScopeDirectory(scope, create: false);
 
-        if (Directory.Exists(directory))
+        if (!Directory.Exists(directory))
+        {
+            return;
+        }
+
+        try
         {
             Directory.Delete(directory, recursive: true);
         }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw LockedFileFailure(relativePath: null, ex);
+        }
+    }
+
+    /// <summary>
+    /// Whether an exception from a file operation is a sharing or lock violation — a running
+    /// process still has the file open — rather than some other I/O failure.
+    /// </summary>
+    internal static bool IsSharingViolation(Exception ex) =>
+        ex.HResult is unchecked((int)0x80070020) or unchecked((int)0x80070021);
+
+    /// <summary>
+    /// Builds a specific, actionable failure for a delete that could not complete, naming the
+    /// offending path when one is known rather than surfacing the raw OS message.
+    /// </summary>
+    private static ExecutionTargetException LockedFileFailure(string? relativePath, Exception ex)
+    {
+        var subject = relativePath is null
+            ? "The registration layout"
+            : $"'{relativePath}'";
+
+        return ExecutionTargetException.Create(
+            ExecutionTargetErrorCodes.TransferInterrupted,
+            IsSharingViolation(ex)
+                ? $"{subject} could not be removed from Windows Sandbox because a running process still has it open."
+                : $"{subject} could not be removed from Windows Sandbox.",
+            userAction: "Close the application that is still running in Windows Sandbox, then retry.",
+            context: relativePath is null
+                ? null
+                : new Dictionary<string, string> { ["relativePath"] = relativePath },
+            innerException: ex);
     }
 
     /// <summary>Lowercase hex SHA-256 of a file's contents.</summary>

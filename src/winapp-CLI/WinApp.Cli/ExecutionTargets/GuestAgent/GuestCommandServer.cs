@@ -2,8 +2,13 @@
 // Licensed under the MIT License.
 
 using System.Collections.Concurrent;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Globalization;
+using System.Runtime.InteropServices;
 using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.Orchestration;
+using WinApp.Cli.Services;
 
 namespace WinApp.Cli.ExecutionTargets.GuestAgent;
 
@@ -31,6 +36,7 @@ internal sealed class GuestCommandServer : IAsyncDisposable
     private readonly GuestAgentIdentity _identity;
     private readonly GuestFileService? _files;
     private readonly string? _guestWinapp;
+    private readonly IAppLauncherService? _appLauncher;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly ConcurrentDictionary<Guid, RunningOperation> _operations = new();
     private readonly ConcurrentDictionary<Guid, GuestFileWrite> _writes = new();
@@ -44,7 +50,8 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         IGuestSessionProbe sessionProbe,
         GuestAgentIdentity identity,
         GuestFileService? files = null,
-        string? guestWinapp = null)
+        string? guestWinapp = null,
+        IAppLauncherService? appLauncher = null)
     {
         _transport = transport;
         _targetEpoch = targetEpoch.Value;
@@ -53,6 +60,7 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         _identity = identity;
         _files = files;
         _guestWinapp = guestWinapp;
+        _appLauncher = appLauncher;
     }
 
     /// <summary>How long a cancelled child gets to exit before its job is terminated.</summary>
@@ -196,6 +204,15 @@ internal sealed class GuestCommandServer : IAsyncDisposable
 
             case GuestMessageTypes.RemoveScopeRequest when message.Scope is { } removeScope:
                 await HandleRemoveScopeAsync(operationId, removeScope, cancellationToken).ConfigureAwait(false);
+                break;
+
+            case GuestMessageTypes.StopPackageRequest when message.PackageFamilyName is { } packageFamilyName:
+                await HandleStopPackageAsync(operationId, packageFamilyName, cancellationToken).ConfigureAwait(false);
+                break;
+
+            case GuestMessageTypes.StopProcessRequest when message.ProcessId is { } stopProcessId:
+                await HandleStopProcessAsync(
+                    operationId, stopProcessId, message.ProcessStartTicksUtc ?? 0, cancellationToken).ConfigureAwait(false);
                 break;
 
             default:
@@ -444,6 +461,174 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Stops every running process of the package a deployment registered, before a redeploy
+    /// mutates the layout it came from.
+    /// </summary>
+    /// <remarks>
+    /// The family name is resolved to whatever full name is actually registered right now, so this
+    /// always targets the guest's live inventory rather than a value the host cached. When nothing
+    /// is registered under that family any more there is nothing that could be running under it, so
+    /// that is reported as success rather than a failure the caller cannot act on.
+    /// <para>
+    /// A failure here is reported rather than swallowed, unlike the best-effort cleanup
+    /// <c>IAppLauncherService.TerminatePackageProcesses</c> performs on an interactive Ctrl+C: the
+    /// caller is about to mutate files this package may still have open, so it must know when the
+    /// stop could not be proven rather than silently continuing.
+    /// </para>
+    /// </remarks>
+    private async Task HandleStopPackageAsync(
+        Guid operationId,
+        string packageFamilyName,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var launcher = RequireAppLauncher();
+            var fullName = launcher.GetPackageFullName(packageFamilyName);
+
+            if (fullName is not null)
+            {
+                launcher.StopPackageProcessesOrThrow(fullName);
+            }
+
+            await SendFileCompletedAsync(operationId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ExecutionTargetException ex)
+        {
+            await SendFailureAsync(operationId, ex.Error).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException or COMException)
+        {
+            await SendFailureAsync(
+                operationId,
+                new ExecutionTargetErrorInfo
+                {
+                    Code = ExecutionTargetErrorCodes.StaleHandle,
+                    Message =
+                        $"Could not confirm that the previous run of '{packageFamilyName}' was stopped before redeploying.",
+                    UserAction = "Close the running application in Windows Sandbox, then retry.",
+                    Context = new Dictionary<string, string> { ["packageFamilyName"] = packageFamilyName },
+                }).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Stops one specific tracked process, verified by PID and start time, before a redeploy
+    /// mutates files it may still have open.
+    /// </summary>
+    /// <remarks>
+    /// A PID alone is never proof: the process winapp launched may have already exited and the
+    /// number reused by something completely unrelated. <paramref name="expectedStartTicksUtc"/> is
+    /// compared against the live process's own start time, and a mismatch is treated exactly like
+    /// "already gone" — the original is provably not there any more, and the process that now holds
+    /// the PID was never winapp's to touch.
+    /// </remarks>
+    private async Task HandleStopProcessAsync(
+        Guid operationId,
+        int processId,
+        long expectedStartTicksUtc,
+        CancellationToken cancellationToken)
+    {
+        var outcome = StopTrackedProcessImpl(processId, expectedStartTicksUtc);
+
+        if (outcome == ProcessStopOutcome.Unproven)
+        {
+            await SendFailureAsync(
+                operationId,
+                new ExecutionTargetErrorInfo
+                {
+                    Code = ExecutionTargetErrorCodes.StaleHandle,
+                    Message = $"Could not confirm that the previous process (PID {processId}) was stopped before redeploying.",
+                    UserAction = "Close the application in Windows Sandbox, then retry.",
+                    Context = new Dictionary<string, string>
+                    {
+                        ["processId"] = processId.ToString(CultureInfo.InvariantCulture),
+                    },
+                }).ConfigureAwait(false);
+            return;
+        }
+
+        await SendFileCompletedAsync(operationId, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Outcome of attempting to stop one tracked process.</summary>
+    internal enum ProcessStopOutcome
+    {
+        /// <summary>The tracked process was not present (already exited, or its PID was reused).</summary>
+        AlreadyGone,
+
+        /// <summary>The tracked process was found, verified, and stopped.</summary>
+        Stopped,
+
+        /// <summary>The tracked process could not be verified as stopped.</summary>
+        Unproven,
+    }
+
+    /// <summary>
+    /// Verification-then-kill seam for <see cref="HandleStopProcessAsync"/>. Overridable in tests
+    /// to exercise the stale-PID and stop-failure paths deterministically, without racing a real
+    /// process's exit.
+    /// </summary>
+    internal Func<int, long, ProcessStopOutcome> StopTrackedProcessImpl { get; set; } = DefaultStopTrackedProcess;
+
+    internal static ProcessStopOutcome DefaultStopTrackedProcess(int processId, long expectedStartTicksUtc)
+    {
+        Process process;
+
+        try
+        {
+            process = Process.GetProcessById(processId);
+        }
+        catch (ArgumentException)
+        {
+            // Nothing has this PID any more. Our tracked process is provably gone.
+            return ProcessStopOutcome.AlreadyGone;
+        }
+
+        using (process)
+        {
+            long actualStartTicksUtc;
+
+            try
+            {
+                actualStartTicksUtc = process.StartTime.ToUniversalTime().Ticks;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+            {
+                // Exited between the lookup and reading its start time. Provably gone either way.
+                return ProcessStopOutcome.AlreadyGone;
+            }
+
+            if (actualStartTicksUtc != expectedStartTicksUtc)
+            {
+                // A different process now holds this PID. The one winapp tracked has already
+                // exited — there is nothing of ours left to stop, and this process, which winapp
+                // never started, must never be touched.
+                return ProcessStopOutcome.AlreadyGone;
+            }
+
+            try
+            {
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit(5000);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+            {
+                return ProcessStopOutcome.Unproven;
+            }
+
+            return process.HasExited ? ProcessStopOutcome.Stopped : ProcessStopOutcome.Unproven;
+        }
+    }
+
+    /// <summary>The app launcher, or a clear failure when this agent was built without one.</summary>
+    private IAppLauncherService RequireAppLauncher() =>
+        _appLauncher ?? throw ExecutionTargetException.Create(
+            ExecutionTargetErrorCodes.TransportFailed,
+            "This guest agent was not configured with application launch/termination support.",
+            userAction: "Retry the command.");
+
     private Task SendFileCompletedAsync(Guid operationId, CancellationToken cancellationToken) =>        SendAsync(
             new GuestMessage
             {
@@ -460,12 +645,20 @@ internal sealed class GuestCommandServer : IAsyncDisposable
             "This guest agent was not configured with managed storage.",
             userAction: "Retry the command.");
 
-    private static ExecutionTargetErrorInfo FileFailure(Exception ex) => new()
-    {
-        Code = ExecutionTargetErrorCodes.TransferInterrupted,
-        Message = $"A guest file operation failed: {ex.Message}",
-        UserAction = "Retry the command.",
-    };
+    private static ExecutionTargetErrorInfo FileFailure(Exception ex) =>
+        GuestFileService.IsSharingViolation(ex)
+            ? new ExecutionTargetErrorInfo
+            {
+                Code = ExecutionTargetErrorCodes.TransferInterrupted,
+                Message = "A guest file operation failed because a running process still has the file open.",
+                UserAction = "Close the application that is still running in Windows Sandbox, then retry.",
+            }
+            : new ExecutionTargetErrorInfo
+            {
+                Code = ExecutionTargetErrorCodes.TransferInterrupted,
+                Message = $"A guest file operation failed: {ex.Message}",
+                UserAction = "Retry the command.",
+            };
 
     private void StartOperation(Guid operationId, GuestExecRequest request)
     {
@@ -535,6 +728,24 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         out ExecutionTargetErrorInfo error)
     {
         error = null!;
+
+        // Checked first and for every request shape: a missing working directory produces the same
+        // "could not start" failure from Process.Start regardless of whether the executable path was
+        // otherwise fine, and that generic message blames the executable (or, for guest winapp, the
+        // deployment) rather than the actual cause. Naming the directory here is what keeps
+        // `sandbox exec --cwd <missing>` from being misdiagnosed as a bad executable or deployment.
+        if (!string.IsNullOrWhiteSpace(request.WorkingDirectory) && !Directory.Exists(request.WorkingDirectory))
+        {
+            resolved = request;
+            error = new ExecutionTargetErrorInfo
+            {
+                Code = ExecutionTargetErrorCodes.ArtifactFailed,
+                Message = $"The working directory '{request.WorkingDirectory}' does not exist inside Windows Sandbox.",
+                UserAction = "Check --cwd, then retry.",
+                Context = new Dictionary<string, string> { ["workingDirectory"] = request.WorkingDirectory },
+            };
+            return false;
+        }
 
         if (request.UseGuestWinapp)
         {

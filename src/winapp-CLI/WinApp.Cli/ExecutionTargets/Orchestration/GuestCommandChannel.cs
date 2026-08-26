@@ -399,6 +399,80 @@ internal sealed class GuestCommandChannel : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Asks the guest to stop every running process of a package before a redeploy mutates the
+    /// layout it was registered from.
+    /// </summary>
+    /// <remarks>
+    /// Scoped to exactly the package this deployment owns: the guest resolves the family name to
+    /// whatever full name is actually registered right now and terminates only that package's
+    /// processes, which is what keeps an unrelated application untouched. The guest reports a
+    /// structured failure — never a raw OS message — when it cannot prove the stop happened, and
+    /// that failure is surfaced here before anything is deleted or overwritten.
+    /// </remarks>
+    public async Task StopPackageProcessesAsync(string packageFamilyName, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageFamilyName);
+
+        var operationId = Guid.NewGuid();
+        var state = Register(operationId);
+
+        try
+        {
+            await SendAsync(
+                new GuestMessage
+                {
+                    Type = GuestMessageTypes.StopPackageRequest,
+                    OperationId = operationId.ToString(),
+                    TargetEpoch = _targetEpoch,
+                    PackageFamilyName = packageFamilyName,
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            await state.FileCompletion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _operations.TryRemove(operationId, out _);
+        }
+    }
+
+    /// <summary>
+    /// Asks the guest to stop one specific tracked process before a redeploy mutates files it may
+    /// still have open.
+    /// </summary>
+    /// <remarks>
+    /// The PID alone never identifies a process across a rerun: it can be reused the instant the
+    /// original exits. <paramref name="startTicksUtc"/> is what lets the guest prove this is still
+    /// the exact process winapp launched rather than something unrelated that inherited its number
+    /// — and refuse to touch anything when it cannot prove that.
+    /// </remarks>
+    public async Task StopTrackedProcessAsync(int processId, long startTicksUtc, CancellationToken cancellationToken)
+    {
+        var operationId = Guid.NewGuid();
+        var state = Register(operationId);
+
+        try
+        {
+            await SendAsync(
+                new GuestMessage
+                {
+                    Type = GuestMessageTypes.StopProcessRequest,
+                    OperationId = operationId.ToString(),
+                    TargetEpoch = _targetEpoch,
+                    ProcessId = processId,
+                    ProcessStartTicksUtc = startTicksUtc,
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            await state.FileCompletion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _operations.TryRemove(operationId, out _);
+        }
+    }
+
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {

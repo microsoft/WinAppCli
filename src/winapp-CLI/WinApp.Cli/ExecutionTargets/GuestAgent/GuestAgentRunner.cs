@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Text;
 using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.Orchestration;
+using WinApp.Cli.Services;
 
 namespace WinApp.Cli.ExecutionTargets.GuestAgent;
 
@@ -23,7 +24,8 @@ namespace WinApp.Cli.ExecutionTargets.GuestAgent;
 /// </remarks>
 internal sealed class GuestAgentRunner(
     IGuestSessionProbe sessionProbe,
-    IGuestProcessHostFactory processes)
+    IGuestProcessHostFactory processes,
+    IAppLauncherService? appLauncher = null)
 {
     /// <summary>Guest-local root the agent installs itself and managed storage under.</summary>
     internal const string DefaultManagedRoot = @"C:\WinApp";
@@ -109,7 +111,8 @@ internal sealed class GuestAgentRunner(
 
                     // The agent is the only party that can assert which binary is guest winapp:
                     // it is the one running it.
-                    Environment.ProcessPath);
+                    Environment.ProcessPath,
+                    appLauncher);
 
                 // One host channel at a time. Accepting a second would let two hosts interleave
                 // mutation operations against one guest with nothing coordinating them.
