@@ -260,7 +260,6 @@ internal static class FindApiShared
                 console.WriteLine("  Use the fully-qualified name to avoid CS0104.");
                 console.WriteLine();
             }
-            return;
         }
 
         if (output.Results.Count == 0)
@@ -368,7 +367,7 @@ internal static class FindApiShared
         {
             string inherited = output.Match is { Inherited: true, DeclaringType: not null } ? $"  (from {output.Match.DeclaringType})" : "";
             string desc = output.Match.Description is not null ? $" \u2014 {output.Match.Description}" : "";
-            console.WriteLine($"\u2705 {output.Type}.{output.Match.Name}");
+            console.WriteLine($"{FoundMarker(output)} {output.Type}.{output.Match.Name}{ReadOnlyNote(output)}");
             console.WriteLine($"   {output.Match.Signature}{inherited}{desc}");
             return;
         }
@@ -432,7 +431,7 @@ internal static class FindApiShared
         if (output is { Found: true, Match: not null })
         {
             string inherited = output.Match is { Inherited: true, DeclaringType: not null } ? $"  (from {output.Match.DeclaringType})" : "";
-            console.WriteLine($"\u2705 {output.Type}.{output.Match.Name}{inherited}");
+            console.WriteLine($"{FoundMarker(output)} {output.Type}.{output.Match.Name}{inherited}{ReadOnlyNote(output)}");
             return;
         }
 
@@ -444,6 +443,17 @@ internal static class FindApiShared
 
         RenderCheckProperty(console, output);
     }
+
+    /// <summary>
+    /// A read-only property exists, so the check is not a failure — but reporting it with
+    /// the same unqualified tick as a settable one invites the caller to assign it, which
+    /// fails at compile time (WMC0050 in XAML). Mark it distinctly instead.
+    /// </summary>
+    private static string FoundMarker(ApiCheckPropertyOutput output) =>
+        output.Writable == false ? "\u26a0\ufe0f" : "\u2705";
+
+    private static string ReadOnlyNote(ApiCheckPropertyOutput output) =>
+        output.Writable == false ? "  \u2014 read-only, cannot be assigned" : "";
 
     public static void RenderTypes(IAnsiConsole console, ApiTypesOutput output)
     {

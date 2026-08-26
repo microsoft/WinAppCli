@@ -279,7 +279,7 @@ Need to know whether a Windows/WinRT API exists, or what a type/enum actually of
 **Key subcommands:**
 - `find-api "<query>" ["<query>"...]` — lexical search for types/members by name or intent (bare form).
 - `find-api members <type> [<type>...]` — list properties, events, and methods of a type (accepts a short name like `NavigationView` or a fully-qualified name), including inherited members.
-- `find-api check-property <type> <property> [<property>...]` — verify (dependency/attached) properties exist on a type; suggests near-matches when they don't.
+- `find-api check-property <type> <property> [<property>...]` — verify (dependency/attached) properties exist on a type; suggests near-matches when they don't, and flags read-only properties (`writable: false`) that exist but can't be assigned.
 - `find-api enums <type> [<type>...]` — list an enum's values (accepts a short or fully-qualified name).
 - `find-api packages` / `find-api stats` — show indexed packages / index statistics for the project.
 - `find-api refresh [--scan] [--project <name>]` — rebuild the API index for the project (forces a full re-index).

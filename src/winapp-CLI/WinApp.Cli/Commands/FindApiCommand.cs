@@ -34,7 +34,7 @@ internal sealed class FindApiCommand : Command, IShortDescription
     public static Option<int> MaxOption { get; } = new("--max")
     {
         Description = "Maximum number of namespace-grouped results to return.",
-        DefaultValueFactory = _ => 30,
+        DefaultValueFactory = _ => 5,
     };
 
     public static Option<string?> ProjectDirOption { get; } = FindApiShared.CreateProjectDirOption();

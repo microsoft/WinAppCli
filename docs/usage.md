@@ -1270,7 +1270,7 @@ A query from a directory with no project is *always* answered by the `sdk` scope
 **Commands:**
 - *(bare)* `find-api "<query>" ["<query>"...]` - Lexically search type and member names, grouped by namespace
 - `members <type> [<type>...] [--filter <text>]` - List a type's properties, events, and methods (with descriptions and inherited members)
-- `check-property <type> <property> [<property>...]` - Validate properties exist on a type (exits non-zero if any is missing)
+- `check-property <type> <property> [<property>...]` - Validate properties exist on a type (exits non-zero if any is missing). A **read-only** property is reported with ⚠️ and "read-only, cannot be assigned" rather than a plain ✅, so a property such as `ActualWidth` is not mistaken for something you can set.
 - `enums <type> [<type>...] [--filter <text>]` - List an enum's values (exits non-zero when the type is not an enum)
 - `packages` - List the indexed metadata packages, with per-package type/member counts
 - `stats` - Show aggregate index statistics (packages, namespaces, types, members, `.winmd` files)
@@ -1283,14 +1283,16 @@ A query from a directory with no project is *always* answered by the `sdk` scope
 - `check-property` batches **properties on one type**: the first argument is the type, every argument after it is a property. In batch mode a property that exists prints a single ✅ line; full near-miss detail is printed only for ones that don't.
 - A batch exits `0` only if **every** subject resolved *and* was found — so a batch is still safe to gate codegen on.
 
+**Search ranking.** A query that exactly matches a type name is ranked ahead of partial matches, and when a short name is shared by several namespaces only the exact-name collisions are listed as ambiguous — a query like `NavigationView` reports the handful of namespaces that define that exact type rather than every namespace containing a similarly-named symbol. The ambiguity list obeys `--max`, and normal results are still printed underneath it.
+
 **Type names.** `members`, `check-property`, and `enums` accept a short name (`NavigationView`) or a fully-qualified one (`Microsoft.UI.Xaml.Controls.NavigationView`). When a short name is shared by a modern `Microsoft.*` type and its legacy `Windows.*` UWP twin, the `Microsoft.*` type answers — that is the projection a Windows App SDK app uses — and the resolved fully-qualified name is always shown. Any other collision exits non-zero and lists the candidates instead of guessing.
 
 **Options:**
-- `--max <n>` - Maximum number of namespace-grouped search results (default `30`; search only)
+- `--max <n>` - Maximum number of namespace-grouped search results (default `5`; search only). Also caps the ambiguity list, so a short query that collides across many namespaces stays readable.
 - `--filter <text>` - Narrow a listing on `members` and `enums`: a **case-insensitive substring** match on the member/value name. Best used on types with hundreds of members. Most enums are small enough to dump whole (even `Symbol`, the largest in WinUI at 197 values), so filtering them usually costs more than it saves once you factor in a second guess. Never re-run the same command with different filter text — dump once and read it.
 - `--scan` - Recursively discover and index every project under the directory (`refresh` only)
 - `--project <name>` - Project to query (matches the `.csproj`/`.vcxproj` name), or `sdk` to query the machine-wide Windows SDK scope
-- `--project-dir <path>` - Project directory to query (defaults to the current directory)
+- `--project-dir <path>` - Project directory to query (defaults to the current directory). A path that does not exist is an error — it is never silently answered from the `sdk` scope.
 - `--json` - Emit a machine-readable payload on stdout (supported by every verb). Query payloads identify the index that answered via `scope` (`project` or `sdk`), `projectName`, and `projectDir` (absent for the SDK scope) — project names are not unique across directories, so `projectDir` is the reliable identity. Under `--json` **every** failure — including argument/parser errors such as a non-integer `--max` — is emitted as a flat `{"error": "..."}` object on stdout with a non-zero exit code, so output stays machine-readable.
 
 **Examples:**
@@ -1323,7 +1325,7 @@ winapp find-api members Button --project sdk
 
 When `--filter` is applied, the output still reports the unfiltered total (`totalValues`, or `totalProperties`/`totalEvents`/`totalMethods` in `--json`), so a narrow view is never mistaken for a small API. A filter that matches nothing still exits `0` and says so explicitly — that is "nothing matched your filter", not "no such type".
 
-**Exit codes:** `search` with no hits, `check-property` on a missing property, and `enums` on a non-enum type all exit non-zero — gate code generation and CI checks on them. A batched invocation exits non-zero if *any* subject fails.
+**Exit codes:** `search` with no hits, `check-property` on a missing property, and `enums` on a non-enum type all exit non-zero — gate code generation and CI checks on them. A batched invocation exits non-zero if *any* subject fails. A read-only property is *not* a failure — it exists, so `check-property` exits `0` and flags it in the output (`writable: false` in `--json`).
 
 **Related:** `find-api` answers "does this API exist and what are its members?"; use [`find-ui`](#find-ui) to find a working WinUI sample for a control.
 

@@ -438,6 +438,34 @@ internal static class ApiCacheBuilder
     /// <c>.winmd</c> files live in the runtime rather than a NuGet package.
     /// Failures are non-fatal — NuGet and Windows SDK metadata still index.
     /// </summary>
+    /// <summary>
+    /// Selects the newest installed Windows App Runtime for the current architecture.
+    /// </summary>
+    /// <remarks>
+    /// Sorting on the raw Appx <c>Version</c> picks the wrong runtime, because the two
+    /// release lines number their packages differently: <c>Microsoft.WindowsAppRuntime.1.8</c>
+    /// reports <c>8000.946.1701.0</c> while the newer <c>Microsoft.WindowsAppRuntime.2</c>
+    /// reports <c>2.4.0.0</c>, so a descending Version sort ranks 1.8 far above 2.4.
+    /// The release identity therefore comes from the package name: a
+    /// <c>major.minor</c> suffix is the release outright, while a major-only suffix
+    /// takes its minor from the package version. Stable beats experimental within a
+    /// release, and experimental is still used when it is all that is installed.
+    /// </remarks>
+    private const string NewestRuntimeScript =
+        "Get-AppxPackage -Name 'Microsoft.WindowsAppRuntime.*' | " +
+        "Where-Object { $_.Name -notmatch 'CBS' -and $_.Architecture -eq '{ARCH}' } | " +
+        "ForEach-Object { " +
+            "$suffix = $_.Name -replace '^Microsoft\\.WindowsAppRuntime\\.',''; " +
+            "$core = ($suffix -split '-')[0]; " +
+            "$v = [version]$_.Version; " +
+            "if ($core -match '^\\d+\\.\\d+$') { $rel = [version]$core } " +
+            "elseif ($core -match '^\\d+$') { $rel = [version]('{0}.{1}' -f $v.Major, $v.Minor) } " +
+            "else { $rel = [version]'0.0' }; " +
+            "[pscustomobject]@{ Rel = $rel; Stable = [int]($suffix -notmatch '-'); Ver = $v; Path = $_.InstallLocation } " +
+        "} | " +
+        "Sort-Object Rel, Stable, Ver -Descending | " +
+        "Select-Object -First 1 -ExpandProperty Path";
+
     internal static string? DetectWinAppSdkRuntime()
     {
         try
@@ -455,7 +483,7 @@ internal static class ApiCacheBuilder
             using Process? process = Process.Start(new ProcessStartInfo
             {
                 FileName = powershellPath,
-                Arguments = "-NoProfile -Command \"Get-AppxPackage -Name 'Microsoft.WindowsAppRuntime.*' | Where-Object { $_.Name -notmatch 'CBS' -and $_.Architecture -eq '" + arch + "' } | Sort-Object -Property Version -Descending | Select-Object -First 1 -ExpandProperty InstallLocation\"",
+                Arguments = "-NoProfile -Command \"" + NewestRuntimeScript.Replace("{ARCH}", arch, StringComparison.Ordinal) + "\"",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,

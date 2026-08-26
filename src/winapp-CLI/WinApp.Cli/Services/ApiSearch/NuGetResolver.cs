@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
 
@@ -12,16 +13,18 @@ namespace WinApp.Cli.Services.ApiSearch;
 /// references — from NuGet (<c>project.assets.json</c> / <c>packages.config</c>),
 /// project references, the Windows SDK UnionMetadata, and the WinAppSDK runtime.
 /// </summary>
-internal static class NuGetResolver
+internal static partial class NuGetResolver
 {
     public static List<PackageWithWinMd> FindPackagesWithWinMd(string projectDir, string projectFile, string? winAppSdkRuntimePath)
     {
         var packages = new List<PackageWithWinMd>();
 
         string? assetsPath = FindProjectAssetsJson(projectDir);
+        string? targetPlatformVersion = null;
         if (assetsPath != null)
         {
             packages.AddRange(FindPackagesFromAssets(assetsPath));
+            targetPlatformVersion = ReadTargetPlatformVersion(assetsPath);
         }
         if (packages.Count == 0)
         {
@@ -33,10 +36,56 @@ internal static class NuGetResolver
         }
 
         packages.AddRange(FindWinMdFromProjectReferences(projectFile));
-        packages.AddRange(CollectSdkPackages(winAppSdkRuntimePath));
+        packages.AddRange(CollectSdkPackages(winAppSdkRuntimePath, targetPlatformVersion));
 
         return Deduplicate(packages);
     }
+
+    /// <summary>
+    /// The Windows platform version a project targets, read from the target framework
+    /// moniker in <c>project.assets.json</c> (<c>net8.0-windows10.0.26100.0</c> yields
+    /// <c>10.0.26100.0</c>). Null when the project targets no Windows platform version.
+    /// </summary>
+    internal static string? ReadTargetPlatformVersion(string assetsPath)
+    {
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(File.ReadAllText(assetsPath));
+            JsonElement root = doc.RootElement;
+
+            var monikers = new List<string>();
+            if (root.TryGetProperty("targets", out var targetsEl) && targetsEl.ValueKind == JsonValueKind.Object)
+            {
+                monikers.AddRange(targetsEl.EnumerateObject().Select(p => p.Name));
+            }
+            if (root.TryGetProperty("project", out var projectEl)
+                && projectEl.TryGetProperty("frameworks", out var frameworksEl)
+                && frameworksEl.ValueKind == JsonValueKind.Object)
+            {
+                monikers.AddRange(frameworksEl.EnumerateObject().Select(p => p.Name));
+            }
+
+            foreach (string moniker in monikers)
+            {
+                Match match = WindowsPlatformMoniker.Match(moniker);
+                if (match.Success)
+                {
+                    return match.Groups[1].Value;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            // An unreadable assets file just means the target version is unknown, and
+            // SDK selection falls back to the newest installed.
+        }
+        return null;
+    }
+
+    private static readonly Regex WindowsPlatformMoniker = WindowsPlatformMonikerRegex();
+
+    [GeneratedRegex(@"-windows(\d+\.\d+\.\d+(?:\.\d+)?)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex WindowsPlatformMonikerRegex();
 
     /// <summary>
     /// The machine-wide metadata that needs no project at all: the Windows SDK
@@ -48,11 +97,11 @@ internal static class NuGetResolver
     public static List<PackageWithWinMd> FindSdkPackages(string? winAppSdkRuntimePath) =>
         Deduplicate(CollectSdkPackages(winAppSdkRuntimePath));
 
-    private static List<PackageWithWinMd> CollectSdkPackages(string? winAppSdkRuntimePath)
+    private static List<PackageWithWinMd> CollectSdkPackages(string? winAppSdkRuntimePath, string? preferredSdkVersion = null)
     {
         var packages = new List<PackageWithWinMd>();
 
-        (List<string> Files, string Version) sdk = FindWindowsSdkWinMd();
+        (List<string> Files, string Version) sdk = FindWindowsSdkWinMd(preferredSdkVersion);
         if (sdk.Files.Count > 0)
         {
             packages.Add(new PackageWithWinMd("WindowsSDK", sdk.Version, sdk.Files, new List<string>()));
@@ -339,7 +388,8 @@ internal static class NuGetResolver
                         }
                         var dlls = compileEl.EnumerateObject()
                             .Select(entry => entry.Name)
-                            .Where(entryName => entryName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+                            .Where(entryName => (entryName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+                                    || entryName.EndsWith(".winmd", StringComparison.OrdinalIgnoreCase))
                                 && !entryName.EndsWith("/_._", StringComparison.Ordinal))
                             .ToList();
                         if (dlls.Count > 0)
@@ -374,6 +424,7 @@ internal static class NuGetResolver
                 }
 
                 var files = new List<string>();
+                bool hasSelectedAssets = compileByLibrary.TryGetValue(library.Name, out var selectedAssets);
                 foreach (string packageFolder in packageFolders)
                 {
                     string packageDir = Path.Combine(packageFolder, relativePath);
@@ -381,12 +432,27 @@ internal static class NuGetResolver
                     {
                         continue;
                     }
-                    files.AddRange(Directory.GetFiles(packageDir, "*.winmd", SearchOption.AllDirectories));
-                    if (compileByLibrary.TryGetValue(library.Name, out var dlls))
+                    if (hasSelectedAssets)
                     {
-                        files.AddRange(dlls
-                            .Select(dll => Path.Combine(packageDir, dll.Replace('/', Path.DirectorySeparatorChar)))
+                        files.AddRange(selectedAssets!
+                            .Select(asset => Path.Combine(packageDir, asset.Replace('/', Path.DirectorySeparatorChar)))
                             .Where(File.Exists));
+                    }
+                }
+
+                // Fall back to scanning the package only when restore named no compile
+                // assets for it. Scanning unconditionally pulls in .winmd files for
+                // TFMs and RIDs NuGet did not select, so the project gets a confident
+                // positive for an API it cannot actually compile against.
+                if (files.Count == 0)
+                {
+                    foreach (string packageFolder in packageFolders)
+                    {
+                        string packageDir = Path.Combine(packageFolder, relativePath);
+                        if (Directory.Exists(packageDir))
+                        {
+                            files.AddRange(Directory.GetFiles(packageDir, "*.winmd", SearchOption.AllDirectories));
+                        }
                     }
                 }
                 var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -496,7 +562,7 @@ internal static class NuGetResolver
         return null;
     }
 
-    internal static (List<string> Files, string Version) FindWindowsSdkWinMd()
+    internal static (List<string> Files, string Version) FindWindowsSdkWinMd(string? preferredVersion = null)
     {
         string unionMetadata = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Windows Kits", "10", "UnionMetadata");
         if (!Directory.Exists(unionMetadata))
@@ -510,15 +576,36 @@ internal static class NuGetResolver
             .Select(x => Version.TryParse(x.Name, out var v) ? (x.Dir, Version: v) : (x.Dir, Version: null))
             .Where(x => x.Version != null)
             .OrderByDescending(x => x.Version)
-            .Select(x => x.Dir)
             .ToList();
 
-        foreach (string dir in versioned)
+        // Prefer the SDK the project actually targets. Indexing whatever is newest on
+        // the machine reports types the project cannot compile against: a project on
+        // 10.0.26100.0 was answered from an installed 10.0.28000.0 and confidently
+        // returned an API that fails to build with CS0234. Matching is tried on the
+        // full version first, then on the build number, because a target moniker and
+        // the UnionMetadata folder can disagree in the trailing revision.
+        if (!string.IsNullOrEmpty(preferredVersion) && Version.TryParse(preferredVersion, out Version? wanted))
         {
-            string windowsWinmd = Path.Combine(dir, "Windows.winmd");
+            var ordered = versioned
+                .Where(x => x.Version!.Equals(wanted))
+                .Concat(versioned.Where(x => x.Version!.Build == wanted.Build && !x.Version.Equals(wanted)))
+                .ToList();
+            foreach (var candidate in ordered)
+            {
+                string targetedWinmd = Path.Combine(candidate.Dir, "Windows.winmd");
+                if (File.Exists(targetedWinmd))
+                {
+                    return (new List<string> { targetedWinmd }, Path.GetFileName(candidate.Dir));
+                }
+            }
+        }
+
+        foreach (var candidate in versioned)
+        {
+            string windowsWinmd = Path.Combine(candidate.Dir, "Windows.winmd");
             if (File.Exists(windowsWinmd))
             {
-                return (new List<string> { windowsWinmd }, Path.GetFileName(dir));
+                return (new List<string> { windowsWinmd }, Path.GetFileName(candidate.Dir));
             }
         }
         return (new List<string>(), "unknown");
@@ -535,11 +622,7 @@ internal static class NuGetResolver
             var files = Directory.EnumerateFiles(runtimePath, "*.winmd", SearchOption.TopDirectoryOnly).ToList();
             if (files.Count > 0)
             {
-                string folderName = Path.GetFileName(runtimePath);
-                const string prefix = "Microsoft.WindowsAppRuntime.";
-                string head = folderName.Split('_')[0];
-                string version = head.Length <= prefix.Length ? folderName : head.Substring(prefix.Length);
-                return (files, version);
+                return (files, RuntimeReleaseLabel(Path.GetFileName(runtimePath)));
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -547,6 +630,41 @@ internal static class NuGetResolver
             // An unreadable runtime folder reports no winmds and an unknown version.
         }
         return (new List<string>(), "unknown");
+    }
+
+    /// <summary>
+    /// A recognizable release label for a Windows App Runtime package folder such as
+    /// <c>Microsoft.WindowsAppRuntime.2_2.4.0.0_arm64__8wekyb3d8bbwe</c>.
+    /// </summary>
+    /// <remarks>
+    /// The two release lines encode the release differently. The 1.x packages carry it
+    /// in the name (<c>...Runtime.1.8</c>) and use an unrelated package version
+    /// (<c>8000.946.1701.0</c>), so the name is the useful label. The 2.x packages carry
+    /// only the major in the name (<c>...Runtime.2</c>) and the real release in the
+    /// version (<c>2.4.0.0</c>), so the two are combined into "2.4" rather than
+    /// reporting a bare "2".
+    /// </remarks>
+    internal static string RuntimeReleaseLabel(string folderName)
+    {
+        const string prefix = "Microsoft.WindowsAppRuntime.";
+        string[] parts = folderName.Split('_');
+        string head = parts[0];
+        if (head.Length <= prefix.Length || !head.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return folderName;
+        }
+
+        string suffix = head.Substring(prefix.Length);
+        string core = suffix.Split('-')[0];
+        if (core.Contains('.', StringComparison.Ordinal))
+        {
+            return suffix;
+        }
+        if (parts.Length > 1 && Version.TryParse(parts[1], out Version? packageVersion))
+        {
+            return core + "." + packageVersion.Minor + (suffix.Length > core.Length ? suffix.Substring(core.Length) : string.Empty);
+        }
+        return suffix;
     }
 
     private static string GetNuGetPackagesDir()

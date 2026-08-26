@@ -213,6 +213,12 @@ internal sealed class ApiMemberOutput
     public string? DeclaringType { get; init; }
 
     public bool Inherited { get; init; }
+
+    /// <summary>
+    /// Whether a property can be assigned. <c>null</c> for non-properties and for
+    /// properties whose accessors could not be determined.
+    /// </summary>
+    public bool? Writable { get; init; }
 }
 
 /// <summary>The result of <c>find-api members &lt;Type&gt;</c>.</summary>
@@ -287,6 +293,14 @@ internal sealed class ApiCheckPropertyOutput : IApiScopedOutput
     public required string Property { get; init; }
 
     public ApiMemberOutput? Match { get; init; }
+
+    /// <summary>
+    /// Whether the found property can be assigned. A read-only property such as
+    /// <c>FrameworkElement.ActualWidth</c> exists and is discoverable, but assigning it
+    /// in XAML fails with WMC0050, so existence alone is not a safe green light.
+    /// <c>null</c> when writability could not be determined.
+    /// </summary>
+    public bool? Writable { get; init; }
 
     public bool Attached { get; init; }
 

@@ -21,7 +21,12 @@ internal static class ApiQueryEngine
         }
 
         List<string> packageCacheDirs = GetPackageCacheDirs(cacheDir, manifest);
-        var namespaceHits = new Dictionary<string, (int BestScore, List<string> Files, List<ApiTypeHit> Matches)>();
+        var namespaceHits = new Dictionary<string, (int BestScore, bool HasExact, List<string> Files, List<(ApiTypeHit Hit, bool Exact)> Matches)>();
+
+        // The symbol the caller actually asked for, when the query names one. Exact
+        // matches sort ahead of merely-related types, and ambiguity is reported for
+        // this name only.
+        string exactTarget = query.Trim();
 
         // Track high-confidence type matches for namespace disambiguation.
         var typeMatches = new List<(string Name, string FullName, TypeKind Kind, int Score, string? Description, List<string>? EnumValues)>();
@@ -92,7 +97,7 @@ internal static class ApiQueryEngine
 
                     if (!namespaceHits.TryGetValue(ns, out var group))
                     {
-                        group = (0, new List<string>(), new List<ApiTypeHit>());
+                        group = (0, false, new List<string>(), new List<(ApiTypeHit, bool)>());
                         namespaceHits[ns] = group;
                     }
                     if (combined > group.BestScore)
@@ -103,10 +108,15 @@ internal static class ApiQueryEngine
                     {
                         group.Files.Add(typesFile);
                     }
+                    bool isExactName = type.Name.Equals(exactTarget, StringComparison.OrdinalIgnoreCase);
+                    if (isExactName)
+                    {
+                        group.HasExact = true;
+                    }
                     string display = typeScore >= bestMemberScore
                         ? $"{type.Kind} {type.FullName}"
                         : $"{type.Kind} {type.FullName} -> {memberSignature}";
-                    group.Matches.Add(new ApiTypeHit { Display = display, Score = typeScore >= bestMemberScore ? typeScore : bestMemberScore });
+                    group.Matches.Add((new ApiTypeHit { Display = display, Score = typeScore >= bestMemberScore ? typeScore : bestMemberScore }, isExactName));
                     namespaceHits[ns] = group;
 
                     if (typeScore >= 60)
@@ -118,12 +128,28 @@ internal static class ApiQueryEngine
         }
 
         // Ambiguity: the same short name resolving to more than one namespace.
-        var ambiguousGroups = typeMatches
+        // Only the requested symbol is worth warning about. A query for
+        // "NavigationView" used to emit a group for every related match it happened to
+        // score — NavigationViewItem, NavigationViewItemAutomationPeer and so on — none
+        // of which the caller asked to disambiguate, and none of which --max bounded.
+        var allAmbiguous = typeMatches
             .GroupBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
             .Where(g => g
                 .Select(t => NamespacePrefix(t.FullName, t.Name))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Count() > 1)
+            .ToList();
+
+        var exactAmbiguous = allAmbiguous
+            .Where(g => g.Key.Equals(exactTarget, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        // When the query names a symbol, report that symbol's ambiguity and nothing
+        // else. A fuzzy query ("acrylic brush") names no symbol, so fall back to the
+        // highest-scoring groups — still bounded by --max, which never applied here before.
+        var ambiguousGroups = (exactAmbiguous.Count > 0 ? exactAmbiguous : allAmbiguous)
+            .OrderByDescending(g => g.Max(t => t.Score))
+            .Take(maxResults)
             .Select(g => new ApiAmbiguityGroup
             {
                 Name = g.Key,
@@ -139,14 +165,20 @@ internal static class ApiQueryEngine
             .ToList();
 
         var results = namespaceHits
-            .OrderByDescending(kv => kv.Value.BestScore)
+            .OrderByDescending(kv => kv.Value.HasExact)
+            .ThenByDescending(kv => kv.Value.BestScore)
             .Take(maxResults)
             .Select(kv => new ApiNamespaceHit
             {
                 Namespace = kv.Key,
                 Score = kv.Value.BestScore,
                 Files = kv.Value.Files,
-                Matches = kv.Value.Matches.OrderByDescending(m => m.Score).Take(5).ToList(),
+                Matches = kv.Value.Matches
+                    .OrderByDescending(m => m.Exact)
+                    .ThenByDescending(m => m.Hit.Score)
+                    .Select(m => m.Hit)
+                    .Take(5)
+                    .ToList(),
             })
             .ToList();
 
@@ -469,12 +501,14 @@ internal static class ApiQueryEngine
             m.Member.Name.Equals(propertyName, StringComparison.OrdinalIgnoreCase));
         if (exact.Member != null)
         {
+            ApiMemberOutput match = ToMemberOutput(exact.Member, exact.DeclaringType, targetType.FullName);
             return ApiQueryResult<ApiCheckPropertyOutput>.Ok(new ApiCheckPropertyOutput
             {
                 Found = true,
                 Type = targetType.FullName,
                 Property = exact.Member.Name,
-                Match = ToMemberOutput(exact.Member, exact.DeclaringType, targetType.FullName),
+                Match = match,
+                Writable = match.Writable,
                 SimilarOnType = new List<ApiMemberOutput>(),
                 TypesWithProperty = new List<ApiCrossTypeMember>(),
                 TypesWithSimilar = new List<ApiCrossTypeMember>(),
@@ -554,7 +588,29 @@ internal static class ApiQueryEngine
             Deprecated = member.DeprecatedMessage,
             DeclaringType = inherited ? declaringType : null,
             Inherited = inherited,
+            Writable = PropertyWritable(member),
         };
+    }
+
+    /// <summary>
+    /// Whether a property can be assigned, read from the accessor block the parser
+    /// bakes into the signature (<c>{ get; }</c>, <c>{ get; set; }</c>, <c>{ set; }</c>).
+    /// Returns <c>null</c> for non-properties, and for a property whose type blob could
+    /// not be decoded and therefore carries no accessor block — so "unknown" is never
+    /// reported as read-only.
+    /// </summary>
+    private static bool? PropertyWritable(WinMdMemberInfo member)
+    {
+        if (member.Kind != MemberKind.Property)
+        {
+            return null;
+        }
+        if (member.Signature.EndsWith("{ get; set; }", StringComparison.Ordinal)
+            || member.Signature.EndsWith("{ set; }", StringComparison.Ordinal))
+        {
+            return true;
+        }
+        return member.Signature.EndsWith("{ get; }", StringComparison.Ordinal) ? false : null;
     }
 
     /// <summary>
@@ -636,9 +692,18 @@ internal static class ApiQueryEngine
         WinMdTypeInfo type, List<WinMdTypeInfo> allTypes)
     {
         var result = new List<(WinMdMemberInfo Member, string? DeclaringType)>();
+
+        // Keyed by kind + full signature, not by name: a base type's overload set
+        // (ListViewBase.ScrollIntoView(object) and ScrollIntoView(object, ScrollIntoViewAlignment))
+        // collapses to a single arbitrary entry under a name-only key, so a derived type
+        // such as GridView silently loses every overload but one. Signature keying also
+        // still hides a true override, because an override repeats the base signature
+        // verbatim and the derived member is added first.
+        var seenSignatures = new HashSet<string>(StringComparer.Ordinal);
         foreach (var m in type.Members)
         {
             result.Add((m, type.FullName));
+            seenSignatures.Add(MemberDedupKey(m));
         }
 
         string? baseTypeName = type.BaseType;
@@ -652,7 +717,7 @@ internal static class ApiQueryEngine
             }
             foreach (var m in baseType.Members)
             {
-                if (!result.Any(r => r.Member.Name == m.Name && r.Member.Kind == m.Kind))
+                if (seenSignatures.Add(MemberDedupKey(m)))
                 {
                     result.Add((m, baseType.FullName));
                 }
@@ -661,6 +726,9 @@ internal static class ApiQueryEngine
         }
         return result;
     }
+
+    private static string MemberDedupKey(WinMdMemberInfo member) =>
+        member.Kind + "|" + member.Signature;
 
     private static string? DetectAttachedProperty(WinMdTypeInfo type, string propertyName)
     {

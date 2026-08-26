@@ -453,6 +453,17 @@ internal sealed class ApiMetadataService(
         if (scope.ProjectDir is not null)
         {
             string fullPath = Path.GetFullPath(scope.ProjectDir);
+
+            // A path that does not exist is a mistake — almost always a typo. Answering
+            // it from the SDK scope returns a confident, plausible result for a project
+            // the caller never named, which is worse than no answer at all.
+            if (!Directory.Exists(fullPath))
+            {
+                return ResolvedScope.Failed(
+                    $"Project directory not found: '{fullPath}'. Check the path passed to '--project-dir', " +
+                    "or use '--project sdk' to query the machine-wide Windows SDK scope.");
+            }
+
             string? match = FindManifestPathForDir(files, fullPath);
             if (match is not null)
             {

@@ -180,6 +180,10 @@ winapp find-api check-property Button Background
 # It also finds attached properties and suggests near-misses and other types
 # that do have the property, so a failed check usually tells you the real answer
 winapp find-api check-property Window SystemBackdrop
+
+# Read-only properties come back ⚠️ "read-only, cannot be assigned" instead of ✅
+# — they exist (so the exit code stays 0), but assigning to them won't compile
+winapp find-api check-property Button ActualWidth
 ```
 
 ### List enum values
@@ -243,15 +247,15 @@ winapp find-api check-property InfoBar Severity Backgruond --json
 - **Lexical, not semantic.** Search matches type and member *names* (and signatures), ranked by a scoring heuristic. It does not do embeddings/semantic matching — phrase queries the way the API is named.
 - **Automatic indexing.** The index builds on first query and refreshes when `project.assets.json` changes, so it stays in sync with restores. Use `refresh` only to force a rebuild or index a project for the first time without querying.
 - **Project resolution and scopes.** Every answer names its scope (`scope` in `--json`, a note in text) and the index that produced it (`projectName`, `projectDir`). A project in the current directory (or `--project` / `--project-dir`) gives `scope: project`, covering the Windows SDK, Windows App SDK, *and* the project's NuGet packages. A directory with **no** project gives `scope: sdk` — the machine-wide Windows SDK + Windows App SDK only, which excludes third-party NuGet packages. A projectless query is *never* answered from some other indexed project, so results don't depend on unrelated global state. Use `--project sdk` to pick the SDK scope explicitly from inside a project.
-- **Exit codes for scripting.** `search` with no hits, `check-property` on a missing property, and `enums` on a non-enum all exit non-zero — gate code generation and CI checks on them.
-- **Ambiguity detection.** When a short type name resolves to multiple namespaces (a CS0104 risk), search surfaces every candidate with its fully-qualified name so you can pick the right one. Candidates are de-duplicated, so each fully-qualified name appears once even when several packages ship the same type, and every listed candidate is a genuinely different name you can choose between.
+- **Exit codes for scripting.** `search` with no hits, `check-property` on a missing property, and `enums` on a non-enum all exit non-zero — gate code generation and CI checks on them. Read-only is not a failure: the property exists, so the exit code stays `0` while the output flags it (`writable: false` in `--json`).
+- **Ambiguity detection.** When a short type name resolves to multiple namespaces (a CS0104 risk), search surfaces every candidate with its fully-qualified name so you can pick the right one. Candidates are de-duplicated, so each fully-qualified name appears once even when several packages ship the same type, and every listed candidate is a genuinely different name you can choose between. Only *exact*-name collisions are listed when the query names a real type, and the list obeys `--max` (default `5`), so an ambiguous short name costs a few lines rather than pages.
 - **Short names in `members` / `enums` / `check-property`.** A short name shared by a modern `Microsoft.*` type and its legacy `Windows.*` UWP twin resolves to the `Microsoft.*` one — that is the projection a Windows App SDK app uses, and the resolved fully-qualified name is always printed so you can see which type answered. Any other collision is an error listing the candidates; re-run with the fully-qualified name.
 - **Search results exclude `ABI.*` projection types.** These compiler-generated interop structs mirror real types and are never what you want to write in source, so search omits them. They remain reachable by exact name — `members ABI.Some.Type` still works if you are debugging interop.
-- **Inherited members.** `members` includes inherited properties/events/methods and marks their declaring type, so you see the full usable surface of a control.
+- **Inherited members.** `members` includes inherited properties/events/methods and marks their declaring type, so you see the full usable surface of a control. Overloads that differ only in their parameters are all listed — a name is never collapsed to a single signature.
 
 ## Troubleshooting
 - **"No indexed API metadata was found for this project."** You are standing in a real project that hasn't been indexed — usually because it has not been restored (no `project.assets.json`). Run `winapp restore`, then retry. `find-api` deliberately does *not* silently narrow to the SDK scope here, because that would hide the project's own NuGet packages and make its types look nonexistent.
-- **Results say `scope: sdk` but you expected project APIs.** There is no project in the current directory, so the machine-wide SDK scope answered. `cd` into the project (or pass `--project-dir <path>`); third-party NuGet packages such as the Community Toolkit only exist in the `project` scope.
+- **Results say `scope: sdk` but you expected project APIs.** There is no project in the current directory, so the machine-wide SDK scope answered. `cd` into the project (or pass `--project-dir <path>`); third-party NuGet packages such as the Community Toolkit only exist in the `project` scope. A `--project-dir` that doesn't exist is a hard error, not a silent fallback to `sdk`.
 - **"No project was found here and no Windows SDK metadata is available on this machine."** Neither a project nor an installed Windows SDK / Windows App SDK was found. Run from a project directory, or install the SDK.
 - **"Project '<name>' is not indexed."** The name passed to `--project` doesn't match a cached project. Run `winapp find-api refresh` in that project's directory, or use `--project-dir <path>` instead. `refresh --project <name>` fails the same way rather than quietly indexing the current directory instead.
 - **"'<Type>' is ambiguous."** Two indexed types share that short name and neither is the `Microsoft.*`/`Windows.*` twin of the other. Re-run with the fully-qualified name from the listed candidates.
@@ -265,7 +269,7 @@ winapp find-api check-property InfoBar Severity Backgruond --json
 ## CLI reference
 - `winapp find-api "<query>" [<query>...] [--max N]` — lexical search across types and members (bare form). Exits non-zero on no hits.
 - `winapp find-api members <type> [<type>...] [--filter <text>]` — properties, events, and methods (incl. inherited) of a type.
-- `winapp find-api check-property <type> <property> [<property>...]` — validate properties exist; exits non-zero if any is missing.
+- `winapp find-api check-property <type> <property> [<property>...]` — validate properties exist; exits non-zero if any is missing. Read-only properties are flagged (`writable: false`) but still exit `0`.
 - `winapp find-api enums <type> [<type>...] [--filter <text>]` — enum values; exits non-zero when the type is not an enum.
 - `winapp find-api packages` — indexed NuGet/SDK packages with per-package counts.
 - `winapp find-api stats` — aggregate index statistics for the project.
