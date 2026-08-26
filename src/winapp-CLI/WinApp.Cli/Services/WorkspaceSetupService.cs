@@ -144,7 +144,7 @@ internal class WorkspaceSetupService(
                     }
                     catch (Exception ex)
                     {
-                        logger.LogDebug("{UISymbol} Could not get version for {PackageName}: {ErrorMessage}", UiSymbols.Note, packageName, ex.Message);
+                        logger.LogDebug("{UISymbol} Could not get version for {PackageName}: {ErrorMessage}", UiSymbols.Note, packageName, NugetErrorMessage.Redact(ex.Message));
                     }
                 }
 
@@ -1174,7 +1174,7 @@ internal class WorkspaceSetupService(
         }
         catch (Exception ex)
         {
-            logger.LogDebug("Failed to fetch latest version for {PackageName} ({Mode}): {ErrorMessage}", packageName, mode, ex.Message);
+            logger.LogDebug("Failed to fetch latest version for {PackageName} ({Mode}): {ErrorMessage}", packageName, mode, NugetErrorMessage.Redact(ex.Message));
             return null;
         }
     }

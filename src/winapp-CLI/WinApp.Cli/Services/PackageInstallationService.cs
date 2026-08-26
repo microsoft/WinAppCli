@@ -172,7 +172,7 @@ internal sealed class PackageInstallationService(
         {
             InitializeWorkspace(rootDirectory);
 
-            var installedVersion = await InstallPackageAsync(
+            await InstallPackageAsync(
                 rootDirectory,
                 packageName,
                 taskContext,
@@ -184,7 +184,7 @@ internal sealed class PackageInstallationService(
         }
         catch (Exception ex)
         {
-            logger.LogError("Failed to install {PackageName}: {ErrorMessage}", packageName, ex.Message);
+            logger.LogError("Failed to install {PackageName}: {ErrorMessage}", packageName, NugetErrorMessage.Redact(ex.Message));
             return false;
         }
     }

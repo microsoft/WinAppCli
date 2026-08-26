@@ -40,6 +40,18 @@ internal sealed class DotNetProjectRestoreService(
             return 1;
         }
 
+        // Nothing to restore. Unreachable through the current caller, which only delegates here after
+        // detecting a .csproj, but RestoreAsync is a public contract — report it rather than letting a
+        // future caller hit an index-out-of-range on csprojFiles[0] below.
+        if (csprojFiles.Count == 0)
+        {
+            logger.LogError(
+                "{UISymbol} No .NET project found in {Directory}. Run 'winapp restore' from a directory containing a .csproj, or pass one as the base directory.",
+                UiSymbols.Error,
+                baseDirectory.FullName);
+            return 1;
+        }
+
         var projectToRestore = csprojFiles[0];
 
         logger.LogInformation(
