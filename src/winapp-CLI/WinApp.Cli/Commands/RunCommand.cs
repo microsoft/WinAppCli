@@ -237,6 +237,15 @@ internal partial class RunCommand : Command, IShortDescription
 
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
+            // GuestLaunchCommand shares this handler (it needs the same app-launcher/package-
+            // registration/debug-output dependencies and the extracted post-launch logic) but is a
+            // structurally distinct verb with its own option set, so it is dispatched before any of
+            // the ordinary run's own parsing runs.
+            if (parseResult.CommandResult.Command is GuestLaunchCommand)
+            {
+                return await InvokeGuestLaunchAsync(parseResult, cancellationToken);
+            }
+
             // input is optional (ArgumentArity.ZeroOrOne). The final FileSystemInfo is resolved
             // below, AFTER the passthrough split, because a bare `winapp run -- <app-arg>` makes the
             // parser greedily bind the first post-'--' token to this positional. That "stolen" case is
@@ -660,6 +669,39 @@ internal partial class RunCommand : Command, IShortDescription
                 return success;
             }
 
+            return await LaunchRegisteredApplicationAsync(
+                aumid, packageName, packageFullName, resolvedOutputDir!, inputFolder, appArgs, processId,
+                withAlias, debugOutput, unregisterOnExit, detach, useSymbols, isJson, cancellationToken);
+        }
+
+        /// <summary>
+        /// Waits for, detaches from, or drives the debug loop over an application that has already
+        /// been launched via AUMID (or is about to launch via alias), then unregisters afterward if
+        /// asked.
+        /// </summary>
+        /// <remarks>
+        /// Extracted verbatim from the tail of <see cref="ExecuteRunPipelineAsync"/> (no behavior
+        /// change) so the ordinary local run and the guest-launch verb
+        /// (<c>InvokeGuestLaunchAsync</c>, in RunCommand.GuestLaunch.cs) -- which never registers or
+        /// unregisters anything itself -- share one implementation of "what happens after launch"
+        /// rather than risk two that drift apart.
+        /// </remarks>
+        private async Task<int> LaunchRegisteredApplicationAsync(
+            string? aumid,
+            string? packageName,
+            string? packageFullName,
+            DirectoryInfo resolvedOutputDir,
+            DirectoryInfo inputFolder,
+            string? appArgs,
+            uint processId,
+            bool withAlias,
+            bool debugOutput,
+            bool unregisterOnExit,
+            bool detach,
+            bool useSymbols,
+            bool isJson,
+            CancellationToken cancellationToken)
+        {
             // --detach: return immediately after launch without waiting for exit
             if (detach)
             {
@@ -679,7 +721,7 @@ internal partial class RunCommand : Command, IShortDescription
             // --with-alias: launch via execution alias with inherited stdio
             if (withAlias)
             {
-                var aliasExitCode = await LaunchViaExecutionAliasAsync(resolvedOutputDir!, inputFolder, appArgs, debugOutput, useSymbols, packageFullName, cancellationToken);
+                var aliasExitCode = await LaunchViaExecutionAliasAsync(resolvedOutputDir, inputFolder, appArgs, debugOutput, useSymbols, packageFullName, cancellationToken);
                 if (unregisterOnExit && packageName != null)
                 {
                     await UnregisterDevPackageAsync(packageName, cancellationToken);
@@ -708,7 +750,6 @@ internal partial class RunCommand : Command, IShortDescription
                 }
                 return exitCode;
             }
-
 
             // Wait for the launched process to exit before returning.
             // The process may have already exited by the time we get here (common for
