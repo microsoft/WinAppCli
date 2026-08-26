@@ -159,6 +159,7 @@ internal sealed record SingleFileRunOptions(
 /// <param name="ExecutableName">The app executable's bare file name (e.g. <c>counter.exe</c>), written concretely into the generated manifest.</param>
 /// <param name="Architecture">The architecture the app was built for (<c>x64</c>/<c>arm64</c>/<c>x86</c>), resolved from the app's own <c>RuntimeIdentifier</c>/<c>Platform</c>. Threaded into Windows App Runtime provisioning so a cross-architecture app gets matching runtime packages.</param>
 /// <param name="TargetFramework">The TFM the app was built for, threaded into runtime provisioning so the Windows App SDK version resolves from the right framework; null when unresolved.</param>
+/// <param name="SelfContained">True when <c>WindowsAppSDKSelfContained=true</c> — the app carries its own Windows App SDK, so no framework dependency is added and no runtime is provisioned.</param>
 /// <param name="Properties">Every evaluated MSBuild property from the <c>--getProperty</c> pass, keyed case-insensitively.</param>
 internal sealed record SingleFileRunResolution(
     FileInfo SingleFile,
@@ -166,6 +167,7 @@ internal sealed record SingleFileRunResolution(
     string ExecutableName,
     string Architecture,
     string? TargetFramework,
+    bool SelfContained,
     IReadOnlyDictionary<string, string> Properties);
 
 /// <summary>

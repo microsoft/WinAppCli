@@ -148,6 +148,7 @@ internal partial class RunCommand
                 projectFile: singleFile,
                 framework: resolution.TargetFramework,
                 noRestore: noRestore,
+                selfContained: resolution.SelfContained,
                 cancellationToken);
         }
 

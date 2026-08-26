@@ -59,6 +59,14 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
         DirectoryInfo outputDirectory,
         string executableName = "counter.exe",
         params (string Name, string Value)[] properties)
+        => SetOutcome(singleFile, outputDirectory, executableName, selfContained: false, properties);
+
+    private void SetOutcome(
+        FileInfo singleFile,
+        DirectoryInfo outputDirectory,
+        string executableName,
+        bool selfContained,
+        params (string Name, string Value)[] properties)
     {
         var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (name, value) in properties)
@@ -68,7 +76,7 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
 
         _fakeProjectRunService.SingleFileBuildOutcome = new SingleFileBuildOutcome(
             new SingleFileRunResolution(
-                singleFile, outputDirectory.FullName, executableName, "x64", "net10.0-windows10.0.19041.0", props), 0);
+                singleFile, outputDirectory.FullName, executableName, "x64", "net10.0-windows10.0.19041.0", selfContained, props), 0);
     }
 
     private static XDocument LoadGeneratedManifest(DirectoryInfo outputDirectory)
@@ -408,7 +416,7 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
         var (singleFile, outputDir) = CreateSingleFileApp();
         _fakeProjectRunService.SingleFileBuildOutcome = new SingleFileBuildOutcome(
             new SingleFileRunResolution(
-                singleFile, outputDir.FullName, "counter.exe", "arm64", "net10.0-windows10.0.22621.0",
+                singleFile, outputDir.FullName, "counter.exe", "arm64", "net10.0-windows10.0.22621.0", false,
                 new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)), 0);
         var command = GetRequiredService<RunCommand>();
 
@@ -438,5 +446,39 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
             "The .cs itself must be the package-list source");
     }
 
+    [TestMethod]
+    public async Task SingleFileMode_SelfContainedApp_SkipsFrameworkDependencyAndRuntimeProvisioning()
+    {
+        // A self-contained app already carries the Windows App SDK. Adding a framework PackageDependency
+        // for it makes registration fail on a machine that lacks that framework, even though the app
+        // never needed it.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir, "counter.exe", selfContained: true);        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.IsTrue(_fakeMsixService.AddLooseLayoutSelfContainedCalls.Single(),
+            "WindowsAppSDKSelfContained must reach the loose-layout pipeline, not be discarded");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_NoRestore_ReachesTheLooseLayoutPipeline()
+    {
+        // The generated manifest carries no MSBuild metadata, so registration takes the raw-manifest
+        // branch. That branch used to hard-code noRestore:false, so `--no-restore` silently still ran an
+        // implicit restore during package discovery — contrary to the option and the docs.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--no-restore", "--detach"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.IsTrue(_fakeMsixService.AddLooseLayoutRuntimeCalls.Single().NoRestore,
+            "--no-restore must be threaded into loose-layout package discovery");
+    }
+
     #endregion
 }
+

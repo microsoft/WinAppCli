@@ -162,6 +162,9 @@ public class SingleFileManifestPlannerTests
     [DataRow("70000.1.2.3", DisplayName = "a component above 65535 is rejected")]
     [DataRow("1.2.3.4.5", DisplayName = "five components are rejected, not truncated")]
     [DataRow("not-a-version", DisplayName = "unparseable text is rejected")]
+    [DataRow("1.2.3oops", DisplayName = "a trailing non-numeric suffix is rejected, not silently dropped")]
+    [DataRow("v1.2.3", DisplayName = "a leading non-numeric prefix is rejected")]
+    [DataRow("1.2.3 (build 7)", DisplayName = "decorated build metadata is rejected")]
     public void Plan_UnusableVersion_ThrowsInsteadOfSilentlyChangingIt(string declared)
     {
         var exception = Assert.ThrowsExactly<ProjectRunException>(() =>

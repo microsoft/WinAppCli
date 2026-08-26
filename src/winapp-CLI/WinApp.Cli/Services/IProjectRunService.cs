@@ -60,9 +60,10 @@ internal interface IProjectRunService
     Task<string?> CheckSdkAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Verifies that an SDK capable of building .NET <b>file-based apps</b> (≥ 10.0.100) is available.
-    /// Single-file mode's floor is higher than <see cref="CheckSdkAsync"/>'s because building a bare
-    /// <c>.cs</c> through a virtual project only exists from .NET 10.
+    /// Verifies that an SDK capable of running .NET <b>file-based apps</b> (≥ 10.0.300) is available.
+    /// Single-file mode's floor is higher than <see cref="CheckSdkAsync"/>'s: 10.0.100 can build a bare
+    /// <c>.cs</c>, but resolving its NuGet packages needs <c>dotnet package list --file</c>, which only
+    /// exists from the 10.0.300 feature band.
     /// </summary>
     /// <returns>An actionable error message if the SDK is missing/too old, otherwise <c>null</c>.</returns>
     Task<string?> CheckSingleFileSdkAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken);

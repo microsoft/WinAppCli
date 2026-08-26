@@ -80,6 +80,12 @@ internal interface IMsixService
         TaskContext taskContext,
         CancellationToken cancellationToken = default);
 
+    /// <param name="selfContained">
+    /// When <c>true</c>, the app carries its own Windows App SDK copy: no framework
+    /// <c>&lt;PackageDependency&gt;</c> is added to the manifest and no runtime is provisioned. Callers
+    /// pass the evaluated <c>WindowsAppSDKSelfContained</c>; the default preserves the previous behavior
+    /// for callers that cannot determine it.
+    /// </param>
     public Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(
         FileInfo appxManifestPath,
         DirectoryInfo inputDirectory,
@@ -91,6 +97,7 @@ internal interface IMsixService
         FileInfo? projectFile = null,
         string? framework = null,
         bool noRestore = false,
+        bool selfContained = false,
         CancellationToken cancellationToken = default);
 
     /// <summary>

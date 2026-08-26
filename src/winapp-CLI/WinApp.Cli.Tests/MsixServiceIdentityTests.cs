@@ -537,19 +537,19 @@ public class MsixServiceIdentityTests : BaseCommandTests
         // *.appxmanifest — not only the conventional Package.appxmanifest — must be normalized on copy.
         // A per-file name like counter.appxmanifest is what a .NET file-based app authors next to its .cs.
         var srcDir = _tempDirectory.CreateSubdirectory("perfile-input");
-        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "counter.appxmanifest"));
+        var srcManifest = new FileInfo(Path.Join(srcDir.FullName, "counter.appxmanifest"));
         await File.WriteAllTextAsync(srcManifest.FullName, BuildRawManifest(), TestContext.CancellationToken);
-        await File.WriteAllTextAsync(Path.Combine(srcDir.FullName, "TestApp.exe"), "not-a-real-pe", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Join(srcDir.FullName, "TestApp.exe"), "not-a-real-pe", TestContext.CancellationToken);
 
-        var output = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "perfile-layout"));
+        var output = new DirectoryInfo(Path.Join(_tempDirectory.FullName, "perfile-layout"));
 
         var result = await _msixService.AddLooseLayoutIdentityAsync(
             srcManifest, srcDir, output, TestTaskContext, cancellationToken: TestContext.CancellationToken);
 
         Assert.AreEqual("TestApp", result.PackageName);
-        Assert.IsTrue(File.Exists(Path.Combine(output.FullName, "appxmanifest.xml")),
+        Assert.IsTrue(File.Exists(Path.Join(output.FullName, "appxmanifest.xml")),
             "A per-file *.appxmanifest must land in the layout as appxmanifest.xml");
-        Assert.IsFalse(File.Exists(Path.Combine(output.FullName, "counter.appxmanifest")),
+        Assert.IsFalse(File.Exists(Path.Join(output.FullName, "counter.appxmanifest")),
             "The non-canonical name must not survive in the layout");
         Assert.HasCount(1, _fakeRegistration.RegisterLooseLayoutCalls);
     }

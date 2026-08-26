@@ -878,7 +878,7 @@ rejected with a message naming the directive to use instead:
 Single-file mode always runs the app **packaged**. `#:property WindowsPackageType=None` is rejected;
 use `dotnet run` if you want to run the file without identity.
 
-Single-file mode requires the **.NET SDK 10.0.100 or newer**.
+Single-file mode requires the **.NET SDK 10.0.300 or newer**.
 
 **Single-file examples:**
 
@@ -1614,3 +1614,4 @@ stop reason, optional `frameArtifacts`, and warnings.
 > stills. Tracked in [#646](https://github.com/microsoft/winappCli/issues/646).
 
 For full documentation, see [docs/ui-automation.md](ui-automation.md).
+

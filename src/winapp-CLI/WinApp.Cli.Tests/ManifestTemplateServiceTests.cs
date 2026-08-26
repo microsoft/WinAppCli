@@ -251,7 +251,7 @@ public class ManifestTemplateServiceTests
     {
         // Single-file mode infers a human-readable display name from #:property WinAppDisplayName, which
         // is independent of the sanitized Identity name.
-        var outDir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "displayname"));
+        var outDir = new DirectoryInfo(Path.Join(_tempDir.FullName, "displayname"));
 
         await new ManifestTemplateService().GenerateCompleteManifestAsync(
             outDir,
@@ -276,7 +276,7 @@ public class ManifestTemplateServiceTests
     [TestMethod]
     public async Task GenerateCompleteManifest_DisplayNameOverride_IsXmlEscaped()
     {
-        var outDir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "displayname_escape"));
+        var outDir = new DirectoryInfo(Path.Join(_tempDir.FullName, "displayname_escape"));
 
         await new ManifestTemplateService().GenerateCompleteManifestAsync(
             outDir,
@@ -299,7 +299,7 @@ public class ManifestTemplateServiceTests
     {
         // Single-file mode pins Application/@Id to "App" rather than deriving it from a dotted
         // reverse-DNS package name, whose sanitization is a needless source of surprise.
-        var outDir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "appid"));
+        var outDir = new DirectoryInfo(Path.Join(_tempDir.FullName, "appid"));
 
         await new ManifestTemplateService().GenerateCompleteManifestAsync(
             outDir,
@@ -322,7 +322,7 @@ public class ManifestTemplateServiceTests
     {
         // Guards the callers that never pass the new arguments (manifest generate, init, sparse identity):
         // omitting them must produce exactly what it produced before they existed.
-        var outDir = new DirectoryInfo(Path.Combine(_tempDir.FullName, "no_overrides"));
+        var outDir = new DirectoryInfo(Path.Join(_tempDir.FullName, "no_overrides"));
 
         await new ManifestTemplateService().GenerateCompleteManifestAsync(
             outDir,

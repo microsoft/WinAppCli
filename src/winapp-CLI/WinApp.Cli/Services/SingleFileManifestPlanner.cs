@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Text.RegularExpressions;
 using WinApp.Cli.Helpers;
 
 namespace WinApp.Cli.Services;
@@ -39,9 +40,8 @@ internal sealed record SingleFileManifestInfo(
 /// </para>
 /// Pure and side-effect free.
 /// </summary>
-internal static class SingleFileManifestPlanner
-{
-    /// <summary>MSBuild property naming the package identity; falls back to the file stem.</summary>
+internal static partial class SingleFileManifestPlanner
+{    /// <summary>MSBuild property naming the package identity; falls back to the file stem.</summary>
     internal const string PackageNameProperty = "WinAppPackageName";
 
     /// <summary>MSBuild property naming the app's display name; falls back to the file stem.</summary>
@@ -138,19 +138,25 @@ internal static class SingleFileManifestPlanner
             return DefaultVersion;
         }
 
-        // Cut the semver pre-release/build suffix: 1.2.3-preview.4 → 1.2.3.
-        var core = raw.Split('-', 2)[0].Trim();
+        // Cut the semver pre-release/build suffix: 1.2.3-preview.4 → 1.2.3, 2.0.0+build.55 → 2.0.0.
+        var core = raw.Split('-', 2)[0].Split('+', 2)[0].Trim();
 
         // System.Version needs at least Major.Minor, so a single-component version (a legal, if unusual,
         // $(Version) of "7") would otherwise be rejected instead of padded to 7.0.0.0. Padding here rather
-        // than in the shared normalizer keeps `manifest generate`'s behavior untouched. Non-numeric input
-        // still fails normalization below, so this cannot turn garbage into a version.
+        // than in the shared normalizer keeps `manifest generate`'s behavior untouched.
         if (core.Length > 0 && !core.Contains('.'))
         {
             core += ".0";
         }
 
-        var normalized = ManifestService.NormalizeManifestVersion(core);
+        // Require the whole remaining value to be numeric components before normalizing. The shared
+        // normalizer deliberately parses only a LEADING numeric token, because it also handles decorated
+        // file metadata like "10.0.26100.1 (WinBuild.160101.0800)" — but that leniency is wrong for a
+        // hand-written directive: it would turn '1.2.3oops' into 1.2.3.0 and ship a version the user never
+        // wrote, contradicting the documented promise that unusable input is rejected.
+        var normalized = StrictVersionRegex().IsMatch(core)
+            ? ManifestService.NormalizeManifestVersion(core)
+            : null;
         if (normalized is null)
         {
             throw new ProjectRunException(
@@ -176,4 +182,8 @@ internal static class SingleFileManifestPlanner
         var trimmed = value?.Trim();
         return string.IsNullOrEmpty(trimmed) ? null : trimmed;
     }
+
+    /// <summary>One to four dot-separated numeric components, and nothing else.</summary>
+    [GeneratedRegex(@"^\d+(\.\d+){0,3}$")]
+    private static partial Regex StrictVersionRegex();
 }

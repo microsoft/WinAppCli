@@ -50,15 +50,15 @@ Is the app a single .cs file (.NET file-based app)?
       ├─ Ready to create MSIX installer?
       │  └─ winapp package <build-output> --cert ./devcert.pfx
       ├─ Need to sign an existing file?
-   │  └─ winapp sign <file> <cert>
-   ├─ Need to update app icons?
-   │  └─ winapp manifest update-assets ./logo.png
-   ├─ Need to run SDK tools directly?
-   │  └─ winapp tool <toolname> <args>
-   ├─ Need to publish to Microsoft Store?
-   │  └─ winapp store <args> (passthrough to Store Developer CLI)
-   └─ Need the .winapp directory path for build scripts?
-      └─ winapp get-winapp-path (or --global for shared cache)
+      │  └─ winapp sign <file> <cert>
+      ├─ Need to update app icons?
+      │  └─ winapp manifest update-assets ./logo.png
+      ├─ Need to run SDK tools directly?
+      │  └─ winapp tool <toolname> <args>
+      ├─ Need to publish to Microsoft Store?
+      │  └─ winapp store <args> (passthrough to Store Developer CLI)
+      └─ Need the .winapp directory path for build scripts?
+         └─ winapp get-winapp-path (or --global for shared cache)
 ```
 
 **Important notes:**

@@ -83,10 +83,15 @@ internal sealed partial class ProjectRunService
     public Task<string?> CheckSingleFileSdkAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken)
         => CheckSdkFloorAsync(
             workingDirectory,
+            // 10.0.100 can BUILD a file-based app, but single-file mode also resolves the app's NuGet
+            // packages with `dotnet package list --file`, and that option only exists from the 10.0.300
+            // feature band. On an older band the discovery silently returns nothing, and a
+            // framework-dependent Windows App SDK app loses the framework dependency it needs to launch.
+            // Requiring the band that supports the whole flow beats degrading into a broken package.
             minimumMajor: 10,
-            minimumPatch: 100,
-            upgradeHint: "Running a .NET file-based app (a single .cs) requires .NET SDK 10.0.100 or newer. Install or update it from https://aka.ms/dotnet/download.",
-            tooOldReason: "cannot build .NET file-based apps",
+            minimumPatch: 300,
+            upgradeHint: "Running a .NET file-based app (a single .cs) requires .NET SDK 10.0.300 or newer. Install or update it from https://aka.ms/dotnet/download.",
+            tooOldReason: "cannot resolve packages for .NET file-based apps",
             cancellationToken);
 
     /// <inheritdoc />
@@ -190,6 +195,7 @@ internal sealed partial class ProjectRunService
                 executableName,
                 ResolveSingleFileArchitecture(props),
                 GetProp(props, "TargetFramework") is { Length: > 0 } tfm ? tfm : null,
+                string.Equals(GetProp(props, "WindowsAppSDKSelfContained"), "true", StringComparison.OrdinalIgnoreCase),
                 props),
             0);
     }
@@ -246,7 +252,7 @@ internal sealed partial class ProjectRunService
                 ? assemblyName + ".exe"
                 : Path.GetFileNameWithoutExtension(singleFile.Name) + ".exe");
 
-        if (string.IsNullOrEmpty(candidate) || !File.Exists(Path.Combine(outputDirectory, candidate)))
+        if (string.IsNullOrEmpty(candidate) || !File.Exists(Path.Join(outputDirectory, candidate)))
         {
             throw new ProjectRunException(
                 $"Could not find the application executable '{candidate}' in the build output ({outputDirectory}). " +
@@ -320,3 +326,4 @@ internal sealed partial class ProjectRunService
         return streamedExit;
     }
 }
+

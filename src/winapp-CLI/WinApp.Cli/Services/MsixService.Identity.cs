@@ -110,7 +110,7 @@ internal partial class MsixService
         return new MsixIdentityResult(debugIdentity.PackageName, debugIdentity.Publisher, debugIdentity.ApplicationId);
     }
 
-    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, string? executable = null, string? runtimeArch = null, FileInfo? projectFile = null, string? framework = null, bool noRestore = false, CancellationToken cancellationToken = default)
+    public async Task<MsixIdentityResult> AddLooseLayoutIdentityAsync(FileInfo appxManifestPath, DirectoryInfo inputDirectory, DirectoryInfo outputAppXDirectory, TaskContext taskContext, bool clean = false, string? executable = null, string? runtimeArch = null, FileInfo? projectFile = null, string? framework = null, bool noRestore = false, bool selfContained = false, CancellationToken cancellationToken = default)
     {
         // Validate inputs
         if (!appxManifestPath.Exists)
@@ -234,8 +234,12 @@ internal partial class MsixService
 
         // Fetch dotnet package list once for all downstream operations. Pin to the effective built TFM
         // (M2) so a multi-targeted app resolves the runtime for the framework it was actually built for.
-        // Shared loose-layout pipeline (folder + packaged project mode); discovery restores as before.
-        var dotNetPackageList = await ResolveDotNetPackageListAsync(projectFile, framework, noRestore: false, cancellationToken);
+        // Shared loose-layout pipeline (folder + packaged project mode); honors the caller's --no-restore
+        // so a run that opted out of restoring cannot trigger an implicit one during discovery.
+        // A self-contained app carries its own Windows App SDK, so skip discovery entirely.
+        var dotNetPackageList = selfContained
+            ? null
+            : await ResolveDotNetPackageListAsync(projectFile, framework, noRestore, cancellationToken);
 
         // If there is a pri file named after the executable, rename it to resources.pri
         var priFilePath = Path.Combine(outputAppXDirectory.FullName, Path.GetFileNameWithoutExtension(executableMatch.Name) + ".pri");
@@ -281,7 +285,7 @@ internal partial class MsixService
         // ProcessorArchitecture auto-detection, and build metadata
         (manifestContent, _) = await UpdateAppxManifestContentAsync(
             manifestContent, null, null, executableMatch.FullName,
-            sparse: false, selfContained: false,
+            sparse: false, selfContained,
             dotNetPackageList, taskContext, cancellationToken);
 
         await File.WriteAllTextAsync(copiedAppxManifestPath.FullName, manifestContent, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
@@ -302,8 +306,12 @@ internal partial class MsixService
         {
             var identity = ParseAppxManifestAsync(manifestContent);
 
-            // Install the Windows App Runtime framework packages if not already present
-            await EnsureWindowsAppRuntimeInstalledAsync(dotNetPackageList, runtimeArch, taskContext, cancellationToken);
+            // Install the Windows App Runtime framework packages if not already present. A self-contained
+            // app ships its own copy, so provisioning is skipped (dotNetPackageList is null there).
+            if (!selfContained)
+            {
+                await EnsureWindowsAppRuntimeInstalledAsync(dotNetPackageList, runtimeArch, taskContext, cancellationToken);
+            }
 
             // See MSBuild branch above for the rationale (issue #537).
             var skipResult = TrySkipRegistration(
