@@ -242,14 +242,33 @@ internal static class GuestTcpTransport
 
     /// <summary>Binds a listener, letting the OS choose the port when none is fixed.</summary>
     /// <remarks>
+    /// Binds every interface, which is what the guest agent needs: the host reaches it across the
+    /// Sandbox's virtual network, not over loopback. That is also why a host-side caller must never
+    /// use this overload — binding all interfaces on the host raises a Windows Firewall consent
+    /// prompt for whichever executable did it.
+    /// </remarks>
+    /// <returns>The listener and the port it actually bound.</returns>
+    public static (TcpListener Listener, int Port) Listen(int requestedPort) =>
+        Listen(requestedPort, IPAddress.Any);
+
+    /// <summary>Binds a listener to one specific address.</summary>
+    /// <remarks>
     /// Ownership transfers to the caller on success. If <see cref="TcpListener.Start()"/> or reading
     /// the bound endpoint fails, the listener is disposed here — otherwise a failed bind would leak
     /// a socket, and the agent retries binding on the path that reports the failure.
+    /// <para>
+    /// The address is explicit rather than assumed because the two callers need opposite things. The
+    /// guest agent must be reachable from the host and binds every interface; anything running on
+    /// the host — a test standing in for the agent, most of all — must bind
+    /// <see cref="IPAddress.Loopback"/>, which is exempt from the firewall and so never prompts.
+    /// </para>
     /// </remarks>
     /// <returns>The listener and the port it actually bound.</returns>
-    public static (TcpListener Listener, int Port) Listen(int requestedPort)
+    public static (TcpListener Listener, int Port) Listen(int requestedPort, IPAddress bindAddress)
     {
-        var listener = new TcpListener(IPAddress.Any, requestedPort);
+        ArgumentNullException.ThrowIfNull(bindAddress);
+
+        var listener = new TcpListener(bindAddress, requestedPort);
 
         try
         {
