@@ -488,6 +488,44 @@ public class MsixServiceIdentityTests : BaseCommandTests
     }
 
     [TestMethod]
+    public async Task AddLooseLayoutIdentityAsync_RecipeLayoutWithStaleManifest_RegistersTheRecipeManifest()
+    {
+        // The recipe copy does not delete stale files, so a reused layout can still hold a
+        // Package.appxmanifest from an earlier run. ManifestHelper.FindManifest prefers that name, so
+        // without cleanup the stale manifest would be registered instead of the one the recipe staged.
+        var srcDir = _tempDirectory.CreateSubdirectory("recipe-stale-input");
+        var srcManifest = new FileInfo(Path.Join(srcDir.FullName, "AppxManifest.xml"));
+        await File.WriteAllTextAsync(srcManifest.FullName, BuildMSBuildManifest(), TestContext.CancellationToken);
+        var srcExe = new FileInfo(Path.Join(srcDir.FullName, "TestApp.exe"));
+        await File.WriteAllTextAsync(srcExe.FullName, "exe", TestContext.CancellationToken);
+
+        var sb = new StringBuilder();
+        sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+        sb.AppendLine("<Project xmlns=\"http://schemas.microsoft.com/developer/msbuild/2003\">");
+        sb.AppendLine("  <ItemGroup>");
+        sb.AppendLine($"    <AppXManifest Include=\"{srcManifest.FullName}\"><PackagePath>appxmanifest.xml</PackagePath></AppXManifest>");
+        sb.AppendLine($"    <AppxPackagedFile Include=\"{srcExe.FullName}\"><PackagePath>TestApp.exe</PackagePath></AppxPackagedFile>");
+        sb.AppendLine("  </ItemGroup>");
+        sb.AppendLine("</Project>");
+        await File.WriteAllTextAsync(Path.Join(srcDir.FullName, "TestApp.build.appxrecipe"), sb.ToString(), TestContext.CancellationToken);
+
+        // Pre-seed the layout with a stale manifest under the name FindManifest prefers.
+        var output = _tempDirectory.CreateSubdirectory("recipe-stale-layout");
+        await File.WriteAllTextAsync(Path.Join(output.FullName, "Package.appxmanifest"), "<Package>STALE</Package>", TestContext.CancellationToken);
+
+        var result = await _msixService.AddLooseLayoutIdentityAsync(
+            srcManifest, srcDir, output, TestTaskContext, cancellationToken: TestContext.CancellationToken);
+
+        Assert.AreEqual("TestApp", result.PackageName);
+        Assert.IsFalse(File.Exists(Path.Join(output.FullName, "Package.appxmanifest")),
+            "The stale manifest must not survive in the layout");
+        Assert.HasCount(1, _fakeRegistration.RegisterLooseLayoutCalls);
+        StringAssert.EndsWith(
+            _fakeRegistration.RegisterLooseLayoutCalls[0], "appxmanifest.xml",
+            "Registration must use the manifest the recipe staged");
+    }
+
+    [TestMethod]
     public async Task AddLooseLayoutIdentityAsync_MSBuildManifestNoRecipe_FallsBackToSync()
     {
         var srcDir = _tempDirectory.CreateSubdirectory("build-output");
@@ -555,6 +593,7 @@ public class MsixServiceIdentityTests : BaseCommandTests
     }
 
     // ---- AddSparseIdentityAsync workflow ------------------------------------------
+
     private (FileInfo manifest, string exePath) ArrangeSparseInputs()
     {
         // Manifest + assets live in one directory; the executable in another, so the

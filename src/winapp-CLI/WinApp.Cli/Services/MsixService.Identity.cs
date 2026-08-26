@@ -151,6 +151,11 @@ internal partial class MsixService
             {
                 taskContext.AddDebugMessage($"{UiSymbols.Files} Using appxrecipe for layout: {recipeFile.Name}");
                 await CopyFilesFromRecipeAsync(recipeFile, outputAppXDirectory, taskContext, cancellationToken);
+
+                // The recipe copy does not delete stale files, so a reused layout can still hold a
+                // Package.appxmanifest from an earlier run. FindManifest below prefers that name, which
+                // would register a stale manifest instead of the one the recipe just staged.
+                RemoveCompetingLayoutManifests(outputAppXDirectory, taskContext);
             }
             else
             {
@@ -462,6 +467,13 @@ internal partial class MsixService
     /// </remarks>
     private static void RemoveCompetingLayoutManifests(DirectoryInfo outputAppXDirectory, TaskContext taskContext)
     {
+        // Only prune once the canonical file is in place, so this can never leave a layout with no
+        // manifest at all (for example if a staging step wrote only Package.appxmanifest).
+        if (!File.Exists(Path.Join(outputAppXDirectory.FullName, "appxmanifest.xml")))
+        {
+            return;
+        }
+
         foreach (var candidate in outputAppXDirectory.EnumerateFiles("*.appxmanifest", SearchOption.TopDirectoryOnly))
         {
             try
