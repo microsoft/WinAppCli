@@ -821,9 +821,15 @@ internal class WorkspaceSetupService(
     /// For a .NET project, keeps winapp's own NuGet lookups on the same <c>nuget.config</c> hierarchy the .NET
     /// SDK will use. Versions are chosen here but written into the project as <c>PackageReference</c> entries
     /// by <c>dotnet add package</c>, which always resolves <c>nuget.config</c> by walking up from the project.
-    /// With an explicit <c>--config-dir</c> outside that hierarchy the two disagreed: a version could be
-    /// selected from a private feed only winapp could see, and <c>dotnet add</c> would then fail with NU1102
-    /// looking for it on the project's own sources.
+    /// Any other root can disagree with it: an unrelated <c>--config-dir</c> misses the project's sources
+    /// entirely, and even an ANCESTOR one does, because starting higher up skips a <c>nuget.config</c> sitting
+    /// in the project itself. Either way a version can be selected from a feed dotnet cannot see, and the
+    /// reference then fails to restore with NU1102.
+    ///
+    /// So the root is always the project directory. NuGet walks up from there, so anything an ancestor
+    /// <c>--config-dir</c> would have contributed is still included — this only adds back the levels below it.
+    /// The ancestor check decides only whether the user needs to be told their <c>--config-dir</c> does not
+    /// apply, not which root to use.
     ///
     /// Aligning to the project rather than forcing <c>dotnet</c> to the config directory is deliberate. The
     /// only way to do the latter is <c>--configfile</c>, which replaces the entire hierarchy with one file and
@@ -832,17 +838,17 @@ internal class WorkspaceSetupService(
     private void AlignNugetConfigRootWithProject(DirectoryInfo configDir, FileInfo csprojFile)
     {
         var projectDirectory = csprojFile.Directory!;
-        if (DirectoryRelationship.IsSameOrAncestor(configDir, projectDirectory))
-        {
-            // Already part of what the SDK discovers, so both sides see the same sources.
-            return;
-        }
 
-        logger.LogWarning(
-            "{UISymbol} The selected configuration directory ({ConfigDir}) does not apply to {Project}: 'dotnet add package' resolves nuget.config relative to the project. Using the project's own nuget.config hierarchy for package sources so the versions selected here can actually be restored.",
-            UiSymbols.Warning,
-            configDir.FullName,
-            csprojFile.Name);
+        // Warn only when the selected directory is outside what dotnet discovers. An ancestor still
+        // contributes its settings once we root at the project, so there is nothing to report.
+        if (!DirectoryRelationship.IsSameOrAncestor(configDir, projectDirectory))
+        {
+            logger.LogWarning(
+                "{UISymbol} The selected configuration directory ({ConfigDir}) does not apply to {Project}: 'dotnet add package' resolves nuget.config relative to the project. Using the project's own nuget.config hierarchy for package sources so the versions selected here can actually be restored.",
+                UiSymbols.Warning,
+                configDir.FullName,
+                csprojFile.Name);
+        }
 
         nugetSourceProvider.SetConfigRoot(projectDirectory);
     }

@@ -144,4 +144,69 @@ public class WorkspaceSetupServiceConfigRootTests : BaseCommandTests
         CollectionAssert.Contains(sources, "project-only-feed", "A .NET project's sources must come from the hierarchy dotnet itself will use.");
         CollectionAssert.DoesNotContain(sources, "configdir-only-feed", "A config directory outside the project is invisible to 'dotnet add package', so selecting versions from it produces references that cannot be restored.");
     }
+
+    /// <summary>
+    /// An ancestor <c>--config-dir</c> is not equivalent to rooting at the project. <c>winapp init src/App
+    /// --config-dir .</c> with a <c>nuget.config</c> inside <c>src/App</c> would start winapp's lookup at the
+    /// repo root and skip the project's own config, while <c>dotnet add package</c> starts at <c>src/App</c>
+    /// and uses it — so the two could still pick different feeds. Rooting at the project loses nothing,
+    /// because NuGet walks up and still picks the ancestor's settings up on the way.
+    /// </summary>
+    [TestMethod]
+    public async Task SetupWorkspace_DotNetProjectWithAncestorConfigDir_StillRootsNuGetSettingsAtProject()
+    {
+        // The ancestor the user points --config-dir at.
+        await File.WriteAllTextAsync(Path.Join(_tempDirectory.FullName, "nuget.config"), """
+            <?xml version="1.0" encoding="utf-8"?>
+            <configuration>
+              <packageSources>
+                <clear />
+                <add key="ancestor-feed" value="ancestor-feed-path" />
+              </packageSources>
+            </configuration>
+            """, TestContext.CancellationToken);
+
+        // The project declares its own feed, which only a project-rooted lookup can see. It does NOT <clear />,
+        // so the ancestor's source is still inherited — proving rooting lower adds levels rather than losing them.
+        var projectDir = _tempDirectory.CreateSubdirectory("src").CreateSubdirectory("App");
+        await File.WriteAllTextAsync(Path.Join(projectDir.FullName, "nuget.config"), """
+            <?xml version="1.0" encoding="utf-8"?>
+            <configuration>
+              <packageSources>
+                <add key="project-feed" value="project-feed-path" />
+              </packageSources>
+            </configuration>
+            """, TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Join(projectDir.FullName, "App.csproj"), """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>Exe</OutputType>
+                <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """, TestContext.CancellationToken);
+
+        var sourceProvider = GetRequiredService<NugetSourceProvider>();
+        var workspaceSetupService = GetRequiredService<IWorkspaceSetupService>();
+
+        var options = new WorkspaceSetupOptions
+        {
+            BaseDirectory = projectDir,
+            ConfigDir = _tempDirectory,
+            SdkInstallMode = SdkInstallMode.None,
+            UseDefaults = true,
+            RequireExistingConfig = false,
+            ForceLatestBuildTools = true,
+            NoGitignore = true
+        };
+
+        await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+
+        var sources = sourceProvider.GetRepositoriesForPackage("Any.Package")
+            .Select(r => r.PackageSource.Name)
+            .ToList();
+
+        CollectionAssert.Contains(sources, "project-feed", "A config directory above the project must not hide the project's own nuget.config, which dotnet would use.");
+        CollectionAssert.Contains(sources, "ancestor-feed", "Rooting at the project still inherits everything above it, so an ancestor config directory loses nothing.");
+    }
 }
