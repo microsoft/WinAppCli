@@ -803,8 +803,12 @@ winapp run . --detach -- --my-flag value
 .NET 10 lets you run a single `.cs` file with no project file, configuring it with `#:` directives at
 the top. Point `winapp run` at that file and it builds the app, generates an appxmanifest for it, and
 launches it **with package identity** — so `Windows.ApplicationModel.Package.Current` works, the app
-gets a real AUMID and a Start-menu entry, and APIs that require identity (notifications, protocol
-handlers, on-device AI, shell integration) all work.
+gets a real AUMID and a Start-menu entry, and the APIs that simply require identity (app notifications,
+`ApplicationData`, on-device AI) work.
+
+Shell integrations such as protocol handlers, file associations, share targets, and startup tasks need
+a declared `<Extensions>` entry, which the generated manifest does not contain. To add one, author your
+own manifest — see [Bring your own manifest](#bring-your-own-manifest) below.
 
 ```bash
 winapp run counter.cs
@@ -845,7 +849,9 @@ dropped and missing components are filled with zeros, so `#:property Version=1.2
 fit — a component above 65535, or more than four components — is **rejected with an error** rather
 than silently changed.
 
-**Bring your own manifest.** If you need something the five properties don't cover, author a manifest
+##### Bring your own manifest
+
+If you need something the five properties don't cover — a protocol handler, a file association, an execution alias — author a manifest
 and `winapp run` will use it verbatim instead of generating one. It is picked up from, in order:
 
 1. `--manifest <path>` on the command line.
@@ -1614,6 +1620,7 @@ stop reason, optional `frameArtifacts`, and warnings.
 > stills. Tracked in [#646](https://github.com/microsoft/winappCli/issues/646).
 
 For full documentation, see [docs/ui-automation.md](ui-automation.md).
+
 
 
 

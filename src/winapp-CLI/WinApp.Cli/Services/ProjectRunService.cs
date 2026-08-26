@@ -63,8 +63,9 @@ internal sealed partial class ProjectRunService(
 
     /// <summary>
     /// Probes <c>dotnet --version</c> and reports whether the installed SDK meets a minimum floor.
-    /// Shared by project mode (8.0.100, for MSBuild <c>--getProperty</c>) and single-file mode (10.0.100,
-    /// the first SDK that can build a bare <c>.cs</c>) so the two cannot drift apart.
+    /// Shared by project mode (8.0.100, for MSBuild <c>--getProperty</c>) and single-file mode (10.0.300,
+    /// the first band whose <c>dotnet package list --file</c> can resolve a file-based app's packages) so
+    /// the two cannot drift apart.
     /// </summary>
     /// <param name="tooOldReason">Completes the sentence "The .NET SDK &lt;version&gt; …".</param>
     /// <returns>An actionable error message if the SDK is missing/too old, otherwise <c>null</c>.</returns>
