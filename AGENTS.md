@@ -148,9 +148,10 @@ Agent setup (.NET, Node, internal feeds and their auth) is shared via
 `.pipelines/templates/build-env.yaml`. Change it there, not in each pipeline.
 
 1ES **release jobs cannot check out the repo**, so any step inside a `templateContext.type:
-releaseJob` job must either be inline or read its scripts from a pipeline artifact. That is why
-the asset renames in `release.yml` are duplicated in `scripts/stage-release-assets.ps1` rather
-than shared; keep the two in sync.
+releaseJob` job cannot call a `.ps1` from the working tree. It *can* still share logic via a
+YAML `- template:` reference, because templates are expanded at compile time — that is how
+`release.yml` and `dryrun.yml` share `templates/release-assets.yaml`. Prefer that over
+duplicating inline script between the two.
 
 `.pipelines/dryrun.yml` rehearses a full release weekly without signing or publishing, so a
 change to the release path should usually be reflected there too.

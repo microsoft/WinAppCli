@@ -1,0 +1,66 @@
+# Renames built packages to the unversioned asset names the GitHub release publishes.
+#
+# Shared by the real release (release.yml, Release_GitHub) and the weekly dry run (dryrun.yml)
+# so the two cannot drift. The release attaches assets under stable, version-free names because
+# the WinGet manifest URLs and the documented download links hardcode them; a rename miss has
+# broken a release before (#201, #568).
+#
+# The PowerShell is inline rather than a call to scripts/stage-release-assets.ps1 on purpose:
+# 1ES release jobs (templateContext.type: releaseJob) cannot check out the repo, so no script
+# from the working tree is on disk there. A YAML `- template:` reference is fine because it is
+# expanded at compile time - the steps below are inlined into the job before it ever runs.
+
+parameters:
+  # Directories to rename in. Leave empty to skip that asset type.
+  - name: msixPath
+    type: string
+    default: ''
+  - name: npmPath
+    type: string
+    default: ''
+  - name: nugetPath
+    type: string
+    default: ''
+  - name: displayName
+    type: string
+    default: 'Rename release assets'
+
+steps:
+  - task: PowerShell@2
+    displayName: ${{ parameters.displayName }}
+    inputs:
+      targetType: 'inline'
+      script: |
+        $msixPath  = '${{ parameters.msixPath }}'
+        $npmPath   = '${{ parameters.npmPath }}'
+        $nugetPath = '${{ parameters.nugetPath }}'
+
+        # Rename MSIX files, removing version in between underscores, keeping anything after the next underscore
+        # winappcli_0.6.3.12_x64.msix -> winappcli_x64.msix
+        if ($msixPath -and (Test-Path $msixPath)) {
+          Get-ChildItem $msixPath -Filter "*.msix" | ForEach-Object {
+            $newName = $_.Name -replace 'winappcli_(.+?)_(.+)', 'winappcli_$2'
+            if ($newName -ne $_.Name) { Rename-Item -Path $_.FullName -NewName $newName }
+            Write-Host "[ASSETS] MSIX: $newName"
+          }
+        }
+
+        # Rename NPM package to remove the version from the filename
+        # microsoft-winappcli-0.6.3.tgz -> microsoft-winappcli.tgz
+        if ($npmPath -and (Test-Path $npmPath)) {
+          Get-ChildItem $npmPath -Filter "*.tgz" | ForEach-Object {
+            $newName = $_.Name -replace 'microsoft-winappcli-(.+?).tgz', 'microsoft-winappcli.tgz'
+            if ($newName -ne $_.Name) { Rename-Item -Path $_.FullName -NewName $newName }
+            Write-Host "[ASSETS] NPM: $newName"
+          }
+        }
+
+        # Rename NuGet packages to remove the version from the filename
+        # BuildTools.WinApp.0.6.3.nupkg -> BuildTools.WinApp.nupkg
+        if ($nugetPath -and (Test-Path $nugetPath)) {
+          Get-ChildItem $nugetPath -Filter "*.nupkg" | ForEach-Object {
+            $newName = $_.Name -replace '\.(\d+\.\d+\.\d+.*)\.nupkg$', '.nupkg'
+            if ($newName -ne $_.Name) { Rename-Item -Path $_.FullName -NewName $newName }
+            Write-Host "[ASSETS] NuGet: $newName"
+          }
+        }

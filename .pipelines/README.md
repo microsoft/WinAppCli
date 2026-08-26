@@ -12,6 +12,13 @@ Shared step templates live in [`templates/`](templates):
 
 - [`build-env.yaml`](templates/build-env.yaml) — agent setup (.NET, Node, internal NuGet/npm feeds and their auth). Shared by CI, release and the dry run, so an ES policy change to feeds or auth is a one-file edit.
 - [`build.yaml`](templates/build.yaml) — the build, packaging, optional ESRP signing, and artifact publishing.
+- [`release-assets.yaml`](templates/release-assets.yaml) — renames built packages to the unversioned asset names the release publishes. Shared by `release.yml`'s `Release_GitHub` **and** the dry run, so the rehearsal runs the real renaming code rather than a copy of it.
+
+> **Why templates and not scripts for release jobs.** 1ES release jobs
+> (`templateContext.type: releaseJob`) cannot check out the repo, so no `.ps1` from the working
+> tree is on disk there. A YAML `- template:` reference is fine regardless, because it is expanded
+> at **compile** time — the steps are inlined into the job before it runs. So release-job logic
+> *can* be shared, as long as it is shared as YAML rather than as a script file.
 
 ---
 
@@ -45,6 +52,41 @@ release credential. The dry run covers the gap:
 | ESRP signing | no | no | yes |
 | Publishing (GitHub, npm, NuGet, WinGet, symbols) | no | no | yes |
 
+### Why a separate pipeline instead of a dry-run switch on the release?
+
+The obvious alternative is to add a `dryRun` option to `release.yml` and schedule that. It was
+considered and rejected. Four reasons, roughly in order of how badly each fails:
+
+1. **A schedule cannot pass parameters.** Azure DevOps cron triggers always compile with the YAML
+   *default* values of `parameters:` — and so do branch triggers. So a `dryRun` parameter cannot
+   distinguish "weekly rehearsal" from "real release": defaulting it to `false` makes the weekly
+   run a **real release off `main`**, and defaulting it to `true` makes every `rel/v*` release
+   silently publish nothing. The mode would have to be inferred from `Build.SourceBranch`, which
+   is a weaker guarantee for a far higher stake.
+2. **The publish stages are not all gated.** `Release_WinGet` (`release.yml:415`) and
+   `Release_MSLearn` (`release.yml:499`) have no parameter gate at all — they run on
+   `dependsOn: [Build, Release_GitHub]`. A dry-run flag that only skipped `GitHubRelease@1` would
+   still submit to WinGet and open a docs PR. `EsrpRelease@10` is additionally `condition: always()`
+   (`release.yml:396`).
+3. **1ES classification is per pipeline registration, not per run.** `Azure/azure-sdk-for-net`'s
+   `1es-redirect.yml` warns that *"Even conditional usage of CFSClean causes the pipeline to be
+   classified as always CFSClean in the backend."* This repo already hit the same wall: #750 split
+   nuget.org into its own pipeline precisely because isolation policy could not be scoped to one
+   stage. Conditionally choosing Official vs Unofficial inside one registration invites the same
+   class of problem, with the production release on the losing side.
+4. **`release-nuget.yml` triggers off this pipeline's `Release_GitHub` stage** for `rel/v*`
+   branches. Sharing a definition adds a new way to reach the nuget.org publish path. Today the
+   dry run is simply invisible to that trigger.
+
+There is also a security argument: two registrations let the dry run's service connections be
+Branch-controlled to `main` while the release's stay on `rel/v*`. One registration must permit both.
+
+**What is shared anyway.** The objection to a separate pipeline is duplication, and that is
+addressed directly rather than structurally: `build-env.yaml`, `build.yaml` and
+`release-assets.yaml` are consumed by both, so the build, the packaging and the asset renaming are
+literally the same code. What remains separate is the part that *should* be — publishing versus
+verifying.
+
 ### What it validates
 
 **Build fidelity**
@@ -66,10 +108,10 @@ release credential. The dry run covers the gap:
   The dry run runs them **from a staged copy that mirrors release.yml's `mslearn-source` file
   list**, not from the checkout, so a script added as a dependency but forgotten in that copy list
   fails here rather than during the release.
-- Release asset renaming, via `scripts/stage-release-assets.ps1 -Verify`. It asserts the build still
-  produces exactly `winappcli_x64.msix`, `winappcli_arm64.msix`, `microsoft-winappcli.tgz` and
-  unversioned `.nupkg` names — the names the WinGet manifest URLs and the install instructions
-  hardcode. A rename miss here caused #568.
+- Release asset renaming, by running **the same `release-assets.yaml` template the release runs**,
+  then asserting the result with `scripts/verify-release-assets.ps1`. The names are load-bearing:
+  the WinGet submission is handed a fixed-length, fixed-order URL list built from them, and the
+  documented download links hardcode them. A rename miss caused #568.
 - Archiving the CLI binaries into `winappcli-x64.zip` and `winappcli-arm64.zip`, asserting both
   architectures produced a `winapp.exe`. These are release assets too, and the WinGet manifest
   hardcodes their URLs.
@@ -130,9 +172,11 @@ Other things a green run does **not** prove:
 - **`github-service-connection` and `NuGet-WinAppCLI` credentials are valid.** Those two are only
   checked for existence and readiness; nothing authenticates the secret inside them without
   publishing, which is out of scope by design.
-- **The release job steps themselves run.** 1ES release jobs cannot check out the repo, so their
-  logic is inline in `release.yml`. The dry run reproduces the *contract* those steps must satisfy
-  (asset names, doc porting from the staged layout), not the inline code itself.
+- **Every release job step runs.** Asset renaming is genuinely shared (`templates/release-assets.yaml`),
+  so that one *is* the real code. But the publish steps themselves — `GitHubRelease@1`,
+  `EsrpRelease@10`, `wingetcreate --submit`, `PublishSymbols@2` — are never executed. For those the
+  dry run reproduces the *contract* they depend on (asset names exist and are correctly named, docs
+  port cleanly from the staged layout, credentials authenticate), not the publish call itself.
 
 ### Security note
 
@@ -140,9 +184,25 @@ The credential stage hands the release PAT, `System.AccessToken`, and authorized
 connections to whatever is checked out. A YAML `condition:` is **not** a security control, because
 the branch being run can edit it.
 
-Restrict this at the ADO level: add a **Branch control** check on each service connection used
-here, limited to `refs/heads/main`. Run other branches with `RunCredentialChecks: false`, which
-skips every credential-bearing step and leaves a pure build validation.
+> [!WARNING]
+> These service connections are **shared with the real release**, which runs from `rel/v*`.
+> A Branch control check limited to `refs/heads/main` would therefore **block real releases.**
+> Any branch filter you add must include **both** `refs/heads/main` (for the dry run) and
+> `refs/heads/rel/v*` (for the release).
+
+Two ways to restrict this properly, best first:
+
+1. **Provision dry-run-only identities.** A separate GitHub PAT with read-only scopes and a
+   separate read-only Azure identity, exposed as their own variable group. Then the dry run never
+   holds credentials that can publish anything, and branch filters stay independent.
+2. **Share the connections but widen the filter.** Add a Branch control check allowing
+   `refs/heads/main` and `refs/heads/rel/v*`, and nothing else. Weaker, because the dry run still
+   holds publish-capable credentials.
+
+For any other branch, run with `RunCredentialChecks: false`. Every secret-bearing step in the
+pipeline — the credential checks, release-notes generation, the symbol-identity probe, the ESRP
+probe, and the token used by the WinGet rehearsal — hangs off that single parameter, so turning it
+off yields a genuinely credential-free build validation.
 
 ### One-time ADO setup
 
@@ -156,14 +216,29 @@ The pipeline is not self-provisioning. To stand it up:
    `SigningSignCertName`, `SymbolPublishingServiceConnection`.
 3. Authorize the pipeline to use the service connections it references. Referencing them through
    runtime variables means ADO cannot grant access automatically.
-4. Add a **Branch control** check on each of those service connections, limited to
-   `refs/heads/main`. See the security note above — without it, any branch that can queue this
-   pipeline gets the release credentials.
+4. Restrict those connections — see the security note above. **Do not limit them to
+   `refs/heads/main`:** they are shared with the release, which runs from `rel/v*`, so a
+   main-only filter would block real releases. Either provision dry-run-only read-only
+   identities, or allow both `refs/heads/main` and `refs/heads/rel/v*`.
 5. Leave the schedule as defined in YAML. Make sure **"Override the YAML schedule"** is off in the
    pipeline's UI settings, or the weekly trigger will not fire.
 
 `always: true` on the schedule is deliberate: without it a week with no commits produces no run,
 and a quiet week is exactly when an external policy change slips in unnoticed.
+
+#### Testing it before merging to `main`
+
+You do not have to merge first. When creating the pipeline, the **"Existing Azure Pipelines YAML
+file"** dialog has a **branch selector above the file picker** — switch it to the feature branch
+and the file becomes selectable. If the wizard skips that step, create the pipeline and then set
+**Settings → "Default branch for manual and scheduled builds"** to the feature branch.
+
+Manually queue it from there to shake the run out. Two caveats:
+
+- The **schedule will not fire** until the YAML is on a branch matching the schedule's
+  `branches: include` list (`main`). Manual queueing is how you test before then.
+- Point that default-branch setting back at `main` once merged, or the weekly run keeps building
+  a stale branch.
 
 ### Triaging a failure
 
@@ -173,7 +248,7 @@ and a quiet week is exactly when an external policy change slips in unnoticed.
 | Replace Stubbed Files | The internal telemetry package or its feed permissions changed. **CI will not catch this** — only release and dry run run it. |
 | Generate Release Notes | `GITHUB_TOKEN_2` or `GH_MODELS_TOKEN` expired or lost access. |
 | Check release credentials → GitHub Models | The Models token or model is gone. **The release will not fail on this** — it silently ships a raw commit list instead of AI notes. |
-| Rehearse release asset staging | Package naming changed, or an architecture stopped building. The WinGet submission and the documented download URLs will break. Update `stage-release-assets.ps1` **and** the inline renames in `release.yml`. |
+| Rehearse release asset renaming / Verify release asset names | Package naming changed, or an architecture stopped building. The WinGet submission and the documented download URLs will break. Fix `templates/release-assets.yaml` — it is the single copy the real release uses too. |
 | Rehearse MS Learn doc porting | A doc edit landed that the porting or validation script rejects, **or** a script it needs is missing from the `mslearn-source` copy list in `release.yml`. |
 | Check release credentials | Read the PASS/WARN/FAIL summary at the end of the log. `FAIL` is definitive; `WARN` means the check could not determine an answer. |
 | Verify symbol publishing identity | The federated credential or its Entra app registration changed. |
@@ -184,8 +259,9 @@ and a quiet week is exactly when an external policy change slips in unnoticed.
 
 Queue it manually from ADO. Four parameters let you narrow the run:
 
-- `RunCredentialChecks` — **set this to false when running a non-`main` branch.** It skips every
-  credential-bearing step, leaving a pure build validation that is safe to run from anywhere.
+- `RunCredentialChecks` — **set this to false when running any branch other than `main`.** It gates
+  every secret-bearing step in the pipeline, leaving a pure build validation that is safe to run
+  from anywhere. Note this also skips release-notes generation, which needs the GitHub tokens.
 - `RunWinGetManifestCheck` — skip to avoid the installer downloads.
 - `RunEsrpCertificateCheck` — enable to probe ESRP Key Vault certificate expiry.
 - `TreatWarningsAsErrors` — fail on warnings too, e.g. a token nearing expiry.
@@ -206,9 +282,15 @@ offline.
 ### Related
 
 - `scripts/check-release-credentials.ps1` and `scripts/tests/check-release-credentials.Tests.ps1`
-- `scripts/stage-release-assets.ps1` and `scripts/tests/stage-release-assets.Tests.ps1`
+- `scripts/verify-release-assets.ps1` and `scripts/tests/verify-release-assets.Tests.ps1`
+- `.pipelines/templates/release-assets.yaml` — the renaming itself, shared with the real release
 
 Both test suites run as part of `scripts/build-cli.ps1`.
+
+Note that the renaming logic has **no** unit test, deliberately. It lives in exactly one place that
+the real release runs, so there is no second copy to drift; the weekly dry run executes it against
+real build output and then verifies the result, which is stronger evidence than a unit test over a
+duplicate would be.
 
 > **Planned (phase 2):** a scheduled agent prompt that reads the weekly run and posts a summary to
 > the team. It will be documented alongside this file once the pipeline has a few runs behind it.

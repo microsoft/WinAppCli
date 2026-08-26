@@ -23,7 +23,7 @@
 #
 # Because it produces no shippable output it extends the Unofficial 1ES template. That is also a
 # limitation worth knowing: Unofficial runs a weaker SDL subset than Official, so a policy change
-# confined to TSA, SBOM or signing enforcement will NOT be caught here. See docs/release-dry-run.md.
+# confined to TSA, SBOM or signing enforcement will NOT be caught here. See .pipelines/README.md.
 
 trigger: none
 pr: none
@@ -142,42 +142,45 @@ extends:
                     Write-Host "Version: $fullVersion"
                     Write-Host "##vso[task.setvariable variable=version;isOutput=true]$fullVersion"
 
+              # Gated on RunCredentialChecks because it receives GITHUB_TOKEN_2 and GH_MODELS_TOKEN.
+              # Every secret-bearing step in this pipeline hangs off that one parameter, so turning
+              # it off really does produce a credential-free run.
+              #
               # release.yml runs this with continueOnError, so a broken GITHUB_TOKEN_2 or
               # GH_MODELS_TOKEN degrades a real release silently. Here it is a hard gate - the
               # whole point is to surface that failure a week early.
-              - task: PowerShell@2
-                displayName: Generate Release Notes (hard gate)
-                env:
-                  GH_TOKEN: $(GITHUB_TOKEN_2)
-                  GH_MODELS_TOKEN: $(GH_MODELS_TOKEN)
-                inputs:
-                  pwsh: true
-                  filePath: '$(System.DefaultWorkingDirectory)/scripts/generate-release-notes.ps1'
-                  arguments: '-CurrentTag "v$(SetMeta.version)" -CurrentRef "$(Build.SourceVersion)" -OutputPath "$(Build.ArtifactStagingDirectory)/release-notes/release-notes.md"'
+              - ${{ if eq(parameters.RunCredentialChecks, true) }}:
+                  - task: PowerShell@2
+                    displayName: Generate Release Notes (hard gate)
+                    env:
+                      GH_TOKEN: $(GITHUB_TOKEN_2)
+                      GH_MODELS_TOKEN: $(GH_MODELS_TOKEN)
+                    inputs:
+                      pwsh: true
+                      filePath: '$(System.DefaultWorkingDirectory)/scripts/generate-release-notes.ps1'
+                      arguments: '-CurrentTag "v$(SetMeta.version)" -CurrentRef "$(Build.SourceVersion)" -OutputPath "$(Build.ArtifactStagingDirectory)/release-notes/release-notes.md"'
 
-              - task: PowerShell@2
-                displayName: Verify release notes were actually produced
-                inputs:
-                  pwsh: true
-                  targetType: inline
-                  errorActionPreference: stop
-                  script: |
-                    $notes = "$(Build.ArtifactStagingDirectory)/release-notes/release-notes.md"
-                    if (-not (Test-Path $notes)) {
-                      throw "Release notes were not generated at $notes. Check GITHUB_TOKEN_2 and GH_MODELS_TOKEN."
-                    }
-                    $content = Get-Content $notes -Raw
-                    if ([string]::IsNullOrWhiteSpace($content)) {
-                      throw "Release notes file is empty. The GitHub Models call likely failed."
-                    }
-                    Write-Host "Release notes generated ($($content.Length) chars)."
+                  - task: PowerShell@2
+                    displayName: Verify release notes were actually produced
+                    inputs:
+                      pwsh: true
+                      targetType: inline
+                      errorActionPreference: stop
+                      script: |
+                        $notes = "$(Build.ArtifactStagingDirectory)/release-notes/release-notes.md"
+                        if (-not (Test-Path $notes)) {
+                          throw "Release notes were not generated at $notes. Check GITHUB_TOKEN_2 and GH_MODELS_TOKEN."
+                        }
+                        $content = Get-Content $notes -Raw
+                        if ([string]::IsNullOrWhiteSpace($content)) {
+                          throw "Release notes file is empty. The GitHub Models call likely failed."
+                        }
+                        Write-Host "Release notes generated ($($content.Length) chars)."
 
-              # Exercises the exact renames the release performs on its assets and asserts the
-              # resulting names WinGet URLs and the install instructions hardcode. Rename drift
-              # has broken releases before (#201, #568). Works on a copy: the staging directory
-              # has already been published by the time this runs.
+              # Copies the built artifacts aside so the rehearsal does not mutate the staging
+              # directory that has already been published above.
               - task: PowerShell@2
-                displayName: Rehearse release asset staging
+                displayName: Stage a copy of the release assets
                 inputs:
                   pwsh: true
                   errorActionPreference: stop
@@ -195,12 +198,6 @@ extends:
                       }
                     }
 
-                    & "$(System.DefaultWorkingDirectory)\scripts\stage-release-assets.ps1" `
-                      -MsixPath (Join-Path $staging 'msix-packages') `
-                      -NpmPath (Join-Path $staging 'npmpackage') `
-                      -NuGetPath (Join-Path $staging 'nuget-packages') `
-                      -Verify
-
                     # The release also archives the CLI binaries into winappcli-<arch>.zip, and the
                     # WinGet manifest and the documented download URLs both hardcode those names.
                     # Nothing else would notice if an architecture stopped being produced.
@@ -217,8 +214,28 @@ extends:
                       Compress-Archive -Path "$binDir\*" -DestinationPath $zip -Force
                       $sizeMb = [math]::Round((Get-Item $zip).Length / 1MB, 2)
                       if ($sizeMb -le 0) { throw "winappcli-$arch.zip is empty." }
-                      Write-Host "[STAGE] ZIP: winappcli-$arch.zip ($sizeMb MB)"
+                      Write-Host "[ASSETS] ZIP: winappcli-$arch.zip ($sizeMb MB)"
                     }
+
+              # THE SAME template the release uses to rename its assets. This is the point of the
+              # dry run: it runs the real renaming code, not a copy of it that can drift.
+              - template: ./.pipelines/templates/release-assets.yaml@self
+                parameters:
+                  displayName: Rehearse release asset renaming
+                  msixPath: $(Agent.TempDirectory)\release-staging\msix-packages
+                  npmPath: $(Agent.TempDirectory)\release-staging\npmpackage
+                  nugetPath: $(Agent.TempDirectory)\release-staging\nuget-packages
+
+              # Asserts the renamed set is exactly what the WinGet manifest URLs and the documented
+              # download links expect. Rename drift has broken releases before (#201, #568).
+              - task: PowerShell@2
+                displayName: Verify release asset names
+                inputs:
+                  pwsh: true
+                  errorActionPreference: stop
+                  filePath: '$(System.DefaultWorkingDirectory)/scripts/verify-release-assets.ps1'
+                  arguments: >-
+                    -StagingPath "$(Agent.TempDirectory)\release-staging"
 
               # The docs port is a release job that only ever runs during a release, against docs
               # that changed all week. Running it here catches breakage (see #685, #777) before it
@@ -400,8 +417,13 @@ extends:
                   - task: PowerShell@2
                     displayName: Rehearse WinGet manifest generation (no submit)
                     continueOnError: true
-                    env:
-                      GH_TOKEN: $(GITHUB_TOKEN_2)
+                    # The token is only used to avoid the unauthenticated rate limit when looking
+                    # up the latest release; microsoft/winappcli is public, so the step still works
+                    # without it. Gating it here keeps RunCredentialChecks: false genuinely
+                    # credential-free.
+                    ${{ if eq(parameters.RunCredentialChecks, true) }}:
+                      env:
+                        GH_TOKEN: $(GITHUB_TOKEN_2)
                     inputs:
                       pwsh: true
                       errorActionPreference: stop

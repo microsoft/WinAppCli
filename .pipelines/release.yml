@@ -246,33 +246,12 @@ extends:
               includeRootFolder: false
               archiveFile: $(Pipeline.Workspace)/winappcli-arm64.zip
           
-          - task: PowerShell@2
-            displayName: Rename files
-            inputs:
-              targetType: 'inline'
-              script: |
-                # Keep these renames in sync with scripts/stage-release-assets.ps1, which the
-                # weekly dry run (.pipelines/dryrun.yml) uses to assert that a build still produces
-                # the asset names the WinGet manifest URLs and the release notes depend on.
-                # They are duplicated because 1ES release jobs cannot check out the repo.
-
-                # Rename MSIX files, removing version in between underscores, keeping anything after the next underscore
-                Get-ChildItem "$(Pipeline.Workspace)/msix-packages/" -Filter "*.msix" | ForEach-Object {
-                  $newName = $_.Name -replace 'winappcli_(.+?)_(.+)', 'winappcli_$2'
-                  Rename-Item -Path $_.FullName -NewName $newName
-                }
-
-                # Rename NPM package to remove the version from the filename
-                Get-ChildItem "$(Pipeline.Workspace)/npm-package/" -Filter "*.tgz" | ForEach-Object {
-                  $newName = $_.Name -replace 'microsoft-winappcli-(.+?).tgz', 'microsoft-winappcli.tgz'
-                  Rename-Item -Path $_.FullName -NewName $newName
-                }
-
-                # Rename NuGet packages to remove the version from the filename
-                Get-ChildItem "$(Pipeline.Workspace)/nuget-packages/" -Filter "*.nupkg" | ForEach-Object {
-                  $newName = $_.Name -replace '\.(\d+\.\d+\.\d+.*)\.nupkg$', '.nupkg'
-                  Rename-Item -Path $_.FullName -NewName $newName
-                }
+          - template: ./.pipelines/templates/release-assets.yaml@self
+            parameters:
+              displayName: Rename files
+              msixPath: $(Pipeline.Workspace)/msix-packages
+              npmPath: $(Pipeline.Workspace)/npm-package
+              nugetPath: $(Pipeline.Workspace)/nuget-packages
 
           - ${{ if ne(parameters.GitHubReleaseAlreadyExists, 'true') }}:
             - task: GitHubRelease@1
