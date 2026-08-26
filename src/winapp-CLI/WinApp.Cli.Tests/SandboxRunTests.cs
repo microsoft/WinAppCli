@@ -511,6 +511,7 @@ public class SandboxRunTests
         private readonly CancellationTokenSource _cancellation = new(TimeSpan.FromSeconds(60));
         private readonly Task _serverTask;
         private readonly GuestCommandChannel _channel;
+        private readonly TargetMutationLease _mutationLease;
 
         public Harness(string guestManagedRoot, string stateRoot, string? guestWinapp = GuestWinappPath)
         {
@@ -533,9 +534,18 @@ public class SandboxRunTests
             States = new DeploymentStateStore(new SandboxTestStateDirectoryProvider(stateRoot));
             Runner = new GuestApplicationRunner(new TargetDeploymentService(States));
 
+            // DeployAsync requires the caller to already hold the mutation lease, exactly as
+            // production callers do via ExecutionTargetOrchestrator.PrepareAsync(Mutating). The
+            // harness stands in for that caller with a real, held lease over its own scratch lock
+            // file.
+            var mutationLockPath = TestPaths.TempFile("deployment-mutation-lock", ".lock");
+            var mutationStream = new FileStream(
+                mutationLockPath, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+            _mutationLease = new TargetMutationLease(mutationStream, wasAbandoned: false);
+
             // The managed root is a guest-side value, so the harness reports a stable one rather
             // than the host temp folder the fake file service actually writes to.
-            Target = new PreparedTarget(_channel, Epoch, Capabilities(), Reused: false);
+            Target = new PreparedTarget(_channel, Epoch, Capabilities(), Reused: false, MutationLease: _mutationLease);
         }
 
         public FakeGuestProcessHostFactory Processes { get; } = new();
@@ -559,6 +569,7 @@ public class SandboxRunTests
                 // Expected.
             }
 
+            _mutationLease.Dispose();
             await _channel.DisposeAsync();
             _cancellation.Dispose();
         }

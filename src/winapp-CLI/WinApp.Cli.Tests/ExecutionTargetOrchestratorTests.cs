@@ -60,10 +60,6 @@ public class ExecutionTargetOrchestratorTests
             PrepareTargetOptions.Mutating, TestContext.CancellationToken);
 
         Assert.AreEqual(1, mutationLock.AcquireCalls);
-
-        // Released once the target is prepared, not held for the life of a running application --
-        // otherwise one long-running app would block every other workflow.
-        Assert.AreEqual(1, mutationLock.ReleaseCalls);
     }
 
     [TestMethod]
@@ -196,6 +192,125 @@ public class ExecutionTargetOrchestratorTests
         Assert.IsTrue(prepared.Reused);
         Assert.AreEqual("Reusing Windows Sandbox...", ExecutionTargetOrchestrator.DescribeProgress(reused: true));
         Assert.AreEqual("Preparing Windows Sandbox...", ExecutionTargetOrchestrator.DescribeProgress(reused: false));
+    }
+
+    [TestMethod]
+    public async Task Prepare_MutatingCommand_StillHoldsTheLockAfterPrepareReturns()
+    {
+        // The lock protects everything PrepareAsync's caller still has to do -- runtime
+        // provisioning, deployment reconciliation, package registration -- not just the probe/
+        // connect/negotiate sequence inside PrepareAsync itself. Releasing it the moment
+        // PrepareAsync returns (the previous behaviour) leaves every one of those guest mutations
+        // unprotected, which is exactly the gap this test guards against.
+        using var mutationLock = new FakeMutationLock();
+        var orchestrator = new ExecutionTargetOrchestrator(
+            new FakeBackend(),
+            mutationLock,
+            new FakeConnectionLock());
+
+        await using var prepared = await orchestrator.PrepareAsync(
+            PrepareTargetOptions.Mutating, TestContext.CancellationToken);
+
+        Assert.AreEqual(1, mutationLock.AcquireCalls);
+        Assert.AreEqual(0, mutationLock.ReleaseCalls, "The lease must still be held once Prepare returns.");
+
+        prepared.ReleaseMutationLease();
+
+        Assert.AreEqual(1, mutationLock.ReleaseCalls, "The caller must be able to release explicitly once done mutating.");
+    }
+
+    [TestMethod]
+    public async Task Prepare_MutatingCommand_DisposeReleasesAnUnreleasedLeaseAsAFailSafe()
+    {
+        using var mutationLock = new FakeMutationLock();
+        var orchestrator = new ExecutionTargetOrchestrator(
+            new FakeBackend(),
+            mutationLock,
+            new FakeConnectionLock());
+
+        var prepared = await orchestrator.PrepareAsync(
+            PrepareTargetOptions.Mutating, TestContext.CancellationToken);
+
+        Assert.AreEqual(0, mutationLock.ReleaseCalls);
+
+        // A caller that forgot to call ReleaseMutationLease() -- or that failed before reaching it
+        // -- must not leak the lock forever.
+        await prepared.DisposeAsync();
+
+        Assert.AreEqual(1, mutationLock.ReleaseCalls);
+    }
+
+    /// <summary>
+    /// Deterministic proof of the SBX-009 gap: two concurrent mutating commands against the same
+    /// target must never have their guest-mutation work overlap.
+    /// </summary>
+    /// <remarks>
+    /// This uses the real, file-backed <see cref="TargetMutationLock"/> rather than a fake, because
+    /// the bug is specifically about *when* the real lock is released relative to the caller's own
+    /// mutation work (runtime install, deployment reconciliation, package registration) -- a fake
+    /// that hands out a fresh lock every call cannot observe that. Before the fix, PrepareAsync
+    /// released the lock as soon as it returned, so both simulated "deployments" below ran their
+    /// mutation window concurrently. After the fix, the lease survives until the caller explicitly
+    /// releases it, so the windows are serialized and <c>maxConcurrency</c> is always 1.
+    /// </remarks>
+    [TestMethod]
+    public async Task ConcurrentMutatingCommands_NeverOverlapGuestMutationWork()
+    {
+        var stateRoot = new DirectoryInfo(TestPaths.TempRoot("OrchestratorMutationRace"));
+        stateRoot.Create();
+
+        try
+        {
+            var mutationLock = new TargetMutationLock(new TargetStateDirectoryProvider(stateRoot.FullName));
+            var observedConcurrency = 0;
+            var maxConcurrency = 0;
+            var gate = new Lock();
+
+            async Task RunOneMutatingCommandAsync()
+            {
+                var orchestrator = new ExecutionTargetOrchestrator(
+                    new FakeBackend(),
+                    mutationLock,
+                    new FakeConnectionLock());
+
+                await using var target = await orchestrator.PrepareAsync(
+                    PrepareTargetOptions.Mutating, TestContext.CancellationToken);
+
+                try
+                {
+                    lock (gate)
+                    {
+                        observedConcurrency++;
+                        maxConcurrency = Math.Max(maxConcurrency, observedConcurrency);
+                    }
+
+                    // Stands in for the caller's own mutation work after Prepare returns: runtime
+                    // provisioning, deployment reconciliation, and package registration all happen
+                    // here in production, none of it inside PrepareAsync.
+                    await Task.Delay(50, TestContext.CancellationToken);
+
+                    lock (gate)
+                    {
+                        observedConcurrency--;
+                    }
+                }
+                finally
+                {
+                    target.ReleaseMutationLease();
+                }
+            }
+
+            await Task.WhenAll(RunOneMutatingCommandAsync(), RunOneMutatingCommandAsync());
+
+            Assert.AreEqual(
+                1,
+                maxConcurrency,
+                "Two mutating commands against the same target must never overlap their guest mutation work.");
+        }
+        finally
+        {
+            stateRoot.Delete(recursive: true);
+        }
     }
 
     /// <summary>A backend whose responses are scripted, standing in for Windows Sandbox.</summary>

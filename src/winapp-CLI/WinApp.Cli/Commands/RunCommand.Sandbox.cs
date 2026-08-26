@@ -252,6 +252,12 @@ internal partial class RunCommand
                     });
                 }
 
+                // Every guest mutation this run needed -- runtime provisioning, deployment
+                // reconciliation, and package registration -- is done. What is left is starting and
+                // running the application, which the mutation lock must never cover: a long-running
+                // app would otherwise block every other winapp workflow against this target.
+                target.ReleaseMutationLease();
+
                 var ownerEnvironment = GuestOwnerContext.WithOwner(
                     environment: null,
                     GuestOwnerContext.ResolveGuestToken(

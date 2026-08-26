@@ -11,13 +11,58 @@ namespace WinApp.Cli.ExecutionTargets.Orchestration;
 /// <param name="Epoch">Generation identity every request and result is fenced against.</param>
 /// <param name="Capabilities">What the guest reported it can do.</param>
 /// <param name="Reused">True when an existing instance was reused, driving the progress line.</param>
+/// <param name="ConnectionLease">
+/// Held for the whole lifetime of this target, released only when it is disposed.
+/// </param>
+/// <param name="MutationLease">
+/// Non-null when this target was prepared with <see cref="PrepareTargetOptions.RequiresMutation"/>
+/// set. Unlike <paramref name="ConnectionLease"/>, this is <em>not</em> released by
+/// <see cref="ExecutionTargetOrchestrator.PrepareAsync"/> -- it stays held across everything the
+/// caller still has to do to mutate the guest (runtime provisioning, deployment reconciliation,
+/// package registration), and the caller must call <see cref="ReleaseMutationLease"/> once that work
+/// is done and before anything that can run for a long time, such as launching an application.
+/// <see cref="DisposeAsync"/> releases it too, as a fail-safe for a caller that forgets or that
+/// fails before reaching its own release point -- never as the primary release path, because that
+/// would hold the lock for the target's entire lifetime, including a running application.
+/// </param>
 internal sealed record PreparedTarget(
     GuestCommandChannel Channel,
     ExecutionTargetEpoch Epoch,
     ExecutionTargetCapabilities Capabilities,
     bool Reused,
-    TargetConnectionLease? ConnectionLease = null) : IAsyncDisposable
+    TargetConnectionLease? ConnectionLease = null,
+    TargetMutationLease? MutationLease = null) : IAsyncDisposable
 {
+    /// <summary>
+    /// Releases the mutation lock now, before the channel itself is torn down.
+    /// </summary>
+    /// <remarks>
+    /// Every mutating caller must call this once runtime provisioning, deployment reconciliation,
+    /// and package registration have all finished, and before launching or otherwise running the
+    /// deployed application -- the lock must never be held across a running app, which would block
+    /// every other winapp workflow. Safe to call when this target was not prepared for mutation
+    /// (a no-op) and safe to call more than once: <see cref="TargetMutationLease.Dispose"/> is
+    /// idempotent, and <see cref="DisposeAsync"/> calling it again afterward is harmless.
+    /// </remarks>
+    public void ReleaseMutationLease() => MutationLease?.Dispose();
+
+    /// <summary>
+    /// Asserts that this target still holds its mutation lease, failing fast on the programming
+    /// error of a guest mutation running without the lock rather than letting it run unprotected.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// This target was not prepared with <see cref="PrepareTargetOptions.RequiresMutation"/> set.
+    /// </exception>
+    internal void RequireMutationLease()
+    {
+        if (MutationLease is null)
+        {
+            throw new InvalidOperationException(
+                "This operation mutates the guest and requires a target prepared with " +
+                $"{nameof(PrepareTargetOptions)}.{nameof(PrepareTargetOptions.Mutating)}.");
+        }
+    }
+
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
@@ -27,6 +72,10 @@ internal sealed record PreparedTarget(
         }
         finally
         {
+            // A fail-safe, not the intended release path: a well-behaved caller has already called
+            // ReleaseMutationLease() by the time the target itself is disposed. Dispose is
+            // idempotent, so this is a no-op in that case.
+            MutationLease?.Dispose();
             ConnectionLease?.Dispose();
         }
     }
@@ -100,10 +149,16 @@ internal sealed class ExecutionTargetOrchestrator(
     /// Ensures a running target with a compatible agent and returns a ready command channel.
     /// </summary>
     /// <remarks>
-    /// The caller owns the returned <see cref="PreparedTarget"/> and must dispose it; the mutation
-    /// lock, by contrast, is released as soon as the target is prepared. Holding it for the life of
-    /// a running application would mean one long-running app blocked every other workflow, which is
-    /// exactly what the spec excludes from the lock's scope.
+    /// The caller owns the returned <see cref="PreparedTarget"/> and must dispose it. When
+    /// <paramref name="options"/> requires mutation, the caller also owns
+    /// <see cref="PreparedTarget.MutationLease"/> and must release it explicitly, via
+    /// <see cref="PreparedTarget.ReleaseMutationLease"/>, once every guest mutation it is about to
+    /// perform (runtime provisioning, deployment reconciliation, package registration) has finished
+    /// — never inside this method, which only probes, connects, and negotiates capabilities. Holding
+    /// the lease for the life of a running application would mean one long-running app blocked every
+    /// other workflow, which is exactly what the spec excludes from the lock's scope; but releasing
+    /// it here, before the caller has done any of the mutating work the lock exists to protect, would
+    /// leave that work completely unprotected.
     /// </remarks>
     public async Task<PreparedTarget> PrepareAsync(
         PrepareTargetOptions options,
@@ -119,6 +174,7 @@ internal sealed class ExecutionTargetOrchestrator(
 
         var connectionLease = AcquireConnection(cancellationToken);
         GuestCommandChannel? channel = null;
+        TargetMutationLease? mutationLease = null;
 
         try
         {
@@ -129,7 +185,7 @@ internal sealed class ExecutionTargetOrchestrator(
             channel = new GuestCommandChannel(connection.Transport, connection.Epoch);
             channel.Start();
 
-            using var mutationLease = options.RequiresMutation ? AcquireLock(cancellationToken) : null;
+            mutationLease = options.RequiresMutation ? AcquireLock(cancellationToken) : null;
 
             if (mutationLease?.WasAbandoned == true)
             {
@@ -147,10 +203,12 @@ internal sealed class ExecutionTargetOrchestrator(
                 connection.Epoch,
                 capabilities,
                 connection.Reused,
-                connectionLease);
+                connectionLease,
+                mutationLease);
 
             channel = null;
             connectionLease = null;
+            mutationLease = null;
             return prepared;
         }
         catch
@@ -165,6 +223,7 @@ internal sealed class ExecutionTargetOrchestrator(
         finally
         {
             connectionLease?.Dispose();
+            mutationLease?.Dispose();
         }
     }
 

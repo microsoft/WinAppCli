@@ -41,11 +41,17 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
     /// <summary>
     /// Reconciles <paramref name="sourceRoot"/> into the guest and returns where it landed.
     /// </summary>
-    /// <param name="target">Prepared target, whose channel and epoch the deployment is fenced on.</param>
+    /// <param name="target">
+    /// Prepared target, whose channel and epoch the deployment is fenced on, and whose mutation
+    /// lease (already held by the caller) this reconciliation relies on.
+    /// </param>
     /// <param name="deploymentId">Internal deployment identity.</param>
     /// <param name="sourceRoot">Host folder to deploy — a materialized layout or a build output.</param>
     /// <param name="clean">True to discard the guest copy and its registration layout first.</param>
     /// <param name="cancellationToken">Cancellation.</param>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="target"/> was not prepared for mutation.
+    /// </exception>
     public async Task<GuestDeployment> DeployAsync(
         PreparedTarget target,
         string deploymentId,
@@ -55,6 +61,8 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
     {
         ArgumentNullException.ThrowIfNull(target);
         ArgumentNullException.ThrowIfNull(sourceRoot);
+
+        target.RequireMutationLease();
 
         var payloadScope = GuestPaths.PayloadScope(deploymentId);
         var layoutScope = GuestPaths.LayoutScope(deploymentId);
