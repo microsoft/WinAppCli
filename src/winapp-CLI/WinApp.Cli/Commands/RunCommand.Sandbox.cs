@@ -546,10 +546,11 @@ internal partial class RunCommand
         /// host-orchestrated phase -- run only after the application has fully exited.
         /// </summary>
         /// <param name="target">
-        /// This run's own prepared target. Still connected (its connection lease is held for the
-        /// whole run, per <see cref="ExecutionTargetOrchestrator.PrepareAsync"/>'s contract) even
-        /// though this run's own mutation lease was already released before the launch phase -- this
-        /// phase reacquires only a fresh mutation lease, over that same live connection.
+        /// This run's own prepared target. Its channel is still live -- <see
+        /// cref="ExecutionTargetOrchestrator.PrepareAsync"/> released only the connection lock, not
+        /// the connection -- even though this run's own mutation lease was already released before
+        /// the launch phase. This phase reacquires only a fresh mutation lease, over that same live
+        /// connection.
         /// </param>
         /// <param name="layoutPath">
         /// This deployment's own registration layout -- the exact location the guest's install
@@ -580,11 +581,12 @@ internal partial class RunCommand
         /// <para>
         /// Deliberately <see cref="ExecutionTargetOrchestrator.AcquireMutationLease"/> rather than a
         /// second <see cref="ExecutionTargetOrchestrator.PrepareAsync"/> call: <paramref name="target"/>
-        /// itself is still alive at this point (its own <c>await using</c> scope has not exited yet)
-        /// and so is still holding its own connection lease -- a second <c>PrepareAsync</c> would try
-        /// to acquire that same, single-holder connection lease again and deadlock against itself.
-        /// Reusing <paramref name="target"/>'s own live channel and acquiring only a fresh mutation
-        /// lease sidesteps that entirely.
+        /// itself is still alive at this point (its own <c>await using</c> scope has not exited yet),
+        /// so its channel is already established and this phase needs nothing from the connection
+        /// lock at all. Re-preparing would re-establish a connection that already exists, and would
+        /// do so under a new epoch rather than the one this deployment's own state is fenced on.
+        /// Reusing <paramref name="target"/>'s live channel and acquiring only a fresh mutation lease
+        /// keeps both the channel and the epoch identical.
         /// </para>
         /// <para>
         /// Best-effort and silent on the primary output: its outcome is never published to stdout
