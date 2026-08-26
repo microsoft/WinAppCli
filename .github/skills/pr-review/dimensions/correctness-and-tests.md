@@ -38,7 +38,7 @@ is what you cannot know without this repo.
 
 Say what changes for existing users and existing flows. A gate that was dead and
 now fires is a behavior change: state whether it will start failing flows that
-used to pass. Lead the Finding line with `Regression:`.
+used to pass. Lead `What is wrong` with `Regression:`.
 
 ## Tests
 
