@@ -45,12 +45,12 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
     private (FileInfo SingleFile, DirectoryInfo OutputDirectory) CreateSingleFileApp(string name = "counter.cs")
     {
         var sourceDir = _tempDirectory.CreateSubdirectory($"src_{Guid.NewGuid():N}");
-        var singleFile = new FileInfo(Path.Combine(sourceDir.FullName, name));
+        var singleFile = new FileInfo(Path.Join(sourceDir.FullName, name));
         File.WriteAllText(singleFile.FullName, "Console.WriteLine(\"hi\");");
 
         // Stands in for %TEMP%\dotnet\runfile\<stem>-<hash>\bin\debug\, which belongs to exactly one .cs.
         var outputDir = _tempDirectory.CreateSubdirectory($"runfile_{Guid.NewGuid():N}");
-        File.WriteAllText(Path.Combine(outputDir.FullName, "counter.exe"), "MZ");
+        File.WriteAllText(Path.Join(outputDir.FullName, "counter.exe"), "MZ");
         return (singleFile, outputDir);
     }
 
@@ -81,7 +81,7 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
 
     private static XDocument LoadGeneratedManifest(DirectoryInfo outputDirectory)
     {
-        var path = Path.Combine(outputDirectory.FullName, "Package.appxmanifest");
+        var path = Path.Join(outputDirectory.FullName, "Package.appxmanifest");
         Assert.IsTrue(File.Exists(path), $"A manifest should have been generated at {path}");
         return XDocument.Load(path);
     }
@@ -275,7 +275,7 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
 
         await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
 
-        var assets = new DirectoryInfo(Path.Combine(outputDir.FullName, "Assets"));
+        var assets = new DirectoryInfo(Path.Join(outputDir.FullName, "Assets"));
         Assert.IsTrue(assets.Exists, "The manifest references Assets\\*, so they must be generated alongside it");
         Assert.IsTrue(assets.GetFiles("*.png").Length > 0);
     }
@@ -302,7 +302,7 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
     {
         var (singleFile, outputDir) = CreateSingleFileApp();
         SetOutcome(singleFile, outputDir);
-        var explicitManifest = new FileInfo(Path.Combine(_tempDirectory.FullName, $"explicit_{Guid.NewGuid():N}.appxmanifest"));
+        var explicitManifest = new FileInfo(Path.Join(_tempDirectory.FullName, $"explicit_{Guid.NewGuid():N}.appxmanifest"));
         File.WriteAllText(explicitManifest.FullName, "<Package/>");
         var command = GetRequiredService<RunCommand>();
 
@@ -311,7 +311,7 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
 
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(explicitManifest.FullName, _fakeMsixService.AddLooseLayoutCalls.Single().ManifestPath);
-        Assert.IsFalse(File.Exists(Path.Combine(outputDir.FullName, "Package.appxmanifest")),
+        Assert.IsFalse(File.Exists(Path.Join(outputDir.FullName, "Package.appxmanifest")),
             "--manifest should short-circuit generation entirely");
     }
 
@@ -319,7 +319,7 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
     public async Task SingleFileMode_WinAppManifestPath_IsHonoredAndSkipsGeneration()
     {
         var (singleFile, outputDir) = CreateSingleFileApp();
-        var declared = new FileInfo(Path.Combine(_tempDirectory.FullName, $"declared_{Guid.NewGuid():N}.appxmanifest"));
+        var declared = new FileInfo(Path.Join(_tempDirectory.FullName, $"declared_{Guid.NewGuid():N}.appxmanifest"));
         File.WriteAllText(declared.FullName, "<Package/>");
         SetOutcome(singleFile, outputDir, "counter.exe", ("WinAppManifestPath", declared.FullName));
         var command = GetRequiredService<RunCommand>();
@@ -328,7 +328,7 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
 
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(declared.FullName, _fakeMsixService.AddLooseLayoutCalls.Single().ManifestPath);
-        Assert.IsFalse(File.Exists(Path.Combine(outputDir.FullName, "Package.appxmanifest")));
+        Assert.IsFalse(File.Exists(Path.Join(outputDir.FullName, "Package.appxmanifest")));
     }
 
     [TestMethod]
@@ -336,7 +336,7 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
     {
         var (singleFile, outputDir) = CreateSingleFileApp();
         SetOutcome(singleFile, outputDir, "counter.exe",
-            ("WinAppManifestPath", Path.Combine(_tempDirectory.FullName, "does-not-exist.appxmanifest")));
+            ("WinAppManifestPath", Path.Join(_tempDirectory.FullName, "does-not-exist.appxmanifest")));
         var command = GetRequiredService<RunCommand>();
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
@@ -352,7 +352,7 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
         // NuGet targets do) would permanently shadow a manifest the user hand-wrote next to their .cs.
         var (singleFile, outputDir) = CreateSingleFileApp();
         SetOutcome(singleFile, outputDir);
-        var authored = new FileInfo(Path.Combine(singleFile.DirectoryName!, "counter.appxmanifest"));
+        var authored = new FileInfo(Path.Join(singleFile.DirectoryName!, "counter.appxmanifest"));
         File.WriteAllText(authored.FullName, "<Package/>");
         var command = GetRequiredService<RunCommand>();
 
@@ -360,7 +360,7 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
 
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(authored.FullName, _fakeMsixService.AddLooseLayoutCalls.Single().ManifestPath);
-        Assert.IsFalse(File.Exists(Path.Combine(outputDir.FullName, "Package.appxmanifest")),
+        Assert.IsFalse(File.Exists(Path.Join(outputDir.FullName, "Package.appxmanifest")),
             "An authored manifest must suppress generation, not be shadowed by it");
     }
 
@@ -374,14 +374,14 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
         // <stem>.appxmanifest is discovered implicitly; a shared one must be named with --manifest.
         var (singleFile, outputDir) = CreateSingleFileApp();
         SetOutcome(singleFile, outputDir);
-        File.WriteAllText(Path.Combine(singleFile.DirectoryName!, manifestName), "<Package/>");
+        File.WriteAllText(Path.Join(singleFile.DirectoryName!, manifestName), "<Package/>");
         var command = GetRequiredService<RunCommand>();
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
 
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(
-            Path.Combine(outputDir.FullName, "Package.appxmanifest"),
+            Path.Join(outputDir.FullName, "Package.appxmanifest"),
             _fakeMsixService.AddLooseLayoutCalls.Single().ManifestPath,
             "A directory-wide manifest beside the .cs must not be adopted; generate one instead");
     }
@@ -392,9 +392,9 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
         // foo.cs and bar.cs can share a source directory, so the per-file name wins when both exist.
         var (singleFile, outputDir) = CreateSingleFileApp();
         SetOutcome(singleFile, outputDir);
-        var perFile = new FileInfo(Path.Combine(singleFile.DirectoryName!, "counter.appxmanifest"));
+        var perFile = new FileInfo(Path.Join(singleFile.DirectoryName!, "counter.appxmanifest"));
         File.WriteAllText(perFile.FullName, "<Package/>");
-        File.WriteAllText(Path.Combine(singleFile.DirectoryName!, "Package.appxmanifest"), "<Package/>");
+        File.WriteAllText(Path.Join(singleFile.DirectoryName!, "Package.appxmanifest"), "<Package/>");
         var command = GetRequiredService<RunCommand>();
 
         var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
@@ -481,4 +481,5 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
 
     #endregion
 }
+
 

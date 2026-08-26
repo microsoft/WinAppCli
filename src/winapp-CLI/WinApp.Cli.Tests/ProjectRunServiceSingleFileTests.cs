@@ -103,7 +103,7 @@ public class ProjectRunServiceSingleFileTests : IDisposable
     [TestMethod]
     public async Task ResolveInput_UnsupportedFileType_MentionsCsInTheGuidance()
     {
-        var path = Path.Combine(_tempDir.FullName, "notes.txt");
+        var path = Path.Join(_tempDir.FullName, "notes.txt");
         File.WriteAllText(path, "hello");
 
         var exception = await Assert.ThrowsExactlyAsync<ProjectRunException>(async () =>
@@ -230,7 +230,27 @@ public class ProjectRunServiceSingleFileTests : IDisposable
         StringAssert.Contains(args, "-c Debug");
     }
 
+    [TestMethod]
+    [DataRow("TargetFramework=net10.0-windows10.0.26100.0", DisplayName = "TargetFramework")]
+    [DataRow("RuntimeIdentifier=win-arm64", DisplayName = "RuntimeIdentifier")]
+    public void Arguments_ForwardPropertiesProjectModeReservesForItsOwnSwitches(string property)
+    {
+        // --arch/--runtime/--framework are rejected for a .cs, so -p is the ONLY way to express these.
+        // Project mode reserves them for its dedicated switches; reusing that filter here would drop them
+        // from both passes and silently ignore what the user asked for. Both passes must carry them so
+        // they still agree on the output path.
+        var singleFile = WriteSingleFile();
+        var options = Options(properties: property);
+
+        var buildArgs = ProjectRunService.BuildSingleFileBuildPassArguments(singleFile, options, "minimal");
+        var evaluateArgs = ProjectRunService.BuildSingleFileEvaluateArguments(singleFile, options);
+
+        StringAssert.Contains(buildArgs, $"-p:{property}");
+        StringAssert.Contains(evaluateArgs, $"-p:{property}");
+    }
+
     #endregion
 
     public TestContext TestContext { get; set; } = null!;
 }
+

@@ -240,10 +240,13 @@ internal sealed partial class ProjectRunService
             tokens.Add("-tl:off");
         }
 
-        // Drop dedicated-switch dupes so the build and evaluate passes cannot resolve a different
-        // Configuration. RuntimeIdentifier/TargetFramework are filtered too: winapp never injects them here,
-        // so a user -p for them would apply to only one of the two passes and desynchronize the output path.
-        foreach (var property in ForwardableProperties(options.Properties))
+        // Reserve ONLY Configuration, which winapp owns via -c. Unlike project mode, single-file mode
+        // injects neither a RuntimeIdentifier nor a TargetFramework, and both passes receive this same
+        // token set — so forwarding those two keeps the passes in agreement AND honors --property's
+        // promise. They are in fact the only way to express them here, since --arch/--runtime/--framework
+        // are rejected for a .cs. Reusing project mode's wider filter would drop them from both passes and
+        // silently ignore what the user asked for.
+        foreach (var property in SingleFileForwardableProperties(options.Properties))
         {
             tokens.Add($"-p:{property}");
         }
@@ -273,7 +276,7 @@ internal sealed partial class ProjectRunService
             options.Configuration,
         };
 
-        foreach (var property in ForwardableProperties(options.Properties))
+        foreach (var property in SingleFileForwardableProperties(options.Properties))
         {
             tokens.Add($"-p:{property}");
         }
@@ -285,6 +288,17 @@ internal sealed partial class ProjectRunService
 
         return WindowsCommandLine.JoinArguments(tokens) ?? string.Empty;
     }
+
+    /// <summary>
+    /// User <c>-p</c> properties forwarded to BOTH single-file passes. Only <c>Configuration</c> is
+    /// reserved, because winapp emits it as <c>-c</c>; everything else — including
+    /// <c>TargetFramework</c> and <c>RuntimeIdentifier</c>, which project mode reserves for its dedicated
+    /// switches — is the user's to set, and passing it identically to both passes keeps them in agreement.
+    /// </summary>
+    private static IEnumerable<string> SingleFileForwardableProperties(IReadOnlyList<string> properties) =>
+        properties.Where(p => !p.Split(';')
+            .Select(segment => segment.Split('=', 2)[0].Trim())
+            .Any(name => name.Equals("Configuration", StringComparison.OrdinalIgnoreCase)));
 
     /// <summary>
     /// Appends the <c>Solution*</c> MSBuild properties a solution build normally sets — most importantly

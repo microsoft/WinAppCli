@@ -13,7 +13,7 @@ namespace WinApp.Cli.Tests;
 public class SingleFileManifestPlannerTests
 {
     private static FileInfo SingleFile(string name = "counter.cs") =>
-        new(Path.Combine(Path.GetTempPath(), name));
+        new(Path.Join(Path.GetTempPath(), name));
 
     private static Dictionary<string, string> Props(params (string Name, string Value)[] values)
     {
@@ -189,3 +189,4 @@ public class SingleFileManifestPlannerTests
 
     #endregion
 }
+
