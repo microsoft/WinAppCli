@@ -99,15 +99,16 @@ internal interface IAppLauncherService
     /// Tolerant: an inventory query failure is treated the same as "not installed", which is safe
     /// for read-only, best-effort callers such as reporting a name for display. It is not safe for
     /// a caller that must prove a package is absent before doing something consequential — use
-    /// <see cref="GetPackageFullNameOrThrow"/> for that.
+    /// <see cref="GetRegisteredPackageOrThrow"/> for that.
     /// </remarks>
     /// <param name="packageFamilyName">The package family name (e.g. <c>MyApp_abc123def</c>).</param>
     /// <returns>The package full name, or <c>null</c> if the package is not installed.</returns>
     string? GetPackageFullName(string packageFamilyName);
 
     /// <summary>
-    /// Resolves the package full name from a package family name, distinguishing a confirmed
-    /// "nothing is registered under this family" from an inventory query that itself failed.
+    /// Resolves the package currently registered under a family name — its full name together with
+    /// its install location — distinguishing a confirmed "nothing is registered under this family"
+    /// from an inventory query that itself failed.
     /// </summary>
     /// <remarks>
     /// Used by callers for whom that distinction is load-bearing: a caller about to prove a
@@ -116,9 +117,24 @@ internal interface IAppLauncherService
     /// running, and proceeding on that assumption is exactly the fail-open gap this exists to close.
     /// A confirmed absence (the query succeeded and found nothing) still returns <c>null</c> and is
     /// safe to treat as "nothing to stop".
+    /// <para>
+    /// The install location is included because a family name alone does not prove <em>which</em>
+    /// deployment's registration is currently live: two deployments built from different source
+    /// paths can share the same package identity, and only one of them can be genuinely registered
+    /// at a time. A caller must compare this location against the one it expects before treating
+    /// the result as "this is my registration" — this method itself makes no such judgement.
+    /// </para>
     /// </remarks>
     /// <param name="packageFamilyName">The package family name (e.g. <c>MyApp_abc123def</c>).</param>
-    /// <returns>The package full name, or <c>null</c> when the query confirmed nothing is registered.</returns>
+    /// <returns>
+    /// The currently registered package's full name and install location, or <c>null</c> when the
+    /// query confirmed nothing is registered.
+    /// </returns>
     /// <exception cref="System.Exception">The inventory query itself failed.</exception>
-    string? GetPackageFullNameOrThrow(string packageFamilyName);
+    RegisteredPackage? GetRegisteredPackageOrThrow(string packageFamilyName);
 }
+
+/// <summary>The package currently registered under a family name, as reported by the OS inventory.</summary>
+/// <param name="FullName">The package's full name (name, version, architecture, and publisher hash).</param>
+/// <param name="InstallLocation">Absolute path the package is installed from.</param>
+internal sealed record RegisteredPackage(string FullName, string InstallLocation);
