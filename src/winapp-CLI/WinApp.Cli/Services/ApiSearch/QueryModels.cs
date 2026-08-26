@@ -147,7 +147,13 @@ internal sealed class ApiNamespaceHit
 
     public required int Score { get; init; }
 
-    public required List<string> Files { get; init; }
+    /// <summary>
+    /// On-disk cache files backing this namespace group. Diagnostics, not an answer:
+    /// long, absolute, and user-specific paths that measured ~21% of a search payload.
+    /// Populated only under <c>--verbose</c>; <see langword="null"/> otherwise, which
+    /// omits the field from JSON entirely.
+    /// </summary>
+    public List<string>? Files { get; set; }
 
     public required List<ApiTypeHit> Matches { get; init; }
 }
@@ -255,6 +261,27 @@ internal sealed class ApiMembersOutput : IApiScopedOutput
     /// <summary>Total method count before filtering; <see langword="null"/> when unfiltered.</summary>
     public int? TotalMethods { get; init; }
 
+    /// <summary>
+    /// Number of dependency-property identifier statics omitted from an unfiltered
+    /// listing. <see langword="null"/> when none were hidden. Reported so a trimmed
+    /// listing is never mistaken for the type's whole property surface.
+    /// </summary>
+    public int? HiddenDependencyProperties { get; init; }
+
+    /// <summary>
+    /// <see langword="true"/> when per-member XML-doc descriptions were omitted because
+    /// this is an unfiltered bulk listing; <see langword="null"/> otherwise. Use
+    /// <c>--filter</c> or <c>--all</c> to get them.
+    /// </summary>
+    public bool? DescriptionsOmitted { get; init; }
+
+    /// <summary>
+    /// How to recover what an unfiltered listing omitted. Present only when something
+    /// was actually omitted. JSON callers cannot use <c>--verbose</c> (it conflicts with
+    /// <c>--json</c>), so the hint names <c>--all</c>.
+    /// </summary>
+    public string? Hint { get; init; }
+
     public required List<ApiMemberOutput> Properties { get; init; }
 
     public required List<ApiMemberOutput> Events { get; init; }
@@ -306,11 +333,18 @@ internal sealed class ApiCheckPropertyOutput : IApiScopedOutput
 
     public string? AttachedInfo { get; init; }
 
-    public required List<ApiMemberOutput> SimilarOnType { get; init; }
+    /// <summary>
+    /// Near-miss properties on the same type. <see langword="null"/> rather than empty
+    /// when there are none, so the field is omitted from JSON instead of costing bytes
+    /// to say "nothing". Populated only on a miss.
+    /// </summary>
+    public List<ApiMemberOutput>? SimilarOnType { get; init; }
 
-    public required List<ApiCrossTypeMember> TypesWithProperty { get; init; }
+    /// <summary>Other types that do have this property; <see langword="null"/> when none.</summary>
+    public List<ApiCrossTypeMember>? TypesWithProperty { get; init; }
 
-    public required List<ApiCrossTypeMember> TypesWithSimilar { get; init; }
+    /// <summary>Other types with a similarly-named property; <see langword="null"/> when none.</summary>
+    public List<ApiCrossTypeMember>? TypesWithSimilar { get; init; }
 
     /// <summary>
     /// Set only on a miss, and only when the index behind it is known to be partial.

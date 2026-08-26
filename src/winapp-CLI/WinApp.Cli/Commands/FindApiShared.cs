@@ -231,6 +231,24 @@ internal static class FindApiShared
 
     // ---- text renderers (mirror the standalone tool's plain output) ----
 
+    /// <summary>
+    /// Drops the cache-file diagnostics from a search payload unless the caller asked
+    /// for them. Text output already hid these at default verbosity; JSON did not, where
+    /// they measured ~21% of the payload. Stripping here rather than in the query engine
+    /// keeps the engine free of presentation concerns.
+    /// </summary>
+    public static void ApplyVerbosity(ApiSearchOutput output, bool verbose)
+    {
+        if (verbose)
+        {
+            return;
+        }
+        foreach (ApiNamespaceHit hit in output.Results)
+        {
+            hit.Files = null;
+        }
+    }
+
     public static void RenderSearch(IAnsiConsole console, ApiSearchOutput output, bool verbose)
     {
         if (output.Ambiguous is { Count: > 0 })
@@ -271,7 +289,7 @@ internal static class FindApiShared
         foreach (ApiNamespaceHit ns in output.Results)
         {
             console.WriteLine($"[{ns.Score}] {ns.Namespace}");
-            if (verbose)
+            if (verbose && ns.Files is not null)
             {
                 // The on-disk cache path is a debugging aid, not an answer. It is long,
                 // absolute, and user-specific, so at default verbosity it was crowding
@@ -317,6 +335,8 @@ internal static class FindApiShared
         WriteMemberGroup(console, "Events:", output.Events);
         WriteMemberGroup(console, "Methods:", output.Methods);
 
+        WriteTrimNote(console, output);
+
         if (output.Properties.Count == 0 && output.Events.Count == 0 && output.Methods.Count == 0)
         {
             // Distinguish a filter miss from a type with no members. Rendering nothing at
@@ -332,6 +352,33 @@ internal static class FindApiShared
             console.WriteLine("     may need COM interop (e.g., IInitializeWithWindow, IDataTransferManagerInterop).");
             console.WriteLine();
         }
+    }
+
+    /// <summary>
+    /// States what an unfiltered listing left out. Without this the trim is invisible,
+    /// and a caller who does not see <c>BackgroundProperty</c> could reasonably conclude
+    /// the type has no such identifier rather than that it was hidden.
+    /// </summary>
+    private static void WriteTrimNote(IAnsiConsole console, ApiMembersOutput output)
+    {
+        if (output.HiddenDependencyProperties is not > 0 && output.DescriptionsOmitted is not true)
+        {
+            return;
+        }
+
+        var parts = new List<string>();
+        if (output.HiddenDependencyProperties is > 0)
+        {
+            parts.Add($"{output.HiddenDependencyProperties} dependency-property identifier(s)");
+        }
+        if (output.DescriptionsOmitted is true)
+        {
+            parts.Add("member descriptions");
+        }
+
+        console.WriteLine($"  Omitted: {string.Join(" and ", parts)}.");
+        console.WriteLine("  Use --filter <text> to search the full surface, or --all to list it in full.");
+        console.WriteLine();
     }
 
     private static void WriteMemberGroup(IAnsiConsole console, string heading, List<ApiMemberOutput> members)
@@ -384,7 +431,7 @@ internal static class FindApiShared
             console.WriteLine($"   \u26a0 {output.Warning}");
         }
         console.WriteLine();
-        if (output.SimilarOnType.Count > 0)
+        if (output.SimilarOnType is { Count: > 0 })
         {
             console.WriteLine($"  Similar {output.Type} properties:");
             foreach (ApiMemberOutput member in output.SimilarOnType)
@@ -394,7 +441,7 @@ internal static class FindApiShared
             }
             console.WriteLine();
         }
-        if (output.TypesWithProperty.Count > 0)
+        if (output.TypesWithProperty is { Count: > 0 })
         {
             console.WriteLine($"  Types that have a '{output.Property}' property:");
             foreach (ApiCrossTypeMember member in output.TypesWithProperty)
@@ -404,7 +451,7 @@ internal static class FindApiShared
             }
             console.WriteLine();
         }
-        if (output.TypesWithSimilar.Count > 0)
+        if (output.TypesWithSimilar is { Count: > 0 })
         {
             console.WriteLine("  Types with a similar property:");
             foreach (ApiCrossTypeMember member in output.TypesWithSimilar)

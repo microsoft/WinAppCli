@@ -27,6 +27,11 @@ internal sealed class FindApiMembersCommand : Command, IShortDescription
         Description = "Only list members whose name contains this text (case-insensitive), e.g. --filter background. Totals for the unfiltered type are still reported. Applies to every type in the call.",
     };
 
+    public static Option<bool> AllOption { get; } = new("--all")
+    {
+        Description = "List the complete member surface: include dependency-property identifier statics (BackgroundProperty) and per-member descriptions, both of which an unfiltered listing omits to save context. Implied by --verbose, and usable together with --json (--verbose is not).",
+    };
+
     public static Option<string?> ProjectDirOption { get; } = FindApiShared.CreateProjectDirOption();
     public static Option<string?> ProjectOption { get; } = FindApiShared.CreateProjectOption();
 
@@ -35,6 +40,7 @@ internal sealed class FindApiMembersCommand : Command, IShortDescription
     {
         Arguments.Add(TypeArgument);
         Options.Add(FilterOption);
+        Options.Add(AllOption);
         Options.Add(ProjectDirOption);
         Options.Add(ProjectOption);
         Options.Add(WinAppRootCommand.JsonOption);
@@ -56,16 +62,20 @@ internal sealed class FindApiMembersCommand : Command, IShortDescription
             var scope = FindApiShared.ReadScope(parseResult, ProjectDirOption, ProjectOption);
             string? filter = parseResult.GetValue(FilterOption);
 
+            // --verbose cannot be combined with --json, so --all is the escape hatch that
+            // works on both surfaces; --verbose implies it for interactive text callers.
+            bool all = parseResult.GetValue(AllOption) || parseResult.GetValue(WinAppRootCommand.VerboseOption);
+
             if (types.Count == 1)
             {
-                var single = service.Members(types[0], scope, filter);
+                var single = service.Members(types[0], scope, filter, all);
                 return FindApiShared.Emit(
                     console, json, "members", single, WinAppJsonContext.Default.ApiMembersOutput,
                     data => FindApiShared.RenderMembers(console, data),
                     data => (0, data.Properties.Count + data.Events.Count + data.Methods.Count, true));
             }
 
-            var results = types.ConvertAll(t => (t, service.Members(t, scope, filter)));
+            var results = types.ConvertAll(t => (t, service.Members(t, scope, filter, all)));
             return FindApiShared.EmitBatch(
                 console, json, "members", results,
                 (ok, errors) => new ApiMembersBatchOutput

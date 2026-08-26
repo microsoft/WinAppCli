@@ -99,6 +99,10 @@ internal sealed class FindApiCommand : Command, IShortDescription
             if (queries.Count == 1)
             {
                 var single = service.Search(queries[0], max, scope);
+                if (single.Data is not null)
+                {
+                    FindApiShared.ApplyVerbosity(single.Data, verbose);
+                }
                 return FindApiShared.Emit(
                     console, json, "search", single, WinAppJsonContext.Default.ApiSearchOutput,
                     data => FindApiShared.RenderSearch(console, data, verbose),
@@ -110,6 +114,13 @@ internal sealed class FindApiCommand : Command, IShortDescription
             }
 
             var results = queries.ConvertAll(q => (q, service.Search(q, max, scope)));
+            foreach (var (_, result) in results)
+            {
+                if (result.Data is not null)
+                {
+                    FindApiShared.ApplyVerbosity(result.Data, verbose);
+                }
+            }
             return FindApiShared.EmitBatch(
                 console, json, "search", results,
                 (ok, errors) => new ApiSearchBatchOutput

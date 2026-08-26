@@ -1290,6 +1290,7 @@ A query from a directory with no project is *always* answered by the `sdk` scope
 **Options:**
 - `--max <n>` - Maximum number of namespace-grouped search results (default `5`; search only). Also caps the ambiguity list, so a short query that collides across many namespaces stays readable.
 - `--filter <text>` - Narrow a listing on `members` and `enums`: a **case-insensitive substring** match on the member/value name. Best used on types with hundreds of members. Most enums are small enough to dump whole (even `Symbol`, the largest in WinUI at 197 values), so filtering them usually costs more than it saves once you factor in a second guess. Never re-run the same command with different filter text — dump once and read it.
+- `--all` - On `members`, list the complete surface: include dependency-property identifier statics and per-member descriptions, both of which an unfiltered listing omits (see **Listing size** below). `--verbose` implies it; use `--all` when you also want `--json`, which cannot be combined with `--verbose`.
 - `--scan` - Recursively discover and index every project under the directory (`refresh` only)
 - `--project <name>` - Project to query (matches the `.csproj`/`.vcxproj` name), or `sdk` to query the machine-wide Windows SDK scope
 - `--project-dir <path>` - Project directory to query (defaults to the current directory). A path that does not exist is an error — it is never silently answered from the `sdk` scope.
@@ -1315,6 +1316,9 @@ winapp find-api "acrylic brush" "teaching tip" --max 5
 # Narrow a large type instead of dumping it and grepping
 winapp find-api members Button --filter background
 
+# Full member surface, including dependency-property statics and descriptions
+winapp find-api members Button --all
+
 # Manage the index
 winapp find-api refresh
 
@@ -1324,6 +1328,15 @@ winapp find-api members Button --project sdk
 ```
 
 When `--filter` is applied, the output still reports the unfiltered total (`totalValues`, or `totalProperties`/`totalEvents`/`totalMethods` in `--json`), so a narrow view is never mistaken for a small API. A filter that matches nothing still exits `0` and says so explicitly — that is "nothing matched your filter", not "no such type".
+
+**Listing size.** An unfiltered `members` listing is the one expensive shape — `members Button` covers 400 members. Two parts of it are omitted by default because nothing is written from them:
+
+- **Dependency-property identifier statics** (`BackgroundProperty`) — 28% of a typical WinUI control's properties. They exist to be passed to `GetValue`/`SetValue`, not assigned.
+- **Per-member descriptions** — the XML-doc prose, roughly 16% of the payload.
+
+Inherited members are **not** trimmed: `Background`, `Width`, and `Click` all come from base types, so dropping them would just force a second lookup. What was omitted is always reported (`hiddenDependencyProperties`, `descriptionsOmitted`, and a `hint` in `--json`; an "Omitted:" line in text), and totals still describe the whole type. Both `--filter` and `--all` see the complete surface, so `members Button --filter BackgroundProperty` still finds the identifier. In practice this halves an unfiltered listing.
+
+**`--json` payloads omit diagnostics.** Cache file paths appear only under `--verbose` (matching text output, where they were already verbose-only), and empty suggestion arrays are omitted rather than serialized as `[]`.
 
 **Exit codes:** `search` with no hits, `check-property` on a missing property, and `enums` on a non-enum type all exit non-zero — gate code generation and CI checks on them. A batched invocation exits non-zero if *any* subject fails. A read-only property is *not* a failure — it exists, so `check-property` exits `0` and flags it in the output (`writable: false` in `--json`).
 

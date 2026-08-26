@@ -35,6 +35,7 @@ internal sealed class FakeApiMetadataService : IApiMetadataService
     public int LastMax { get; private set; }
     public string? LastMembersType { get; private set; }
     public string? LastMembersFilter { get; private set; }
+    public bool LastMembersIncludeAll { get; private set; }
     public string? LastEnumsFilter { get; private set; }
     public string? LastCheckType { get; private set; }
     public string? LastCheckProperty { get; private set; }
@@ -69,10 +70,11 @@ internal sealed class FakeApiMetadataService : IApiMetadataService
         return ApiQueryResult<ApiSearchOutput>.Ok(new ApiSearchOutput { Query = query, Ambiguous = null, Results = results });
     }
 
-    public ApiQueryResult<ApiMembersOutput> Members(string fullName, ApiRequestScope scope, string? filter = null)
+    public ApiQueryResult<ApiMembersOutput> Members(string fullName, ApiRequestScope scope, string? filter = null, bool includeAll = false)
     {
         LastMembersType = fullName;
         LastMembersFilter = filter;
+        LastMembersIncludeAll = includeAll;
         LastScope = scope;
         MembersTypes.Add(fullName);
         if (fullName == MissingType)

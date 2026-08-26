@@ -27,7 +27,7 @@ internal interface IApiMetadataService
 {
     ApiQueryResult<ApiSearchOutput> Search(string query, int maxResults, ApiRequestScope scope);
 
-    ApiQueryResult<ApiMembersOutput> Members(string fullName, ApiRequestScope scope, string? filter = null);
+    ApiQueryResult<ApiMembersOutput> Members(string fullName, ApiRequestScope scope, string? filter = null, bool includeAll = false);
 
     ApiQueryResult<ApiCheckPropertyOutput> CheckProperty(string typeName, string propertyName, ApiRequestScope scope);
 
@@ -58,8 +58,8 @@ internal sealed class ApiMetadataService(
     public ApiQueryResult<ApiSearchOutput> Search(string query, int maxResults, ApiRequestScope scope) =>
         WithManifest(scope, (cacheDir, manifest) => ApiQueryEngine.Search(query, maxResults, cacheDir, manifest));
 
-    public ApiQueryResult<ApiMembersOutput> Members(string fullName, ApiRequestScope scope, string? filter = null) =>
-        WithManifest(scope, (cacheDir, manifest) => ApiQueryEngine.Members(fullName, filter, cacheDir, manifest));
+    public ApiQueryResult<ApiMembersOutput> Members(string fullName, ApiRequestScope scope, string? filter = null, bool includeAll = false) =>
+        WithManifest(scope, (cacheDir, manifest) => ApiQueryEngine.Members(fullName, filter, cacheDir, manifest, includeAll));
 
     public ApiQueryResult<ApiCheckPropertyOutput> CheckProperty(string typeName, string propertyName, ApiRequestScope scope) =>
         WithManifest(scope, (cacheDir, manifest) => ApiQueryEngine.CheckProperty(typeName, propertyName, cacheDir, manifest));

@@ -160,6 +160,10 @@ winapp find-api members InfoBar TeachingTip ContentDialog
 
 # Narrow a large type instead of dumping ~370 members and searching the output
 winapp find-api members NavigationView --filter selected
+
+# Unfiltered listings omit dependency-property statics and descriptions.
+# --all restores them (works with --json; --verbose does not).
+winapp find-api members NavigationView --all
 ```
 
 ### Validate a property before you write it
@@ -252,6 +256,8 @@ winapp find-api check-property InfoBar Severity Backgruond --json
 - **Short names in `members` / `enums` / `check-property`.** A short name shared by a modern `Microsoft.*` type and its legacy `Windows.*` UWP twin resolves to the `Microsoft.*` one — that is the projection a Windows App SDK app uses, and the resolved fully-qualified name is always printed so you can see which type answered. Any other collision is an error listing the candidates; re-run with the fully-qualified name.
 - **Search results exclude `ABI.*` projection types.** These compiler-generated interop structs mirror real types and are never what you want to write in source, so search omits them. They remain reachable by exact name — `members ABI.Some.Type` still works if you are debugging interop.
 - **Inherited members.** `members` includes inherited properties/events/methods and marks their declaring type, so you see the full usable surface of a control. Overloads that differ only in their parameters are all listed — a name is never collapsed to a single signature.
+- **Unfiltered listings are trimmed.** An unfiltered `members` call omits dependency-property identifier statics (`BackgroundProperty`, ~28% of a WinUI control's properties) and per-member descriptions, which roughly halves the payload. Inherited members are kept — they are most of what you actually write. What was left out is always reported (`hiddenDependencyProperties`, `descriptionsOmitted`, `hint`), and both `--filter` and `--all` see the complete surface, so `members Button --filter BackgroundProperty` still finds it. Use `--all` for the exhaustive listing; `--verbose` does the same but cannot be combined with `--json`.
+- **`--json` omits diagnostics.** Cache file paths appear only under `--verbose`, and empty suggestion arrays are omitted rather than sent as `[]`.
 
 ## Troubleshooting
 - **"No indexed API metadata was found for this project."** You are standing in a real project that hasn't been indexed — usually because it has not been restored (no `project.assets.json`). Run `winapp restore`, then retry. `find-api` deliberately does *not* silently narrow to the SDK scope here, because that would hide the project's own NuGet packages and make its types look nonexistent.
@@ -268,7 +274,7 @@ winapp find-api check-property InfoBar Severity Backgruond --json
 
 ## CLI reference
 - `winapp find-api "<query>" [<query>...] [--max N]` — lexical search across types and members (bare form). Exits non-zero on no hits.
-- `winapp find-api members <type> [<type>...] [--filter <text>]` — properties, events, and methods (incl. inherited) of a type.
+- `winapp find-api members <type> [<type>...] [--filter <text>] [--all]` — properties, events, and methods (incl. inherited) of a type. An unfiltered listing omits dependency-property statics and descriptions; `--filter` and `--all` see everything.
 - `winapp find-api check-property <type> <property> [<property>...]` — validate properties exist; exits non-zero if any is missing. Read-only properties are flagged (`writable: false`) but still exit `0`.
 - `winapp find-api enums <type> [<type>...] [--filter <text>]` — enum values; exits non-zero when the type is not an enum.
 - `winapp find-api packages` — indexed NuGet/SDK packages with per-package counts.

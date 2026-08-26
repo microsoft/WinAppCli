@@ -213,7 +213,7 @@ internal static class ApiQueryEngine
     private static bool IsProjectionInternal(string fullName) =>
         fullName.StartsWith("ABI.", StringComparison.Ordinal);
 
-    public static ApiQueryResult<ApiMembersOutput> Members(string typeName, string? filter, string cacheDir, ProjectManifest manifest)
+    public static ApiQueryResult<ApiMembersOutput> Members(string typeName, string? filter, string cacheDir, ProjectManifest manifest, bool includeAll = false)
     {
         if (string.IsNullOrWhiteSpace(typeName))
         {
@@ -234,9 +234,18 @@ internal static class ApiQueryEngine
 
         var members = CollectMembersWithInheritance(type, allTypes);
 
+        bool filtered = !string.IsNullOrWhiteSpace(filter);
+
+        // An unfiltered listing without --all is a bulk dump — the one shape that is
+        // routinely expensive (Button: 400 members, ~46k tokens of JSON). Trim the two
+        // parts of it that no caller writes code from, and leave everything else alone:
+        // a targeted --filter query is already small, and its descriptions are the most
+        // useful text in the payload.
+        bool bulk = !filtered && !includeAll;
+
         List<ApiMemberOutput> Project(MemberKind kind) => members
             .Where(m => m.Member.Kind == kind)
-            .Select(m => ToMemberOutput(m.Member, m.DeclaringType, type.FullName))
+            .Select(m => ToMemberOutput(m.Member, m.DeclaringType, type.FullName, includeDescription: !bulk))
             .ToList();
 
         var allProperties = Project(MemberKind.Property);
@@ -247,10 +256,26 @@ internal static class ApiQueryEngine
         // so it must be computed before filtering or a filter would suppress it.
         bool getForCurrentView = allMethods.Any(m => m.Name.Equals("GetForCurrentView", StringComparison.Ordinal));
 
-        bool filtered = !string.IsNullOrWhiteSpace(filter);
+        // Dependency-property identifier statics (BackgroundProperty) are 28% of a
+        // WinUI control's members and are never what you write in XAML or in a property
+        // assignment — they exist to be passed to GetValue/SetValue/RegisterCallback.
+        // A --filter query still reaches them, so code-behind work is unaffected.
+        int hiddenDependencyProperties = 0;
+        if (bulk)
+        {
+            int before = allProperties.Count;
+            allProperties = allProperties.Where(m => !IsDependencyPropertyIdentifier(m)).ToList();
+            hiddenDependencyProperties = before - allProperties.Count;
+        }
+
         List<ApiMemberOutput> Filter(List<ApiMemberOutput> source) => filtered
             ? source.Where(m => MatchesFilter(m.Name, filter)).ToList()
             : source;
+
+        // Totals describe the type, not the view, so anything hidden — by a filter or by
+        // the bulk-dump trim — must be visible as a count or a narrow view reads as a
+        // small API. When nothing is hidden they stay null and cost nothing.
+        bool anythingHidden = filtered || hiddenDependencyProperties > 0;
 
         return ApiQueryResult<ApiMembersOutput>.Ok(new ApiMembersOutput
         {
@@ -260,17 +285,32 @@ internal static class ApiQueryEngine
             BaseType = type.BaseType,
             Deprecated = type.DeprecatedMessage,
             Filter = filtered ? filter : null,
-            // Totals are reported only when filtering, so a caller can see how much
-            // of the type was hidden and never mistake a narrow view for the whole API.
-            TotalProperties = filtered ? allProperties.Count : null,
-            TotalEvents = filtered ? allEvents.Count : null,
-            TotalMethods = filtered ? allMethods.Count : null,
+            TotalProperties = anythingHidden ? allProperties.Count + hiddenDependencyProperties : null,
+            TotalEvents = anythingHidden ? allEvents.Count : null,
+            TotalMethods = anythingHidden ? allMethods.Count : null,
+            HiddenDependencyProperties = hiddenDependencyProperties > 0 ? hiddenDependencyProperties : null,
+            DescriptionsOmitted = bulk ? true : null,
+            Hint = bulk
+                ? "Dependency-property identifiers and member descriptions are omitted from an unfiltered listing. Use --filter <text> to search the full surface, or --all for the complete listing."
+                : null,
             Properties = Filter(allProperties),
             Events = Filter(allEvents),
             Methods = Filter(allMethods),
             GetForCurrentViewWarning = getForCurrentView,
         });
     }
+
+    /// <summary>
+    /// Whether a member is a dependency-property identifier static — a property named
+    /// <c>XxxProperty</c> whose type is <c>DependencyProperty</c>. Both conditions are
+    /// required so an ordinary member that merely ends in "Property" is never hidden.
+    /// </summary>
+    private static bool IsDependencyPropertyIdentifier(ApiMemberOutput member) =>
+        member.Kind == nameof(MemberKind.Property)
+        && member.Name.EndsWith("Property", StringComparison.Ordinal)
+        && member.ReturnType is not null
+        && (member.ReturnType.EndsWith(".DependencyProperty", StringComparison.Ordinal)
+            || member.ReturnType.Equals("DependencyProperty", StringComparison.Ordinal));
 
     /// <summary>
     /// Case-insensitive substring match used by the <c>--filter</c> option on
@@ -509,9 +549,6 @@ internal static class ApiQueryEngine
                 Property = exact.Member.Name,
                 Match = match,
                 Writable = match.Writable,
-                SimilarOnType = new List<ApiMemberOutput>(),
-                TypesWithProperty = new List<ApiCrossTypeMember>(),
-                TypesWithSimilar = new List<ApiCrossTypeMember>(),
             });
         }
 
@@ -526,9 +563,6 @@ internal static class ApiQueryEngine
                 Property = propertyName,
                 Attached = true,
                 AttachedInfo = attached,
-                SimilarOnType = new List<ApiMemberOutput>(),
-                TypesWithProperty = new List<ApiCrossTypeMember>(),
-                TypesWithSimilar = new List<ApiCrossTypeMember>(),
             });
         }
 
@@ -569,13 +603,13 @@ internal static class ApiQueryEngine
             // A miss is the only outcome a partial index can get wrong, so the caveat
             // rides on the negative answer rather than on every result.
             Warning = IncompleteIndexNote(cacheDir, manifest),
-            SimilarOnType = similarOnType,
-            TypesWithProperty = typesWithProperty,
-            TypesWithSimilar = typesWithSimilar,
+            SimilarOnType = NullIfEmpty(similarOnType),
+            TypesWithProperty = NullIfEmpty(typesWithProperty),
+            TypesWithSimilar = NullIfEmpty(typesWithSimilar),
         });
     }
 
-    private static ApiMemberOutput ToMemberOutput(WinMdMemberInfo member, string? declaringType, string ownerFullName)
+    private static ApiMemberOutput ToMemberOutput(WinMdMemberInfo member, string? declaringType, string ownerFullName, bool includeDescription = true)
     {
         bool inherited = declaringType != null && declaringType != ownerFullName;
         return new ApiMemberOutput
@@ -584,7 +618,7 @@ internal static class ApiQueryEngine
             Kind = member.Kind.ToString(),
             Signature = member.Signature,
             ReturnType = member.ReturnType,
-            Description = member.Description,
+            Description = includeDescription ? member.Description : null,
             Deprecated = member.DeprecatedMessage,
             DeclaringType = inherited ? declaringType : null,
             Inherited = inherited,
@@ -729,6 +763,13 @@ internal static class ApiQueryEngine
 
     private static string MemberDedupKey(WinMdMemberInfo member) =>
         member.Kind + "|" + member.Signature;
+
+    /// <summary>
+    /// Collapses an empty suggestion list to <see langword="null"/> so it is omitted
+    /// from JSON rather than serialized as <c>[]</c>. Empty arrays measured ~10% of a
+    /// batched <c>check-property</c> payload while carrying no information.
+    /// </summary>
+    private static List<T>? NullIfEmpty<T>(List<T> list) => list.Count > 0 ? list : null;
 
     private static string? DetectAttachedProperty(WinMdTypeInfo type, string propertyName)
     {

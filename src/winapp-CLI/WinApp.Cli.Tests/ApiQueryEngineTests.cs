@@ -184,6 +184,76 @@ public sealed class ApiQueryEngineTests
     }
 
     [TestMethod]
+    public void Members_Unfiltered_HidesDependencyPropertyIdentifiers()
+    {
+        var result = ApiQueryEngine.Members("My.Ns.Ctl", null, _cacheDir, _manifest);
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        var names = result.Data!.Properties.Select(p => p.Name).ToList();
+        CollectionAssert.Contains(names, "Background");
+        CollectionAssert.DoesNotContain(names, "BackgroundProperty");
+
+        // A member ending in "Property" that is not typed DependencyProperty is a real
+        // API and must survive the trim.
+        CollectionAssert.Contains(names, "NameProperty");
+
+        Assert.AreEqual(1, result.Data.HiddenDependencyProperties);
+        Assert.AreEqual(3, result.Data.TotalProperties, "totals must describe the type, not the trimmed view");
+    }
+
+    [TestMethod]
+    public void Members_Unfiltered_OmitsDescriptionsAndSaysSo()
+    {
+        var result = ApiQueryEngine.Members("My.Ns.Ctl", null, _cacheDir, _manifest);
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.IsTrue(result.Data!.Properties.All(p => p.Description is null));
+        Assert.IsTrue(result.Data.DescriptionsOmitted);
+        Assert.IsNotNull(result.Data.Hint);
+    }
+
+    [TestMethod]
+    public void Members_IncludeAll_RestoresIdentifiersAndDescriptions()
+    {
+        var result = ApiQueryEngine.Members("My.Ns.Ctl", null, _cacheDir, _manifest, includeAll: true);
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        CollectionAssert.Contains(result.Data!.Properties.Select(p => p.Name).ToList(), "BackgroundProperty");
+        Assert.AreEqual("The background brush.", result.Data.Properties.Single(p => p.Name == "Background").Description);
+        Assert.IsNull(result.Data.HiddenDependencyProperties);
+        Assert.IsNull(result.Data.DescriptionsOmitted);
+        Assert.IsNull(result.Data.Hint);
+    }
+
+    [TestMethod]
+    public void Members_Filter_ReachesDependencyPropertyIdentifiersAndKeepsDescriptions()
+    {
+        // A targeted query is already cheap, so it sees the whole surface — code-behind
+        // work that needs BackgroundProperty must not be forced to --all.
+        var result = ApiQueryEngine.Members("My.Ns.Ctl", "backgroundproperty", _cacheDir, _manifest);
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        var match = result.Data!.Properties.Single();
+        Assert.AreEqual("BackgroundProperty", match.Name);
+        Assert.AreEqual("Identifies the Background property.", match.Description);
+        Assert.IsNull(result.Data.HiddenDependencyProperties);
+    }
+
+    [TestMethod]
+    public void CheckProperty_Found_OmitsEmptySuggestionArrays()
+    {
+        // Empty suggestion arrays measured ~10% of a batched check-property payload
+        // while carrying no information; null collapses them out of the JSON.
+        var result = ApiQueryEngine.CheckProperty("My.Ns.Widget", "Color", _cacheDir, _manifest);
+
+        Assert.AreEqual(ApiQueryOutcome.Ok, result.Outcome);
+        Assert.IsTrue(result.Data!.Found);
+        Assert.IsNull(result.Data.SimilarOnType);
+        Assert.IsNull(result.Data.TypesWithProperty);
+        Assert.IsNull(result.Data.TypesWithSimilar);
+    }
+
+    [TestMethod]
     public void Members_Unfiltered_ReportsNoFilterMetadata()
     {
         var result = ApiQueryEngine.Members("My.Ns.Widget", null, _cacheDir, _manifest);
@@ -373,6 +443,37 @@ public sealed class ApiQueryEngineTests
             {
                 Namespace = "My.Ns", Name = "Gadget", FullName = "My.Ns.Gadget", Kind = TypeKind.Class,
                 SourceFile = "test.winmd", Members = [],
+            },
+            new()
+            {
+                // Mirrors a WinUI control: a real property, its dependency-property
+                // identifier static, and XML-doc descriptions — the three things the
+                // unfiltered-listing trim has to distinguish between.
+                Namespace = "My.Ns", Name = "Ctl", FullName = "My.Ns.Ctl", Kind = TypeKind.Class,
+                SourceFile = "test.winmd",
+                Members =
+                [
+                    new WinMdMemberInfo
+                    {
+                        Name = "Background", Kind = MemberKind.Property,
+                        Signature = "Brush Background { get; set; }",
+                        ReturnType = "My.Ns.Brush", Description = "The background brush.",
+                    },
+                    new WinMdMemberInfo
+                    {
+                        Name = "BackgroundProperty", Kind = MemberKind.Property,
+                        Signature = "My.Ns.DependencyProperty BackgroundProperty { get; }",
+                        ReturnType = "My.Ns.DependencyProperty", Description = "Identifies the Background property.",
+                    },
+                    new WinMdMemberInfo
+                    {
+                        // Ends in "Property" but is not a DependencyProperty, so it must
+                        // survive the trim.
+                        Name = "NameProperty", Kind = MemberKind.Property,
+                        Signature = "String NameProperty { get; set; }",
+                        ReturnType = "String", Description = "Not a dependency property.",
+                    },
+                ],
             },
         };
 
