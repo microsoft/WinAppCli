@@ -185,7 +185,7 @@ Building a WinUI 3 UI and need to find the right control or a working sample?
 - `--no-launch` — register/prepare without launching
 - `--with-alias` — launch via execution alias (console apps run in current terminal)
 - `-c, --configuration <name>` — (project + single-file mode) build configuration; default `Debug`
-- `--arch <x64|arm64|x86>` — (project mode) target architecture; default: current process arch. Sets both the build RID and the Windows App Runtime arch. **Rejected in single-file mode** — declare `#:property Platform=x64` in the `.cs` instead
+- `--arch <x64|arm64|x86>` — (project mode) target architecture; default: current process arch. Sets both the build RID and the Windows App Runtime arch. **Rejected in single-file mode** — declare `#:property RuntimeIdentifier=win-x64` in the `.cs` instead
 - `-r, --runtime <rid>` — (project mode) target .NET RID (e.g. `win-x64`); **only the RID's architecture is used** — project mode reduces it and always builds the canonical `win-<arch>` RID, so a version-specific or non-Windows RID is not forwarded (a non-Windows RID like `linux-x64` is rejected). Overrides `--arch`. **Rejected in single-file mode**
 - `-f, --framework <tfm>` — (project mode) target framework for multi-targeted projects. **Rejected in single-file mode** — declare `#:property TargetFramework=…` instead
 - `--project <name-or-path>` — (project mode) select which project to launch when a solution/directory has multiple runnable app projects (errors listing candidates if ambiguous). **Rejected in single-file mode** — the `.cs` file is the project
@@ -427,5 +427,6 @@ When the user encounters an error, check these common causes:
 - **Sparse package** — A lightweight package registration that gives a desktop app package identity without full MSIX deployment. The exe stays in its original location; Windows associates identity with it via `Add-AppxPackage -ExternalLocation`. Used by `create-debug-identity`. Best for scenarios where the exe is separate from the app code (e.g., Electron).
 - **Loose layout package** — A folder-based package registered with Windows via `Add-AppxPackage`, simulating a full MSIX install without creating an `.msix` file. Used by `winapp run`. The preferred approach for most frameworks during development.
 - **Package identity** — A Windows concept that enables certain APIs (notifications, background tasks, share target). Obtained via full MSIX packaging, loose layout registration (`winapp run`), or sparse package registration (`create-debug-identity`).
+
 
 

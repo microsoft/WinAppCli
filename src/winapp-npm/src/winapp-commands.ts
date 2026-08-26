@@ -599,7 +599,7 @@ export interface RunOptions extends CommonOptions {
   input?: string;
   /** @deprecated Use `input` instead. Retained for backward compatibility. */
   inputFolder?: string;
-  /** Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Rejected for a .cs file-based app, which declares its own architecture with '#:property Platform=x64'. Default: the current process architecture. */
+  /** Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Rejected for a .cs file-based app, which declares its own architecture with '#:property RuntimeIdentifier=win-x64'. Default: the current process architecture. */
   arch?: string;
   /** Command-line arguments to pass to the application. Alternatively, use -- followed by arguments to avoid escaping (e.g., winapp run . -- --flag value). */
   args?: string;
@@ -631,7 +631,7 @@ export interface RunOptions extends CommonOptions {
   project?: string;
   /** Project and single-file mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p EnableMyFeature=true). Ignored in folder mode. */
   property?: string | string[];
-  /** Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode. Rejected for a .cs file-based app, which declares its own architecture with '#:property Platform=x64'. */
+  /** Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode. Rejected for a .cs file-based app, which declares its own architecture with '#:property RuntimeIdentifier=win-x64'. */
   runtime?: string;
   /** Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. */
   symbols?: boolean;

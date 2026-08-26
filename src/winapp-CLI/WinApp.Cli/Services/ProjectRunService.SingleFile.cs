@@ -61,11 +61,11 @@ internal sealed partial class ProjectRunService
         // is read from the framework the app was actually built for.
         "TargetFramework",
         // Architecture. Single-file mode rejects --arch and tells the user to declare
-        // '#:property Platform=x64' instead, so these are the ONLY way the app's target architecture
-        // reaches the Windows App Runtime provisioning that follows registration. RuntimeIdentifier is
-        // read first because it is unambiguous; Platform is the directive the docs point users at.
+        // '#:property RuntimeIdentifier=win-x64' instead, so this is the only way the app's target
+        // architecture reaches the Windows App Runtime provisioning that follows registration.
+        // Platform is deliberately NOT consulted: a file-based app accepts it but ignores it for RID
+        // selection, so 'Platform=arm64' still yields an x64 apphost.
         "RuntimeIdentifier",
-        "Platform",
         // Manifest inference. WinAppManifestPath mirrors the NuGet targets' escape hatch so a consumer can
         // point single-file mode at a hand-authored manifest from the .cs itself.
         "WinAppManifestPath",
@@ -205,16 +205,14 @@ internal sealed partial class ProjectRunService
     /// after registration matches it.
     /// </summary>
     /// <remarks>
-    /// Single-file mode rejects <c>--arch</c> (a file-based app declares its own platform), so without
-    /// this the run would fall back to the machine's architecture — and an x64 app on an arm64 host would
-    /// have arm64 runtime packages provisioned for it and fail to launch. Reads the unambiguous
-    /// <c>RuntimeIdentifier</c> first, then <c>Platform</c> (the directive the docs point users at).
-    /// Falls back to the current process architecture, matching the pre-existing default, when the app
-    /// declares neither or declares something unrecognized such as <c>AnyCPU</c>.
+    /// Reads <c>RuntimeIdentifier</c> only. For a file-based app that is the sole property that changes
+    /// the apphost's architecture — <c>#:property Platform=arm64</c> is accepted but leaves
+    /// <c>RuntimeIdentifier</c> empty and still emits an x64 apphost on an x64 host, so treating
+    /// <c>Platform</c> as the architecture would provision arm64 runtime packages for an x64 binary.
+    /// With no RID the SDK builds for the host, which is what the fallback reports.
     /// </remarks>
     private static string ResolveSingleFileArchitecture(IReadOnlyDictionary<string, string> props)
         => RunArchHelper.ArchitectureFromRid(GetProp(props, "RuntimeIdentifier"))
-            ?? RunArchHelper.NormalizeArchitecture(GetProp(props, "Platform"))
             ?? RunArchHelper.DefaultArchitecture();
 
     /// <summary>
@@ -326,4 +324,5 @@ internal sealed partial class ProjectRunService
         return streamedExit;
     }
 }
+
 

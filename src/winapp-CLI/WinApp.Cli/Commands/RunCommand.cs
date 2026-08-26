@@ -134,12 +134,12 @@ internal partial class RunCommand : Command, IShortDescription
 
         ArchOption = new Option<string?>("--arch")
         {
-            Description = "Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Rejected for a .cs file-based app, which declares its own architecture with '#:property Platform=x64'. Default: the current process architecture."
+            Description = "Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Rejected for a .cs file-based app, which declares its own architecture with '#:property RuntimeIdentifier=win-x64'. Default: the current process architecture."
         };
 
         RuntimeOption = new Option<string?>("--runtime")
         {
-            Description = "Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode. Rejected for a .cs file-based app, which declares its own architecture with '#:property Platform=x64'."
+            Description = "Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode. Rejected for a .cs file-based app, which declares its own architecture with '#:property RuntimeIdentifier=win-x64'."
         };
         RuntimeOption.Aliases.Add("-r");
 
@@ -991,4 +991,5 @@ internal sealed class RunCommandResult
     NewLine = "\n",
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 internal partial class RunCommandJsonContext : JsonSerializerContext;
+
 

@@ -36,8 +36,8 @@ internal partial class RunCommand
         [
             (ProjectOption, "--project", "A .cs file-based app IS the project; omit --project."),
             (FrameworkOption, "--framework", "Declare the target framework in the file instead, e.g. '#:property TargetFramework=net10.0-windows10.0.22621.0'."),
-            (ArchOption, "--arch", "Declare the architecture in the file instead, e.g. '#:property Platform=x64'."),
-            (RuntimeOption, "--runtime", "Declare the architecture in the file instead, e.g. '#:property Platform=x64'."),
+            (ArchOption, "--arch", "Declare the architecture in the file instead, e.g. '#:property RuntimeIdentifier=win-x64'."),
+            (RuntimeOption, "--runtime", "Declare the architecture in the file instead, e.g. '#:property RuntimeIdentifier=win-x64'."),
         ];
 
         /// <summary>
@@ -413,3 +413,4 @@ internal partial class RunCommand
         }
     }
 }
+

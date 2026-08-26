@@ -200,7 +200,7 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
         using var document = JsonDocument.Parse(stdout);
         var error = document.RootElement.GetProperty("Error").GetString();
         StringAssert.Contains(error, "--arch", "The JSON error should name the rejected option");
-        StringAssert.Contains(error, "#:property Platform", "The JSON error should point at the replacement directive");
+        StringAssert.Contains(error, "#:property RuntimeIdentifier", "The JSON error should point at the replacement directive");
     }
 
     [TestMethod]

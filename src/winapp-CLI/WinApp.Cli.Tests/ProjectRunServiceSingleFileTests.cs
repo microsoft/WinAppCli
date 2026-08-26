@@ -201,6 +201,20 @@ public class ProjectRunServiceSingleFileTests : IDisposable
     }
 
     [TestMethod]
+    public void EvaluateArguments_DoNotRequestPlatform()
+    {
+        // Platform is NOT the architecture for a file-based app: '#:property Platform=arm64' is accepted
+        // but leaves RuntimeIdentifier empty and still emits an x64 apphost on an x64 host. Reading it
+        // would provision arm64 runtime packages for an x64 binary, so it must not be requested at all.
+        var singleFile = WriteSingleFile();
+
+        var args = ProjectRunService.BuildSingleFileEvaluateArguments(singleFile, Options());
+
+        Assert.IsFalse(args.Contains("--getProperty:Platform", StringComparison.Ordinal), $"Unexpected in: {args}");
+        StringAssert.Contains(args, "--getProperty:RuntimeIdentifier");
+    }
+
+    [TestMethod]
     public void EvaluateArguments_MirrorTheBuildPassConfigurationAndProperties()
     {
         // The evaluate must describe the output the build actually wrote, so both passes get the same
