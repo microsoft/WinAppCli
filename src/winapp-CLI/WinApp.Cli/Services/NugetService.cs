@@ -240,9 +240,12 @@ internal partial class NugetService : INugetService
                     continue;
                 }
 
-                foreach (var depName in deps.Keys)
+                // Only the membership test is lifted into Where. `reachable.Add` stays in the body on purpose:
+                // it mutates the set this traversal is simultaneously reading, and hiding that behind a lazily
+                // evaluated LINQ predicate would make the visit-once guarantee depend on enumeration timing.
+                foreach (var depName in deps.Keys.Where(Installed.ContainsKey))
                 {
-                    if (Installed.ContainsKey(depName) && reachable.Add(depName))
+                    if (reachable.Add(depName))
                     {
                         pending.Enqueue(depName);
                     }
