@@ -153,8 +153,11 @@ YAML `- template:` reference, because templates are expanded at compile time —
 `release.yml` and `dryrun.yml` share `templates/release-assets.yaml`. Prefer that over
 duplicating inline script between the two.
 
-`.pipelines/dryrun.yml` rehearses a full release weekly without signing or publishing, so a
-change to the release path should usually be reflected there too.
+`.pipelines/release.yml` both ships releases (from `rel/v*`) and rehearses one weekly (from
+`main`). Every publishing action is gated on `startsWith(variables['Build.SourceBranch'],
+'refs/heads/rel/v')` — derived from the branch, not a parameter, because Azure DevOps compiles
+scheduled and triggered runs with parameter *defaults*. If you add a publishing step, gate it the
+same way, and write the condition as a positive test for `rel/v*` so it fails closed.
 
 ## CLI command semantics
 

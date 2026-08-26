@@ -7,6 +7,25 @@
       - '*'
 pr: none
 
+# Weekly release rehearsal.
+#
+# ES/1ES policies change continuously and we kept discovering the breakage mid-release. This runs
+# the REAL release pipeline every Monday against main, with only the final publishing actions
+# omitted, so a policy or credential failure shows up days before anyone cuts rel/v*.
+#
+# Running it here rather than in a lookalike pipeline is the point: same 1ES Official template,
+# same stages, same jobs, same tasks, same service connections. A separate pipeline can only ever
+# approximate those.
+schedules:
+  - cron: '0 9 * * Mon'
+    displayName: Weekly release dry run
+    branches:
+      include:
+        - main
+    # Without this a quiet week produces no run, and a quiet week is exactly when an external
+    # policy change slips in unnoticed.
+    always: true
+
 resources:
   repositories:
   - repository: 1esPipelines
@@ -44,6 +63,22 @@ parameters:
       project: $(SymbolPublishingProject)
 
 variables:
+  # ---------------------------------------------------------------------------------------------
+  # Release vs. rehearsal
+  #
+  # Every publishing action in this file is gated on the source branch starting with `rel/v`.
+  # That is deliberate and it is NOT interchangeable with a parameter: Azure DevOps compiles both
+  # scheduled AND branch-triggered runs with the DEFAULT values of `parameters:`, so a `dryRun`
+  # parameter could not distinguish a Monday rehearsal from a real release - defaulting it false
+  # would make the weekly run publish, and defaulting it true would make every real release ship
+  # nothing. The branch can tell them apart; a parameter cannot.
+  #
+  # The condition is written as a positive test for `rel/v*` at every site, so an unexpected
+  # branch fails CLOSED (publishes nothing) rather than open.
+  #
+  # Grep for `refs/heads/rel/v` to find every gate.
+  # ---------------------------------------------------------------------------------------------
+
   # Declared once so the URL and its hash cannot drift apart across the stages that install gh.
   # To bump: take the version and its SHA-256 from the gh_<version>_checksums.txt asset published
   # with the release at https://github.com/cli/cli/releases.
@@ -93,7 +128,10 @@ extends:
           - template: ./.pipelines/templates/build.yaml@self
             parameters:
               stable: 'true'
-              DoEsrp: ${{ parameters.DoEsrp }}
+              # ANDed with the branch on purpose. DoEsrp defaults to true and a scheduled run
+              # compiles with defaults, so passing the parameter straight through would make the
+              # weekly rehearsal ESRP-sign real binaries.
+              DoEsrp: ${{ and(parameters.DoEsrp, startsWith(variables['Build.SourceBranch'], 'refs/heads/rel/v')) }}
               signingIdentity: ${{ parameters.signingIdentity }}
           - task: PowerShell@2
             name: SetMeta
@@ -111,7 +149,10 @@ extends:
                 Write-Host "##vso[task.setvariable variable=version;isOutput=true]$fullVersion"
           - task: PowerShell@2
             displayName: "Generate Release Notes"
-            continueOnError: true
+            # A real release tolerates a failure here and ships a raw commit list. The rehearsal
+            # does not: surfacing a dead GITHUB_TOKEN_2 / GH_MODELS_TOKEN early is the whole point.
+            ${{ if startsWith(variables['Build.SourceBranch'], 'refs/heads/rel/v') }}:
+              continueOnError: true
             env:
               GH_TOKEN: $(GITHUB_TOKEN_2)
               GH_MODELS_TOKEN: $(GH_MODELS_TOKEN)
@@ -171,6 +212,84 @@ extends:
 
                 $fullBody | Set-Content "$outDir/full-release-notes.md" -Encoding UTF8 -NoNewline
                 Write-Host "Release body written ($($fullBody.Length) chars)"
+          # Asset-name preflight. Runs on EVERY build, release or rehearsal.
+          #
+          # The real rename happens later in Release_GitHub, which has no checkout and so cannot
+          # run the verifier. Doing a dry rename on a copy here catches a naming regression before
+          # the release job needs it - on a real release that is the difference between failing
+          # early and silently publishing versioned asset names the WinGet URLs do not match (#568).
+          - task: PowerShell@2
+            displayName: Stage a copy of the release assets
+            inputs:
+              pwsh: true
+              errorActionPreference: stop
+              targetType: inline
+              script: |
+                $staging = "$(Agent.TempDirectory)\release-staging"
+                if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
+                foreach ($n in 'msix-packages', 'npmpackage', 'nuget-packages') {
+                  $t = Join-Path $staging $n
+                  New-Item -ItemType Directory -Path $t -Force | Out-Null
+                  $s = "$(Build.ArtifactStagingDirectory)\$n"
+                  if (Test-Path $s) { Copy-Item "$s\*" $t -Recurse -Force -ErrorAction SilentlyContinue }
+                }
+                # Release_GitHub archives the real winappcli-<arch>.zip. Just assert the inputs
+                # exist here; the zips themselves are verified there.
+                foreach ($arch in 'x64', 'arm64') {
+                  if (-not (Test-Path "$(Build.ArtifactStagingDirectory)\cli\win-$arch\winapp.exe")) {
+                    throw "winapp.exe missing for $arch. The release would publish an incomplete asset set."
+                  }
+                }
+
+          - template: ./.pipelines/templates/release-assets.yaml@self
+            parameters:
+              displayName: Preflight - rename release assets on a copy
+              msixPath: $(Agent.TempDirectory)\release-staging\msix-packages
+              npmPath: $(Agent.TempDirectory)\release-staging\npmpackage
+              nugetPath: $(Agent.TempDirectory)\release-staging\nuget-packages
+
+          - task: PowerShell@2
+            displayName: Preflight - assert asset name contract
+            inputs:
+              pwsh: true
+              errorActionPreference: stop
+              filePath: '$(System.DefaultWorkingDirectory)/scripts/verify-release-assets.ps1'
+              arguments: '-StagingPath "$(Agent.TempDirectory)\release-staging" -SkipZip'
+
+          - ${{ if not(startsWith(variables['Build.SourceBranch'], 'refs/heads/rel/v')) }}:
+            # Rehearsal-only gates. A real release must not fail because of these; the rehearsal
+            # exists precisely to fail on them.
+            - task: PowerShell@2
+              displayName: "[Rehearsal] Verify release notes were produced"
+              inputs:
+                pwsh: true
+                targetType: inline
+                errorActionPreference: stop
+                script: |
+                  $notes = "$(Build.ArtifactStagingDirectory)/release-notes/release-notes.md"
+                  if (-not (Test-Path $notes)) {
+                    throw "Release notes were not generated. Check GITHUB_TOKEN_2 and GH_MODELS_TOKEN."
+                  }
+                  if ([string]::IsNullOrWhiteSpace((Get-Content $notes -Raw))) {
+                    throw "Release notes are empty. The GitHub Models call likely failed."
+                  }
+                  Write-Host "Release notes generated."
+
+            - task: PowerShell@2
+              displayName: "[Rehearsal] Check release credentials"
+              env:
+                GH_TOKEN: $(GITHUB_TOKEN_2)
+                GH_MODELS_TOKEN: $(GH_MODELS_TOKEN)
+                SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+              inputs:
+                pwsh: true
+                errorActionPreference: stop
+                filePath: '$(System.DefaultWorkingDirectory)/scripts/check-release-credentials.ps1'
+                arguments: >-
+                  -WingetPkgsFork "$(WingetPkgsFork)"
+                  -MSLearnDocsFork "$(MSLearnDocsFork)"
+                  -ServiceConnections "github-service-connection","$(SigningServiceName)","$(SymbolPublishingServiceConnection)","NuGet-WinAppCLI"
+
           - task: 1ES.PublishPipelineArtifact@1
             displayName: Upload Artifact - Release Notes
             inputs:
@@ -253,7 +372,7 @@ extends:
               npmPath: $(Pipeline.Workspace)/npm-package
               nugetPath: $(Pipeline.Workspace)/nuget-packages
 
-          - ${{ if ne(parameters.GitHubReleaseAlreadyExists, 'true') }}:
+          - ${{ if and(ne(parameters.GitHubReleaseAlreadyExists, 'true'), startsWith(variables['Build.SourceBranch'], 'refs/heads/rel/v')) }}:
             - task: GitHubRelease@1
               displayName: "Create GitHub Release"
               inputs:
@@ -275,7 +394,7 @@ extends:
                 releaseNotesSource: 'filePath'
                 releaseNotesFilePath: '$(Pipeline.Workspace)/release-notes/full-release-notes.md'
 
-    - ${{ if eq(parameters.PublishSymbols, 'true') }}:
+    - ${{ if and(eq(parameters.PublishSymbols, 'true'), startsWith(variables['Build.SourceBranch'], 'refs/heads/rel/v')) }}:
       - stage: Publish_Symbols
         displayName: Publish Symbols
         # Build supplies the version output; Release_GitHub gates on the release actually shipping, so
@@ -366,7 +485,7 @@ extends:
                 Invoke-RestMethod -Uri "$baseUri/$($createBody.requestName)" -Body ($publishBody | ConvertTo-Json -Compress)
               displayName: Request publication to symweb and MSDL
 
-    - ${{ if eq(parameters.DoEsrp, 'true') }}:
+    - ${{ if and(eq(parameters.DoEsrp, 'true'), startsWith(variables['Build.SourceBranch'], 'refs/heads/rel/v')) }}:
       - stage: Release_Npm
         displayName: Create Npm Release
         dependsOn: Release_GitHub
@@ -435,6 +554,12 @@ extends:
               # PAT lasts 90 days, regenerate as needed and re-run if it failes due to authentication
               WINGET_CREATE_GITHUB_TOKEN: $(GITHUB_TOKEN_2)
               GH_TOKEN: $(GITHUB_TOKEN_2)
+              # Set ONLY on a real release. The rehearsal generates the manifest and stops, so it
+              # still exercises wingetcreate, the installer downloads and the manifest schema -
+              # everything except the fork mutation and the PR. Absent variable = no submit, so
+              # this fails closed.
+              ${{ if startsWith(variables['Build.SourceBranch'], 'refs/heads/rel/v') }}:
+                WINGET_SUBMIT: 'true'
             inputs:
               targetType: 'inline'
               errorActionPreference: 'stop'
@@ -468,33 +593,81 @@ extends:
                 # that updates the main repo.  This fork will be under the account attached to the token.
                 # We need to keep this fork up-to-date, otherwise the wingetcreate command will fail.
                 # See: https://github.com/microsoft/winget-create/issues/502
-                Write-Host "Syncing winget-pkgs fork..."
-                & "$tempDir\gh\bin\gh.exe" repo sync $(WingetPkgsFork) -b master
-                if ($LASTEXITCODE -ne 0) {
-                  Write-Error "Failed to sync winget-pkgs fork. Exit code: $LASTEXITCODE"
-                  exit $LASTEXITCODE
+                #
+                # Skipped in a rehearsal: syncing mutates the fork, and nothing is submitted anyway.
+                # The token's ability to reach the fork is still proven by the read below.
+                if ($env:WINGET_SUBMIT -eq 'true') {
+                  Write-Host "Syncing winget-pkgs fork..."
+                  & "$tempDir\gh\bin\gh.exe" repo sync $(WingetPkgsFork) -b master
+                  if ($LASTEXITCODE -ne 0) {
+                    Write-Error "Failed to sync winget-pkgs fork. Exit code: $LASTEXITCODE"
+                    exit $LASTEXITCODE
+                  }
+                  Write-Host "Fork synced successfully."
+                } else {
+                  Write-Host "[REHEARSAL] Skipping fork sync. Verifying fork access instead..."
+                  & "$tempDir\gh\bin\gh.exe" repo view $(WingetPkgsFork) --json nameWithOwner,viewerPermission
+                  if ($LASTEXITCODE -ne 0) {
+                    Write-Error "Cannot read the winget-pkgs fork. The release would fail to sync it. Exit code: $LASTEXITCODE"
+                    exit $LASTEXITCODE
+                  }
                 }
-                Write-Host "Fork synced successfully."
                 
                 # Get the installer URLs from the GitHub release
                 # Order must match the winget manifest: x64 MSIX, arm64 MSIX, x64 portable zip, arm64 portable zip
-                $x64MsixUrl = "https://github.com/microsoft/winappcli/releases/download/v$(version)/winappcli_x64.msix"
-                $arm64MsixUrl = "https://github.com/microsoft/winappcli/releases/download/v$(version)/winappcli_arm64.msix"
-                $x64ZipUrl = "https://github.com/microsoft/winappcli/releases/download/v$(version)/winappcli-x64.zip"
-                $arm64ZipUrl = "https://github.com/microsoft/winappcli/releases/download/v$(version)/winappcli-arm64.zip"
+                $manifestVersion = "$(version)"
+                if ($env:WINGET_SUBMIT -ne 'true') {
+                  # A rehearsal runs before any release exists for $(version), so its installer URLs
+                  # would 404 when wingetcreate downloads them to hash. Rehearse against the last
+                  # PUBLISHED release instead - that still exercises the download, the hashing and
+                  # the manifest schema, which is where submissions actually break (#568).
+                  $latest = & "$tempDir\gh\bin\gh.exe" api repos/microsoft/winappcli/releases/latest --jq .tag_name
+                  if ($LASTEXITCODE -ne 0 -or -not $latest) {
+                    Write-Error "Could not resolve the latest published release to rehearse against."
+                    exit 1
+                  }
+                  $manifestVersion = $latest.Trim().TrimStart('v')
+                  Write-Host "[REHEARSAL] Using last published release v$manifestVersion for URL validation."
+                }
+
+                $base = "https://github.com/microsoft/winappcli/releases/download/v$manifestVersion"
+                $x64MsixUrl = "$base/winappcli_x64.msix"
+                $arm64MsixUrl = "$base/winappcli_arm64.msix"
+                $x64ZipUrl = "$base/winappcli-x64.zip"
+                $arm64ZipUrl = "$base/winappcli-arm64.zip"
                 
-                Write-Host "Submitting to WinGet..."
-                Write-Host "Version: $(version)"
+                Write-Host "Version: $manifestVersion"
                 Write-Host "x64 MSIX: $x64MsixUrl"
                 Write-Host "ARM64 MSIX: $arm64MsixUrl"
                 Write-Host "x64 Portable: $x64ZipUrl"
                 Write-Host "ARM64 Portable: $arm64ZipUrl"
                 
-                # Submit to WinGet repository
-                wingetcreate update Microsoft.WinAppCli `
-                  --version $(version) `
-                  --urls $x64MsixUrl $arm64MsixUrl $x64ZipUrl $arm64ZipUrl `
-                  --submit
+                if ($env:WINGET_SUBMIT -eq 'true') {
+                  Write-Host "Submitting to WinGet..."
+                  wingetcreate update Microsoft.WinAppCli `
+                    --version $manifestVersion `
+                    --urls $x64MsixUrl $arm64MsixUrl $x64ZipUrl $arm64ZipUrl `
+                    --submit
+                } else {
+                  # Same command minus --submit: manifests are written locally and thrown away.
+                  # Nothing is pushed and no PR is opened.
+                  Write-Host "[REHEARSAL] Generating manifest without submitting..."
+                  $manifestDir = "$tempDir\winget-manifests"
+                  wingetcreate update Microsoft.WinAppCli `
+                    --version $manifestVersion `
+                    --urls $x64MsixUrl $arm64MsixUrl $x64ZipUrl $arm64ZipUrl `
+                    --out $manifestDir
+                  if ($LASTEXITCODE -ne 0) {
+                    Write-Error "wingetcreate manifest generation failed. A real submission would also fail. Exit code: $LASTEXITCODE"
+                    exit $LASTEXITCODE
+                  }
+                  $manifests = Get-ChildItem $manifestDir -Recurse -Filter '*.yaml' -ErrorAction SilentlyContinue
+                  if (-not $manifests) {
+                    Write-Error "wingetcreate produced no manifest files."
+                    exit 1
+                  }
+                  Write-Host "[REHEARSAL] Generated $($manifests.Count) manifest file(s). Nothing submitted."
+                }
 
     - stage: Release_MSLearn
       displayName: Update MS Learn Docs
@@ -522,6 +695,11 @@ extends:
             env:
               GH_TOKEN: $(GITHUB_TOKEN_2)
               MSLEARN_DOCS_FORK: $(MSLearnDocsFork)
+              # Set ONLY on a real release. A rehearsal syncs nothing, pushes nothing and opens no
+              # PR - it still clones, runs the port and prune scripts, and commits locally, which is
+              # where doc porting has actually broken (#685, #777). Absent variable = no push.
+              ${{ if startsWith(variables['Build.SourceBranch'], 'refs/heads/rel/v') }}:
+                MSLEARN_PUBLISH: 'true'
             inputs:
               targetType: 'inline'
               pwsh: true
@@ -562,14 +740,25 @@ extends:
                   exit $LASTEXITCODE
                 }
 
-                # Sync the fork with upstream
-                Write-Host "Syncing docs repo fork..."
-                & $ghExe repo sync $docsFork -b main
-                if ($LASTEXITCODE -ne 0) {
-                  Write-Error "Failed to sync docs repo fork. Exit code: $LASTEXITCODE"
-                  exit $LASTEXITCODE
+                # Sync the fork with upstream. Skipped in a rehearsal: it mutates the fork, and
+                # nothing gets pushed anyway. Read access is verified instead, since that is what
+                # a broken token would show up as.
+                if ($env:MSLEARN_PUBLISH -eq 'true') {
+                  Write-Host "Syncing docs repo fork..."
+                  & $ghExe repo sync $docsFork -b main
+                  if ($LASTEXITCODE -ne 0) {
+                    Write-Error "Failed to sync docs repo fork. Exit code: $LASTEXITCODE"
+                    exit $LASTEXITCODE
+                  }
+                  Write-Host "Fork synced successfully."
+                } else {
+                  Write-Host "[REHEARSAL] Skipping fork sync. Verifying fork access instead..."
+                  & $ghExe repo view $docsFork --json nameWithOwner,viewerPermission
+                  if ($LASTEXITCODE -ne 0) {
+                    Write-Error "Cannot read the docs fork. The release would fail to sync it. Exit code: $LASTEXITCODE"
+                    exit $LASTEXITCODE
+                  }
                 }
-                Write-Host "Fork synced successfully."
 
                 # Clone the fork
                 Write-Host "Cloning docs repo fork..."
@@ -633,6 +822,18 @@ extends:
                   Write-Error "Failed to commit. Exit code: $LASTEXITCODE"
                   exit $LASTEXITCODE
                 }
+
+                # A rehearsal stops here. Everything above - clone, port, validate, prune, commit -
+                # has run for real against this week's docs, which is where the failures are. The
+                # push and the PR are the only parts skipped.
+                if ($env:MSLEARN_PUBLISH -ne 'true') {
+                  $changed = (git diff --name-only HEAD~1 HEAD | Measure-Object -Line).Lines
+                  Pop-Location
+                  Write-Host "[REHEARSAL] Docs ported, validated and committed locally ($changed file(s) changed)."
+                  Write-Host "[REHEARSAL] Not pushing and not opening a PR."
+                  exit 0
+                }
+
                 git push --force-with-lease origin $branch
                 if ($LASTEXITCODE -ne 0) {
                   Pop-Location
