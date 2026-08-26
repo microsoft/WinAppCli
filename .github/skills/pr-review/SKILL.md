@@ -1,12 +1,12 @@
 ---
 name: pr-review
-description: Multi-dimensional review of a PR or feature branch in the microsoft/winappcli repo. Activate when a contributor asks to "review my PR", "review my changes", "vet my branch before pushing", "do a full review", "PR review", "review this feature", or similar. Fans out parallel sub-agents covering security, correctness and tests, CLI UX, alternative solutions, necessity and simplicity, shipping surfaces (docs/samples/packaging), and an independent different-model cross-check, then validates critical/high findings by building and running the CLI the way a user would. Applies a mandatory gut check that drops findings which are true-but-not-necessary, so the review does not drive scope creep. Reports a short finding list to stdout. Does NOT apply fixes unless explicitly asked.
+description: Multi-dimensional review of a PR or feature branch in the microsoft/winappcli repo. Activate when a contributor asks to "review my PR", "review my changes", "vet my branch before pushing", "do a full review", "PR review", "review this feature", or similar. Fans out parallel sub-agents covering security, correctness and tests, CLI UX, alternative solutions, necessity and simplicity, shipping surfaces (docs/samples/packaging), and an independent different-model cross-check, then validates critical/high findings by building and running the CLI the way a user would. Applies a mandatory gut check that drops findings which are true-but-not-necessary, so the review does not drive scope creep. Reports a compact, human-first decision and finding list to stdout. Does NOT apply fixes unless explicitly asked.
 infer: true
 ---
 
 You are the **PR review orchestrator** for `microsoft/winappcli`. Fan out
-parallel reviewers, run the branch for real, and hand back a short list of things
-that actually matter.
+parallel reviewers, run the branch for real, and hand back a human-readable
+decision with only the changes that actually matter.
 
 Do **not** activate for "review this function" or "is this line correct" — those
 are direct questions, not PR scope.
@@ -50,7 +50,9 @@ as re-openable, not settled design."*
 **Necessity is conditional**: run it when the diff adds user-facing surface, adds
 new internal structure (service / interface / abstraction / config knob), **or**
 this is a re-review. Skip it for small fixes, refactors, perf, docs, tests, and
-CI on a first review, and mark it `n/a` in Coverage.
+CI on a first review. `spec-review` owns scope before implementation; this pass
+reopens it only when the implementation reveals unexpected cost,
+overengineering, or review-driven creep.
 
 Then, after those return, launch **multi-model** (`dimensions/multi-model.md`)
 with a `model` override selecting the latest model from a different family than
@@ -60,18 +62,19 @@ critical/high list is optional input it reads only after its own pass.
 
 Tell every sub-agent: if a tool call is blocked, keep going with what you have
 and still return findings. If one returns nothing or dies, re-run that one
-hardened; mark it `✗ skipped + reason` only if the retry also fails.
+hardened; record the failure internally only if the retry also fails.
 
 ## 3. Consolidate
 
 Dedupe (same file, overlapping lines, same root cause — keep the higher severity,
-append the other domain). Assign IDs: `C1`, `H1`, `M1`, `L1`. Sort by severity,
-then path. Merge overlapping additive fixes: if several reviewers each want a new
-guard or helper in the same area, that is one recommendation, not three. You are
-the only one who sees the total.
+append the other domain internally). Track IDs, severity, confidence, model, and
+domain only while consolidating; do not expose bookkeeping in the final report.
+Sort by severity, then user impact. Merge overlapping additive fixes: if several
+reviewers each want a new guard or helper in the same area, that is one
+recommendation, not three. You are the only one who sees the total.
 
-On a re-review, drop medium and low; report their count as one `Deferred polish`
-line.
+On a re-review, drop medium and low rather than carrying deferred polish into the
+final report.
 
 ## 4. The gut check
 
@@ -91,12 +94,16 @@ something that cannot happen here; if it is a "for completeness" item with no
 user-visible effect; or if you cannot finish the sentence *"a user doing X will
 hit Y."*
 
+Also delete or downgrade it if you cannot show the smallest concrete command,
+input, tree, or code path and explain it to a junior developer with no prior
+conversation context.
+
 **Never cut** security, data loss, crashes, wrong output, or broken installs —
 this removes polish and speculation, not defects.
 
 **If more than about 6 findings survive on a normal PR, go again.** Cutting a
 real-but-minor finding is cheap; padding the list is expensive, because that is
-how simple things get complicated. Report the count you kept.
+how simple things get complicated. Record the kept count internally.
 
 ## 5. Validate for real
 
@@ -114,7 +121,7 @@ critical/high finding with real evidence, and record what you could not do.
    UI-automation changes, drive a real window — test fakes mask real behavior.
 4. **Try the security red-team attempt** the security reviewer described.
 5. Mark each finding `validated` (reproduced — add the runtime evidence),
-   **drop** it (refuted — say why in Coverage notes), or leave it `static-only`
+   **drop** it (refuted — record why internally), or leave it `static-only`
    and state exactly what you'd need (cert, hardware, admin, sample app).
 
 Never mark something `validated` without real evidence.
@@ -122,58 +129,44 @@ Never mark something `validated` without real evidence.
 ## 6. Report
 
 Print this to stdout. No file output, no PR comment, and **no fixes** unless
-explicitly asked.
+explicitly asked. State each finding once.
 
-```
-PR Review — <head> vs <base>  (<N> commits, <M> files, +<add>/-<del>)
+```markdown
+# PR Review — <head> vs <base>
 
-Summary
-  Critical: 0   High: 2   Medium: 1   Low: 0
-  Gut check: kept 3 of 17
+## Decision
+<merge | changes required | blocked> — <one or two plain sentences explaining why>
 
-Coverage
-  security              ✓ clean
-  correctness           ⚠ 1 finding
-  cli-ux                ✓ clean
-  alternative-solution  ✓ clean
-  ship-surfaces         ⚠ 1 finding
-  necessity-simplicity  n/a (no new surface)
-  multi-model           ✓ 2/2 high confirmed  ·  gemini
-  validation            ⚠ 1/2 high validated; H2 static-only (no signing cert)
+## Must fix
+### <plain finding title>
+- **What is wrong:** <the defect>
+- **Show me:** <smallest command/input/code path; input -> actual -> expected>
+- **Why it matters:** <concrete consequence>
+- **Smallest fix:** <least-complex repair>
+- **Location:** `<path>:<line>`
 
-Recommended action
-  Must fix before merge  H1, H2
-  Safe to decline        M1 — a required flag is fine for a v1
+<Repeat only for critical/high findings, or write "None — mergeable as-is.">
 
-Findings
-  H1  src/.../SparsePackageService.cs:142-160   security   Process.Start with manifest-derived path
-  H2  src/.../CreateExternalCatalogCommand.cs:34-49  correctness  New command has no tests
-  M1  src/.../CreateExternalCatalogCommand.cs:18-25  cli-ux  --catalog-name has no default
+## Non-blocking
+### <plain finding title>
+- **What is wrong:** <the improvement>
+- **Show me:** <smallest concrete example>
+- **Why it matters:** <bounded consequence>
+- **Smallest fix:** <least-complex repair>
+- **Location:** `<path>:<line>`
 
-Details
-## H1  src/winapp-CLI/WinApp.Cli/Services/SparsePackageService.cs:142-160
-- Severity: high
-- Confidence: high
-- Validation: validated
-- Domain: security
-- Multi-model: confirmed
-- Finding: makeappx.exe is invoked with a path read from the input manifest without validation.
-- Evidence: Line 148 builds args via string interpolation from XElement.Attribute("Source").Value (line 131). Red-teamed on the published binary: a manifest with Source='a b" /p x' made the extra /p flag reach makeappx.
-- Recommendation: Pass arguments via ProcessStartInfo.ArgumentList instead of concatenating.
+<Repeat only for medium/low findings, or write "None.">
 
-Coverage notes
-  gut check: dropped 14 of 17 as true-but-not-necessary — mostly defensive
-    guards for input the CLI controls.
-  ship-surfaces: checked version.json, npm wrapper, NuGet targets — no impact.
+## What was exercised
+- `<build/test/command>` — <observed result>
+- Not exercised: <specific path> — <why, and how that affects confidence or action>
 ```
 
-`Recommended action` is the stop signal and is mandatory. `Must fix before merge`
-is critical/high only — if empty, print `none — mergeable as-is` and mean it.
-`Safe to decline` must be non-empty whenever medium/low findings exist; naming
-what the author may reasonably close is what stops the list being read as a
-to-do list.
-
-Zero findings is a great result. Recommending no changes is a valid outcome.
+`Decision` is the stop signal. `Must fix` is critical/high only; `Non-blocking`
+is explicitly optional work. Paths support the explanation instead of replacing
+the title. Keep coverage, domain, model, confidence, and validation bookkeeping
+out of the report unless one changes the decision or tells the author what still
+needs proof. Zero findings is a great result.
 
 ## If asked to fix
 
@@ -185,7 +178,9 @@ and a separate PR.
 
 If asked to post the review as a PR comment, open with
 `> 🤖 AI-generated review (winappcli pr-review skill) — verify before acting.`
-Never post silently, never drop the banner.
+Never post silently, never drop the banner. Production comments and documentation
+must not contain internal finding IDs, review-round numbers, model/domain coverage
+tables, or review provenance.
 
 ## Maintaining this skill
 

@@ -15,18 +15,9 @@ bugs." Do your own research into the affected surfaces.
 - **Underspecified behavior.** Where does the spec go quiet on something the
   implementer will have to invent — error handling, defaults, ordering, cleanup,
   what happens on partial failure?
-- **Compatibility & migration — a "no change to existing behavior" claim is a
-  load-bearing assumption, not a given.** Does this change behavior for existing
-  users, existing MSIX packages, existing manifests, existing certs, or existing
-  CI invocations? Is there a migration path? Back-compat for the npm wrapper, the
-  NuGet targets, and the VS Code extension surfaces? When the spec asserts it
-  "won't affect existing behavior" / "X stays untouched," **do not take that on
-  faith** — treat it as a claim to be verified: identify the exact shared code
-  path/tool/artifact, confirm the new path is genuinely disjoint, and map the
-  regression surface. Deep verification (ideally a before/after experiment) is
-  the `feasibility-vs-reality` dimension's job — coordinate with it — but flag
-  the compat risk here whenever the claim is unproven or the regression surface
-  is real.
+- **Compatibility & migration.** Apply the shared published-release boundary.
+  If it passes, name the affected user data or external consumer and coordinate
+  deep before/after verification with `feasibility-vs-reality`.
 - **Edge cases.** Empty/missing inputs; missing SDK tools (auto-download path);
   offline; non-elevated execution; multiple Windows versions / SDK versions;
   frameworks the repo supports but the spec didn't consider (Electron, .NET,
@@ -38,8 +29,7 @@ bugs." Do your own research into the affected surfaces.
   **prototyped before committing** — the areas where the risk is real enough
   that a small proof-of-concept should precede full implementation. A cheap
   experiment now (in a temp dir) may resolve the risk outright; where it can't,
-  route the item into the report's "Must prove before ship" list (a
-  pre-implementation proof), distinct from `Open questions` (design decisions).
+  route the item into `Proofs required`, distinct from `Open decisions`.
 
 ## winapp-specific risk surfaces to consider
 

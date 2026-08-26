@@ -144,12 +144,13 @@ internal partial class MsixService(
             var doc = AppxManifestDocument.Parse(manifestContent);
             if (doc.ApplicationExecutable != null && PlaceholderHelper.ContainsPlaceholders(doc.ApplicationExecutable))
             {
-                // Try to auto-infer by finding .exe files in the input folder root
-                var exeFiles = inputFolder.Exists
+                // Try to auto-infer by finding .exe files in the input folder root. Runtime
+                // helpers (createdump.exe, RestartAgent.exe, ...) are never entry points, so
+                // they are excluded from the candidates but kept for the error message.
+                var allExeFiles = inputFolder.Exists
                     ? inputFolder.GetFiles("*.exe", SearchOption.TopDirectoryOnly)
-                        .Where(f => !IsRuntimeToolExecutable(f.Name))
-                        .ToArray()
                     : [];
+                var exeFiles = allExeFiles.Where(f => !IsRuntimeToolExecutable(f.Name)).ToArray();
 
                 if (exeFiles.Length == 1)
                 {
@@ -164,9 +165,8 @@ internal partial class MsixService(
                 }
                 else
                 {
-                    var count = exeFiles.Length == 0 ? "no" : "multiple";
                     throw new InvalidOperationException(
-                        $"The manifest contains a placeholder for the executable but {count} .exe files were found in the input folder. " +
+                        $"The manifest contains a placeholder for the executable but {DescribeExecutableCandidates(allExeFiles, exeFiles)}. " +
                         "Edit the manifest to specify the executable or use --executable to specify the relative path to the exe.");
                 }
             }
@@ -180,6 +180,32 @@ internal partial class MsixService(
 
         return manifestContent;
     }
+
+    /// <summary>
+    /// Builds the middle clause of the "cannot resolve the executable placeholder" error,
+    /// naming the candidates so the caller knows what to pass to <c>--executable</c>. When
+    /// every executable was filtered out as a runtime helper, it says so instead of claiming
+    /// the folder has no <c>.exe</c> files at all.
+    /// </summary>
+    private static string DescribeExecutableCandidates(FileInfo[] allExeFiles, FileInfo[] candidates)
+    {
+        if (candidates.Length > 1)
+        {
+            return $"multiple .exe files in the input folder could be the app: {FormatExeNames(candidates)}";
+        }
+
+        var skipped = allExeFiles.Where(f => IsRuntimeToolExecutable(f.Name)).ToArray();
+        if (skipped.Length > 0)
+        {
+            var helperLabel = skipped.Length == 1 ? "a known runtime helper" : "known runtime helpers";
+            return $"no .exe file in the input folder could be the app ({FormatExeNames(skipped)} skipped as {helperLabel})";
+        }
+
+        return "no .exe files were found in the input folder";
+    }
+
+    private static string FormatExeNames(IEnumerable<FileInfo> files) =>
+        string.Join(", ", files.Select(f => f.Name).Order(StringComparer.OrdinalIgnoreCase));
 
     /// <summary>
     /// Resolves <c>&lt;Resource Language="x-generate"/&gt;</c> in the manifest by replacing it
@@ -838,13 +864,32 @@ internal partial class MsixService(
     }
 
     /// <summary>
-    /// Returns true if the given file name belongs to a .NET runtime tool that should be
+    /// Helper executables that runtimes drop next to the application executable in a build
+    /// output. None of them is ever an app entry point, so they are excluded when
+    /// auto-detecting the application executable.
+    /// </summary>
+    /// <remarks>
+    /// <c>createdump.exe</c> and <c>apphost.exe</c> come from a .NET self-contained publish.
+    /// <c>RestartAgent.exe</c> and <c>DeploymentAgent.exe</c> are the only two executables in
+    /// the Windows App SDK framework payload, which <c>WindowsAppSDKSelfContained=true</c>
+    /// extracts into the output root — so without them here, auto-detection is ambiguous for
+    /// every Windows App SDK self-contained app (issue #790).
+    /// </remarks>
+    private static readonly HashSet<string> RuntimeToolExecutables = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "createdump.exe",
+        "apphost.exe",
+        "RestartAgent.exe",
+        "DeploymentAgent.exe"
+    };
+
+    /// <summary>
+    /// Returns true if the given file name belongs to a runtime helper that should be
     /// excluded when auto-detecting the application executable.
     /// </summary>
     internal static bool IsRuntimeToolExecutable(string fileName)
     {
-        return string.Equals(fileName, "createdump.exe", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(fileName, "apphost.exe", StringComparison.OrdinalIgnoreCase);
+        return RuntimeToolExecutables.Contains(fileName);
     }
 
     /// <summary>
