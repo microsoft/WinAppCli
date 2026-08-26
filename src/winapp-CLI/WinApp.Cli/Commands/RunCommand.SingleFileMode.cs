@@ -121,10 +121,16 @@ internal partial class RunCommand
             var resolution = outcome.Resolution;
             var outputFolder = new DirectoryInfo(resolution.OutputDirectory);
 
+            // Resolve the effective executable ONCE, before the manifest is generated. Generation writes a
+            // concrete Executable attribute, so an explicit --executable has to be known here — passing it
+            // only downstream would leave the generated manifest naming the build's executable, and
+            // placeholder resolution then has nothing to substitute and silently keeps that name.
+            var effectiveExecutable = string.IsNullOrWhiteSpace(executable) ? resolution.ExecutableName : executable;
+
             FileInfo resolvedManifest;
             try
             {
-                resolvedManifest = await ResolveSingleFileManifestAsync(resolution, manifest, outputFolder, isJson, cancellationToken);
+                resolvedManifest = await ResolveSingleFileManifestAsync(resolution, manifest, outputFolder, effectiveExecutable, isJson, cancellationToken);
             }
             catch (ProjectRunException ex)
             {
@@ -141,15 +147,14 @@ internal partial class RunCommand
             // framework dependency and runtime. Passing null instead would fall back to globbing the
             // current directory for any .csproj, which for a file-based app can only find an unrelated
             // project — and would write THAT project's Windows App SDK dependency into this app's manifest.
-            // Default --executable to the executable the build resolved. An authored manifest may still
-            // use the $targetnametoken$ placeholder, and resolving it by scanning the output directory hits
-            // the "multiple .exe files found" ambiguity, because every WinAppSDK self-contained output
-            // ships a RestartAgent.exe beside the app. The build already knows which one is the app, so use
-            // it — while still letting an explicit --executable win.
+            // The effective executable also covers an AUTHORED manifest that still uses the
+            // $targetnametoken$ placeholder: resolving that by scanning the output hits the "multiple .exe
+            // files found" ambiguity, because every WinAppSDK self-contained output ships a
+            // RestartAgent.exe beside the app.
             return await ExecuteRunPipelineAsync(
                 outputFolder, resolvedManifest, outputAppXDirectory, appArgs,
                 noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols,
-                string.IsNullOrWhiteSpace(executable) ? resolution.ExecutableName : executable,
+                effectiveExecutable,
                 isJson,
                 runtimeArch: resolution.Architecture,
                 projectFile: singleFile,
@@ -194,6 +199,7 @@ internal partial class RunCommand
             SingleFileRunResolution resolution,
             FileInfo? explicitManifest,
             DirectoryInfo outputFolder,
+            string effectiveExecutable,
             bool isJson,
             CancellationToken cancellationToken)
         {
@@ -241,7 +247,7 @@ internal partial class RunCommand
             // fall through to registration against a missing or half-written manifest.
             var generateResult = await statusService.ExecuteWithStatusAsync("Generating manifest...", async (taskContext, ct) =>
             {
-                await GenerateSingleFileManifestAsync(outputFolder, info, resolution.ExecutableName, manifestFileName, taskContext, ct);
+                await GenerateSingleFileManifestAsync(outputFolder, info, effectiveExecutable, manifestFileName, taskContext, ct);
                 return (0, $"Manifest generated for {info.PackageName} {info.Version}");
             }, cancellationToken);
 

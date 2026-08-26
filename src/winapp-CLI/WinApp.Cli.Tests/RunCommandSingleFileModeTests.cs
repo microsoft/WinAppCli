@@ -508,6 +508,14 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual("other.exe", _fakeMsixService.AddLooseLayoutExecutableCalls.Single(),
             "An explicit --executable must still win over the resolved default");
+
+        // The generated manifest writes a CONCRETE Executable, so the override has to reach generation.
+        // Checking only what flows downstream would miss this: placeholder resolution finds nothing to
+        // substitute in a generated manifest and silently leaves the build's executable in place.
+        var app = LoadGeneratedManifest(outputDir).Root!
+            .Element(Ns + "Applications")!.Element(Ns + "Application")!;
+        Assert.AreEqual("other.exe", app.Attribute("Executable")!.Value,
+            "--executable must be written into the generated manifest, not just passed downstream");
     }
 
     #endregion
