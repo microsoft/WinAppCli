@@ -67,7 +67,8 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
         }
 
         _fakeProjectRunService.SingleFileBuildOutcome = new SingleFileBuildOutcome(
-            new SingleFileRunResolution(singleFile, outputDirectory.FullName, executableName, props), 0);
+            new SingleFileRunResolution(
+                singleFile, outputDirectory.FullName, executableName, "x64", "net10.0-windows10.0.19041.0", props), 0);
     }
 
     private static XDocument LoadGeneratedManifest(DirectoryInfo outputDirectory)
@@ -356,6 +357,28 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
     }
 
     [TestMethod]
+    [DataRow("Package.appxmanifest", DisplayName = "Package.appxmanifest")]
+    [DataRow("appxmanifest.xml", DisplayName = "appxmanifest.xml")]
+    public async Task SingleFileMode_DirectoryWideManifestNextToTheFile_IsNotPickedUpImplicitly(string manifestName)
+    {
+        // foo.cs and bar.cs can share a source directory, so a directory-wide manifest name would be
+        // silently applied to BOTH — registering one under the other's identity. Only the per-file
+        // <stem>.appxmanifest is discovered implicitly; a shared one must be named with --manifest.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        File.WriteAllText(Path.Combine(singleFile.DirectoryName!, manifestName), "<Package/>");
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(
+            Path.Combine(outputDir.FullName, "Package.appxmanifest"),
+            _fakeMsixService.AddLooseLayoutCalls.Single().ManifestPath,
+            "A directory-wide manifest beside the .cs must not be adopted; generate one instead");
+    }
+
+    [TestMethod]
     public async Task SingleFileMode_PerFileAuthoredManifest_BeatsThePerDirectoryOne()
     {
         // foo.cs and bar.cs can share a source directory, so the per-file name wins when both exist.
@@ -370,6 +393,49 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
 
         Assert.AreEqual(0, exitCode);
         Assert.AreEqual(perFile.FullName, _fakeMsixService.AddLooseLayoutCalls.Single().ManifestPath);
+    }
+
+    #endregion
+
+    #region Architecture
+
+    [TestMethod]
+    public async Task SingleFileMode_ProvisionsTheRuntimeForTheAppsArchitecture()
+    {
+        // Single-file mode rejects --arch, so the architecture the app declared via #:property is the
+        // ONLY thing that can reach runtime provisioning. Passing null there would install the machine's
+        // architecture instead, and a cross-architecture app would fail to launch.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        _fakeProjectRunService.SingleFileBuildOutcome = new SingleFileBuildOutcome(
+            new SingleFileRunResolution(
+                singleFile, outputDir.FullName, "counter.exe", "arm64", "net10.0-windows10.0.22621.0",
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)), 0);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
+
+        Assert.AreEqual(0, exitCode);
+        var runtimeCall = _fakeMsixService.AddLooseLayoutRuntimeCalls.Single();
+        Assert.AreEqual("arm64", runtimeCall.RuntimeArch);
+        Assert.AreEqual("net10.0-windows10.0.22621.0", runtimeCall.Framework,
+            "The built TFM must reach runtime provisioning so the Windows App SDK version resolves correctly");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_ResolvesPackagesFromTheCsFile_NotAnUnrelatedProjectInTheCurrentDirectory()
+    {
+        // With a null project file the loose-layout pipeline globs the CURRENT DIRECTORY for any .csproj
+        // and uses its package list. A .cs file-based app has no project, so that could only ever find an
+        // unrelated one — and would write ITS Windows App SDK dependency into this app's manifest.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(singleFile.FullName, _fakeMsixService.AddLooseLayoutRuntimeCalls.Single().ProjectFile,
+            "The .cs itself must be the package-list source");
     }
 
     #endregion

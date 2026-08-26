@@ -157,11 +157,15 @@ internal sealed record SingleFileRunOptions(
 /// <param name="SingleFile">The <c>.cs</c> file that was built/evaluated.</param>
 /// <param name="OutputDirectory">Absolute build-output directory (under <c>%TEMP%\dotnet\runfile\…</c>). Stable across edits, so package identity and <c>LocalState</c> survive code changes.</param>
 /// <param name="ExecutableName">The app executable's bare file name (e.g. <c>counter.exe</c>), written concretely into the generated manifest.</param>
+/// <param name="Architecture">The architecture the app was built for (<c>x64</c>/<c>arm64</c>/<c>x86</c>), resolved from the app's own <c>RuntimeIdentifier</c>/<c>Platform</c>. Threaded into Windows App Runtime provisioning so a cross-architecture app gets matching runtime packages.</param>
+/// <param name="TargetFramework">The TFM the app was built for, threaded into runtime provisioning so the Windows App SDK version resolves from the right framework; null when unresolved.</param>
 /// <param name="Properties">Every evaluated MSBuild property from the <c>--getProperty</c> pass, keyed case-insensitively.</param>
 internal sealed record SingleFileRunResolution(
     FileInfo SingleFile,
     string OutputDirectory,
     string ExecutableName,
+    string Architecture,
+    string? TargetFramework,
     IReadOnlyDictionary<string, string> Properties);
 
 /// <summary>

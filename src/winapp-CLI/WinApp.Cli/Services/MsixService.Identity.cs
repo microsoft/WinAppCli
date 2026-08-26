@@ -431,6 +431,39 @@ internal partial class MsixService
             File.Move(originalPath, renamedPath, true);
             taskContext.AddDebugMessage($"{UiSymbols.Files} Renamed {appxManifestPath.Name} to appxmanifest.xml");
         }
+
+        RemoveCompetingLayoutManifests(outputAppXDirectory, taskContext);
+    }
+
+    /// <summary>
+    /// Deletes any manifest in the layout root other than the <c>appxmanifest.xml</c> that was just
+    /// staged, so a registered loose layout carries exactly one manifest.
+    /// </summary>
+    /// <remarks>
+    /// The directory sync copies the whole input folder into the layout, so a manifest that lives in the
+    /// payload — for example the <c>Package.appxmanifest</c> winapp generates into a file-based app's
+    /// build output — arrives as an ordinary file. Registration always uses the normalized
+    /// <c>appxmanifest.xml</c>, but downstream readers do not: <see cref="ManifestHelper.FindManifest"/>
+    /// probes <c>Package.appxmanifest</c> FIRST, so leaving the stale copy behind makes
+    /// <c>--with-alias</c> read the wrong manifest and report "No execution alias found" even though the
+    /// app was registered from a manifest that declares one.
+    /// </remarks>
+    private static void RemoveCompetingLayoutManifests(DirectoryInfo outputAppXDirectory, TaskContext taskContext)
+    {
+        foreach (var candidate in outputAppXDirectory.EnumerateFiles("*.appxmanifest", SearchOption.TopDirectoryOnly))
+        {
+            try
+            {
+                candidate.Delete();
+                taskContext.AddDebugMessage($"{UiSymbols.Files} Removed competing layout manifest: {candidate.Name}");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Best effort: a locked leftover must not fail the run, and registration still uses the
+                // normalized appxmanifest.xml.
+                taskContext.AddDebugMessage($"{UiSymbols.Warning} Could not remove {candidate.Name}: {ex.Message}");
+            }
+        }
     }
 
     /// <summary>

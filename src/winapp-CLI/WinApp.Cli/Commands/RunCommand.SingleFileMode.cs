@@ -130,15 +130,24 @@ internal partial class RunCommand
                 return Fail(ex.Message, isJson);
             }
 
-            WarnOnSingleFileIdentityCollision(resolvedManifest, outputFolder, isJson);
+            WarnOnSingleFileIdentityCollision(resolvedManifest, outputAppXDirectory ?? new DirectoryInfo(Path.Combine(outputFolder.FullName, "AppX")), isJson);
 
             // A tier-3 manifest can be named <stem>.appxmanifest, which ManifestHelper.FindManifest does not
             // probe for, so the resolved manifest is always passed explicitly rather than left to
             // folder-mode auto-detection.
+            // Pass the .cs itself as the "project file": AddLooseLayoutIdentityAsync resolves the app's
+            // NuGet package list from it (via `dotnet package list --file`) to decide the Windows App SDK
+            // framework dependency and runtime. Passing null instead would fall back to globbing the
+            // current directory for any .csproj, which for a file-based app can only find an unrelated
+            // project — and would write THAT project's Windows App SDK dependency into this app's manifest.
             return await ExecuteRunPipelineAsync(
                 outputFolder, resolvedManifest, outputAppXDirectory, appArgs,
                 noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, isJson,
-                runtimeArch: null, projectFile: null, framework: null, noRestore: noRestore, cancellationToken);
+                runtimeArch: resolution.Architecture,
+                projectFile: singleFile,
+                framework: resolution.TargetFramework,
+                noRestore: noRestore,
+                cancellationToken);
         }
 
         /// <summary>
@@ -146,8 +155,8 @@ internal partial class RunCommand
         /// <list type="number">
         ///   <item><c>--manifest</c> — an explicit path on the command line always wins.</item>
         ///   <item><c>WinAppManifestPath</c> — the same escape hatch the NuGet targets expose, declared from the <c>.cs</c>.</item>
-        ///   <item>A manifest the user authored <b>next to the <c>.cs</c></b> — used verbatim; nothing is generated.</item>
-        ///   <item>Otherwise, generate <c>&lt;stem&gt;.appxmanifest</c> into the build output.</item>
+        ///   <item>A manifest the user authored <b>next to the <c>.cs</c></b>, named <c>&lt;stem&gt;.appxmanifest</c> — used verbatim; nothing is generated.</item>
+        ///   <item>Otherwise, generate <c>Package.appxmanifest</c> into the build output.</item>
         /// </list>
         /// </summary>
         /// <remarks>
@@ -165,7 +174,7 @@ internal partial class RunCommand
         /// </para>
         /// <para>
         /// The names differ by tier on purpose. The SOURCE directory is shared — <c>foo.cs</c> and
-        /// <c>bar.cs</c> can sit side by side — so tier 3 prefers a per-file
+        /// <c>bar.cs</c> can sit side by side — so tier 3 discovers ONLY the per-file
         /// <c>&lt;stem&gt;.appxmanifest</c>, matching the SDK's own per-file <c>&lt;stem&gt;.run.json</c>
         /// convention. The OUTPUT directory is not shared: the SDK gives every file-based app its own
         /// <c>%TEMP%\dotnet\runfile\&lt;stem&gt;-&lt;hash&gt;\</c>, so tier 4 writes the canonical
@@ -218,11 +227,20 @@ internal partial class RunCommand
             var info = SingleFileManifestPlanner.Plan(resolution.SingleFile, resolution.Properties);
             const string manifestFileName = "Package.appxmanifest";
 
-            await statusService.ExecuteWithStatusAsync("Generating manifest...", async (taskContext, ct) =>
+            // The status task converts a thrown exception into a non-zero return code rather than
+            // rethrowing, so ignoring the result would let a failed generation (disk full, denied write)
+            // fall through to registration against a missing or half-written manifest.
+            var generateResult = await statusService.ExecuteWithStatusAsync("Generating manifest...", async (taskContext, ct) =>
             {
                 await GenerateSingleFileManifestAsync(outputFolder, info, resolution.ExecutableName, manifestFileName, taskContext, ct);
                 return (0, $"Manifest generated for {info.PackageName} {info.Version}");
             }, cancellationToken);
+
+            if (generateResult != 0)
+            {
+                throw new ProjectRunException(
+                    $"Could not generate a manifest for '{resolution.SingleFile.Name}' in '{outputFolder.FullName}'.");
+            }
 
             return new FileInfo(Path.Combine(outputFolder.FullName, manifestFileName));
         }
@@ -259,22 +277,21 @@ internal partial class RunCommand
                 cancellationToken);
 
         /// <summary>
-        /// Finds a manifest the user authored next to the <c>.cs</c>, preferring the per-file
-        /// <c>&lt;stem&gt;.appxmanifest</c> over the conventional per-directory names.
+        /// Finds a manifest the user authored next to the <c>.cs</c>.
         /// </summary>
+        /// <remarks>
+        /// Only the per-file <c>&lt;stem&gt;.appxmanifest</c> name is discovered implicitly. The
+        /// directory-wide names (<c>Package.appxmanifest</c>, <c>appxmanifest.xml</c>) are deliberately
+        /// NOT probed: file-based apps are per-file and can sit side by side, so a shared
+        /// <c>Package.appxmanifest</c> would silently be applied to every <c>.cs</c> in the folder —
+        /// registering <c>bar.cs</c> under <c>foo.cs</c>'s identity. A user who genuinely wants one
+        /// manifest for several files points at it explicitly with <c>--manifest</c> or
+        /// <c>#:property WinAppManifestPath</c>.
+        /// </remarks>
         private static FileInfo? FindAuthoredSingleFileManifest(DirectoryInfo sourceDirectory, string stem)
         {
-            string[] candidates = [$"{stem}.appxmanifest", "Package.appxmanifest", "appxmanifest.xml"];
-            foreach (var candidate in candidates)
-            {
-                var path = Path.Combine(sourceDirectory.FullName, candidate);
-                if (File.Exists(path))
-                {
-                    return new FileInfo(path);
-                }
-            }
-
-            return null;
+            var path = Path.Combine(sourceDirectory.FullName, $"{stem}.appxmanifest");
+            return File.Exists(path) ? new FileInfo(path) : null;
         }
 
         private void LogSingleFileManifestSource(FileInfo manifest, string reason, bool isJson)
@@ -296,10 +313,19 @@ internal partial class RunCommand
         /// ugly for everyone in order to protect a rare case — and identity is already scoped by
         /// <c>Publisher=CN=&lt;user&gt;</c>, so it can never collide across users. Keep the clean default
         /// and make the replacement visible instead of silent.
+        /// <para>
+        /// <paramref name="layoutDirectory"/> must be the EFFECTIVE AppX layout directory (honoring
+        /// <c>--output-appx-directory</c>), because that is what a registration's install location points
+        /// at. Comparing against the build output instead would warn about every re-run that uses a
+        /// custom layout path, which trains users to ignore a warning that is usually real.
+        /// </para>
         /// </remarks>
-        private void WarnOnSingleFileIdentityCollision(FileInfo manifest, DirectoryInfo outputFolder, bool isJson)
+        private void WarnOnSingleFileIdentityCollision(FileInfo manifest, DirectoryInfo layoutDirectory, bool isJson)
         {
-            if (isJson || !logger.IsEnabled(LogLevel.Information))
+            // Gate on Warning, not Information: --quiet suppresses Information but still promises
+            // warnings, and silently replacing another app's registration is exactly what a user needs
+            // to hear about.
+            if (isJson || !logger.IsEnabled(LogLevel.Warning))
             {
                 return;
             }
@@ -325,7 +351,7 @@ internal partial class RunCommand
                         continue;
                     }
 
-                    if (PathsPointToSameLocation(existing.InstallLocation, outputFolder.FullName))
+                    if (PathsPointToSameLocation(existing.InstallLocation, layoutDirectory.FullName))
                     {
                         continue;
                     }

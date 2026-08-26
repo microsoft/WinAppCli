@@ -174,26 +174,27 @@ Building a WinUI 3 UI and need to find the right control or a working sample?
 **Requires:** a sparse `appxmanifest.xml` + the target `.exe` or `.xml`/`.manifest`
 
 ### `winapp run [<input>]`
-**Purpose:** Build and/or package a Windows app and launch it — for **packaged** apps this simulates a full MSIX install with package identity; for **unpackaged** apps it launches the built `.exe` directly (no package identity). Returns the launched process ID for debugger attachment. Operates in one of two modes, auto-selected from the input:
+**Purpose:** Build and/or package a Windows app and launch it — for **packaged** apps this simulates a full MSIX install with package identity; for **unpackaged** apps it launches the built `.exe` directly (no package identity). Returns the launched process ID for debugger attachment. Operates in one of three modes, auto-selected from the input:
 - **Folder mode** — input is a build-output folder (contains `Package.appxmanifest`/`AppxManifest.xml`). Creates a loose-layout package, registers it with Windows, and launches it. Original behavior, unchanged.
 - **Project mode** — input is a `.csproj`, a `.sln`/`.slnx` solution, or a directory containing one (including `.`). Builds the project with `dotnet build`, installs the matching-architecture Windows App Runtime if the app uses the Windows App SDK, then launches it. Supports both **packaged** (`WindowsPackageType=MSIX` → loose-layout + AUMID) and **unpackaged** (`WindowsPackageType=None` → launch the built `.exe` directly) WinUI apps, detected from the effective `WindowsPackageType` MSBuild property. Input defaults to the current directory when omitted (like `dotnet run`). Requires .NET SDK 8.0.100+.
-**When to use:** The **preferred command** for iterative development and debugging with package identity (.NET, C++, Rust, Flutter, Tauri). Point it at a project/solution to build-and-run in one step, or at a build-output folder to package-and-run existing output.
+- **Single-file mode** — input is a `.cs` .NET file-based app (a single file configured by `#:` directives, no project file). Builds it, **generates a manifest** from its `#:property` values, and launches it packaged with identity — so **no `winapp init` or `manifest generate` step is needed**. Configure identity with `#:property WinAppPackageName`, `WinAppDisplayName`, `WinAppPublisher`, `WinAppVersion`, `WinAppDescription` (all optional). Always packaged; `WindowsPackageType=None` is rejected. Requires .NET SDK 10.0.100+.
+**When to use:** The **preferred command** for iterative development and debugging with package identity (.NET, C++, Rust, Flutter, Tauri). Point it at a project/solution to build-and-run in one step, at a `.cs` file-based app, or at a build-output folder to package-and-run existing output.
 **Key options:**
-- `--manifest <path>` — path to `appxmanifest.xml` (folder mode and packaged project mode; default: auto-detect)
+- `--manifest <path>` — path to `appxmanifest.xml` (folder mode, packaged project mode, and single-file mode; default: auto-detect, or generated in single-file mode)
 - `--args <string>` — command-line arguments to pass to the app. Alternatively pass app args after `--` (e.g., `winapp run . -- --flag value`)
 - `--no-launch` — register/prepare without launching
 - `--with-alias` — launch via execution alias (console apps run in current terminal)
-- `-c, --configuration <name>` — (project mode) build configuration; default `Debug`
-- `--arch <x64|arm64|x86>` — (project mode) target architecture; default: current process arch. Sets both the build RID and the Windows App Runtime arch
-- `-r, --runtime <rid>` — (project mode) target .NET RID (e.g. `win-x64`); **only the RID's architecture is used** — project mode reduces it and always builds the canonical `win-<arch>` RID, so a version-specific or non-Windows RID is not forwarded (a non-Windows RID like `linux-x64` is rejected). Overrides `--arch`.
-- `-f, --framework <tfm>` — (project mode) target framework for multi-targeted projects
-- `--project <name-or-path>` — (project mode) select which project to launch when a solution/directory has multiple runnable app projects (errors listing candidates if ambiguous)
-- `--no-build` / `--no-restore` — (project mode) skip build / restore
-- `-p, --property <Name=Value>` — (project mode) MSBuild property forwarded to build + evaluation; repeatable (e.g. `-p WindowsPackageType=None`)
+- `-c, --configuration <name>` — (project + single-file mode) build configuration; default `Debug`
+- `--arch <x64|arm64|x86>` — (project mode) target architecture; default: current process arch. Sets both the build RID and the Windows App Runtime arch. **Rejected in single-file mode** — declare `#:property Platform=x64` in the `.cs` instead
+- `-r, --runtime <rid>` — (project mode) target .NET RID (e.g. `win-x64`); **only the RID's architecture is used** — project mode reduces it and always builds the canonical `win-<arch>` RID, so a version-specific or non-Windows RID is not forwarded (a non-Windows RID like `linux-x64` is rejected). Overrides `--arch`. **Rejected in single-file mode**
+- `-f, --framework <tfm>` — (project mode) target framework for multi-targeted projects. **Rejected in single-file mode** — declare `#:property TargetFramework=…` instead
+- `--project <name-or-path>` — (project mode) select which project to launch when a solution/directory has multiple runnable app projects (errors listing candidates if ambiguous). **Rejected in single-file mode** — the `.cs` file is the project
+- `--no-build` / `--no-restore` — (project + single-file mode) skip build / restore
+- `-p, --property <Name=Value>` — (project + single-file mode) MSBuild property forwarded to build + evaluation; repeatable (e.g. `-p WindowsPackageType=None`)
 - `--debug-output` — capture `OutputDebugString` messages and first-chance exceptions (prevents other debuggers like VS/VS Code from attaching). For WinUI apps it also auto-runs a stowed-exception (`0xC000027B`) triage pass (`!xamlstowed`/`!xamltriage`) that recovers the originating HRESULT and native XAML dispatch stack. The first triage run downloads debugger components (engine bits from NuGet + `JsProvider.dll` from the WinDbg CDN) and caches them under `~\.winapp\dbgtools\`; if downloads are blocked, install Debugging Tools for Windows or point `WINAPP_DBGTOOLS_DIR` at a debugger directory containing `dbgeng.dll` and `JsProvider.dll`.
 - `--symbols` — with `--debug-output`, download Microsoft public symbols for richer native crash stacks (first run downloads and caches them)
 - `--output-appx-directory <path>` — custom output directory for the loose layout
-**Requires:** Folder mode — built app output directory + `appxmanifest.xml`. Project mode — a `.csproj`/`.sln`/`.slnx` (or directory containing one) + .NET SDK 8.0.100+.
+**Requires:** Folder mode — built app output directory + `appxmanifest.xml`. Project mode — a `.csproj`/`.sln`/`.slnx` (or directory containing one) + .NET SDK 8.0.100+. Single-file mode — a `.cs` file-based app + .NET SDK 10.0.100+ (no manifest needed).
 
 ### `winapp cert generate`
 **Purpose:** Create a self-signed PFX certificate for local testing.

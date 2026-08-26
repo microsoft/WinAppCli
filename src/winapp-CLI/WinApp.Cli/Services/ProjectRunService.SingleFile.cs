@@ -57,6 +57,15 @@ internal sealed partial class ProjectRunService
         "OutputType",
         "WindowsPackageType",
         "WindowsAppSDKSelfContained",
+        // The built TFM. Threaded into loose-layout runtime provisioning so the Windows App SDK version
+        // is read from the framework the app was actually built for.
+        "TargetFramework",
+        // Architecture. Single-file mode rejects --arch and tells the user to declare
+        // '#:property Platform=x64' instead, so these are the ONLY way the app's target architecture
+        // reaches the Windows App Runtime provisioning that follows registration. RuntimeIdentifier is
+        // read first because it is unambiguous; Platform is the directive the docs point users at.
+        "RuntimeIdentifier",
+        "Platform",
         // Manifest inference. WinAppManifestPath mirrors the NuGet targets' escape hatch so a consumer can
         // point single-file mode at a hand-authored manifest from the .cs itself.
         "WinAppManifestPath",
@@ -211,8 +220,32 @@ internal sealed partial class ProjectRunService
         var executableName = ResolveSingleFileExecutableName(props, singleFile, outputDirectory);
 
         return new SingleFileBuildOutcome(
-            new SingleFileRunResolution(singleFile, outputDirectory, executableName, props), 0);
+            new SingleFileRunResolution(
+                singleFile,
+                outputDirectory,
+                executableName,
+                ResolveSingleFileArchitecture(props),
+                GetProp(props, "TargetFramework") is { Length: > 0 } tfm ? tfm : null,
+                props),
+            0);
     }
+
+    /// <summary>
+    /// Resolves the architecture the app was actually built for, so the Windows App Runtime installed
+    /// after registration matches it.
+    /// </summary>
+    /// <remarks>
+    /// Single-file mode rejects <c>--arch</c> (a file-based app declares its own platform), so without
+    /// this the run would fall back to the machine's architecture — and an x64 app on an arm64 host would
+    /// have arm64 runtime packages provisioned for it and fail to launch. Reads the unambiguous
+    /// <c>RuntimeIdentifier</c> first, then <c>Platform</c> (the directive the docs point users at).
+    /// Falls back to the current process architecture, matching the pre-existing default, when the app
+    /// declares neither or declares something unrecognized such as <c>AnyCPU</c>.
+    /// </remarks>
+    private static string ResolveSingleFileArchitecture(IReadOnlyDictionary<string, string> props)
+        => RunArchHelper.ArchitectureFromRid(GetProp(props, "RuntimeIdentifier"))
+            ?? RunArchHelper.NormalizeArchitecture(GetProp(props, "Platform"))
+            ?? RunArchHelper.DefaultArchitecture();
 
     /// <summary>
     /// Resolves the app executable's bare file name, written CONCRETELY into the generated manifest.

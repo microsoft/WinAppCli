@@ -29,25 +29,27 @@ Use this skill when:
 ## Command selection guide
 
 ```
-Does the project have a Package.appxmanifest?
-├─ No → Do you want full setup (manifest + config + optional SDKs)?
-│       ├─ Yes → winapp init (adds Windows platform files to existing project)
-│       └─ No, just a manifest → winapp manifest generate
-└─ Yes
-   ├─ Has winapp.yaml, cloned/pulled but .winapp/ folder missing?
-   │  └─ winapp restore
-   ├─ Want newer SDK versions?
-   │  └─ winapp update
-   ├─ Need a dev certificate?
-   │  └─ winapp cert generate (then winapp cert install for trust)
-   ├─ Need package identity for debugging? (see [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md))
-   │  ├─ Exe is in your build output folder? (most frameworks)
-   │  │  └─ winapp run <build-output-dir>
-   │  └─ Exe is separate from app code? (Electron, sparse testing)
-   │     └─ winapp create-debug-identity <exe>
-   ├─ Ready to create MSIX installer?
-   │  └─ winapp package <build-output> --cert ./devcert.pfx
-   ├─ Need to sign an existing file?
+Is the app a single .cs file (.NET file-based app)?
+├─ Yes → winapp run <file>.cs  (builds it and generates the manifest for you)
+└─ No → Does the project have a Package.appxmanifest?
+   ├─ No → Do you want full setup (manifest + config + optional SDKs)?
+   │       ├─ Yes → winapp init (adds Windows platform files to existing project)
+   │       └─ No, just a manifest → winapp manifest generate
+   └─ Yes
+      ├─ Has winapp.yaml, cloned/pulled but .winapp/ folder missing?
+      │  └─ winapp restore
+      ├─ Want newer SDK versions?
+      │  └─ winapp update
+      ├─ Need a dev certificate?
+      │  └─ winapp cert generate (then winapp cert install for trust)
+      ├─ Need package identity for debugging? (see [Debugging Guide](https://github.com/microsoft/WinAppCli/blob/main/docs/debugging.md))
+      │  ├─ Exe is in your build output folder? (most frameworks)
+      │  │  └─ winapp run <build-output-dir>
+      │  └─ Exe is separate from app code? (Electron, sparse testing)
+      │     └─ winapp create-debug-identity <exe>
+      ├─ Ready to create MSIX installer?
+      │  └─ winapp package <build-output> --cert ./devcert.pfx
+      ├─ Need to sign an existing file?
    │  └─ winapp sign <file> <cert>
    ├─ Need to update app icons?
    │  └─ winapp manifest update-assets ./logo.png
@@ -95,7 +97,7 @@ For full details, see the [Debugging Guide](https://github.com/microsoft/WinAppC
 | `cert generate` | Nothing (or `Package.appxmanifest` for publisher) | `devcert.pfx` |
 | `cert install` | Certificate file + admin | Machine certificate store |
 | `create-debug-identity` | `Package.appxmanifest` + exe + trusted cert | Registers sparse package with Windows |
-| `run` | Build output folder + `Package.appxmanifest` | Registers loose layout package, launches app |
+| `run` | Build output folder + `Package.appxmanifest`; **or** a `.csproj`/`.sln`; **or** a `.cs` file-based app (no manifest needed — one is generated) | Registers loose layout package, launches app |
 | `unregister` | `Package.appxmanifest` (auto-detect or `--manifest`) | Removes dev-mode package registrations |
 | `package` | Build output + `Package.appxmanifest` | `.msix` file |
 | `sign` | File + certificate | Signed file (in-place) |

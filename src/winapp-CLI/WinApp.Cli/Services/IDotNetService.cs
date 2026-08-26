@@ -148,7 +148,10 @@ internal interface IDotNetService
     /// <summary>
     /// Runs `dotnet list package --format json` and returns the parsed result.
     /// </summary>
-    /// <param name="csprojFile">The .csproj file to query.</param>
+    /// <param name="csprojFile">
+    /// The project to query. A <c>.cs</c> .NET file-based app is also accepted and is queried through
+    /// the SDK 10 <c>dotnet package list --file</c> form.
+    /// </param>
     /// <param name="includeTransitive">When true, includes transitive package references in the output.</param>
     /// <param name="noRestore">When true, pass <c>--no-restore</c> so the query doesn't trigger an implicit restore.</param>
     /// <param name="cancellationToken">Cancellation token.</param>

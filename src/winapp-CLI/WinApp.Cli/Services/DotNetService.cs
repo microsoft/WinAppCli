@@ -689,7 +689,15 @@ internal partial class DotNetService : IDotNetService
         var applyNoRestore = noRestore
             && await GetSdkMajorVersionAsync(csprojFile.Directory!, cancellationToken) is int major
             && major >= 10;
-        var args = $"list \"{csprojFile.FullName}\" package{(includeTransitive ? " --include-transitive" : "")}{(applyNoRestore ? " --no-restore" : "")} --format json";
+
+        // A .NET file-based app (a single .cs) has no project file for `dotnet list <project> package` to
+        // read, so it uses the SDK 10 `dotnet package list --file <app>.cs` form instead. Without this a
+        // caller would have to pass null and fall back to globbing the current directory for ANY .csproj,
+        // which for a file-based app can only ever find an unrelated project.
+        var isSingleFileApp = string.Equals(csprojFile.Extension, ".cs", StringComparison.OrdinalIgnoreCase);
+        var args = isSingleFileApp
+            ? $"package list --file \"{csprojFile.FullName}\"{(includeTransitive ? " --include-transitive" : "")}{(applyNoRestore ? " --no-restore" : "")} --format json"
+            : $"list \"{csprojFile.FullName}\" package{(includeTransitive ? " --include-transitive" : "")}{(applyNoRestore ? " --no-restore" : "")} --format json";
         var (exitCode, output, _) = await RunDotnetCommandAsync(csprojFile.Directory!, args, cancellationToken);
 
         if (exitCode != 0 || string.IsNullOrWhiteSpace(output))

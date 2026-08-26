@@ -850,8 +850,13 @@ and `winapp run` will use it verbatim instead of generating one. It is picked up
 
 1. `--manifest <path>` on the command line.
 2. `#:property WinAppManifestPath=<path>` in the `.cs` file.
-3. A manifest sitting next to the `.cs` file, named `<filename>.appxmanifest` (preferred, so `foo.cs`
-   and `bar.cs` can live in one folder), `Package.appxmanifest`, or `appxmanifest.xml`.
+3. A manifest sitting next to the `.cs` file, named `<filename>.appxmanifest` (for example
+   `counter.appxmanifest` beside `counter.cs`).
+
+Only that per-file name is picked up automatically. A `Package.appxmanifest` or `appxmanifest.xml` in
+the same folder is deliberately ignored — several `.cs` files can share a folder, and adopting a
+shared name would silently run one app under another's identity. To use one manifest for several
+files, name it explicitly with `--manifest` or `WinAppManifestPath`.
 
 Otherwise a `Package.appxmanifest` is generated into the build output, along with the default image
 assets, and refreshed on every run.
