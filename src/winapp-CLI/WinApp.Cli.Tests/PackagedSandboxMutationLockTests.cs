@@ -190,6 +190,49 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
     }
 
     /// <summary>
+    /// H1: <c>--no-launch</c>'s single guest call is not merely tagged <c>--no-launch</c> in its
+    /// arguments -- the mutation lease genuinely spans the entire in-flight call. A concurrent,
+    /// second packaged run against the same deployment must be unable to start any guest process
+    /// of its own until the first run's <c>--no-launch</c> registration completes.
+    /// </summary>
+    [TestMethod]
+    public async Task NoLaunchPackagedSandboxRun_HoldsLeaseThroughTheRegisterCall_BlockingConcurrentRun()
+    {
+        var ct = TestContext.CancellationToken;
+
+        await using var harnessA = CreateHarness("noLaunchA");
+        await using var harnessB = CreateHarness("noLaunchB");
+
+        var taskA = RunAsync(harnessA, noLaunch: true, clean: false, ct);
+
+        var aRegister = await harnessA.Processes.WaitForNextAsync(ct);
+        Assert.IsTrue(IsRegisterOnly(aRegister));
+
+        var taskB = RunAsync(harnessB, noLaunch: false, clean: false, ct);
+
+        // If the lease were released before (or without covering) this in-flight call -- the exact
+        // H1 gap -- B's own registration would be free to start right away. It must not.
+        Assert.IsFalse(
+            await TryWaitForNextAsync(harnessB, TimeSpan.FromMilliseconds(300), ct),
+            "B must not start any guest process while A's --no-launch registration lease is held.");
+
+        aRegister.Exit(0);
+
+        Assert.AreEqual(0, await taskA);
+        Assert.AreEqual(0, harnessA.Processes.Started.Count, "--no-launch performs no separate launch call.");
+
+        // Now that A's lease is released, B's registration must be free to proceed.
+        var bRegister = await harnessB.Processes.WaitForNextAsync(ct);
+        Assert.IsTrue(IsRegisterOnly(bRegister));
+        bRegister.Exit(0);
+
+        var bLaunch = await harnessB.Processes.WaitForNextAsync(ct);
+        bLaunch.Exit(0);
+
+        Assert.AreEqual(0, await taskB);
+    }
+
+    /// <summary>
     /// A registration failure never reaches the launch phase, and still releases the lease --
     /// proving the failure/cancellation path is not a leak, and exercising it through a second,
     /// otherwise-blocked run that becomes unblocked the moment the failed lease is released.
@@ -261,6 +304,185 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
         Assert.AreEqual(0, await task);
     }
 
+    /// <summary>
+    /// H2: the third, host-orchestrated <c>--unregister-on-exit</c> phase targets exactly this
+    /// deployment's own layout -- the same <see cref="GuestRunPlanner.BuildUnregisterArguments"/>
+    /// call the standalone <c>winapp unregister --sandbox</c> command already sends -- rather than
+    /// a name-only unregister. It never runs before the application exits.
+    /// </summary>
+    [TestMethod]
+    public async Task UnregisterOnExit_AfterAppExits_SendsExactLayoutUnregisterRequest()
+    {
+        var ct = TestContext.CancellationToken;
+
+        await using var harness = CreateHarness("unregOnExit");
+
+        var task = RunAsync(harness, noLaunch: false, clean: false, ct, unregisterOnExit: true);
+
+        var register = await harness.Processes.WaitForNextAsync(ct);
+        Assert.IsTrue(IsRegisterOnly(register));
+        register.Exit(0);
+
+        var launch = await harness.Processes.WaitForNextAsync(ct);
+        Assert.IsTrue(IsGuestLaunchVerb(launch));
+
+        // The application is still "running": the unregister-on-exit phase must not have started.
+        Assert.IsFalse(
+            await TryWaitForNextAsync(harness, TimeSpan.FromMilliseconds(300), ct),
+            "Unregister-on-exit must never run while the application is still alive.");
+
+        launch.Exit(0);
+
+        var unregister = await harness.Processes.WaitForNextAsync(ct);
+
+        // The guest-side layout path is whatever this run's own register-only call used
+        // (--output-appx-directory) -- the guest's own materialized location, not the host's input
+        // layout -- so the expected arguments are derived from that call rather than assumed.
+        var guestLayoutPath = register.Request.Arguments[3];
+        var expectedArguments = GuestRunPlanner.BuildUnregisterArguments(guestLayoutPath, json: false);
+        CollectionAssert.AreEqual(
+            expectedArguments,
+            unregister.Request.Arguments,
+            "Unregister-on-exit must send the exact same manifest-scoped unregister request the " +
+            "standalone `winapp unregister --sandbox` command already sends -- never a name-only " +
+            "unregister that could match a different deployment's registration.");
+        Assert.AreEqual(
+            guestLayoutPath,
+            unregister.Request.WorkingDirectory,
+            "The guest's own install-location check compares against its working directory, so the " +
+            "unregister request must run from this deployment's own layout.");
+
+        unregister.Exit(0);
+
+        Assert.AreEqual(0, await task);
+    }
+
+    /// <summary>
+    /// H2: the mutation lease is never held across the application's own lifetime -- a second,
+    /// unrelated packaged run's registration must be free to proceed while the first run's app is
+    /// still "running", even though that first run asked for <c>--unregister-on-exit</c>.
+    /// </summary>
+    [TestMethod]
+    public async Task UnregisterOnExit_DoesNotHoldLeaseAcrossTheApplicationsLifetime()
+    {
+        var ct = TestContext.CancellationToken;
+
+        await using var harnessA = CreateHarness("unregA");
+        await using var harnessB = CreateHarness("unregB");
+
+        var taskA = RunAsync(harnessA, noLaunch: false, clean: false, ct, unregisterOnExit: true);
+
+        var aRegister = await harnessA.Processes.WaitForNextAsync(ct);
+        aRegister.Exit(0);
+
+        var aLaunch = await harnessA.Processes.WaitForNextAsync(ct);
+        Assert.IsTrue(IsGuestLaunchVerb(aLaunch));
+
+        // A's application is now "running" (aLaunch deliberately left open). B's registration --
+        // an entirely different run against a different deployment -- must not be blocked behind
+        // it: the lease A released after registering must still be released, not silently
+        // reacquired for the remainder of A's lifetime.
+        var taskB = RunAsync(harnessB, noLaunch: false, clean: false, ct);
+
+        var bRegister = await harnessB.Processes.WaitForNextAsync(ct);
+        Assert.IsTrue(IsRegisterOnly(bRegister));
+        bRegister.Exit(0);
+
+        var bLaunch = await harnessB.Processes.WaitForNextAsync(ct);
+        bLaunch.Exit(0);
+        Assert.AreEqual(0, await taskB);
+
+        // Only now does A's application exit, triggering its own unregister-on-exit phase.
+        aLaunch.Exit(0);
+
+        var aUnregister = await harnessA.Processes.WaitForNextAsync(ct);
+        aUnregister.Exit(0);
+
+        Assert.AreEqual(0, await taskA);
+    }
+
+    /// <summary>
+    /// H2: the fresh lease the unregister-on-exit phase acquires is a real mutation lease, not a
+    /// no-op -- a concurrent registration attempt against the same target must still be blocked
+    /// while that phase's own guest call is in flight, and become free the moment it completes.
+    /// </summary>
+    [TestMethod]
+    public async Task UnregisterOnExit_HoldsAFreshLease_BlockingConcurrentRegistration()
+    {
+        var ct = TestContext.CancellationToken;
+
+        await using var harnessA = CreateHarness("unregLeaseA");
+        await using var harnessB = CreateHarness("unregLeaseB");
+
+        var taskA = RunAsync(harnessA, noLaunch: false, clean: false, ct, unregisterOnExit: true);
+
+        var aRegister = await harnessA.Processes.WaitForNextAsync(ct);
+        aRegister.Exit(0);
+
+        var aLaunch = await harnessA.Processes.WaitForNextAsync(ct);
+        aLaunch.Exit(0);
+
+        var aUnregister = await harnessA.Processes.WaitForNextAsync(ct);
+
+        var taskB = RunAsync(harnessB, noLaunch: false, clean: false, ct);
+
+        Assert.IsFalse(
+            await TryWaitForNextAsync(harnessB, TimeSpan.FromMilliseconds(300), ct),
+            "B must not start any guest process while A's unregister-on-exit lease is held.");
+
+        aUnregister.Exit(0);
+        Assert.AreEqual(0, await taskA);
+
+        var bRegister = await harnessB.Processes.WaitForNextAsync(ct);
+        Assert.IsTrue(IsRegisterOnly(bRegister));
+        bRegister.Exit(0);
+
+        var bLaunch = await harnessB.Processes.WaitForNextAsync(ct);
+        bLaunch.Exit(0);
+        Assert.AreEqual(0, await taskB);
+    }
+
+    /// <summary>
+    /// H2: unregister-on-exit is best-effort, matching the pre-existing local
+    /// <c>UnregisterDevPackageAsync</c> semantics -- a failure in this phase (including the guest
+    /// declining because the registration no longer matches this deployment's layout) must not
+    /// fail the run itself, and must not leak the fresh lease it acquired.
+    /// </summary>
+    [TestMethod]
+    public async Task UnregisterOnExit_Failure_DoesNotFailTheRun_AndReleasesTheLease()
+    {
+        var ct = TestContext.CancellationToken;
+
+        await using var harnessA = CreateHarness("unregFailA");
+        await using var harnessB = CreateHarness("unregFailB");
+
+        var taskA = RunAsync(harnessA, noLaunch: false, clean: false, ct, unregisterOnExit: true);
+
+        var aRegister = await harnessA.Processes.WaitForNextAsync(ct);
+        aRegister.Exit(0);
+
+        var aLaunch = await harnessA.Processes.WaitForNextAsync(ct);
+        aLaunch.Exit(0);
+
+        var aUnregister = await harnessA.Processes.WaitForNextAsync(ct);
+        aUnregister.Exit(1);
+
+        // The launch itself succeeded, so the run's own exit code must still reflect that --
+        // exactly like the pre-existing local unregister-on-exit's best-effort semantics.
+        Assert.AreEqual(0, await taskA);
+
+        // The failed phase must still have released its fresh lease rather than leaking it.
+        var taskB = RunAsync(harnessB, noLaunch: false, clean: false, ct);
+
+        var bRegister = await harnessB.Processes.WaitForNextAsync(ct);
+        Assert.IsTrue(IsRegisterOnly(bRegister));
+        bRegister.Exit(0);
+
+        var bLaunch = await harnessB.Processes.WaitForNextAsync(ct);
+        bLaunch.Exit(0);
+        Assert.AreEqual(0, await taskB);
+    }
+
     private static bool IsRegisterOnly(FakeGuestProcessHost host) =>
         host.Request.Arguments.Contains("--no-launch");
 
@@ -290,7 +512,8 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
         bool noLaunch,
         bool clean,
         CancellationToken cancellationToken,
-        bool withAlias = false) =>
+        bool withAlias = false,
+        bool unregisterOnExit = false) =>
         Task.Run(
             () => harness.Handler.ExecuteRunPipelineAsync(
                 new DirectoryInfo(harness.HostFolder ?? throw new InvalidOperationException()),
@@ -300,7 +523,7 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
                 noLaunch,
                 withAlias,
                 debugOutput: false,
-                unregisterOnExit: false,
+                unregisterOnExit,
                 detach: false,
                 clean,
                 useSymbols: false,
