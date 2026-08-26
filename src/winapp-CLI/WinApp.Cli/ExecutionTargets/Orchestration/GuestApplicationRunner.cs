@@ -68,12 +68,14 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
             .CreateSnapshotAsync(sourceRoot, deploymentId, cancellationToken, IsExcludedFromDeployment)
             .ConfigureAwait(false);
 
-        if (clean)
-        {
-            // The registration layout is guest-derived from the payload, so a clean redeploy that
-            // left it in place would register the previous build's files.
-            await target.Channel.DeleteScopeAsync(layoutScope, cancellationToken).ConfigureAwait(false);
-        }
+        var existing = deployments.ReadCurrent(ExecutionTargetRef.WindowsSandboxDefault, target.Epoch, deploymentId);
+
+        // A rerun must never leave the previous launch's instance running alongside the new one,
+        // and must never mutate files that instance still has open. This runs before any write,
+        // delete, or the explicit --clean layout wipe below, and fails closed -- naming the app or
+        // process it could not prove it stopped -- rather than risk a duplicate process or a
+        // sharing violation partway through reconciliation.
+        await StopPreviousInstanceAsync(target, existing, cancellationToken).ConfigureAwait(false);
 
         var result = await deployments.ReconcileAsync(
             ExecutionTargetRef.WindowsSandboxDefault,
@@ -85,9 +87,58 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
             clean,
             cancellationToken).ConfigureAwait(false);
 
+        if (clean)
+        {
+            // Wiped only after the payload reconciliation above has committed a clean state. The
+            // registration layout is guest-derived from the payload, so it must not be left holding
+            // the previous build's files -- but wiping it *before* reconciliation could itself fail
+            // (a locked file, for instance) and leave the layout missing its manifest with nothing
+            // recording that damage. Deferring the wipe to here means a reconciliation failure never
+            // touches the layout at all, and a wipe failure here happens only once the payload is
+            // already known-good, so the next run has far less to redo.
+            await target.Channel.DeleteScopeAsync(layoutScope, cancellationToken).ConfigureAwait(false);
+        }
+
         TargetDeploymentService.EnsureLaunchable(result.State, target.Epoch);
 
         return new GuestDeployment(result.State, payloadPath, layoutPath);
+    }
+
+    /// <summary>
+    /// Stops the previous run's tracked instance for this deployment, if any, before its layout is
+    /// mutated.
+    /// </summary>
+    /// <remarks>
+    /// Package identity is preferred whenever a package was registered: it is resolved to whatever
+    /// full name the guest currently has registered and terminates exactly that package's
+    /// processes, which needs no process ID at all and so has nothing that can go stale or be
+    /// reused by an unrelated process. The process-ID path exists for the unpackaged direct-launch
+    /// case, where PID plus start time is the only identity available, and is verified the same way
+    /// on the guest side before anything is touched.
+    /// </remarks>
+    private static async Task StopPreviousInstanceAsync(
+        PreparedTarget target,
+        DeploymentState? existing,
+        CancellationToken cancellationToken)
+    {
+        if (existing is null)
+        {
+            // Nothing recorded for this deployment in the current generation, so there is nothing
+            // that could still be running from a previous run of it.
+            return;
+        }
+
+        if (existing.Package is { PackageFamilyName: { } familyName })
+        {
+            await target.Channel.StopPackageProcessesAsync(familyName, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if (existing.ProcessId is { } processId && existing.ProcessStartTicksUtc is { } startTicksUtc)
+        {
+            await target.Channel.StopTrackedProcessAsync(processId, startTicksUtc, cancellationToken)
+                .ConfigureAwait(false);
+        }
     }
 
     /// <summary>

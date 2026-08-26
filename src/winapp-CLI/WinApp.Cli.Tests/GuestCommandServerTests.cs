@@ -5,6 +5,7 @@ using System.Text;
 using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.GuestAgent;
 using WinApp.Cli.ExecutionTargets.Orchestration;
+using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Tests;
 
@@ -267,6 +268,162 @@ public class GuestCommandServerTests
         await WaitUntilAsync(() => process.StopRequested, CancellationToken.None);
     }
 
+    // ---- Missing working directory --------------------------------------------------
+
+    [TestMethod]
+    public async Task Exec_WithAMissingWorkingDirectory_NamesTheDirectoryRatherThanBlamingTheExecutable()
+    {
+        using var harness = new Harness(Interactive);
+
+        var missing = @"C:\WinApp\does-not-exist\anywhere";
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
+            harness.Channel.ExecuteAsync(
+                new GuestExecRequest { Executable = "app.exe", Arguments = [], WorkingDirectory = missing },
+                callbacks: null,
+                harness.Token));
+
+        StringAssert.Contains(failure.Error.Message, missing);
+        Assert.IsTrue(harness.Processes.Started.IsEmpty, "A missing --cwd must be refused before anything starts.");
+    }
+
+    // ---- Stop before redeploy --------------------------------------------------------
+
+    [TestMethod]
+    public async Task StopPackage_ResolvesTheFamilyNameAndTerminatesTheCurrentFullName()
+    {
+        var launcher = new FakeAppLauncherService { FakePackageFullName = "Contoso.MyApp_1.0.0.0_x64__abc" };
+        using var harness = new Harness(Interactive, appLauncher: launcher);
+
+        await harness.Channel.StopPackageProcessesAsync("Contoso.MyApp_abc", harness.Token);
+
+        CollectionAssert.AreEqual(new[] { "Contoso.MyApp_1.0.0.0_x64__abc" }, launcher.StopPackageCalls);
+    }
+
+    [TestMethod]
+    public async Task StopPackage_WhenNothingIsCurrentlyRegistered_SucceedsWithoutTerminatingAnything()
+    {
+        var launcher = new FakeAppLauncherService { FakePackageFullName = null };
+        using var harness = new Harness(Interactive, appLauncher: launcher);
+
+        // Nothing registered under that family any more means nothing could be running under it.
+        await harness.Channel.StopPackageProcessesAsync("Contoso.MyApp_abc", harness.Token);
+
+        Assert.AreEqual(0, launcher.StopPackageCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task StopPackage_WhenTerminationCannotBeProven_FailsWithGuidanceNamingThePackage()
+    {
+        var launcher = new FakeAppLauncherService
+        {
+            FakePackageFullName = "Contoso.MyApp_1.0.0.0_x64__abc",
+            StopPackageProcessesFailure = new InvalidOperationException("still running"),
+        };
+        using var harness = new Harness(Interactive, appLauncher: launcher);
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => harness.Channel.StopPackageProcessesAsync("Contoso.MyApp_abc", harness.Token));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.StaleHandle, failure.Error.Code);
+        StringAssert.Contains(failure.Error.Message, "Contoso.MyApp_abc");
+    }
+
+    [TestMethod]
+    public async Task StopPackage_WithoutAConfiguredLauncher_FailsRatherThanSilentlyDoingNothing()
+    {
+        using var harness = new Harness(Interactive);
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => harness.Channel.StopPackageProcessesAsync("Contoso.MyApp_abc", harness.Token));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.TransportFailed, failure.Error.Code);
+    }
+
+    [TestMethod]
+    public async Task StopProcess_WithAMatchingPidAndStartTime_Stops()
+    {
+        using var harness = new Harness(Interactive);
+
+        harness.Server.StopTrackedProcessImpl = (pid, ticks) =>
+        {
+            Assert.AreEqual(4242, pid);
+            Assert.AreEqual(555L, ticks);
+            return GuestCommandServer.ProcessStopOutcome.Stopped;
+        };
+
+        // Must not throw.
+        await harness.Channel.StopTrackedProcessAsync(4242, 555L, harness.Token);
+    }
+
+    [TestMethod]
+    public async Task StopProcess_ThatIsAlreadyGone_SucceedsWithoutFailing()
+    {
+        using var harness = new Harness(Interactive);
+        harness.Server.StopTrackedProcessImpl = (_, _) => GuestCommandServer.ProcessStopOutcome.AlreadyGone;
+
+        await harness.Channel.StopTrackedProcessAsync(4242, 555L, harness.Token);
+    }
+
+    [TestMethod]
+    public async Task StopProcess_WhenItCannotBeProvenStopped_FailsWithGuidanceNamingThePid()
+    {
+        using var harness = new Harness(Interactive);
+        harness.Server.StopTrackedProcessImpl = (_, _) => GuestCommandServer.ProcessStopOutcome.Unproven;
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => harness.Channel.StopTrackedProcessAsync(4242, 555L, harness.Token));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.StaleHandle, failure.Error.Code);
+        StringAssert.Contains(failure.Error.Message, "4242");
+    }
+
+    /// <summary>
+    /// A stale or recycled PID must never be killed: a mismatched start time proves the tracked
+    /// process is not the one currently holding that PID, however that came to be.
+    /// </summary>
+    [TestMethod]
+    public void DefaultStopTrackedProcess_ARealProcessWithADifferentStartTime_IsNeverTouched()
+    {
+        using var helper = StartHelperProcess();
+        var wrongStartTicksUtc = helper.StartTime.ToUniversalTime().Ticks - TimeSpan.FromDays(1).Ticks;
+
+        var outcome = GuestCommandServer.DefaultStopTrackedProcess(helper.Id, wrongStartTicksUtc);
+
+        Assert.AreEqual(GuestCommandServer.ProcessStopOutcome.AlreadyGone, outcome);
+        Assert.IsFalse(helper.HasExited, "A process must never be touched when its start time does not match.");
+    }
+
+    [TestMethod]
+    public void DefaultStopTrackedProcess_ARealProcessWithAMatchingStartTime_IsStopped()
+    {
+        using var helper = StartHelperProcess();
+        var expectedStartTicksUtc = helper.StartTime.ToUniversalTime().Ticks;
+
+        var outcome = GuestCommandServer.DefaultStopTrackedProcess(helper.Id, expectedStartTicksUtc);
+
+        Assert.AreEqual(GuestCommandServer.ProcessStopOutcome.Stopped, outcome);
+        Assert.IsTrue(helper.WaitForExit(5000));
+    }
+
+    [TestMethod]
+    public void DefaultStopTrackedProcess_WhenNothingHasThatPid_ReportsAlreadyGone()
+    {
+        // No real process is expected to ever hold this PID during a test run.
+        var outcome = GuestCommandServer.DefaultStopTrackedProcess(int.MaxValue - 5, expectedStartTicksUtc: 0);
+
+        Assert.AreEqual(GuestCommandServer.ProcessStopOutcome.AlreadyGone, outcome);
+    }
+
+    private static System.Diagnostics.Process StartHelperProcess() =>
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            Arguments = "-NoProfile -NonInteractive -Command \"Start-Sleep -Seconds 60\"",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        })!;
+
     private static async Task WaitUntilAsync(Func<bool> condition, CancellationToken cancellationToken)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
@@ -289,7 +446,7 @@ public class GuestCommandServerTests
         private readonly GuestCommandServer _server;
         private readonly Task _serverTask;
 
-        public Harness(GuestSessionInfo session, ExecutionTargetEpoch? hostEpoch = null)
+        public Harness(GuestSessionInfo session, ExecutionTargetEpoch? hostEpoch = null, IAppLauncherService? appLauncher = null)
         {
             var pair = new LoopbackTransportPair();
             Processes = new FakeGuestProcessHostFactory();
@@ -299,7 +456,10 @@ public class GuestCommandServerTests
                 Epoch,
                 Processes,
                 new StaticGuestSessionProbe(session),
-                Identity);
+                Identity,
+                files: null,
+                guestWinapp: null,
+                appLauncher);
 
             _serverTask = _server.RunAsync(_cancellation.Token);
 
@@ -310,6 +470,8 @@ public class GuestCommandServerTests
         public FakeGuestProcessHostFactory Processes { get; }
 
         public GuestCommandChannel Channel { get; }
+
+        public GuestCommandServer Server => _server;
 
         public CancellationToken Token => _cancellation.Token;
 
