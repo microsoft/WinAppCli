@@ -263,7 +263,7 @@ public class ManifestTemplateServiceTests
             taskContext: CreateTaskContext(),
             displayName: "Contoso Counter");
 
-        var root = XDocument.Load(Path.Combine(outDir.FullName, "Package.appxmanifest")).Root!;
+        var root = XDocument.Load(Path.Join(outDir.FullName, "Package.appxmanifest")).Root!;
 
         Assert.AreEqual("com.contoso.counter", root.Element(Ns + "Identity")!.Attribute("Name")!.Value,
             "the display name must not leak into the identity");
@@ -289,7 +289,7 @@ public class ManifestTemplateServiceTests
             displayName: "Tom & Jerry <\"quoted\">");
 
         // Loading at all proves the document stayed well-formed; the value round-trips decoded.
-        var root = XDocument.Load(Path.Combine(outDir.FullName, "Package.appxmanifest")).Root!;
+        var root = XDocument.Load(Path.Join(outDir.FullName, "Package.appxmanifest")).Root!;
 
         Assert.AreEqual("Tom & Jerry <\"quoted\">", root.Element(Ns + "Properties")!.Element(Ns + "DisplayName")!.Value);
     }
@@ -311,7 +311,7 @@ public class ManifestTemplateServiceTests
             taskContext: CreateTaskContext(),
             applicationId: "App");
 
-        var app = XDocument.Load(Path.Combine(outDir.FullName, "Package.appxmanifest"))
+        var app = XDocument.Load(Path.Join(outDir.FullName, "Package.appxmanifest"))
             .Root!.Element(Ns + "Applications")!.Element(Ns + "Application")!;
 
         Assert.AreEqual("App", app.Attribute("Id")!.Value);
@@ -333,7 +333,7 @@ public class ManifestTemplateServiceTests
             description: "unchanged",
             taskContext: CreateTaskContext());
 
-        var root = XDocument.Load(Path.Combine(outDir.FullName, "Package.appxmanifest")).Root!;
+        var root = XDocument.Load(Path.Join(outDir.FullName, "Package.appxmanifest")).Root!;
         var app = root.Element(Ns + "Applications")!.Element(Ns + "Application")!;
 
         Assert.AreEqual("MyTestApp", root.Element(Ns + "Properties")!.Element(Ns + "DisplayName")!.Value,

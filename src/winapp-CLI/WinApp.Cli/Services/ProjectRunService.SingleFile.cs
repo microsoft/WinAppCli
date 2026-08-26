@@ -80,50 +80,14 @@ internal sealed partial class ProjectRunService
     ];
 
     /// <inheritdoc />
-    public async Task<string?> CheckSingleFileSdkAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken)
-    {
-        const string upgradeHint =
-            "Running a .NET file-based app (a single .cs) requires .NET SDK 10.0.100 or newer. Install or update it from https://aka.ms/dotnet/download.";
-
-        int exitCode;
-        string output;
-        try
-        {
-            (exitCode, output, _) = await dotNetService.RunDotnetCommandAsync(workingDirectory, "--version", cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // Honor Ctrl+C during the SDK probe instead of reporting it as a missing SDK.
-            throw;
-        }
-        catch (Exception)
-        {
-            // dotnet not on PATH → Process.Start throws.
-            return $"The .NET SDK was not found. {upgradeHint}";
-        }
-
-        if (exitCode != 0)
-        {
-            return $"Could not determine the .NET SDK version ('dotnet --version' failed). {upgradeHint}";
-        }
-
-        var versionLine = output
-            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .FirstOrDefault();
-
-        if (!string.IsNullOrEmpty(versionLine) && TryParseSdkVersion(versionLine, out var major, out var minor, out var patch))
-        {
-            var capable = major > 10 || (major == 10 && (minor > 0 || (minor == 0 && patch >= 100)));
-            if (!capable)
-            {
-                return $"The .NET SDK {versionLine} cannot build .NET file-based apps. {upgradeHint}";
-            }
-        }
-
-        // Present but unparseable version → assume a modern SDK; the build surfaces a real error if the
-        // installed SDK genuinely cannot build a bare .cs.
-        return null;
-    }
+    public Task<string?> CheckSingleFileSdkAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken)
+        => CheckSdkFloorAsync(
+            workingDirectory,
+            minimumMajor: 10,
+            minimumPatch: 100,
+            upgradeHint: "Running a .NET file-based app (a single .cs) requires .NET SDK 10.0.100 or newer. Install or update it from https://aka.ms/dotnet/download.",
+            tooOldReason: "cannot build .NET file-based apps",
+            cancellationToken);
 
     /// <inheritdoc />
     public async Task<SingleFileBuildOutcome> BuildAndResolveSingleFileAsync(
@@ -271,11 +235,18 @@ internal sealed partial class ProjectRunService
         }
 
         var assemblyName = GetProp(props, "AssemblyName");
-        var candidate = !string.IsNullOrEmpty(assemblyName)
-            ? assemblyName + ".exe"
-            : Path.GetFileNameWithoutExtension(singleFile.Name) + ".exe";
 
-        if (!File.Exists(Path.Combine(outputDirectory, candidate)))
+        // Normalize to a bare file name. Both the RunCommand branch above and AssemblyName come from
+        // MSBuild properties the .cs file controls, and this value is used TWICE: to probe the output
+        // directory, and (via the caller) as the manifest's Executable attribute. A rooted or
+        // separator-bearing value would make Path.Combine silently discard outputDirectory and would put
+        // a path where the manifest schema expects a package-relative file name.
+        var candidate = Path.GetFileName(
+            !string.IsNullOrEmpty(assemblyName)
+                ? assemblyName + ".exe"
+                : Path.GetFileNameWithoutExtension(singleFile.Name) + ".exe");
+
+        if (string.IsNullOrEmpty(candidate) || !File.Exists(Path.Combine(outputDirectory, candidate)))
         {
             throw new ProjectRunException(
                 $"Could not find the application executable '{candidate}' in the build output ({outputDirectory}). " +

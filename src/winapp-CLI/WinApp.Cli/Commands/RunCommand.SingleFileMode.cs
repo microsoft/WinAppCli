@@ -4,6 +4,7 @@
 using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using System.CommandLine;
+using System.Xml;
 using WinApp.Cli.ConsoleTasks;
 using WinApp.Cli.Helpers;
 using WinApp.Cli.Models;
@@ -130,7 +131,7 @@ internal partial class RunCommand
                 return Fail(ex.Message, isJson);
             }
 
-            WarnOnSingleFileIdentityCollision(resolvedManifest, outputAppXDirectory ?? new DirectoryInfo(Path.Combine(outputFolder.FullName, "AppX")), isJson);
+            WarnOnSingleFileIdentityCollision(resolvedManifest, outputAppXDirectory ?? new DirectoryInfo(Path.Join(outputFolder.FullName, "AppX")), isJson);
 
             // A tier-3 manifest can be named <stem>.appxmanifest, which ManifestHelper.FindManifest does not
             // probe for, so the resolved manifest is always passed explicitly rather than left to
@@ -242,7 +243,7 @@ internal partial class RunCommand
                     $"Could not generate a manifest for '{resolution.SingleFile.Name}' in '{outputFolder.FullName}'.");
             }
 
-            return new FileInfo(Path.Combine(outputFolder.FullName, manifestFileName));
+            return new FileInfo(Path.Join(outputFolder.FullName, manifestFileName));
         }
 
         /// <summary>
@@ -290,7 +291,16 @@ internal partial class RunCommand
         /// </remarks>
         private static FileInfo? FindAuthoredSingleFileManifest(DirectoryInfo sourceDirectory, string stem)
         {
-            var path = Path.Combine(sourceDirectory.FullName, $"{stem}.appxmanifest");
+            // Reduce the stem to a bare name before composing: it originates from the user-supplied input
+            // path, and a rooted or separator-bearing value would make Path.Combine discard sourceDirectory
+            // and probe somewhere else entirely.
+            var fileName = Path.GetFileName(stem);
+            if (string.IsNullOrEmpty(fileName))
+            {
+                return null;
+            }
+
+            var path = Path.Join(sourceDirectory.FullName, $"{fileName}.appxmanifest");
             return File.Exists(path) ? new FileInfo(path) : null;
         }
 
@@ -362,9 +372,10 @@ internal partial class RunCommand
                     return;
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or XmlException or ArgumentException or InvalidOperationException)
             {
-                // Purely advisory — never let the check itself fail the run.
+                // Purely advisory — an unreadable or malformed manifest must not fail the run. Unexpected
+                // exception types still surface rather than being silently swallowed.
                 logger.LogDebug("Could not check for an existing registration: {Message}", ex.Message);
             }
         }

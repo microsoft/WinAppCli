@@ -13,21 +13,30 @@ namespace WinApp.Cli.Tests;
 /// building the mirrored build/evaluate argument sets a .NET file-based app needs.
 /// </summary>
 [TestClass]
-public class ProjectRunServiceSingleFileTests
+public class ProjectRunServiceSingleFileTests : IDisposable
 {
     private DirectoryInfo _tempDir = null!;
     private ProjectRunService _service = null!;
+    private TestConsole _testConsole = null!;
+
+    /// <summary>Releases the console the service writes to. MSTest disposes the instance after each test.</summary>
+    public void Dispose()
+    {
+        _testConsole?.Dispose();
+        GC.SuppressFinalize(this);
+    }
 
     [TestInitialize]
     public void Setup()
     {
         _tempDir = Directory.CreateTempSubdirectory("winapp_sfrun_");
+        _testConsole = new TestConsole();
         var dotnet = new FakeDotNetService();
         _service = new ProjectRunService(
             dotnet,
             new ProjectDetectionService(NullLogger<ProjectDetectionService>.Instance, dotnet),
             new FakeCsWinRTMetadataShimService(),
-            new TestConsole(),
+            _testConsole,
             NullLogger<ProjectRunService>.Instance);
     }
 
@@ -46,7 +55,7 @@ public class ProjectRunServiceSingleFileTests
 
     private FileInfo WriteSingleFile(string name = "counter.cs")
     {
-        var path = Path.Combine(_tempDir.FullName, name);
+        var path = Path.Join(_tempDir.FullName, name);
         File.WriteAllText(path, "Console.WriteLine(\"hi\");");
         return new FileInfo(path);
     }

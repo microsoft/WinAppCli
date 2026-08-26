@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -51,11 +52,30 @@ internal sealed partial class ProjectRunService(
     internal Func<bool>? NativeTerminalGateOverrideForTests { get; set; }
 
     /// <inheritdoc />
-    public async Task<string?> CheckSdkAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken)
-    {
-        const string upgradeHint =
-            "Running csproj requires .NET SDK 8.0.100 or newer. Install or update it from https://aka.ms/dotnet/download.";
+    public Task<string?> CheckSdkAsync(DirectoryInfo workingDirectory, CancellationToken cancellationToken)
+        => CheckSdkFloorAsync(
+            workingDirectory,
+            minimumMajor: 8,
+            minimumPatch: 100,
+            upgradeHint: "Running csproj requires .NET SDK 8.0.100 or newer. Install or update it from https://aka.ms/dotnet/download.",
+            tooOldReason: "is too old for project mode",
+            cancellationToken);
 
+    /// <summary>
+    /// Probes <c>dotnet --version</c> and reports whether the installed SDK meets a minimum floor.
+    /// Shared by project mode (8.0.100, for MSBuild <c>--getProperty</c>) and single-file mode (10.0.100,
+    /// the first SDK that can build a bare <c>.cs</c>) so the two cannot drift apart.
+    /// </summary>
+    /// <param name="tooOldReason">Completes the sentence "The .NET SDK &lt;version&gt; …".</param>
+    /// <returns>An actionable error message if the SDK is missing/too old, otherwise <c>null</c>.</returns>
+    private async Task<string?> CheckSdkFloorAsync(
+        DirectoryInfo workingDirectory,
+        int minimumMajor,
+        int minimumPatch,
+        string upgradeHint,
+        string tooOldReason,
+        CancellationToken cancellationToken)
+    {
         int exitCode;
         string output;
         try
@@ -67,9 +87,10 @@ internal sealed partial class ProjectRunService(
             // Honor Ctrl+C during the SDK probe instead of reporting it as a missing SDK.
             throw;
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is Win32Exception or FileNotFoundException or InvalidOperationException)
         {
-            // dotnet not on PATH → Process.Start throws.
+            // dotnet not on PATH → Process.Start throws Win32Exception (or FileNotFoundException when a
+            // resolved path has since disappeared). Anything else is unexpected and should surface.
             return $"The .NET SDK was not found. {upgradeHint}";
         }
 
@@ -84,15 +105,16 @@ internal sealed partial class ProjectRunService(
 
         if (!string.IsNullOrEmpty(versionLine) && TryParseSdkVersion(versionLine, out var major, out var minor, out var patch))
         {
-            var capable = major > 8 || (major == 8 && (minor > 0 || (minor == 0 && patch >= 100)));
+            var capable = major > minimumMajor
+                || (major == minimumMajor && (minor > 0 || (minor == 0 && patch >= minimumPatch)));
             if (!capable)
             {
-                return $"The .NET SDK {versionLine} is too old for project mode. {upgradeHint}";
+                return $"The .NET SDK {versionLine} {tooOldReason}. {upgradeHint}";
             }
         }
 
         // Present but unparseable version → assume a modern SDK; the build will surface a real error
-        // if --getProperty is genuinely unsupported.
+        // if the SDK is genuinely incapable.
         return null;
     }
 
