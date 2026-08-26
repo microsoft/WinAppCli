@@ -88,6 +88,14 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
         _layout = new DirectoryInfo(TestPaths.Under(_hostFolder, "AppX"));
         _layout.Create();
 
+        // The layout carries real content, because an empty one is not a packaged app: with no
+        // files to transfer, reconciliation writes nothing and the guest deployment directory is
+        // never created, so the agent refuses every exec with "the working directory does not
+        // exist" -- before the fake process factory this suite scripts is ever reached. These are
+        // the two files a minimal packaged layout always has, and neither is a runtime marker.
+        File.WriteAllText(TestPaths.Under(_layout.FullName, "AppxManifest.xml"), RunCommandTests.TestManifestContent);
+        File.WriteAllText(TestPaths.Under(_layout.FullName, "App.exe"), "not a real binary");
+
         var directories = new TargetStateDirectoryProvider(stateRoot);
         _mutationLock = new TargetMutationLock(directories);
         _deploymentStateStore = new DeploymentStateStore(directories);
@@ -487,6 +495,19 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
         host.Request.Arguments.Contains("--no-launch");
 
     /// <summary>
+    /// The registration layout a guest request names with <c>--output-appx-directory</c>, or null
+    /// when it names none.
+    /// </summary>
+    private static string? LayoutDirectoryOf(GuestExecRequest request)
+    {
+        var index = Array.IndexOf(request.Arguments?.ToArray() ?? [], "--output-appx-directory");
+
+        return index >= 0 && index + 1 < request.Arguments!.Count
+            ? request.Arguments[index + 1]
+            : null;
+    }
+
+    /// <summary>
     /// True when a guest exec request is the hidden guest-launch verb -- the structurally
     /// mutation-incapable verify-and-launch call -- rather than the general, registration-capable
     /// <c>run</c>.
@@ -599,7 +620,25 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
             Manifest = manifest;
             Layout = layout;
 
-            Processes = new FakeGuestProcessHostFactory();
+            Processes = new FakeGuestProcessHostFactory
+            {
+                // The real guest winapp creates the registration layout while it registers, and
+                // the unregister-on-exit call that follows uses that layout as its working
+                // directory -- which the agent now verifies exists before starting anything. This
+                // suite's guest winapp is faked, so nothing would ever create it and every
+                // unregister request would be refused before reaching this factory. Done here,
+                // when the registration request starts, so it lands after any --clean wipe of the
+                // layout scope, exactly as the real one does.
+                OnStart = request =>
+                {
+                    var layout = LayoutDirectoryOf(request);
+
+                    if (layout is not null)
+                    {
+                        Directory.CreateDirectory(layout);
+                    }
+                },
+            };
 
             var pair = new LoopbackTransportPair();
 
@@ -610,7 +649,17 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
                 new StaticGuestSessionProbe(new GuestSessionInfo(1, "WinSta0", HasInputDesktop: true)),
                 new GuestAgentIdentity("1.0.0", "hash", "x64", 1, 1),
                 new GuestFileService(guestManagedRoot),
-                guestWinapp: Path.Join(guestManagedRoot, "agent", "current", "winapp.exe"));
+                guestWinapp: Path.Join(guestManagedRoot, "agent", "current", "winapp.exe"),
+
+                // The guest's package inventory. A rerun asks the agent to stop the previous run's
+                // package before it mutates that package's layout, and the agent refuses to serve
+                // that request at all without a launcher. This suite's guest winapp is faked and so
+                // never actually registers anything, and reporting nothing registered is what says
+                // so: the stop completes with nothing to stop, and these tests stay about when the
+                // mutation lease is held. What the stop does when a package *is* registered --
+                // including refusing one registered from a different layout -- is
+                // GuestCommandServerTests' subject, against a launcher scripted for it.
+                new FakeAppLauncherService { FakePackageFullName = null });
 
             _serverTask = server.RunAsync(_cancellation.Token);
 
