@@ -141,6 +141,20 @@ internal sealed class TargetDeploymentService(IDeploymentStateStore stateStore)
     /// <summary>Every deployment recorded for a target.</summary>
     public IReadOnlyList<DeploymentState> List(ExecutionTargetRef target) => stateStore.List(target);
 
+    /// <summary>
+    /// Reads a deployment's state, but only when it describes the current target generation.
+    /// </summary>
+    /// <remarks>
+    /// Used before a redeploy decides whether there is a previous instance to stop: state from a
+    /// previous generation describes a guest that no longer exists, so its package and process
+    /// records must never be treated as something currently running.
+    /// </remarks>
+    public DeploymentState? ReadCurrent(ExecutionTargetRef target, ExecutionTargetEpoch epoch, string deploymentId)
+    {
+        var existing = stateStore.Read(target, deploymentId);
+        return existing is not null && existing.IsForEpoch(epoch) ? existing : null;
+    }
+
     /// <summary>Records the process this deployment launched.</summary>
     public DeploymentState CommitProcess(
         ExecutionTargetRef target,

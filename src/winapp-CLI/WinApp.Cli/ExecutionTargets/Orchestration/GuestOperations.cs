@@ -78,6 +78,18 @@ internal static class GuestMessageTypes
 
     /// <summary>Guest reports a structured failure for an operation.</summary>
     public const string OperationFailed = "operation-failed";
+
+    /// <summary>
+    /// Host asks the guest to stop every running process of a package before a redeploy mutates
+    /// the layout it was registered from.
+    /// </summary>
+    public const string StopPackageRequest = "stop-package-request";
+
+    /// <summary>
+    /// Host asks the guest to stop one specific tracked process, identified by PID and start time,
+    /// before a redeploy mutates the files it may still have open.
+    /// </summary>
+    public const string StopProcessRequest = "stop-process-request";
 }
 
 /// <summary>Managed guest roots a file operation may address.</summary>
@@ -252,6 +264,13 @@ internal sealed class GuestMessage
 
     /// <summary>Present on <see cref="GuestMessageTypes.OperationFailed"/>.</summary>
     public ExecutionTargetErrorInfo? Error { get; init; }
+
+    /// <summary>
+    /// Present on <see cref="GuestMessageTypes.StopPackageRequest"/>. The package family name a
+    /// deployment registered, resolved to the guest's actual current full name before anything is
+    /// terminated.
+    /// </summary>
+    public string? PackageFamilyName { get; init; }
 }
 
 /// <summary>Source-generated serializer context for guest control messages.</summary>

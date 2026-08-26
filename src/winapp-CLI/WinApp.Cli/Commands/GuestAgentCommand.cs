@@ -6,6 +6,7 @@ using System.CommandLine.Invocation;
 using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.GuestAgent;
 using WinApp.Cli.ExecutionTargets.Orchestration;
+using WinApp.Cli.Services;
 
 namespace WinApp.Cli.Commands;
 
@@ -98,7 +99,7 @@ internal class GuestAgentCommand : Command, IShortDescription
     }
 
     /// <summary>Runs the agent, or its self-test.</summary>
-    public class Handler(IGuestSessionProbe sessionProbe, IGuestProcessHostFactory processes)
+    public class Handler(IGuestSessionProbe sessionProbe, IGuestProcessHostFactory processes, IAppLauncherService appLauncher)
         : AsynchronousCommandLineAction
     {
         /// <inheritdoc/>
@@ -142,7 +143,7 @@ internal class GuestAgentCommand : Command, IShortDescription
                 return 1;
             }
 
-            return await new GuestAgentRunner(sessionProbe, processes).RunAsync(
+            return await new GuestAgentRunner(sessionProbe, processes, appLauncher).RunAsync(
                 bootstrapDirectory,
                 resultDirectory,
                 GuestAgentRunner.DefaultManagedRoot,

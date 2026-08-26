@@ -57,6 +57,17 @@ internal partial class UnregisterCommand
                     return 0;
                 }
 
+                // Verified here rather than left for the guest's own argument parser to discover:
+                // guest winapp's `--manifest` validates the path exists before it runs, and a path
+                // that does not (for example a registration layout an interrupted `--clean` left
+                // without its manifest) fails that parse and prints the guest's usage help instead
+                // of a runtime error. Checking first turns that into the same structured,
+                // state-repair guidance every other failure here gets.
+                var layoutFiles = await target.Channel
+                    .ListFilesAsync(GuestPaths.LayoutScope(deployment.DeploymentId), cancellationToken);
+
+                EnsureLayoutHasManifest(layoutFiles, deployment.DeploymentId);
+
                 var exitCode = await target.Channel.ExecuteAsync(
                     new GuestExecRequest
                     {
@@ -92,6 +103,37 @@ internal partial class UnregisterCommand
         {
             stream.Write(data.Span);
             stream.Flush();
+        }
+
+        /// <summary>
+        /// Fails with state-repair guidance when a deployment's registration layout is missing its
+        /// manifest, instead of letting the guest's own argument parser discover that and print its
+        /// usage help.
+        /// </summary>
+        /// <remarks>
+        /// A layout can end up without a manifest when a previous <c>--clean</c> was interrupted
+        /// partway through (for example by a locked file). Guest winapp's <c>--manifest</c> option
+        /// validates the path exists before the command runs at all, so handing it a missing path
+        /// fails argument parsing rather than the command itself — and System.CommandLine's default
+        /// response to a parse failure is to print usage help, which looks like a bug in
+        /// <c>unregister</c> rather than the actual, repairable cause.
+        /// </remarks>
+        internal static void EnsureLayoutHasManifest(IReadOnlyList<GuestFileInfo> layoutFiles, string deploymentId)
+        {
+            ArgumentNullException.ThrowIfNull(layoutFiles);
+
+            if (layoutFiles.Any(file => string.Equals(
+                Path.GetFileName(file.RelativePath), "appxmanifest.xml", StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.DeploymentDirty,
+                "The registration layout for this deployment in Windows Sandbox is missing its manifest, so it cannot be unregistered.",
+                userAction: "Redeploy to repair the layout, then unregister again.",
+                example: "winapp run . --sandbox --clean",
+                context: new Dictionary<string, string> { ["deploymentId"] = deploymentId });
         }
     }
 }

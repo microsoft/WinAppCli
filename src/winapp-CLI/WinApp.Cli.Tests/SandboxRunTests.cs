@@ -392,6 +392,206 @@ public class SandboxRunTests
         Assert.IsNull(harness.Runner.FindOwningDeployment(Epoch, "Contoso.MyApp", "CN=Contoso"));
     }
 
+    // ---- Stop before redeploy -------------------------------------------------------
+
+    [TestMethod]
+    public async Task Deploy_FirstDeploymentForAnIdentity_NeverAsksToStopAnything()
+    {
+        await WriteHostFileAsync("app.exe", "v1");
+
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+
+        await harness.Runner.DeployAsync(
+            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+
+        Assert.AreEqual(0, harness.AppLauncher.StopPackageCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task Deploy_RedeployingAPackagedApp_StopsItsPreviousProcessesEveryTime()
+    {
+        await WriteHostFileAsync("app.exe", "v1");
+
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+
+        var deployment = await harness.Runner.DeployAsync(
+            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+
+        harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
+
+        // Unchanged rerun: this used to leave the previous instance running unstopped, which is
+        // exactly what let a second one launch alongside it.
+        await harness.Runner.DeployAsync(
+            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+
+        CollectionAssert.AreEqual(
+            new[] { harness.AppLauncher.FakePackageFullName }, harness.AppLauncher.StopPackageCalls);
+
+        // Editing the output and rerunning must stop it too, not just an unchanged rerun.
+        await WriteHostFileAsync("app.exe", "v2");
+
+        await harness.Runner.DeployAsync(
+            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+
+        CollectionAssert.AreEqual(
+            new[] { harness.AppLauncher.FakePackageFullName, harness.AppLauncher.FakePackageFullName },
+            harness.AppLauncher.StopPackageCalls);
+    }
+
+    [TestMethod]
+    public async Task Deploy_NeverStopsAnUnrelatedDeploymentsPackage()
+    {
+        await WriteHostFileAsync("app.exe", "v1");
+
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+
+        var depA = await harness.Runner.DeployAsync(
+            harness.Target, "dep-a", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+        harness.Runner.CommitPackage(depA.State, Ownership(depA.LayoutPath));
+
+        // A completely different deployment redeploying must never touch dep-a's package: unrelated
+        // applications must survive untouched.
+        await harness.Runner.DeployAsync(
+            harness.Target, "dep-b", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+
+        Assert.AreEqual(0, harness.AppLauncher.StopPackageCalls.Count);
+    }
+
+    [TestMethod]
+    public async Task Deploy_WhenStoppingThePreviousPackageCannotBeProven_RefusesBeforeMutatingAnything()
+    {
+        await WriteHostFileAsync("app.exe", "v1");
+
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+
+        var deployment = await harness.Runner.DeployAsync(
+            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+
+        harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
+
+        await WriteHostFileAsync("app.exe", "v2");
+        harness.AppLauncher.StopPackageProcessesFailure = new InvalidOperationException("still running");
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
+            harness.Runner.DeployAsync(
+                harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.StaleHandle, failure.Error.Code);
+
+        // The refusal happened before anything was written: the guest's copy is still the old
+        // build, never left half up-to-date by a redeploy that could not prove the app was stopped.
+        Assert.AreEqual("v1", await File.ReadAllTextAsync(
+            TestPaths.Under(_guestManaged, "deployments", "dep-1", "app.exe"), TestContext.CancellationToken));
+    }
+
+    [TestMethod]
+    public async Task Deploy_ForAnUnpackagedDeployment_AsksTheGuestToStopThePreviouslyTrackedProcess()
+    {
+        await WriteHostFileAsync("app.exe", "v1");
+
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+
+        var deployment = await harness.Runner.DeployAsync(
+            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+
+        var run = harness.Runner.RunAsync(
+            harness.Target,
+            deployment.State,
+            new GuestExecRequest { Executable = "app.exe", Arguments = [] },
+            new GuestExecCallbacks(),
+            TestContext.CancellationToken);
+
+        var process = await harness.Processes.WaitForNextAsync(TestContext.CancellationToken);
+        process.Exit(0);
+        await run;
+
+        var stopCalls = new List<(int ProcessId, long StartTicksUtc)>();
+        harness.Server.StopTrackedProcessImpl = (pid, ticks) =>
+        {
+            stopCalls.Add((pid, ticks));
+            return GuestCommandServer.ProcessStopOutcome.Stopped;
+        };
+
+        await WriteHostFileAsync("app.exe", "v2");
+
+        await harness.Runner.DeployAsync(
+            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+
+        Assert.AreEqual(1, stopCalls.Count);
+        Assert.AreEqual(process.ProcessId, stopCalls[0].ProcessId);
+        Assert.AreEqual(process.StartTicksUtc, stopCalls[0].StartTicksUtc);
+    }
+
+    [TestMethod]
+    public async Task Deploy_WhenTheTrackedProcessCannotBeProvenStopped_RefusesBeforeMutatingAnything()
+    {
+        await WriteHostFileAsync("app.exe", "v1");
+
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+
+        var deployment = await harness.Runner.DeployAsync(
+            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+
+        var run = harness.Runner.RunAsync(
+            harness.Target,
+            deployment.State,
+            new GuestExecRequest { Executable = "app.exe", Arguments = [] },
+            new GuestExecCallbacks(),
+            TestContext.CancellationToken);
+
+        var process = await harness.Processes.WaitForNextAsync(TestContext.CancellationToken);
+        process.Exit(0);
+        await run;
+
+        harness.Server.StopTrackedProcessImpl = (_, _) => GuestCommandServer.ProcessStopOutcome.Unproven;
+
+        await WriteHostFileAsync("app.exe", "v2");
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
+            harness.Runner.DeployAsync(
+                harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.StaleHandle, failure.Error.Code);
+
+        Assert.AreEqual("v1", await File.ReadAllTextAsync(
+            TestPaths.Under(_guestManaged, "deployments", "dep-1", "app.exe"), TestContext.CancellationToken));
+    }
+
+    // ---- --clean layout ordering -----------------------------------------------------
+
+    [TestMethod]
+    public async Task Deploy_Clean_WhenReconciliationFails_NeverTouchesTheRegistrationLayout()
+    {
+        await WriteHostFileAsync("app.exe", "binary");
+
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+
+        var deployment = await harness.Runner.DeployAsync(
+            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: true, TestContext.CancellationToken);
+
+        // A registration layout the first run produced.
+        var layoutDirectory = TestPaths.Under(_guestManaged, "deployments", "dep-1-layout");
+        Directory.CreateDirectory(layoutDirectory);
+        await File.WriteAllTextAsync(
+            TestPaths.Under(layoutDirectory, "appxmanifest.xml"), "<Package/>", TestContext.CancellationToken);
+
+        // Lock the payload file the next clean reconciliation must delete, simulating the still-open
+        // handle a `--clean` interrupted by a running process would hit.
+        var payloadFile = TestPaths.Under(_guestManaged, "deployments", "dep-1", "app.exe");
+        await using (new FileStream(payloadFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
+                harness.Runner.DeployAsync(
+                    harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: true, TestContext.CancellationToken));
+
+            Assert.AreEqual(ExecutionTargetErrorCodes.TransferInterrupted, failure.Error.Code);
+        }
+
+        // The registration layout and its manifest must still be there: the old ordering wiped the
+        // layout *before* attempting the payload delete above, which is what left it missing.
+        Assert.IsTrue(File.Exists(TestPaths.Under(layoutDirectory, "appxmanifest.xml")));
+    }
+
     // ---- Additive JSON -------------------------------------------------------------
 
     [TestMethod]
@@ -515,17 +715,19 @@ public class SandboxRunTests
         public Harness(string guestManagedRoot, string stateRoot, string? guestWinapp = GuestWinappPath)
         {
             var pair = new LoopbackTransportPair();
+            AppLauncher = new FakeAppLauncherService();
 
-            var server = new GuestCommandServer(
+            Server = new GuestCommandServer(
                 pair.Guest,
                 Epoch,
                 Processes,
                 new StaticGuestSessionProbe(new GuestSessionInfo(1, "WinSta0", true)),
                 new GuestAgentIdentity("1.0.0", "hash", "arm64", 1, 1),
                 new GuestFileService(guestManagedRoot),
-                guestWinapp);
+                guestWinapp,
+                AppLauncher);
 
-            _serverTask = server.RunAsync(_cancellation.Token);
+            _serverTask = Server.RunAsync(_cancellation.Token);
 
             _channel = new GuestCommandChannel(pair.Host, Epoch);
             _channel.Start();
@@ -539,6 +741,10 @@ public class SandboxRunTests
         }
 
         public FakeGuestProcessHostFactory Processes { get; } = new();
+
+        public FakeAppLauncherService AppLauncher { get; }
+
+        public GuestCommandServer Server { get; }
 
         public DeploymentStateStore States { get; }
 

@@ -67,6 +67,21 @@ internal interface IAppLauncherService
     void TerminatePackageProcesses(string? packageFullName, uint processId);
 
     /// <summary>
+    /// Terminates all processes belonging to a packaged application using
+    /// <c>IPackageDebugSettings.TerminateAllProcesses</c>, and throws when the termination call
+    /// itself reports failure.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="TerminatePackageProcesses"/>, this never falls back to a best-effort PID
+    /// kill and never swallows the failure: it exists for callers that must prove the app was
+    /// stopped before mutating files it may still have open, and for whom silently continuing on
+    /// an unverified assumption would be worse than failing loudly.
+    /// </remarks>
+    /// <param name="packageFullName">The full name of the package whose processes should be terminated.</param>
+    /// <exception cref="System.Exception">The termination call reported failure.</exception>
+    void StopPackageProcessesOrThrow(string packageFullName);
+
+    /// <summary>
     /// Computes the package family name from a package name and publisher distinguished name.
     /// The result follows the Windows format: <c>{packageName}_{publisherId}</c>, where the
     /// publisher ID is a 13-character Crockford Base32 encoding derived from the publisher's SHA256 hash.
