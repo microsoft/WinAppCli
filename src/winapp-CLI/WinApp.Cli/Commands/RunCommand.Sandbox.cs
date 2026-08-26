@@ -102,6 +102,15 @@ internal partial class RunCommand
             var options = new GuestRunOptions(
                 noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, isJson, appArgs);
 
+            // When this run also launches, RunInGuestAsync pulls registration out into its own
+            // locked call (see RegisterPackageAsync) so the mutation lease never has to keep
+            // covering the launch/wait that follows. That earlier call already applied --clean, so
+            // this, the real run, must never re-apply it: doing so would defeat
+            // TrySkipRegistration's "nothing changed" check and force an unlocked re-registration.
+            // When noLaunch is requested there is no launch phase to split off, so this is the one
+            // and only call and must keep the real --clean.
+            var requestOptions = noLaunch ? options : options with { Clean = false };
+
             return await RunInGuestAsync(
                 layout,
                 DeploymentIdFor(inputFolder, identity),
@@ -109,11 +118,12 @@ internal partial class RunCommand
                 isJson,
                 requiresRealInput: !noLaunch,
                 identity,
+                noLaunch,
                 (deployment, ownerEnvironment) => new GuestExecRequest
                 {
                     UseGuestWinapp = true,
                     Arguments = GuestRunPlanner.BuildRunArguments(
-                        deployment.PayloadPath, deployment.LayoutPath, options),
+                        deployment.PayloadPath, deployment.LayoutPath, requestOptions),
 
                     // The payload folder, so a guest app that resolves files relative to its working
                     // directory sees its own deployment rather than the agent's location.
@@ -173,6 +183,9 @@ internal partial class RunCommand
                 isJson,
                 requiresRealInput: true,
                 identity: null,
+
+                // No package, so no registration phase applies regardless of this value.
+                noLaunch: false,
                 (deployment, ownerEnvironment) => new GuestExecRequest
                 {
                     Executable = TargetPathSafety.CombineInsideRoot(deployment.PayloadPath, executableRelativePath),
@@ -195,6 +208,13 @@ internal partial class RunCommand
         /// <param name="isJson">Whether the invoking command is in machine-readable mode.</param>
         /// <param name="requiresRealInput">Whether the guest command needs a usable input desktop.</param>
         /// <param name="identity">Package identity to record ownership for, when there is one.</param>
+        /// <param name="noLaunch">
+        /// True when the caller asked only to deploy and register, never to launch. Irrelevant when
+        /// <paramref name="identity"/> is null (an unpackaged run has no registration phase to
+        /// split), but for a packaged run this decides whether <paramref name="buildRequest"/> is
+        /// the whole operation (true) or only its launch half, with registration pulled out into
+        /// its own locked call first (false) -- see <see cref="RegisterPackageAsync"/>.
+        /// </param>
         /// <param name="buildRequest">Builds the guest request once the guest paths are known.</param>
         /// <param name="cancellationToken">Cancellation.</param>
         /// <param name="guestProducesRunResult">
@@ -213,6 +233,7 @@ internal partial class RunCommand
             bool isJson,
             bool requiresRealInput,
             MsixIdentityResult? identity,
+            bool noLaunch,
             Func<GuestDeployment, Dictionary<string, string>, GuestExecRequest> buildRequest,
             CancellationToken cancellationToken,
             bool guestProducesRunResult = true,
@@ -250,12 +271,33 @@ internal partial class RunCommand
                         RegisteredLocation = deployment.LayoutPath,
                         Aumid = $"{familyName}!{identity.ApplicationId}",
                     });
+
+                    // A packaged run's own guest `winapp run` registers AND launches in one call, so
+                    // when this run also launches, registration -- the actual guest package mutation
+                    // -- is pulled out into its own locked call first. Otherwise the mutation lease
+                    // would have to keep covering the launch/wait that comes after registration
+                    // inside that single call, which is exactly the window it must never span. When
+                    // noLaunch was requested there is nothing to launch, so the single call below
+                    // already is the whole (locked) operation and no split is needed.
+                    if (!noLaunch)
+                    {
+                        WriteProgress(isJson, "Registering the application in the Windows Sandbox...");
+
+                        var registrationFailure = await RegisterPackageAsync(
+                            target, deployment, clean, isJson, cancellationToken);
+
+                        if (registrationFailure is { } failureExitCode)
+                        {
+                            return failureExitCode;
+                        }
+                    }
                 }
 
                 // Every guest mutation this run needed -- runtime provisioning, deployment
-                // reconciliation, and package registration -- is done. What is left is starting and
-                // running the application, which the mutation lock must never cover: a long-running
-                // app would otherwise block every other winapp workflow against this target.
+                // reconciliation, and (for a packaged, launching run) package registration -- is
+                // done. What is left is starting and running the application, which the mutation
+                // lock must never cover: a long-running app would otherwise block every other
+                // winapp workflow against this target.
                 target.ReleaseMutationLease();
 
                 var ownerEnvironment = GuestOwnerContext.WithOwner(
@@ -338,6 +380,93 @@ internal partial class RunCommand
             {
                 return SandboxOutput.Fail(ansiConsole, isJson, ex.Error);
             }
+        }
+
+        /// <summary>
+        /// Registers the packaged application in the guest without launching it, so registration --
+        /// the only guest package mutation a launching packaged run performs -- happens while the
+        /// mutation lease from <see cref="ExecutionTargetOrchestrator.PrepareAsync"/> is still held.
+        /// </summary>
+        /// <param name="target">Prepared target whose mutation lease this call relies on.</param>
+        /// <param name="deployment">The deployment just reconciled into the guest.</param>
+        /// <param name="clean">
+        /// Whether to clear the guest package's application data, forwarded from the run's own
+        /// <c>--clean</c>. Applied here, in the locked phase, and never again in the launch call
+        /// that follows once the lease is released.
+        /// </param>
+        /// <param name="isJson">Whether the invoking command is in machine-readable mode.</param>
+        /// <param name="cancellationToken">Cancellation.</param>
+        /// <returns>
+        /// Null when registration succeeded and the caller should proceed to launch. Otherwise the
+        /// guest's own exit code, which the caller returns immediately without attempting to launch.
+        /// </returns>
+        /// <remarks>
+        /// This is phase 1 of a two-phase packaged run: guest <c>winapp run --no-launch</c>, the
+        /// same production code every local registration-only run already uses, never a bespoke
+        /// reimplementation. The launch call that follows (phase 2, unlocked) re-verifies the
+        /// manifest through <c>TrySkipRegistration</c>/<c>IsExistingRegistrationUpToDate</c> and
+        /// skips re-registering when nothing changed since this call, so in the common case it is a
+        /// query rather than a guest package mutation and needs no lock of its own.
+        /// <para>
+        /// Output handling mirrors the ordinary run exactly: a <c>--json</c> result is captured and
+        /// published only on failure (on success this call's own result is never the one the caller
+        /// sees -- the launch call's is), and non-JSON output streams live precisely as a single,
+        /// unsplit call already would. The started guest process here is the short-lived
+        /// registration-only <c>winapp.exe</c>, not the application, so it is never committed as the
+        /// deployment's running process.
+        /// </para>
+        /// </remarks>
+        private async Task<int?> RegisterPackageAsync(
+            PreparedTarget target,
+            GuestDeployment deployment,
+            bool clean,
+            bool isJson,
+            CancellationToken cancellationToken)
+        {
+            target.RequireMutationLease();
+
+            var request = new GuestExecRequest
+            {
+                UseGuestWinapp = true,
+                Arguments = GuestRunPlanner.BuildRunArguments(
+                    deployment.PayloadPath,
+                    deployment.LayoutPath,
+                    new GuestRunOptions(NoLaunch: true, Clean: clean, Json: isJson)),
+                WorkingDirectory = deployment.PayloadPath,
+            };
+
+            using var capturedOutput = isJson ? new MemoryStream() : null;
+
+            var result = await target.Channel.ExecuteAsync(
+                request,
+                new GuestExecCallbacks(
+                    OnStandardOutput: data =>
+                    {
+                        if (capturedOutput is not null)
+                        {
+                            CaptureBounded(capturedOutput, data);
+                            return;
+                        }
+
+                        WriteRawToConsole(Console.OpenStandardOutput(), data);
+                    },
+                    OnStandardError: data => WriteRawToConsole(Console.OpenStandardError(), data)),
+                cancellationToken).ConfigureAwait(false);
+
+            if (result.ExitCode == 0)
+            {
+                return null;
+            }
+
+            // Registration itself failed, so the launch call never runs and this call's own result
+            // is the only one the caller gets -- relayed exactly as an unsplit call's failure
+            // would have been.
+            if (isJson && capturedOutput is not null)
+            {
+                PublishGuestJson(capturedOutput, target, result.ProcessId);
+            }
+
+            return result.ExitCode;
         }
 
         /// <summary>
