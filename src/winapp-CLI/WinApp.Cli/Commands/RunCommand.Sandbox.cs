@@ -104,13 +104,18 @@ internal partial class RunCommand
 
             // When this run also launches, RunInGuestAsync pulls registration out into its own
             // locked call (see RegisterPackageAsync) so the mutation lease never has to keep
-            // covering the launch/wait that follows. That earlier call already applied --clean, so
-            // this, the real run, must never re-apply it: doing so would defeat
-            // TrySkipRegistration's "nothing changed" check and force an unlocked re-registration.
-            // When noLaunch is requested there is no launch phase to split off, so this is the one
-            // and only call and must keep the real --clean.
-            var requestOptions = noLaunch ? options : options with { Clean = false };
-
+            // covering the launch/wait that follows. The general guest `winapp run` is never used
+            // for that second, unlocked call: after releasing the lease, a different deployment
+            // sharing this package identity could register in the gap, and the general `run` would
+            // then see a mismatched install location and silently fall through to an unlocked
+            // unregister+register of its own -- reintroducing exactly the mutation this split exists
+            // to prevent, and disturbing the other deployment's registration in the process. The
+            // hidden guest-launch verb is structurally incapable of that: it has no code path that
+            // registers or unregisters anything, so a mismatch is refused outright instead of
+            // "repaired". See GuestLaunchPlanner/GuestLaunchCommand.
+            //
+            // When noLaunch is requested there is no launch phase to split off, so the single,
+            // already-fully-locked general `run --no-launch` call below is the whole operation.
             return await RunInGuestAsync(
                 layout,
                 DeploymentIdFor(inputFolder, identity),
@@ -122,8 +127,15 @@ internal partial class RunCommand
                 (deployment, ownerEnvironment) => new GuestExecRequest
                 {
                     UseGuestWinapp = true,
-                    Arguments = GuestRunPlanner.BuildRunArguments(
-                        deployment.PayloadPath, deployment.LayoutPath, requestOptions),
+                    Arguments = noLaunch
+                        ? GuestRunPlanner.BuildRunArguments(deployment.PayloadPath, deployment.LayoutPath, options)
+                        : GuestLaunchPlanner.BuildLaunchArguments(
+                            identity.PackageName,
+                            identity.Publisher,
+                            identity.ApplicationId,
+                            deployment.LayoutPath,
+                            deployment.PayloadPath,
+                            options),
 
                     // The payload folder, so a guest app that resolves files relative to its working
                     // directory sees its own deployment rather than the agent's location.
@@ -401,12 +413,18 @@ internal partial class RunCommand
         /// guest's own exit code, which the caller returns immediately without attempting to launch.
         /// </returns>
         /// <remarks>
-        /// This is phase 1 of a two-phase packaged run: guest <c>winapp run --no-launch</c>, the
-        /// same production code every local registration-only run already uses, never a bespoke
-        /// reimplementation. The launch call that follows (phase 2, unlocked) re-verifies the
-        /// manifest through <c>TrySkipRegistration</c>/<c>IsExistingRegistrationUpToDate</c> and
-        /// skips re-registering when nothing changed since this call, so in the common case it is a
-        /// query rather than a guest package mutation and needs no lock of its own.
+        /// This is phase 1 of a two-phase launching packaged run: guest <c>winapp run --no-launch</c>,
+        /// the same production code every local registration-only run already uses, never a bespoke
+        /// reimplementation. Phase 2 (unlocked, after <see cref="PreparedTarget.ReleaseMutationLease"/>)
+        /// is deliberately <em>not</em> the general guest <c>run</c> -- that command registers and
+        /// launches inseparably, and if a different deployment sharing this package identity
+        /// registers in the gap between phase 1 and phase 2, the general <c>run</c> would see the
+        /// now-mismatched install location and silently fall through to an unlocked
+        /// unregister+register, disturbing the other deployment's registration. Phase 2 is instead
+        /// the hidden guest-launch verb (<see cref="GuestLaunchPlanner"/>/<see cref="GuestLaunchCommand"/>),
+        /// which has no code path that registers or unregisters anything: it verifies the currently
+        /// registered package is installed from exactly this call's layout and refuses to launch
+        /// otherwise, rather than "repairing" the mismatch.
         /// <para>
         /// Output handling mirrors the ordinary run exactly: a <c>--json</c> result is captured and
         /// published only on failure (on success this call's own result is never the one the caller

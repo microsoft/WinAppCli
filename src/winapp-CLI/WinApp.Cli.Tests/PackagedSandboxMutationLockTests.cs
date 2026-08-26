@@ -140,6 +140,9 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
 
         var aLaunch = await harnessA.Processes.WaitForNextAsync(ct);
         Assert.IsFalse(IsRegisterOnly(aLaunch), "A's second guest exec must be the (unlocked) launch.");
+        Assert.IsTrue(
+            IsGuestLaunchVerb(aLaunch),
+            "The unlocked launch call must be the structurally mutation-incapable guest-launch verb, never the general (registration-capable) run.");
         Assert.IsFalse(aLaunch.Request.Arguments.Contains("--clean"), "The launch call must never re-apply --clean.");
 
         // With A's registration done and its own app now "running" (aLaunch deliberately left
@@ -152,6 +155,7 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
 
         var bLaunch = await harnessB.Processes.WaitForNextAsync(ct);
         Assert.IsFalse(IsRegisterOnly(bLaunch));
+        Assert.IsTrue(IsGuestLaunchVerb(bLaunch), "B's unlocked launch call must also be the guest-launch verb.");
 
         // Only now let both "applications" finish.
         aLaunch.Exit(0);
@@ -249,6 +253,7 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
 
         var launch = await harness.Processes.WaitForNextAsync(ct);
         Assert.IsFalse(IsRegisterOnly(launch));
+        Assert.IsTrue(IsGuestLaunchVerb(launch), "The unlocked launch call must be the guest-launch verb, not the general run.");
         Assert.IsTrue(launch.Request.Arguments.Contains("--with-alias"), "The launch call must carry the caller's --with-alias.");
 
         launch.Exit(0);
@@ -258,6 +263,14 @@ public class PackagedSandboxMutationLockTests : BaseCommandTests
 
     private static bool IsRegisterOnly(FakeGuestProcessHost host) =>
         host.Request.Arguments.Contains("--no-launch");
+
+    /// <summary>
+    /// True when a guest exec request is the hidden guest-launch verb -- the structurally
+    /// mutation-incapable verify-and-launch call -- rather than the general, registration-capable
+    /// <c>run</c>.
+    /// </summary>
+    private static bool IsGuestLaunchVerb(FakeGuestProcessHost host) =>
+        host.Request.Arguments is [WinApp.Cli.ExecutionTargets.Orchestration.GuestLaunchPlanner.Verb, ..];
 
     /// <summary>
     /// Starts one simulated <c>run --sandbox</c> invocation on its own thread-pool work item.
