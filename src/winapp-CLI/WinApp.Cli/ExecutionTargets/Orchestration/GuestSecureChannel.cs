@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Buffers.Binary;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text.Json;
 using WinApp.Cli.ExecutionTargets.Abstractions;
@@ -80,17 +81,24 @@ internal sealed class GuestSecureChannel : IGuestTransport
         ArgumentNullException.ThrowIfNull(stream);
 
         var localHello = BuildHello();
-        await stream.WriteAsync(localHello, cancellationToken).ConfigureAwait(false);
-        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await stream.WriteAsync(localHello, cancellationToken).ConfigureAwait(false);
+            await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or SocketException)
+        {
+            throw ClassifyHandshakeFailure(ex);
+        }
 
         var remoteHello = new byte[GuestProtocol.HelloSize];
         try
         {
             await stream.ReadExactlyAsync(remoteHello, cancellationToken).ConfigureAwait(false);
         }
-        catch (EndOfStreamException ex)
+        catch (Exception ex) when (ex is IOException or SocketException)
         {
-            throw PeerClosedDuringHandshake(ex);
+            throw ClassifyHandshakeFailure(ex);
         }
 
         var negotiatedVersion = NegotiateVersion(remoteHello);
@@ -418,11 +426,59 @@ internal sealed class GuestSecureChannel : IGuestTransport
     /// <remarks>
     /// Distinguished from every other handshake failure because the two mean opposite things to the
     /// host. A refused or unanswered connection means the agent is gone and should be repaired; a
-    /// connection the agent <em>accepted</em> and then dropped means the agent is alive and declining
-    /// this one — usually because it is at its channel ceiling. Repairing on that would replace a
-    /// working agent underneath the channels it is still serving.
+    /// connection the agent <em>accepted</em> and then dropped means the agent was alive and
+    /// declining this one — usually because it is at its channel ceiling. Repairing on that would
+    /// replace a working agent underneath the channels it is still serving.
     /// </remarks>
     public const string ClosedDuringHandshakeKey = "closedDuringHandshake";
+
+    /// <summary>
+    /// Turns a handshake I/O failure into a coded one, marking the peer-closed case.
+    /// </summary>
+    /// <remarks>
+    /// Every failure here becomes an <see cref="ExecutionTargetException"/>. That matters as much as
+    /// the classification: callers that decide between reporting and repairing catch only coded
+    /// failures, so a raw <see cref="IOException"/> escaping would bypass that decision entirely and
+    /// surface to the user as an uncoded I/O error instead.
+    /// <para>
+    /// The peer-closed case covers both shapes the same event takes on the wire. A peer that closes
+    /// a drained socket sends FIN, which surfaces as <see cref="EndOfStreamException"/>. A peer that
+    /// closes one with the hello still unread — which is exactly what dropping a connection at the
+    /// tracked ceiling does — sends RST instead, which surfaces as a
+    /// <see cref="SocketException"/> for a reset or aborted connection, usually wrapped in an
+    /// <see cref="IOException"/>. Recognising only the first would leave the second uncoded.
+    /// </para>
+    /// </remarks>
+    private static ExecutionTargetException ClassifyHandshakeFailure(Exception exception) =>
+        IsPeerClosed(exception)
+            ? PeerClosedDuringHandshake(exception)
+            : ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.TransportFailed,
+                "The connection to the guest agent failed during the handshake.",
+                userAction: "Retry the command.",
+                innerException: exception);
+
+    /// <summary>Whether this failure is the peer closing a connection it had accepted.</summary>
+    private static bool IsPeerClosed(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is EndOfStreamException)
+            {
+                return true;
+            }
+
+            if (current is SocketException socket &&
+                socket.SocketErrorCode is SocketError.ConnectionReset
+                    or SocketError.ConnectionAborted
+                    or SocketError.Shutdown)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static ExecutionTargetException PeerClosedDuringHandshake(Exception innerException) =>
         ExecutionTargetException.Create(

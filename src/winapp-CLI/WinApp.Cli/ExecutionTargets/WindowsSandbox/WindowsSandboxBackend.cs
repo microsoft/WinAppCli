@@ -61,6 +61,15 @@ internal sealed class WindowsSandboxBackend(
     /// <summary>Delay while the connected client is still establishing the interactive login.</summary>
     internal static readonly TimeSpan AgentLaunchRetryDelay = TimeSpan.FromMilliseconds(500);
 
+    /// <summary>
+    /// How long to spend deciding whether an agent that closed a handshake is still listening.
+    /// </summary>
+    /// <remarks>
+    /// Short on purpose. It only runs on a failure path, and it answers a question a live local
+    /// agent settles in milliseconds; waiting longer would just delay the repair a dead one needs.
+    /// </remarks>
+    internal static readonly TimeSpan AgentLivenessProbeTimeout = TimeSpan.FromSeconds(5);
+
     /// <summary>Most files the untrusted result folder may contain before it is refused.</summary>
     internal const int MaxResultFiles = 16;
 
@@ -336,11 +345,14 @@ internal sealed class WindowsSandboxBackend(
         {
             _activeMaterial = null;
 
-            // The agent accepted this connection and then closed it, which means it is alive and
-            // declining — at its channel ceiling — rather than dead. Repairing here would stage and
-            // relaunch an agent underneath the channels the running one is still serving, so this
-            // reports the refusal instead.
-            if (ex.Error.Context?.ContainsKey(GuestSecureChannel.ClosedDuringHandshakeKey) == true)
+            // A peer that accepted the connection and then closed it was alive a moment ago, which
+            // an agent at its channel ceiling is and a dead agent is not. The two are identical on
+            // the wire, so they are told apart by asking whether anything is still listening rather
+            // than by guessing. Repairing a live agent would stage and relaunch one underneath the
+            // channels the running agent is still serving.
+            if (ex.Error.Context?.ContainsKey(GuestSecureChannel.ClosedDuringHandshakeKey) == true &&
+                await GuestTcpTransport.IsListeningAsync(
+                    address, material.Port, AgentLivenessProbeTimeout, cancellationToken).ConfigureAwait(false))
             {
                 throw ExecutionTargetException.Create(
                     ExecutionTargetErrorCodes.AgentBusy,

@@ -263,6 +263,44 @@ internal static class GuestTcpTransport
         }
     }
 
+    /// <summary>
+    /// Whether anything is still accepting connections at this address, without handshaking.
+    /// </summary>
+    /// <remarks>
+    /// The disambiguator for a handshake the peer closed. On the wire, an agent dropping a
+    /// connection at its tracked ceiling and an agent that has just died look identical — both
+    /// reset a connection they had accepted. What separates them is what happens next: a live agent
+    /// still accepts, a dead one refuses.
+    /// <para>
+    /// Deliberately connect-only. Completing a handshake here would consume one of the very channels
+    /// whose scarcity is being diagnosed, and the answer needed is only "is something listening",
+    /// which the TCP handshake alone settles. The connection is closed immediately, so the agent
+    /// sheds it as an unauthenticated peer rather than admitting it.
+    /// </para>
+    /// </remarks>
+    public static async Task<bool> IsListeningAsync(
+        string address,
+        int port,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(timeout);
+
+        try
+        {
+            await socket.ConnectAsync(IPAddress.Parse(address), port, deadline.Token).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception ex) when (
+            ex is SocketException or OperationCanceledException or FormatException or ArgumentException)
+        {
+            // Refused, unreachable, or too slow to answer. Any of those means "not serving".
+            return false;
+        }
+    }
+
     private static async Task<Socket> ConnectSocketAsync(
         string address,
         int port,
