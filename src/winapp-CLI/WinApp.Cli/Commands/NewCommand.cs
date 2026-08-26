@@ -285,6 +285,7 @@ internal class NewCommand : Command, IShortDescription
         ICurrentDirectoryProvider currentDirectoryProvider,
         IAnsiConsole ansiConsole,
         ITemplateCacheReader templateCacheReader,
+        ITemplateUpdateCheckThrottle templateUpdateThrottle,
         ILogger<Handler> logger) : AsynchronousCommandLineAction
     {
         /// <summary>How the caller asked us to resolve the template-pack version.</summary>
@@ -681,6 +682,8 @@ internal class NewCommand : Command, IShortDescription
             var verb = entry.IsItem ? "Adding" : "Creating";
             var (exitCode, stdout, stderr) = await WithSpinnerAsync(
                 $"{verb} {name} from {entry.ShortName}...",
+                "Setting up the project; missing NuGet packages are restoring…",
+                ScaffoldStatusDelay,
                 () => dotNetService.RunDotnetCommandAsync(workingDir, args, cancellationToken: cancellationToken));
             LogDotnetOutput(args, exitCode, stdout, stderr);
             if (exitCode != 0)
@@ -801,10 +804,29 @@ internal class NewCommand : Command, IShortDescription
                         return (true, await QueryInstalledPackVersionAsync(cwd, cancellationToken), null);
                     }
 
-                    // Installed: only offer an update when the pack is actually behind the feed.
-                    var latest = await WithSpinnerAsync(
-                        "Checking for WinUI template pack updates...",
-                        () => GetLatestAvailableVersionAsync(cwd, installed, cancellationToken));
+                    // Installed: only offer an update when the pack is actually behind the feed. The
+                    // feed round-trip is throttled to once a day so back-to-back invocations (e.g. list
+                    // then scaffold) don't each pay the latency; between checks the cached result is reused.
+                    string? latest;
+                    if (templateUpdateThrottle.TryGetRecentLatest(installed, out var cachedLatest))
+                    {
+                        latest = cachedLatest;
+                    }
+                    else
+                    {
+                        var (checkSucceeded, feedLatest) = await WithSpinnerAsync(
+                            "Checking for WinUI template pack updates...",
+                            () => GetLatestAvailableVersionAsync(cwd, installed, cancellationToken));
+                        latest = feedLatest;
+
+                        // Only throttle a check that actually reached the feed. A transient failure must
+                        // retry on the next run rather than be cached as "up-to-date" for a day.
+                        if (checkSucceeded)
+                        {
+                            templateUpdateThrottle.Record(installed, latest);
+                        }
+                    }
+
                     var isStale = latest is not null
                         && NuGetVersionHelper.Compare(installed, latest) is int cmp && cmp < 0;
 
@@ -879,6 +901,47 @@ internal class NewCommand : Command, IShortDescription
                 .StartAsync(message, async _ => await operation());
         }
 
+        private async Task<T> WithSpinnerAsync<T>(
+            string message,
+            string delayedMessage,
+            TimeSpan delay,
+            Func<Task<T>> operation)
+        {
+            if (!ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger))
+            {
+                return await operation();
+            }
+
+            return await ansiConsole.Status()
+                .AutoRefresh(true)
+                .Spinner(Spinner.Known.Dots)
+                .SpinnerStyle(Style.Parse("blue"))
+                .StartAsync(message, async context =>
+                {
+                    var operationTask = operation();
+                    return await AwaitWithDelayedActionAsync(
+                        operationTask,
+                        Task.Delay(delay),
+                        () => context.Status(delayedMessage));
+                });
+        }
+
+        internal static TimeSpan ScaffoldStatusDelay => TimeSpan.FromSeconds(10);
+
+        internal static async Task<T> AwaitWithDelayedActionAsync<T>(
+            Task<T> operationTask,
+            Task delayTask,
+            Action delayedAction)
+        {
+            if (await Task.WhenAny(operationTask, delayTask) == delayTask
+                && !operationTask.IsCompleted)
+            {
+                delayedAction();
+            }
+
+            return await operationTask;
+        }
+
         /// <summary>Returns the installed WinUI pack version, or <c>null</c> when the pack isn't installed.</summary>
         private async Task<string?> QueryInstalledPackVersionAsync(DirectoryInfo cwd, CancellationToken cancellationToken)
         {
@@ -888,22 +951,33 @@ internal class NewCommand : Command, IShortDescription
         }
 
         /// <summary>
-        /// Returns the newest available WinUI pack version reported by <c>dotnet new update
-        /// --check-only</c> (which resolves through the caller's configured NuGet feeds and surfaces
-        /// prerelease updates), or <c>null</c> when the pack is already up-to-date or the check fails.
-        /// Falls back to <paramref name="installed"/>'s value semantics via a null return.
+        /// Checks the NuGet feed for a newer WinUI pack via <c>dotnet new update --check-only</c> (which
+        /// resolves through the caller's configured feeds and surfaces prerelease updates).
+        /// <para>
+        /// <c>Succeeded</c> is <see langword="false"/> when the check couldn't produce an authoritative
+        /// result — a non-zero exit (feed unreachable) or exit 0 with output we can't interpret (an SDK
+        /// output-format change, truncated stdout) — so the caller avoids caching a non-result as
+        /// "up-to-date" for a day; <c>Latest</c> is the newest available version, or <see langword="null"/>
+        /// when the pack is already up-to-date.
+        /// </para>
         /// </summary>
-        private async Task<string?> GetLatestAvailableVersionAsync(DirectoryInfo cwd, string installed, CancellationToken cancellationToken)
+        private async Task<(bool Succeeded, string? Latest)> GetLatestAvailableVersionAsync(DirectoryInfo cwd, string installed, CancellationToken cancellationToken)
         {
             var (exit, output, stderr) = await dotNetService.RunDotnetCommandAsync(cwd, UpdateCheckArgs, EnglishUiEnvironment, cancellationToken);
             LogDotnetOutput(UpdateCheckArgs, exit, output, stderr);
             if (exit != 0)
             {
-                return null;
+                return (false, null);
             }
 
-            var (_, latest) = WinUiTemplateCatalog.ParseUpdateCheck(output, TemplatePackageId);
-            return latest;
+            var (outcome, _, latest) = WinUiTemplateCatalog.ParseUpdateCheck(output, TemplatePackageId);
+            if (outcome == UpdateCheckOutcome.Unrecognized)
+            {
+                // Exit 0 but output we can't interpret: don't cache it as authoritative — retry next run.
+                return (false, null);
+            }
+
+            return (true, latest);
         }
 
         /// <summary>

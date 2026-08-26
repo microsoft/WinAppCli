@@ -71,9 +71,10 @@ public class WinUiTemplateCatalogTests
             "-----------------------------------------------  -----------  -----------\n" +
             "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates   0.0.5-alpha  0.0.6-alpha\n";
 
-        var (current, latest) = WinUiTemplateCatalog.ParseUpdateCheck(
+        var (outcome, current, latest) = WinUiTemplateCatalog.ParseUpdateCheck(
             output, "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates");
 
+        Assert.AreEqual(UpdateCheckOutcome.UpdateAvailable, outcome);
         Assert.AreEqual("0.0.5-alpha", current);
         Assert.AreEqual("0.0.6-alpha", latest);
     }
@@ -81,9 +82,10 @@ public class WinUiTemplateCatalogTests
     [TestMethod]
     public void ParseUpdateCheck_UpToDate_ReturnsNulls()
     {
-        var (current, latest) = WinUiTemplateCatalog.ParseUpdateCheck(
+        var (outcome, current, latest) = WinUiTemplateCatalog.ParseUpdateCheck(
             "All template packages are up-to-date.", "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates");
 
+        Assert.AreEqual(UpdateCheckOutcome.UpToDate, outcome);
         Assert.IsNull(current);
         Assert.IsNull(latest);
     }
@@ -96,10 +98,25 @@ public class WinUiTemplateCatalogTests
             "-------------  -------  ------\n" +
             "Some.Other.Id  1.0.0    2.0.0\n";
 
-        var (current, latest) = WinUiTemplateCatalog.ParseUpdateCheck(
+        var (outcome, current, latest) = WinUiTemplateCatalog.ParseUpdateCheck(
             output, "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates");
 
+        Assert.AreEqual(UpdateCheckOutcome.UpToDate, outcome,
+            "A recognizable table listing only other packages means our pack is authoritatively up-to-date.");
         Assert.IsNull(current, "Only the requested package's row must be considered.");
+        Assert.IsNull(latest);
+    }
+
+    [TestMethod]
+    public void ParseUpdateCheck_UnrecognizedOutput_ReturnsUnrecognized()
+    {
+        // Exit 0 but output we can't interpret (an SDK format change or truncated stdout) must not be
+        // mistaken for "up-to-date", otherwise the throttle would cache a non-result for a day.
+        var (outcome, current, latest) = WinUiTemplateCatalog.ParseUpdateCheck(
+            "Determining projects to restore...\nSome unexpected banner.", "Microsoft.WindowsAppSDK.WinUI.CSharp.Templates");
+
+        Assert.AreEqual(UpdateCheckOutcome.Unrecognized, outcome);
+        Assert.IsNull(current);
         Assert.IsNull(latest);
     }
 
