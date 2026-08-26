@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Collections.Concurrent;
+using System.Xml;
 using NuGet.Common;
 using NuGet.Configuration;
 using NuGet.Packaging;
@@ -162,93 +163,130 @@ internal partial class NugetService : INugetService
             && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WINAPP_CLI_CACHE_DIRECTORY"));
     }
 
+    /// <summary>
+    /// Mutable state for a single <see cref="InstallPackageAsync"/> walk: what has been selected, what each
+    /// selected version requires, and what failed. Bundled rather than passed as separate parameters so the
+    /// resolver can answer "is this package still part of the graph?" at any point, which is what makes the
+    /// constraint set self-correcting when an upgrade discards a subtree.
+    /// </summary>
+    private sealed class InstallGraph(string rootPackage)
+    {
+        public string RootPackage { get; } = rootPackage;
+
+        /// <summary>The selected version of each package id, and the value returned to callers.</summary>
+        public Dictionary<string, string> Installed { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public List<string> Failures { get; } = [];
+
+        /// <summary>
+        /// The ranges declared by each package's SELECTED version, keyed by the DECLARING package id. Keying by
+        /// declaring id (rather than appending every range ever seen to a per-dependency list) means re-walking
+        /// an upgraded package overwrites its entry, so the replaced version's requirements stop applying.
+        /// </summary>
+        public Dictionary<string, Dictionary<string, VersionRange>> Declared { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// The package ids the graph still reaches from the root, following the dependencies declared by each
+        /// package's selected version. An upgrade can orphan a whole subtree, and those packages linger in
+        /// <see cref="Installed"/> and <see cref="Declared"/> until pruned, so membership here — not mere
+        /// presence in the dictionaries — is what makes a package part of the resolved graph.
+        /// </summary>
+        public HashSet<string> GetReachablePackages()
+        {
+            var reachable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!Installed.ContainsKey(RootPackage))
+            {
+                // The root is recorded before its dependencies are walked, so this only happens if the root
+                // itself never installed. Return every id rather than an empty set: callers use this to
+                // discard things, and discarding everything would be worse than discarding nothing.
+                return [.. Installed.Keys];
+            }
+
+            reachable.Add(RootPackage);
+            var pending = new Queue<string>();
+            pending.Enqueue(RootPackage);
+
+            while (pending.Count > 0)
+            {
+                if (!Declared.TryGetValue(pending.Dequeue(), out var deps))
+                {
+                    continue;
+                }
+
+                foreach (var depName in deps.Keys)
+                {
+                    if (Installed.ContainsKey(depName) && reachable.Add(depName))
+                    {
+                        pending.Enqueue(depName);
+                    }
+                }
+            }
+
+            return reachable;
+        }
+
+        /// <summary>
+        /// Every range the graph currently places on <paramref name="dependencyId"/>, counting only packages
+        /// still reachable from the root. Requirements from a subtree an upgrade discarded must not be able to
+        /// veto a version: with C 1.0 -> D -> E [1.0], upgrading to a C 2.0 that has no D leaves D's E [1.0]
+        /// behind, and counting it would reject a later branch that legitimately needs E [2.0].
+        /// </summary>
+        public IEnumerable<VersionRange> GetActiveConstraints(string dependencyId)
+        {
+            var reachable = GetReachablePackages();
+            foreach (var (declaringPackage, declared) in Declared)
+            {
+                if (reachable.Contains(declaringPackage) && declared.TryGetValue(dependencyId, out var range))
+                {
+                    yield return range;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Drops packages the resolved graph no longer reaches. Callers such as <c>WorkspaceSetupService</c>
+        /// copy headers, libs, WinMDs and runtimes for every returned entry, so an orphan left here publishes
+        /// assets from a package the resolution rejected into <c>.winapp</c>.
+        /// </summary>
+        public void PruneUnreachablePackages()
+        {
+            var reachable = GetReachablePackages();
+            foreach (var orphan in Installed.Keys.Where(name => !reachable.Contains(name)).ToList())
+            {
+                Installed.Remove(orphan);
+            }
+        }
+    }
+
     public async Task<Dictionary<string, string>> InstallPackageAsync(string package, string version, TaskContext taskContext, CancellationToken cancellationToken = default)
     {
         NugetSourceProvider.EnsureCredentialService();
-        var packages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var dependencyFailures = new List<string>();
-        // The dependency ranges declared by each SELECTED package version, keyed by the DECLARING package id.
-        // Keying by declaring id (rather than appending every range ever seen to a per-dependency list) makes
-        // the set self-retracting: when a package is upgraded, re-walking it overwrites its entry, so the
-        // ranges contributed by the version that was replaced stop constraining the graph. An append-only list
-        // instead kept them forever and could reject a perfectly valid graph — e.g. A->C >=1, B->C >=2,
-        // C1->D [1.0], C2->D [2.0]: after legitimately upgrading C to 2.0, C1's stale D [1.0] would combine
-        // with C2's D [2.0] and report a conflict that does not exist in the resolved graph.
-        var declaredDependencies = new Dictionary<string, Dictionary<string, VersionRange>>(StringComparer.OrdinalIgnoreCase);
+        var graph = new InstallGraph(package);
         using var cacheContext = new SourceCacheContext();
-        await InstallPackageRecursiveAsync(package, version, packages, dependencyFailures, declaredDependencies, taskContext, cacheContext, cancellationToken);
+        await InstallPackageRecursiveAsync(package, version, graph, taskContext, cacheContext, cancellationToken);
 
         // A downloaded root package with unresolvable/uninstallable REQUIRED transitive dependencies is an
         // incomplete install, not a success. Each gap was surfaced as a warning above (and the rest of the
         // tree was still installed best-effort); now fail the operation so callers such as `restore` exit
         // non-zero instead of reporting a partial install as complete.
-        if (dependencyFailures.Count > 0)
+        if (graph.Failures.Count > 0)
         {
             throw new InvalidOperationException(
-                $"Installed {package} {version} but {dependencyFailures.Count} required dependency(ies) could not be installed: {string.Join("; ", dependencyFailures)}.");
+                $"Installed {package} {version} but {graph.Failures.Count} required dependency(ies) could not be installed: {string.Join("; ", graph.Failures)}.");
         }
 
-        // Upgrading a package replaces its entry but leaves behind anything that was installed solely because
-        // the REPLACED version required it. Those orphans are not part of the resolved graph, and callers such
-        // as WorkspaceSetupService copy headers, libs, WinMDs and runtimes for every entry returned here — so
-        // leaving them in would publish assets from a package the resolution rejected into .winapp. Drop
-        // whatever the final graph can no longer reach from the root.
-        PruneUnreachablePackages(packages, declaredDependencies, package);
+        graph.PruneUnreachablePackages();
 
-        return packages;
-    }
-
-    /// <summary>
-    /// Removes entries that the resolved graph no longer reaches from <paramref name="rootPackage"/>, walking
-    /// the dependencies declared by each package's SELECTED version. A package required by any surviving
-    /// branch stays, so this only discards subtrees orphaned when an upgrade replaced the version that pulled
-    /// them in.
-    /// </summary>
-    private static void PruneUnreachablePackages(
-        Dictionary<string, string> installed,
-        Dictionary<string, Dictionary<string, VersionRange>> declaredDependencies,
-        string rootPackage)
-    {
-        // If the root itself is not present there is nothing meaningful to walk from; pruning against an empty
-        // reachable set would discard the entire result, so leave it untouched.
-        if (!installed.ContainsKey(rootPackage))
-        {
-            return;
-        }
-
-        var reachable = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { rootPackage };
-        var pending = new Queue<string>();
-        pending.Enqueue(rootPackage);
-
-        while (pending.Count > 0)
-        {
-            if (!declaredDependencies.TryGetValue(pending.Dequeue(), out var deps))
-            {
-                continue;
-            }
-
-            foreach (var depName in deps.Keys)
-            {
-                if (installed.ContainsKey(depName) && reachable.Add(depName))
-                {
-                    pending.Enqueue(depName);
-                }
-            }
-        }
-
-        foreach (var orphan in installed.Keys.Where(name => !reachable.Contains(name)).ToList())
-        {
-            installed.Remove(orphan);
-        }
+        return graph.Installed;
     }
 
     /// <summary>
     /// Downloads and extracts a NuGet package to the global packages cache, then recursively installs dependencies.
     /// </summary>
-    private async Task InstallPackageRecursiveAsync(string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, Dictionary<string, Dictionary<string, VersionRange>> declaredDependencies, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
+    private async Task InstallPackageRecursiveAsync(string package, string version, InstallGraph graph, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         // Already processed this package?
-        if (installed.ContainsKey(package))
+        if (graph.Installed.ContainsKey(package))
         {
             return;
         }
@@ -269,9 +307,9 @@ internal partial class NugetService : INugetService
         if (HasCompletionMarker(packageDir))
         {
             taskContext.AddDebugMessage($"{UiSymbols.Skip} {package} {normalizedVersion} already present");
-            installed[package] = normalizedVersion;
+            graph.Installed[package] = normalizedVersion;
             // Still resolve dependencies to populate installed dictionary
-            await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, declaredDependencies, taskContext, cacheContext, cancellationToken);
+            await ResolveDependenciesAsync(packageDir, package, normalizedVersion, graph, taskContext, cacheContext, cancellationToken);
             return;
         }
 
@@ -281,43 +319,55 @@ internal partial class NugetService : INugetService
         var identity = new PackageIdentity(package, ParseVersion(package, normalizedVersion));
         await _downloader.DownloadPackageAsync(identity, GetNuGetGlobalPackagesDir().FullName, cacheContext, cancellationToken);
 
-        installed[package] = normalizedVersion;
+        graph.Installed[package] = normalizedVersion;
         taskContext.AddStatusMessage($"{UiSymbols.Check} Installed {package} {normalizedVersion}");
 
         // Recursively install dependencies
-        await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, declaredDependencies, taskContext, cacheContext, cancellationToken);
+        await ResolveDependenciesAsync(packageDir, package, normalizedVersion, graph, taskContext, cacheContext, cancellationToken);
     }
 
     /// <summary>
     /// Reads the .nuspec from an extracted package and recursively installs dependencies.
     /// </summary>
-    private async Task ResolveDependenciesAsync(DirectoryInfo packageDir, string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, Dictionary<string, Dictionary<string, VersionRange>> declaredDependencies, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
+    private async Task ResolveDependenciesAsync(DirectoryInfo packageDir, string package, string version, InstallGraph graph, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         Dictionary<string, VersionRange> deps;
         try
         {
             deps = ReadDependenciesFromNuspec(packageDir, package);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is IOException
+            or UnauthorizedAccessException
+            or XmlException
+            or InvalidDataException
+            or ArgumentException
+            or InvalidOperationException
+            or PackagingException)
         {
+            // Anything that stops the manifest being read is treated the same way. The list is the set
+            // ReadDependenciesFromNuspec can actually produce: file/permission errors, malformed XML, NuGet's
+            // own parse failures, and the package-id shape guard. Nothing is swallowed — every one of these is
+            // recorded below and makes InstallPackageAsync throw — so the filter exists to let a genuinely
+            // unexpected exception keep its own stack rather than being relabelled a manifest problem.
+            //
             // The package was downloaded, but its .nuspec cannot be read so its dependency graph is unknown.
             // This is different from a package that simply declares no dependencies (that reads back as an
             // empty set without throwing): an unreadable manifest means required transitive packages may be
             // silently missing. Record it as a failure — like the dependency resolution/install errors below —
             // so the overall install fails loudly instead of reporting success with an incomplete graph.
             taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not read dependencies for {package} {version}: {NugetErrorMessage.Redact(ex.Message)}");
-            dependencyFailures.Add($"{package} {version}: dependency manifest could not be read: {NugetErrorMessage.Redact(ex.Message)}");
+            graph.Failures.Add($"{package} {version}: dependency manifest could not be read: {NugetErrorMessage.Redact(ex.Message)}");
             return;
         }
 
         // Record what THIS version of the package requires, replacing whatever the previously selected version
         // of the same id declared. Only the selected version of each id is ever present, so the map always
         // describes the current graph and never the branches that an upgrade discarded.
-        declaredDependencies[package] = deps;
+        graph.Declared[package] = deps;
 
         foreach (var (depName, depVersionRange) in deps)
         {
-            if (installed.TryGetValue(depName, out var installedDepVersion))
+            if (graph.Installed.TryGetValue(depName, out var installedDepVersion))
             {
                 if (NuGetVersion.TryParse(installedDepVersion, out var selectedVersion)
                     && RangeSatisfiesWithFloat(depVersionRange, selectedVersion))
@@ -347,26 +397,26 @@ internal partial class NugetService : INugetService
                 catch (Exception ex)
                 {
                     taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not re-resolve dependency {depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
-                    dependencyFailures.Add($"{depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
+                    graph.Failures.Add($"{depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
                     continue;
                 }
 
                 if (!string.IsNullOrEmpty(candidate)
                     && NuGetVersion.TryParse(candidate, out var candidateVersion)
-                    && GetActiveConstraints(declaredDependencies, depName).All(r => RangeSatisfiesWithFloat(r, candidateVersion)))
+                    && graph.GetActiveConstraints(depName).All(r => RangeSatisfiesWithFloat(r, candidateVersion)))
                 {
                     taskContext.AddDebugMessage($"{UiSymbols.Rocket} {depName}: {installedDepVersion} → {candidate} (required by {package} {version})");
                     // Drop the earlier selection so the recursive install re-walks the upgraded version's own
                     // dependency graph rather than short-circuiting on the package id.
-                    installed.Remove(depName);
-                    await InstallPackageRecursiveAsync(depName, candidate, installed, dependencyFailures, declaredDependencies, taskContext, cacheContext, cancellationToken);
+                    graph.Installed.Remove(depName);
+                    await InstallPackageRecursiveAsync(depName, candidate, graph, taskContext, cacheContext, cancellationToken);
                     continue;
                 }
 
                 var rangeText = depVersionRange.OriginalString ?? depVersionRange.ToNormalizedString();
                 var conflict = $"{depName} cannot be resolved to a single version: already selected {installedDepVersion}, but {package} {version} requires '{rangeText}' and no available version satisfies every requirement";
                 taskContext.AddStatusMessage($"{UiSymbols.Warning} Dependency version conflict: {conflict}");
-                dependencyFailures.Add(conflict);
+                graph.Failures.Add(conflict);
                 continue;
             }
 
@@ -382,7 +432,7 @@ internal partial class NugetService : INugetService
                     continue;
                 }
 
-                await InstallPackageRecursiveAsync(depName, depVersion, installed, dependencyFailures, declaredDependencies, taskContext, cacheContext, cancellationToken);
+                await InstallPackageRecursiveAsync(depName, depVersion, graph, taskContext, cacheContext, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -397,28 +447,7 @@ internal partial class NugetService : INugetService
                 // behind verbose-only logging) AND fail the overall operation. Record it so InstallPackageAsync
                 // exits non-zero rather than reporting an incomplete install as success.
                 taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not install dependency {depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
-                dependencyFailures.Add($"{depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
-            }
-        }
-    }
-
-    /// <summary>
-    /// Every range the CURRENTLY selected packages place on <paramref name="dependencyId"/>. Derived from the
-    /// selected version of each declaring package rather than from an append-only history, so ranges declared
-    /// by a version that a later upgrade replaced no longer constrain the result. Validating an upgrade against
-    /// stale ranges could reject a graph that is actually consistent — e.g. A->C >=1, B->C >=2, C1->D [1.0],
-    /// C2->D [2.0]: once C is upgraded to 2.0, D's only live requirement is [2.0], and C1's [1.0] must not
-    /// still be counted.
-    /// </summary>
-    private static IEnumerable<VersionRange> GetActiveConstraints(
-        Dictionary<string, Dictionary<string, VersionRange>> declaredDependencies,
-        string dependencyId)
-    {
-        foreach (var declared in declaredDependencies.Values)
-        {
-            if (declared.TryGetValue(dependencyId, out var range))
-            {
-                yield return range;
+                graph.Failures.Add($"{depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
             }
         }
     }

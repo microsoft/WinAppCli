@@ -236,6 +236,66 @@ public class NugetServiceInstallGraphTests : BaseCommandTests
         }
     }
 
+    /// <summary>
+    /// A constraint declared by a package that an upgrade orphaned must stop applying immediately, not just at
+    /// the final prune. Here C 1.0.0 pulls in D, which pins E [1.0.0]; the `>= 2.0.0` branch upgrades C to a
+    /// version with no D at all, so D leaves the graph. A later branch legitimately requiring E [2.0.0] must
+    /// not be rejected by dead D's pin — the resolver has to judge reachability while it walks, since the
+    /// conflict is decided long before pruning runs.
+    /// </summary>
+    [TestMethod]
+    public async Task InstallPackageAsync_OrphanedSubtreeConstraint_DoesNotBlockALaterBranch()
+    {
+        // NUGET_PACKAGES takes precedence over the globalPackagesFolder written by WriteLocalFeedConfig.
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NUGET_PACKAGES")))
+        {
+            Assert.Inconclusive("NUGET_PACKAGES is set in the environment; it overrides the config's globalPackagesFolder, so the local feed would not be exercised.");
+        }
+
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
+            feed.Create();
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
+
+            // Walk order: A pulls C 1.0.0 (and through it D 1.0.0, pinning E [1.0.0]); B forces C to 2.0.0,
+            // which drops D entirely; Z then requires E [2.0.0].
+            WriteNupkgToFeed(feed, "Dead.Root", "1.0.0", ("Dead.A", "[1.0.0, )"), ("Dead.B", "[1.0.0, )"), ("Dead.Z", "[1.0.0, )"));
+            WriteNupkgToFeed(feed, "Dead.A", "1.0.0", ("Dead.C", "[1.0.0, )"));
+            WriteNupkgToFeed(feed, "Dead.B", "1.0.0", ("Dead.C", "[2.0.0, )"));
+            WriteNupkgToFeed(feed, "Dead.C", "1.0.0", ("Dead.D", "[1.0.0]"));
+            WriteNupkgToFeed(feed, "Dead.C", "2.0.0");
+            WriteNupkgToFeed(feed, "Dead.D", "1.0.0", ("Dead.E", "[1.0.0]"));
+            WriteNupkgToFeed(feed, "Dead.Z", "1.0.0", ("Dead.E", "[2.0.0]"));
+            WriteNupkgToFeed(feed, "Dead.E", "1.0.0");
+            WriteNupkgToFeed(feed, "Dead.E", "2.0.0");
+
+            WriteLocalFeedConfig(root, feed, packages);
+
+            var service = CreateServiceRootedAt(root);
+
+            Dictionary<string, string> installed;
+            try
+            {
+                installed = await service.InstallPackageAsync("Dead.Root", "1.0.0", TestTaskContext, TestContext.CancellationToken);
+            }
+            catch (InvalidOperationException ex)
+            {
+                Assert.Fail($"Graph is satisfiable once dead D's pin is retracted, but install reported a conflict: {ex.Message}");
+                return;
+            }
+
+            Assert.AreEqual("2.0.0", installed.GetValueOrDefault("Dead.C"));
+            Assert.AreEqual("2.0.0", installed.GetValueOrDefault("Dead.E"), "E must follow the only live requirement, from Z.");
+            Assert.IsFalse(installed.ContainsKey("Dead.D"), "D was required only by the replaced C 1.0.0 and must not survive.");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
     [TestMethod]
     public async Task InstallPackageAsync_CacheFolderExistsWithoutCompletionMarker_ReDownloadsInsteadOfTrustingIt()
     {
