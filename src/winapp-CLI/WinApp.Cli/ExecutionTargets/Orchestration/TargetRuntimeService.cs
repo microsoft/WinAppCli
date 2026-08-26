@@ -58,8 +58,7 @@ internal sealed record RuntimeProvisionResult(
 internal sealed class TargetRuntimeService(
     IRuntimeProvisionStateStore stateStore,
     IRuntimePayloadResolver payloadResolver,
-    IRuntimeFrameworkResolver frameworkResolver,
-    ITargetMutationLock mutationLock)
+    IRuntimeFrameworkResolver frameworkResolver)
 {
     /// <summary>Telemetry event names for the phases the spec requires timings for.</summary>
     /// <remarks>
@@ -91,7 +90,11 @@ internal sealed class TargetRuntimeService(
     /// <summary>
     /// Ensures every runtime <paramref name="sourceRoot"/> needs is present in the guest.
     /// </summary>
-    /// <param name="target">Prepared target, whose channel and epoch the work is fenced on.</param>
+    /// <param name="target">
+    /// Prepared target, whose channel and epoch the work is fenced on, and whose mutation lease
+    /// (already held by the caller from <see cref="ExecutionTargetOrchestrator.PrepareAsync"/>)
+    /// this call relies on rather than reacquiring.
+    /// </param>
     /// <param name="targetRef">Target whose state root holds the provisioning record.</param>
     /// <param name="sourceRoot">Host folder about to be deployed — a layout or a build output.</param>
     /// <param name="projectRoot">Workspace root, used only when a payload has to be acquired.</param>
@@ -100,6 +103,9 @@ internal sealed class TargetRuntimeService(
     /// <exception cref="ExecutionTargetException">
     /// The required graph could not be satisfied without removing or downgrading a shared runtime.
     /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="target"/> was not prepared for mutation.
+    /// </exception>
     /// <remarks>
     /// The graph is verified before every launch, never inferred from a previous pass. A clean
     /// journal proves what winapp did, not what the guest currently has: <c>sandbox exec</c> gives
@@ -107,6 +113,12 @@ internal sealed class TargetRuntimeService(
     /// generation, and a deployment that trusted the record would launch into a guest whose runtime
     /// had been changed underneath it. The journal's job is narrower and unchanged — it says whether
     /// a previous pass was interrupted, and therefore whether the staged area can be trusted.
+    /// <para>
+    /// This no longer acquires the mutation lock itself: the caller already holds it for the whole
+    /// mutating sequence (runtime provisioning, deployment reconciliation, package registration), via
+    /// <paramref name="target"/>'s <see cref="PreparedTarget.MutationLease"/>. Reacquiring the same
+    /// file-backed lock here would deadlock against the caller's own held lease rather than nest.
+    /// </para>
     /// </remarks>
     public async Task<RuntimeProvisionResult> EnsureAsync(
         PreparedTarget target,
@@ -132,12 +144,9 @@ internal sealed class TargetRuntimeService(
             return new RuntimeProvisionResult(requirements, AlreadySatisfied: true, Report: null);
         }
 
-        var planId = requirements.PlanId;
+        target.RequireMutationLease();
 
-        using var lease = mutationLock.TryAcquire(targetRef, ExecutionTargetOrchestrator.LockTimeout, cancellationToken)
-            ?? throw Failed(
-                "Another winapp command is still changing this Windows Sandbox.",
-                "Wait for the other command to finish, then retry.");
+        var planId = requirements.PlanId;
 
         var existing = stateStore.Read(targetRef);
 

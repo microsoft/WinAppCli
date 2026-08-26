@@ -34,6 +34,7 @@ public partial class TargetRuntimeServiceTests
         private readonly CancellationTokenSource _cancellation = new(TimeSpan.FromSeconds(60));
         private readonly Task _serverTask;
         private readonly RuntimeGuestProcessHostFactory _processes;
+        private readonly TargetMutationLease _mutationLease;
 
         public Harness(
             string guestManagedRoot,
@@ -62,6 +63,18 @@ public partial class TargetRuntimeServiceTests
             var channel = new GuestCommandChannel(pair.Host, currentEpoch);
             channel.Start();
 
+            var directories = new FixedTargetStateDirectoryProvider(stateRoot);
+            StateStore = new RuntimeProvisionStateStore(directories);
+
+            // Runtime provisioning no longer acquires the mutation lock itself -- it trusts the
+            // caller already holds it, exactly as production callers do via
+            // ExecutionTargetOrchestrator.PrepareAsync(Mutating). The harness stands in for that
+            // caller with a real, held lease over its own scratch lock file.
+            var mutationLockPath = TestPaths.TempFile("runtime-mutation-lock", ".lock");
+            var mutationStream = new FileStream(
+                mutationLockPath, FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+            _mutationLease = new TargetMutationLease(mutationStream, wasAbandoned: false);
+
             Prepared = new PreparedTarget(
                 channel,
                 currentEpoch,
@@ -76,16 +89,10 @@ public partial class TargetRuntimeServiceTests
                     PersistentStorage = false,
                     ManagedRoot = guestManagedRoot,
                 },
-                Reused: false);
+                Reused: false,
+                MutationLease: _mutationLease);
 
-            var directories = new FixedTargetStateDirectoryProvider(stateRoot);
-            StateStore = new RuntimeProvisionStateStore(directories);
-
-            Service = new TargetRuntimeService(
-                StateStore,
-                Resolver,
-                Frameworks,
-                new TargetMutationLock(directories));
+            Service = new TargetRuntimeService(StateStore, Resolver, Frameworks);
         }
 
         /// <summary>Payloads the host is allowed to find, keyed by package identity name.</summary>
