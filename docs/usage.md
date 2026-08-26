@@ -753,7 +753,7 @@ Project mode requires the **.NET SDK 8.0.100 or newer** (for MSBuild `--getPrope
 - `--project <name-or-path>` - When the input is a solution (`.sln`/`.slnx`) or a directory with multiple runnable app projects, selects which project to launch (by project name or path).
 - `--no-build` - Skip building and run the existing build output (still evaluates output properties). *(Also honored in single-file mode.)*
 - `--no-restore` - Skip restoring before building. *(Also honored in single-file mode.)*
-- `-p, --property <Name=Value>` - MSBuild property, forwarded to both the build and the property evaluation. Repeatable (e.g. `-p WindowsPackageType=None`). *(Also honored in single-file mode, where it is the only way to set `TargetFramework` or `RuntimeIdentifier`.)*
+- `-p, --property <Name=Value>` - MSBuild property, forwarded to both the build and the property evaluation. Repeatable (e.g. `-p EnableMyFeature=true`). *(Also honored in single-file mode, where it is the only way to set `TargetFramework` or `RuntimeIdentifier`.)*
 
 **Build output & verbosity:** the project is built in two steps — a `dotnet build` whose output **streams live** to your console, followed by a fast property-evaluation pass. winapp prints the exact `dotnet build …` invocation before the output, and streams warnings even on a successful build. Verbosity:
 
@@ -1625,6 +1625,7 @@ stop reason, optional `frameArtifacts`, and warnings.
 > stills. Tracked in [#646](https://github.com/microsoft/winappCli/issues/646).
 
 For full documentation, see [docs/ui-automation.md](ui-automation.md).
+
 
 
 

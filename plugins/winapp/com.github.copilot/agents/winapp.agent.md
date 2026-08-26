@@ -190,7 +190,7 @@ Building a WinUI 3 UI and need to find the right control or a working sample?
 - `-f, --framework <tfm>` — (project mode) target framework for multi-targeted projects. **Rejected in single-file mode** — declare `#:property TargetFramework=…` instead
 - `--project <name-or-path>` — (project mode) select which project to launch when a solution/directory has multiple runnable app projects (errors listing candidates if ambiguous). **Rejected in single-file mode** — the `.cs` file is the project
 - `--no-build` / `--no-restore` — (project + single-file mode) skip build / restore
-- `-p, --property <Name=Value>` — (project + single-file mode) MSBuild property forwarded to build + evaluation; repeatable (e.g. `-p WindowsPackageType=None`)
+- `-p, --property <Name=Value>` — (project + single-file mode) MSBuild property forwarded to build + evaluation; repeatable (e.g. `-p EnableMyFeature=true`)
 - `--debug-output` — capture `OutputDebugString` messages and first-chance exceptions (prevents other debuggers like VS/VS Code from attaching). For WinUI apps it also auto-runs a stowed-exception (`0xC000027B`) triage pass (`!xamlstowed`/`!xamltriage`) that recovers the originating HRESULT and native XAML dispatch stack. The first triage run downloads debugger components (engine bits from NuGet + `JsProvider.dll` from the WinDbg CDN) and caches them under `~\.winapp\dbgtools\`; if downloads are blocked, install Debugging Tools for Windows or point `WINAPP_DBGTOOLS_DIR` at a debugger directory containing `dbgeng.dll` and `JsProvider.dll`.
 - `--symbols` — with `--debug-output`, download Microsoft public symbols for richer native crash stacks (first run downloads and caches them)
 - `--output-appx-directory <path>` — custom output directory for the loose layout
@@ -427,4 +427,5 @@ When the user encounters an error, check these common causes:
 - **Sparse package** — A lightweight package registration that gives a desktop app package identity without full MSIX deployment. The exe stays in its original location; Windows associates identity with it via `Add-AppxPackage -ExternalLocation`. Used by `create-debug-identity`. Best for scenarios where the exe is separate from the app code (e.g., Electron).
 - **Loose layout package** — A folder-based package registered with Windows via `Add-AppxPackage`, simulating a full MSIX install without creating an `.msix` file. Used by `winapp run`. The preferred approach for most frameworks during development.
 - **Package identity** — A Windows concept that enables certain APIs (notifications, background tasks, share target). Obtained via full MSIX packaging, loose layout registration (`winapp run`), or sparse package registration (`create-debug-identity`).
+
 
