@@ -123,15 +123,37 @@ internal sealed class NugetPackageDownloader(NugetSourceProvider sourceProvider)
                 }
 
                 await using var readStream = File.OpenRead(tempFile);
-                using var addResult = await GlobalPackagesFolderUtility.AddPackageAsync(
-                    source: repo.PackageSource.Source,
-                    packageIdentity: identity,
-                    packageStream: readStream,
-                    globalPackagesFolder: globalPackagesFolder,
-                    parentId: Guid.Empty,
-                    clientPolicyContext: clientPolicyContext,
-                    logger: Logger,
-                    token: cancellationToken);
+
+                // NuGet reports signature/trust policy failures by throwing SignatureException with an EMPTY
+                // Message and writing the actual diagnosis (e.g. NU3004 "the package is not signed") through
+                // the logger. Passing NullLogger here therefore surfaced a completely blank error to the user
+                // whenever signatureValidationMode=require rejected a package. Capture the diagnosis the same
+                // way the download step already does.
+                var addLogger = new CollectingLogger();
+                try
+                {
+                    using var addResult = await GlobalPackagesFolderUtility.AddPackageAsync(
+                        source: repo.PackageSource.Source,
+                        packageIdentity: identity,
+                        packageStream: readStream,
+                        globalPackagesFolder: globalPackagesFolder,
+                        parentId: Guid.Empty,
+                        clientPolicyContext: clientPolicyContext,
+                        logger: addLogger,
+                        token: cancellationToken);
+                }
+                catch (SignatureException ex)
+                {
+                    // Not a failover condition: the package downloaded fine and was rejected by the client's
+                    // own trust policy, so trying the next source would only repeat it. The raw exception is
+                    // deliberately not attached — its verification results can carry the source URL, and this
+                    // is the same sanitization boundary as the other throws in this file.
+                    throw new InvalidOperationException(
+                        NugetErrorMessage.Redact(
+                            $"Signature validation rejected {package} {version} from source '{repo.PackageSource.Name}': "
+                            + $"{DescribeSignatureFailure(ex, addLogger)} "
+                            + "This is enforced by 'signatureValidationMode' / 'trustedSigners' in your nuget.config."));
+                }
 
                 return;
             }
@@ -164,6 +186,35 @@ internal sealed class NugetPackageDownloader(NugetSourceProvider sourceProvider)
         }
 
         throw new InvalidOperationException($"{baseMessage} The package/version was not found on any configured source.");
+    }
+
+    /// <summary>
+    /// Builds a non-empty explanation for a <see cref="SignatureException"/>. Its own <c>Message</c> is empty,
+    /// so the detail has to be recovered from the diagnostics NuGet logged, or failing that from the
+    /// verification results it carries. Always returns something a user can act on, since the whole point is
+    /// that this failure must not reach them blank.
+    /// </summary>
+    private static string DescribeSignatureFailure(SignatureException ex, CollectingLogger logger)
+    {
+        if (!string.IsNullOrWhiteSpace(logger.LastErrorMessage))
+        {
+            return logger.LastErrorMessage;
+        }
+
+        var issues = ex.Results?
+            .SelectMany(result => result.Issues ?? [])
+            .Select(issue => issue.Message)
+            .Where(message => !string.IsNullOrWhiteSpace(message))
+            .ToList();
+
+        if (issues is { Count: > 0 })
+        {
+            return string.Join("; ", issues);
+        }
+
+        return string.IsNullOrWhiteSpace(ex.Message)
+            ? "the package failed the configured signature/trust policy."
+            : ex.Message;
     }
 
     /// <summary>
