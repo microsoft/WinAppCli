@@ -114,6 +114,19 @@ internal static class StoreHostBuilderExtensions
                 .UseCommandHandler<CreateDebugIdentityCommand, CreateDebugIdentityCommand.Handler>()
                 .UseCommandHandler<EmbedIdentityCommand, EmbedIdentityCommand.Handler>()
                 .UseCommandHandler<RunCommand, RunCommand.Handler>()
+                // GuestLaunchCommand shares RunCommand.Handler rather than a second handler
+                // instance: it is a structurally distinct, hidden verb (see
+                // RunCommand.GuestLaunch.cs) dispatched from the same class, because it reuses
+                // that handler's launch/debug/alias/unregister logic without any path back into
+                // package registration.
+                .AddSingleton(sp =>
+                {
+                    var command = ActivatorUtilities.CreateInstance<GuestLaunchCommand>(sp);
+                    command.Options.Add(WinAppRootCommand.VerboseOption);
+                    command.Options.Add(WinAppRootCommand.QuietOption);
+                    command.SetAction((parseResult, ct) => sp.GetRequiredService<RunCommand.Handler>().InvokeAsync(parseResult, ct));
+                    return command;
+                })
                 .UseCommandHandler<UnregisterCommand, UnregisterCommand.Handler>()
                 .UseCommandHandler<GetWinappPathCommand, GetWinappPathCommand.Handler>()
                 .UseCommandHandler<FindUiCommand, FindUiCommand.Handler>()
