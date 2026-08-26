@@ -240,6 +240,78 @@ public class ExecutionTargetOrchestratorTests
         Assert.AreEqual(1, mutationLock.ReleaseCalls);
     }
 
+    [TestMethod]
+    public async Task RequireMutationLease_BeforeRelease_DoesNotThrow()
+    {
+        using var mutationLock = new FakeMutationLock();
+        var orchestrator = new ExecutionTargetOrchestrator(
+            new FakeBackend(),
+            mutationLock,
+            new FakeConnectionLock());
+
+        await using var prepared = await orchestrator.PrepareAsync(
+            PrepareTargetOptions.Mutating, TestContext.CancellationToken);
+
+        // Does not throw: the lease is still held.
+        prepared.RequireMutationLease();
+    }
+
+    [TestMethod]
+    public async Task RequireMutationLease_AfterReleaseMutationLease_ThrowsRatherThanPassSilently()
+    {
+        // The bug this guards against: RequireMutationLease checking only "is the lease reference
+        // non-null" would keep passing after ReleaseMutationLease() disposed it, because disposing
+        // a lease does not null out the PreparedTarget's own reference to it. A mutation that ran
+        // after release would then look "checked" while actually being completely unprotected.
+        using var mutationLock = new FakeMutationLock();
+        var orchestrator = new ExecutionTargetOrchestrator(
+            new FakeBackend(),
+            mutationLock,
+            new FakeConnectionLock());
+
+        await using var prepared = await orchestrator.PrepareAsync(
+            PrepareTargetOptions.Mutating, TestContext.CancellationToken);
+
+        prepared.ReleaseMutationLease();
+
+        Assert.ThrowsExactly<InvalidOperationException>(prepared.RequireMutationLease);
+    }
+
+    [TestMethod]
+    public async Task RequireMutationLease_AfterDisposeFailSafeRelease_ThrowsRatherThanPassSilently()
+    {
+        // Same as above, but released via the DisposeAsync fail-safe path instead of the caller's
+        // own explicit ReleaseMutationLease() call -- both release paths must leave the lease
+        // observably released, not just physically unlocked on disk.
+        using var mutationLock = new FakeMutationLock();
+        var orchestrator = new ExecutionTargetOrchestrator(
+            new FakeBackend(),
+            mutationLock,
+            new FakeConnectionLock());
+
+        var prepared = await orchestrator.PrepareAsync(
+            PrepareTargetOptions.Mutating, TestContext.CancellationToken);
+
+        await prepared.DisposeAsync();
+
+        Assert.ThrowsExactly<InvalidOperationException>(prepared.RequireMutationLease);
+    }
+
+    [TestMethod]
+    public async Task RequireMutationLease_ReadOnlyTarget_Throws()
+    {
+        using var mutationLock = new FakeMutationLock();
+        var orchestrator = new ExecutionTargetOrchestrator(
+            new FakeBackend(),
+            mutationLock,
+            new FakeConnectionLock());
+
+        await using var prepared = await orchestrator.PrepareAsync(
+            PrepareTargetOptions.ReadOnly, TestContext.CancellationToken);
+
+        Assert.ThrowsExactly<InvalidOperationException>(prepared.RequireMutationLease);
+    }
+
     /// <summary>
     /// Deterministic proof of the SBX-009 gap: two concurrent mutating commands against the same
     /// target must never have their guest-mutation work overlap.
