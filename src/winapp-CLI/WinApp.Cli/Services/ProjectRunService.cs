@@ -508,8 +508,8 @@ internal sealed partial class ProjectRunService(
     /// </summary>
     private async Task<int> RunRestorePassAsync(FileInfo csproj, ProjectRunOptions options, DirectoryInfo workingDir, CancellationToken cancellationToken)
     {
-        var restoreArgs = BuildRestorePassArguments(csproj, options);
-        logger.LogDebug("{UISymbol} Restoring before SDK-less CsWinRT metadata resolution: dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(restoreArgs));
+        var restoreArgs = BuildRestorePassArguments(csproj, options, ResolveRestoreVerbosity(logger, options.Json));
+        logger.LogDebug("{UISymbol} Restoring before SDK-less CsWinRT metadata resolution.", UiSymbols.Note);
         var exitCode = await RunRestoreCommandAsync(
             restoreArgs, $"Restoring {csproj.Name} dependencies...", options, workingDir, cancellationToken);
         if (exitCode != 0)
@@ -548,8 +548,8 @@ internal sealed partial class ProjectRunService(
         if (allManaged)
         {
             // Closest to VS: one restore over the whole solution pulls the target and every sibling.
-            var args = BuildRestorePassArguments(options.Solution, options);
-            logger.LogDebug("{UISymbol} Restoring solution before build (build-dependency parity): dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(args));
+            var args = BuildRestorePassArguments(options.Solution, options, ResolveRestoreVerbosity(logger, options.Json));
+            logger.LogDebug("{UISymbol} Restoring solution before build for build-dependency parity.", UiSymbols.Note);
             var exitCode = await RunRestoreCommandAsync(
                 args, $"Restoring {options.Solution.Name} dependencies...", options, workingDir, cancellationToken);
             if (exitCode == 0)
@@ -582,8 +582,8 @@ internal sealed partial class ProjectRunService(
     {
         foreach (var sibling in siblings)
         {
-            var args = BuildRestorePassArguments(sibling, options);
-            logger.LogDebug("{UISymbol} Restoring solution sibling before build (build-dependency parity): dotnet {Arguments}", UiSymbols.Note, RedactSecretsForDisplay(args));
+            var args = BuildRestorePassArguments(sibling, options, ResolveRestoreVerbosity(logger, options.Json));
+            logger.LogDebug("{UISymbol} Restoring solution sibling {Sibling} before build for build-dependency parity.", UiSymbols.Note, sibling.Name);
             var exitCode = await RunRestoreCommandAsync(
                 args, $"Restoring {sibling.Name} dependencies...", options, workingDir, cancellationToken);
             if (exitCode != 0)
@@ -598,7 +598,7 @@ internal sealed partial class ProjectRunService(
     /// are visible as they happen. A real terminal is handed directly to dotnet so its terminal logger can
     /// render in-place progress; redirected, JSON, and quiet modes use line streaming instead.
     /// </summary>
-    private async Task<int> RunRestoreCommandAsync(
+    internal async Task<int> RunRestoreCommandAsync(
         string arguments,
         string banner,
         ProjectRunOptions options,
@@ -641,6 +641,9 @@ internal sealed partial class ProjectRunService(
         return await dotNetService.RunDotnetStreamingAsync(
             workingDir, arguments, WriteLive, WriteLive, cancellationToken);
     }
+
+    private static string? ResolveRestoreVerbosity(ILogger logger, bool json) =>
+        !json && !logger.IsEnabled(LogLevel.Information) ? "quiet" : null;
 
     /// <summary>
     /// Runs the project-mode build pass, streaming dotnet's output live. Output routing:

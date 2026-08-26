@@ -18,9 +18,13 @@ internal sealed partial class ProjectRunService
     /// RID / Configuration / user <c>-p</c> / solution properties so the same graph resolves into
     /// <c>project.assets.json</c> that the subsequent <c>--no-restore</c> build consumes. Dedicated-flag
     /// user <c>-p</c> are filtered (see <see cref="ForwardableProperties"/>) so a conflicting
-    /// <c>-p:RuntimeIdentifier</c> can't restore a different RID's assets than the build needs.
+    /// <c>-p:RuntimeIdentifier</c> can't restore a different RID's assets than the build needs. The optional
+    /// <paramref name="verbosity"/> is used by quiet mode; otherwise dotnet keeps its default verbosity.
     /// </summary>
-    internal static string BuildRestorePassArguments(FileInfo csproj, ProjectRunOptions options)
+    internal static string BuildRestorePassArguments(
+        FileInfo csproj,
+        ProjectRunOptions options,
+        string? verbosity = null)
     {
         var rid = RunArchHelper.ToRuntimeIdentifier(options.Architecture);
         var tokens = new List<string>
@@ -54,6 +58,12 @@ internal sealed partial class ProjectRunService
         }
 
         AppendSolutionProperties(tokens, options);
+
+        if (!string.IsNullOrWhiteSpace(verbosity))
+        {
+            tokens.Add("-v");
+            tokens.Add(verbosity);
+        }
 
         return WindowsCommandLine.JoinArguments(tokens) ?? string.Empty;
     }
