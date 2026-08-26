@@ -28,15 +28,14 @@ only.
 
 ## Structure
 
-- **Pick the right pattern.** Interface + DI service for stateful logic with
-  dependencies; static helper for pure functions; data document for wrapping a
-  file format; partial class for splitting a large tightly-coupled service. A
-  stateless three-line helper registered in DI, or a stateful class written as a
-  static, will need rework.
-- **File size.** Target ≤500 lines, soft limit ~800, hard limit ~1000. Flag a new
-  file already over the soft limit, or an existing file this diff pushes over.
-- **Premature abstraction.** An interface with one caller and no anticipated
-  second should be inlined.
+- **Use the architecture guidance in `AGENTS.md`.** DI does not require an
+  interface. Add one only for multiple implementations, an established contract,
+  or a necessary substitution/test boundary.
+- **Prefer cohesion.** One implementation is better than several one-caller
+  wrappers. Recommend extraction only when you can name the real boundary or
+  reuse it creates.
+- **Treat file size as a signal.** Flag a concrete cohesion, navigation, or test
+  problem, not a line threshold by itself.
 - **Duplication inside this PR.** If the diff repeats a near-identical block
   across commands or files, recommend one shared helper and cite each site.
   Near-duplicates silently drift.

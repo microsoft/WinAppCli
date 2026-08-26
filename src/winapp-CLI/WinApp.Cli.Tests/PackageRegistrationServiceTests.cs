@@ -11,6 +11,50 @@ public class PackageRegistrationServiceTests
 {
     private const int ERROR_INSTALL_PACKAGE_ALREADY_EXISTS = unchecked((int)0x80073CFB);
     private const int ERROR_ACCESS_DISABLED_BY_POLICY = unchecked((int)0x800704EC);
+    private const int ERROR_INSTALL_FAILED = unchecked((int)0x80073CF9);
+
+    [TestMethod]
+    public void BuildRegistrationException_InstallFailed_HintsAtMaxPath()
+    {
+        // 0x80073CF9 arrives with no error text, so without a hint the caller sees only
+        // "Unknown error (0x80073CF9)". MAX_PATH is a common enough cause to surface.
+        var ex = PackageRegistrationService.BuildRegistrationException(
+            "Failed to register package",
+            errorText: null,
+            ERROR_INSTALL_FAILED);
+
+        StringAssert.Contains(ex.Message, "(0x80073CF9)");
+        StringAssert.Contains(ex.Message, "MAX_PATH");
+        StringAssert.Contains(ex.Message, "--output-appx-directory");
+    }
+
+    [TestMethod]
+    public void BuildRegistrationException_InstallFailed_HintIsFlowAgnostic()
+    {
+        // This builder is shared with RegisterSparseAsync, reached from
+        // winapp create-debug-identity — which has no --output-appx-directory and stages no
+        // layout. The hint must never hand that caller a winapp run command to paste.
+        var ex = PackageRegistrationService.BuildRegistrationException(
+            "Failed to register sparse package",
+            errorText: null,
+            ERROR_INSTALL_FAILED);
+
+        StringAssert.Contains(ex.Message, "MAX_PATH");
+        Assert.IsFalse(
+            ex.Message.Contains("  winapp run"),
+            "sparse callers cannot act on a 'winapp run --output-appx-directory' remediation");
+    }
+
+    [TestMethod]
+    public void BuildRegistrationException_OtherHResults_NoMaxPathHint()
+    {
+        var ex = PackageRegistrationService.BuildRegistrationException(
+            "Failed to register package",
+            "boom",
+            unchecked((int)0x8007000B));
+
+        Assert.IsFalse(ex.Message.Contains("MAX_PATH"));
+    }
 
     [TestMethod]
     public void IsSideloadPolicyError_TrueForGroupPolicyHResult()

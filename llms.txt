@@ -13,7 +13,7 @@ winapp helps developers add Windows-specific features (MSIX packaging, push noti
 
 A single shared plugin at `plugins/winapp/` serves both GitHub Copilot and Claude Code. It includes:
 
-- **Agent:** [winapp.agent.md](https://github.com/microsoft/WinAppCli/blob/main/plugins/winapp/agents/winapp.agent.md) — full system prompt with command reference, decision trees, framework-specific guidance, error diagnosis, and critical rules
+- **Agent:** [winapp.agent.md](https://github.com/microsoft/WinAppCli/blob/main/plugins/winapp/com.github.copilot/agents/winapp.agent.md) — full system prompt with command reference, decision trees, framework-specific guidance, error diagnosis, and critical rules
 - **Skills** (auto-generated, in `plugins/winapp/skills/`):
   - `winapp-setup/SKILL.md` — project init, restore, update
   - `winapp-package/SKILL.md` — MSIX packaging
