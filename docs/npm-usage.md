@@ -451,7 +451,7 @@ function run(options?: RunOptions): Promise<WinappResult>
 | `noRestore` | `boolean \| undefined` | No | Project and single-file mode: skip restoring before building. Ignored in folder mode. |
 | `outputAppxDirectory` | `string \| undefined` | No | Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory will be used. |
 | `project` | `string \| undefined` | No | Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode. |
-| `property` | `string \| string[] \| undefined` | No | Project and single-file mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. |
+| `property` | `string \| string[] \| undefined` | No | Project and single-file mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p EnableMyFeature=true). Ignored in folder mode. |
 | `runtime` | `string \| undefined` | No | Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode. |
 | `symbols` | `boolean \| undefined` | No | Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. |
 | `unregisterOnExit` | `boolean \| undefined` | No | Unregister the development package after the application exits. Only removes packages registered in development mode. |
@@ -1594,7 +1594,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `noRestore` | `boolean \| undefined` | No | Project and single-file mode: skip restoring before building. Ignored in folder mode. |
 | `outputAppxDirectory` | `string \| undefined` | No | Output directory for the loose layout package. If not specified, a directory named AppX inside the input directory will be used. |
 | `project` | `string \| undefined` | No | Project mode: when the input is a solution (.sln/.slnx) or a directory with multiple runnable app projects, selects which project to launch (by name or path). Ignored in folder mode. |
-| `property` | `string \| string[] \| undefined` | No | Project and single-file mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode. |
+| `property` | `string \| string[] \| undefined` | No | Project and single-file mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p EnableMyFeature=true). Ignored in folder mode. |
 | `runtime` | `string \| undefined` | No | Project mode: target .NET runtime identifier (RID), e.g. win-x64. Project mode uses only the RID's architecture, always builds the canonical win-<arch>, and rejects non-Windows RIDs (e.g. linux-x64); it overrides --arch. Ignored in folder mode. |
 | `symbols` | `boolean \| undefined` | No | Download symbols from Microsoft Symbol Server for richer native crash analysis, including the WinUI stowed-exception dispatch stack. Only used with --debug-output. First run downloads symbols and caches them locally; subsequent runs use the cache. |
 | `unregisterOnExit` | `boolean \| undefined` | No | Unregister the development package after the application exits. Only removes packages registered in development mode. |
@@ -1935,6 +1935,7 @@ type ManifestTemplates = "packaged" | "sparse"
 | `quiet` | `boolean \| undefined` | No | Suppress progress messages. |
 | `verbose` | `boolean \| undefined` | No | Enable verbose output. |
 | `cwd` | `string \| undefined` | No | Working directory for the CLI process (defaults to process.cwd()). |
+
 
 
 

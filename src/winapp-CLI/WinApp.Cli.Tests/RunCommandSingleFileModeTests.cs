@@ -479,6 +479,37 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
             "--no-restore must be threaded into loose-layout package discovery");
     }
 
+    [TestMethod]
+    public async Task SingleFileMode_DefaultsTheExecutableToTheResolvedApp()
+    {
+        // An authored manifest can still use the $targetnametoken$ placeholder. Resolving it by scanning
+        // the output hits "multiple .exe files found", because every WinAppSDK self-contained output ships
+        // a RestartAgent.exe beside the app. The build already knows which one is the app.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual("counter.exe", _fakeMsixService.AddLooseLayoutExecutableCalls.Single());
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_ExplicitExecutable_OverridesTheResolvedDefault()
+    {
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        var command = GetRequiredService<RunCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(
+            command, [singleFile.FullName, "--executable", "other.exe", "--detach"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual("other.exe", _fakeMsixService.AddLooseLayoutExecutableCalls.Single(),
+            "An explicit --executable must still win over the resolved default");
+    }
+
     #endregion
 }
 

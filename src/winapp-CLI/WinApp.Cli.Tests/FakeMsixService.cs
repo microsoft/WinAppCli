@@ -18,6 +18,9 @@ internal class FakeMsixService : IMsixService
 
     /// <summary>Records the <c>selfContained</c> flag passed to each <see cref="AddLooseLayoutIdentityAsync"/> call.</summary>
     public List<bool> AddLooseLayoutSelfContainedCalls { get; } = [];
+
+    /// <summary>Records the <c>executable</c> passed to each <see cref="AddLooseLayoutIdentityAsync"/> call.</summary>
+    public List<string?> AddLooseLayoutExecutableCalls { get; } = [];
     public List<(string? ProjectFile, string? Architecture, string? Framework, bool NoRestore)> EnsureRuntimeInstalledCalls { get; } = [];
     public List<(string? EntryPoint, string? ManifestPath, bool NoInstall, bool KeepIdentity)> AddSparseIdentityCalls { get; } = [];
     public Exception? ExceptionToThrow { get; set; }
@@ -67,6 +70,7 @@ internal class FakeMsixService : IMsixService
         AddLooseLayoutCalls.Add((appxManifestPath.FullName, clean));
         AddLooseLayoutRuntimeCalls.Add((runtimeArch, projectFile?.FullName, framework, noRestore));
         AddLooseLayoutSelfContainedCalls.Add(selfContained);
+        AddLooseLayoutExecutableCalls.Add(executable);
         if (ExceptionToThrow != null)
         {
             throw ExceptionToThrow;

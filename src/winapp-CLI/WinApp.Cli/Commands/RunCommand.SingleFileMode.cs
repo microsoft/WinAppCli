@@ -141,9 +141,16 @@ internal partial class RunCommand
             // framework dependency and runtime. Passing null instead would fall back to globbing the
             // current directory for any .csproj, which for a file-based app can only find an unrelated
             // project — and would write THAT project's Windows App SDK dependency into this app's manifest.
+            // Default --executable to the executable the build resolved. An authored manifest may still
+            // use the $targetnametoken$ placeholder, and resolving it by scanning the output directory hits
+            // the "multiple .exe files found" ambiguity, because every WinAppSDK self-contained output
+            // ships a RestartAgent.exe beside the app. The build already knows which one is the app, so use
+            // it — while still letting an explicit --executable win.
             return await ExecuteRunPipelineAsync(
                 outputFolder, resolvedManifest, outputAppXDirectory, appArgs,
-                noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols, executable, isJson,
+                noLaunch, withAlias, debugOutput, unregisterOnExit, detach, clean, useSymbols,
+                string.IsNullOrWhiteSpace(executable) ? resolution.ExecutableName : executable,
+                isJson,
                 runtimeArch: resolution.Architecture,
                 projectFile: singleFile,
                 framework: resolution.TargetFramework,

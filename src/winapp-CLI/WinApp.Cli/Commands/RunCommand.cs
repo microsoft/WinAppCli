@@ -161,7 +161,7 @@ internal partial class RunCommand : Command, IShortDescription
 
         PropertyOption = new Option<string[]>("--property")
         {
-            Description = "Project and single-file mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p WindowsPackageType=None). Ignored in folder mode.",
+            Description = "Project and single-file mode: MSBuild property as Name=Value, forwarded to both build and evaluation. Repeatable (e.g. -p EnableMyFeature=true). Ignored in folder mode.",
             // ZeroOrMore (not OneOrMore) so a valueless '-p' reaches the handler, which emits a
             // --json-aware error; OneOrMore would raise a plain-text parser error, bypassing --json.
             Arity = ArgumentArity.ZeroOrMore,
@@ -877,8 +877,16 @@ internal partial class RunCommand : Command, IShortDescription
             string? packageFullName,
             CancellationToken cancellationToken)
         {
-            // Read the processed manifest from the AppX output directory (placeholders already resolved)
-            var processedManifest = ManifestHelper.FindManifest(outputAppXDirectory.FullName);
+            // Read the manifest that was actually REGISTERED, not whatever the directory probe prefers.
+            // Windows registers appxmanifest.xml, but ManifestHelper.FindManifest checks
+            // Package.appxmanifest first — so a leftover copy of that name in the layout (for example one
+            // the staging cleanup could not delete) would make this read a different manifest than the one
+            // whose alias Windows knows about, and report "No execution alias found" for an alias that is
+            // in fact registered. Fall back to the probe only when the canonical file is absent.
+            var registeredManifest = new FileInfo(Path.Join(outputAppXDirectory.FullName, "appxmanifest.xml"));
+            var processedManifest = registeredManifest.Exists
+                ? registeredManifest
+                : ManifestHelper.FindManifest(outputAppXDirectory.FullName);
             if (!processedManifest.Exists)
             {
                 logger.LogError("{UISymbol} Processed manifest not found at {Path}. Cannot determine execution alias.", UiSymbols.Error, processedManifest.FullName);
