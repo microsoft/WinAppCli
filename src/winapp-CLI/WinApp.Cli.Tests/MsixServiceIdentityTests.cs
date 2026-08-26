@@ -538,18 +538,18 @@ public class MsixServiceIdentityTests : BaseCommandTests
         // payload into the build output root, so a helper exe always sits next to the app exe.
         // $targetnametoken$ must still resolve to the app exe without --executable.
         var srcDir = _tempDirectory.CreateSubdirectory("raw-input");
-        var srcManifest = new FileInfo(Path.Combine(srcDir.FullName, "Package.appxmanifest"));
+        var srcManifest = new FileInfo(Path.Join(srcDir.FullName, "Package.appxmanifest"));
         await File.WriteAllTextAsync(srcManifest.FullName, BuildRawManifest(exe: "$targetnametoken$.exe"), TestContext.CancellationToken);
-        await File.WriteAllTextAsync(Path.Combine(srcDir.FullName, "TestApp.exe"), "not-a-real-pe", TestContext.CancellationToken);
-        await File.WriteAllTextAsync(Path.Combine(srcDir.FullName, helperExeName), "not-a-real-pe", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Join(srcDir.FullName, "TestApp.exe"), "not-a-real-pe", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Join(srcDir.FullName, helperExeName), "not-a-real-pe", TestContext.CancellationToken);
 
-        var output = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "layout"));
+        var output = new DirectoryInfo(Path.Join(_tempDirectory.FullName, "layout"));
 
         var result = await _msixService.AddLooseLayoutIdentityAsync(
             srcManifest, srcDir, output, TestTaskContext, cancellationToken: TestContext.CancellationToken);
 
         Assert.AreEqual("TestApp", result.PackageName);
-        var written = await File.ReadAllTextAsync(Path.Combine(output.FullName, "appxmanifest.xml"), TestContext.CancellationToken);
+        var written = await File.ReadAllTextAsync(Path.Join(output.FullName, "appxmanifest.xml"), TestContext.CancellationToken);
         Assert.Contains(@"Executable=""TestApp.exe""", written,
             $"{helperExeName} should be skipped so the app exe resolves without --executable");
         Assert.DoesNotContain("$targetnametoken$", written, "No $targetnametoken$ placeholder should remain");

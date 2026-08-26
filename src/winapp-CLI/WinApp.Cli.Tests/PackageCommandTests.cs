@@ -1307,7 +1307,7 @@ public class PackageCommandTests : BaseCommandTests
         // apphost.exe from a .NET self-contained publish, RestartAgent.exe and DeploymentAgent.exe
         // from the Windows App SDK framework payload (WindowsAppSDKSelfContained=true, issue #790).
         // Auto-inference must skip the helper and pick the app exe.
-        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, $"PlaceholderHelperTest_{Path.GetFileNameWithoutExtension(helperExeName)}"));
+        var packageDir = new DirectoryInfo(Path.Join(_tempDirectory.FullName, $"PlaceholderHelperTest_{Path.GetFileNameWithoutExtension(helperExeName)}"));
         CreatePlaceholderTestPackageStructure(packageDir, "MyApp.exe", helperExeName);
 
         await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
