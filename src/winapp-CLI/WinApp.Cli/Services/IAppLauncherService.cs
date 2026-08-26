@@ -95,7 +95,30 @@ internal interface IAppLauncherService
     /// Resolves the package full name from a package family name by querying
     /// the system's package inventory.
     /// </summary>
+    /// <remarks>
+    /// Tolerant: an inventory query failure is treated the same as "not installed", which is safe
+    /// for read-only, best-effort callers such as reporting a name for display. It is not safe for
+    /// a caller that must prove a package is absent before doing something consequential — use
+    /// <see cref="GetPackageFullNameOrThrow"/> for that.
+    /// </remarks>
     /// <param name="packageFamilyName">The package family name (e.g. <c>MyApp_abc123def</c>).</param>
     /// <returns>The package full name, or <c>null</c> if the package is not installed.</returns>
     string? GetPackageFullName(string packageFamilyName);
+
+    /// <summary>
+    /// Resolves the package full name from a package family name, distinguishing a confirmed
+    /// "nothing is registered under this family" from an inventory query that itself failed.
+    /// </summary>
+    /// <remarks>
+    /// Used by callers for whom that distinction is load-bearing: a caller about to prove a
+    /// previous instance was stopped before mutating files must never treat "the inventory query
+    /// failed" the same as "confirmed not installed" — the package could still be installed and
+    /// running, and proceeding on that assumption is exactly the fail-open gap this exists to close.
+    /// A confirmed absence (the query succeeded and found nothing) still returns <c>null</c> and is
+    /// safe to treat as "nothing to stop".
+    /// </remarks>
+    /// <param name="packageFamilyName">The package family name (e.g. <c>MyApp_abc123def</c>).</param>
+    /// <returns>The package full name, or <c>null</c> when the query confirmed nothing is registered.</returns>
+    /// <exception cref="System.Exception">The inventory query itself failed.</exception>
+    string? GetPackageFullNameOrThrow(string packageFamilyName);
 }

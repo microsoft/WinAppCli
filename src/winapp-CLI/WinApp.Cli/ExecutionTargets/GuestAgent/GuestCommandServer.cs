@@ -5,7 +5,6 @@ using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
-using System.Runtime.InteropServices;
 using WinApp.Cli.ExecutionTargets.Abstractions;
 using WinApp.Cli.ExecutionTargets.Orchestration;
 using WinApp.Cli.Services;
@@ -467,9 +466,13 @@ internal sealed class GuestCommandServer : IAsyncDisposable
     /// </summary>
     /// <remarks>
     /// The family name is resolved to whatever full name is actually registered right now, so this
-    /// always targets the guest's live inventory rather than a value the host cached. When nothing
-    /// is registered under that family any more there is nothing that could be running under it, so
-    /// that is reported as success rather than a failure the caller cannot act on.
+    /// always targets the guest's live inventory rather than a value the host cached. When the
+    /// inventory query <em>confirms</em> nothing is registered under that family any more, there is
+    /// nothing that could be running under it, so that is reported as success. A query that instead
+    /// *fails* -- a transient COM error, a denied inventory read -- is never treated the same way:
+    /// it means winapp does not know whether the package is installed and possibly running, and
+    /// that has to fail closed exactly like a termination it could not confirm, not be quietly
+    /// read as "nothing to stop".
     /// <para>
     /// A failure here is reported rather than swallowed, unlike the best-effort cleanup
     /// <c>IAppLauncherService.TerminatePackageProcesses</c> performs on an interactive Ctrl+C: the
@@ -485,7 +488,10 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         try
         {
             var launcher = RequireAppLauncher();
-            var fullName = launcher.GetPackageFullName(packageFamilyName);
+
+            // Strict lookup: an inventory query failure must never be read as "confirmed absent".
+            // Only a query that actually completed and found nothing may skip the termination call.
+            var fullName = launcher.GetPackageFullNameOrThrow(packageFamilyName);
 
             if (fullName is not null)
             {
@@ -498,8 +504,13 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         {
             await SendFailureAsync(operationId, ex.Error).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException or COMException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            // Deliberately broad: whether the inventory lookup or the termination call itself
+            // failed, and whatever exception type either one happens to surface (COM, WinRT
+            // projection, or otherwise), the caller is about to mutate files this package may still
+            // have open. An unrecognised exception type must fail closed the same way a recognised
+            // one does, never propagate uncaught and tear down the connection instead.
             await SendFailureAsync(
                 operationId,
                 new ExecutionTargetErrorInfo
