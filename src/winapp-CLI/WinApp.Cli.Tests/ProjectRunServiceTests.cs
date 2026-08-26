@@ -1996,7 +1996,7 @@ public class ProjectRunServiceTests
     {
         // C6: the pre-build restore mirrors the build's effective RID + configuration (as
         // -p:Configuration=, since 'dotnet restore' has no -c switch) + user -p, but never adds
-        // --no-restore (restoring is the whole point) and omits -v.
+        // --no-restore (restoring is the whole point) and leaves dotnet at its default verbosity.
         var csproj = WriteFile("App.csproj", ExecutableCsproj);
         var options = new ProjectRunOptions("Debug", "arm64", "net10.0-windows10.0.26100.0", NoBuild: false, NoRestore: false,
             Properties: ["WindowsPackageType=None"]);
@@ -2009,6 +2009,19 @@ public class ProjectRunServiceTests
         StringAssert.Contains(args, "-p:WindowsPackageType=None");
         Assert.IsFalse(args.Contains("--no-restore", StringComparison.Ordinal), "restore must not carry --no-restore");
         Assert.IsFalse(args.Contains(" -c ", StringComparison.Ordinal), "restore has no -c switch; configuration flows via -p:Configuration=");
+        Assert.IsFalse(args.Contains(" -v ", StringComparison.Ordinal), "default restore must keep dotnet's default minimal verbosity");
+    }
+
+    [TestMethod]
+    public void BuildRestorePassArguments_QuietVerbosity_AddsQuietSwitch()
+    {
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var options = new ProjectRunOptions(
+            "Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: []);
+
+        var args = ProjectRunService.BuildRestorePassArguments(csproj, options, "quiet");
+
+        StringAssert.Contains(args, "-v quiet");
     }
 
     [TestMethod]
@@ -2920,6 +2933,115 @@ public class ProjectRunServiceTests
             dotnet.StreamingCalls.Any(a => a.StartsWith("restore ", StringComparison.Ordinal)),
             "an interactive restore must not use redirected line streaming");
         StringAssert.Contains(console.Output, "Restoring App.slnx dependencies");
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // redirects the process-wide Console.Error
+    public async Task RunRestoreCommandAsync_Json_KeepsStdoutClean_RoutesInvocationAndOutputToStderr()
+    {
+        var solution = WriteFile("App.slnx", SlnxListing("App.csproj", "Server/Server.csproj"));
+        var options = new ProjectRunOptions(
+            "Debug", "x64", null, NoBuild: false, NoRestore: false,
+            Properties: ["NuGetApiKey=top-secret"], Json: true, Solution: solution);
+        var args = ProjectRunService.BuildRestorePassArguments(solution, options);
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetStreamingHandler = (_, onOut, onErr) =>
+            {
+                onOut?.Invoke("RESTORE-STDOUT");
+                onErr?.Invoke("RESTORE-STDERR");
+                return 0;
+            },
+        };
+        var service = NewServiceWith(dotnet, LogLevel.None, out var console);
+
+        var stderr = new StringWriter();
+        var originalError = Console.Error;
+        Console.SetError(stderr);
+        int exit;
+        try
+        {
+            exit = await service.RunRestoreCommandAsync(
+                args, "Restoring App.slnx dependencies...", options, _tempDir, CancellationToken.None);
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
+
+        Assert.AreEqual(0, exit);
+        Assert.AreEqual(string.Empty, console.Output, "--json must keep stdout clean");
+        StringAssert.Contains(stderr.ToString(), "dotnet restore", "--json must route the invocation to stderr");
+        StringAssert.Contains(stderr.ToString(), "NuGetApiKey=***", "displayed restore commands must redact secrets");
+        Assert.IsFalse(stderr.ToString().Contains("top-secret"), "the secret must not be displayed");
+        StringAssert.Contains(stderr.ToString(), "RESTORE-STDOUT", "--json must route child stdout to stderr");
+        StringAssert.Contains(stderr.ToString(), "RESTORE-STDERR", "--json must route child stderr to stderr");
+        Assert.IsFalse(args.Contains(" -v quiet", StringComparison.Ordinal),
+            "--json must preserve dotnet's default restore verbosity");
+    }
+
+    [TestMethod]
+    [DoNotParallelize] // redirects the process-wide Console.Error
+    public async Task RunRestoreCommandAsync_Quiet_KeepsStdoutClean_RoutesQuietOutputToStderr_SuppressesInvocation()
+    {
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var options = new ProjectRunOptions(
+            "Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: []);
+        var args = ProjectRunService.BuildRestorePassArguments(csproj, options, "quiet");
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetStreamingHandler = (_, onOut, onErr) =>
+            {
+                onOut?.Invoke("QUIET-RESTORE-STDOUT");
+                onErr?.Invoke("QUIET-RESTORE-STDERR");
+                return 0;
+            },
+        };
+        var service = NewServiceWith(dotnet, LogLevel.Warning, out var console);
+
+        var stderr = new StringWriter();
+        var originalError = Console.Error;
+        Console.SetError(stderr);
+        int exit;
+        try
+        {
+            exit = await service.RunRestoreCommandAsync(
+                args, "Restoring App.csproj dependencies...", options, _tempDir, CancellationToken.None);
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
+
+        Assert.AreEqual(0, exit);
+        Assert.AreEqual(string.Empty, console.Output, "--quiet must keep stdout clean");
+        Assert.IsFalse(stderr.ToString().Contains("dotnet restore"), "--quiet must suppress the invocation");
+        StringAssert.Contains(stderr.ToString(), "QUIET-RESTORE-STDOUT", "--quiet must route child stdout to stderr");
+        StringAssert.Contains(stderr.ToString(), "QUIET-RESTORE-STDERR", "--quiet must route child stderr to stderr");
+        StringAssert.Contains(dotnet.StreamingCalls.Single(), "-v quiet",
+            "--quiet must run dotnet restore at quiet verbosity");
+    }
+
+    [TestMethod]
+    public async Task BuildAndResolveAsync_SolutionRestore_QuietUsesQuietVerbosity()
+    {
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var solution = WriteFile("App.slnx", SlnxListing("App.csproj", "Server/Server.csproj"));
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = _ => (0, PackagedPropertiesJson(), string.Empty),
+        };
+        var service = NewServiceWith(dotnet, LogLevel.Warning, out _);
+        var options = new ProjectRunOptions(
+            "Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Solution: solution);
+
+        var outcome = await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsNotNull(outcome.Resolution);
+        var restoreArgs = dotnet.StreamingCalls.Single(
+            args => args.StartsWith($"restore {solution.FullName}", StringComparison.Ordinal));
+        StringAssert.Contains(restoreArgs, "-v quiet",
+            "--quiet must apply quiet verbosity to the restore created by the project-run pipeline");
     }
 
     [TestMethod]
