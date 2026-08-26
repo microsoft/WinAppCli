@@ -40,6 +40,32 @@ public class GuestHandshakeSocketTests
 
     private static byte[] NewKey() => RandomNumberGenerator.GetBytes(GuestProtocol.PreSharedKeySize);
 
+    /// <summary>
+    /// Binds a real listener that only loopback can reach.
+    /// </summary>
+    /// <remarks>
+    /// Every listener in this file goes through here, and the assertion is the point of it. Binding
+    /// every interface — which is what the guest agent correctly does, and what these tests used to
+    /// inherit by calling the agent's own overload — makes Windows raise a Firewall consent prompt
+    /// for the test executable and leave "Query User" rules behind on the developer's machine. A
+    /// test must never do that.
+    /// <para>
+    /// Loopback is still a real socket, so resets, RST-on-close, and the rest of the behaviour these
+    /// tests exist to cover are unaffected; it is only reachability that narrows.
+    /// </para>
+    /// </remarks>
+    private static (TcpListener Listener, int Port) ListenOnLoopback()
+    {
+        var (listener, port) = GuestTcpTransport.Listen(requestedPort: 0, IPAddress.Loopback);
+
+        Assert.AreEqual(
+            IPAddress.Loopback,
+            ((IPEndPoint)listener.LocalEndpoint).Address,
+            "A test listener must bind loopback only, or running the suite prompts for firewall access.");
+
+        return (listener, port);
+    }
+
     private static GuestBootstrapMaterial Material(byte[] key, int port) => new()
     {
         SchemaVersion = GuestBootstrapMaterial.CurrentSchemaVersion,
@@ -53,7 +79,7 @@ public class GuestHandshakeSocketTests
     public async Task PeerThatAcceptsThenResets_IsClassifiedAsClosedDuringHandshake()
     {
         var key = NewKey();
-        var (listener, port) = GuestTcpTransport.Listen(requestedPort: 0);
+        var (listener, port) = ListenOnLoopback();
 
         try
         {
@@ -93,7 +119,7 @@ public class GuestHandshakeSocketTests
     public async Task PeerThatAcceptsThenClosesCleanly_IsClassifiedAsClosedDuringHandshake()
     {
         var key = NewKey();
-        var (listener, port) = GuestTcpTransport.Listen(requestedPort: 0);
+        var (listener, port) = ListenOnLoopback();
 
         try
         {
@@ -130,7 +156,7 @@ public class GuestHandshakeSocketTests
         // on that reset alone, from one dropping a connection at its tracked ceiling. This is the
         // case that must still repair, and what separates it is that nothing answers afterwards.
         var key = NewKey();
-        var (listener, port) = GuestTcpTransport.Listen(requestedPort: 0);
+        var (listener, port) = ListenOnLoopback();
 
         var killed = Task.Run(async () =>
         {
@@ -167,7 +193,7 @@ public class GuestHandshakeSocketTests
         // Authentication and tamper failures keep their own meaning. Classifying them as "the peer
         // closed" would report a key mismatch as a busy agent and never repair the stale material
         // that actually caused it.
-        var (listener, port) = GuestTcpTransport.Listen(requestedPort: 0);
+        var (listener, port) = ListenOnLoopback();
 
         try
         {
@@ -207,7 +233,7 @@ public class GuestHandshakeSocketTests
     {
         // The probe that tells a ceiling drop from a dead agent. Both reset a connection they
         // accepted, so what separates them is whether anything still answers afterwards.
-        var (listener, port) = GuestTcpTransport.Listen(requestedPort: 0);
+        var (listener, port) = ListenOnLoopback();
 
         try
         {
@@ -231,7 +257,7 @@ public class GuestHandshakeSocketTests
         // The end-to-end shape of the reviewed defect: a burst that drives the agent past its
         // tracked ceiling, over real sockets, while healthy channels are open.
         var key = NewKey();
-        var (listener, port) = GuestTcpTransport.Listen(requestedPort: 0);
+        var (listener, port) = ListenOnLoopback();
         var material = Material(key, port);
 
         var limits = new GuestConnectionLimits(
