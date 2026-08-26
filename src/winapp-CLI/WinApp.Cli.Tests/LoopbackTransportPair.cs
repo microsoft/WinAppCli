@@ -183,6 +183,16 @@ internal sealed class FakeGuestProcessHostFactory : IGuestProcessHostFactory
     /// <summary>Completes each time a host is started, so tests need no polling.</summary>
     public SemaphoreSlim StartSignal { get; } = new(0);
 
+    /// <summary>
+    /// Optional side effect to run when a host starts, for suites whose guest winapp is faked but
+    /// whose later requests depend on what a real one would have left behind on disk.
+    /// </summary>
+    /// <remarks>
+    /// Runs before the host is handed back, so a directory it creates is already there for the next
+    /// request the agent validates. Null by default: suites that do not need it are unaffected.
+    /// </remarks>
+    public Action<GuestExecRequest>? OnStart { get; set; }
+
     /// <inheritdoc/>
     public IGuestProcessHost Start(
         GuestExecRequest request,
@@ -192,6 +202,8 @@ internal sealed class FakeGuestProcessHostFactory : IGuestProcessHostFactory
         {
             throw new ExecutionTargetException(error);
         }
+
+        OnStart?.Invoke(request);
 
         var host = new FakeGuestProcessHost(request, onOutput, Interlocked.Increment(ref _nextProcessId));
         Started.Enqueue(host);
