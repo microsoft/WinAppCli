@@ -55,8 +55,8 @@ internal class WorkspaceSetupService(
         configService.ConfigPath = new FileInfo(Path.Join(options.ConfigDir.FullName, "winapp.yaml"));
 
         // Resolve the user's nuget.config hierarchy from the selected project/config directory, which can
-        // differ from the process working directory when `init <dir>` / `restore --config-dir <dir>` is
-        // used. Without this, a project-level private feed, credentials or globalPackagesFolder would be
+        // differ from the process working directory when `init <dir>` / `restore <dir>` / `--config-dir <dir>`
+        // is used. Without this, a project-level private feed, credentials or globalPackagesFolder would be
         // ignored unless the user first changed into that directory.
         nugetSourceProvider.SetConfigRoot(options.ConfigDir);
 

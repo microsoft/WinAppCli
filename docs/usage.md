@@ -250,7 +250,7 @@ winapp restore
 ```
 
 > [!NOTE]
-> winapp reads the `nuget.config` for the selected project directory, so run `init`/`restore`/`update` only against directories you trust — the same caution that applies to `dotnet restore`. When several sources are configured, use [Package Source Mapping](https://learn.microsoft.com/nuget/consume-packages/package-source-mapping) to pin each package to a feed.
+> winapp resolves `nuget.config` from the directory it operates on — the `init`/`restore` directory argument, `--config-dir` when given, otherwise the current directory — so run these commands only against directories you trust, the same caution that applies to `dotnet restore`. For .NET projects the delegated `dotnet restore` resolves `nuget.config` relative to the project itself. When several sources are configured, use [Package Source Mapping](https://learn.microsoft.com/nuget/consume-packages/package-source-mapping) to pin each package to a feed.
 
 ---
 

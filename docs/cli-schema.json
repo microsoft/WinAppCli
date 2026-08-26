@@ -1818,7 +1818,7 @@
       },
       "options": {
         "--config-dir": {
-          "description": "Directory to read configuration from (default: current directory)",
+          "description": "Directory to read configuration from (default: base-directory)",
           "hidden": false,
           "valueType": "System.IO.DirectoryInfo",
           "hasDefaultValue": false,

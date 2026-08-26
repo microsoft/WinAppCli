@@ -141,7 +141,7 @@ Use `restore` when you clone a repo that already has `winapp.yaml` but no `.wina
 </configuration>
 ```
 
-> **Security note:** winapp reads the `nuget.config` for the selected project directory, so run `init`/`restore`/`update` only against directories you trust, the same as `dotnet restore`. Use `<packageSourceMapping>` to pin packages to specific feeds when more than one source is configured.
+> **Security note:** winapp resolves `nuget.config` from the directory it operates on — the `init`/`restore` directory argument, `--config-dir` when given, otherwise the current directory — so run these commands only against directories you trust, the same as `dotnet restore`. For .NET projects the delegated `dotnet restore` resolves `nuget.config` relative to the project itself. Use `<packageSourceMapping>` to pin packages to specific feeds when more than one source is configured.
 
 ### Update SDK versions
 

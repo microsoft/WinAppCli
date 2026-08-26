@@ -14,7 +14,8 @@ namespace WinApp.Cli.Services;
 /// Resolves NuGet package sources, credentials and <c>&lt;packageSourceMapping&gt;</c> from the user's
 /// <c>nuget.config</c> hierarchy. The hierarchy is rooted at the process working directory by default, or
 /// at the explicit project/config directory supplied via <see cref="SetConfigRoot"/> (e.g. by
-/// <c>init &lt;dir&gt;</c> / <c>restore --config-dir &lt;dir&gt;</c>). Owns the source/configuration
+/// <c>init &lt;dir&gt;</c> / <c>restore &lt;dir&gt;</c> / <c>--config-dir &lt;dir&gt;</c>). Owns the
+/// source/configuration
 /// concern for <see cref="NugetService"/> so private/custom feeds and mirrors are honored when restoring
 /// SDK packages, and so this logic can be tested independently of package download/version resolution.
 /// </summary>

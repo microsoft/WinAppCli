@@ -10,8 +10,10 @@ namespace WinApp.Cli.Services;
 internal interface IDotNetProjectRestoreService
 {
     /// <summary>
-    /// Runs <c>dotnet restore</c> for every .NET project found under <paramref name="baseDirectory"/>.
-    /// Returns 0 when all of them restored, or 1 as soon as one fails.
+    /// Restores the .NET project found under <paramref name="baseDirectory"/> by running
+    /// <c>dotnet restore</c> for it. Returns 0 on success, or 1 when the restore fails or when the
+    /// directory contains several projects — that is ambiguous and reported rather than guessed at, since
+    /// restore runs non-interactively and has no project-selection option.
     /// </summary>
     /// <param name="baseDirectory">Directory to search for .csproj files.</param>
     /// <param name="configDir">

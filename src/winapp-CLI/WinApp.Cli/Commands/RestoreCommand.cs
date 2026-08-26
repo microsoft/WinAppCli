@@ -23,7 +23,7 @@ internal class RestoreCommand : Command, IShortDescription
 
         ConfigDirOption = new Option<DirectoryInfo>("--config-dir")
         {
-            Description = "Directory to read configuration from (default: current directory)"
+            Description = "Directory to read configuration from (default: base-directory)"
         };
         ConfigDirOption.AcceptExistingOnly();
     }
@@ -39,7 +39,13 @@ internal class RestoreCommand : Command, IShortDescription
         public override async Task<int> InvokeAsync(ParseResult parseResult, CancellationToken cancellationToken = default)
         {
             var baseDirectory = parseResult.GetValue(BaseDirectoryArgument) ?? currentDirectoryProvider.GetCurrentDirectoryInfo();
-            var configDir = parseResult.GetValue(ConfigDirOption) ?? currentDirectoryProvider.GetCurrentDirectoryInfo();
+
+            // When --config-dir is not given, read the configuration from the directory being restored, so
+            // `winapp restore ./my-project` finds ./my-project/winapp.yaml. This mirrors `init`, which already
+            // co-locates winapp.yaml with the selected directory; without it the two commands disagreed and
+            // `winapp restore ./my-project` silently reported "nothing to restore" while looking in the
+            // current directory. With no base directory both still default to the current directory.
+            var configDir = parseResult.GetValue(ConfigDirOption) ?? baseDirectory;
 
             var options = new WorkspaceSetupOptions
             {

@@ -576,7 +576,7 @@ export async function packageApp(options: PackageOptions): Promise<WinappResult>
 export interface RestoreOptions extends CommonOptions {
   /** Base/root directory for the winapp workspace */
   baseDirectory?: string;
-  /** Directory to read configuration from (default: current directory) */
+  /** Directory to read configuration from (default: base-directory) */
   configDir?: string;
 }
 
