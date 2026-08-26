@@ -1267,6 +1267,8 @@ public class PackageCommandTests : BaseCommandTests
         });
 
         Assert.Contains("--executable", ex.Message, "Error message should mention --executable option");
+        Assert.Contains("App1.exe", ex.Message, "Error message should name the candidate exes so the user can pick one");
+        Assert.Contains("App2.exe", ex.Message, "Error message should name the candidate exes so the user can pick one");
     }
 
     [TestMethod]
@@ -1295,12 +1297,18 @@ public class PackageCommandTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task CreateMsixPackageAsync_PlaceholderWithAppExeAndCreatedump_InfersAppExe()
+    [DataRow("createdump.exe", DisplayName = ".NET crash dump tool")]
+    [DataRow("apphost.exe", DisplayName = ".NET app host")]
+    [DataRow("RestartAgent.exe", DisplayName = "Windows App SDK restart agent")]
+    [DataRow("DeploymentAgent.exe", DisplayName = "Windows App SDK deployment agent")]
+    public async Task CreateMsixPackageAsync_PlaceholderWithAppExeAndRuntimeHelper_InfersAppExe(string helperExeName)
     {
-        // Arrange - .NET self-contained build outputs include createdump.exe alongside the app exe.
-        // Auto-inference must skip createdump.exe and pick the app exe.
-        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "PlaceholderCreatedumpTest"));
-        CreatePlaceholderTestPackageStructure(packageDir, "MyApp.exe", "createdump.exe");
+        // Arrange - build outputs ship runtime helpers next to the app exe: createdump.exe and
+        // apphost.exe from a .NET self-contained publish, RestartAgent.exe and DeploymentAgent.exe
+        // from the Windows App SDK framework payload (WindowsAppSDKSelfContained=true, issue #790).
+        // Auto-inference must skip the helper and pick the app exe.
+        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, $"PlaceholderHelperTest_{Path.GetFileNameWithoutExtension(helperExeName)}"));
+        CreatePlaceholderTestPackageStructure(packageDir, "MyApp.exe", helperExeName);
 
         await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
 
@@ -1316,45 +1324,21 @@ public class PackageCommandTests : BaseCommandTests
         );
 
         // Assert
-        var manifestContent = await ExtractManifestContentFromPackageAsync(result.MsixPath, "PlaceholderCreatedumpExtracted");
-        Assert.Contains(@"Executable=""MyApp.exe""", manifestContent, "createdump.exe should be filtered out, MyApp.exe should be picked");
-        Assert.DoesNotContain("createdump", manifestContent, "createdump should not appear in resolved manifest");
-    }
-
-    [TestMethod]
-    public async Task CreateMsixPackageAsync_PlaceholderWithAppExeAndApphost_InfersAppExe()
-    {
-        // Arrange - apphost.exe is a .NET runtime artifact that should also be filtered
-        // during executable auto-inference.
-        var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "PlaceholderApphostTest"));
-        CreatePlaceholderTestPackageStructure(packageDir, "MyApp.exe", "apphost.exe");
-
-        await File.WriteAllTextAsync(_configService.ConfigPath.FullName, "packages: []", TestContext.CancellationToken);
-
-        // Act
-        var result = await _msixService.CreateMsixPackageAsync(
-            inputFolder: packageDir,
-            outputPath: _tempDirectory,
-            TestTaskContext,
-            packageName: "TestPackage",
-            skipPri: true,
-            autoSign: false,
-            cancellationToken: TestContext.CancellationToken
-        );
-
-        // Assert
-        var manifestContent = await ExtractManifestContentFromPackageAsync(result.MsixPath, "PlaceholderApphostExtracted");
-        Assert.Contains(@"Executable=""MyApp.exe""", manifestContent, "apphost.exe should be filtered out, MyApp.exe should be picked");
-        Assert.DoesNotContain("apphost", manifestContent, "apphost should not appear in resolved manifest");
+        var manifestContent = await ExtractManifestContentFromPackageAsync(
+            result.MsixPath, $"PlaceholderHelperExtracted_{Path.GetFileNameWithoutExtension(helperExeName)}");
+        Assert.Contains(@"Executable=""MyApp.exe""", manifestContent, $"{helperExeName} should be filtered out, MyApp.exe should be picked");
+        Assert.DoesNotContain(Path.GetFileNameWithoutExtension(helperExeName), manifestContent,
+            $"{helperExeName} should not appear in resolved manifest");
     }
 
     [TestMethod]
     public async Task CreateMsixPackageAsync_PlaceholderWithOnlyRuntimeTools_Throws()
     {
-        // Arrange - only runtime-tool exes present; auto-inference should fail with the
-        // same multi-/no-exe guidance rather than silently picking createdump.exe.
+        // Arrange - only runtime-helper exes present; auto-inference should fail rather than
+        // silently picking one, and should name the helpers it skipped instead of claiming the
+        // folder has no .exe files at all.
         var packageDir = new DirectoryInfo(Path.Combine(_tempDirectory.FullName, "PlaceholderOnlyRuntimeToolsTest"));
-        CreatePlaceholderTestPackageStructure(packageDir, "createdump.exe", "apphost.exe");
+        CreatePlaceholderTestPackageStructure(packageDir, "createdump.exe", "RestartAgent.exe");
 
         // Act & Assert
         var ex = await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
@@ -1371,6 +1355,8 @@ public class PackageCommandTests : BaseCommandTests
         });
 
         Assert.Contains("--executable", ex.Message, "Error message should mention --executable option");
+        Assert.Contains("createdump.exe", ex.Message, "Error message should name the skipped runtime helpers");
+        Assert.Contains("RestartAgent.exe", ex.Message, "Error message should name the skipped runtime helpers");
     }
 
     #endregion
