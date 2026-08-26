@@ -754,7 +754,7 @@ Project mode requires the **.NET SDK 8.0.100 or newer** (for MSBuild `--getPrope
 - `--no-restore` - Skip restoring the project before building.
 - `-p, --property <Name=Value>` - MSBuild property, forwarded to both the build and the property evaluation. Repeatable (e.g. `-p WindowsPackageType=None`).
 
-**Build output & verbosity:** the project is built in two steps — a `dotnet build` whose output **streams live** to your console, followed by a fast property-evaluation pass. winapp prints the exact `dotnet build …` invocation before the output, and streams warnings even on a successful build. Verbosity:
+**Build output & verbosity:** dependency restore and `dotnet build` output **stream live** to your console, followed by a fast property-evaluation pass. winapp prints each exact `dotnet restore …` or `dotnet build …` invocation before its output, so package downloads, feed retries, errors, and build warnings remain visible. Verbosity:
 
 | Flag | dotnet verbosity | Adds |
 |------|------------------|------|
@@ -762,7 +762,7 @@ Project mode requires the **.NET SDK 8.0.100 or newer** (for MSBuild `--getPrope
 | `--verbose` | `minimal` | winapp's build decision traces |
 | `--quiet` | `quiet` | — |
 
-Under `--json` or `--quiet` the invocation and build output go to stderr so stdout stays pure JSON / clean.
+Under `--json` or `--quiet` the invocation, restore output, and build output go to stderr so stdout stays pure JSON / clean.
 
 **Option applicability:** the identity/loose-layout options (`--manifest`, `--output-appx-directory`, `--no-launch`, `--with-alias`, `--unregister-on-exit`, `--clean`, `--executable`) apply to packaged apps only. They are rejected with a clear error for unpackaged apps (which have no MSIX package). Launch/debug options (`--args`/`--`, `--detach`, `--debug-output`, `--symbols`, `--json`) work in both.
 

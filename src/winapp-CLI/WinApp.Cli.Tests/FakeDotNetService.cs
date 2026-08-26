@@ -133,6 +133,19 @@ internal class FakeDotNetService : IDotNetService
         {
             return Task.FromResult(RunDotnetStreamingHandler(arguments, onOutputLine, onErrorLine));
         }
+        if (RunDotnetCommandHandler is not null)
+        {
+            var (exitCode, output, error) = RunDotnetCommandHandler(arguments);
+            foreach (var line in output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+            {
+                onOutputLine?.Invoke(line);
+            }
+            foreach (var line in error.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+            {
+                onErrorLine?.Invoke(line);
+            }
+            return Task.FromResult(exitCode);
+        }
         return Task.FromResult(0);
     }
 

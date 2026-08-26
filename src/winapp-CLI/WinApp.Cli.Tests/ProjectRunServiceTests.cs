@@ -1942,10 +1942,10 @@ public class ProjectRunServiceTests
         Assert.IsTrue(commandArgs.Any(a => a.StartsWith("restore ", StringComparison.Ordinal)),
             "an explicit restore pass should run before the build when the shim initially resolves null on an SDK-less host");
         Assert.AreEqual(2, shim.ResolvedMonikers.Count, "the shim should be re-consulted after the restore");
-        Assert.AreEqual(1, dotnet.StreamingCalls.Count, "exactly one build pass should have run");
-        StringAssert.Contains(dotnet.StreamingCalls[0], $"-p:CsWinRTWindowsMetadata={folder}",
+        var buildCall = dotnet.StreamingCalls.Single(a => a.StartsWith("build ", StringComparison.Ordinal));
+        StringAssert.Contains(buildCall, $"-p:CsWinRTWindowsMetadata={folder}",
             "the re-resolved folder must be injected into the build");
-        StringAssert.Contains(dotnet.StreamingCalls[0], "--no-restore",
+        StringAssert.Contains(buildCall, "--no-restore",
             "the build pass should skip its own restore since the explicit restore already ran");
     }
 
@@ -2871,9 +2871,15 @@ public class ProjectRunServiceTests
         var commandArgs = new List<string>();
         var dotnet = new FakeDotNetService
         {
-            RunDotnetCommandHandler = a => { commandArgs.Add(a); return (0, PackagedPropertiesJson(), string.Empty); },
+            RunDotnetCommandHandler = a =>
+            {
+                commandArgs.Add(a);
+                return a.StartsWith("restore ", StringComparison.Ordinal)
+                    ? (0, "RESTORE-PROGRESS", string.Empty)
+                    : (0, PackagedPropertiesJson(), string.Empty);
+            },
         };
-        var service = NewServiceWith(dotnet, out _);
+        var service = NewServiceWith(dotnet, LogLevel.Information, out var console);
         var options = new ProjectRunOptions("Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Solution: solution);
 
         var outcome = await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
@@ -2881,7 +2887,11 @@ public class ProjectRunServiceTests
         Assert.IsNotNull(outcome.Resolution);
         Assert.IsTrue(commandArgs.Any(a => a.StartsWith($"restore {solution.FullName}", StringComparison.Ordinal)),
             "the whole solution should be restored up front for build-dependency parity");
-        StringAssert.Contains(dotnet.StreamingCalls[0], "--no-restore",
+        StringAssert.Contains(console.Output, "Restoring App.slnx dependencies",
+            "the restore phase should be announced before dotnet starts");
+        StringAssert.Contains(console.Output, "RESTORE-PROGRESS",
+            "restore output should stream live instead of being buffered until dotnet exits");
+        StringAssert.Contains(dotnet.StreamingCalls.Single(a => a.StartsWith("build ", StringComparison.Ordinal)), "--no-restore",
             "the build pass should skip its own restore since the solution restore already covered the target");
     }
 
