@@ -291,6 +291,9 @@ public class GuestCommandServerTests
 
     private const string FakeLayout = @"C:\WinApp\deployments\dep-1-layout";
 
+    /// <summary>The one full name every stop-before-redeploy case expects to be terminated.</summary>
+    private static readonly string[] ExpectedStoppedFullNames = ["Contoso.MyApp_1.0.0.0_x64__abc"];
+
     [TestMethod]
     public async Task StopPackage_ResolvesTheFamilyNameAndTerminatesTheCurrentFullName()
     {
@@ -303,7 +306,7 @@ public class GuestCommandServerTests
 
         await harness.Channel.StopPackageProcessesAsync("Contoso.MyApp_abc", FakeLayout, harness.Token);
 
-        CollectionAssert.AreEqual(new[] { "Contoso.MyApp_1.0.0.0_x64__abc" }, launcher.StopPackageCalls);
+        CollectionAssert.AreEqual(ExpectedStoppedFullNames, launcher.StopPackageCalls);
     }
 
     [TestMethod]
@@ -392,7 +395,7 @@ public class GuestCommandServerTests
         await harness.Channel.StopPackageProcessesAsync(
             "Contoso.MyApp_abc", @"c:\winapp\deployments\dep-1-layout", harness.Token);
 
-        CollectionAssert.AreEqual(new[] { "Contoso.MyApp_1.0.0.0_x64__abc" }, launcher.StopPackageCalls);
+        CollectionAssert.AreEqual(ExpectedStoppedFullNames, launcher.StopPackageCalls);
     }
 
     [TestMethod]
@@ -435,7 +438,7 @@ public class GuestCommandServerTests
         // Must not throw, even though nothing exists at this path.
         await harness.Channel.StopPackageProcessesAsync("Contoso.MyApp_abc", deletedLayout, harness.Token);
 
-        CollectionAssert.AreEqual(new[] { "Contoso.MyApp_1.0.0.0_x64__abc" }, launcher.StopPackageCalls);
+        CollectionAssert.AreEqual(ExpectedStoppedFullNames, launcher.StopPackageCalls);
     }
 
     /// <summary>

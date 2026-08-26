@@ -144,6 +144,12 @@ public partial class TargetRuntimeServiceTests
             }
 
             await Prepared.DisposeAsync();
+
+            // Already released by the line above, which disposes the lease it was handed as a
+            // fail-safe. Repeated here because that indirection is invisible to the analyzer, and
+            // because TargetMutationLease.Dispose is idempotent, so saying it twice costs nothing.
+            _mutationLease.Dispose();
+
             _cancellation.Dispose();
         }
 
