@@ -221,7 +221,7 @@ internal partial class NugetService
         if (lastError != null)
         {
             throw new InvalidOperationException(
-                $"Could not reliably determine the versions of {packageName}: source '{lastErrorSource}' could not be queried: {lastError.Message}",
+                $"Could not reliably determine the versions of {packageName}: source '{lastErrorSource}' could not be queried: {NugetErrorMessage.Redact(lastError.Message)}",
                 lastError);
         }
 
@@ -653,7 +653,7 @@ internal partial class NugetService
         if (lastError != null)
         {
             throw new InvalidOperationException(
-                $"Failed to resolve dependencies for {packageName} {version} from the configured NuGet sources. Last error from source '{lastErrorSource}': {lastError.Message}",
+                $"Failed to resolve dependencies for {packageName} {version} from the configured NuGet sources. Last error from source '{lastErrorSource}': {NugetErrorMessage.Redact(lastError.Message)}",
                 lastError);
         }
 

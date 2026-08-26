@@ -188,7 +188,58 @@ internal partial class NugetService : INugetService
                 $"Installed {package} {version} but {dependencyFailures.Count} required dependency(ies) could not be installed: {string.Join("; ", dependencyFailures)}.");
         }
 
+        // Upgrading a package replaces its entry but leaves behind anything that was installed solely because
+        // the REPLACED version required it. Those orphans are not part of the resolved graph, and callers such
+        // as WorkspaceSetupService copy headers, libs, WinMDs and runtimes for every entry returned here — so
+        // leaving them in would publish assets from a package the resolution rejected into .winapp. Drop
+        // whatever the final graph can no longer reach from the root.
+        PruneUnreachablePackages(packages, declaredDependencies, package);
+
         return packages;
+    }
+
+    /// <summary>
+    /// Removes entries that the resolved graph no longer reaches from <paramref name="rootPackage"/>, walking
+    /// the dependencies declared by each package's SELECTED version. A package required by any surviving
+    /// branch stays, so this only discards subtrees orphaned when an upgrade replaced the version that pulled
+    /// them in.
+    /// </summary>
+    private static void PruneUnreachablePackages(
+        Dictionary<string, string> installed,
+        Dictionary<string, Dictionary<string, VersionRange>> declaredDependencies,
+        string rootPackage)
+    {
+        // If the root itself is not present there is nothing meaningful to walk from; pruning against an empty
+        // reachable set would discard the entire result, so leave it untouched.
+        if (!installed.ContainsKey(rootPackage))
+        {
+            return;
+        }
+
+        var reachable = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { rootPackage };
+        var pending = new Queue<string>();
+        pending.Enqueue(rootPackage);
+
+        while (pending.Count > 0)
+        {
+            if (!declaredDependencies.TryGetValue(pending.Dequeue(), out var deps))
+            {
+                continue;
+            }
+
+            foreach (var depName in deps.Keys)
+            {
+                if (installed.ContainsKey(depName) && reachable.Add(depName))
+                {
+                    pending.Enqueue(depName);
+                }
+            }
+        }
+
+        foreach (var orphan in installed.Keys.Where(name => !reachable.Contains(name)).ToList())
+        {
+            installed.Remove(orphan);
+        }
     }
 
     /// <summary>
@@ -254,8 +305,8 @@ internal partial class NugetService : INugetService
             // empty set without throwing): an unreadable manifest means required transitive packages may be
             // silently missing. Record it as a failure — like the dependency resolution/install errors below —
             // so the overall install fails loudly instead of reporting success with an incomplete graph.
-            taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not read dependencies for {package} {version}: {ex.Message}");
-            dependencyFailures.Add($"{package} {version}: dependency manifest could not be read: {ex.Message}");
+            taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not read dependencies for {package} {version}: {NugetErrorMessage.Redact(ex.Message)}");
+            dependencyFailures.Add($"{package} {version}: dependency manifest could not be read: {NugetErrorMessage.Redact(ex.Message)}");
             return;
         }
 
@@ -295,8 +346,8 @@ internal partial class NugetService : INugetService
                 }
                 catch (Exception ex)
                 {
-                    taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not re-resolve dependency {depName} (required by {package} {version}): {ex.Message}");
-                    dependencyFailures.Add($"{depName} (required by {package} {version}): {ex.Message}");
+                    taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not re-resolve dependency {depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
+                    dependencyFailures.Add($"{depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
                     continue;
                 }
 
@@ -345,8 +396,8 @@ internal partial class NugetService : INugetService
                 // the remaining dependencies best-effort — but the failure must be both visible (not hidden
                 // behind verbose-only logging) AND fail the overall operation. Record it so InstallPackageAsync
                 // exits non-zero rather than reporting an incomplete install as success.
-                taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not install dependency {depName} (required by {package} {version}): {ex.Message}");
-                dependencyFailures.Add($"{depName} (required by {package} {version}): {ex.Message}");
+                taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not install dependency {depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
+                dependencyFailures.Add($"{depName} (required by {package} {version}): {NugetErrorMessage.Redact(ex.Message)}");
             }
         }
     }

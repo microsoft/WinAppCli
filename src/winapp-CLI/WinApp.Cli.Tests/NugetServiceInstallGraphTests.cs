@@ -187,6 +187,55 @@ public class NugetServiceInstallGraphTests : BaseCommandTests
         }
     }
 
+    /// <summary>
+    /// A package pulled in only by a version that a later upgrade replaced must not survive in the resolved
+    /// graph. `WorkspaceSetupService` copies headers, libs, WinMDs and runtimes for every entry returned by
+    /// the install, so an orphan left behind here publishes assets from a package the resolution rejected.
+    /// Here C 1.0.0 requires Orphan.Removed, C 2.0.0 requires nothing, and the `>= 2.0.0` branch forces C up.
+    /// </summary>
+    [TestMethod]
+    public async Task InstallPackageAsync_UpgradeDropsDependency_DoesNotReturnTheOrphanedDescendant()
+    {
+        // NUGET_PACKAGES takes precedence over the globalPackagesFolder written by WriteLocalFeedConfig.
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NUGET_PACKAGES")))
+        {
+            Assert.Inconclusive("NUGET_PACKAGES is set in the environment; it overrides the config's globalPackagesFolder, so the local feed would not be exercised.");
+        }
+
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
+            feed.Create();
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
+
+            WriteNupkgToFeed(feed, "Orphan.Root", "1.0.0", ("Orphan.A", "[1.0.0, )"), ("Orphan.B", "[1.0.0, )"));
+            WriteNupkgToFeed(feed, "Orphan.A", "1.0.0", ("Orphan.C", "[1.0.0, )"));
+            WriteNupkgToFeed(feed, "Orphan.B", "1.0.0", ("Orphan.C", "[2.0.0, )"));
+            WriteNupkgToFeed(feed, "Orphan.C", "1.0.0", ("Orphan.Removed", "[1.0.0]"));
+            WriteNupkgToFeed(feed, "Orphan.C", "2.0.0");
+            WriteNupkgToFeed(feed, "Orphan.Removed", "1.0.0");
+
+            WriteLocalFeedConfig(root, feed, packages);
+
+            var service = CreateServiceRootedAt(root);
+
+            var installed = await service.InstallPackageAsync("Orphan.Root", "1.0.0", TestTaskContext, TestContext.CancellationToken);
+
+            Assert.AreEqual("2.0.0", installed.GetValueOrDefault("Orphan.C"), "C must end up at the only version satisfying both branches.");
+            // Packages still reachable from the root must be untouched by pruning.
+            Assert.AreEqual("1.0.0", installed.GetValueOrDefault("Orphan.A"));
+            Assert.AreEqual("1.0.0", installed.GetValueOrDefault("Orphan.B"));
+            Assert.IsFalse(
+                installed.ContainsKey("Orphan.Removed"),
+                "Orphan.Removed is required only by the replaced C 1.0.0, so it is not part of the resolved graph and its assets must not be copied.");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
     [TestMethod]
     public async Task InstallPackageAsync_CacheFolderExistsWithoutCompletionMarker_ReDownloadsInsteadOfTrustingIt()
     {
