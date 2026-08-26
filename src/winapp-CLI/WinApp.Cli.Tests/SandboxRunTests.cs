@@ -711,6 +711,95 @@ public class SandboxRunTests
         Assert.AreEqual(ExecutionTargetErrorCodes.DeploymentDirty, failure.Error.Code);
     }
 
+    /// <summary>
+    /// A package stays registered even after an interrupted <c>--clean</c> deletes the layout
+    /// folder it was registered from -- the registration entry and the files on disk are two
+    /// separate things. A retry redeploying that same deployment must still be able to prove it
+    /// owns the registration (the package manager's recorded location matches this deployment's
+    /// own, whether or not anything still exists there) and both stop whatever might still be
+    /// running and repair the layout, rather than fail every time before it gets that far.
+    /// </summary>
+    [TestMethod]
+    public async Task Deploy_WhenTheLayoutWasDeletedButThePackageIsStillRegisteredFromIt_StopAndRepairSucceed()
+    {
+        await WriteHostFileAsync("app.exe", "v1");
+
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+
+        var deployment = await harness.Runner.DeployAsync(
+            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: true, TestContext.CancellationToken);
+
+        harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
+
+        // The package manager's own record of where this deployment registered from, unaffected by
+        // whatever winapp has since done to the files themselves -- exactly what
+        // Package.InstalledPath keeps reporting even after the folder underneath it is gone.
+        harness.AppLauncher.FakeRegisteredLocation = deployment.LayoutPath;
+
+        // A registration layout a prior real run produced, then simulate an interrupted `--clean`
+        // (or an operator deleting the folder): the directory is gone from the guest, but the
+        // package stays registered from it.
+        var layoutDirectory = TestPaths.Under(_guestManaged, "deployments", "dep-1-layout");
+        Directory.CreateDirectory(layoutDirectory);
+        await File.WriteAllTextAsync(
+            TestPaths.Under(layoutDirectory, "appxmanifest.xml"), "<Package/>", TestContext.CancellationToken);
+        Directory.Delete(layoutDirectory, recursive: true);
+        Assert.IsFalse(Directory.Exists(layoutDirectory));
+
+        await WriteHostFileAsync("app.exe", "v2");
+
+        // The retry must stop the (possibly still running) previous instance -- proven purely by
+        // the recorded registration location matching, never by anything on disk -- and then
+        // reconcile the payload cleanly.
+        var repaired = await harness.Runner.DeployAsync(
+            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: true, TestContext.CancellationToken);
+
+        CollectionAssert.AreEqual(
+            new[] { harness.AppLauncher.FakePackageFullName }, harness.AppLauncher.StopPackageCalls);
+        Assert.IsFalse(repaired.State.Dirty);
+        Assert.AreEqual("v2", await File.ReadAllTextAsync(
+            TestPaths.Under(_guestManaged, "deployments", "dep-1", "app.exe"), TestContext.CancellationToken));
+    }
+
+    /// <summary>
+    /// The companion negative case: a deleted layout must never be used as an excuse to skip the
+    /// ownership proof. If the currently registered location is genuinely a different one, the
+    /// redeploy still refuses, exactly as it would if the folder existed.
+    /// </summary>
+    [TestMethod]
+    public async Task Deploy_WhenTheLayoutIsDeletedAndTheRegisteredLocationIsADifferentDeployment_StillRefuses()
+    {
+        await WriteHostFileAsync("app.exe", "v1");
+
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+
+        var deployment = await harness.Runner.DeployAsync(
+            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: true, TestContext.CancellationToken);
+
+        harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
+
+        // Registered from a different deployment's layout entirely -- the mismatch that matters,
+        // independent of whether dep-1's own layout still exists.
+        harness.AppLauncher.FakeRegisteredLocation = @"C:\WinAppGuest\deployments\dep-other-layout";
+
+        var layoutDirectory = TestPaths.Under(_guestManaged, "deployments", "dep-1-layout");
+        Directory.CreateDirectory(layoutDirectory);
+        await File.WriteAllTextAsync(
+            TestPaths.Under(layoutDirectory, "appxmanifest.xml"), "<Package/>", TestContext.CancellationToken);
+        Directory.Delete(layoutDirectory, recursive: true);
+
+        await WriteHostFileAsync("app.exe", "v2");
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
+            harness.Runner.DeployAsync(
+                harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: true, TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.StaleHandle, failure.Error.Code);
+        Assert.AreEqual(0, harness.AppLauncher.StopPackageCalls.Count);
+        Assert.AreEqual("v1", await File.ReadAllTextAsync(
+            TestPaths.Under(_guestManaged, "deployments", "dep-1", "app.exe"), TestContext.CancellationToken));
+    }
+
     // ---- Strict package-inventory lookup (fail-closed on query failure) --------------
 
     [TestMethod]
