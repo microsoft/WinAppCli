@@ -872,6 +872,11 @@ assets, and refreshed on every run.
 `--manifest`, `--output-appx-directory`, plus `-c/--configuration`, `--no-build`, `--no-restore`, and
 `-p/--property`.
 
+> [!NOTE]
+> `--with-alias` launches through a `uap5:ExecutionAlias`, which the generated manifest does not
+> declare — it reports `No execution alias found`. Author your own manifest with an alias (see below)
+> to use it.
+
 The project-mode build options do **not** apply, because a file-based app configures itself. They are
 rejected with a message naming the directive to use instead:
 

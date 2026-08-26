@@ -210,6 +210,7 @@ Describe the package with `#:property` directives in the file. All are optional:
 
 - **Bring your own manifest** with `--manifest`, `#:property WinAppManifestPath=…`, or a manifest next to the `.cs` named `<filename>.appxmanifest`. Only that per-file name is auto-detected — a shared `Package.appxmanifest` in the folder is ignored, since several `.cs` files can live together. Otherwise one is generated into the build output (with default assets) and refreshed each run.
 - **Always packaged.** `#:property WindowsPackageType=None` is rejected — use `dotnet run` to run without identity.
+- **`--with-alias` needs an authored manifest.** The generated manifest declares no `uap5:ExecutionAlias`, so alias launch reports `No execution alias found`.
 - **Rejected options** (the file configures itself): `--arch`/`-r` ⇒ `#:property Platform=x64`; `-f` ⇒ `#:property TargetFramework=…`; `--project` ⇒ not applicable. Everything else — `-c`, `-p`, `--no-build`, `--no-restore`, and all the launch/identity options — works as usual.
 - Requires **.NET SDK 10.0.300+**.
 
