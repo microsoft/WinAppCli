@@ -134,7 +134,7 @@ internal partial class RunCommand : Command, IShortDescription
 
         ArchOption = new Option<string?>("--arch")
         {
-            Description = "Project mode: target architecture (x64, arm64, or x86). Ignored in folder mode. Default: the current process architecture."
+            Description = "Project mode: target architecture (x64, arm64, or x86). Sets the canonical Windows RID and selects a matching platform-dependent publish profile when required by the effective build. Ignored in folder mode. Default: the current process architecture."
         };
 
         RuntimeOption = new Option<string?>("--runtime")

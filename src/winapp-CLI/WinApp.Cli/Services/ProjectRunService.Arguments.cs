@@ -46,6 +46,11 @@ internal sealed partial class ProjectRunService
             tokens.Add($"-p:Platform={options.Platform}");
         }
 
+        if (!string.IsNullOrWhiteSpace(options.PublishProfile))
+        {
+            tokens.Add($"-p:PublishProfile={options.PublishProfile}");
+        }
+
         // Drop dedicated-flag user -p (RID/Configuration/TFM) so the restored graph can't diverge from
         // what the --no-restore build resolves; WarnOnOverriddenFlags surfaces the conflict.
         foreach (var property in ForwardableProperties(options.Properties))
@@ -122,6 +127,13 @@ internal sealed partial class ProjectRunService
             tokens.Add($"-p:Platform={options.Platform}");
         }
 
+        // A profile inferred from --arch is target-specific. Unlike a global Platform, it lets the app's
+        // profile set its local Platform while referenced AnyCPU projects keep their own Platform.
+        if (!string.IsNullOrWhiteSpace(options.PublishProfile))
+        {
+            tokens.Add($"-p:PublishProfile={options.PublishProfile}");
+        }
+
         AppendSolutionProperties(tokens, options);
 
         // SHIM (temporary): inject the resolved ref-pack winmd folder so cswinrt.exe finds contract winmds
@@ -141,7 +153,8 @@ internal sealed partial class ProjectRunService
     /// <c>RunCommand</c> match what was built. <c>dotnet msbuild</c> rejects <c>-c</c>/<c>-r</c> (MSB1001),
     /// so Configuration/RID/TFM/Platform go as <c>-p:</c> emitted LAST (MSBuild last-wins beats a
     /// conflicting user <c>-p</c>). <paramref name="includeRuntimeIdentifier"/> and
-    /// <paramref name="includePlatform"/> are <see langword="false"/> only for the <c>--no-build</c>
+    /// <paramref name="includePlatform"/> and <paramref name="includePublishProfile"/> are
+    /// <see langword="false"/> only for the <c>--no-build</c>
     /// output-discovery fallback (see <c>BuildAndResolveAsync</c>): an app previously built by Visual Studio
     /// or a plain <c>dotnet build</c> injects NEITHER a RID nor a Platform, so its output sits at
     /// <c>bin\&lt;cfg&gt;\&lt;tfm&gt;\</c> — which only resolves when both are omitted.
@@ -151,7 +164,8 @@ internal sealed partial class ProjectRunService
         ProjectRunOptions options,
         string? csWinRTMetadataFolder = null,
         bool includeRuntimeIdentifier = true,
-        bool includePlatform = true)
+        bool includePlatform = true,
+        bool includePublishProfile = true)
     {
         var rid = RunArchHelper.ToRuntimeIdentifier(options.Architecture);
 
@@ -185,6 +199,11 @@ internal sealed partial class ProjectRunService
         if (includePlatform && !string.IsNullOrWhiteSpace(options.Platform))
         {
             tokens.Add($"-p:Platform={options.Platform}");
+        }
+
+        if (includePublishProfile && !string.IsNullOrWhiteSpace(options.PublishProfile))
+        {
+            tokens.Add($"-p:PublishProfile={options.PublishProfile}");
         }
 
         // SHIM (temporary): keep the evaluate pass's inputs identical to the build pass.
