@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 using System.Collections.Concurrent;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using WinApp.Cli.ExecutionTargets.Abstractions;
@@ -511,11 +510,16 @@ internal sealed class GuestCommandServer : IAsyncDisposable
                 return;
             }
 
-            if (!TargetPathSafety.PathsEqual(registered.InstallLocation, expectedRegisteredLocation))
+            var actualLocation = registered.InstallLocation;
+
+            if (actualLocation is null || !TargetPathSafety.PathsEqual(actualLocation, expectedRegisteredLocation))
             {
                 // Something else -- most plausibly a different deployment that legitimately owns
-                // this family right now -- is registered here. Refused, not adopted and not
-                // terminated, exactly like any Sandbox or package winapp cannot prove it owns.
+                // this family right now -- is registered here, or the inventory could not report a
+                // location to compare at all. Both are treated identically: refused, not adopted
+                // and not terminated, exactly like any Sandbox or package winapp cannot prove it
+                // owns. A location that could not be determined is proof failure, not proof of
+                // absence, and must never be read as "safe to proceed".
                 await SendFailureAsync(
                     operationId,
                     new ExecutionTargetErrorInfo
@@ -528,7 +532,7 @@ internal sealed class GuestCommandServer : IAsyncDisposable
                         {
                             ["packageFamilyName"] = packageFamilyName,
                             ["expectedRegisteredLocation"] = expectedRegisteredLocation,
-                            ["actualRegisteredLocation"] = registered.InstallLocation,
+                            ["actualRegisteredLocation"] = actualLocation ?? "(unknown)",
                         },
                     }).ConfigureAwait(false);
                 return;
@@ -572,6 +576,16 @@ internal sealed class GuestCommandServer : IAsyncDisposable
     /// compared against the live process's own start time, and a mismatch is treated exactly like
     /// "already gone" — the original is provably not there any more, and the process that now holds
     /// the PID was never winapp's to touch.
+    /// <para>
+    /// <see cref="StopTrackedProcessImpl"/> is a replaceable delegate, and killing a real process
+    /// tree can itself throw (<c>Process.Kill(entireProcessTree: true)</c> aggregates a partial
+    /// failure into an <see cref="AggregateException"/>). Whatever it throws is caught here and
+    /// converted to the same structured, fail-closed response an <see
+    /// cref="ProcessStopOutcome.Unproven"/> outcome produces: this is one operation on one
+    /// connection, and it must never be allowed to escape into the dispatch loop that is serving
+    /// every other request on this Sandbox, tearing the whole connection down over one process this
+    /// deployment happened to be unable to stop.
+    /// </para>
     /// </remarks>
     private async Task HandleStopProcessAsync(
         Guid operationId,
@@ -579,7 +593,16 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         long expectedStartTicksUtc,
         CancellationToken cancellationToken)
     {
-        var outcome = StopTrackedProcessImpl(processId, expectedStartTicksUtc);
+        ProcessStopOutcome outcome;
+
+        try
+        {
+            outcome = StopTrackedProcessImpl(processId, expectedStartTicksUtc);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            outcome = ProcessStopOutcome.Unproven;
+        }
 
         if (outcome == ProcessStopOutcome.Unproven)
         {
@@ -643,7 +666,7 @@ internal sealed class GuestCommandServer : IAsyncDisposable
             {
                 actualStartTicksUtc = process.StartTime.ToUniversalTime().Ticks;
             }
-            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // Exited between the lookup and reading its start time. Provably gone either way.
                 return ProcessStopOutcome.AlreadyGone;
@@ -662,8 +685,14 @@ internal sealed class GuestCommandServer : IAsyncDisposable
                 process.Kill(entireProcessTree: true);
                 process.WaitForExit(5000);
             }
-            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                // Deliberately broad, unlike the narrower catches above: killing a real process
+                // tree can throw AggregateException (Process.Kill(entireProcessTree: true)
+                // aggregates a partial per-process failure) in addition to Win32Exception or
+                // InvalidOperationException, and every one of those means the same thing here --
+                // the stop could not be proven -- so every one of them must produce the same
+                // fail-closed outcome rather than only the two types this used to recognise.
                 return ProcessStopOutcome.Unproven;
             }
 

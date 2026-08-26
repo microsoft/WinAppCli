@@ -107,8 +107,8 @@ internal interface IAppLauncherService
 
     /// <summary>
     /// Resolves the package currently registered under a family name — its full name together with
-    /// its install location — distinguishing a confirmed "nothing is registered under this family"
-    /// from an inventory query that itself failed.
+    /// its recorded install location — distinguishing a confirmed "nothing is registered under this
+    /// family" from an inventory query that itself failed.
     /// </summary>
     /// <remarks>
     /// Used by callers for whom that distinction is load-bearing: a caller about to prove a
@@ -124,6 +124,15 @@ internal interface IAppLauncherService
     /// at a time. A caller must compare this location against the one it expects before treating
     /// the result as "this is my registration" — this method itself makes no such judgement.
     /// </para>
+    /// <para>
+    /// The location is read without requiring the folder to still exist on disk: a package stays
+    /// registered even after its files have been deleted (for example by an interrupted
+    /// <c>--clean</c>), and a caller repairing that damage from a retry must still be able to prove
+    /// the registration is its own before it can stop whatever is running and redeploy. A location
+    /// this method could not determine is reported as <c>null</c> rather than making the whole call
+    /// throw, and a caller must treat that the same as a mismatch — proof failed, not proof of
+    /// absence.
+    /// </para>
     /// </remarks>
     /// <param name="packageFamilyName">The package family name (e.g. <c>MyApp_abc123def</c>).</param>
     /// <returns>
@@ -136,5 +145,8 @@ internal interface IAppLauncherService
 
 /// <summary>The package currently registered under a family name, as reported by the OS inventory.</summary>
 /// <param name="FullName">The package's full name (name, version, architecture, and publisher hash).</param>
-/// <param name="InstallLocation">Absolute path the package is installed from.</param>
-internal sealed record RegisteredPackage(string FullName, string InstallLocation);
+/// <param name="InstallLocation">
+/// The path the package was installed from, as the package manager itself recorded it — present
+/// even when nothing exists at that path any more. Null when the inventory could not report one.
+/// </param>
+internal sealed record RegisteredPackage(string FullName, string? InstallLocation);

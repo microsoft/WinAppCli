@@ -413,6 +413,54 @@ public class GuestCommandServerTests
         Assert.AreEqual(0, launcher.StopPackageCalls.Count);
     }
 
+    /// <summary>
+    /// A package stays registered even after the files it was registered from are gone (an
+    /// interrupted <c>--clean</c> deletes the layout's files, not the registration). The recorded
+    /// install location the guest compares against is never required to exist on disk, so a stop
+    /// (and the redeploy behind it) must succeed here exactly as it would if the folder were intact.
+    /// </summary>
+    [TestMethod]
+    public async Task StopPackage_WhenTheRegisteredLocationNoLongerExistsOnDisk_StillMatchesAndStops()
+    {
+        var deletedLayout = Path.Combine(Path.GetTempPath(), $"winapp-test-deleted-layout-{Guid.NewGuid():n}");
+        Assert.IsFalse(Directory.Exists(deletedLayout), "Precondition: the simulated layout must not exist.");
+
+        var launcher = new FakeAppLauncherService
+        {
+            FakePackageFullName = "Contoso.MyApp_1.0.0.0_x64__abc",
+            FakeRegisteredLocation = deletedLayout,
+        };
+        using var harness = new Harness(Interactive, appLauncher: launcher);
+
+        // Must not throw, even though nothing exists at this path.
+        await harness.Channel.StopPackageProcessesAsync("Contoso.MyApp_abc", deletedLayout, harness.Token);
+
+        CollectionAssert.AreEqual(new[] { "Contoso.MyApp_1.0.0.0_x64__abc" }, launcher.StopPackageCalls);
+    }
+
+    /// <summary>
+    /// A location the inventory could not report at all (the real API surfacing an empty value) is
+    /// proof failure, not proof of absence, and must fail exactly like a genuine mismatch rather
+    /// than being read as "nothing to compare, so proceed".
+    /// </summary>
+    [TestMethod]
+    public async Task StopPackage_WhenTheInventoryCannotReportALocation_FailsClosedRatherThanProceeding()
+    {
+        var launcher = new FakeAppLauncherService
+        {
+            FakePackageFullName = "Contoso.MyApp_1.0.0.0_x64__abc",
+            FakeRegisteredLocation = null,
+        };
+        using var harness = new Harness(Interactive, appLauncher: launcher);
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
+            harness.Channel.StopPackageProcessesAsync(
+                "Contoso.MyApp_abc", @"C:\WinApp\deployments\dep-1-layout", harness.Token));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.StaleHandle, failure.Error.Code);
+        Assert.AreEqual(0, launcher.StopPackageCalls.Count);
+    }
+
     [TestMethod]
     public async Task StopProcess_WithAMatchingPidAndStartTime_Stops()
     {
@@ -449,6 +497,60 @@ public class GuestCommandServerTests
 
         Assert.AreEqual(ExecutionTargetErrorCodes.StaleHandle, failure.Error.Code);
         StringAssert.Contains(failure.Error.Message, "4242");
+    }
+
+    /// <summary>
+    /// Killing a real process tree can itself throw -- <c>Process.Kill(entireProcessTree: true)</c>
+    /// aggregates a partial per-process failure into an <see cref="AggregateException"/> -- and
+    /// <see cref="GuestCommandServer.StopTrackedProcessImpl"/> is a replaceable delegate a test (or
+    /// a future implementation) can make throw anything. Whatever escapes it must become the same
+    /// structured, fail-closed response an <see cref="GuestCommandServer.ProcessStopOutcome.Unproven"/>
+    /// outcome produces, and must never propagate out of the request into the dispatch loop serving
+    /// every other operation on this connection.
+    /// </summary>
+    [TestMethod]
+    public async Task StopProcess_WhenTheStopDelegateThrows_FailsWithStructuredResponseRatherThanCrashingTheAgent()
+    {
+        using var harness = new Harness(Interactive);
+
+        harness.Server.StopTrackedProcessImpl = (_, _) => throw new AggregateException(
+            "Kill failed for some processes.", new InvalidOperationException("access denied"));
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => harness.Channel.StopTrackedProcessAsync(4242, 555L, harness.Token));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.StaleHandle, failure.Error.Code);
+        StringAssert.Contains(failure.Error.Message, "4242");
+
+        // The connection survives: a second, unrelated operation on the same channel still
+        // completes normally rather than the whole server having gone down with the first.
+        var execution = harness.Channel.ExecuteAsync(Request("run", "."), callbacks: null, harness.Token);
+        var process = await harness.Processes.WaitForNextAsync(harness.Token);
+        process.Exit(0);
+
+        Assert.AreEqual(0, (await execution).ExitCode);
+    }
+
+    /// <summary>
+    /// Same guarantee at the default implementation itself, using a real process: an
+    /// <see cref="AggregateException"/> raised by the kill call (simulated here since a real
+    /// process can be made to throw one only under specific, unreliable conditions) must be caught
+    /// and converted to <see cref="GuestCommandServer.ProcessStopOutcome.Unproven"/>, matching the
+    /// existing narrower catch it replaces.
+    /// </summary>
+    [TestMethod]
+    public void DefaultStopTrackedProcess_StartTimeReadThrowsAnUnrecognisedExceptionType_ReportsAlreadyGoneRatherThanThrowing()
+    {
+        using var helper = StartHelperProcess();
+        helper.Kill(entireProcessTree: true);
+        helper.WaitForExit(5000);
+
+        // The process has already exited by the time its start time is read: on some runtimes this
+        // surfaces as InvalidOperationException, on others as Win32Exception. Either way the method
+        // itself must never throw.
+        var outcome = GuestCommandServer.DefaultStopTrackedProcess(helper.Id, expectedStartTicksUtc: 0);
+
+        Assert.AreEqual(GuestCommandServer.ProcessStopOutcome.AlreadyGone, outcome);
     }
 
     /// <summary>
