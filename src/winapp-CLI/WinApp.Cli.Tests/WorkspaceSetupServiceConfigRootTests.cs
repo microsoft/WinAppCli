@@ -76,4 +76,72 @@ public class WorkspaceSetupServiceConfigRootTests : BaseCommandTests
         CollectionAssert.Contains(sources, "configdir-only-feed", "NuGet settings must be resolved from the selected ConfigDir.");
         CollectionAssert.DoesNotContain(sources, "working-only-feed", "NuGet settings must NOT be resolved from the process working directory when an explicit ConfigDir is provided.");
     }
+
+    /// <summary>
+    /// For a .NET project the versions chosen here are written into the project by <c>dotnet add package</c>,
+    /// which always resolves <c>nuget.config</c> by walking up from the project. An explicit
+    /// <c>--config-dir</c> outside that hierarchy therefore used to split the two: winapp could select a
+    /// version from a feed only it could see, and <c>dotnet add</c> would then fail with NU1102 looking for it
+    /// on the project's own sources. Setup now re-roots at the project so both sides agree.
+    /// </summary>
+    [TestMethod]
+    public async Task SetupWorkspace_DotNetProjectWithConfigDirOutsideProject_RootsNuGetSettingsAtProject()
+    {
+        var configDir = _tempDirectory.CreateSubdirectory("external-config");
+        await File.WriteAllTextAsync(Path.Join(configDir.FullName, "nuget.config"), """
+            <?xml version="1.0" encoding="utf-8"?>
+            <configuration>
+              <packageSources>
+                <clear />
+                <add key="configdir-only-feed" value="configdir-feed" />
+              </packageSources>
+            </configuration>
+            """, TestContext.CancellationToken);
+
+        // A sibling of the config directory, so the config directory is NOT an ancestor of the project and
+        // dotnet would never discover it.
+        var projectDir = _tempDirectory.CreateSubdirectory("dotnet-project");
+        await File.WriteAllTextAsync(Path.Join(projectDir.FullName, "nuget.config"), """
+            <?xml version="1.0" encoding="utf-8"?>
+            <configuration>
+              <packageSources>
+                <clear />
+                <add key="project-only-feed" value="project-feed" />
+              </packageSources>
+            </configuration>
+            """, TestContext.CancellationToken);
+        await File.WriteAllTextAsync(Path.Join(projectDir.FullName, "App.csproj"), """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>Exe</OutputType>
+                <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """, TestContext.CancellationToken);
+
+        var sourceProvider = GetRequiredService<NugetSourceProvider>();
+        var workspaceSetupService = GetRequiredService<IWorkspaceSetupService>();
+
+        var options = new WorkspaceSetupOptions
+        {
+            BaseDirectory = projectDir,
+            ConfigDir = configDir,
+            SdkInstallMode = SdkInstallMode.None,
+            UseDefaults = true,
+            RequireExistingConfig = false,
+            ForceLatestBuildTools = true,
+            NoGitignore = true
+        };
+
+        await workspaceSetupService.SetupWorkspaceAsync(options, TestContext.CancellationToken);
+
+        // The exit code is deliberately not asserted: re-rooting happens as soon as the project is selected,
+        // and what matters here is which nuget.config hierarchy the rest of setup then resolves against.
+        var sources = sourceProvider.GetRepositoriesForPackage("Any.Package")
+            .Select(r => r.PackageSource.Name)
+            .ToList();
+
+        CollectionAssert.Contains(sources, "project-only-feed", "A .NET project's sources must come from the hierarchy dotnet itself will use.");
+        CollectionAssert.DoesNotContain(sources, "configdir-only-feed", "A config directory outside the project is invisible to 'dotnet add package', so selecting versions from it produces references that cannot be restored.");
+    }
 }

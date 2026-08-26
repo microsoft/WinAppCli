@@ -67,7 +67,7 @@ internal sealed class DotNetProjectRestoreService(
         // the whole hierarchy with one file, so a source declared there but authenticated through credentials
         // in the user-level config would start failing. Since the config root cannot be honored without that
         // loss, say so instead of silently restoring from feeds the user did not select.
-        if (!IsSameOrAncestorDirectory(configDir, projectToRestore.Directory!))
+        if (!DirectoryRelationship.IsSameOrAncestor(configDir, projectToRestore.Directory!))
         {
             logger.LogWarning(
                 "{UISymbol} The selected configuration directory ({ConfigDir}) does not apply to {Project}: 'dotnet restore' resolves nuget.config relative to the project. Its own nuget.config hierarchy is used instead.",
@@ -92,26 +92,5 @@ internal sealed class DotNetProjectRestoreService(
 
         logger.LogInformation("{UISymbol} Restore completed for {Project}.", UiSymbols.Check, projectToRestore.Name);
         return 0;
-    }
-
-    /// <summary>
-    /// True when <paramref name="candidate"/> is <paramref name="directory"/> itself or one of its ancestors.
-    /// Used to tell whether a selected configuration directory is already part of the nuget.config hierarchy
-    /// that <c>dotnet restore</c> discovers for a project, since that discovery walks up from the project.
-    /// </summary>
-    private static bool IsSameOrAncestorDirectory(DirectoryInfo candidate, DirectoryInfo directory)
-    {
-        var candidatePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(candidate.FullName));
-
-        for (var current = directory; current is not null; current = current.Parent)
-        {
-            var currentPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(current.FullName));
-            if (string.Equals(candidatePath, currentPath, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 }

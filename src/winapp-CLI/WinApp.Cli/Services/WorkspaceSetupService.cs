@@ -57,7 +57,8 @@ internal class WorkspaceSetupService(
         // Resolve the user's nuget.config hierarchy from the selected project/config directory, which can
         // differ from the process working directory when `init <dir>` / `restore <dir>` / `--config-dir <dir>`
         // is used. Without this, a project-level private feed, credentials or globalPackagesFolder would be
-        // ignored unless the user first changed into that directory.
+        // ignored unless the user first changed into that directory. For .NET projects this is re-rooted at
+        // the project below, once one has been selected.
         nugetSourceProvider.SetConfigRoot(options.ConfigDir);
 
         // Detect .NET project (.csproj) in the base directory
@@ -73,6 +74,7 @@ internal class WorkspaceSetupService(
                 logger.LogDebug("Detected {Count} .NET project(s) in {BaseDirectory}", csprojFiles.Count, options.BaseDirectory);
                 csprojFile = await SelectCsprojFileAsync(csprojFiles, cancellationToken);
                 logger.LogDebug(".NET project setup for {CsprojFile}", csprojFile.FullName);
+                AlignNugetConfigRootWithProject(options.ConfigDir, csprojFile);
             }
         }
         else if (dotNetService.FindCsproj(options.BaseDirectory).Count > 0 && !configService.Exists())
@@ -815,6 +817,36 @@ internal class WorkspaceSetupService(
     /// <summary>
     /// Selects the .csproj file to configure when multiple are found.
     /// </summary>
+    /// <summary>
+    /// For a .NET project, keeps winapp's own NuGet lookups on the same <c>nuget.config</c> hierarchy the .NET
+    /// SDK will use. Versions are chosen here but written into the project as <c>PackageReference</c> entries
+    /// by <c>dotnet add package</c>, which always resolves <c>nuget.config</c> by walking up from the project.
+    /// With an explicit <c>--config-dir</c> outside that hierarchy the two disagreed: a version could be
+    /// selected from a private feed only winapp could see, and <c>dotnet add</c> would then fail with NU1102
+    /// looking for it on the project's own sources.
+    ///
+    /// Aligning to the project rather than forcing <c>dotnet</c> to the config directory is deliberate. The
+    /// only way to do the latter is <c>--configfile</c>, which replaces the entire hierarchy with one file and
+    /// so drops the user- and machine-level sources and their credentials.
+    /// </summary>
+    private void AlignNugetConfigRootWithProject(DirectoryInfo configDir, FileInfo csprojFile)
+    {
+        var projectDirectory = csprojFile.Directory!;
+        if (DirectoryRelationship.IsSameOrAncestor(configDir, projectDirectory))
+        {
+            // Already part of what the SDK discovers, so both sides see the same sources.
+            return;
+        }
+
+        logger.LogWarning(
+            "{UISymbol} The selected configuration directory ({ConfigDir}) does not apply to {Project}: 'dotnet add package' resolves nuget.config relative to the project. Using the project's own nuget.config hierarchy for package sources so the versions selected here can actually be restored.",
+            UiSymbols.Warning,
+            configDir.FullName,
+            csprojFile.Name);
+
+        nugetSourceProvider.SetConfigRoot(projectDirectory);
+    }
+
     private async Task<FileInfo> SelectCsprojFileAsync(IReadOnlyList<FileInfo> csprojFiles, CancellationToken cancellationToken)
     {
         if (csprojFiles.Count == 1)
