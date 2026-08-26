@@ -58,13 +58,11 @@
     <EmbeddedResource Include="Services\Controls\Data\core-patterns.json" LogicalName="core-patterns.json" />
     <EmbeddedResource Include="Services\Controls\Data\gallery-tags.json" LogicalName="gallery-tags.json" />
     <!--
-      The baked corpus floor (see EmbeddedSnapshot.cs). ~910 KB of JSON compresses ~10x,
-      so the compressed form is what ships. The hidden bake option writes BOTH forms:
-      the .json is committed for review (a corpus regression has to be visible as a
-      readable diff) and the .json.br is what gets embedded.
-      EmbeddedSnapshotTests.CompressedSnapshot_MatchesCommittedJson fails the build if
-      the two ever disagree, so the compressed blob can't silently drift
-      from the reviewed source.
+      The baked corpus floor (see EmbeddedSnapshot.cs). Only the Brotli blob is committed
+      and embedded: the corpus is a backup for the offline case, refreshed wholesale by
+      the release bake, so release time is its source of truth rather than a committed
+      text copy. snapshot-manifest.json stays readable so per-source scenario counts are
+      still reviewable in a diff.
     -->
     <EmbeddedResource Include="Services\Controls\Data\snapshot-manifest.json"
                       LogicalName="snapshot-manifest.json"
@@ -72,8 +70,6 @@
     <EmbeddedResource Include="Services\Controls\Data\snapshot-*.json.br">
       <LogicalName>%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
-    <!-- Committed for review only; the compressed sibling above is what ships. -->
-    <None Include="Services\Controls\Data\snapshot-*.json" />
   </ItemGroup>
 
   <ItemGroup>

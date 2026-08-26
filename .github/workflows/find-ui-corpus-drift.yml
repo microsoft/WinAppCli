@@ -79,13 +79,27 @@ jobs:
 
           # snapshot-manifest.json is excluded on purpose: bakedAtUtc changes on every run,
           # so including it would report drift 100% of the time and train everyone to ignore
-          # this job. Note that it matches "snapshot-*.json" too, hence the explicit skip.
-          # The corpus files themselves are byte-deterministic for unchanged upstream input,
-          # which is what makes a hash comparison meaningful here.
+          # this job.
+          #
+          # Only the Brotli blob is committed, so both sides are decompressed and compared
+          # as JSON rather than hashed as bytes. Brotli output is deterministic for
+          # identical input today, but comparing the compressed bytes would couple this job
+          # to the encoder: a .NET update that changed compression would report drift on
+          # every file at once and mean nothing. The decompressed corpus is the thing we
+          # actually care about, and it is byte-deterministic for unchanged upstream input.
           $drifted = @()
           $lines = @()
-          $corpusFiles = Get-ChildItem $fresh -Filter "snapshot-*.json" |
-            Where-Object { $_.Name -ne 'snapshot-manifest.json' }
+          $corpusFiles = Get-ChildItem $fresh -Filter "snapshot-*.json.br"
+
+          function Read-Snapshot([string]$path) {
+            $raw = [System.IO.File]::ReadAllBytes($path)
+            $in = New-Object System.IO.MemoryStream(, $raw)
+            $out = New-Object System.IO.MemoryStream
+            $br = New-Object System.IO.Compression.BrotliStream($in, [System.IO.Compression.CompressionMode]::Decompress)
+            $br.CopyTo($out)
+            $br.Dispose()
+            [System.Text.Encoding]::UTF8.GetString($out.ToArray())
+          }
 
           if ($corpusFiles.Count -eq 0) {
             "status=bake-failed" >> $env:GITHUB_OUTPUT
@@ -101,9 +115,12 @@ jobs:
               continue
             }
 
-            if ((Get-FileHash $file.FullName).Hash -ne (Get-FileHash $old).Hash) {
-              $freshCount = (Get-Content $file.FullName -Raw | ConvertFrom-Json).scenarios.Count
-              $oldCount = (Get-Content $old -Raw | ConvertFrom-Json).scenarios.Count
+            $freshJson = Read-Snapshot $file.FullName
+            $oldJson = Read-Snapshot $old
+
+            if ($freshJson -ne $oldJson) {
+              $freshCount = ($freshJson | ConvertFrom-Json).scenarios.Count
+              $oldCount = ($oldJson | ConvertFrom-Json).scenarios.Count
               $delta = $freshCount - $oldCount
               $drifted += $file.Name
               $lines += "- ``$($file.Name)`` — $oldCount → $freshCount scenarios ($(if ($delta -ge 0) { "+$delta" } else { "$delta" }))"

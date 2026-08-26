@@ -251,8 +251,14 @@ try
         Write-Warning "[BAKE] Skipped (-SkipBake); shipping the committed find-ui corpus as-is. It may be several releases behind upstream."
     }
 
-    # Whether or not we just baked, a stable build must carry a complete, non-empty corpus.
+    # Whether or not we just baked, a stable build must carry a complete, working corpus.
     # This catches the restored-from-backup case as well as a repo that never had one.
+    #
+    # Presence is not enough now that only the compressed blob is committed: a truncated or
+    # half-written blob is still a file of non-zero length, and it would fail at runtime as
+    # "no embedded corpus" -- silently reinstating issue #704 in a shipped build. So the
+    # blobs are actually decompressed and parsed here, and cross-checked against the
+    # manifest that the CLI, the drift job and the release all read.
     if ($Stable) {
         $RequiredSnapshots = @("snapshot-manifest.json", "snapshot-gallery.json.br", "snapshot-toolkit.json.br", "snapshot-reactor.json.br")
         $MissingSnapshots = @(
@@ -264,6 +270,53 @@ try
         if ($MissingSnapshots.Count -gt 0) {
             Write-Error "Stable build is missing the find-ui corpus: $($MissingSnapshots -join ', '). Shipping without it leaves find-ui non-functional offline (issue #704). Run: dotnet run --project $SnapshotBakerProjectPath -- $SnapshotDataPath"
             exit 1
+        }
+
+        $ManifestPath = Join-Path $SnapshotDataPath "snapshot-manifest.json"
+        try {
+            $Manifest = Get-Content $ManifestPath -Raw | ConvertFrom-Json
+        } catch {
+            Write-Error "Stable build aborted: snapshot-manifest.json does not parse ($($_.Exception.Message)). Re-bake: dotnet run --project $SnapshotBakerProjectPath -- $SnapshotDataPath"
+            exit 1
+        }
+
+        # A CacheVersion bump without a matching re-bake makes EmbeddedSnapshot reject the
+        # corpus at runtime, which removes the offline floor without failing anything else.
+        $CacheVersionSource = Join-Path $PSScriptRoot "..\src\winapp-CLI\WinApp.Cli\Services\Controls\CacheVersion.cs"
+        $CurrentCacheVersion = (Select-String -Path $CacheVersionSource -Pattern 'Current\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+        if ($Manifest.cacheVersion -ne $CurrentCacheVersion) {
+            Write-Error "Stable build aborted: the find-ui corpus was baked at CacheVersion '$($Manifest.cacheVersion)' but the code is at '$CurrentCacheVersion'. EmbeddedSnapshot rejects a version mismatch, so this would ship with no offline corpus. Re-bake: dotnet run --project $SnapshotBakerProjectPath -- $SnapshotDataPath"
+            exit 1
+        }
+
+        foreach ($Provider in @("gallery", "toolkit", "reactor")) {
+            $BlobPath = Join-Path $SnapshotDataPath "snapshot-$Provider.json.br"
+            try {
+                $Raw = [System.IO.File]::ReadAllBytes($BlobPath)
+                $InStream = New-Object System.IO.MemoryStream(, $Raw)
+                $OutStream = New-Object System.IO.MemoryStream
+                $Brotli = New-Object System.IO.Compression.BrotliStream($InStream, [System.IO.Compression.CompressionMode]::Decompress)
+                $Brotli.CopyTo($OutStream)
+                $Brotli.Dispose()
+                $Snapshot = [System.Text.Encoding]::UTF8.GetString($OutStream.ToArray()) | ConvertFrom-Json
+            } catch {
+                Write-Error "Stable build aborted: snapshot-$Provider.json.br is corrupt or truncated ($($_.Exception.Message)). find-ui would start with no offline corpus for '$Provider'. Re-bake: dotnet run --project $SnapshotBakerProjectPath -- $SnapshotDataPath"
+                exit 1
+            }
+
+            $ActualCount = @($Snapshot.scenarios).Count
+            if ($ActualCount -eq 0) {
+                Write-Error "Stable build aborted: snapshot-$Provider.json.br contains no scenarios. The '$Provider' source would silently vanish from find-ui offline. Re-bake: dotnet run --project $SnapshotBakerProjectPath -- $SnapshotDataPath"
+                exit 1
+            }
+
+            $DeclaredCount = $Manifest.scenarioCounts.$Provider
+            if ($ActualCount -ne $DeclaredCount) {
+                Write-Error "Stable build aborted: snapshot-manifest.json declares $DeclaredCount scenarios for '$Provider' but the blob carries $ActualCount. The manifest and the blobs are written by one bake, so they have been edited or partially re-baked. Re-bake: dotnet run --project $SnapshotBakerProjectPath -- $SnapshotDataPath"
+                exit 1
+            }
+
+            Write-Host "[BAKE] Verified $Provider corpus: $ActualCount scenarios." -ForegroundColor Green
         }
     }
 

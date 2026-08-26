@@ -12,42 +12,39 @@ using WinApp.Cli.Helpers;
 /// Produces the corpus that <c>EmbeddedSnapshot</c> serves. Lives in the build-time
 /// <c>WinApp.Cli.SnapshotBaker</c> tool rather than in the CLI, so regenerating the
 /// corpus is not reachable from the shipped product. Invoked by
-/// <c>scripts/build-cli.ps1</c> on the release path, writing uncompressed, indented
-/// JSON that is committed to the repo; the build Brotli-compresses it into the binary.
+/// <c>scripts/build-cli.ps1</c> on the release path.
 ///
-/// The committed form is deliberately uncompressed: a compressed blob in git cannot be
-/// reviewed, and the whole point of baking is that corpus regressions — malformed XAML,
-/// an upstream layout change that guts a source — show up as a diff a human can read
-/// before they ship.
+/// Only the Brotli blob is written and committed. The corpus is a backup: whenever the
+/// network is reachable the CLI serves live data, so the embedded copy exists for the
+/// offline case and is refreshed wholesale at every release — which makes release time,
+/// not any committed text file, the source of truth for what it contains.
+/// <c>snapshot-manifest.json</c> stays readable and committed, so scenario counts per
+/// source remain reviewable in a diff without carrying roughly 900 KB of duplicated JSON.
 /// </summary>
 internal static class SnapshotBaker
 {
-    /// <summary>Filename for a provider's committed snapshot. The compressed sibling that
-    /// actually ships is this name plus <c>.br</c>.</summary>
-    public static string SnapshotFileName(string providerId) => $"snapshot-{providerId}.json";
+    /// <summary>Filename for a provider's committed snapshot — the Brotli blob that is
+    /// embedded in the binary, and the only per-provider corpus file written.</summary>
+    public static string SnapshotFileName(string providerId) => $"snapshot-{providerId}.json.br";
 
     public const string ManifestFileName = "snapshot-manifest.json";
 
     private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
     /// <summary>
-    /// Write <paramref name="json"/> in both committed forms: readable text for review and
-    /// diffing, and the Brotli blob that is embedded in the binary. They are written
-    /// together so they cannot diverge at the source;
-    /// <c>EmbeddedSnapshotTests.CompressedSnapshot_MatchesCommittedJson</c> enforces
-    /// that they stay together in the repo.
+    /// Brotli-compress <paramref name="json"/> to <paramref name="path"/>. Compression is
+    /// deterministic for identical input, which is what lets the drift job compare a fresh
+    /// bake against the committed blob without a second, uncompressed copy in the repo.
     /// </summary>
-    private static async Task WriteSnapshotPairAsync(string path, string json, CancellationToken cancellationToken)
+    private static async Task WriteSnapshotAsync(string path, string json, CancellationToken cancellationToken)
     {
-        await PathSafety.AtomicWriteAllTextAsync(path, json, Utf8NoBom, cancellationToken).ConfigureAwait(false);
-
         using var compressed = new MemoryStream();
         using (var brotli = new BrotliStream(compressed, CompressionLevel.SmallestSize, leaveOpen: true))
         {
             await brotli.WriteAsync(Utf8NoBom.GetBytes(json), cancellationToken).ConfigureAwait(false);
         }
 
-        await File.WriteAllBytesAsync(path + ".br", compressed.ToArray(), cancellationToken).ConfigureAwait(false);
+        await File.WriteAllBytesAsync(path, compressed.ToArray(), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -115,7 +112,7 @@ internal static class SnapshotBaker
                 };
 
                 var path = Path.Join(staging, SnapshotFileName(provider.Id));
-                await WriteSnapshotPairAsync(
+                await WriteSnapshotAsync(
                     path,
                     JsonSerializer.Serialize(snapshot, ControlsSnapshotWriteContext.Default.ProviderSnapshot),
                     cancellationToken).ConfigureAwait(false);

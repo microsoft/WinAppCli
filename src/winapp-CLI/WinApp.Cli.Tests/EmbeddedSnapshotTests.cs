@@ -43,7 +43,7 @@ public class EmbeddedSnapshotTests
         var manifest = EmbeddedSnapshot.Manifest;
 
         Assert.IsNotNull(manifest,
-            "no snapshot manifest is embedded — find-ui has no offline floor. Re-bake with the hidden find-ui bake option.");
+            "no snapshot manifest is embedded — find-ui has no offline floor. Re-bake with WinApp.Cli.SnapshotBaker.");
         Assert.AreEqual(CacheVersion.Current, manifest.CacheVersion,
             $"the embedded snapshot was baked at CacheVersion '{manifest.CacheVersion}' but the code is at " +
             $"'{CacheVersion.Current}'. EmbeddedSnapshot rejects a version mismatch, so shipping this would " +
@@ -92,36 +92,28 @@ public class EmbeddedSnapshotTests
     }
 
     [TestMethod]
-    public void CompressedSnapshot_MatchesCommittedJson()
+    public void CompressedSnapshot_MatchesTheManifest()
     {
-        // Both files are committed: the .json so a bake diff is reviewable, the .json.br
-        // because it is what actually ships. Nothing at build time derives one from the
-        // other (the inline-MSBuild route can't Brotli on netstandard2.0), so this test is
-        // what stops a hand-edited or half-re-baked pair from shipping.
-        var dataDir = FindDataDirectory();
-        if (dataDir is null)
-        {
-            Assert.Inconclusive("source tree not reachable from the test output directory; parity can only be checked in-tree");
-            return;
-        }
+        // Only the Brotli blob is committed now, so there is no readable sibling to diff
+        // it against. What can still diverge is the blob and the manifest: they are
+        // written as a set by one bake, so a hand-edit or a half-applied re-bake shows up
+        // as counts that disagree. The manifest is also what the release assertion and the
+        // drift job read, so a wrong count there is load-bearing, not cosmetic.
+        var manifest = EmbeddedSnapshot.Manifest;
+        Assert.IsNotNull(manifest, "no snapshot manifest is embedded — find-ui has no offline floor.");
 
         foreach (var descriptor in ProviderRegistry.Descriptors)
         {
-            var jsonPath = Path.Join(dataDir, $"snapshot-{descriptor.Id}.json");
-            Assert.IsTrue(File.Exists(jsonPath), $"missing committed snapshot-{descriptor.Id}.json");
-
-            var fromDisk = JsonSerializer.Deserialize(
-                File.ReadAllText(jsonPath), ControlsJsonContext.Default.ProviderSnapshot);
             var fromResource = ReadEmbeddedSnapshot(descriptor.Id);
-
-            Assert.IsNotNull(fromDisk, $"snapshot-{descriptor.Id}.json did not parse");
             Assert.IsNotNull(fromResource, $"snapshot-{descriptor.Id}.json.br did not parse");
 
-            Assert.AreEqual(
-                JsonSerializer.Serialize(fromDisk, ControlsJsonContext.Default.ProviderSnapshot),
-                JsonSerializer.Serialize(fromResource, ControlsJsonContext.Default.ProviderSnapshot),
-                $"snapshot-{descriptor.Id}.json and snapshot-{descriptor.Id}.json.br disagree. " +
-                "They are written as a pair — re-bake rather than editing either by hand.");
+            Assert.IsTrue(manifest.ScenarioCounts.TryGetValue(descriptor.Id, out var declared),
+                $"snapshot-manifest.json has no scenario count for '{descriptor.Id}'. " +
+                "The manifest and the blobs are written by one bake — re-bake rather than editing either by hand.");
+
+            Assert.AreEqual(declared, fromResource.Scenarios.Length,
+                $"snapshot-manifest.json says '{descriptor.Id}' has {declared} scenarios but the embedded " +
+                $"blob carries {fromResource.Scenarios.Length}. Re-bake — do not edit either by hand.");
         }
     }
 
@@ -483,25 +475,6 @@ public class EmbeddedSnapshotTests
 
         using var brotli = new BrotliStream(compressed, CompressionMode.Decompress);
         return JsonSerializer.Deserialize(brotli, ControlsJsonContext.Default.ProviderSnapshot);
-    }
-
-    /// <summary>Locate the in-tree snapshot data directory by walking up from the test
-    /// binaries, or null when running from a detached output layout.</summary>
-    private static string? FindDataDirectory()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null)
-        {
-            var candidate = Path.Join(
-                dir.FullName, "src", "winapp-CLI", "WinApp.Cli", "Services", "Controls", "Data");
-            if (Directory.Exists(candidate))
-            {
-                return candidate;
-            }
-
-            dir = dir.Parent;
-        }
-        return null;
     }
 
     private static void BackdateCache(string root, string providerId, DateTime writtenAtUtc)
