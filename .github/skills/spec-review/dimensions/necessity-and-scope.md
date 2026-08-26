@@ -5,9 +5,10 @@ spec-review skill. You own the deepest question in the review: **should this be
 built at all, and at this size?** Apply the shared output contract in
 `_shared-contract.md`. Set `Domain: necessity-and-scope` on every finding.
 
-This is the home for the "should this exist?" debate that `pr-review`
-deliberately avoids. Be direct — but ground every judgment in independent
-research, not opinion.
+This is the default home for "should this exist?" and scope decisions before
+implementation. `pr-review` reopens scope only when the implementation reveals
+unexpected cost, overengineering, or review-driven creep. Be direct, but ground
+every judgment in independent research, not opinion.
 
 ## winapp's mission
 

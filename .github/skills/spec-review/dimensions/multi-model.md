@@ -17,8 +17,8 @@ family** than the orchestrator, chosen from the latest available **GPT**,
   number in this file.** Model versions churn; the orchestrator resolves the
   newest available model in the target family at run time.
 - **Record the family you ran as** in your output (see below). The orchestrator
-  surfaces it in the report so readers know a genuinely different family
-  performed this pass.
+  keeps it as internal bookkeeping. The final report mentions model agreement or
+  disagreement only when it changes confidence or the decision.
 
 ## Your job — independent research first, cross-check second
 
