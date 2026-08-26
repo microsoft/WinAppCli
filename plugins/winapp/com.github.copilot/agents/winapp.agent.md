@@ -209,7 +209,7 @@ Building a WinUI 3 UI and need to find the right control or a working sample?
 - `--debug-output` — capture `OutputDebugString` messages and first-chance exceptions (prevents other debuggers like VS/VS Code from attaching). For WinUI apps it also auto-runs a stowed-exception (`0xC000027B`) triage pass (`!xamlstowed`/`!xamltriage`) that recovers the originating HRESULT and native XAML dispatch stack. The first triage run downloads debugger components (engine bits from NuGet + `JsProvider.dll` from the WinDbg CDN) and caches them under `~\.winapp\dbgtools\`; if downloads are blocked, install Debugging Tools for Windows or point `WINAPP_DBGTOOLS_DIR` at a debugger directory containing `dbgeng.dll` and `JsProvider.dll`.
 - `--symbols` — with `--debug-output`, download Microsoft public symbols for richer native crash stacks (first run downloads and caches them)
 - `--output-appx-directory <path>` — custom output directory for the loose layout
-- `--sandbox` — deploy and run the app inside the Windows Sandbox winapp manages instead of on this machine. The app is still **built on the host**; only registration, launch, and debugging move. Every other run option keeps its meaning (`--detach`, `--no-launch`, `--clean`, `--unregister-on-exit`, `--with-alias`, `--json`), except `--debug-output`, which is refused for unpackaged apps in the Sandbox. No fallback to local execution.
+- `--sandbox` — deploy and run the app inside the Windows Sandbox winapp manages instead of on this machine. The app is still **built on the host**; only registration, launch, and debugging move. Every other run option keeps its meaning (`--detach`, `--no-launch`, `--clean`, `--unregister-on-exit`, `--with-alias`, `--json`), except `--debug-output`, which is refused for unpackaged apps in the Sandbox. No fallback to local execution. Note that `--detach` on an **unpackaged** app yields a process that lives only for the current guest agent's lifetime: it stops if the Sandbox closes or if winapp automatically repairs the agent, with no error reported at that moment — rerun to bring it back, or run in the foreground when it must survive a long sequence. A packaged app is activated by Windows rather than started by the agent and was observed to survive an agent repair.
 **Requires:** Folder mode — built app output directory + `appxmanifest.xml`. Project mode — a `.csproj`/`.sln`/`.slnx` (or directory containing one) + .NET SDK 8.0.100+.
 
 ### `winapp unregister`
@@ -235,10 +235,11 @@ Building a WinUI 3 UI and need to find the right control or a working sample?
 **Behavior:** Exactly one endpoint must carry the `sandbox:` prefix, so the direction is never guessed. Copy-out is contained under the requested host destination, and transfers are size- and hash-verified before anything is published — an interrupted transfer never leaves a plausible-looking partial file. Symbolic links and junctions in a host source are not followed.
 **Examples:**
 ```powershell
-winapp sandbox cp .\setup.ps1 sandbox:C:\Setup\setup.ps1
-winapp sandbox exec --cwd C:\Setup -- powershell -File .\setup.ps1
-winapp sandbox cp sandbox:C:\Results .\results
+winapp sandbox cp .\setup.ps1 sandbox:Setup\setup.ps1
+winapp sandbox exec --cwd C:\WinApp\work\Setup -- powershell -ExecutionPolicy Bypass -File .\setup.ps1
+winapp sandbox cp sandbox:Results .\results
 ```
+Guest paths are relative to `C:\WinApp\work`; a drive-absolute, rooted, or UNC guest path is refused rather than re-rooted, and each copy prints the resolved destination to use as the next `--cwd`. `-ExecutionPolicy Bypass` is required because a fresh Sandbox starts at `Restricted`, so a freshly copied script is otherwise refused with `UnauthorizedAccess`.
 
 ### `winapp cert generate`
 **Purpose:** Create a self-signed PFX certificate for local testing.
@@ -476,6 +477,8 @@ When the user encounters an error, check these common causes:
 | `sandbox_unmanaged_instance` | A Sandbox winapp did not create is running | Report the ID and stop. **Never stop it for the user** — Windows allows only one, and it may hold work that matters |
 | `sandbox_input_not_ready` / `sandbox_no_interactive_session` | The Sandbox window is disconnected or minimized | Reconnect with `wsb connect --id <id>`; inspection still works, input and recording do not |
 | `sandbox_runtime_provision_failed` | A runtime the app needs is missing in the guest | The error names it. Publish self-contained, or install it via `winapp sandbox exec` |
+| Detached **unpackaged** Sandbox app vanished, no error reported | It was started by the guest agent and ended with it, usually because winapp repaired the agent automatically | Rerun `winapp run . --sandbox --detach`; run in the foreground when the app must outlive a long sequence |
+| Copied-in script fails with `UnauthorizedAccess` | A fresh Sandbox starts with the PowerShell execution policy at `Restricted` | Invoke it as `powershell -ExecutionPolicy Bypass -File .\script.ps1` |
 
 ## Key files and concepts
 

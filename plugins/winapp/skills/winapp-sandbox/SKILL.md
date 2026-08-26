@@ -48,7 +48,7 @@ before it is published, so an interrupted transfer never leaves a plausible-look
 ### Iterate
 
 ```powershell
-winapp run . --sandbox --detach   # returns once the app is up
+winapp run . --sandbox --detach   # returns once the app is up (see the note below)
 winapp ui list-windows --sandbox  # discover targets
 winapp run . --sandbox --clean    # fresh application data
 winapp unregister --sandbox       # remove just this app from the Sandbox
@@ -59,14 +59,28 @@ Several winapp commands can use one Sandbox at the same time, so a foreground `w
 Past eight commands at once the next one fails immediately with `sandbox_agent_busy` instead of
 waiting. Deployment and registration still take turns, so two commands never redeploy at once.
 
+With `--detach` on an **unpackaged** app, expect the app to last only as long as the current guest
+agent. It is started as a child of the agent, and the agent deliberately contains everything it starts
+so a cancelled command cannot strand guest processes holding files the next deployment must replace.
+The same containment ends the app when the agent does — including when winapp repairs the agent
+automatically, which it does without asking if a later command finds it unresponsive or replaces it
+after a winapp upgrade. Nothing reports an error at that moment, because nothing was waiting on the
+app. Rerun `winapp run . --sandbox --detach` to bring it back, and prefer a foreground run when the app
+must survive a long automation sequence. A packaged app is activated by Windows rather than started by
+the agent and was observed to survive an agent repair that ended an unpackaged one; closing or
+restarting the Sandbox still ends both.
+
 ### Prepare dependencies or diagnose
 
 ```powershell
 winapp sandbox exec -- dotnet --info
 winapp sandbox cp .\setup.ps1 sandbox:Setup\setup.ps1
-winapp sandbox exec --cwd C:\WinApp\work\Setup -- powershell -File .\setup.ps1
+winapp sandbox exec --cwd C:\WinApp\work\Setup -- powershell -ExecutionPolicy Bypass -File .\setup.ps1
 winapp sandbox cp sandbox:Results .\results
 ```
+
+`-ExecutionPolicy Bypass` belongs in that command. A fresh Sandbox starts at `Restricted`, so a script
+you just copied in is refused with `UnauthorizedAccess` without it.
 
 `sandbox cp` requires exactly one endpoint prefixed with `sandbox:`, so the direction is never
 guessed. Symbolic links and junctions in a host source are not followed — only what is genuinely
@@ -116,8 +130,9 @@ A numeric `--window` needs `--sandbox`, because a handle carries no scope of its
 
 **Every run option keeps its meaning** — `--detach`, `--debug-output`, `--no-launch`, `--clean`,
 `--unregister-on-exit`, `--with-alias`, `--json` — because the Sandbox runs the ordinary
-`winapp run`. The exception: `--debug-output` is not available for an *unpackaged* app in Sandbox and
-is refused up front.
+`winapp run`. Two limits: `--debug-output` is not available for an *unpackaged* app in Sandbox and is
+refused up front, and `--detach` on an unpackaged app gives you a process that lasts only as long as
+the current guest agent, as described under *Iterate* above.
 
 **`--sandbox` isolates the running app, not the build.** Project evaluation, restore, and compilation
 happen on the host, so it does not make an untrusted project safe to open. Everything inside the
@@ -164,6 +179,13 @@ capabilities.
 
 Infrastructure failures use codes distinct from your app's exit codes, so "winapp could not run your
 app" is always distinguishable from "your app failed".
+
+Two problems report no winapp error code at all:
+
+| Symptom | Cause | What to do |
+|---|---|---|
+| A detached **unpackaged** app is gone, and no command reported it stopping | It was started by the guest agent and ended with it, most often because winapp automatically repaired the agent | Rerun `winapp run . --sandbox --detach`. For an app that must survive a long automation sequence, run it in the foreground instead |
+| A script copied in with `sandbox cp` fails with `UnauthorizedAccess` | A fresh Sandbox starts with the PowerShell execution policy at `Restricted` | Run it as `powershell -ExecutionPolicy Bypass -File .\script.ps1` |
 
 ## Full documentation
 
