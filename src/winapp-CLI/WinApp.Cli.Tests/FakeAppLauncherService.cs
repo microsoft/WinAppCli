@@ -50,6 +50,23 @@ internal class FakeAppLauncherService : IAppLauncherService
         return FakePackageFullName;
     }
 
+    /// <summary>
+    /// When set, <see cref="GetPackageFullNameOrThrow"/> throws this instead of returning
+    /// <see cref="FakePackageFullName"/> — simulating an inventory query failure, as distinct from
+    /// a query that succeeded and confirmed nothing is registered.
+    /// </summary>
+    public Exception? GetPackageFullNameFailure { get; set; }
+
+    public string? GetPackageFullNameOrThrow(string packageFamilyName)
+    {
+        if (GetPackageFullNameFailure is { } failure)
+        {
+            throw failure;
+        }
+
+        return FakePackageFullName;
+    }
+
     public void TerminatePackageProcesses(string? packageFullName, uint processId)
     {
         TerminateCalls.Add((packageFullName, processId));

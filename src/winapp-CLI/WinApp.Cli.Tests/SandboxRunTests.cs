@@ -592,6 +592,156 @@ public class SandboxRunTests
         Assert.IsTrue(File.Exists(TestPaths.Under(layoutDirectory, "appxmanifest.xml")));
     }
 
+    [TestMethod]
+    public async Task Deploy_Clean_WhenLayoutCleanupIsInterruptedByALockedFile_PersistsDirtyTruthfully()
+    {
+        await WriteHostFileAsync("app.exe", "binary");
+
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+
+        var deployment = await harness.Runner.DeployAsync(
+            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: true, TestContext.CancellationToken);
+
+        var owned = harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
+        Assert.IsFalse(owned.Dirty);
+
+        // A registration layout the first run produced, with more than one entry so a partial,
+        // non-transactional delete has something to prove: one file survives the interrupted
+        // cleanup below, the other does not.
+        var layoutDirectory = TestPaths.Under(_guestManaged, "deployments", "dep-1-layout");
+        Directory.CreateDirectory(layoutDirectory);
+        await File.WriteAllTextAsync(
+            TestPaths.Under(layoutDirectory, "appxmanifest.xml"), "<Package/>", TestContext.CancellationToken);
+        await File.WriteAllTextAsync(
+            TestPaths.Under(layoutDirectory, "resources.pri"), "pri", TestContext.CancellationToken);
+
+        var lockedFile = TestPaths.Under(layoutDirectory, "resources.pri");
+
+        await using (new FileStream(lockedFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            // The payload itself reconciles cleanly; only the registration-layout cleanup that runs
+            // afterward, inside the same dirty window, is interrupted.
+            var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
+                harness.Runner.DeployAsync(
+                    harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: true, TestContext.CancellationToken));
+
+            Assert.AreEqual(ExecutionTargetErrorCodes.TransferInterrupted, failure.Error.Code);
+        }
+
+        // Directory.Delete(recursive: true) is not transactional: the unlocked entry is already
+        // gone even though the call as a whole failed. This is what makes trusting a "clean" state
+        // here dangerous, and exactly why the flag must not have flipped.
+        Assert.IsFalse(File.Exists(TestPaths.Under(layoutDirectory, "appxmanifest.xml")));
+        Assert.IsTrue(File.Exists(lockedFile));
+
+        var persisted = harness.States.Read(ExecutionTargetRef.WindowsSandboxDefault, "dep-1");
+        Assert.IsTrue(persisted!.Dirty, "A layout cleanup interrupted partway through must leave the deployment dirty.");
+
+        // Package ownership must survive the failure too: unregister and the next run both still
+        // need to know what this deployment registered.
+        Assert.IsNotNull(persisted.Package);
+        Assert.AreEqual(owned.Package!.PackageFamilyName, persisted.Package!.PackageFamilyName);
+
+        // The next retry, once the lock is released, must repair deterministically: the same
+        // deployment call succeeds and finally commits a truthfully clean state.
+        var repaired = await harness.Runner.DeployAsync(
+            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: true, TestContext.CancellationToken);
+
+        Assert.IsFalse(repaired.State.Dirty);
+        Assert.IsFalse(File.Exists(lockedFile));
+    }
+
+    [TestMethod]
+    public async Task EnsureLayoutHasManifest_CatchesADamagedLayoutRegardlessOfWhatDeploymentStateClaims()
+    {
+        await WriteHostFileAsync("app.exe", "v1");
+
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+
+        var deployment = await harness.Runner.DeployAsync(
+            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+
+        var owned = harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
+        Assert.IsFalse(owned.Dirty, "The persisted state in this scenario claims a healthy, clean deployment.");
+
+        // A layout damaged by something other than a normal deploy (a bug elsewhere, manual
+        // tampering, disk corruption) while the persisted state still says clean. Unregister must
+        // never take that state's word for it -- it has to look at what is actually there.
+        var layoutDirectory = TestPaths.Under(_guestManaged, "deployments", "dep-1-layout");
+        Directory.CreateDirectory(layoutDirectory);
+        await File.WriteAllTextAsync(
+            TestPaths.Under(layoutDirectory, "resources.pri"), "pri", TestContext.CancellationToken);
+
+        var layoutFiles = await harness.Target.Channel.ListFilesAsync(
+            GuestPaths.LayoutScope("dep-1"), TestContext.CancellationToken);
+
+        var failure = Assert.ThrowsExactly<ExecutionTargetException>(
+            () => UnregisterCommand.Handler.EnsureLayoutHasManifest(layoutFiles, "dep-1"));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.DeploymentDirty, failure.Error.Code);
+    }
+
+    // ---- Strict package-inventory lookup (fail-closed on query failure) --------------
+
+    [TestMethod]
+    public async Task Deploy_WhenThePackageInventoryQueryFails_RefusesBeforeMutatingAnything()
+    {
+        await WriteHostFileAsync("app.exe", "v1");
+
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+
+        var deployment = await harness.Runner.DeployAsync(
+            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+
+        harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
+
+        await WriteHostFileAsync("app.exe", "v2");
+
+        // A query failure (transient COM error, denied inventory read) is not the same as a query
+        // that ran and confirmed nothing is registered. It must never be read as "safe to proceed".
+        harness.AppLauncher.GetPackageFullNameFailure = new InvalidOperationException("inventory unavailable");
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
+            harness.Runner.DeployAsync(
+                harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.StaleHandle, failure.Error.Code);
+
+        // Never even reached the termination call, since the lookup itself failed first.
+        Assert.AreEqual(0, harness.AppLauncher.StopPackageCalls.Count);
+
+        // And, as always, nothing was mutated: the guest's copy is still the old build.
+        Assert.AreEqual("v1", await File.ReadAllTextAsync(
+            TestPaths.Under(_guestManaged, "deployments", "dep-1", "app.exe"), TestContext.CancellationToken));
+    }
+
+    [TestMethod]
+    public async Task Deploy_WhenTheInventoryConfirmsNothingIsRegistered_ProceedsSafely()
+    {
+        await WriteHostFileAsync("app.exe", "v1");
+
+        await using var harness = new Harness(_guestManaged, _stateRoot);
+
+        var deployment = await harness.Runner.DeployAsync(
+            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+
+        harness.Runner.CommitPackage(deployment.State, Ownership(deployment.LayoutPath));
+
+        // The query itself succeeds and confirms nothing is registered under that family any more
+        // (distinct from a query that failed): safe to treat as nothing to stop.
+        harness.AppLauncher.FakePackageFullName = null;
+
+        await WriteHostFileAsync("app.exe", "v2");
+
+        var redeployed = await harness.Runner.DeployAsync(
+            harness.Target, "dep-1", new DirectoryInfo(_hostSource), clean: false, TestContext.CancellationToken);
+
+        Assert.IsFalse(redeployed.State.Dirty);
+        Assert.AreEqual(0, harness.AppLauncher.StopPackageCalls.Count);
+        Assert.AreEqual("v2", await File.ReadAllTextAsync(
+            TestPaths.Under(_guestManaged, "deployments", "dep-1", "app.exe"), TestContext.CancellationToken));
+    }
+
     // ---- Additive JSON -------------------------------------------------------------
 
     [TestMethod]

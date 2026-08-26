@@ -85,19 +85,17 @@ internal sealed class GuestApplicationRunner(TargetDeploymentService deployments
             snapshot,
             sourceRoot,
             clean,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
 
-        if (clean)
-        {
-            // Wiped only after the payload reconciliation above has committed a clean state. The
-            // registration layout is guest-derived from the payload, so it must not be left holding
-            // the previous build's files -- but wiping it *before* reconciliation could itself fail
-            // (a locked file, for instance) and leave the layout missing its manifest with nothing
-            // recording that damage. Deferring the wipe to here means a reconciliation failure never
-            // touches the layout at all, and a wipe failure here happens only once the payload is
-            // already known-good, so the next run has far less to redo.
-            await target.Channel.DeleteScopeAsync(layoutScope, cancellationToken).ConfigureAwait(false);
-        }
+            // Run inside reconciliation's own dirty-to-clean window rather than after it returns.
+            // The registration layout is guest-derived from the payload just reconciled above, so
+            // wiping it is as much a part of "clean" as the payload deletion is -- and a failure
+            // here (a locked file, for instance) must leave the deployment dirty for the identical
+            // reason a failed payload delete does. Committing "clean" first and only then attempting
+            // this would let a partial, non-transactional directory delete leave a damaged layout
+            // behind a state that calls itself clean, which is exactly what let a previous
+            // interrupted `--clean` masquerade as healthy.
+            clean ? ct => target.Channel.DeleteScopeAsync(layoutScope, ct) : null).ConfigureAwait(false);
 
         TargetDeploymentService.EnsureLaunchable(result.State, target.Epoch);
 
