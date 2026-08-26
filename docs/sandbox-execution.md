@@ -111,6 +111,57 @@ have run locally:
 Build options — `--configuration`, `--arch`, `--framework`, `--property`, `--no-build`,
 `--no-restore` — still apply on the host, before anything is transferred.
 
+### Progress, and why the terminal is never silent
+
+Preparing a Sandbox is a chain of multi-second operations, and a terminal that prints nothing for
+that long is indistinguishable from a hang — which usually ends with the user killing the command
+part-way through a deployment. Every slow phase therefore announces itself *before* it starts:
+checking availability, starting or reusing the Sandbox, repairing or preparing the agent, connecting
+to it, checking runtimes, deploying the application, and starting it.
+
+All of that goes to **standard error**, never standard output. That is what keeps `--json` honest: a
+scripted caller still gets exactly one machine-readable document on stdout, and a terminal user still
+sees what is happening.
+
+### Reuse across commands
+
+The Sandbox, its agent, and the deployment survive between commands, so a `run` followed by several
+`ui` commands is one environment rather than several. The connection material is written to the
+target's bootstrap folder, so the *next winapp process* reconnects to the agent that is already
+serving instead of restaging and relaunching it — reuse that in-process state alone could never
+provide, because every CLI invocation is a new process.
+
+Two consequences are deliberate:
+
+- **The Sandbox client is not reconnected for a read-only command.** `wsb connect` against an
+  instance whose client is already up ends that session and asks the user whether to reconnect, so it
+  is used only when there is no session yet, or when the verb genuinely needs real input or screen
+  capture. `ui inspect`, `search`, `get-property`, `get-focused`, `list-windows`, `wait-for`, and
+  `status` read UI Automation state and do neither.
+- **A failed reconnect repairs the agent, never the Sandbox.** If the agent has stopped, the next
+  command restages and relaunches it inside the same instance. The epoch is unchanged, so deployment
+  and runtime state stay valid across the repair, and nothing running in the guest is discarded.
+
+Upgrading winapp while a Sandbox is running is the one case that cannot be repaired in place: the
+running agent holds the staged binary open, so the new version reports that plainly and asks you to
+close the Sandbox, rather than failing with a file-sharing error.
+
+### The guest agent's network exposure
+
+The host assigns the agent's TCP port before the agent starts, writes it into the read-only bootstrap
+material, and creates the inbound allow rule for that exact port and program *before* launching the
+agent.
+
+The ordering is the point. Windows raises its "Windows Firewall has blocked some features of this
+app" consent dialog at the instant a program binds a listening socket with no matching rule, so a
+rule created after the agent reports its port — however narrow — arrives too late to prevent a prompt
+the user then has to answer inside the Sandbox window. Letting the agent bind port 0 and reporting
+back makes that ordering impossible, which is why the host chooses the port.
+
+The rule is scoped to one program, one protocol, one direction, and one port in the dynamic range,
+and rules from earlier boots are removed rather than accumulating. Reachability is not authorisation:
+every frame is still authenticated and encrypted with the per-boot pre-shared key.
+
 Unpackaged apps run too: there is no package to register, so the build output is deployed and the
 app's executable is started in the guest. Its working directory is the deployed folder, because the
 host directory you ran from does not exist there. `--debug-output` is not available for an

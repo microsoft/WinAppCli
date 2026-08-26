@@ -224,9 +224,14 @@ internal partial class RunCommand
                     PrepareTargetOptions.Mutating with { RequireInteractiveDesktop = requiresRealInput },
                     cancellationToken);
 
-                WriteProgress(isJson, ExecutionTargetOrchestrator.DescribeProgress(target.Reused));
+                // The orchestrator has already reported how the target was obtained. What remains
+                // are the two phases that dominate a first run — provisioning shared runtimes and
+                // transferring the build — and each is announced before it starts rather than after.
+                WriteProgress(isJson, "Checking runtimes in the Windows Sandbox...");
 
                 var provisioning = await ProvisionRuntimesAsync(target, sourceRoot, cancellationToken);
+
+                WriteProgress(isJson, "Deploying the application into the Windows Sandbox...");
 
                 var deployment = await guestApplicationRunner.DeployAsync(
                     target, deploymentId, sourceRoot, clean, cancellationToken);
@@ -271,6 +276,10 @@ internal partial class RunCommand
                 // field.
                 using var capturedOutput = isJson && guestProducesRunResult ? new MemoryStream() : null;
                 var request = buildRequest(deployment, ownerEnvironment);
+
+                // Registration and activation happen inside the guest and can take several seconds
+                // for a packaged app, so the last silent stretch gets a line too.
+                WriteProgress(isJson, "Starting the application in the Windows Sandbox...");
 
                 var exitCode = await guestApplicationRunner.RunAsync(
                     target,

@@ -73,6 +73,7 @@ internal static class StoreHostBuilderExtensions
             .AddSingleton<IControlsSearchService, ControlsSearchService>()
             // Execution targets (Windows Sandbox and any future target)
             .AddSingleton<ITargetStateDirectoryProvider>(_ => new TargetStateDirectoryProvider())
+            .AddSingleton<ITargetProgress, StandardErrorTargetProgress>()
             .AddSingleton<ITargetStateStore, TargetStateStore>()
             .AddSingleton<ITargetMutationLock, TargetMutationLock>()
             .AddSingleton<ITargetConnectionLock, TargetConnectionLock>()

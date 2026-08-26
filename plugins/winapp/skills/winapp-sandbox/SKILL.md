@@ -69,6 +69,26 @@ inside the folder you named is copied.
 
 ## What to know before relying on it
 
+**The Sandbox stays and is reused.** The instance, its agent, and your deployment persist between
+commands, so `winapp run . --sandbox` followed by several `winapp ui ... --sandbox` commands is one
+environment, not several. A later command reconnects to the agent that is already running rather than
+restarting it, and read-only verbs (`inspect`, `search`, `get-property`, `get-focused`,
+`list-windows`, `wait-for`, `status`) do **not** reconnect the Sandbox window — so they never
+interrupt what is on screen. If the agent has stopped, the next command repairs it inside the same
+Sandbox; your deployment survives.
+
+**Slow phases report progress on stderr.** Starting or reusing the Sandbox, preparing the agent,
+checking runtimes, deploying, and launching each print a line before they begin. Under `--json`,
+stdout still carries exactly one machine-readable document — progress never goes there.
+
+**No firewall prompt.** The host assigns the agent's port and creates a narrow inbound rule for that
+program and port before the agent starts listening, so Windows never raises its consent dialog inside
+the Sandbox.
+
+**Upgrading winapp needs a fresh Sandbox.** A running agent holds the staged binary, so a newer
+winapp cannot replace it in place. It says so and asks you to close the Sandbox rather than failing
+with a file error.
+
 **Targets must be explicit.** `--app` or `--window` is required, exactly as locally. Use
 `winapp ui list-windows --sandbox` to discover them; no command infers the most recent launch.
 
@@ -123,7 +143,7 @@ capabilities.
 | `sandbox_terminated` | The Sandbox went away mid-command | Retry; the next command recreates and redeploys |
 | `sandbox_deployment_dirty` | The guest copy is incomplete, so it will not launch | Run the command again to redeploy completely |
 | `sandbox_transfer_interrupted` | A transfer stopped; nothing was published | Retry. The error names the artifact, expected size, and what arrived |
-| `sandbox_agent_incompatible` | The guest agent needs a newer winapp | `winapp update` |
+| `sandbox_agent_incompatible` | The guest agent needs a newer winapp, or a different winapp version is already running it | `winapp update`. If you upgraded winapp while a Sandbox was running, close the Sandbox so a fresh agent starts |
 | `sandbox_runtime_provision_failed` | A runtime the app requires is missing from the Sandbox | The error names it. Publish self-contained, or install it with `winapp sandbox exec` |
 
 Infrastructure failures use codes distinct from your app's exit codes, so "winapp could not run your

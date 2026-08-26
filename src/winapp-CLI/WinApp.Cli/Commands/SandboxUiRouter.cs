@@ -10,6 +10,73 @@ using WinApp.Cli.ExecutionTargets.Orchestration;
 namespace WinApp.Cli.Commands;
 
 /// <summary>
+/// What a routed <c>winapp ui</c> verb actually needs from the guest.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Routing every verb as if it injected real input has a visible cost: requiring an interactive
+/// desktop makes the backend reconnect the Sandbox client, which tears down the session the previous
+/// command left running and shows the user "the connection was lost, reconnect?". For a verb that
+/// only reads the UI Automation tree, all of that is unnecessary — and when the reconnect races the
+/// command, the command simply hangs.
+/// </para>
+/// <para>
+/// The split is drawn conservatively. Only verbs that are unambiguously read-only are treated as
+/// such; anything that changes the UI, injects input, or captures pixels keeps the stricter
+/// treatment even where it might technically work through UI Automation alone. Being too strict
+/// costs a reconnect, while being too lax would let a command report input it never delivered, and
+/// those two mistakes are not equally bad.
+/// </para>
+/// </remarks>
+/// <param name="RequiresInteractiveDesktop">
+/// Whether the guest must have a connected client with a usable input desktop.
+/// </param>
+/// <param name="RequiresRealInput">
+/// Whether the guest should re-probe input readiness before starting the command.
+/// </param>
+internal sealed record SandboxUiRequirements(bool RequiresInteractiveDesktop, bool RequiresRealInput)
+{
+    /// <summary>Verbs that only read UI Automation state.</summary>
+    /// <remarks>
+    /// Each of these resolves elements and reads properties. None moves a pointer, synthesizes a
+    /// keystroke, changes a control's value, or captures the screen, so none needs a connected
+    /// client — which is exactly what makes them safe to run against a Sandbox someone is already
+    /// looking at.
+    /// </remarks>
+    private static readonly HashSet<string> ReadOnlyVerbs = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "status",
+        "inspect",
+        "search",
+        "get-property",
+        "get-focused",
+        "list-windows",
+        "wait-for",
+    };
+
+    /// <summary>Requirements for a verb that reads without touching anything.</summary>
+    public static SandboxUiRequirements ReadOnly { get; } = new(false, false);
+
+    /// <summary>Requirements for a verb that injects input or captures the screen.</summary>
+    public static SandboxUiRequirements Interactive { get; } = new(true, true);
+
+    /// <summary>Classifies the parsed command.</summary>
+    /// <remarks>
+    /// Taken from the parsed command name rather than by scanning raw tokens, so an argument that
+    /// merely contains a verb's name — a selector or a file path — cannot change how the command is
+    /// gated. An unrecognized verb gets the stricter treatment.
+    /// </remarks>
+    public static SandboxUiRequirements For(ParseResult parseResult)
+    {
+        ArgumentNullException.ThrowIfNull(parseResult);
+
+        return ReadOnlyVerbs.Contains(parseResult.CommandResult.Command.Name)
+            ? ReadOnly
+            : Interactive;
+    }
+}
+
+/// <summary>
 /// The single place a <c>winapp ui</c> command is diverted into the guest
 /// (spec §"UI command routing").
 /// </summary>
@@ -59,10 +126,12 @@ internal sealed class SandboxUiRouter(
     /// <summary>Runs the command in the guest and returns its exit code.</summary>
     public async Task<int> RouteAsync(
         IReadOnlyList<string> arguments,
+        SandboxUiRequirements requirements,
         bool isJson,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(arguments);
+        ArgumentNullException.ThrowIfNull(requirements);
 
         var operationScope = TargetArtifactService.ScopeFor(Guid.NewGuid());
 
@@ -80,7 +149,23 @@ internal sealed class SandboxUiRouter(
 
         try
         {
-            return await RouteCoreAsync(arguments, isJson, operationScope, interrupt.Token).ConfigureAwait(false);
+            return await RouteCoreAsync(arguments, requirements, isJson, operationScope, interrupt.Token)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // The caller never pressed Ctrl+C, so this is an internal timeout somewhere in
+            // preparation or transport. Reported as a target failure with a code and an action,
+            // because surfacing it as a bare "OperationCanceled" tells the user nothing about which
+            // step gave up or what to do about it.
+            return SandboxOutput.Fail(console, isJson, ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.TransportFailed,
+                "The Windows Sandbox did not respond while preparing this command.",
+                userAction:
+                    "Retry the command. If it keeps failing, check that the Sandbox window is still " +
+                    "connected, or close it so winapp can start a fresh one.",
+                context: orchestrator.DescribeForDiagnostics().ToDictionary(
+                    pair => pair.Key, pair => pair.Value, StringComparer.Ordinal)).Error);
         }
         finally
         {
@@ -90,17 +175,22 @@ internal sealed class SandboxUiRouter(
 
     private async Task<int> RouteCoreAsync(
         IReadOnlyList<string> arguments,
+        SandboxUiRequirements requirements,
         bool isJson,
         GuestPathScope operationScope,
         CancellationToken cancellationToken)
     {
         try
         {
-            // Real input and screen capture need a connected client; inspection does not. The
-            // distinction is not made here because the guest re-verifies readiness immediately
-            // before a command that injects input, and only the guest can know which those are.
+            // Read-only inspection neither needs a connected client nor should force one: requiring
+            // an interactive desktop reconnects the Sandbox window, which interrupts whatever the
+            // user or a previous command left running there.
             await using var target = await orchestrator
-                .PrepareAsync(PrepareTargetOptions.Interactive, cancellationToken)
+                .PrepareAsync(
+                    requirements.RequiresInteractiveDesktop
+                        ? PrepareTargetOptions.Interactive
+                        : PrepareTargetOptions.ReadOnly,
+                    cancellationToken)
                 .ConfigureAwait(false);
 
             var routed = UiArgvRouter.Rewrite(
@@ -124,9 +214,11 @@ internal sealed class SandboxUiRouter(
                     Arguments = routed.Arguments,
                     Environment = owner,
 
-                    // The guest decides per verb whether input is actually injected; declaring it
-                    // here makes the guest re-probe readiness before starting any of them.
-                    RequiresRealInput = true,
+                    // Declared from the verb's own requirements. Asserting real input for a
+                    // read-only inspection would make the guest re-probe an input desktop it does
+                    // not need, and fail the command when the Sandbox window happens to be
+                    // disconnected.
+                    RequiresRealInput = requirements.RequiresRealInput,
                 },
                 new GuestExecCallbacks(
                     OnOperationId: GuestStandardInputPump.Attach(target.Channel, cancellationToken),

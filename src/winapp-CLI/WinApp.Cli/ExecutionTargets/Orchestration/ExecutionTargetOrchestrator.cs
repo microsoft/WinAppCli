@@ -70,8 +70,11 @@ internal sealed record PrepareTargetOptions(bool RequireInteractiveDesktop, bool
 internal sealed class ExecutionTargetOrchestrator(
     IExecutionTargetBackend backend,
     ITargetMutationLock mutationLock,
-    ITargetConnectionLock connectionLock)
+    ITargetConnectionLock connectionLock,
+    ITargetProgress? progress = null)
 {
+    private readonly ITargetProgress _progress = progress ?? NullTargetProgress.Instance;
+
     /// <summary>How long to wait for another winapp process to finish mutating this target.</summary>
     internal static readonly TimeSpan LockTimeout = TimeSpan.FromMinutes(10);
 
@@ -108,6 +111,10 @@ internal sealed class ExecutionTargetOrchestrator(
     {
         ArgumentNullException.ThrowIfNull(options);
 
+        // Reported before the probe rather than after it, because everything from here on can block
+        // for seconds and the user is looking at a terminal that has just gone quiet.
+        _progress.Report("Checking Windows Sandbox availability...");
+
         await EnsureSupportedAsync(cancellationToken).ConfigureAwait(false);
 
         var connectionLease = AcquireConnection(cancellationToken);
@@ -118,6 +125,9 @@ internal sealed class ExecutionTargetOrchestrator(
             var connection = await backend.EnsureConnectedAsync(
                 new EnsureTargetOptions(options.RequireInteractiveDesktop),
                 cancellationToken).ConfigureAwait(false);
+
+            _progress.Report("Connecting to the Windows Sandbox agent...");
+
             channel = new GuestCommandChannel(connection.Transport, connection.Epoch);
             channel.Start();
 
@@ -133,6 +143,8 @@ internal sealed class ExecutionTargetOrchestrator(
             var capabilities = await channel.GetCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
 
             EnsureCapable(options, capabilities);
+
+            _progress.Report(DescribeProgress(connection.Reused));
 
             var prepared = new PreparedTarget(
                 channel,
