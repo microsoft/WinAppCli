@@ -29,7 +29,7 @@ winapp init [base-directory] [options]
 
 **Options:**
 
-- `--config-dir <path>` - Directory to read/store configuration (default: current directory)
+- `--config-dir <path>` - Directory to read/store configuration (default: the selected project directory, or current directory if no project is detected)
 - `--setup-sdks` - SDK installation mode: 'stable' (default), 'preview', 'experimental', or 'none' (skip SDK installation)
 - `--ignore-config`, `--no-config` - Don't use configuration file for version management
 - `--no-gitignore` - Don't update .gitignore file
@@ -257,7 +257,7 @@ winapp restore ./my-project
 ```
 
 > [!NOTE]
-> winapp resolves `nuget.config` from the directory it operates on — the `init`/`restore` directory argument, `--config-dir` when given, otherwise the current directory — so run these commands only against directories you trust, the same caution that applies to `dotnet restore`. For .NET projects the delegated `dotnet restore` resolves `nuget.config` relative to the project itself. When several sources are configured, use [Package Source Mapping](https://learn.microsoft.com/nuget/consume-packages/package-source-mapping) to pin each package to a feed.
+> For native projects winapp resolves `nuget.config` from the directory it operates on: the `init`/`restore` directory argument, `--config-dir` when given, otherwise the current directory. For **.NET projects** the sources come from the project's own `nuget.config` hierarchy instead, because that is what `dotnet add package` and `dotnet restore` use, so put a private feed's config in the project directory or an ancestor. A `--config-dir` outside that hierarchy is reported and ignored rather than silently selecting versions the project cannot restore. Run these commands only against directories you trust, the same caution that applies to `dotnet restore`. When several sources are configured, use [Package Source Mapping](https://learn.microsoft.com/nuget/consume-packages/package-source-mapping) to pin each package to a feed.
 
 ---
 

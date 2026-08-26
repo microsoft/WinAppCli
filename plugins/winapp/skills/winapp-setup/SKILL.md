@@ -141,7 +141,7 @@ Use `restore` when you clone a repo that already has `winapp.yaml` but no `.wina
 </configuration>
 ```
 
-> **Security note:** winapp resolves `nuget.config` from the directory it operates on — the `init`/`restore` directory argument, `--config-dir` when given, otherwise the current directory — so run these commands only against directories you trust, the same as `dotnet restore`. For .NET projects the delegated `dotnet restore` resolves `nuget.config` relative to the project itself. Use `<packageSourceMapping>` to pin packages to specific feeds when more than one source is configured.
+> **Security note:** For native projects winapp resolves `nuget.config` from the directory it operates on: the `init`/`restore` directory argument, `--config-dir` when given, otherwise the current directory. For **.NET projects** the sources come from the project's own `nuget.config` hierarchy instead, because that is what `dotnet add package` and `dotnet restore` use — so put a private feed's config in the project directory or an ancestor, not in a sibling passed via `--config-dir` (that is reported and ignored). Run these commands only against directories you trust, the same as `dotnet restore`. Use `<packageSourceMapping>` to pin packages to specific feeds when more than one source is configured.
 
 ### Update SDK versions
 
