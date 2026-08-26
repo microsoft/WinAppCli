@@ -54,6 +54,11 @@ winapp run . --sandbox --clean    # fresh application data
 winapp unregister --sandbox       # remove just this app from the Sandbox
 ```
 
+Several winapp commands can use one Sandbox at the same time, so a foreground `winapp run .
+--sandbox` running in one terminal does not hold up `winapp ui list-windows --sandbox` in another.
+Past eight commands at once the next one fails immediately with `sandbox_agent_busy` instead of
+waiting. Deployment and registration still take turns, so two commands never redeploy at once.
+
 ### Prepare dependencies or diagnose
 
 ```powershell
@@ -154,6 +159,7 @@ capabilities.
 | `sandbox_deployment_dirty` | The guest copy is incomplete, so it will not launch | Run the command again to redeploy completely |
 | `sandbox_transfer_interrupted` | A transfer stopped; nothing was published | Retry. The error names the artifact, expected size, and what arrived |
 | `sandbox_agent_incompatible` | The guest agent needs a newer winapp, or a different winapp version is already running it | `winapp update`. If you upgraded winapp while a Sandbox was running, close the Sandbox so a fresh agent starts |
+| `sandbox_agent_busy` | Eight winapp commands are already using this Sandbox | Wait for one to finish, then retry |
 | `sandbox_runtime_provision_failed` | A runtime the app requires is missing from the Sandbox | The error names it. Publish self-contained, or install it with `winapp sandbox exec` |
 
 Infrastructure failures use codes distinct from your app's exit codes, so "winapp could not run your

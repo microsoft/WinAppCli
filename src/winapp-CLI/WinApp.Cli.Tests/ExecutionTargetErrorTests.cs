@@ -29,6 +29,7 @@ public class ExecutionTargetErrorTests
         "sandbox_terminated",
         "sandbox_agent_incompatible",
         "sandbox_agent_upgrade_failed",
+        "sandbox_agent_busy",
         "sandbox_transport_failed",
         "sandbox_transfer_interrupted",
         "sandbox_runtime_provision_failed",

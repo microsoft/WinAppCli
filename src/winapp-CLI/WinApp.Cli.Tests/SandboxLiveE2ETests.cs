@@ -341,6 +341,101 @@ public class SandboxLiveE2ETests
     }
 
     /// <summary>
+    /// A long-running foreground operation must not delay a separate command in a real Sandbox.
+    /// </summary>
+    /// <remarks>
+    /// The reported symptom, measured rather than described: a foreground <c>run</c> made a separate
+    /// <c>ui list-windows</c> wait more than ninety seconds, and a long <c>exec</c> made a short one
+    /// wait 144 seconds. Both were the guest serving one channel at a time while the host held the
+    /// connection lock for its prepared target's whole life.
+    /// <para>
+    /// The assertion is deliberately generous. What is being proven is the difference between
+    /// "waits for the long operation" and "does not", not a performance budget: a cold guest, a
+    /// loaded machine, and a debug build all move the absolute numbers, while the long operation
+    /// here runs far longer than any of them.
+    /// </para>
+    /// </remarks>
+    [TestMethod]
+    public async Task LongRunningOperation_DoesNotDelayASeparateCommand()
+    {
+        await SkipIfUnsupportedOrOccupiedAsync();
+
+        var provider = new TargetStateDirectoryProvider();
+        var orchestrator = new ExecutionTargetOrchestrator(
+            CreateBackend(),
+            new TargetMutationLock(provider),
+            new TargetConnectionLock(provider));
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.CancellationToken);
+        timeout.CancelAfter(CommandTimeout);
+
+        var longOperationSeconds = TimeSpan.FromMinutes(2);
+
+        try
+        {
+            // Everything expensive — creating the Sandbox, bootstrapping the agent, connecting the
+            // window — happens here, so the measurement below covers only the contended path.
+            await using var warmUp = await orchestrator.PrepareAsync(
+                PrepareTargetOptions.Mutating, timeout.Token);
+
+            await using var occupied = await orchestrator.PrepareAsync(
+                PrepareTargetOptions.ReadOnly, timeout.Token);
+
+            var longRunning = occupied.Channel.ExecuteAsync(
+                new GuestExecRequest
+                {
+                    Executable = "cmd.exe",
+
+                    // ping rather than timeout: timeout exits immediately when standard input is
+                    // redirected, which it always is here, and would leave this measuring nothing.
+                    Arguments =
+                    [
+                        "/c",
+                        "ping",
+                        "-n",
+                        ((int)longOperationSeconds.TotalSeconds + 1).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        "127.0.0.1",
+                    ],
+                },
+                callbacks: null,
+                timeout.Token);
+
+            // A second winapp process's worth of work, start to finish, while that one runs.
+            var stopwatch = Stopwatch.StartNew();
+
+            await using (var separate = await orchestrator.PrepareAsync(
+                PrepareTargetOptions.ReadOnly, timeout.Token))
+            {
+                var quick = await separate.Channel.ExecuteAsync(
+                    new GuestExecRequest { Executable = "cmd.exe", Arguments = ["/c", "exit", "3"] },
+                    callbacks: null,
+                    timeout.Token);
+
+                Assert.AreEqual(3, quick.ExitCode);
+            }
+
+            stopwatch.Stop();
+
+            TestContext.WriteLine(
+                $"Separate command completed in {stopwatch.Elapsed.TotalSeconds:F1}s while a " +
+                $"{longOperationSeconds.TotalSeconds:F0}s operation was running.");
+
+            Assert.IsTrue(
+                stopwatch.Elapsed < TimeSpan.FromSeconds(45),
+                $"A separate command waited {stopwatch.Elapsed.TotalSeconds:F1}s behind a long-running " +
+                "operation, which means channels are still being serialized.");
+
+            Assert.IsFalse(
+                longRunning.IsCompleted,
+                "The long operation must still have been running, or this measured nothing.");
+        }
+        finally
+        {
+            await StopOwnedSandboxAsync();
+        }
+    }
+
+    /// <summary>
     /// A host directory junction must not widen what <c>sandbox cp</c> sends into the guest.
     /// </summary>
     /// <remarks>
@@ -386,7 +481,10 @@ public class SandboxLiveE2ETests
 
             var copied = await SandboxCopyService.CopyAsync(
                 target.Channel,
-                new SandboxCopyRequest(SandboxCopyDirection.ToGuest, root, $@"C:\{guestFolder}"),
+
+                // Relative to the guest work root. A rooted guest path is refused outright, so
+                // passing one here would fail before the junction was ever exercised.
+                new SandboxCopyRequest(SandboxCopyDirection.ToGuest, root, guestFolder),
                 timeout.Token);
 
             Assert.AreEqual(1, copied.Transferred, "Only the file genuinely inside the folder may be copied.");

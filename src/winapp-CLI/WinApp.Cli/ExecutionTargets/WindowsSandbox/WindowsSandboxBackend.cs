@@ -332,11 +332,25 @@ internal sealed class WindowsSandboxBackend(
 
             return new TargetConnection(lease.Epoch, transport, Reused: true);
         }
-        catch (ExecutionTargetException)
+        catch (ExecutionTargetException ex)
         {
+            _activeMaterial = null;
+
+            // The agent accepted this connection and then closed it, which means it is alive and
+            // declining — at its channel ceiling — rather than dead. Repairing here would stage and
+            // relaunch an agent underneath the channels the running one is still serving, so this
+            // reports the refusal instead.
+            if (ex.Error.Context?.ContainsKey(GuestSecureChannel.ClosedDuringHandshakeKey) == true)
+            {
+                throw ExecutionTargetException.Create(
+                    ExecutionTargetErrorCodes.AgentBusy,
+                    "The Windows Sandbox agent is serving as many winapp commands as it allows.",
+                    userAction: "Wait for one of the running commands to finish, then retry.",
+                    innerException: ex);
+            }
+
             // The Sandbox is alive but its agent is not answering. Repair only that layer; the
             // unchanged epoch keeps deployment and runtime state valid across the repair.
-            _activeMaterial = null;
             return null;
         }
     }

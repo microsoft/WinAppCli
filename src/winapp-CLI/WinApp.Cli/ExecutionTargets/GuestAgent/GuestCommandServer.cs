@@ -58,6 +58,38 @@ internal sealed class GuestCommandServer : IAsyncDisposable
     /// <summary>How long a cancelled child gets to exit before its job is terminated.</summary>
     public TimeSpan GracefulStopTimeout { get; init; } = GuestProcessHost.DefaultGracefulStopTimeout;
 
+    /// <summary>Most operations and transfers one connection may have in flight at once.</summary>
+    /// <remarks>
+    /// A bound, not a queue: an admitted connection that asks for more gets an immediate, actionable
+    /// refusal rather than an unbounded set of child processes and open file handles. It is per
+    /// connection because operation identity is per connection, so one host's traffic cannot consume
+    /// another's budget.
+    /// </remarks>
+    public int MaxConcurrentOperations { get; init; } = DefaultMaxConcurrentOperations;
+
+    /// <summary>Default value of <see cref="MaxConcurrentOperations"/>.</summary>
+    internal const int DefaultMaxConcurrentOperations = 32;
+
+    /// <summary>
+    /// How long shutdown waits for operations to finish reporting before closing the connection.
+    /// </summary>
+    /// <remarks>
+    /// Generous enough that an operation stopping normally always completes within it, and finite so
+    /// that one whose final frames are blocked on an unresponsive peer cannot hold the agent open.
+    /// </remarks>
+    public TimeSpan ShutdownDrainTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// When set, every request on this connection is answered with this error instead of served.
+    /// </summary>
+    /// <remarks>
+    /// This is how the agent refuses a connection past its channel bound. Refusing here rather than
+    /// by dropping the socket is deliberate: the refusal is only produced after the secure handshake
+    /// has authenticated the peer, and it reaches the host as an ordinary failure envelope with a
+    /// user action, instead of as a connection reset the host can only report as a transport error.
+    /// </remarks>
+    public ExecutionTargetErrorInfo? AdmissionRefusal { get; init; }
+
     /// <summary>
     /// Serves operations until the host disconnects or <paramref name="cancellationToken"/> fires.
     /// </summary>
@@ -137,6 +169,15 @@ internal sealed class GuestCommandServer : IAsyncDisposable
                     },
                 },
                 cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        // Refused connections never reach the dispatch table. The check sits after the epoch fence
+        // so a stale request still gets the more specific answer, and before every handler so a
+        // refused peer cannot start a process, open a file, or learn capabilities.
+        if (AdmissionRefusal is { } refusal)
+        {
+            await SendFailureAsync(operationId, refusal).ConfigureAwait(false);
             return;
         }
 
@@ -313,6 +354,12 @@ internal sealed class GuestCommandServer : IAsyncDisposable
     /// <summary>Opens a destination for an incoming file; content follows as stream frames.</summary>
     private void BeginWrite(Guid operationId, GuestPathScope scope, GuestFileInfo file)
     {
+        if (IsAtOperationLimit())
+        {
+            _ = SendFailureAsync(operationId, OperationLimitReached());
+            return;
+        }
+
         try
         {
             _writes[operationId] = RequireFiles().BeginWrite(scope, file);
@@ -467,9 +514,26 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         UserAction = "Retry the command.",
     };
 
+    /// <summary>Whether this connection already owns as much in-flight work as it may.</summary>
+    private bool IsAtOperationLimit() => _operations.Count + _writes.Count >= MaxConcurrentOperations;
+
+    private ExecutionTargetErrorInfo OperationLimitReached() => new()
+    {
+        Code = ExecutionTargetErrorCodes.AgentBusy,
+        Message =
+            $"This connection to the Windows Sandbox agent already has {MaxConcurrentOperations} operations in flight.",
+        UserAction = "Wait for one of this command's operations to finish, then retry.",
+    };
+
     private void StartOperation(Guid operationId, GuestExecRequest request)
     {
         RunningOperation operation;
+
+        if (IsAtOperationLimit())
+        {
+            _ = SendFailureAsync(operationId, OperationLimitReached());
+            return;
+        }
 
         // Readiness is re-verified here, immediately before the process starts, rather than taken
         // from the capability handshake. The user can close the Sandbox window at any moment, which
@@ -517,7 +581,7 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         }
 
         _operations[operationId] = operation;
-        operation.Completion = Task.Run(() => RunOperationAsync(operationId, operation));
+        _ = Task.Run(() => RunOperationAsync(operationId, operation));
     }
 
     /// <summary>
@@ -640,10 +704,27 @@ internal sealed class GuestCommandServer : IAsyncDisposable
                     UserAction = "Retry the command.",
                 }).ConfigureAwait(false);
         }
+        catch (Exception ex)
+        {
+            // Total by construction. Nothing awaits this task, so an escaping exception would become
+            // an unobserved fault and leave the requesting host waiting for a result that can no
+            // longer arrive. It is reported to that host and to diagnostics instead.
+            System.Diagnostics.Trace.TraceWarning("A guest operation ended unexpectedly: {0}", ex.Message);
+
+            await SendFailureAsync(
+                operationId,
+                new ExecutionTargetErrorInfo
+                {
+                    Code = ExecutionTargetErrorCodes.TransportFailed,
+                    Message = "The guest agent failed while running this operation.",
+                    UserAction = "Retry the command.",
+                }).ConfigureAwait(false);
+        }
         finally
         {
             _operations.TryRemove(operationId, out _);
             await operation.Host.DisposeAsync().ConfigureAwait(false);
+            operation.MarkFinished();
         }
     }
 
@@ -710,9 +791,30 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         }
     }
 
-    /// <summary>Stops every running operation, so nothing outlives the connection that asked for it.</summary>
+    /// <summary>
+    /// Stops every running operation, so nothing outlives the connection that asked for it.
+    /// </summary>
+    /// <remarks>
+    /// Cancellation is requested for all of them first and awaited afterwards, so operations stop in
+    /// parallel rather than one graceful timeout after another.
+    /// <para>
+    /// Completion is awaited rather than merely requested. Returning as soon as a stop was asked for
+    /// would leave child processes and their handles being disposed on background tasks after the
+    /// agent believed it had shut down — which is exactly the kind of "mostly cleaned up" that
+    /// leaves a Sandbox holding files the next deployment has to replace.
+    /// </para>
+    /// <para>
+    /// The wait is bounded because an operation's final frames are sent with no cancellation: a peer
+    /// that stopped reading can block that send until its socket buffer drains, which may be never.
+    /// On timeout this returns anyway, and disposing the transport immediately afterwards is what
+    /// unblocks it. Bounded rather than unbounded is the difference between an agent that always
+    /// shuts down and one that a single stalled host can wedge.
+    /// </para>
+    /// </remarks>
     private async Task StopAllOperationsAsync()
     {
+        var stopping = new List<Task>();
+
         foreach (var (id, operation) in _operations.ToArray())
         {
             if (operation.Detach)
@@ -721,14 +823,20 @@ internal sealed class GuestCommandServer : IAsyncDisposable
             }
 
             _operations.TryRemove(id, out _);
+            stopping.Add(StopOperationAsync(operation));
+        }
 
+        if (stopping.Count > 0)
+        {
             try
             {
-                await operation.CancelAsync().ConfigureAwait(false);
+                await Task.WhenAll(stopping).WaitAsync(ShutdownDrainTimeout).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is IOException or InvalidOperationException or ObjectDisposedException)
+            catch (TimeoutException)
             {
-                // The process already died with the connection.
+                System.Diagnostics.Trace.TraceWarning(
+                    "A guest operation did not finish reporting within {0}; closing the connection anyway.",
+                    ShutdownDrainTimeout);
             }
         }
 
@@ -741,6 +849,21 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         }
     }
 
+    /// <summary>Stops one operation and waits for it to finish reporting and releasing its child.</summary>
+    private static async Task StopOperationAsync(RunningOperation operation)
+    {
+        try
+        {
+            // Bounded by the host's own graceful timeout, after which it terminates the job.
+            await operation.CancelAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or ObjectDisposedException)
+        {
+            // The process already died with the connection.
+        }
+
+        await operation.Completion.ConfigureAwait(false);
+    }
     /// <summary>One in-flight operation and its child process.</summary>
     private sealed class RunningOperation(
         IGuestProcessHost host,
@@ -748,6 +871,8 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         TimeSpan gracefulTimeout,
         bool detach)
     {
+        private readonly TaskCompletionSource _finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         /// <summary>The child process running this operation.</summary>
         public IGuestProcessHost Host { get; } = host;
 
@@ -757,8 +882,17 @@ internal sealed class GuestCommandServer : IAsyncDisposable
         /// <summary>Whether this process remains owned by the agent after its host channel closes.</summary>
         public bool Detach { get; } = detach;
 
-        /// <summary>Task that completes when the operation has fully reported its outcome.</summary>
-        public Task? Completion { get; set; }
+        /// <summary>
+        /// Completes when the operation has fully reported its outcome and released its child.
+        /// </summary>
+        /// <remarks>
+        /// Created with the operation rather than assigned once its task is scheduled, so a shutdown
+        /// that races the very first moment of an operation still has something to wait on.
+        /// </remarks>
+        public Task Completion => _finished.Task;
+
+        /// <summary>Marks this operation as fully finished.</summary>
+        public void MarkFinished() => _finished.TrySetResult();
 
         /// <summary>
         /// Requests graceful termination, then terminates the process tree after the timeout.

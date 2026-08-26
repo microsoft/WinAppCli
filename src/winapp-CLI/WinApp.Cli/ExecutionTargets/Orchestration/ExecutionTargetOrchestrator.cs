@@ -11,25 +11,19 @@ namespace WinApp.Cli.ExecutionTargets.Orchestration;
 /// <param name="Epoch">Generation identity every request and result is fenced against.</param>
 /// <param name="Capabilities">What the guest reported it can do.</param>
 /// <param name="Reused">True when an existing instance was reused, driving the progress line.</param>
+/// <remarks>
+/// Deliberately owns no lock. The connection lock covers establishing a channel, not using one, so
+/// a prepared target — which lives for as long as the command that holds it, including a foreground
+/// application — never keeps another winapp process from connecting.
+/// </remarks>
 internal sealed record PreparedTarget(
     GuestCommandChannel Channel,
     ExecutionTargetEpoch Epoch,
     ExecutionTargetCapabilities Capabilities,
-    bool Reused,
-    TargetConnectionLease? ConnectionLease = null) : IAsyncDisposable
+    bool Reused) : IAsyncDisposable
 {
     /// <inheritdoc/>
-    public async ValueTask DisposeAsync()
-    {
-        try
-        {
-            await Channel.DisposeAsync().ConfigureAwait(false);
-        }
-        finally
-        {
-            ConnectionLease?.Dispose();
-        }
-    }
+    public ValueTask DisposeAsync() => Channel.DisposeAsync();
 }
 
 /// <summary>What a command needs from the target before it will run.</summary>
@@ -100,10 +94,17 @@ internal sealed class ExecutionTargetOrchestrator(
     /// Ensures a running target with a compatible agent and returns a ready command channel.
     /// </summary>
     /// <remarks>
-    /// The caller owns the returned <see cref="PreparedTarget"/> and must dispose it; the mutation
-    /// lock, by contrast, is released as soon as the target is prepared. Holding it for the life of
-    /// a running application would mean one long-running app blocked every other workflow, which is
-    /// exactly what the spec excludes from the lock's scope.
+    /// The caller owns the returned <see cref="PreparedTarget"/> and must dispose it. Neither lock
+    /// outlives this method. The mutation lock is released as soon as the target is prepared, and
+    /// the connection lock is released the moment the channel exists — holding either for the life
+    /// of a running application would mean one long-running app blocked every other workflow, which
+    /// is exactly what the spec excludes from their scope.
+    /// <para>
+    /// The connection lock's remaining job is to make establishment safe: it spans the reconnect
+    /// attempt and the bootstrap that follows a failed one, so two hosts starting at once cannot
+    /// both create an instance, rewrite connection material, or replace the agent. Whichever gets in
+    /// first bootstraps; the second finds a healthy agent and reconnects to it.
+    /// </para>
     /// </remarks>
     public async Task<PreparedTarget> PrepareAsync(
         PrepareTargetOptions options,
@@ -117,17 +118,26 @@ internal sealed class ExecutionTargetOrchestrator(
 
         await EnsureSupportedAsync(cancellationToken).ConfigureAwait(false);
 
-        var connectionLease = AcquireConnection(cancellationToken);
         GuestCommandChannel? channel = null;
 
         try
         {
-            var connection = await backend.EnsureConnectedAsync(
-                new EnsureTargetOptions(options.RequireInteractiveDesktop),
-                cancellationToken).ConfigureAwait(false);
+            TargetConnection connection;
 
-            channel = new GuestCommandChannel(connection.Transport, connection.Epoch);
-            channel.Start();
+            using (AcquireConnection(cancellationToken))
+            {
+                connection = await backend.EnsureConnectedAsync(
+                    new EnsureTargetOptions(options.RequireInteractiveDesktop),
+                    cancellationToken).ConfigureAwait(false);
+
+                channel = new GuestCommandChannel(connection.Transport, connection.Epoch);
+                channel.Start();
+            }
+
+            // Negotiated before any lock is taken, not after. A guest that is refusing this channel
+            // says so here, and waiting up to the lock timeout first would turn an immediate,
+            // actionable "the agent is busy" into a stale channel and a confusing transport error.
+            var capabilities = await channel.GetCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
 
             using var mutationLease = options.RequiresMutation ? AcquireLock(cancellationToken) : null;
 
@@ -138,19 +148,15 @@ internal sealed class ExecutionTargetOrchestrator(
                     backend.Target.Id);
             }
 
-            var capabilities = await channel.GetCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
-
             EnsureCapable(options, capabilities);
 
             var prepared = new PreparedTarget(
                 channel,
                 connection.Epoch,
                 capabilities,
-                connection.Reused,
-                connectionLease);
+                connection.Reused);
 
             channel = null;
-            connectionLease = null;
             return prepared;
         }
         catch
@@ -161,10 +167,6 @@ internal sealed class ExecutionTargetOrchestrator(
             }
 
             throw;
-        }
-        finally
-        {
-            connectionLease?.Dispose();
         }
     }
 
@@ -201,7 +203,7 @@ internal sealed class ExecutionTargetOrchestrator(
         return connectionLock.TryAcquire(backend.Target, LockTimeout, cancellationToken)
             ?? throw ExecutionTargetException.Create(
                 ExecutionTargetErrorCodes.TargetAmbiguous,
-                "Another winapp command is still using the Windows Sandbox agent.",
+                "Another winapp command is still starting or repairing this Windows Sandbox.",
                 userAction: "Wait for the other command to finish, then retry.",
                 context: new Dictionary<string, string> { ["targetId"] = backend.Target.Id });
     }

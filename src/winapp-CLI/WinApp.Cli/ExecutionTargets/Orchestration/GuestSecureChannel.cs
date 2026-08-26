@@ -90,7 +90,7 @@ internal sealed class GuestSecureChannel : IGuestTransport
         }
         catch (EndOfStreamException ex)
         {
-            throw TransportFailure("The peer closed the connection during the handshake.", ex);
+            throw PeerClosedDuringHandshake(ex);
         }
 
         var negotiatedVersion = NegotiateVersion(remoteHello);
@@ -412,5 +412,23 @@ internal sealed class GuestSecureChannel : IGuestTransport
             ExecutionTargetErrorCodes.TransportFailed,
             message,
             userAction: "Retry the command.",
+            innerException: innerException);
+
+    /// <summary>Context key marking a peer that accepted the connection and then closed it.</summary>
+    /// <remarks>
+    /// Distinguished from every other handshake failure because the two mean opposite things to the
+    /// host. A refused or unanswered connection means the agent is gone and should be repaired; a
+    /// connection the agent <em>accepted</em> and then dropped means the agent is alive and declining
+    /// this one — usually because it is at its channel ceiling. Repairing on that would replace a
+    /// working agent underneath the channels it is still serving.
+    /// </remarks>
+    public const string ClosedDuringHandshakeKey = "closedDuringHandshake";
+
+    private static ExecutionTargetException PeerClosedDuringHandshake(Exception innerException) =>
+        ExecutionTargetException.Create(
+            ExecutionTargetErrorCodes.TransportFailed,
+            "The peer closed the connection during the handshake.",
+            userAction: "Retry the command.",
+            context: new Dictionary<string, string> { [ClosedDuringHandshakeKey] = "true" },
             innerException: innerException);
 }
