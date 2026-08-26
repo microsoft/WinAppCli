@@ -80,7 +80,7 @@ public class ExecutionTargetOrchestratorTests
     }
 
     [TestMethod]
-    public async Task Prepare_HoldsTheConnectionLeaseForThePreparedChannelLifetime()
+    public async Task Prepare_ReleasesTheConnectionLeaseOnceTheChannelExists()
     {
         var connectionLock = new FakeConnectionLock();
         var orchestrator = new ExecutionTargetOrchestrator(
@@ -92,12 +92,37 @@ public class ExecutionTargetOrchestratorTests
             PrepareTargetOptions.ReadOnly,
             TestContext.CancellationToken);
 
+        // The lock covers establishing a channel, not using one. Holding it for the prepared
+        // target's lifetime is what made a foreground application block every other command:
+        // `winapp run --sandbox` keeps its prepared target for as long as the app runs.
         Assert.AreEqual(1, connectionLock.AcquireCalls);
-        Assert.AreEqual(0, connectionLock.ReleaseCalls);
+        Assert.AreEqual(1, connectionLock.ReleaseCalls);
 
         await prepared.DisposeAsync();
 
         Assert.AreEqual(1, connectionLock.ReleaseCalls);
+    }
+
+    [TestMethod]
+    public async Task Prepare_ConcurrentCommands_DoNotWaitOnEachOther()
+    {
+        // Two commands preparing while a third's target is still alive: the second must not be
+        // serialized behind the first's channel, which is the whole contract SBX-009 restores.
+        using var connectionLock = new SerializingConnectionLock();
+
+        var first = await new ExecutionTargetOrchestrator(
+            new FakeBackend(), new FakeMutationLock(), connectionLock)
+            .PrepareAsync(PrepareTargetOptions.ReadOnly, TestContext.CancellationToken);
+
+        await using (first)
+        {
+            // Would deadlock, not merely fail, if the first prepared target still held the lock.
+            await using var second = await new ExecutionTargetOrchestrator(
+                new FakeBackend(), new FakeMutationLock(), connectionLock)
+                .PrepareAsync(PrepareTargetOptions.ReadOnly, TestContext.CancellationToken);
+
+            Assert.IsNotNull(second.Channel);
+        }
     }
 
     [TestMethod]
@@ -385,10 +410,73 @@ public class ExecutionTargetOrchestratorTests
         }
     }
 
+    [TestMethod]
+    public async Task Prepare_SimultaneousEstablishment_IsStillSerialized()
+    {
+        // Two hosts starting at once — one cold-starting the Sandbox, one reconnecting to it — must
+        // not both bootstrap, rewrite connection material, or replace the agent binary. Narrowing
+        // the lock to establishment must not lose that.
+        using var connectionLock = new SerializingConnectionLock();
+        var backend = new FakeBackend { EstablishDuration = TimeSpan.FromMilliseconds(150) };
+
+        var prepares = Enumerable.Range(0, 4).Select(_ => Task.Run(
+            () => new ExecutionTargetOrchestrator(backend, new FakeMutationLock(), connectionLock)
+                .PrepareAsync(PrepareTargetOptions.ReadOnly, TestContext.CancellationToken),
+            TestContext.CancellationToken));
+
+        var prepared = await Task.WhenAll(prepares);
+
+        try
+        {
+            Assert.IsFalse(backend.ObservedOverlap, "Establishment must never run concurrently.");
+            Assert.AreEqual(4, backend.EnsureCalls);
+        }
+        finally
+        {
+            foreach (var target in prepared)
+            {
+                await target.DisposeAsync();
+            }
+        }
+    }
+
+    [TestMethod]
+    public async Task Prepare_CompetingMutations_AreStillSerialized()
+    {
+        // The mutation lock's scope is unchanged: deployment, registration, and runtime installation
+        // still take turns even though channels no longer do. Each task releases its own lease at
+        // the end of its mutation window, which is where release happens in production too --
+        // PrepareAsync now hands the lease to its caller instead of dropping it on return, so a test
+        // that held four leases at once would be asserting against a contract that no longer exists.
+        using var connectionLock = new SerializingConnectionLock();
+        using var mutationLock = new CountingMutationLock();
+
+        async Task PrepareMutateAndReleaseAsync()
+        {
+            await using var target = await new ExecutionTargetOrchestrator(
+                    new FakeBackend(),
+                    mutationLock,
+                    connectionLock)
+                .PrepareAsync(PrepareTargetOptions.Mutating, TestContext.CancellationToken);
+
+            // Stands in for the caller's own mutation window, which the lease must span.
+            await Task.Delay(20, TestContext.CancellationToken);
+
+            target.ReleaseMutationLease();
+        }
+
+        await Task.WhenAll(Enumerable.Range(0, 4).Select(
+            _ => Task.Run(PrepareMutateAndReleaseAsync, TestContext.CancellationToken)));
+
+        Assert.IsFalse(mutationLock.ObservedOverlap, "Two mutations must never hold the lock at once.");
+        Assert.AreEqual(4, mutationLock.AcquireCalls);
+    }
+
     /// <summary>A backend whose responses are scripted, standing in for Windows Sandbox.</summary>
     private sealed class FakeBackend : IExecutionTargetBackend
     {
         private readonly List<GuestCommandServer> _servers = [];
+        private int _inFlight;
 
         public ExecutionTargetRef Target => ExecutionTargetRef.WindowsSandboxDefault;
 
@@ -402,33 +490,58 @@ public class ExecutionTargetOrchestratorTests
 
         public int EnsureCalls { get; private set; }
 
+        /// <summary>How long establishing a connection takes, to widen the race window.</summary>
+        public TimeSpan EstablishDuration { get; init; } = TimeSpan.Zero;
+
+        /// <summary>True if two establishments were ever in flight at the same time.</summary>
+        public bool ObservedOverlap { get; private set; }
+
         public Task<TargetSupportResult> ProbeSupportAsync(CancellationToken cancellationToken) =>
             Task.FromResult(Support);
 
-        public Task<TargetConnection> EnsureConnectedAsync(
+        public async Task<TargetConnection> EnsureConnectedAsync(
             EnsureTargetOptions options,
             CancellationToken cancellationToken)
         {
-            EnsureCalls++;
+            // Bootstrap, material rewrite, and agent replacement all happen inside here, so two
+            // hosts overlapping here is exactly the race the connection lock exists to prevent.
+            if (Interlocked.Increment(ref _inFlight) > 1)
+            {
+                ObservedOverlap = true;
+            }
 
-            var pair = new LoopbackTransportPair();
+            try
+            {
+                EnsureCalls++;
 
-            // A real guest server rather than a scripted peer, so capability negotiation exercises
-            // the same code path the orchestrator will meet in production.
-            var server = new GuestCommandServer(
-                pair.Guest,
-                Epoch,
-                new FakeGuestProcessHostFactory(),
-                new StaticGuestSessionProbe(new GuestSessionInfo(
-                    SessionId,
-                    "WinSta0",
-                    HasInputDesktop: SupportsInteractiveDesktop)),
-                new GuestAgentIdentity("1.0.0", "hash", "arm64", 1, 1));
+                if (EstablishDuration > TimeSpan.Zero)
+                {
+                    await Task.Delay(EstablishDuration, cancellationToken).ConfigureAwait(false);
+                }
 
-            _servers.Add(server);
-            _ = server.RunAsync(CancellationToken.None);
+                var pair = new LoopbackTransportPair();
 
-            return Task.FromResult(new TargetConnection(Epoch, pair.Host, Reused));
+                // A real guest server rather than a scripted peer, so capability negotiation
+                // exercises the same code path the orchestrator will meet in production.
+                var server = new GuestCommandServer(
+                    pair.Guest,
+                    Epoch,
+                    new FakeGuestProcessHostFactory(),
+                    new StaticGuestSessionProbe(new GuestSessionInfo(
+                        SessionId,
+                        "WinSta0",
+                        HasInputDesktop: SupportsInteractiveDesktop)),
+                    new GuestAgentIdentity("1.0.0", "hash", "arm64", 1, 1));
+
+                _servers.Add(server);
+                _ = server.RunAsync(CancellationToken.None);
+
+                return new TargetConnection(Epoch, pair.Host, Reused);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _inFlight);
+            }
         }
 
         public IReadOnlyDictionary<string, string> DescribeForDiagnostics() =>
@@ -506,6 +619,147 @@ public class ExecutionTargetOrchestratorTests
                 FileOptions.DeleteOnClose);
             _streams.Add(stream);
             return new TargetConnectionLease(stream);
+        }
+    }
+
+    /// <summary>
+    /// A connection lock that behaves like the real file-backed one: exclusive, and unavailable to
+    /// a second caller until the first releases.
+    /// </summary>
+    private sealed class SerializingConnectionLock : ITargetConnectionLock, IDisposable
+    {
+        private readonly string _path = TestPaths.TempFile("serializing-connection-lock", ".lock");
+
+        public TargetConnectionLease? TryAcquire(
+            ExecutionTargetRef target,
+            TimeSpan timeout,
+            CancellationToken cancellationToken = default)
+        {
+            var deadline = DateTimeOffset.UtcNow + timeout;
+
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
+                {
+                    return new TargetConnectionLease(new FileStream(
+                        _path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None));
+                }
+                catch (IOException)
+                {
+                    if (DateTimeOffset.UtcNow >= deadline)
+                    {
+                        return null;
+                    }
+
+                    Thread.Sleep(10);
+                }
+            }
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                File.Delete(_path);
+            }
+            catch (IOException)
+            {
+                // Cleanup noise is less useful than the assertion that already ran.
+            }
+        }
+    }
+
+    /// <summary>
+    /// A mutually exclusive mutation lock that notices if two holders ever overlap.
+    /// </summary>
+    /// <remarks>
+    /// Overlap is detected inside the lease rather than inferred from call counts, because the thing
+    /// that matters is whether two mutations were ever simultaneously permitted — not how many times
+    /// the lock was asked for.
+    /// </remarks>
+    private sealed class CountingMutationLock : ITargetMutationLock, IDisposable
+    {
+        private readonly string _path = TestPaths.TempFile("counting-mutation-lock", ".lock");
+        private int _acquireCalls;
+        private int _held;
+        private int _overlapped;
+
+        public int AcquireCalls => Volatile.Read(ref _acquireCalls);
+
+        public bool ObservedOverlap => Volatile.Read(ref _overlapped) != 0;
+
+        public TargetMutationLease? TryAcquire(
+            ExecutionTargetRef target,
+            TimeSpan timeout,
+            CancellationToken cancellationToken = default)
+        {
+            var deadline = DateTimeOffset.UtcNow + timeout;
+
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
+                {
+                    var stream = new ObservedFileStream(_path, () => Interlocked.Decrement(ref _held));
+
+                    Interlocked.Increment(ref _acquireCalls);
+
+                    if (Interlocked.Increment(ref _held) > 1)
+                    {
+                        Interlocked.Exchange(ref _overlapped, 1);
+                    }
+
+                    return new TargetMutationLease(stream, wasAbandoned: false);
+                }
+                catch (IOException)
+                {
+                    if (DateTimeOffset.UtcNow >= deadline)
+                    {
+                        return null;
+                    }
+
+                    Thread.Sleep(10);
+                }
+            }
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                File.Delete(_path);
+            }
+            catch (IOException)
+            {
+                // Cleanup noise is less useful than the assertion that already ran.
+            }
+        }
+
+        /// <summary>A handle that reports when it is actually released.</summary>
+        /// <remarks>
+        /// The count drops <em>before</em> the exclusive handle closes. The handle is what actually
+        /// serializes, so nothing can acquire while the count is already low — whereas decrementing
+        /// afterwards leaves a window where the next acquirer opens the file and increments before
+        /// the previous owner has decremented, which reads as an overlap that never happened.
+        /// </remarks>
+        private sealed class ObservedFileStream(string path, Action released)
+            : FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None)
+        {
+            private bool _reported;
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing && !_reported)
+                {
+                    _reported = true;
+                    released();
+                }
+
+                base.Dispose(disposing);
+            }
         }
     }
 }

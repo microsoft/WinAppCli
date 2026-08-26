@@ -430,6 +430,11 @@ At startup it verifies it is not in session 0 and that its window station and in
 interactive. It publishes its status **whether or not it is ready**, so a disconnected Sandbox
 window is reported as exactly that rather than as a timeout.
 
+It then accepts host channels concurrently. Each one completes its own handshake and derives its own
+session keys, so channels cannot read, replay, or reorder each other's frames, and each owns its own
+operations. Shutting the agent down stops every channel's operations and waits for them, so nothing
+it started outlives it.
+
 Every command runs inside a Job Object so that cancelling it terminates the whole process tree, not
 just the process winapp started. Because Windows cannot create a process that is already a job
 member, the agent starts a small internal barrier instead: it waits until the agent has placed it in
@@ -451,19 +456,28 @@ host is the fix.
 
 ## Coordination between commands
 
-There is no background winapp service. Concurrent winapp processes coordinate through a per-target
-lock, atomic revisioned state files, and a generation identity carried on every request and result.
+There is no background winapp service. Concurrent winapp processes coordinate through per-target
+locks, atomic revisioned state files, and a generation identity carried on every request and result.
 
-The lock covers Sandbox creation and repair, guest agent replacement, runtime installation,
-deployment synchronization, and package registration. It deliberately does **not** cover host
-builds, running applications, or read-only UI Automation — so a long build or a running app never
-blocks another workflow, and an inspection never waits behind a deployment.
+The guest agent serves several winapp commands at once — up to eight channels — so a running
+application and a separate inspection, input, capture, or `sandbox exec` proceed independently. Each
+channel is authenticated on its own and is isolated from the others: operation identities, standard
+input, cancellation, and failure never cross between them, and losing one channel stops only the
+operations that channel started. Past eight channels a command is refused immediately with
+`sandbox_agent_busy` and told to retry, rather than left waiting.
+
+The **mutation lock** covers guest state: runtime installation, deployment synchronization, and
+package registration. The **connection lock** covers establishing a channel — creating or repairing
+the Sandbox and replacing the guest agent — and is released as soon as the channel exists.
+
+Neither lock covers host builds, running applications, or read-only UI Automation. So a long build or
+a running app never blocks another workflow, and an inspection never waits behind a deployment.
 
 If a winapp process dies mid-change, the next one treats the abandoned lock as a recovery signal and
 reconciles before mutating further.
 
-This lock is unrelated to UI turn coordination. It protects guest environment and deployment state,
-not the desktop.
+These locks are unrelated to UI turn coordination. They protect guest environment and deployment
+state, not the desktop.
 
 ## Failures
 
@@ -499,6 +513,7 @@ run your app" is always distinguishable from "your app failed".
 | `sandbox_terminated` | The Sandbox went away underneath the command |
 | `sandbox_agent_incompatible` | The guest agent needs a newer winapp |
 | `sandbox_agent_upgrade_failed` | Staging, self-testing, or activating a replacement agent failed |
+| `sandbox_agent_busy` | The agent is already serving as many channels or operations as it allows |
 | `sandbox_transport_failed` | The command channel could not be established or was lost |
 | `sandbox_transfer_interrupted` | A transfer stopped; no destination was published |
 | `sandbox_runtime_provision_failed` | A required runtime could not be provisioned |
@@ -518,7 +533,7 @@ Hyper-V, Dev Box, or remote-machine target can reuse everything above it without
 run / ui / unregister / sandbox exec / sandbox cp
         │
         ▼
-ExecutionTargetOrchestrator      probe → lock (only if mutating) → connect → negotiate
+ExecutionTargetOrchestrator      probe → connect (locked) → negotiate → lock (only if mutating)
         │
         ├── TargetDeploymentService     snapshot, reconcile, ownership
         │
