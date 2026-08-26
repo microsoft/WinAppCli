@@ -2896,6 +2896,33 @@ public class ProjectRunServiceTests
     }
 
     [TestMethod]
+    public async Task BuildAndResolveAsync_SolutionRestoreInRealTerminal_UsesInheritedLauncher()
+    {
+        var csproj = WriteFile("App.csproj", ExecutableCsproj);
+        var solution = WriteFile("App.slnx", SlnxListing("App.csproj", "Server/Server.csproj"));
+        var dotnet = new FakeDotNetService
+        {
+            RunDotnetCommandHandler = _ => (0, PackagedPropertiesJson(), string.Empty),
+            RunDotnetInheritedHandler = _ => 0,
+        };
+        var service = NewServiceWith(dotnet, LogLevel.Information, out var console);
+        service.NativeTerminalGateOverrideForTests = () => true;
+        var options = new ProjectRunOptions(
+            "Debug", "x64", null, NoBuild: false, NoRestore: false, Properties: [], Solution: solution);
+
+        var outcome = await service.BuildAndResolveAsync(csproj, options, CancellationToken.None);
+
+        Assert.IsNotNull(outcome.Resolution);
+        Assert.IsTrue(
+            dotnet.InheritedCalls.Any(a => a.StartsWith($"restore {solution.FullName}", StringComparison.Ordinal)),
+            "an interactive restore must inherit stdio so dotnet's terminal logger can render in-place progress");
+        Assert.IsFalse(
+            dotnet.StreamingCalls.Any(a => a.StartsWith("restore ", StringComparison.Ordinal)),
+            "an interactive restore must not use redirected line streaming");
+        StringAssert.Contains(console.Output, "Restoring App.slnx dependencies");
+    }
+
+    [TestMethod]
     public async Task BuildAndResolveAsync_SolutionWithNativeSibling_RestoresManagedSiblingNotVcxproj()
     {
         // ISSUE-1: with a native sibling present, `dotnet restore <sln>` would fail on a VS-less box, so

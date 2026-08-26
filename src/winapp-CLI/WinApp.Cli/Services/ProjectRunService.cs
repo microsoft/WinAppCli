@@ -43,8 +43,8 @@ internal sealed partial class ProjectRunService(
     private static readonly string[] DedicatedFlagProperties = ["Configuration", "RuntimeIdentifier", "TargetFramework"];
 
     /// <summary>
-    /// Test seam for the "real interactive terminal" gate <see cref="RunBuildPassAsync"/> uses to choose
-    /// the native terminal-logger launcher over plain line streaming. <see langword="null"/> in production
+    /// Test seam for the "real interactive terminal" gate restore and build passes use to choose the native
+    /// terminal-logger launcher over plain line streaming. <see langword="null"/> in production
     /// (the gate is <see cref="ProgressDisplay.ShouldUseLiveSpinner(IAnsiConsole, ILogger)"/>); overridable
     /// only because that gate reads process-global state that is always false under the test host.
     /// </summary>
@@ -595,7 +595,8 @@ internal sealed partial class ProjectRunService(
 
     /// <summary>
     /// Runs a pre-build restore with live output so slow package downloads, feed retries, and NuGet errors
-    /// are visible as they happen. JSON and quiet modes route output to stderr to preserve stdout contracts.
+    /// are visible as they happen. A real terminal is handed directly to dotnet so its terminal logger can
+    /// render in-place progress; redirected, JSON, and quiet modes use line streaming instead.
     /// </summary>
     private async Task<int> RunRestoreCommandAsync(
         string arguments,
@@ -620,6 +621,13 @@ internal sealed partial class ProjectRunService(
 
         ansiConsole.MarkupLineInterpolated($"{UiSymbols.Sync} {banner}");
         ansiConsole.MarkupLineInterpolated($"[dim]   dotnet {Markup.Escape(RedactSecretsForDisplay(arguments))}[/]");
+
+        var nativeTerminal = NativeTerminalGateOverrideForTests?.Invoke()
+            ?? ProgressDisplay.ShouldUseLiveSpinner(ansiConsole, logger);
+        if (nativeTerminal)
+        {
+            return await dotNetService.RunDotnetInheritedAsync(workingDir, arguments, cancellationToken);
+        }
 
         var writeLock = new object();
         void WriteLive(string line)
