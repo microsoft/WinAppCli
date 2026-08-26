@@ -189,28 +189,44 @@ internal static class GuestTcpTransport
     }
 
     /// <summary>
-    /// Listens for the host and completes the authenticated handshake, from inside the guest.
+    /// Accepts one inbound TCP connection, without authenticating it.
     /// </summary>
     /// <remarks>
-    /// One connection at a time by design: the agent serves a single host channel, and accepting a
-    /// second would let two hosts issue interleaved mutation operations against one guest with no
-    /// coordination between them.
+    /// Split from <see cref="EstablishAsync"/> so the agent's accept loop never blocks on a
+    /// handshake. A peer that connects and then stalls delays only its own connection, not every
+    /// other host waiting to be accepted.
     /// </remarks>
-    public static async Task<IGuestTransport> AcceptAsync(
-        TcpListener listener,
+    public static Task<TcpClient> AcceptClientAsync(TcpListener listener, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(listener);
+
+        return listener.AcceptTcpClientAsync(cancellationToken).AsTask();
+    }
+
+    /// <summary>
+    /// Completes the authenticated handshake for an accepted connection, from inside the guest.
+    /// </summary>
+    /// <remarks>
+    /// Each connection derives its own session keys from fresh handshake randoms and tracks its own
+    /// directional sequence numbers, so concurrent channels can never decrypt, replay, or reorder
+    /// one another's frames even though they share one pre-shared key.
+    /// <para>
+    /// Ownership of <paramref name="client"/> transfers to the returned transport on success and is
+    /// released here on failure, so a peer that fails authentication leaks no socket.
+    /// </para>
+    /// </remarks>
+    public static async Task<IGuestTransport> EstablishAsync(
+        TcpClient client,
         GuestBootstrapMaterial material,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(listener);
+        ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(material);
-
-        var client = await listener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
-        var stream = client.GetStream();
 
         try
         {
             return await GuestSecureChannel.EstablishAsync(
-                stream,
+                client.GetStream(),
                 GuestRole.Guest,
                 material.DecodeKey(),
                 material.TargetId,

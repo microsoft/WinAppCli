@@ -43,6 +43,9 @@ internal static class ExecutionTargetErrorCodes
     /// <summary>Staging, self-testing, or activating a replacement guest agent failed.</summary>
     public const string AgentUpgradeFailed = "sandbox_agent_upgrade_failed";
 
+    /// <summary>The guest agent is already serving as many channels or operations as it allows.</summary>
+    public const string AgentBusy = "sandbox_agent_busy";
+
     /// <summary>The host/guest command channel could not be established or was lost.</summary>
     public const string TransportFailed = "sandbox_transport_failed";
 
@@ -87,6 +90,7 @@ internal static class ExecutionTargetErrorCodes
         Terminated,
         AgentIncompatible,
         AgentUpgradeFailed,
+        AgentBusy,
         TransportFailed,
         TransferInterrupted,
         RuntimeProvisionFailed,

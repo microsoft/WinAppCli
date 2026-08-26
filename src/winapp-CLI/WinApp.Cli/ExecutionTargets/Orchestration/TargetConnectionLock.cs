@@ -5,7 +5,7 @@ using WinApp.Cli.ExecutionTargets.Abstractions;
 
 namespace WinApp.Cli.ExecutionTargets.Orchestration;
 
-/// <summary>Held ownership of the target's single host-to-agent channel.</summary>
+/// <summary>Held ownership of the target's connection-establishment critical section.</summary>
 internal sealed class TargetConnectionLease : IDisposable
 {
     private FileStream? _stream;

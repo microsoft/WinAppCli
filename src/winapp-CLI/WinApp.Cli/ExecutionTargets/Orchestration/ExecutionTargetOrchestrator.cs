@@ -11,26 +11,29 @@ namespace WinApp.Cli.ExecutionTargets.Orchestration;
 /// <param name="Epoch">Generation identity every request and result is fenced against.</param>
 /// <param name="Capabilities">What the guest reported it can do.</param>
 /// <param name="Reused">True when an existing instance was reused, driving the progress line.</param>
-/// <param name="ConnectionLease">
-/// Held for the whole lifetime of this target, released only when it is disposed.
-/// </param>
 /// <param name="MutationLease">
 /// Non-null when this target was prepared with <see cref="PrepareTargetOptions.RequiresMutation"/>
-/// set. Unlike <paramref name="ConnectionLease"/>, this is <em>not</em> released by
-/// <see cref="ExecutionTargetOrchestrator.PrepareAsync"/> -- it stays held across everything the
-/// caller still has to do to mutate the guest (runtime provisioning, deployment reconciliation,
-/// package registration), and the caller must call <see cref="ReleaseMutationLease"/> once that work
-/// is done and before anything that can run for a long time, such as launching an application.
-/// <see cref="DisposeAsync"/> releases it too, as a fail-safe for a caller that forgets or that
-/// fails before reaching its own release point -- never as the primary release path, because that
-/// would hold the lock for the target's entire lifetime, including a running application.
+/// set. This is <em>not</em> released by <see cref="ExecutionTargetOrchestrator.PrepareAsync"/> --
+/// it stays held across everything the caller still has to do to mutate the guest (runtime
+/// provisioning, deployment reconciliation, package registration), and the caller must call
+/// <see cref="ReleaseMutationLease"/> once that work is done and before anything that can run for a
+/// long time, such as launching an application. <see cref="DisposeAsync"/> releases it too, as a
+/// fail-safe for a caller that forgets or that fails before reaching its own release point -- never
+/// as the primary release path, because that would hold the lock for the target's entire lifetime,
+/// including a running application.
 /// </param>
+/// <remarks>
+/// Deliberately owns no <em>connection</em> lock. The connection lock covers establishing a channel,
+/// not using one, so a prepared target — which lives for as long as the command that holds it,
+/// including a foreground application — never keeps another winapp process from connecting. The
+/// mutation lock is a separate concern with a separate lifetime: it covers the window in which this
+/// target changes guest state, and is released before the application runs.
+/// </remarks>
 internal sealed record PreparedTarget(
     GuestCommandChannel Channel,
     ExecutionTargetEpoch Epoch,
     ExecutionTargetCapabilities Capabilities,
     bool Reused,
-    TargetConnectionLease? ConnectionLease = null,
     TargetMutationLease? MutationLease = null) : IAsyncDisposable
 {
     /// <summary>
@@ -82,7 +85,6 @@ internal sealed record PreparedTarget(
             // ReleaseMutationLease() by the time the target itself is disposed. Dispose is
             // idempotent, so this is a no-op in that case.
             MutationLease?.Dispose();
-            ConnectionLease?.Dispose();
         }
     }
 }
@@ -165,6 +167,13 @@ internal sealed class ExecutionTargetOrchestrator(
     /// other workflow, which is exactly what the spec excludes from the lock's scope; but releasing
     /// it here, before the caller has done any of the mutating work the lock exists to protect, would
     /// leave that work completely unprotected.
+    /// <para>
+    /// The connection lock, unlike the mutation lock, never outlives this method. It is released the
+    /// moment the channel exists, because its job is to make establishment safe, not use: it spans
+    /// the reconnect attempt and the bootstrap that follows a failed one, so two hosts starting at
+    /// once cannot both create an instance, rewrite connection material, or replace the agent.
+    /// Whichever gets in first bootstraps; the second finds a healthy agent and reconnects to it.
+    /// </para>
     /// </remarks>
     public async Task<PreparedTarget> PrepareAsync(
         PrepareTargetOptions options,
@@ -178,18 +187,27 @@ internal sealed class ExecutionTargetOrchestrator(
 
         await EnsureSupportedAsync(cancellationToken).ConfigureAwait(false);
 
-        var connectionLease = AcquireConnection(cancellationToken);
         GuestCommandChannel? channel = null;
         TargetMutationLease? mutationLease = null;
 
         try
         {
-            var connection = await backend.EnsureConnectedAsync(
-                new EnsureTargetOptions(options.RequireInteractiveDesktop),
-                cancellationToken).ConfigureAwait(false);
+            TargetConnection connection;
 
-            channel = new GuestCommandChannel(connection.Transport, connection.Epoch);
-            channel.Start();
+            using (AcquireConnection(cancellationToken))
+            {
+                connection = await backend.EnsureConnectedAsync(
+                    new EnsureTargetOptions(options.RequireInteractiveDesktop),
+                    cancellationToken).ConfigureAwait(false);
+
+                channel = new GuestCommandChannel(connection.Transport, connection.Epoch);
+                channel.Start();
+            }
+
+            // Negotiated before any lock is taken, not after. A guest that is refusing this channel
+            // says so here, and waiting up to the lock timeout first would turn an immediate,
+            // actionable "the agent is busy" into a stale channel and a confusing transport error.
+            var capabilities = await channel.GetCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
 
             mutationLease = options.RequiresMutation ? AcquireLock(cancellationToken) : null;
 
@@ -200,8 +218,6 @@ internal sealed class ExecutionTargetOrchestrator(
                     backend.Target.Id);
             }
 
-            var capabilities = await channel.GetCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
-
             EnsureCapable(options, capabilities);
 
             var prepared = new PreparedTarget(
@@ -209,11 +225,9 @@ internal sealed class ExecutionTargetOrchestrator(
                 connection.Epoch,
                 capabilities,
                 connection.Reused,
-                connectionLease,
                 mutationLease);
 
             channel = null;
-            connectionLease = null;
             mutationLease = null;
             return prepared;
         }
@@ -228,7 +242,9 @@ internal sealed class ExecutionTargetOrchestrator(
         }
         finally
         {
-            connectionLease?.Dispose();
+            // Only the mutation lease needs cleaning up here: the connection lease is scoped to the
+            // establishment block above. On the success path this is a no-op, because ownership of
+            // the lease has already transferred to the PreparedTarget and the local was nulled.
             mutationLease?.Dispose();
         }
     }
@@ -288,7 +304,7 @@ internal sealed class ExecutionTargetOrchestrator(
         return connectionLock.TryAcquire(backend.Target, LockTimeout, cancellationToken)
             ?? throw ExecutionTargetException.Create(
                 ExecutionTargetErrorCodes.TargetAmbiguous,
-                "Another winapp command is still using the Windows Sandbox agent.",
+                "Another winapp command is still starting or repairing this Windows Sandbox.",
                 userAction: "Wait for the other command to finish, then retry.",
                 context: new Dictionary<string, string> { ["targetId"] = backend.Target.Id });
     }

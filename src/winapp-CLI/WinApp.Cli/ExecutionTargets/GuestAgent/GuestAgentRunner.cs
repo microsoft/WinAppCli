@@ -11,7 +11,7 @@ namespace WinApp.Cli.ExecutionTargets.GuestAgent;
 
 /// <summary>
 /// The persistent guest agent's lifetime: install itself locally, verify its session, publish a
-/// heartbeat, then serve one host channel at a time.
+/// heartbeat, then serve host channels.
 /// </summary>
 /// <remarks>
 /// Separated from the CLI verb so the sequence — including the refusal paths, which are the ones
@@ -20,6 +20,11 @@ namespace WinApp.Cli.ExecutionTargets.GuestAgent;
 /// The heartbeat is published even when the agent is <em>not</em> ready. That is deliberate: the
 /// bootstrap channel returns only an exit code, so an agent that stayed silent when it refused to
 /// serve would surface to the user as a timeout instead of "the Sandbox window is disconnected".
+/// </para>
+/// <para>
+/// Concurrent channels are the acceptor's business, not this class's. What stays here is the
+/// lifetime that has to happen exactly once per boot: containment, material, identity, readiness,
+/// the listener, and the heartbeat.
 /// </para>
 /// </remarks>
 internal sealed class GuestAgentRunner(
@@ -93,41 +98,41 @@ internal sealed class GuestAgentRunner(
 
         var files = new GuestFileService(managedRoot);
 
+        // Every collaborator below is shared across concurrent channels, so each is either immutable
+        // or independently safe: the file service holds only a resolved root, the session probe
+        // re-reads the live session on every call, the process factory builds a self-contained host
+        // per operation, and the identity is a record. Per-connection state — operations, transfers,
+        // standard input, cancellation, and session keys — lives entirely inside each server.
+        var acceptor = new GuestConnectionAcceptor(
+            new GuestTcpConnectionSource(listener, material),
+            (transport, refusal) => new GuestCommandServer(
+                transport,
+                epoch,
+                processes,
+                sessionProbe,
+                identity,
+                files,
+
+                // The agent is the only party that can assert which binary is guest winapp:
+                // it is the one running it.
+                Environment.ProcessPath,
+                appLauncher)
+            {
+                AdmissionRefusal = refusal,
+            },
+            connectionClosed: () => PublishHeartbeat(
+                resultDirectory,
+                identity,
+
+                // Re-probed rather than cached: the user may have closed the Sandbox window while
+                // that channel was open.
+                GuestAgentReadiness.Evaluate(sessionProbe.Probe()),
+                epoch,
+                port));
+
         try
         {
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                var transport = await GuestTcpTransport
-                    .AcceptAsync(listener, material, cancellationToken)
-                    .ConfigureAwait(false);
-
-                await using var server = new GuestCommandServer(
-                    transport,
-                    epoch,
-                    processes,
-                    sessionProbe,
-                    identity,
-                    files,
-
-                    // The agent is the only party that can assert which binary is guest winapp:
-                    // it is the one running it.
-                    Environment.ProcessPath,
-                    appLauncher);
-
-                // One host channel at a time. Accepting a second would let two hosts interleave
-                // mutation operations against one guest with nothing coordinating them.
-                await server.RunAsync(cancellationToken).ConfigureAwait(false);
-
-                // Re-publish so a host reconnecting after a dropped channel sees a fresh timestamp
-                // rather than treating the agent as stalled, and re-probes the session because the
-                // user may have closed the Sandbox window while the previous channel was open.
-                PublishHeartbeat(
-                    resultDirectory,
-                    identity,
-                    GuestAgentReadiness.Evaluate(sessionProbe.Probe()),
-                    epoch,
-                    port);
-            }
+            await acceptor.RunAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
