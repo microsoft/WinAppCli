@@ -222,6 +222,13 @@ internal class SandboxCopyCommand : Command, IShortDescription
                     .CopyAsync(target.Channel, request, cancellationToken)
                     .ConfigureAwait(false);
 
+                // Guest paths resolve under a managed root, so the effective destination is stated
+                // rather than left for the user to infer from a path they did not type.
+                var resolved = request.Direction == SandboxCopyDirection.ToGuest
+                    ? SandboxCopyService.DescribeGuestPath(
+                        SandboxCopyService.NormalizeGuestRelative(request.GuestPath))
+                    : null;
+
                 if (json)
                 {
                     console.Profile.Out.Writer.WriteLine(JsonSerializer.Serialize(
@@ -230,8 +237,14 @@ internal class SandboxCopyCommand : Command, IShortDescription
                             Transferred = result.Transferred,
                             Skipped = result.Skipped,
                             Bytes = result.Bytes,
+                            GuestPath = resolved,
                         },
                         SandboxJsonContext.Default.SandboxCopyOutput));
+                }
+                else if (resolved is not null)
+                {
+                    console.MarkupLineInterpolated(
+                        $"Copied {result.Transferred} file(s), skipped {result.Skipped} unchanged, to {resolved} in the Sandbox.");
                 }
                 else
                 {
@@ -260,6 +273,16 @@ internal sealed class SandboxCopyOutput
 
     /// <summary>Total bytes transferred.</summary>
     public long Bytes { get; init; }
+
+    /// <summary>
+    /// Where the copy actually landed, fully qualified in the guest.
+    /// </summary>
+    /// <remarks>
+    /// Reported so the effective location is never implicit: it is exactly the path a following
+    /// <c>sandbox exec --cwd</c> should use. Null for a copy out to the host, where the caller
+    /// already named the destination.
+    /// </remarks>
+    public string? GuestPath { get; init; }
 }
 
 /// <summary>Error envelope emitted by the <c>sandbox</c> commands.</summary>

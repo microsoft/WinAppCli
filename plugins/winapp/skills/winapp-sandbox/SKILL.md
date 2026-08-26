@@ -58,14 +58,24 @@ winapp unregister --sandbox       # remove just this app from the Sandbox
 
 ```powershell
 winapp sandbox exec -- dotnet --info
-winapp sandbox cp .\setup.ps1 sandbox:C:\Setup\setup.ps1
-winapp sandbox exec --cwd C:\Setup -- powershell -File .\setup.ps1
-winapp sandbox cp sandbox:C:\Results .\results
+winapp sandbox cp .\setup.ps1 sandbox:Setup\setup.ps1
+winapp sandbox exec --cwd C:\WinApp\work\Setup -- powershell -File .\setup.ps1
+winapp sandbox cp sandbox:Results .\results
 ```
 
 `sandbox cp` requires exactly one endpoint prefixed with `sandbox:`, so the direction is never
 guessed. Symbolic links and junctions in a host source are not followed — only what is genuinely
 inside the folder you named is copied.
+
+**Guest paths are relative to `C:\WinApp\work`.** That is the folder winapp manages inside the
+Sandbox, and resolving every guest path against it is what keeps a path you pass from selecting an
+arbitrary location. A drive-absolute, rooted, or UNC guest path is refused with a message naming the
+work root rather than quietly re-rooted, so a copy never reports success for a file that is not where
+you asked for it. Each copy into the Sandbox prints the resolved destination — use that as the
+`--cwd` of whatever you run next.
+
+A single file lands at exactly the destination you name: `sandbox:Setup\setup.ps1` *is* the file, not
+a folder to place it in. A directory keeps its own structure beneath the destination.
 
 ## What to know before relying on it
 

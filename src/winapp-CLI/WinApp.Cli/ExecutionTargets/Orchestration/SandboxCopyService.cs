@@ -55,6 +55,11 @@ internal static class SandboxCopyService
         CancellationToken cancellationToken)
     {
         var sources = EnumerateHostSources(request.HostPath, cancellationToken, out var sourceRoot);
+
+        // Recorded from what the caller actually named, not re-derived later. `sourceRoot` is the
+        // *parent directory* of a named file, so asking File.Exists about it always answered "no",
+        // and a file copied to sandbox:...\setup.ps1 landed at ...\setup.ps1\setup.ps1.
+        var singleFile = File.Exists(request.HostPath);
         var existing = await channel.ListFilesAsync(WorkScope, cancellationToken).ConfigureAwait(false);
 
         var existingByPath = existing.ToDictionary(f => f.RelativePath, StringComparer.OrdinalIgnoreCase);
@@ -67,7 +72,8 @@ internal static class SandboxCopyService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var relativePath = CombineGuestRelativePath(request.GuestPath, sourceRoot, source.FullName);
+            var relativePath = CombineGuestRelativePath(
+                request.GuestPath, sourceRoot, source.FullName, singleFile);
 
             // Re-proven immediately before the file is read, so a link planted between the walk and
             // the copy — as an ancestor, as the source root, or as the file itself — is refused
@@ -270,9 +276,28 @@ internal static class SandboxCopyService
             context: new Dictionary<string, string> { ["hostPath"] = hostPath });
 
     /// <summary>Builds the guest-relative path one source file should land at.</summary>
-    private static string CombineGuestRelativePath(string guestPath, string sourceRoot, string sourceFile)
+    /// <param name="guestPath">Destination the caller asked for.</param>
+    /// <param name="sourceRoot">Directory relative paths are measured from.</param>
+    /// <param name="sourceFile">The file being placed.</param>
+    /// <param name="singleFile">
+    /// Whether the caller named one file rather than a folder. Passed in from what was actually
+    /// named: it cannot be re-derived here, because <paramref name="sourceRoot"/> is the file's
+    /// parent directory, so an existence check on it always reported "not a file" and turned
+    /// <c>cp .\setup.ps1 sandbox:Setup\setup.ps1</c> into <c>Setup\setup.ps1\setup.ps1</c>.
+    /// </param>
+    private static string CombineGuestRelativePath(
+        string guestPath,
+        string sourceRoot,
+        string sourceFile,
+        bool singleFile)
     {
         var target = NormalizeGuestRelative(guestPath);
+
+        // A single file lands exactly where it was pointed, whatever it is called on the host.
+        if (singleFile)
+        {
+            return target;
+        }
 
         if (sourceRoot.Length == 0 || !sourceFile.StartsWith(sourceRoot, StringComparison.OrdinalIgnoreCase))
         {
@@ -282,11 +307,8 @@ internal static class SandboxCopyService
         var relative = sourceFile[sourceRoot.Length..].TrimStart(
             Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-        // A single file keeps the destination name it was given; a directory preserves its own
-        // structure beneath it.
-        return File.Exists(sourceRoot) || relative.Length == 0
-            ? target
-            : Path.Join(target, relative);
+        // A directory preserves its own structure beneath the destination.
+        return relative.Length == 0 ? target : Path.Join(target, relative);
     }
 
     /// <summary>Where one guest file lands on the host.</summary>
@@ -315,23 +337,77 @@ internal static class SandboxCopyService
         return TargetPathSafety.CombineInsideRoot(hostPath, segments);
     }
 
+    /// <summary>Guest path every managed copy lands beneath.</summary>
+    /// <remarks>
+    /// Stated in errors and success output so a caller can address the copied file afterwards. It is
+    /// the guest-side spelling of the managed work root the guest resolves <see cref="WorkScope"/>
+    /// against.
+    /// </remarks>
+    internal const string GuestWorkRoot = @"C:\WinApp\work";
+
     /// <summary>Reduces a guest path to a relative form inside managed storage.</summary>
     /// <remarks>
-    /// Guest paths are written the way a user thinks of them, including drive-qualified forms. They
-    /// are reduced to a relative path here so the guest resolves them against a managed root and can
-    /// prove containment — a guest-provided path never selects an arbitrary location.
+    /// <para>
+    /// Guest paths are relative to the managed work root, and that is what makes containment
+    /// provable: a guest-provided path can never select an arbitrary location because it is always
+    /// resolved against a root the guest owns.
+    /// </para>
+    /// <para>
+    /// A drive-absolute or rooted path is therefore <b>refused</b> rather than quietly stripped of
+    /// its root. Accepting <c>sandbox:C:\Setup\setup.ps1</c> and silently placing it at
+    /// <c>C:\WinApp\work\Setup\setup.ps1</c> means the next command — which uses the path the user
+    /// actually typed — cannot find it, and the copy reports success. Saying so plainly costs one
+    /// error message and saves that entire class of confusion.
+    /// </para>
     /// </remarks>
+    /// <exception cref="ExecutionTargetException">The path is rooted, or escapes the work root.</exception>
     internal static string NormalizeGuestRelative(string guestPath)
     {
-        var path = guestPath.Replace('/', '\\').Trim();
+        var path = (guestPath ?? string.Empty).Replace('/', '\\').Trim();
+
+        if (path.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            throw RootedGuestPath(guestPath!, "a UNC path");
+        }
 
         if (path.Length >= 2 && path[1] == ':')
         {
-            path = path[2..];
+            throw RootedGuestPath(guestPath!, "a drive-absolute path");
+        }
+
+        if (path.StartsWith('\\'))
+        {
+            throw RootedGuestPath(guestPath!, "a rooted path");
+        }
+
+        foreach (var segment in path.Split('\\', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (segment is "..")
+            {
+                throw RootedGuestPath(guestPath!, "a path that leaves the managed folder");
+            }
         }
 
         return path.TrimStart('\\');
     }
+
+    /// <summary>The guest path a normalized relative path actually resolves to.</summary>
+    /// <remarks>
+    /// Reported on success so the effective location is never left implicit — the caller can copy
+    /// it straight into the <c>--cwd</c> of the command they run next.
+    /// </remarks>
+    internal static string DescribeGuestPath(string relativePath) =>
+        relativePath.Length == 0 ? GuestWorkRoot : $@"{GuestWorkRoot}\{relativePath}";
+
+    private static ExecutionTargetException RootedGuestPath(string guestPath, string what) =>
+        ExecutionTargetException.Create(
+            ExecutionTargetErrorCodes.TargetAmbiguous,
+            $"'{guestPath}' is {what}, and Sandbox paths are relative to '{GuestWorkRoot}'.",
+            userAction:
+                $"Drop the leading drive or separator and pass a relative path. It lands under " +
+                $"'{GuestWorkRoot}', which is what a following command should use as its working directory.",
+            example: @"winapp sandbox cp .\setup.ps1 sandbox:Setup\setup.ps1",
+            context: new Dictionary<string, string> { ["guestPath"] = guestPath });
 
     private static bool IsUnderPrefix(string relativePath, string prefix) =>
         prefix.Length == 0 ||
