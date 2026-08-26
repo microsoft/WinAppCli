@@ -384,7 +384,7 @@ internal class WorkspaceSetupService(
                         }
                         catch (Exception ex)
                         {
-                            taskContext.AddDebugMessage($"{UiSymbols.Note} Could not query existing packages: {ex.Message}");
+                            taskContext.AddDebugMessage($"{UiSymbols.Note} Could not query existing packages: {NugetErrorMessage.Redact(ex.Message)}");
                         }
 
                         foreach (var (packageName, required) in packages)

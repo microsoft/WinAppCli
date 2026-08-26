@@ -103,7 +103,7 @@ internal class UpdateCommand : Command, IShortDescription
                                     }
                                     catch (Exception ex)
                                     {
-                                        taskContext.AddStatusMessage($"{UiSymbols.Warning} Failed to check {package.Name}: {ex.Message}");
+                                        taskContext.AddStatusMessage($"{UiSymbols.Warning} Failed to check {package.Name}: {NugetErrorMessage.Redact(ex.Message)}");
                                         // Keep current version on error, but remember the failure so the
                                         // command exits non-zero and does not claim everything is up to date.
                                         updatedConfig.SetVersion(package.Name, package.Version);

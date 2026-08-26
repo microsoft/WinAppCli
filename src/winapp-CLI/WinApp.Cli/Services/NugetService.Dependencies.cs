@@ -312,7 +312,7 @@ internal partial class NugetService
             // A source that could have satisfied the range could not be queried (feed/auth/network error);
             // surface it rather than masking a real failure as a missing dependency.
             throw new InvalidOperationException(
-                $"Could not resolve a version for dependency '{packageId}' satisfying '{range}': source '{candidates.ErrorSource}' could not be queried: {candidates.Error.Message}",
+                $"Could not resolve a version for dependency '{packageId}' satisfying '{range}': source '{candidates.ErrorSource}' could not be queried: {NugetErrorMessage.Redact(candidates.Error.Message)}",
                 candidates.Error);
         }
 
