@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation and Contributors. All rights reserved.
 // Licensed under the MIT License.
 
+using System.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Spectre.Console.Testing;
 using WinApp.Cli.Models;
@@ -12,27 +13,36 @@ namespace WinApp.Cli.Tests;
 public sealed class ProjectRunServicePublishProfileTests
 {
     private DirectoryInfo _tempDirectory = null!;
+    private readonly List<TestConsole> _consoles = [];
 
     [TestInitialize]
     public void Setup()
     {
         _tempDirectory = new DirectoryInfo(
-            Path.Combine(Path.GetTempPath(), $"ProjectRunPublishProfileTests_{Guid.NewGuid():N}"));
+            Path.Join(Path.GetTempPath(), $"ProjectRunPublishProfileTests_{Guid.NewGuid():N}"));
         _tempDirectory.Create();
     }
 
     [TestCleanup]
     public void Cleanup()
     {
+        foreach (var console in _consoles)
+        {
+            console.Dispose();
+        }
+        _consoles.Clear();
+
         try
         {
             _tempDirectory.Delete(recursive: true);
         }
-        catch (IOException)
+        catch (IOException ex)
         {
+            Debug.WriteLine($"Could not delete test directory '{_tempDirectory.FullName}': {ex}");
         }
-        catch (UnauthorizedAccessException)
+        catch (UnauthorizedAccessException ex)
         {
+            Debug.WriteLine($"Could not delete test directory '{_tempDirectory.FullName}': {ex}");
         }
     }
 
@@ -126,6 +136,58 @@ public sealed class ProjectRunServicePublishProfileTests
     }
 
     [TestMethod]
+    public void DirectoryQualifiedProfile_ValidatesSdkResolvedFile()
+    {
+        var app = WriteFile("App.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>WinExe</OutputType>
+                <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+                <Platforms>x64;ARM64</Platforms>
+                <PublishProfile>Custom\win-$(Platform.ToLower()).pubxml</PublishProfile>
+              </PropertyGroup>
+            </Project>
+            """);
+        WriteFile("Custom\\win-arm64.pubxml", """
+            <Project>
+              <PropertyGroup>
+                <Platform>ARM64</Platform>
+                <RuntimeIdentifier>win-arm64</RuntimeIdentifier>
+                <SelfContained>true</SelfContained>
+              </PropertyGroup>
+            </Project>
+            """);
+        WriteProfile("win-arm64.pubxml", "x64", "win-x64");
+
+        var resolved = ProjectRunService.ResolvePublishProfileFallback(app, Options("arm64"));
+
+        Assert.IsNull(
+            resolved.PublishProfile,
+            "the SDK imports the profile basename from Properties\\PublishProfiles, not the directory in PublishProfile");
+    }
+
+    [TestMethod]
+    public void ResolvedProfile_EscapesMsBuildPropertySeparators()
+    {
+        var app = WriteFile("App.csproj", """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <OutputType>WinExe</OutputType>
+                <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+                <Platforms>x64;ARM64</Platforms>
+                <PublishProfile>win-$(Platform.ToLower());Extra=true.pubxml</PublishProfile>
+              </PropertyGroup>
+            </Project>
+            """);
+        WriteProfile("win-arm64;Extra=true.pubxml", "ARM64", "win-arm64");
+
+        var resolved = ProjectRunService.ResolvePublishProfileFallback(app, Options("arm64"));
+        var arguments = ProjectRunService.BuildBuildPassArguments(app, resolved, "minimal");
+
+        StringAssert.Contains(arguments, "-p:PublishProfile=win-arm64%3BExtra=true.pubxml");
+    }
+
+    [TestMethod]
     public void FrameworkDependentProfile_IsNotSelectedAsSelfContainedFallback()
     {
         var app = WriteApp();
@@ -193,15 +255,7 @@ public sealed class ProjectRunServicePublishProfileTests
             RunDotnetCommandHandler = _ =>
                 (0, PackagedPropertiesJson(), string.Empty),
         };
-        var service = new ProjectRunService(
-            dotnet,
-            new ProjectDetectionService(NullLogger<ProjectDetectionService>.Instance, dotnet),
-            new FakeCsWinRTMetadataShimService(),
-            new TestConsole(),
-            NullLogger<ProjectRunService>.Instance)
-        {
-            NativeTerminalGateOverrideForTests = () => false,
-        };
+        var service = NewService(dotnet);
         var options = Options("arm64");
 
         var outcome = await service.BuildAndResolveAsync(app, options, CancellationToken.None);
@@ -330,16 +384,20 @@ public sealed class ProjectRunServicePublishProfileTests
     private static ProjectRunOptions Options(string architecture, params string[] properties) =>
         new("Release", architecture, null, NoBuild: false, NoRestore: false, Properties: properties);
 
-    private static ProjectRunService NewService(FakeDotNetService dotnet) =>
-        new(
+    private ProjectRunService NewService(FakeDotNetService dotnet)
+    {
+        var console = new TestConsole();
+        _consoles.Add(console);
+        return new(
             dotnet,
             new ProjectDetectionService(NullLogger<ProjectDetectionService>.Instance, dotnet),
             new FakeCsWinRTMetadataShimService(),
-            new TestConsole(),
+            console,
             NullLogger<ProjectRunService>.Instance)
         {
             NativeTerminalGateOverrideForTests = () => false,
         };
+    }
 
     private FileInfo WriteApp(string extra = "") =>
         WriteFile("App.csproj", $$"""
@@ -371,7 +429,7 @@ public sealed class ProjectRunServicePublishProfileTests
 
     private FileInfo WriteFile(string relativePath, string content)
     {
-        var path = Path.Combine(_tempDirectory.FullName, relativePath);
+        var path = Path.Join(_tempDirectory.FullName, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, content);
         return new FileInfo(path);

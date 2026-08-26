@@ -186,46 +186,24 @@ internal sealed partial class ProjectRunService
             return false;
         }
 
-        var values = publishProfile.EndsWith(".pubxml", StringComparison.OrdinalIgnoreCase)
-            ? new[] { publishProfile }
-            : new[] { publishProfile, publishProfile + ".pubxml" };
-
         try
         {
-            foreach (var value in values)
+            // Microsoft.NET.Sdk.ImportPublishProfile.targets discards directory components from
+            // $(PublishProfile) and resolves the basename under Properties\PublishProfiles.
+            var profileName = Path.GetFileNameWithoutExtension(publishProfile);
+            if (string.IsNullOrWhiteSpace(profileName))
             {
-                if (Path.IsPathRooted(value))
-                {
-                    var rooted = new FileInfo(value);
-                    if (rooted.Exists)
-                    {
-                        profile = rooted;
-                        return true;
-                    }
-
-                    continue;
-                }
-
-                var hasDirectory = value.Contains(Path.DirectorySeparatorChar)
-                    || value.Contains(Path.AltDirectorySeparatorChar);
-                var paths = hasDirectory
-                    ? new[] { Path.Combine(projectDirectory.FullName, value) }
-                    :
-                    [
-                        Path.Combine(projectDirectory.FullName, "Properties", "PublishProfiles", value),
-                        Path.Combine(projectDirectory.FullName, value),
-                    ];
-
-                foreach (var path in paths)
-                {
-                    var candidate = new FileInfo(path);
-                    if (candidate.Exists)
-                    {
-                        profile = candidate;
-                        return true;
-                    }
-                }
+                return false;
             }
+
+            var candidate = new FileInfo(Path.Join(
+                projectDirectory.FullName,
+                "Properties",
+                "PublishProfiles",
+                profileName + ".pubxml"));
+
+            profile = candidate;
+            return candidate.Exists;
         }
         catch (ArgumentException)
         {
@@ -235,8 +213,6 @@ internal sealed partial class ProjectRunService
         {
             return false;
         }
-
-        return false;
     }
 
     private static bool PublishProfileTargetsArchitecture(FileInfo profile, string architecture)
@@ -259,21 +235,16 @@ internal sealed partial class ProjectRunService
             return false;
         }
 
-        var declaredArchitectures = new List<string>();
-        foreach (var element in document.Descendants())
-        {
-            string? declared = element.Name.LocalName switch
+        var declaredArchitectures = document
+            .Descendants()
+            .Select(element => element.Name.LocalName switch
             {
                 "RuntimeIdentifier" => RunArchHelper.ArchitectureFromRid(element.Value),
                 "Platform" => RunArchHelper.NormalizeArchitecture(element.Value),
                 _ => null,
-            };
-
-            if (declared is not null)
-            {
-                declaredArchitectures.Add(declared);
-            }
-        }
+            })
+            .OfType<string>()
+            .ToList();
 
         return declaredArchitectures.Count > 0
             && declaredArchitectures.All(value =>

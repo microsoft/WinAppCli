@@ -48,7 +48,7 @@ internal sealed partial class ProjectRunService
 
         if (!string.IsNullOrWhiteSpace(options.PublishProfile))
         {
-            tokens.Add($"-p:PublishProfile={options.PublishProfile}");
+            tokens.Add($"-p:PublishProfile={EscapeMsBuildPropertyValue(options.PublishProfile)}");
         }
 
         // Drop dedicated-flag user -p (RID/Configuration/TFM) so the restored graph can't diverge from
@@ -131,7 +131,7 @@ internal sealed partial class ProjectRunService
         // profile set its local Platform while referenced AnyCPU projects keep their own Platform.
         if (!string.IsNullOrWhiteSpace(options.PublishProfile))
         {
-            tokens.Add($"-p:PublishProfile={options.PublishProfile}");
+            tokens.Add($"-p:PublishProfile={EscapeMsBuildPropertyValue(options.PublishProfile)}");
         }
 
         AppendSolutionProperties(tokens, options);
@@ -203,7 +203,7 @@ internal sealed partial class ProjectRunService
 
         if (includePublishProfile && !string.IsNullOrWhiteSpace(options.PublishProfile))
         {
-            tokens.Add($"-p:PublishProfile={options.PublishProfile}");
+            tokens.Add($"-p:PublishProfile={EscapeMsBuildPropertyValue(options.PublishProfile)}");
         }
 
         // SHIM (temporary): keep the evaluate pass's inputs identical to the build pass.
