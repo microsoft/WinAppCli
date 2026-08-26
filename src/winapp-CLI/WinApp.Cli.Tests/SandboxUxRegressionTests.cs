@@ -358,6 +358,66 @@ public class SandboxUxRegressionTests
         Assert.IsGreaterThanOrEqualTo(WindowsSandboxBackend.MinAgentPort, material.Port);
     }
 
+    /// <summary>
+    /// Committing target state preserves the guest address rather than silently dropping it.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="TargetStateStore.Commit"/> rebuilds the record field by field instead of copying
+    /// it, so a field added to <see cref="TargetState"/> but not to that constructor is discarded on
+    /// every write — silently, because the caller's own object still holds the value it just set.
+    /// That is exactly what happened to the address cache: the code looked correct, the unit tests
+    /// passed, and the field simply never reached disk. Live state was the only thing that showed it.
+    /// </remarks>
+    [TestMethod]
+    public void CommittedTargetState_PreservesEveryPersistedField()
+    {
+        var root = new DirectoryInfo(TestPaths.TempRoot(nameof(CommittedTargetState_PreservesEveryPersistedField)));
+        root.Create();
+
+        try
+        {
+            var store = new TargetStateStore(new TargetStateDirectoryProvider(root.FullName));
+            var target = ExecutionTargetRef.WindowsSandboxDefault;
+
+            store.Commit(
+                target,
+                new TargetState
+                {
+                    SchemaVersion = 0,
+                    Revision = 0,
+                    TargetKind = target.Kind,
+                    TargetId = target.Id,
+                    InstanceId = "sandbox-1",
+                    BootNonce = "nonce-1",
+                    AgentVersion = "1.2.3",
+                    AgentBinaryHash = "abc123",
+                    GuestAddress = "172.27.0.9",
+                },
+                expectedRevision: 0);
+
+            // Read back through the store, so this asserts what actually reached disk.
+            var persisted = store.Read(target);
+
+            Assert.IsNotNull(persisted);
+            Assert.AreEqual("sandbox-1", persisted.InstanceId);
+            Assert.AreEqual("nonce-1", persisted.BootNonce);
+            Assert.AreEqual("1.2.3", persisted.AgentVersion);
+            Assert.AreEqual("abc123", persisted.AgentBinaryHash);
+            Assert.AreEqual("172.27.0.9", persisted.GuestAddress);
+        }
+        finally
+        {
+            try
+            {
+                root.Delete(recursive: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Temp cleanup is not worth failing a test over.
+            }
+        }
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
