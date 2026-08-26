@@ -211,6 +211,27 @@ public class UpdateCommandTests : BaseCommandTests
         Assert.HasCount(1, _fakeInstall.InstallPackagesCalls);
     }
 
+    /// <summary>
+    /// `--setup-sdks none` means "skip SDK package work". It previously passed None straight to
+    /// GetLatestVersionAsync, which rejects None outright, so every package was recorded as a lookup failure
+    /// and the documented option always exited 1 on a non-empty config.
+    /// </summary>
+    [TestMethod]
+    public async Task Update_SetupSdksNone_SkipsPackageUpdatesAndSucceeds()
+    {
+        WriteConfig((PackageName, "1.0.0"));
+        var command = GetRequiredService<UpdateCommand>();
+
+        var exitCode = await ParseAndInvokeWithCaptureAsync(command, ["--setup-sdks", "none"]);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.IsEmpty(_fakeNuget.QueriedPackages, "None means no channel, so no latest-version lookup may be attempted.");
+        Assert.IsEmpty(_fakeInstall.InstallPackagesCalls, "None must not reinstall SDK packages.");
+        // The pinned version must survive untouched.
+        var persisted = _configService.Load().Packages.Single(p => p.Name == PackageName).Version;
+        Assert.AreEqual("1.0.0", persisted);
+    }
+
     // ── Lookup / cancellation failure paths ─────────────────────────────
 
     [TestMethod]

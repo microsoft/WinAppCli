@@ -167,11 +167,8 @@ internal partial class NugetService : INugetService
         NugetSourceProvider.EnsureCredentialService();
         var packages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var dependencyFailures = new List<string>();
-        // Every declared range seen for a given dependency id is accumulated here as the graph is walked, so a
-        // later branch can be evaluated against the full constraint set rather than only its own range.
-        var dependencyConstraints = new Dictionary<string, List<VersionRange>>(StringComparer.OrdinalIgnoreCase);
         using var cacheContext = new SourceCacheContext();
-        await InstallPackageRecursiveAsync(package, version, packages, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
+        await InstallPackageRecursiveAsync(package, version, packages, dependencyFailures, taskContext, cacheContext, cancellationToken);
 
         // A downloaded root package with unresolvable/uninstallable REQUIRED transitive dependencies is an
         // incomplete install, not a success. Each gap was surfaced as a warning above (and the rest of the
@@ -189,7 +186,7 @@ internal partial class NugetService : INugetService
     /// <summary>
     /// Downloads and extracts a NuGet package to the global packages cache, then recursively installs dependencies.
     /// </summary>
-    private async Task InstallPackageRecursiveAsync(string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, Dictionary<string, List<VersionRange>> dependencyConstraints, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
+    private async Task InstallPackageRecursiveAsync(string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         // Already processed this package?
         if (installed.ContainsKey(package))
@@ -215,7 +212,7 @@ internal partial class NugetService : INugetService
             taskContext.AddDebugMessage($"{UiSymbols.Skip} {package} {normalizedVersion} already present");
             installed[package] = normalizedVersion;
             // Still resolve dependencies to populate installed dictionary
-            await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
+            await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, taskContext, cacheContext, cancellationToken);
             return;
         }
 
@@ -229,13 +226,13 @@ internal partial class NugetService : INugetService
         taskContext.AddStatusMessage($"{UiSymbols.Check} Installed {package} {normalizedVersion}");
 
         // Recursively install dependencies
-        await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
+        await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, taskContext, cacheContext, cancellationToken);
     }
 
     /// <summary>
     /// Reads the .nuspec from an extracted package and recursively installs dependencies.
     /// </summary>
-    private async Task ResolveDependenciesAsync(DirectoryInfo packageDir, string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, Dictionary<string, List<VersionRange>> dependencyConstraints, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
+    private async Task ResolveDependenciesAsync(DirectoryInfo packageDir, string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         Dictionary<string, VersionRange> deps;
         try
@@ -256,43 +253,24 @@ internal partial class NugetService : INugetService
 
         foreach (var (depName, depVersionRange) in deps)
         {
-            // Accumulate every range required for this dependency id across all branches of the graph so a
-            // later branch can be evaluated against the full constraint set, not just its own range.
-            if (!dependencyConstraints.TryGetValue(depName, out var accumulatedRanges))
-            {
-                accumulatedRanges = [];
-                dependencyConstraints[depName] = accumulatedRanges;
-            }
-            accumulatedRanges.Add(depVersionRange);
-
             if (installed.TryGetValue(depName, out var installedDepVersion))
             {
                 // The dependency id was already installed earlier in this operation, which fixed its version.
-                // A package-id match alone is not enough: in a diamond graph two branches can require ranges
-                // the selected version does not both satisfy. Distinguish two cases:
-                //   * GENUINE conflict — no single version can satisfy every accumulated range (e.g. [1,2) and
-                //     [2,3)). That graph is unsatisfiable and must fail the operation rather than be accepted
-                //     as a complete install with an invalid graph.
-                //   * Differing lower bounds only — some version satisfies every range (e.g. [1.0,) then
-                //     [2.0,)), but winapp keeps the already-selected (lowest) version. That is a documented
-                //     limitation of its resolve-as-it-installs strategy (winapp targets curated SDK graphs and
-                //     does not perform NuGet's global upgrade/downgrade unification), not a conflict — warn at
-                //     debug level and continue so common differing-minimum diamonds are not falsely failed.
+                // A package-id match alone is not enough: in a diamond graph a later branch can require a range
+                // the selected version does not satisfy. Fail in that case rather than keeping the selected
+                // version, which would report a successful install of a graph that does not actually satisfy
+                // every declared requirement (leaving consumers with missing APIs, headers or runtime files).
+                //
+                // winapp resolves as it installs and does not perform NuGet's global graph unification, so it
+                // cannot upgrade the earlier branch to a version satisfying both. Failing loudly is the honest
+                // outcome; real unification would mean adopting NuGet's resolver, which is separate work.
                 if (!(NuGetVersion.TryParse(installedDepVersion, out var installedNuGetVersion)
                         && RangeSatisfiesWithFloat(depVersionRange, installedNuGetVersion)))
                 {
                     var rangeText = depVersionRange.OriginalString ?? depVersionRange.ToNormalizedString();
-                    if (RangesHaveCommonVersion(accumulatedRanges))
-                    {
-                        taskContext.AddDebugMessage(
-                            $"{UiSymbols.Skip} {depName} kept at already-selected {installedDepVersion}; {package} {version} requests '{rangeText}' (a higher version would also satisfy it, but winapp keeps the first-selected version).");
-                    }
-                    else
-                    {
-                        var conflict = $"{depName} cannot be resolved to a single version: already selected {installedDepVersion}, but {package} {version} requires '{rangeText}' and no version satisfies every requirement";
-                        taskContext.AddStatusMessage($"{UiSymbols.Warning} Dependency version conflict: {conflict}");
-                        dependencyFailures.Add(conflict);
-                    }
+                    var conflict = $"{depName} cannot be resolved to a single version: already selected {installedDepVersion}, but {package} {version} requires '{rangeText}'";
+                    taskContext.AddStatusMessage($"{UiSymbols.Warning} Dependency version conflict: {conflict}");
+                    dependencyFailures.Add(conflict);
                 }
                 continue;
             }
@@ -309,7 +287,7 @@ internal partial class NugetService : INugetService
                     continue;
                 }
 
-                await InstallPackageRecursiveAsync(depName, depVersion, installed, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
+                await InstallPackageRecursiveAsync(depName, depVersion, installed, dependencyFailures, taskContext, cacheContext, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -353,165 +331,5 @@ internal partial class NugetService : INugetService
         }
 
         return true;
-    }
-
-    /// <summary>
-    /// Returns true when at least one version could satisfy ALL of <paramref name="ranges"/> simultaneously.
-    /// Used to tell a genuinely unsatisfiable set of diamond constraints (e.g. [1.0,2.0) and [2.0,3.0), which
-    /// must fail the install) apart from constraints that merely differ in their lower bound (e.g. [1.0,) and
-    /// [2.0,), where a higher version satisfies both and keeping winapp's first-selected version is a
-    /// documented limitation, not a conflict).
-    ///
-    /// The ranges are intersected as numeric intervals — the greatest lower bound and least upper bound, each
-    /// carrying its own inclusivity, with a floating range's implicit next-prefix ceiling folded into the upper
-    /// bound (1.* caps just below 2.0.0). Working with the actual interval (rather than only testing each
-    /// range's minimum version) is what makes an exclusive lower bound correct: [1.0.0,3.0.0) and (2.0.0,4.0.0)
-    /// share 2.1.0, yet neither minimum (1.0.0, 2.0.0) lies in both, so a minimum-only test would falsely report
-    /// a conflict. A prerelease-prefix float (1.2.3-beta.*) has no numeric ceiling and its floor overlaps a
-    /// sibling prefix (1.2.3-rc.*) that shares no real version, so when one is present a non-empty numeric
-    /// interval is confirmed with a concrete witness via <see cref="RangeSatisfiesWithFloat"/> (which honors the
-    /// float ceiling, prerelease eligibility and prefix).
-    /// </summary>
-    internal static bool RangesHaveCommonVersion(IReadOnlyList<VersionRange> ranges)
-    {
-        // Greatest lower bound / least upper bound of the intersection. null = open on that side.
-        NuGetVersion? low = null;
-        var lowInclusive = true;
-        NuGetVersion? high = null;
-        var highInclusive = true;
-
-        foreach (var range in ranges)
-        {
-            var (rangeLow, rangeLowInclusive, rangeHigh, rangeHighInclusive) = GetEffectiveBounds(range);
-
-            if (rangeLow is not null)
-            {
-                var comparison = low is null ? 1 : rangeLow.CompareTo(low);
-                if (comparison > 0)
-                {
-                    low = rangeLow;
-                    lowInclusive = rangeLowInclusive;
-                }
-                else if (comparison == 0)
-                {
-                    // Same greatest lower bound from two ranges: the intersection includes it only if both do.
-                    lowInclusive &= rangeLowInclusive;
-                }
-            }
-
-            if (rangeHigh is not null)
-            {
-                var comparison = high is null ? -1 : rangeHigh.CompareTo(high);
-                if (comparison < 0)
-                {
-                    high = rangeHigh;
-                    highInclusive = rangeHighInclusive;
-                }
-                else if (comparison == 0)
-                {
-                    highInclusive &= rangeHighInclusive;
-                }
-            }
-        }
-
-        // Empty numeric interval => no version can satisfy every range. The interval is empty when the lower
-        // bound is above the upper bound, or they touch at a single point that at least one side excludes.
-        if (low is not null && high is not null)
-        {
-            var comparison = low.CompareTo(high);
-            if (comparison > 0 || (comparison == 0 && !(lowInclusive && highInclusive)))
-            {
-                return false;
-            }
-
-            // The interval collapsed to a single included version, so the question is fully decidable: that
-            // version is the ONLY candidate, and testing it with the float-aware predicate is exact — no
-            // witness heuristics, and no risk of a false conflict. This is what a numeric interval alone
-            // cannot express, because prerelease eligibility is not an interval property: a stable float
-            // rejects prereleases, so `1.*` and the exact pin `[1.5.0-preview]` intersect at the non-empty
-            // point 1.5.0-preview yet share no version. Exact pins are the common shape here (the SDK
-            // packages pin their sub-packages that way), so this is worth deciding precisely.
-            if (comparison == 0)
-            {
-                return ranges.All(range => RangeSatisfiesWithFloat(range, low));
-            }
-        }
-
-        // A non-empty numeric interval settles plain and numeric-float ranges. Prerelease-prefix floats need a
-        // witness because their numeric floor over-includes sibling prerelease prefixes (see summary).
-        if (!ranges.Any(IsPrereleasePrefixFloat))
-        {
-            return true;
-        }
-
-        // Candidate witnesses anchored at the intersection's lower edge: each floating range's floor and the
-        // numeric greatest lower bound when it is itself included. For the prerelease-prefix floats winapp
-        // actually encounters (an inclusive floor, open above) one of these is the binding version.
-        var witnesses = new List<NuGetVersion>();
-        foreach (var range in ranges.Where(r => r.IsFloating && r.Float is not null))
-        {
-            witnesses.Add(range.Float!.MinVersion);
-        }
-
-        if (low is not null && lowInclusive)
-        {
-            witnesses.Add(low);
-        }
-
-        return witnesses.Any(witness => ranges.All(range => RangeSatisfiesWithFloat(range, witness)));
-    }
-
-    private static bool IsPrereleasePrefixFloat(VersionRange range)
-        => range.IsFloating && range.Float is { } floatRange && floatRange.MinVersion.IsPrerelease;
-
-    /// <summary>
-    /// Projects a range onto the numeric interval used by <see cref="RangesHaveCommonVersion"/>: its declared
-    /// lower/upper bounds plus, for a floating range, the implicit exclusive ceiling just below the next prefix
-    /// increment (1.* => &lt; 2.0.0, 1.2.* => &lt; 1.3.0). Interval intersection fundamentally needs numeric
-    /// endpoints, which is why the ceiling is materialized here; <see cref="RangeSatisfiesWithFloat"/> remains
-    /// the authoritative point test, and the caller's prerelease-prefix witness check recovers the semantics a
-    /// numeric ceiling cannot express.
-    /// </summary>
-    private static (NuGetVersion? Low, bool LowInclusive, NuGetVersion? High, bool HighInclusive) GetEffectiveBounds(VersionRange range)
-    {
-        NuGetVersion? low = range.HasLowerBound ? range.MinVersion : null;
-        var lowInclusive = range.HasLowerBound && range.IsMinInclusive;
-
-        NuGetVersion? high = range.HasUpperBound ? range.MaxVersion : null;
-        var highInclusive = range.HasUpperBound && range.IsMaxInclusive;
-
-        if (range.IsFloating && range.Float is { } floatRange && TryGetFloatUpperBound(floatRange) is { } floatCeiling)
-        {
-            // The floated ceiling is the exclusive next-prefix boundary; fold it in when it is tighter than any
-            // declared upper bound.
-            if (high is null || floatCeiling < high)
-            {
-                high = floatCeiling;
-                highInclusive = false;
-            }
-        }
-
-        return (low, lowInclusive, high, highInclusive);
-    }
-
-    /// <summary>
-    /// The exclusive numeric ceiling of a numeric floating range (the first version the float no longer
-    /// accepts): 1.* => 2.0.0, 1.2.* => 1.3.0, 1.2.3.* => 1.2.4. Fully-open floats (*) and prerelease-only
-    /// floats (1.2.3-beta.*, which float the label of a fixed major.minor.patch) have no finite numeric ceiling
-    /// and return null — the former is open above, the latter is bounded by the prerelease witness check.
-    /// </summary>
-    private static NuGetVersion? TryGetFloatUpperBound(FloatRange floatRange)
-    {
-        var prefix = floatRange.MinVersion;
-        return floatRange.FloatBehavior switch
-        {
-            NuGetVersionFloatBehavior.Minor or NuGetVersionFloatBehavior.PrereleaseMinor
-                => new NuGetVersion(prefix.Major + 1, 0, 0),
-            NuGetVersionFloatBehavior.Patch or NuGetVersionFloatBehavior.PrereleasePatch
-                => new NuGetVersion(prefix.Major, prefix.Minor + 1, 0),
-            NuGetVersionFloatBehavior.Revision or NuGetVersionFloatBehavior.PrereleaseRevision
-                => new NuGetVersion(prefix.Major, prefix.Minor, prefix.Patch + 1),
-            _ => null,
-        };
     }
 }

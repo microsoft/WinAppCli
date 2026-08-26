@@ -22,56 +22,63 @@ internal sealed class DotNetProjectRestoreService(
     /// <inheritdoc />
     public async Task<int> RestoreAsync(DirectoryInfo baseDirectory, DirectoryInfo configDir, CancellationToken cancellationToken = default)
     {
-        // Every detected project is restored, deliberately without the interactive project picker `init` uses.
-        // Restore is routinely run non-interactively (CI, or straight after a clone) and exposes no
-        // project-selection option, so prompting here would block on redirected input; and unlike init — which
-        // configures one project — restore is just reinstalling what is already declared, so doing that for
-        // each project in the directory is both safe and what a multi-project repo needs.
         var csprojFiles = dotNetService.FindCsproj(baseDirectory);
 
-        logger.LogInformation(
-            "{UISymbol} .NET project detected with no winapp.yaml — SDK packages are PackageReferences in {Count} project(s). Running 'dotnet restore'.",
-            UiSymbols.Note,
-            csprojFiles.Count);
-
-        foreach (var projectToRestore in csprojFiles)
+        // One project restores automatically. Several in the same directory is ambiguous — restoring all of
+        // them would let an unrelated project fail `winapp restore` — so list them and hand off rather than
+        // guessing or adding a project-selection option. Discovery is top-directory-only, so the common
+        // layout (one project per directory) is unaffected, and `winapp restore .\src\App` still works.
+        if (csprojFiles.Count > 1)
         {
-            // Let dotnet resolve nuget.config itself, relative to the project. That is the standard hierarchy
-            // — the project's directory and its ancestors, merged with the user and machine levels — and it is
-            // exactly what the user gets running `dotnet restore` by hand.
-            //
-            // Deliberately NOT forwarding the selected config directory as `--configfile`: that switch
-            // replaces the whole hierarchy with one file, so a source declared there but authenticated through
-            // credentials in the user-level config would start failing. Verified: restoring with
-            // `--configfile` pointing at a config that lists one source drops every user-level source. Since
-            // the config root cannot be honored without that loss, say so instead of silently restoring from
-            // feeds the user did not select.
-            if (!IsSameOrAncestorDirectory(configDir, projectToRestore.Directory!))
-            {
-                logger.LogWarning(
-                    "{UISymbol} The selected configuration directory ({ConfigDir}) does not apply to {Project}: 'dotnet restore' resolves nuget.config relative to the project. Its own nuget.config hierarchy is used instead.",
-                    UiSymbols.Warning,
-                    configDir.FullName,
-                    projectToRestore.Name);
-            }
-
-            var restoreExitCode = await dotNetService.RunDotnetInheritedAsync(
-                projectToRestore.Directory!,
-                $"restore \"{projectToRestore.FullName}\"",
-                cancellationToken);
-
-            if (restoreExitCode != 0)
-            {
-                logger.LogError(
-                    "'dotnet restore' failed for {Project} (exit code {ExitCode}).",
-                    projectToRestore.Name,
-                    restoreExitCode);
-                return 1;
-            }
-
-            logger.LogInformation("{UISymbol} Restore completed for {Project}.", UiSymbols.Check, projectToRestore.Name);
+            logger.LogError(
+                "{UISymbol} Found {Count} projects in {Directory}: {Projects}. Restore one of them directly, for example 'dotnet restore {Example}'.",
+                UiSymbols.Error,
+                csprojFiles.Count,
+                baseDirectory.FullName,
+                string.Join(", ", csprojFiles.Select(f => f.Name)),
+                csprojFiles[0].Name);
+            return 1;
         }
 
+        var projectToRestore = csprojFiles[0];
+
+        logger.LogInformation(
+            "{UISymbol} .NET project detected with no winapp.yaml — SDK packages are PackageReferences in {Project}. Running 'dotnet restore'.",
+            UiSymbols.Note,
+            projectToRestore.Name);
+
+        // Let dotnet resolve nuget.config itself, relative to the project. That is the standard hierarchy —
+        // the project's directory and its ancestors, merged with the user and machine levels — and it is
+        // exactly what the user gets running `dotnet restore` by hand.
+        //
+        // Deliberately NOT forwarding the selected config directory as `--configfile`: that switch replaces
+        // the whole hierarchy with one file, so a source declared there but authenticated through credentials
+        // in the user-level config would start failing. Since the config root cannot be honored without that
+        // loss, say so instead of silently restoring from feeds the user did not select.
+        if (!IsSameOrAncestorDirectory(configDir, projectToRestore.Directory!))
+        {
+            logger.LogWarning(
+                "{UISymbol} The selected configuration directory ({ConfigDir}) does not apply to {Project}: 'dotnet restore' resolves nuget.config relative to the project. Its own nuget.config hierarchy is used instead.",
+                UiSymbols.Warning,
+                configDir.FullName,
+                projectToRestore.Name);
+        }
+
+        var restoreExitCode = await dotNetService.RunDotnetInheritedAsync(
+            projectToRestore.Directory!,
+            $"restore \"{projectToRestore.FullName}\"",
+            cancellationToken);
+
+        if (restoreExitCode != 0)
+        {
+            logger.LogError(
+                "'dotnet restore' failed for {Project} (exit code {ExitCode}).",
+                projectToRestore.Name,
+                restoreExitCode);
+            return 1;
+        }
+
+        logger.LogInformation("{UISymbol} Restore completed for {Project}.", UiSymbols.Check, projectToRestore.Name);
         return 0;
     }
 

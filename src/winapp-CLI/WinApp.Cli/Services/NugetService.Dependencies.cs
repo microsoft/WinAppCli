@@ -262,12 +262,11 @@ internal partial class NugetService
             return null;
         }
 
-        // A range with no bounds at all (a version-less dependency) constrains nothing; keep the historical
-        // behavior of skipping it rather than pulling in an arbitrary version.
-        if (!range.HasLowerBound && !range.HasUpperBound)
-        {
-            return null;
-        }
+        // A dependency declared with no version (`<dependency id="X" />`) parses as an unbounded range. NuGet
+        // treats that as an unconstrained REQUIRED dependency and resolves the lowest available version (while
+        // warning NU1602); winapp does the same rather than silently omitting it, which would report a
+        // successful install of a graph that is missing a declared package. An unbounded range that cannot be
+        // resolved fails loudly through the same diagnostics as any other range.
 
         // Resolve every bounded/floating range against the versions the sources actually offer and pick the
         // lowest one that satisfies it (NuGet's lowest-applicable rule). Never shortcut to the declared lower

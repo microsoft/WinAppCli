@@ -115,15 +115,15 @@ public class WorkspaceSetupServiceConfigModeTests : BaseCommandTests
     }
 
     /// <summary>
-    /// Restore runs non-interactively (CI, or straight after a clone) and has no project-selection option, so
-    /// a directory with several projects must restore all of them rather than opening init's picker, which
-    /// would block on redirected input.
+    /// Several projects in one directory is ambiguous: restoring all of them would let an unrelated project
+    /// fail `winapp restore`, and picking one silently could restore the wrong thing. List them and hand off
+    /// to `dotnet restore <project>` instead.
     /// </summary>
     [TestMethod]
-    public async Task Restore_DotNetMultiProject_WithoutYaml_RestoresEveryProjectWithoutPrompting()
+    public async Task Restore_DotNetMultiProject_WithoutYaml_ListsProjectsAndFails()
     {
-        var first = await CreateCsprojAsync(_tempDirectory, "AppOne");
-        var second = await CreateCsprojAsync(_tempDirectory, "AppTwo");
+        await CreateCsprojAsync(_tempDirectory, "AppOne");
+        await CreateCsprojAsync(_tempDirectory, "AppTwo");
 
         var options = new WorkspaceSetupOptions
         {
@@ -136,14 +136,13 @@ public class WorkspaceSetupServiceConfigModeTests : BaseCommandTests
         var service = GetRequiredService<IWorkspaceSetupService>();
         var result = await service.SetupWorkspaceAsync(options, TestContext.CancellationToken);
 
-        Assert.AreEqual(0, result);
-        Assert.HasCount(2, _dotnet.InheritedCalls);
-        Assert.IsTrue(
-            _dotnet.InheritedCalls.Any(c => c.Contains(first.FullName, StringComparison.Ordinal)),
-            $"Expected a restore for {first.Name}. Calls: {string.Join(" | ", _dotnet.InheritedCalls)}");
-        Assert.IsTrue(
-            _dotnet.InheritedCalls.Any(c => c.Contains(second.FullName, StringComparison.Ordinal)),
-            $"Expected a restore for {second.Name}. Calls: {string.Join(" | ", _dotnet.InheritedCalls)}");
+        Assert.AreNotEqual(0, result);
+        Assert.IsEmpty(_dotnet.InheritedCalls, "Nothing may be restored when the target project is ambiguous.");
+
+        var stderr = ConsoleStdErr.ToString();
+        StringAssert.Contains(stderr, "AppOne.csproj", StringComparison.Ordinal);
+        StringAssert.Contains(stderr, "AppTwo.csproj", StringComparison.Ordinal);
+        StringAssert.Contains(stderr, "dotnet restore", StringComparison.Ordinal);
     }
 
     /// <summary>

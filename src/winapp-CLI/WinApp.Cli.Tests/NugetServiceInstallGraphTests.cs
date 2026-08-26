@@ -63,7 +63,7 @@ public class NugetServiceInstallGraphTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task InstallPackageAsync_DiamondDiffersOnlyInLowerBound_DoesNotFalselyFail()
+    public async Task InstallPackageAsync_DiamondWithHigherLowerBound_NeverSucceedsWithUnsatisfyingVersion()
     {
         // NUGET_PACKAGES takes precedence over the globalPackagesFolder written by WriteLocalFeedConfig.
         if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NUGET_PACKAGES")))
@@ -78,12 +78,12 @@ public class NugetServiceInstallGraphTests : BaseCommandTests
             feed.Create();
             var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
 
-            // Diamond graph whose two branches require DiffMin.C at DIFFERENT LOWER BOUNDS but with no upper
-            // bound: A needs [1.0.0, ) and B needs [2.0.0, ). Unlike conflicting exact pins, a version (2.0.0)
-            // satisfies BOTH ranges, so the graph is NOT unsatisfiable. winapp keeps whichever version its
-            // first-resolved branch selected (a documented lowest-first limitation) and must NOT report this
-            // common differing-minimum diamond as a conflict — the round-21 satisfaction check must not fire a
-            // false positive here.
+            // A needs DiffMin.C [1.0.0, ), B needs [2.0.0, ), and both 1.0.0 and 2.0.0 exist — so only 2.0.0
+            // satisfies BOTH branches. winapp resolves as it installs, so whichever branch it reaches first
+            // fixes the version; the invariant under test is that it must never report SUCCESS having selected
+            // a version that does not satisfy every branch. It previously did exactly that: an intersection
+            // check saw that *some* version could satisfy both and kept 1.0.0, leaving the consumer without
+            // the APIs B declared it needed.
             WriteNupkgToFeed(feed, "DiffMin.Root", "1.0.0", ("DiffMin.A", "[1.0.0, )"), ("DiffMin.B", "[1.0.0, )"));
             WriteNupkgToFeed(feed, "DiffMin.A", "1.0.0", ("DiffMin.C", "[1.0.0, )"));
             WriteNupkgToFeed(feed, "DiffMin.B", "1.0.0", ("DiffMin.C", "[2.0.0, )"));
@@ -94,15 +94,32 @@ public class NugetServiceInstallGraphTests : BaseCommandTests
 
             var service = CreateServiceRootedAt(root);
 
-            // Must complete without throwing: a satisfiable differing-minimum diamond is not a conflict.
-            var installed = await service.InstallPackageAsync("DiffMin.Root", "1.0.0", TestTaskContext, TestContext.CancellationToken);
+            string? resolvedC = null;
+            InvalidOperationException? failure = null;
+            try
+            {
+                var installed = await service.InstallPackageAsync("DiffMin.Root", "1.0.0", TestTaskContext, TestContext.CancellationToken);
+                resolvedC = installed.TryGetValue("DiffMin.C", out var c) ? c : null;
+            }
+            catch (InvalidOperationException ex)
+            {
+                failure = ex;
+            }
 
-            Assert.IsTrue(installed.ContainsKey("DiffMin.C"), "The shared dependency must have been installed.");
-
-            // Whichever branch resolved first fixes the version; both 1.0.0 and 2.0.0 are valid outcomes of the
-            // documented first-resolution-wins behavior.
-            var resolvedC = installed["DiffMin.C"];
-            Assert.IsTrue(resolvedC is "1.0.0" or "2.0.0", $"Expected DiffMin.C to resolve to 1.0.0 or 2.0.0 but was '{resolvedC}'.");
+            // Asserted independently of which branch resolves first, so the test cannot pass for the wrong
+            // reason if traversal order changes.
+            if (failure is not null)
+            {
+                StringAssert.Contains(failure.Message, "DiffMin.C", StringComparison.Ordinal);
+                StringAssert.Contains(failure.Message, "cannot be resolved to a single version", StringComparison.Ordinal);
+            }
+            else
+            {
+                Assert.AreEqual(
+                    "2.0.0",
+                    resolvedC,
+                    "Reporting success is only valid when the selected version satisfies every branch; 2.0.0 is the only such version here.");
+            }
         }
         finally
         {

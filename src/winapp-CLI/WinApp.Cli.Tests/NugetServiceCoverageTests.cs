@@ -244,7 +244,7 @@ public class NugetServiceCoverageTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task GetPackageDependenciesAsync_VersionlessDependency_IsSkippedInsteadOfResolved()
+    public async Task GetPackageDependenciesAsync_VersionlessDependency_ResolvesLowestAvailable()
     {
         if (NugetPackagesEnvOverridesConfig)
         {
@@ -256,17 +256,21 @@ public class NugetServiceCoverageTests : BaseCommandTests
         {
             var (feed, _) = SetUpLocalFeed(root);
 
-            // Root declares a dependency with NO version constraint (an unbounded range). That constrains
-            // nothing, so the resolver skips it rather than pulling in an arbitrary version.
+            // Root declares a dependency with NO version constraint (an unbounded range). NuGet treats that as
+            // an unconstrained required dependency and resolves the lowest available version; winapp matches
+            // that rather than silently omitting a declared package from the graph.
             File.WriteAllBytes(
                 Path.Join(feed.FullName, "Versionless.Root.1.0.0.nupkg"),
                 BuildNupkgWithVersionlessDependency("Versionless.Root", "1.0.0", "Versionless.Dep"));
+            WriteNupkgToFeed(feed, "Versionless.Dep", "1.0.0");
+            WriteNupkgToFeed(feed, "Versionless.Dep", "2.0.0");
 
             var service = CreateServiceRootedAt(root);
 
             var deps = await service.GetPackageDependenciesAsync("Versionless.Root", "1.0.0", TestContext.CancellationToken);
 
-            Assert.IsFalse(deps.ContainsKey("Versionless.Dep"), "A version-less dependency must be skipped, not resolved to an arbitrary version.");
+            Assert.IsTrue(deps.ContainsKey("Versionless.Dep"), "A version-less dependency is still a declared dependency and must be resolved.");
+            Assert.AreEqual("1.0.0", deps["Versionless.Dep"], "An unconstrained range resolves to the lowest available version, as NuGet does.");
         }
         finally
         {
@@ -275,7 +279,7 @@ public class NugetServiceCoverageTests : BaseCommandTests
     }
 
     [TestMethod]
-    public async Task InstallPackageAsync_VersionlessDependency_IsSkippedWithoutFailing()
+    public async Task InstallPackageAsync_VersionlessDependency_IsInstalled()
     {
         if (NugetPackagesEnvOverridesConfig)
         {
@@ -290,13 +294,14 @@ public class NugetServiceCoverageTests : BaseCommandTests
             File.WriteAllBytes(
                 Path.Join(feed.FullName, "Versionless.Install.1.0.0.nupkg"),
                 BuildNupkgWithVersionlessDependency("Versionless.Install", "1.0.0", "Versionless.Dep"));
+            WriteNupkgToFeed(feed, "Versionless.Dep", "1.0.0");
 
             var service = CreateServiceRootedAt(root);
 
             var installed = await service.InstallPackageAsync("Versionless.Install", "1.0.0", TestTaskContext, TestContext.CancellationToken);
 
             Assert.IsTrue(installed.ContainsKey("Versionless.Install"), "The root package must install.");
-            Assert.IsFalse(installed.ContainsKey("Versionless.Dep"), "The version-less dependency must be skipped rather than installed.");
+            Assert.IsTrue(installed.ContainsKey("Versionless.Dep"), "The version-less dependency must be installed rather than silently dropped.");
         }
         finally
         {

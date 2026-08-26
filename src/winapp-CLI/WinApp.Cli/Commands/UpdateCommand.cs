@@ -53,6 +53,15 @@ internal class UpdateCommand : Command, IShortDescription
                         {
                             taskContext.AddDebugMessage($"{UiSymbols.Note} winapp.yaml found but contains no packages");
                         }
+                        else if (setupSdks == SdkInstallMode.None)
+                        {
+                            // --setup-sdks none means "skip SDK package work entirely", so there is no channel to
+                            // resolve a latest version against; GetLatestVersionAsync rejects None outright. Skip
+                            // the package loop and leave the pinned versions alone rather than asking for a
+                            // version we then report as a lookup failure, which made the documented option always
+                            // exit non-zero on a non-empty config. Build tools and the runtime still run below.
+                            taskContext.AddStatusMessage($"{UiSymbols.Skip} SDK updates skipped (--setup-sdks none); pinned versions in winapp.yaml are unchanged");
+                        }
                         else
                         {
                             taskContext.AddStatusMessage($"{UiSymbols.Package} Found winapp.yaml with {config.Packages.Count} packages, checking for updates...");
