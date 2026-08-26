@@ -167,11 +167,16 @@ internal partial class NugetService : INugetService
         NugetSourceProvider.EnsureCredentialService();
         var packages = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var dependencyFailures = new List<string>();
-        // Every declared range seen for a dependency id, so a later branch can be validated against the full
-        // set when deciding whether an upgrade satisfies every requirement.
-        var dependencyConstraints = new Dictionary<string, List<VersionRange>>(StringComparer.OrdinalIgnoreCase);
+        // The dependency ranges declared by each SELECTED package version, keyed by the DECLARING package id.
+        // Keying by declaring id (rather than appending every range ever seen to a per-dependency list) makes
+        // the set self-retracting: when a package is upgraded, re-walking it overwrites its entry, so the
+        // ranges contributed by the version that was replaced stop constraining the graph. An append-only list
+        // instead kept them forever and could reject a perfectly valid graph — e.g. A->C >=1, B->C >=2,
+        // C1->D [1.0], C2->D [2.0]: after legitimately upgrading C to 2.0, C1's stale D [1.0] would combine
+        // with C2's D [2.0] and report a conflict that does not exist in the resolved graph.
+        var declaredDependencies = new Dictionary<string, Dictionary<string, VersionRange>>(StringComparer.OrdinalIgnoreCase);
         using var cacheContext = new SourceCacheContext();
-        await InstallPackageRecursiveAsync(package, version, packages, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
+        await InstallPackageRecursiveAsync(package, version, packages, dependencyFailures, declaredDependencies, taskContext, cacheContext, cancellationToken);
 
         // A downloaded root package with unresolvable/uninstallable REQUIRED transitive dependencies is an
         // incomplete install, not a success. Each gap was surfaced as a warning above (and the rest of the
@@ -189,7 +194,7 @@ internal partial class NugetService : INugetService
     /// <summary>
     /// Downloads and extracts a NuGet package to the global packages cache, then recursively installs dependencies.
     /// </summary>
-    private async Task InstallPackageRecursiveAsync(string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, Dictionary<string, List<VersionRange>> dependencyConstraints, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
+    private async Task InstallPackageRecursiveAsync(string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, Dictionary<string, Dictionary<string, VersionRange>> declaredDependencies, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         // Already processed this package?
         if (installed.ContainsKey(package))
@@ -215,7 +220,7 @@ internal partial class NugetService : INugetService
             taskContext.AddDebugMessage($"{UiSymbols.Skip} {package} {normalizedVersion} already present");
             installed[package] = normalizedVersion;
             // Still resolve dependencies to populate installed dictionary
-            await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
+            await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, declaredDependencies, taskContext, cacheContext, cancellationToken);
             return;
         }
 
@@ -229,13 +234,13 @@ internal partial class NugetService : INugetService
         taskContext.AddStatusMessage($"{UiSymbols.Check} Installed {package} {normalizedVersion}");
 
         // Recursively install dependencies
-        await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
+        await ResolveDependenciesAsync(packageDir, package, normalizedVersion, installed, dependencyFailures, declaredDependencies, taskContext, cacheContext, cancellationToken);
     }
 
     /// <summary>
     /// Reads the .nuspec from an extracted package and recursively installs dependencies.
     /// </summary>
-    private async Task ResolveDependenciesAsync(DirectoryInfo packageDir, string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, Dictionary<string, List<VersionRange>> dependencyConstraints, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
+    private async Task ResolveDependenciesAsync(DirectoryInfo packageDir, string package, string version, Dictionary<string, string> installed, List<string> dependencyFailures, Dictionary<string, Dictionary<string, VersionRange>> declaredDependencies, TaskContext taskContext, SourceCacheContext cacheContext, CancellationToken cancellationToken)
     {
         Dictionary<string, VersionRange> deps;
         try
@@ -254,19 +259,13 @@ internal partial class NugetService : INugetService
             return;
         }
 
+        // Record what THIS version of the package requires, replacing whatever the previously selected version
+        // of the same id declared. Only the selected version of each id is ever present, so the map always
+        // describes the current graph and never the branches that an upgrade discarded.
+        declaredDependencies[package] = deps;
+
         foreach (var (depName, depVersionRange) in deps)
         {
-            // Every range seen for this dependency id is accumulated so a later branch can be validated
-            // against the full set. This is a plain list of ranges checked with the point test
-            // RangeSatisfiesWithFloat — not the interval-intersection machinery that previously existed only
-            // to justify keeping an unsatisfying version.
-            if (!dependencyConstraints.TryGetValue(depName, out var accumulatedRanges))
-            {
-                accumulatedRanges = [];
-                dependencyConstraints[depName] = accumulatedRanges;
-            }
-            accumulatedRanges.Add(depVersionRange);
-
             if (installed.TryGetValue(depName, out var installedDepVersion))
             {
                 if (NuGetVersion.TryParse(installedDepVersion, out var selectedVersion)
@@ -282,9 +281,9 @@ internal partial class NugetService : INugetService
                 // version would report success for a graph that does not satisfy every requirement, leaving
                 // consumers without APIs a package declared it needs.
                 //
-                // Resolve this branch's range and, when the result also satisfies every range seen so far for
-                // this id, upgrade to it. Versions only ever move up, so this terminates. If no such version
-                // exists (e.g. two conflicting exact pins) it is a genuine conflict and fails loudly.
+                // Resolve this branch's range and, when the result also satisfies every range the CURRENT graph
+                // places on this id, upgrade to it. Versions only ever move up, so this terminates. If no such
+                // version exists (e.g. two conflicting exact pins) it is a genuine conflict and fails loudly.
                 string? candidate;
                 try
                 {
@@ -303,13 +302,13 @@ internal partial class NugetService : INugetService
 
                 if (!string.IsNullOrEmpty(candidate)
                     && NuGetVersion.TryParse(candidate, out var candidateVersion)
-                    && accumulatedRanges.All(r => RangeSatisfiesWithFloat(r, candidateVersion)))
+                    && GetActiveConstraints(declaredDependencies, depName).All(r => RangeSatisfiesWithFloat(r, candidateVersion)))
                 {
                     taskContext.AddDebugMessage($"{UiSymbols.Rocket} {depName}: {installedDepVersion} → {candidate} (required by {package} {version})");
                     // Drop the earlier selection so the recursive install re-walks the upgraded version's own
                     // dependency graph rather than short-circuiting on the package id.
                     installed.Remove(depName);
-                    await InstallPackageRecursiveAsync(depName, candidate, installed, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
+                    await InstallPackageRecursiveAsync(depName, candidate, installed, dependencyFailures, declaredDependencies, taskContext, cacheContext, cancellationToken);
                     continue;
                 }
 
@@ -332,7 +331,7 @@ internal partial class NugetService : INugetService
                     continue;
                 }
 
-                await InstallPackageRecursiveAsync(depName, depVersion, installed, dependencyFailures, dependencyConstraints, taskContext, cacheContext, cancellationToken);
+                await InstallPackageRecursiveAsync(depName, depVersion, installed, dependencyFailures, declaredDependencies, taskContext, cacheContext, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -348,6 +347,27 @@ internal partial class NugetService : INugetService
                 // exits non-zero rather than reporting an incomplete install as success.
                 taskContext.AddStatusMessage($"{UiSymbols.Warning} Could not install dependency {depName} (required by {package} {version}): {ex.Message}");
                 dependencyFailures.Add($"{depName} (required by {package} {version}): {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Every range the CURRENTLY selected packages place on <paramref name="dependencyId"/>. Derived from the
+    /// selected version of each declaring package rather than from an append-only history, so ranges declared
+    /// by a version that a later upgrade replaced no longer constrain the result. Validating an upgrade against
+    /// stale ranges could reject a graph that is actually consistent — e.g. A->C >=1, B->C >=2, C1->D [1.0],
+    /// C2->D [2.0]: once C is upgraded to 2.0, D's only live requirement is [2.0], and C1's [1.0] must not
+    /// still be counted.
+    /// </summary>
+    private static IEnumerable<VersionRange> GetActiveConstraints(
+        Dictionary<string, Dictionary<string, VersionRange>> declaredDependencies,
+        string dependencyId)
+    {
+        foreach (var declared in declaredDependencies.Values)
+        {
+            if (declared.TryGetValue(dependencyId, out var range))
+            {
+                yield return range;
             }
         }
     }

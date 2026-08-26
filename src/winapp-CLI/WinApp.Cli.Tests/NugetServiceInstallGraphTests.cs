@@ -127,6 +127,66 @@ public class NugetServiceInstallGraphTests : BaseCommandTests
         }
     }
 
+    /// <summary>
+    /// Upgrading a shared dependency must retract the requirements of the version it replaced. This graph is
+    /// satisfiable (C 2.0.0 with D 2.0.0), but resolution reaches C through the `>= 1.0.0` branch first, so C
+    /// 1.0.0 and its pinned D [1.0.0] are selected before the `>= 2.0.0` branch forces C up to 2.0.0. C 1.0.0
+    /// is then no longer part of the graph, so its D [1.0.0] pin must stop counting. While constraints were
+    /// accumulated in an append-only list, that stale pin was combined with C 2.0.0's D [2.0.0] and the install
+    /// failed with a conflict that does not exist in the resolved graph.
+    /// </summary>
+    [TestMethod]
+    public async Task InstallPackageAsync_UpgradeChangesPinnedTransitive_DoesNotFailOnReplacedVersionsConstraint()
+    {
+        // NUGET_PACKAGES takes precedence over the globalPackagesFolder written by WriteLocalFeedConfig.
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NUGET_PACKAGES")))
+        {
+            Assert.Inconclusive("NUGET_PACKAGES is set in the environment; it overrides the config's globalPackagesFolder, so the local feed would not be exercised.");
+        }
+
+        var root = CreateFeedTestDirectory();
+        try
+        {
+            var feed = new DirectoryInfo(Path.Join(root.FullName, "feed"));
+            feed.Create();
+            var packages = new DirectoryInfo(Path.Join(root.FullName, "packages"));
+
+            WriteNupkgToFeed(feed, "Retract.Root", "1.0.0", ("Retract.A", "[1.0.0, )"), ("Retract.B", "[1.0.0, )"));
+            WriteNupkgToFeed(feed, "Retract.A", "1.0.0", ("Retract.C", "[1.0.0, )"));
+            WriteNupkgToFeed(feed, "Retract.B", "1.0.0", ("Retract.C", "[2.0.0, )"));
+            // Each version of C pins a DIFFERENT exact version of D, so keeping the replaced version's pin
+            // makes the two mutually unsatisfiable.
+            WriteNupkgToFeed(feed, "Retract.C", "1.0.0", ("Retract.D", "[1.0.0]"));
+            WriteNupkgToFeed(feed, "Retract.C", "2.0.0", ("Retract.D", "[2.0.0]"));
+            WriteNupkgToFeed(feed, "Retract.D", "1.0.0");
+            WriteNupkgToFeed(feed, "Retract.D", "2.0.0");
+
+            WriteLocalFeedConfig(root, feed, packages);
+
+            var service = CreateServiceRootedAt(root);
+
+            Dictionary<string, string> installed;
+            try
+            {
+                installed = await service.InstallPackageAsync("Retract.Root", "1.0.0", TestTaskContext, TestContext.CancellationToken);
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Asserted independently of which branch resolves first: this graph has a valid solution, so
+                // failing is wrong no matter what order the walk happens to take.
+                Assert.Fail($"Graph is satisfiable (C 2.0.0 + D 2.0.0) but install reported a conflict: {ex.Message}");
+                return;
+            }
+
+            Assert.AreEqual("2.0.0", installed.GetValueOrDefault("Retract.C"), "C must end up at the only version satisfying both branches.");
+            Assert.AreEqual("2.0.0", installed.GetValueOrDefault("Retract.D"), "D must follow the pin declared by the version of C that is actually selected.");
+        }
+        finally
+        {
+            TryDelete(root);
+        }
+    }
+
     [TestMethod]
     public async Task InstallPackageAsync_CacheFolderExistsWithoutCompletionMarker_ReDownloadsInsteadOfTrustingIt()
     {
