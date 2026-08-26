@@ -271,6 +271,20 @@ internal sealed class GuestMessage
     /// terminated.
     /// </summary>
     public string? PackageFamilyName { get; init; }
+
+    /// <summary>
+    /// Present on <see cref="GuestMessageTypes.StopPackageRequest"/>. The guest location the
+    /// requesting deployment's own registration is expected to be installed from.
+    /// </summary>
+    /// <remarks>
+    /// Two deployments built from different source paths can share the same package identity, and
+    /// resolving a family name to a full name proves only that <em>something</em> is registered
+    /// under it — not that it is <em>this</em> deployment's registration. The guest verifies the
+    /// currently registered package's own install location against this value before terminating
+    /// anything, so a family name collision with a different, legitimately running deployment
+    /// refuses instead of stopping the wrong application.
+    /// </remarks>
+    public string? ExpectedRegisteredLocation { get; init; }
 }
 
 /// <summary>Source-generated serializer context for guest control messages.</summary>

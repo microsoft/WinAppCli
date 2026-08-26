@@ -51,20 +51,28 @@ internal class FakeAppLauncherService : IAppLauncherService
     }
 
     /// <summary>
-    /// When set, <see cref="GetPackageFullNameOrThrow"/> throws this instead of returning
-    /// <see cref="FakePackageFullName"/> — simulating an inventory query failure, as distinct from
-    /// a query that succeeded and confirmed nothing is registered.
+    /// The install location <see cref="GetRegisteredPackageOrThrow"/> reports alongside
+    /// <see cref="FakePackageFullName"/> — the fake's simulated ground truth for "where this
+    /// family is actually registered from right now". Tests set this to whichever deployment's
+    /// layout the fake should pretend genuinely owns the current registration.
     /// </summary>
-    public Exception? GetPackageFullNameFailure { get; set; }
+    public string FakeRegisteredLocation { get; set; } = string.Empty;
 
-    public string? GetPackageFullNameOrThrow(string packageFamilyName)
+    /// <summary>
+    /// When set, <see cref="GetRegisteredPackageOrThrow"/> throws this instead of returning a
+    /// result — simulating an inventory query failure, as distinct from a query that succeeded
+    /// and confirmed nothing is registered.
+    /// </summary>
+    public Exception? GetRegisteredPackageFailure { get; set; }
+
+    public RegisteredPackage? GetRegisteredPackageOrThrow(string packageFamilyName)
     {
-        if (GetPackageFullNameFailure is { } failure)
+        if (GetRegisteredPackageFailure is { } failure)
         {
             throw failure;
         }
 
-        return FakePackageFullName;
+        return FakePackageFullName is null ? null : new RegisteredPackage(FakePackageFullName, FakeRegisteredLocation);
     }
 
     public void TerminatePackageProcesses(string? packageFullName, uint processId)

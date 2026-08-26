@@ -175,9 +175,6 @@ internal class AppLauncherService(ILogger<AppLauncherService> logger) : IAppLaun
         }
     }
 
-    /// <inheritdoc />
-    public string? GetPackageFullNameOrThrow(string packageFamilyName) => FindPackageFullNameImpl(packageFamilyName);
-
     /// <summary>
     /// Package-manager lookup seam. Defaults to the real <see cref="PackageManager"/> query;
     /// overridable in tests to exercise the not-found and error fallbacks.
@@ -189,6 +186,26 @@ internal class AppLauncherService(ILogger<AppLauncherService> logger) : IAppLaun
         var pm = new PackageManager();
         var packages = pm.FindPackages(packageFamilyName);
         return packages.FirstOrDefault()?.Id.FullName;
+    }
+
+    /// <inheritdoc />
+    public RegisteredPackage? GetRegisteredPackageOrThrow(string packageFamilyName) =>
+        FindRegisteredPackageImpl(packageFamilyName);
+
+    /// <summary>
+    /// Package-manager lookup seam for the full-name-plus-install-location query. Defaults to the
+    /// real <see cref="PackageManager"/> query; overridable in tests to exercise the not-found,
+    /// error, and mismatched-location fallbacks.
+    /// </summary>
+    internal Func<string, RegisteredPackage?> FindRegisteredPackageImpl { get; set; } = DefaultFindRegisteredPackage;
+
+    [SupportedOSPlatform("windows8.0")]
+    private static RegisteredPackage? DefaultFindRegisteredPackage(string packageFamilyName)
+    {
+        var pm = new PackageManager();
+        var package = pm.FindPackages(packageFamilyName).FirstOrDefault();
+
+        return package is null ? null : new RegisteredPackage(package.Id.FullName, package.InstalledLocation.Path);
     }
 
     /// <summary>

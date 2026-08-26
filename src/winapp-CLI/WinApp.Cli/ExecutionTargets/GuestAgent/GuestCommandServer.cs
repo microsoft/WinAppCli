@@ -205,8 +205,10 @@ internal sealed class GuestCommandServer : IAsyncDisposable
                 await HandleRemoveScopeAsync(operationId, removeScope, cancellationToken).ConfigureAwait(false);
                 break;
 
-            case GuestMessageTypes.StopPackageRequest when message.PackageFamilyName is { } packageFamilyName:
-                await HandleStopPackageAsync(operationId, packageFamilyName, cancellationToken).ConfigureAwait(false);
+            case GuestMessageTypes.StopPackageRequest when message.PackageFamilyName is { } packageFamilyName
+                && message.ExpectedRegisteredLocation is { } expectedRegisteredLocation:
+                await HandleStopPackageAsync(
+                    operationId, packageFamilyName, expectedRegisteredLocation, cancellationToken).ConfigureAwait(false);
                 break;
 
             case GuestMessageTypes.StopProcessRequest when message.ProcessId is { } stopProcessId:
@@ -474,6 +476,15 @@ internal sealed class GuestCommandServer : IAsyncDisposable
     /// that has to fail closed exactly like a termination it could not confirm, not be quietly
     /// read as "nothing to stop".
     /// <para>
+    /// A family name match alone is not ownership: two deployments built from different source
+    /// paths can share the same package identity, and only one of them can be genuinely registered
+    /// at a time. Before anything is terminated, the currently registered package's own install
+    /// location is compared against the location the requesting deployment itself expects. A
+    /// mismatch means the family currently belongs to a different deployment's live registration --
+    /// possibly a legitimately running application -- and that is refused exactly like an unproven
+    /// stop, never resolved by guessing.
+    /// </para>
+    /// <para>
     /// A failure here is reported rather than swallowed, unlike the best-effort cleanup
     /// <c>IAppLauncherService.TerminatePackageProcesses</c> performs on an interactive Ctrl+C: the
     /// caller is about to mutate files this package may still have open, so it must know when the
@@ -483,6 +494,7 @@ internal sealed class GuestCommandServer : IAsyncDisposable
     private async Task HandleStopPackageAsync(
         Guid operationId,
         string packageFamilyName,
+        string expectedRegisteredLocation,
         CancellationToken cancellationToken)
     {
         try
@@ -491,12 +503,38 @@ internal sealed class GuestCommandServer : IAsyncDisposable
 
             // Strict lookup: an inventory query failure must never be read as "confirmed absent".
             // Only a query that actually completed and found nothing may skip the termination call.
-            var fullName = launcher.GetPackageFullNameOrThrow(packageFamilyName);
+            var registered = launcher.GetRegisteredPackageOrThrow(packageFamilyName);
 
-            if (fullName is not null)
+            if (registered is null)
             {
-                launcher.StopPackageProcessesOrThrow(fullName);
+                await SendFileCompletedAsync(operationId, cancellationToken).ConfigureAwait(false);
+                return;
             }
+
+            if (!TargetPathSafety.PathsEqual(registered.InstallLocation, expectedRegisteredLocation))
+            {
+                // Something else -- most plausibly a different deployment that legitimately owns
+                // this family right now -- is registered here. Refused, not adopted and not
+                // terminated, exactly like any Sandbox or package winapp cannot prove it owns.
+                await SendFailureAsync(
+                    operationId,
+                    new ExecutionTargetErrorInfo
+                    {
+                        Code = ExecutionTargetErrorCodes.StaleHandle,
+                        Message =
+                            $"The package currently registered as '{packageFamilyName}' is not the one this deployment registered, so winapp cannot safely stop it before redeploying.",
+                        UserAction = "Close the running application manually in Windows Sandbox, then retry.",
+                        Context = new Dictionary<string, string>
+                        {
+                            ["packageFamilyName"] = packageFamilyName,
+                            ["expectedRegisteredLocation"] = expectedRegisteredLocation,
+                            ["actualRegisteredLocation"] = registered.InstallLocation,
+                        },
+                    }).ConfigureAwait(false);
+                return;
+            }
+
+            launcher.StopPackageProcessesOrThrow(registered.FullName);
 
             await SendFileCompletedAsync(operationId, cancellationToken).ConfigureAwait(false);
         }

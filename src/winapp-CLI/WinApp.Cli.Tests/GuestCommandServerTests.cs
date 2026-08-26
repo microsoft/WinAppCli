@@ -289,13 +289,19 @@ public class GuestCommandServerTests
 
     // ---- Stop before redeploy --------------------------------------------------------
 
+    private const string FakeLayout = @"C:\WinApp\deployments\dep-1-layout";
+
     [TestMethod]
     public async Task StopPackage_ResolvesTheFamilyNameAndTerminatesTheCurrentFullName()
     {
-        var launcher = new FakeAppLauncherService { FakePackageFullName = "Contoso.MyApp_1.0.0.0_x64__abc" };
+        var launcher = new FakeAppLauncherService
+        {
+            FakePackageFullName = "Contoso.MyApp_1.0.0.0_x64__abc",
+            FakeRegisteredLocation = FakeLayout,
+        };
         using var harness = new Harness(Interactive, appLauncher: launcher);
 
-        await harness.Channel.StopPackageProcessesAsync("Contoso.MyApp_abc", harness.Token);
+        await harness.Channel.StopPackageProcessesAsync("Contoso.MyApp_abc", FakeLayout, harness.Token);
 
         CollectionAssert.AreEqual(new[] { "Contoso.MyApp_1.0.0.0_x64__abc" }, launcher.StopPackageCalls);
     }
@@ -307,7 +313,7 @@ public class GuestCommandServerTests
         using var harness = new Harness(Interactive, appLauncher: launcher);
 
         // Nothing registered under that family any more means nothing could be running under it.
-        await harness.Channel.StopPackageProcessesAsync("Contoso.MyApp_abc", harness.Token);
+        await harness.Channel.StopPackageProcessesAsync("Contoso.MyApp_abc", FakeLayout, harness.Token);
 
         Assert.AreEqual(0, launcher.StopPackageCalls.Count);
     }
@@ -318,12 +324,13 @@ public class GuestCommandServerTests
         var launcher = new FakeAppLauncherService
         {
             FakePackageFullName = "Contoso.MyApp_1.0.0.0_x64__abc",
+            FakeRegisteredLocation = FakeLayout,
             StopPackageProcessesFailure = new InvalidOperationException("still running"),
         };
         using var harness = new Harness(Interactive, appLauncher: launcher);
 
         var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
-            () => harness.Channel.StopPackageProcessesAsync("Contoso.MyApp_abc", harness.Token));
+            () => harness.Channel.StopPackageProcessesAsync("Contoso.MyApp_abc", FakeLayout, harness.Token));
 
         Assert.AreEqual(ExecutionTargetErrorCodes.StaleHandle, failure.Error.Code);
         StringAssert.Contains(failure.Error.Message, "Contoso.MyApp_abc");
@@ -335,9 +342,75 @@ public class GuestCommandServerTests
         using var harness = new Harness(Interactive);
 
         var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
-            () => harness.Channel.StopPackageProcessesAsync("Contoso.MyApp_abc", harness.Token));
+            () => harness.Channel.StopPackageProcessesAsync("Contoso.MyApp_abc", FakeLayout, harness.Token));
 
         Assert.AreEqual(ExecutionTargetErrorCodes.TransportFailed, failure.Error.Code);
+    }
+
+    /// <summary>
+    /// Two deployments built from different source paths can share a package identity. Only one
+    /// of them can be genuinely registered at a time, so a family-name match alone must never be
+    /// enough to terminate: the currently registered install location has to match too.
+    /// </summary>
+    [TestMethod]
+    public async Task StopPackage_WhenTheCurrentRegistrationIsADifferentDeploymentsLayout_RefusesRatherThanStoppingIt()
+    {
+        var launcher = new FakeAppLauncherService
+        {
+            FakePackageFullName = "Contoso.MyApp_1.0.0.0_x64__abc",
+            FakeRegisteredLocation = @"C:\WinApp\deployments\dep-A-layout",
+        };
+        using var harness = new Harness(Interactive, appLauncher: launcher);
+
+        // This request believes it owns the registration from dep-B's layout, but the guest's
+        // actual live registration is dep-A's.
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
+            harness.Channel.StopPackageProcessesAsync(
+                "Contoso.MyApp_abc", @"C:\WinApp\deployments\dep-B-layout", harness.Token));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.StaleHandle, failure.Error.Code);
+        StringAssert.Contains(failure.Error.Message, "not the one this deployment registered");
+        Assert.AreEqual(0, launcher.StopPackageCalls.Count, "dep-A's legitimate registration must never be terminated.");
+    }
+
+    /// <summary>
+    /// The location check must canonicalize rather than do a literal string compare: a trailing
+    /// separator or a case difference must not itself cause a false mismatch (NTFS is
+    /// case-insensitive), and neither may it be fooled into a false match by a genuinely different
+    /// path that happens to share a prefix.
+    /// </summary>
+    [TestMethod]
+    public async Task StopPackage_TheLocationCheckIsCaseInsensitiveAndTrailingSeparatorInsensitive()
+    {
+        var launcher = new FakeAppLauncherService
+        {
+            FakePackageFullName = "Contoso.MyApp_1.0.0.0_x64__abc",
+            FakeRegisteredLocation = @"C:\WinApp\deployments\Dep-1-Layout\",
+        };
+        using var harness = new Harness(Interactive, appLauncher: launcher);
+
+        await harness.Channel.StopPackageProcessesAsync(
+            "Contoso.MyApp_abc", @"c:\winapp\deployments\dep-1-layout", harness.Token);
+
+        CollectionAssert.AreEqual(new[] { "Contoso.MyApp_1.0.0.0_x64__abc" }, launcher.StopPackageCalls);
+    }
+
+    [TestMethod]
+    public async Task StopPackage_APathThatMerelySharesAPrefixIsNotTreatedAsAMatch()
+    {
+        var launcher = new FakeAppLauncherService
+        {
+            FakePackageFullName = "Contoso.MyApp_1.0.0.0_x64__abc",
+            FakeRegisteredLocation = @"C:\WinApp\deployments\dep-1-layout",
+        };
+        using var harness = new Harness(Interactive, appLauncher: launcher);
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(() =>
+            harness.Channel.StopPackageProcessesAsync(
+                "Contoso.MyApp_abc", @"C:\WinApp\deployments\dep-1-layout-2", harness.Token));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.StaleHandle, failure.Error.Code);
+        Assert.AreEqual(0, launcher.StopPackageCalls.Count);
     }
 
     [TestMethod]

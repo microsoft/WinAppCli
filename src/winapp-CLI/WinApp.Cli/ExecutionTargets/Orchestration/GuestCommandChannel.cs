@@ -404,15 +404,23 @@ internal sealed class GuestCommandChannel : IAsyncDisposable
     /// layout it was registered from.
     /// </summary>
     /// <remarks>
-    /// Scoped to exactly the package this deployment owns: the guest resolves the family name to
-    /// whatever full name is actually registered right now and terminates only that package's
-    /// processes, which is what keeps an unrelated application untouched. The guest reports a
-    /// structured failure — never a raw OS message — when it cannot prove the stop happened, and
-    /// that failure is surfaced here before anything is deleted or overwritten.
+    /// Scoped to exactly the package this deployment owns, in two independent ways: the guest
+    /// resolves the family name to whatever full name is actually registered right now, and then
+    /// verifies that package's own install location against <paramref name="expectedRegisteredLocation"/>
+    /// before terminating anything. The second check is what keeps a different deployment's
+    /// legitimately running application untouched when it happens to share the same package
+    /// identity — a family name match alone does not prove it is <em>this</em> deployment's
+    /// registration. The guest reports a structured failure — never a raw OS message — when it
+    /// cannot prove the stop happened or the location does not match, and that failure is surfaced
+    /// here before anything is deleted or overwritten.
     /// </remarks>
-    public async Task StopPackageProcessesAsync(string packageFamilyName, CancellationToken cancellationToken)
+    public async Task StopPackageProcessesAsync(
+        string packageFamilyName,
+        string expectedRegisteredLocation,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packageFamilyName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedRegisteredLocation);
 
         var operationId = Guid.NewGuid();
         var state = Register(operationId);
@@ -426,6 +434,7 @@ internal sealed class GuestCommandChannel : IAsyncDisposable
                     OperationId = operationId.ToString(),
                     TargetEpoch = _targetEpoch,
                     PackageFamilyName = packageFamilyName,
+                    ExpectedRegisteredLocation = expectedRegisteredLocation,
                 },
                 cancellationToken).ConfigureAwait(false);
 
@@ -437,8 +446,7 @@ internal sealed class GuestCommandChannel : IAsyncDisposable
         }
     }
 
-    /// <summary>
-    /// Asks the guest to stop one specific tracked process before a redeploy mutates files it may
+    /// <summary>    /// Asks the guest to stop one specific tracked process before a redeploy mutates files it may
     /// still have open.
     /// </summary>
     /// <remarks>
