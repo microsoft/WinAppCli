@@ -457,6 +457,34 @@ public class WindowsSandboxLifecycleTests
     }
 
     [TestMethod]
+    public async Task EnsureInstance_HalfWrittenOwnershipRecord_AdoptsTheOneRunningInstance()
+    {
+        // A record with an ID but no boot nonce names an instance winapp cannot form an epoch for,
+        // so it establishes no ownership. Excluding that ID anyway would leave zero candidates and
+        // report a single running Sandbox as "more than one".
+        _stateStore.Commit(
+            ExecutionTargetRef.WindowsSandboxDefault,
+            new TargetState
+            {
+                SchemaVersion = 0,
+                Revision = 0,
+                TargetKind = ExecutionTargetRef.WindowsSandboxDefault.Kind,
+                TargetId = ExecutionTargetRef.WindowsSandboxDefault.Id,
+                InstanceId = "sandbox-a",
+            },
+            expectedRevision: 0);
+
+        _cli.SetRunning("sandbox-a");
+
+        var lease = await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
+
+        Assert.AreEqual("sandbox-a", lease.InstanceId);
+        Assert.AreEqual(SandboxInstanceOrigin.Adopted, lease.Origin);
+        Assert.IsFalse(lease.Epoch.IsNone, "Taking it over is what gives it an epoch it did not have.");
+        Assert.AreEqual(0, _cli.StartCount);
+    }
+
+    [TestMethod]
     public async Task EnsureInstance_SeveralSandboxesRunning_RefusesRatherThanGuessing()
     {
         _cli.SetRunning("sandbox-one", "sandbox-two");

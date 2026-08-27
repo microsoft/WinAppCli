@@ -565,38 +565,53 @@ internal sealed class WindowsSandboxBackend(
     }
 
     /// <summary>Best-effort removal of bootstrap folders from generations that are long gone.</summary>
+    /// <remarks>
+    /// The two folder families are separated explicitly, because <c>bootstrap-result-</c> also starts
+    /// with <c>bootstrap-</c>: a single prefix match would count result folders toward the read-only
+    /// family's retention and could delete a live one.
+    /// </remarks>
     private static void PruneOldGenerations(string root, string currentToken)
     {
         try
         {
-            foreach (var prefix in (string[])[BootstrapFolderPrefix, ResultFolderPrefix])
-            {
-                var stale = new DirectoryInfo(root)
-                    .GetDirectories(prefix + "*")
-                    .Where(directory => !string.Equals(
-                        directory.Name,
-                        prefix + currentToken,
-                        StringComparison.OrdinalIgnoreCase))
-                    .OrderByDescending(directory => directory.LastWriteTimeUtc)
-                    .Skip(MaxRetainedBootstrapGenerations);
+            var directories = new DirectoryInfo(root).GetDirectories();
 
-                foreach (var directory in stale)
-                {
-                    try
-                    {
-                        directory.Delete(recursive: true);
-                    }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                    {
-                        // Still mapped by a live Sandbox, or otherwise held open. It will be
-                        // collected on a later run once that instance is gone.
-                    }
-                }
-            }
+            var results = directories
+                .Where(directory => directory.Name.StartsWith(ResultFolderPrefix, StringComparison.OrdinalIgnoreCase));
+
+            var bootstraps = directories
+                .Where(directory =>
+                    directory.Name.StartsWith(BootstrapFolderPrefix, StringComparison.OrdinalIgnoreCase) &&
+                    !directory.Name.StartsWith(ResultFolderPrefix, StringComparison.OrdinalIgnoreCase));
+
+            PruneFamily(results, ResultFolderPrefix + currentToken);
+            PruneFamily(bootstraps, BootstrapFolderPrefix + currentToken);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Housekeeping never fails a command.
+        }
+    }
+
+    /// <summary>Keeps the current generation plus the most recent few, and drops the rest.</summary>
+    private static void PruneFamily(IEnumerable<DirectoryInfo> family, string currentName)
+    {
+        var stale = family
+            .Where(directory => !string.Equals(directory.Name, currentName, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(directory => directory.LastWriteTimeUtc)
+            .Skip(MaxRetainedBootstrapGenerations);
+
+        foreach (var directory in stale)
+        {
+            try
+            {
+                directory.Delete(recursive: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Still mapped by a live Sandbox, or otherwise held open. It will be collected on a
+                // later run once that instance is gone.
+            }
         }
     }
 
@@ -817,8 +832,17 @@ internal sealed class WindowsSandboxBackend(
     /// </para>
     /// <para>
     /// The rule is scoped to the agent program <em>and</em> the single port it was told to use, so
-    /// nothing else in the guest gains inbound reachability. Stale allow rules from earlier boots
-    /// are removed first, so a port this guest is no longer using does not stay open.
+    /// nothing else in the guest gains inbound reachability. Existing rules for that exact program
+    /// path are removed first, which is what lets the <em>same</em> generation be repaired onto a
+    /// fresh port without leaving its previous one open.
+    /// </para>
+    /// <para>
+    /// The program path is per generation, so this deliberately cannot see, and cannot remove, a
+    /// rule belonging to a different generation — including one created by a second winapp whose
+    /// state root was redirected, which under the old fixed path would have had its live agent's
+    /// rule deleted underneath it. A rule left behind by a generation that is gone names a program
+    /// path that no longer exists, lives only in the volatile <c>ActiveStore</c>, and disappears
+    /// with the Sandbox, so it authorises nothing.
     /// </para>
     /// </remarks>
     private async Task AllowGuestAgentConnectionAsync(
@@ -845,9 +869,9 @@ internal sealed class WindowsSandboxBackend(
             @"powershell.exe -NoProfile -NonInteractive -Command " +
             $@"""$agent='{agentPath}'; " +
 
-            // Any existing rule for this program is removed first, block or allow: a block rule
-            // would defeat the new allow, and a stale allow would leave a port open that this boot
-            // is not using.
+            // Any existing rule for this exact program path is removed first, block or allow: a
+            // block rule would defeat the new allow, and a stale allow from an earlier attempt at
+            // this same generation would leave a port open that is no longer in use.
             @"$existing=Get-NetFirewallRule -PolicyStore ActiveStore -ErrorAction SilentlyContinue | Where-Object { " +
             @"($_ | Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue).Program -eq $agent }; " +
             @"foreach ($rule in $existing) { " +

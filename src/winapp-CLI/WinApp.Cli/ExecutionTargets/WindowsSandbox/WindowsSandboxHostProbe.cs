@@ -113,11 +113,18 @@ internal sealed class WindowsSandboxHostProbe(IProcessRunner processRunner) : IW
     /// unsupported.
     /// </para>
     /// <para>
-    /// It is not a general search path, because that would reintroduce exactly the hijack absolute
-    /// resolution exists to prevent. The candidate is built from the <em>known folder</em> for local
-    /// application data (<c>SHGetFolderPath</c>), not from <c>%LOCALAPPDATA%</c>, so redefining that
-    /// variable redirects nothing; and it is accepted only if it carries the reparse attribute every
-    /// real execution alias has, so a plain executable dropped into that folder is not used.
+    /// It is not a general search path, because that would reintroduce exactly the ambiguity
+    /// absolute resolution exists to prevent. The candidate is built from the <em>known folder</em>
+    /// for local application data (<c>SHGetFolderPath</c>) rather than from <c>%LOCALAPPDATA%</c>,
+    /// and it is accepted only if it carries the reparse attribute every real execution alias has,
+    /// so a plain executable dropped into that folder is not used.
+    /// </para>
+    /// <para>
+    /// Both checks are robustness, not a security boundary. That folder is writable by the very
+    /// user winapp runs as, and so is the shell-folder registry value behind the known-folder
+    /// lookup — an attacker who can subvert either is already running as this user and could
+    /// replace <c>winapp.exe</c> itself. What the checks do buy is that an ordinary stray file, or
+    /// a redefined environment variable, does not silently become the Sandbox control plane.
     /// </para>
     /// </remarks>
     internal static string? ResolveTrustedAlias()
