@@ -168,9 +168,10 @@ Sandbox** — use `wsb list`, `wsb connect --id <id>`, `wsb stop --id <id>`.
 
 **The Sandbox window must stay connected** for real input and screen recording. winapp connects a
 client only when the guest has no interactive session yet — connecting one that already has a client
-would start a second window, not reuse yours. Closing the window leaves inspection working while
-input and recording stop; winapp reports `sandbox_input_not_ready` rather than claiming input it did
-not deliver. `wsb connect` restores the same session and both capabilities.
+would start a second window, not reuse yours. If you closed the window, the session survives it, so
+winapp only finds out when the guest agent reports no input desktop; it then reconnects for you once,
+off-screen and without stealing focus. If that still leaves no input desktop it reports
+`sandbox_input_not_ready` with a `wsb connect` command rather than reconnecting again.
 
 ## Troubleshooting
 
