@@ -33,7 +33,7 @@ namespace WinApp.Cli.Tests;
 /// </remarks>
 [TestClass]
 [DoNotParallelize]
-public class SandboxHandleInheritanceTests
+public partial class SandboxHandleInheritanceTests
 {
     private const int StdOutputHandle = -11;
     private const uint HandleFlagInherit = 0x00000001;
@@ -171,10 +171,17 @@ public class SandboxHandleInheritanceTests
         }
     }
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern nint GetStdHandle(int nStdHandle);
+    // Deliberately its own P/Invoke declarations rather than a call through
+    // StandardHandleInheritance (the production type under test, just above): these two tests exist
+    // to verify what that type's Suppress() scope actually does to the real Win32 handle state, so
+    // reading that state back through the same type being verified would make the assertions
+    // tautological -- a regression in StandardHandleInheritance's own handle-flag logic could no
+    // longer be caught. Source-generated (LibraryImport) rather than classic DllImport, matching
+    // StandardHandleInheritance's own declarations, with the same SetLastError and BOOL marshalling.
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    private static partial nint GetStdHandle(int nStdHandle);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetHandleInformation(nint hObject, out uint lpdwFlags);
+    private static partial bool GetHandleInformation(nint hObject, out uint lpdwFlags);
 }
