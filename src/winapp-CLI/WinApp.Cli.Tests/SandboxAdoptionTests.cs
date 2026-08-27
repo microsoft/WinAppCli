@@ -61,19 +61,21 @@ public class SandboxAdoptionTests
     }
 
     [TestMethod]
-    public async Task AdoptedInstance_WhoseSessionCannotBeDetermined_IsConnected()
+    public async Task AdoptedInstance_WhoseSessionCannotBeDetermined_IsNotGivenAClientEither()
     {
-        // Without a session nothing else works, so an unanswerable probe errs toward making the
-        // guest usable rather than toward leaving it unreachable.
+        // `Unknown` means the probe drew no conclusion, not that there is no client. Treating it
+        // like a confirmed absence would reintroduce the duplication this whole path exists to
+        // prevent, because a client may well be attached. winapp prepares the guest anyway and lets
+        // the agent's own readiness report settle it.
         using var harness = new AdoptionHarness();
         harness.Cli.SetRunning(ManualInstanceId);
         harness.Cli.Session = GuestSessionAvailability.Unknown;
 
         await harness.RunUntilAgentLaunchAsync(TestContext.CancellationToken);
 
-        Assert.AreEqual(
-            1,
-            harness.Cli.Operations.Count(op => op.StartsWith("connect:", StringComparison.Ordinal)));
+        Assert.IsFalse(
+            harness.Cli.Operations.Any(op => op.StartsWith("connect:", StringComparison.Ordinal)),
+            "Only a confirmed absence of a login session may create a client.");
     }
 
     [TestMethod]
@@ -280,6 +282,90 @@ public class SandboxAdoptionTests
         Assert.IsLessThanOrEqualTo(ceiling, results, "Stale result generations must be bounded.");
     }
 
+    /// <summary>
+    /// A privileged bootstrap step that the guest ran and rejected must fail the command.
+    /// </summary>
+    /// <remarks>
+    /// This branch was unreachable until the guest's own exit code was parsed: <c>wsb exec</c> exits
+    /// 0 whenever it managed to launch the command, so reading its code reported a refused firewall
+    /// rule as a success and let the bootstrap continue toward an agent nothing could reach.
+    /// </remarks>
+    [TestMethod]
+    public async Task FirewallRuleRefusedByTheGuest_FailsAndDoesNotMarkTheTargetBootstrapped()
+    {
+        using var harness = new AdoptionHarness();
+        harness.Cli.SetRunning(ManualInstanceId);
+        harness.Cli.GuestExitCodes["New-NetFirewallRule"] = 1;
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => harness.Backend.EnsureConnectedAsync(
+                new EnsureTargetOptions(true), TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.TransportFailed, failure.Error.Code);
+        Assert.AreEqual("1", failure.Error.Context!["exitCode"]);
+
+        Assert.IsFalse(
+            harness.Cli.Operations.Any(op => op.StartsWith("launch-agent", StringComparison.Ordinal)),
+            "The agent must not be launched onto a port nothing authorised.");
+        Assert.IsNull(
+            harness.ReadState()?.BootstrappedEpoch,
+            "A bootstrap that failed must never be recorded as completed.");
+    }
+
+    /// <summary>
+    /// Developer Mode is a registration prerequisite, so a guest refusal warns rather than fails.
+    /// </summary>
+    /// <remarks>
+    /// Copying files and running commands do not need it. Refusing those because a packaged-run
+    /// prerequisite could not be set would turn one broken capability into all of them; guest winapp
+    /// reports the real problem when a packaged run is actually attempted.
+    /// </remarks>
+    [TestMethod]
+    public async Task DeveloperModeRefusedByTheGuest_DoesNotFailTheBootstrap()
+    {
+        using var harness = new AdoptionHarness();
+        harness.Cli.SetRunning(ManualInstanceId);
+        harness.Cli.GuestExitCodes["AllowDevelopmentWithoutDevLicense"] = 5;
+
+        // Reaching the agent launch at all is the assertion: the bootstrap kept going.
+        await harness.RunUntilAgentLaunchAsync(TestContext.CancellationToken);
+    }
+
+    /// <summary>
+    /// A guest with a login session but no attached client fails fast, not after three minutes.
+    /// </summary>
+    /// <remarks>
+    /// A closed Sandbox window leaves <c>ExistingLogin</c> working, so the session probe reports
+    /// ready and no client is launched. The agent then refuses with <c>NoInputDesktop</c>. Retrying
+    /// that is only sensible while a client winapp just launched is still coming up; with no client
+    /// launched it would spin to the heartbeat deadline and then blame the wrong thing.
+    /// </remarks>
+    [TestMethod]
+    public async Task ClosedClient_ReportsInputNotReadyImmediatelyInsteadOfRetryingForMinutes()
+    {
+        using var harness = new AdoptionHarness();
+        harness.Cli.SetRunning(ManualInstanceId);
+        harness.Cli.Session = GuestSessionAvailability.Ready;
+        harness.Cli.AgentRefusesWithNoInputDesktop = true;
+        harness.Cli.CurrentTargetRoot = harness.TargetRoot;
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => harness.Backend.EnsureConnectedAsync(
+                new EnsureTargetOptions(true), TestContext.CancellationToken));
+
+        stopwatch.Stop();
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.InputNotReady, failure.Error.Code);
+        StringAssert.Contains(failure.Error.NextCommand!.Command, "wsb connect", StringComparison.Ordinal);
+        Assert.IsTrue(failure.Error.NextCommand.Advisory);
+        Assert.IsLessThan(
+            WindowsSandboxBackend.HeartbeatTimeout,
+            stopwatch.Elapsed,
+            "The refusal must not wait out the heartbeat deadline.");
+    }
+
     private static List<string> GuestSharePaths(AdoptionHarness harness) =>
         [.. harness.Cli.Operations
             .Where(op => op.StartsWith("share|", StringComparison.Ordinal))
@@ -298,6 +384,7 @@ public class SandboxAdoptionTests
     private sealed class AdoptionHarness : IDisposable
     {
         private readonly DirectoryInfo _root;
+        private readonly TargetStateStore _stateStore;
 
         public AdoptionHarness()
         {
@@ -305,7 +392,8 @@ public class SandboxAdoptionTests
             _root.Create();
 
             var directories = new TargetStateDirectoryProvider(_root.FullName);
-            var stateStore = new TargetStateStore(directories);
+            _stateStore = new TargetStateStore(directories);
+            var stateStore = _stateStore;
             Cli = new AdoptionSandboxCli();
 
             TargetRoot = directories
@@ -332,6 +420,9 @@ public class SandboxAdoptionTests
 
         /// <summary>Where this target's per-generation bootstrap folders live.</summary>
         public string TargetRoot { get; }
+
+        /// <summary>The ownership record as another winapp process would read it.</summary>
+        public TargetState? ReadState() => _stateStore.Read(ExecutionTargetRef.WindowsSandboxDefault);
 
         public async Task RunUntilAgentLaunchAsync(CancellationToken cancellationToken)
         {
@@ -435,16 +526,78 @@ public class SandboxAdoptionTests
             CancellationToken cancellationToken)
         {
             Operations.Add(command);
+
+            // Lets a test make one specific privileged bootstrap step fail the way a guest would:
+            // dispatched fine, non-zero exit.
+            foreach (var (fragment, exitCode) in GuestExitCodes)
+            {
+                if (command.Contains(fragment, StringComparison.Ordinal))
+                {
+                    return Task.FromResult(exitCode);
+                }
+            }
+
             return Task.FromResult(0);
         }
+
+        /// <summary>Guest exit codes keyed by a fragment of the command that produces them.</summary>
+        public Dictionary<string, int> GuestExitCodes { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// When set, the agent publishes a <c>NoInputDesktop</c> refusal instead of a heartbeat.
+        /// </summary>
+        /// <remarks>
+        /// What a guest with a login session but no attached client actually does: it starts, finds
+        /// no input desktop, says so, and exits.
+        /// </remarks>
+        public bool AgentRefusesWithNoInputDesktop { get; set; }
 
         public Task LaunchAgentAsync(string id, string command, CancellationToken cancellationToken)
         {
             Operations.Add($"launch-agent:{command}");
 
+            if (AgentRefusesWithNoInputDesktop)
+            {
+                PublishNoInputDesktopHeartbeat(command);
+                return Task.CompletedTask;
+            }
+
             // Everything after this point needs a guest that does not exist in a unit test.
             throw new AgentLaunchReached();
         }
+
+        /// <summary>Writes the refusal the real agent would publish into the result share.</summary>
+        /// <remarks>
+        /// The epoch is read back from the connection material the host just staged, exactly as the
+        /// real agent does, because the boot nonce inside it is generated during the run and cannot
+        /// be known in advance.
+        /// </remarks>
+        private void PublishNoInputDesktopHeartbeat(string command)
+        {
+            const string Flag = "--result-dir \"";
+
+            var start = command.IndexOf(Flag, StringComparison.Ordinal) + Flag.Length;
+            var guestResult = command[start..command.IndexOf('"', start)];
+            var token = guestResult[(guestResult.LastIndexOf('-') + 1)..];
+
+            var hostResult = Path.Join(CurrentTargetRoot!, "bootstrap-result-" + token);
+            var material = GuestBootstrapMaterial.TryParse(
+                File.ReadAllText(Path.Join(CurrentTargetRoot!, "bootstrap-" + token, GuestBootstrapMaterial.FileName)))!;
+
+            var heartbeat = GuestAgentHeartbeat.Create(
+                new GuestAgentIdentity("test", "hash", "arm64", 1, 1),
+                GuestReadinessFailure.NoInputDesktop,
+                new ExecutionTargetEpoch(material.TargetEpoch),
+                port: 0,
+                DateTimeOffset.UtcNow);
+
+            File.WriteAllText(
+                Path.Join(hostResult, WindowsSandboxBackend.HeartbeatFileName),
+                heartbeat.ToJson());
+        }
+
+        /// <summary>Target root the harness is driving, so the heartbeat lands in the right share.</summary>
+        public string? CurrentTargetRoot { get; set; }
     }
 
     private sealed class StaticBinaryProvider(FileInfo binary) : IHostWinappBinaryProvider

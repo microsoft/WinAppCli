@@ -325,6 +325,34 @@ public class WindowsSandboxSetupTests
     }
 
     [TestMethod]
+    public async Task WorkingClientWithAnUnhealthyPackage_SaysSoWithoutAnInstallationWait()
+    {
+        // A client that answers but whose package Windows reports as Servicing is mid-update, not
+        // missing. Treating it as missing would launch the OS installer and wait ten minutes on a
+        // machine that is already nearly there.
+        _probe.Enqueue(Facts(payload: true, package: true, alias: true, version: "0.8.107.0", packageStatus: "Servicing"));
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => NewSetup().EnsureReadyAsync(TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.SetupIncomplete, failure.Error.Code);
+        Assert.AreEqual("Servicing", failure.Error.Context!["packageStatus"]);
+        Assert.AreEqual(0, _bootstrapperLaunches, "A client that already answers must not be reinstalled.");
+        Assert.AreEqual(0, _enabler.Attempts);
+    }
+
+    [TestMethod]
+    public async Task UnobservablePackageStatus_IsNotHeldAgainstAWorkingClient()
+    {
+        // A status winapp could not read is not evidence of a problem.
+        _probe.Enqueue(Facts(payload: true, package: true, alias: true, version: "0.8.107.0"));
+
+        var facts = await NewSetup().EnsureReadyAsync(TestContext.CancellationToken);
+
+        Assert.AreEqual(WindowsSandboxSetupState.Ready, facts.State);
+    }
+
+    [TestMethod]
     public async Task NonWindowsHost_IsUnsupportedAndNothingIsAttempted()
     {
         _probe.Enqueue(Facts(isWindows: false));

@@ -164,6 +164,20 @@ internal sealed class WindowsSandboxSetup(
             }
         }
 
+        // A client that answers but whose package Windows reports as unhealthy is being updated,
+        // not missing. Launching the installer and waiting ten minutes for it would be the wrong
+        // remedy for a machine that is already most of the way there, so this says what is happening
+        // and returns immediately.
+        if (!string.IsNullOrWhiteSpace(facts.Version) && !facts.IsPackageHealthy)
+        {
+            throw ExecutionTargetException.Create(
+                ExecutionTargetErrorCodes.SetupIncomplete,
+                "Windows is still updating the Windows Sandbox client.",
+                userAction: "Wait for Windows to finish, then run the command again.",
+                context: Detail(facts, facts.Detail),
+                example: "winapp run . --sandbox");
+        }
+
         return await InitializeClientAsync(facts, cancellationToken).ConfigureAwait(false);
     }
 

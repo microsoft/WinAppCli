@@ -262,18 +262,20 @@ internal sealed class WindowsSandboxBackend(
         // instance. Measured on a live Sandbox: `wsb connect` against an instance whose client is
         // already attached starts a *second* WindowsSandboxRemoteSession rather than reusing the
         // first, and that extra client outlives `wsb stop`. Taking over a Sandbox somebody already
-        // has open is exactly the case that would hit it, so the cheap ExistingLogin probe below is
-        // what keeps a user's own visible client from being silently duplicated.
+        // has open is exactly the case that would hit it.
         //
-        // A guest that already has a session is left alone even for a foreground command. If its
-        // client was closed, the session still answers but real input does not -- and the agent's
-        // own capability report is what settles that, failing with sandbox_input_not_ready and
-        // advising `wsb connect` rather than winapp guessing and stacking clients.
+        // Only a *confirmed* absence of a login session creates a client. `Unknown` means the probe
+        // could draw no conclusion, and a client may well be attached -- so treating it like a
+        // confirmed absence would reintroduce the duplication this exists to prevent. When winapp
+        // does not know, it prepares the guest anyway and lets the agent's own readiness report
+        // settle it, which is the authoritative signal for real input in any case.
         var session = await cli
             .ProbeInteractiveSessionAsync(lease.InstanceId, cancellationToken)
             .ConfigureAwait(false);
 
-        if (session is not GuestSessionAvailability.Ready)
+        var connectedClient = session is GuestSessionAvailability.NoLoginSession;
+
+        if (connectedClient)
         {
             _progress.Report("Connecting the Windows Sandbox window...");
             var windowSnapshot = windowController.Capture();
@@ -309,6 +311,7 @@ internal sealed class WindowsSandboxBackend(
             lease.InstanceId,
             bootstrap,
             lease.Epoch,
+            connectedClient,
             cancellationToken).ConfigureAwait(false);
 
         if (!string.Equals(heartbeat.BinaryHash, agentHash, StringComparison.OrdinalIgnoreCase))
@@ -964,19 +967,27 @@ internal sealed class WindowsSandboxBackend(
     }
 
     /// <summary>
-    /// Starts the agent once the connected client has made the login desktop input-ready.
+    /// Starts the agent, waiting for a just-launched client to make the desktop input-ready.
     /// </summary>
     /// <remarks>
     /// The client process is necessarily launched without waiting for it to exit, and its window can
     /// appear before the guest input desktop is ready. An agent started in that interval reports
     /// <c>NoInputDesktop</c> and exits without accepting anything, so repeating that bootstrap is
-    /// safe. No other failure is retried: once a command can be dispatched, its result is
-    /// authoritative and repeating it could duplicate a side effect.
+    /// safe — <em>while a client winapp just launched is still coming up</em>.
+    /// <para>
+    /// When no client was launched, the same report means something entirely different: the guest
+    /// has a login session but nobody is attached to it, which is what a closed Sandbox window looks
+    /// like. Retrying that would spin until the heartbeat deadline and then blame the wrong thing,
+    /// so it is reported immediately as the reconnectable condition it is.
+    /// </para>
+    /// No other failure is retried: once a command can be dispatched, its result is authoritative
+    /// and repeating it could duplicate a side effect.
     /// </remarks>
     private async Task<GuestAgentHeartbeat> LaunchReadyAgentAsync(
         string instanceId,
         BootstrapShare bootstrap,
         ExecutionTargetEpoch epoch,
+        bool clientWasLaunched,
         CancellationToken cancellationToken)
     {
         var deadline = DateTimeOffset.UtcNow + HeartbeatTimeout;
@@ -1003,14 +1014,38 @@ internal sealed class WindowsSandboxBackend(
                     .ConfigureAwait(false);
             }
             catch (ExecutionTargetException ex) when (
-                ex.Error.Code == ExecutionTargetErrorCodes.NoInteractiveSession &&
-                ex.Error.Context?.GetValueOrDefault("reason") == GuestReadinessFailure.NoInputDesktop.ToString() &&
+                IsWaitingForALaunchedClient(ex, clientWasLaunched) &&
                 DateTimeOffset.UtcNow < deadline)
             {
                 await Task.Delay(AgentLaunchRetryDelay, cancellationToken).ConfigureAwait(false);
             }
+            catch (ExecutionTargetException ex) when (IsNoInputDesktop(ex) && !clientWasLaunched)
+            {
+                throw ExecutionTargetException.Create(
+                    ExecutionTargetErrorCodes.InputNotReady,
+                    "The Windows Sandbox window is disconnected, so the guest has no input desktop.",
+                    userAction: "Reconnect the Sandbox window, then retry.",
+                    context: new Dictionary<string, string> { ["sandboxId"] = instanceId },
+                    nextCommand: new ExecutionTargetNextCommand
+                    {
+                        Command = $"wsb connect --id {instanceId}",
+
+                        // Reconnecting changes what is on screen, so it needs a user decision.
+                        Advisory = true,
+                    },
+                    innerException: ex);
+            }
         }
     }
+
+    /// <summary>Whether the agent refused because no input desktop is available.</summary>
+    private static bool IsNoInputDesktop(ExecutionTargetException exception) =>
+        exception.Error.Code == ExecutionTargetErrorCodes.NoInteractiveSession &&
+        exception.Error.Context?.GetValueOrDefault("reason") == GuestReadinessFailure.NoInputDesktop.ToString();
+
+    /// <summary>Whether that refusal is one a client winapp just launched will resolve.</summary>
+    private static bool IsWaitingForALaunchedClient(ExecutionTargetException exception, bool clientWasLaunched) =>
+        clientWasLaunched && IsNoInputDesktop(exception);
 
     /// <summary>
     /// Waits for the agent's readiness heartbeat, reporting its own diagnostics when it refuses.
