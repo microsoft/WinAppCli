@@ -80,39 +80,33 @@ public class GuestHandshakeSocketTests
     {
         var key = NewKey();
         var (listener, port) = ListenOnLoopback();
+        using var _ = listener;
 
-        try
+        // Exactly what GuestConnectionAcceptor does past its tracked ceiling: accept, then close
+        // without ever reading. The host's hello is already in the receive buffer, so Windows
+        // answers with RST rather than FIN.
+        var dropping = Task.Run(async () =>
         {
-            // Exactly what GuestConnectionAcceptor does past its tracked ceiling: accept, then close
-            // without ever reading. The host's hello is already in the receive buffer, so Windows
-            // answers with RST rather than FIN.
-            var dropping = Task.Run(async () =>
-            {
-                var client = await listener.AcceptTcpClientAsync(TestContext.CancellationToken);
-                client.Client.LingerState = new LingerOption(enable: true, seconds: 0);
-                client.Dispose();
-            });
+            var client = await listener.AcceptTcpClientAsync(TestContext.CancellationToken);
+            client.Client.LingerState = new LingerOption(enable: true, seconds: 0);
+            client.Dispose();
+        });
 
-            var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
-                () => GuestTcpTransport.ConnectAsync(Loopback, Material(key, port), TestContext.CancellationToken)
-                    .WaitAsync(Promptly, TestContext.CancellationToken));
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => GuestTcpTransport.ConnectAsync(Loopback, Material(key, port), TestContext.CancellationToken)
+                .WaitAsync(Promptly, TestContext.CancellationToken));
 
-            await dropping;
+        await dropping;
 
-            // Coded, not a raw IOException. An uncoded failure would escape the caller that decides
-            // between reporting and repairing, and reach the user as an unclassified I/O error.
-            Assert.AreEqual(ExecutionTargetErrorCodes.TransportFailed, failure.Error.Code);
-            Assert.IsTrue(
-                failure.Error.Context?.ContainsKey(GuestSecureChannel.ClosedDuringHandshakeKey) == true,
-                "A peer that accepted and then reset the connection must be recognised as having closed it.");
+        // Coded, not a raw IOException. An uncoded failure would escape the caller that decides
+        // between reporting and repairing, and reach the user as an unclassified I/O error.
+        Assert.AreEqual(ExecutionTargetErrorCodes.TransportFailed, failure.Error.Code);
+        Assert.IsTrue(
+            failure.Error.Context?.ContainsKey(GuestSecureChannel.ClosedDuringHandshakeKey) is true,
+            "A peer that accepted and then reset the connection must be recognised as having closed it.");
 
-            // The original cause survives classification, so diagnostics still say what happened.
-            Assert.IsNotNull(failure.InnerException);
-        }
-        finally
-        {
-            listener.Dispose();
-        }
+        // The original cause survives classification, so diagnostics still say what happened.
+        Assert.IsNotNull(failure.InnerException);
     }
 
     [TestMethod]
@@ -120,33 +114,27 @@ public class GuestHandshakeSocketTests
     {
         var key = NewKey();
         var (listener, port) = ListenOnLoopback();
+        using var _ = listener;
 
-        try
+        // The other shape of the same event: the peer drains the hello first, so the close is a
+        // clean FIN and surfaces as end of stream. Both must classify the same way.
+        var closing = Task.Run(async () =>
         {
-            // The other shape of the same event: the peer drains the hello first, so the close is a
-            // clean FIN and surfaces as end of stream. Both must classify the same way.
-            var closing = Task.Run(async () =>
-            {
-                var client = await listener.AcceptTcpClientAsync(TestContext.CancellationToken);
-                var buffer = new byte[GuestProtocol.HelloSize];
-                await client.GetStream().ReadExactlyAsync(buffer, TestContext.CancellationToken);
-                client.Dispose();
-            });
+            var client = await listener.AcceptTcpClientAsync(TestContext.CancellationToken);
+            var buffer = new byte[GuestProtocol.HelloSize];
+            await client.GetStream().ReadExactlyAsync(buffer, TestContext.CancellationToken);
+            client.Dispose();
+        });
 
-            var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
-                () => GuestTcpTransport.ConnectAsync(Loopback, Material(key, port), TestContext.CancellationToken)
-                    .WaitAsync(Promptly, TestContext.CancellationToken));
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => GuestTcpTransport.ConnectAsync(Loopback, Material(key, port), TestContext.CancellationToken)
+                .WaitAsync(Promptly, TestContext.CancellationToken));
 
-            await closing;
+        await closing;
 
-            Assert.IsTrue(
-                failure.Error.Context?.ContainsKey(GuestSecureChannel.ClosedDuringHandshakeKey) == true,
-                "A clean close during the handshake must classify the same as a reset.");
-        }
-        finally
-        {
-            listener.Dispose();
-        }
+        Assert.IsTrue(
+            failure.Error.Context?.ContainsKey(GuestSecureChannel.ClosedDuringHandshakeKey) == true,
+            "A clean close during the handshake must classify the same as a reset.");
     }
 
     [TestMethod]
@@ -194,38 +182,32 @@ public class GuestHandshakeSocketTests
         // closed" would report a key mismatch as a busy agent and never repair the stale material
         // that actually caused it.
         var (listener, port) = ListenOnLoopback();
+        using var _ = listener;
 
-        try
+        var guestKey = NewKey();
+        var serving = Task.Run(async () =>
         {
-            var guestKey = NewKey();
-            var serving = Task.Run(async () =>
+            var client = await listener.AcceptTcpClientAsync(TestContext.CancellationToken);
+            try
             {
-                var client = await listener.AcceptTcpClientAsync(TestContext.CancellationToken);
-                try
-                {
-                    await GuestTcpTransport.EstablishAsync(
-                        client, Material(guestKey, port), TestContext.CancellationToken);
-                }
-                catch (ExecutionTargetException)
-                {
-                    // The guest rejects the host too; this test asserts on the host's view.
-                }
-            });
+                await GuestTcpTransport.EstablishAsync(
+                    client, Material(guestKey, port), TestContext.CancellationToken);
+            }
+            catch (ExecutionTargetException)
+            {
+                // The guest rejects the host too; this test asserts on the host's view.
+            }
+        });
 
-            var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
-                () => GuestTcpTransport.ConnectAsync(Loopback, Material(NewKey(), port), TestContext.CancellationToken)
-                    .WaitAsync(Promptly, TestContext.CancellationToken));
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => GuestTcpTransport.ConnectAsync(Loopback, Material(NewKey(), port), TestContext.CancellationToken)
+                .WaitAsync(Promptly, TestContext.CancellationToken));
 
-            await serving;
+        await serving;
 
-            Assert.IsFalse(
-                failure.Error.Context?.ContainsKey(GuestSecureChannel.ClosedDuringHandshakeKey) == true,
-                "A key mismatch must not be reported as the peer declining the connection.");
-        }
-        finally
-        {
-            listener.Dispose();
-        }
+        Assert.IsFalse(
+            failure.Error.Context?.ContainsKey(GuestSecureChannel.ClosedDuringHandshakeKey) == true,
+            "A key mismatch must not be reported as the peer declining the connection.");
     }
 
     [TestMethod]
@@ -235,15 +217,11 @@ public class GuestHandshakeSocketTests
         // accepted, so what separates them is whether anything still answers afterwards.
         var (listener, port) = ListenOnLoopback();
 
-        try
+        using (listener)
         {
             Assert.IsTrue(
                 await GuestTcpTransport.IsListeningAsync(
                     Loopback, port, TimeSpan.FromSeconds(5), TestContext.CancellationToken));
-        }
-        finally
-        {
-            listener.Dispose();
         }
 
         Assert.IsFalse(
@@ -258,6 +236,7 @@ public class GuestHandshakeSocketTests
         // tracked ceiling, over real sockets, while healthy channels are open.
         var key = NewKey();
         var (listener, port) = ListenOnLoopback();
+        using var _ = listener;
         var material = Material(key, port);
 
         var limits = new GuestConnectionLimits(
@@ -332,7 +311,6 @@ public class GuestHandshakeSocketTests
 
             await shutdown.CancelAsync();
             await serving;
-            listener.Dispose();
         }
     }
 
