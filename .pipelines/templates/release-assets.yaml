@@ -4,7 +4,7 @@
 # scripts/verify-release-assets.ps1) and the real rename in Release_GitHub - both in release.yml.
 # One copy of the regexes means the weekly rehearsal exercises the same code a real release runs.
 #
-# The PowerShell is inline rather than a call to scripts/stage-release-assets.ps1 on purpose:
+# The PowerShell is inline rather than a call to a .ps1 in scripts/ on purpose:
 # 1ES release jobs (templateContext.type: releaseJob) cannot check out the repo, so no script
 # from the working tree is on disk there. A YAML `- template:` reference is fine because it is
 # expanded at compile time - the steps below are inlined into the job before it ever runs.
