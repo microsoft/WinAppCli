@@ -425,7 +425,7 @@ public class GuestCommandServerTests
     [TestMethod]
     public async Task StopPackage_WhenTheRegisteredLocationNoLongerExistsOnDisk_StillMatchesAndStops()
     {
-        var deletedLayout = Path.Combine(Path.GetTempPath(), $"winapp-test-deleted-layout-{Guid.NewGuid():n}");
+        var deletedLayout = Path.Join(Path.GetTempPath(), $"winapp-test-deleted-layout-{Guid.NewGuid():n}");
         Assert.IsFalse(Directory.Exists(deletedLayout), "Precondition: the simulated layout must not exist.");
 
         var launcher = new FakeAppLauncherService
