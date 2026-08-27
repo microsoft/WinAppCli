@@ -84,6 +84,18 @@ internal sealed record WindowsSandboxHostFacts
     /// <summary>Diagnostic detail from the last probe, for setup failure context.</summary>
     public string? Detail { get; init; }
 
+    /// <summary>
+    /// Whether the package is either healthy or simply not observable.
+    /// </summary>
+    /// <remarks>
+    /// A status winapp could not read is not evidence of a problem, so it does not count against
+    /// the host. A status Windows actively reported as not OK does: <c>Servicing</c> means the
+    /// package is being replaced underneath any command that starts now, and <c>Disabled</c> or
+    /// <c>NeedsRemediation</c> mean it may stop working part-way through.
+    /// </remarks>
+    public bool IsPackageHealthy =>
+        PackageStatus is null || string.Equals(PackageStatus, "Ok", StringComparison.Ordinal);
+
     /// <summary>Classifies these facts into the state the setup runner acts on.</summary>
     public WindowsSandboxSetupState State => WindowsSandboxReadiness.Classify(this);
 }
@@ -119,10 +131,16 @@ internal static class WindowsSandboxReadiness
             return WindowsSandboxSetupState.NotWindows;
         }
 
-        // A version reply is the only proof of readiness. It is deliberately checked before the
-        // payload: a host can be ready through a client winapp did not watch arrive, and re-running
-        // setup against a working Sandbox would start one for no reason.
-        if (!string.IsNullOrWhiteSpace(facts.Version))
+        // A version reply is the only proof that the client works. It is deliberately checked before
+        // the payload: a host can be ready through a client winapp did not watch arrive, and
+        // re-running setup against a working Sandbox would start one for no reason.
+        //
+        // Package health is consulted alongside it rather than ignored. A package Windows reports as
+        // Disabled, Servicing, or otherwise not OK is one that can stop working mid-command or is
+        // being replaced underneath us, so a version reply from it is not a durable "ready" -- and
+        // an unhealthy package with a working alias is exactly the state a mid-update machine is in.
+        // A package winapp could not observe at all (PackageStatus null) is not held against it.
+        if (!string.IsNullOrWhiteSpace(facts.Version) && facts.IsPackageHealthy)
         {
             return WindowsSandboxSetupState.Ready;
         }

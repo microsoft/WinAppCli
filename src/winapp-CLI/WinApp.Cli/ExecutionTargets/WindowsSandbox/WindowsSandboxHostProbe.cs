@@ -46,8 +46,9 @@ internal sealed class WindowsSandboxHostProbe(IProcessRunner processRunner) : IW
     /// <summary>Existence check seam, so path handling can be exercised without those files.</summary>
     internal Func<string, bool> FileExists { get; set; } = File.Exists;
 
-    /// <summary>Alias resolution seam.</summary>
-    internal Func<string?> ResolveAlias { get; set; } = ResolveTrustedAlias;
+    /// <summary>Alias resolution seam; the argument is whether the Sandbox package is registered.</summary>
+    internal Func<bool, string?> ResolveAlias { get; set; } = registered =>
+        ResolveTrustedAlias(() => registered);
 
     /// <summary>Package query seam; the real one calls <see cref="PackageManager"/>.</summary>
     internal Func<SandboxPackagePresence> QueryPackage { get; set; } = DefaultQueryPackage;
@@ -71,7 +72,7 @@ internal sealed class WindowsSandboxHostProbe(IProcessRunner processRunner) : IW
 
         var payloadPresent = FileExists(PayloadExecutablePath());
         var package = QueryPackage();
-        var alias = ResolveAlias();
+        var alias = ResolveAlias(package.Registered);
 
         var version = alias is null
             ? null
@@ -102,38 +103,33 @@ internal sealed class WindowsSandboxHostProbe(IProcessRunner processRunner) : IW
             WindowsSandboxReadiness.PayloadExecutableName);
 
     /// <summary>
-    /// Finds a <c>wsb.exe</c> that is safe to execute, preferring PATH and falling back to the
-    /// known WindowsApps folder.
+    /// Finds the Windows Sandbox execution alias, and only that.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The fallback exists because a process launched with a stripped or minimal PATH — a build
-    /// agent, a service, an editor task runner — sees no WindowsApps entry at all, even on a host
-    /// where Sandbox is perfectly usable. Refusing to look anywhere else would report that host as
-    /// unsupported.
+    /// <b>PATH is deliberately not consulted.</b> It used to be, and that was a real hole: PATH is
+    /// an ordered list winapp does not control, its entries are frequently directories written by
+    /// installers, build agents, or other principals, and the first absolute entry containing a file
+    /// named <c>wsb.exe</c> won. A planted binary there would become the Sandbox control plane — and
+    /// worse since readiness probing runs it, it would be executed <em>before</em> the user's
+    /// project is even built. Resolving one known location instead removes the ordering and the
+    /// cross-principal exposure together.
     /// </para>
     /// <para>
-    /// It is not a general search path, because that would reintroduce exactly the ambiguity
-    /// absolute resolution exists to prevent. The candidate is built from the <em>known folder</em>
-    /// for local application data (<c>SHGetFolderPath</c>) rather than from <c>%LOCALAPPDATA%</c>,
-    /// and it is accepted only if it carries the reparse attribute every real execution alias has,
-    /// so a plain executable dropped into that folder is not used.
+    /// The candidate is built from the <em>known folder</em> for local application data
+    /// (<c>SHGetFolderPath</c>) rather than <c>%LOCALAPPDATA%</c>, so redefining that variable
+    /// redirects nothing, and it is accepted only when it is a reparse point — every real execution
+    /// alias is one — and the Windows Sandbox package is registered for this user.
     /// </para>
     /// <para>
-    /// Both checks are robustness, not a security boundary. That folder is writable by the very
-    /// user winapp runs as, and so is the shell-folder registry value behind the known-folder
-    /// lookup — an attacker who can subvert either is already running as this user and could
-    /// replace <c>winapp.exe</c> itself. What the checks do buy is that an ordinary stray file, or
-    /// a redefined environment variable, does not silently become the Sandbox control plane.
+    /// This is not a defence against the user's own account. That folder, and the shell-folder
+    /// registry value behind the known-folder lookup, are both writable by the very user winapp runs
+    /// as; anyone who can subvert either can already replace <c>winapp.exe</c> itself. What it does
+    /// remove is every path that depends on some *other* principal's directory being trustworthy.
     /// </para>
     /// </remarks>
-    internal static string? ResolveTrustedAlias()
+    internal static string? ResolveTrustedAlias(Func<bool>? isPackageRegistered = null)
     {
-        if (WindowsSandboxCli.ResolveExecutable() is { } onPath)
-        {
-            return onPath;
-        }
-
         try
         {
             var localAppData = Environment.GetFolderPath(
@@ -151,7 +147,16 @@ internal sealed class WindowsSandboxHostProbe(IProcessRunner processRunner) : IW
                 "WindowsApps",
                 WindowsSandboxCli.ExecutableName);
 
-            return IsExecutionAlias(candidate) ? candidate : null;
+            if (!IsExecutionAlias(candidate))
+            {
+                return null;
+            }
+
+            // Ties the file to the package it is supposed to belong to. An alias whose package is
+            // not registered for this user cannot be the Sandbox client, whatever it is named.
+            var registered = isPackageRegistered ?? (() => DefaultQueryPackage().Registered);
+
+            return registered() ? candidate : null;
         }
         catch (Exception ex) when (
             ex is IOException or UnauthorizedAccessException or ArgumentException

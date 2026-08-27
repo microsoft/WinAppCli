@@ -514,6 +514,12 @@ public class SandboxUxRegressionTests
             const string InstanceId = "sandbox-existing";
 
             Cli.SetRunning(InstanceId);
+
+            // A previously bootstrapped instance has a client attached, so its guest already has an
+            // interactive session -- which is what makes reconnecting it both unnecessary and
+            // harmful.
+            Cli.Session = GuestSessionAvailability.Ready;
+
             _stateStore.Commit(
                 ExecutionTargetRef.WindowsSandboxDefault,
                 new TargetState
@@ -680,6 +686,21 @@ public class SandboxUxRegressionTests
         {
             Operations.Add("get-ip");
             return Task.FromResult("172.27.0.2");
+        }
+
+        /// <summary>What the guest reports when asked whether it already has a login session.</summary>
+        /// <remarks>
+        /// Defaults to "nobody has connected yet", which is what a Sandbox started by <c>wsb start</c>
+        /// actually reports until a client attaches.
+        /// </remarks>
+        public GuestSessionAvailability Session { get; set; } = GuestSessionAvailability.NoLoginSession;
+
+        public Task<GuestSessionAvailability> ProbeInteractiveSessionAsync(
+            string id,
+            CancellationToken cancellationToken)
+        {
+            Operations.Add("probe-session");
+            return Task.FromResult(Session);
         }
 
         public Task ShareFolderAsync(

@@ -40,7 +40,7 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
     private string? _executablePath;
 
     /// <summary>Starts the long-lived interactive client; seamed for argument-construction tests.</summary>
-    internal Action<ProcessStartInfo> ConnectLauncher { get; set; } = LaunchConnectedClient;
+    internal Func<ProcessStartInfo, Process?> ConnectLauncher { get; set; } = LaunchConnectedClient;
 
     /// <inheritdoc/>
     public bool IsAvailable => Executable is not null;
@@ -181,15 +181,17 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
         }
 
         // `wsb connect` is the interactive client, not a setup command that exits after opening one.
-        // Waiting for it would block target preparation until the user closed Sandbox. Start it as a
-        // long-lived child; `wsb stop --id` remains the only lifecycle operation that ends it.
+        // Waiting for it to finish would block target preparation until the user closed Sandbox.
         cancellationToken.ThrowIfCancellationRequested();
 
         var startInfo = new ProcessStartInfo
         {
-            // ShellExecute does not inherit handles, so the client cannot hold the caller's captured
-            // stdout/stderr open. That is load-bearing, not incidental: this child outlives winapp.
-            // The suppression scope below keeps the guarantee even if this flag is ever changed.
+            // Load-bearing, not incidental. This child can outlive winapp, so it must not inherit
+            // the caller's standard handles: a caller capturing winapp's output would otherwise not
+            // reach end of stream until the whole Sandbox went away. ShellExecute does not inherit
+            // handles, and the suppression scope below keeps the guarantee even if this flag is ever
+            // changed. Redirecting the child's own streams instead is NOT sufficient and must not be
+            // substituted -- doing so reproduces the pipe deadlock this avoids.
             UseShellExecute = true,
             FileName = executable,
             CreateNoWindow = false,
@@ -199,22 +201,135 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
             startInfo.ArgumentList.Add(argument);
         }
 
+        Process? client;
+
         using (StandardHandleInheritance.Suppress())
         {
-            ConnectLauncher(startInfo);
+            client = ConnectLauncher(startInfo);
         }
 
-        await Task.CompletedTask;
+        if (client is null)
+        {
+            return;
+        }
+
+        // Some client builds exit immediately and leave the window to a separate process; others
+        // stay up for the life of the session. Waiting a bounded moment catches a fast, outright
+        // failure without ever blocking on the long-lived case -- which is why the timeout is short
+        // and a still-running client is simply left alone rather than waited on or killed.
+        try
+        {
+            using (client)
+            {
+                var exited = await client
+                    .WaitForExitAsync(cancellationToken)
+                    .WaitAsync(ConnectFailureWindow, cancellationToken)
+                    .ContinueWith(
+                        task => task.IsCompletedSuccessfully,
+                        cancellationToken,
+                        TaskContinuationOptions.ExecuteSynchronously,
+                        TaskScheduler.Default)
+                    .ConfigureAwait(false);
+
+                if (exited && client.ExitCode != 0)
+                {
+                    throw ExecutionTargetException.Create(
+                        ExecutionTargetErrorCodes.NoInteractiveSession,
+                        "The Windows Sandbox client could not connect to the Sandbox.",
+                        userAction: "Retry the command. If it keeps failing, close the Sandbox and try again.",
+                        context: new Dictionary<string, string>
+                        {
+                            ["sandboxId"] = id,
+                            ["exitCode"] = client.ExitCode.ToString(
+                                System.Globalization.CultureInfo.InvariantCulture),
+                        });
+                }
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // The client is gone or its exit code is unavailable. Not being able to observe a
+            // failure is not evidence of one; the agent heartbeat is what proves the session works.
+        }
     }
 
-    private static void LaunchConnectedClient(ProcessStartInfo startInfo)
-    {
-        using var process = Process.Start(startInfo)
+    /// <summary>How long to watch a just-launched client before assuming it is the long-lived one.</summary>
+    /// <remarks>
+    /// Short on purpose. It exists only to catch an outright launch failure, and every extra second
+    /// here is a second added to every bootstrap that is working perfectly well.
+    /// </remarks>
+    internal static readonly TimeSpan ConnectFailureWindow = TimeSpan.FromSeconds(2);
+
+    private static Process? LaunchConnectedClient(ProcessStartInfo startInfo) =>
+        Process.Start(startInfo)
             ?? throw new InvalidOperationException("Failed to start the Windows Sandbox client.");
-    }
 
     /// <inheritdoc/>
     public async Task<int> ExecuteAsync(
+        string id,
+        string command,
+        string? workingDirectory,
+        bool asSystem,
+        CancellationToken cancellationToken)
+    {
+        var result = await RunExecAsync(id, command, workingDirectory, asSystem, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (result.Dispatched)
+        {
+            return result.GuestExitCode;
+        }
+
+        throw NotDispatched(id, result);
+    }
+
+    /// <inheritdoc/>
+    public async Task<GuestSessionAvailability> ProbeInteractiveSessionAsync(
+        string id,
+        CancellationToken cancellationToken)
+    {
+        // A fixed no-op. It changes nothing in the guest and its own exit code is irrelevant --
+        // what is being measured is whether `wsb` could dispatch it as the interactive user at all.
+        var result = await RunExecAsync(
+            id,
+            "cmd.exe /c exit 0",
+            workingDirectory: null,
+            asSystem: false,
+            cancellationToken).ConfigureAwait(false);
+
+        if (result.Dispatched)
+        {
+            return GuestSessionAvailability.Ready;
+        }
+
+        return result.HResult == WsbHResult.NoSuchLogonSession
+            ? GuestSessionAvailability.NoLoginSession
+            : GuestSessionAvailability.Unknown;
+    }
+
+    /// <summary>What one <c>wsb exec</c> invocation actually reported.</summary>
+    /// <param name="Dispatched">Whether the command reached the guest at all.</param>
+    /// <param name="GuestExitCode">The guest process's exit code, when it ran.</param>
+    /// <param name="HResult">The HRESULT <c>wsb</c> failed with, when it did not.</param>
+    /// <param name="Summary">One line of <c>wsb</c>'s own diagnostic, for the failure message.</param>
+    private readonly record struct ExecOutcome(
+        bool Dispatched,
+        int GuestExitCode,
+        int? HResult,
+        string Summary);
+
+    /// <summary>
+    /// Runs <c>wsb exec --raw</c> and separates "the guest ran it" from "it never started".
+    /// </summary>
+    /// <remarks>
+    /// Both halves are load-bearing. <c>wsb</c> exits 0 whenever it managed to launch the command,
+    /// whatever the command then did, and prints the guest's own exit code as JSON; it exits with an
+    /// HRESULT and writes to standard error when the command could not be launched. Treating
+    /// <c>wsb</c>'s exit code as the guest's makes every failed privileged bootstrap step look
+    /// successful, and treating a dispatch failure as a guest exit code lets an infrastructure
+    /// problem impersonate an application result.
+    /// </remarks>
+    private async Task<ExecOutcome> RunExecAsync(
         string id,
         string command,
         string? workingDirectory,
@@ -238,24 +353,38 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
 
         var result = await RunAsync(arguments, cancellationToken, throwOnFailure: false).ConfigureAwait(false);
 
-        // wsb exec never relays the guest's stdout or stderr, so anything on stderr is wsb's own
-        // diagnostic, meaning the command was not dispatched. Returning that exit code as if it came
-        // from the guest process would let an infrastructure failure impersonate an application
-        // result -- exactly the confusion the failure model exists to prevent.
-        if (!string.IsNullOrWhiteSpace(result.StandardError))
+        // Anything on stderr, or a non-zero wsb exit, means the command was never dispatched.
+        if (result.ExitCode != 0 || !string.IsNullOrWhiteSpace(result.StandardError))
         {
-            throw ExecutionTargetException.Create(
-                ExecutionTargetErrorCodes.TransportFailed,
-                $"The guest bootstrap command could not be dispatched: {Summarize(result)}",
-                userAction: "Retry the command. If it keeps failing, close the Sandbox and try again.",
-                context: new Dictionary<string, string>
-                {
-                    ["sandboxId"] = id,
-                    ["exitCode"] = result.ExitCode.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                });
+            return new ExecOutcome(false, 0, WsbHResult.Extract(result), Summarize(result));
         }
 
-        return result.ExitCode;
+        var payload = Deserialize(result.StandardOutput, WindowsSandboxCliJsonContext.Default.WsbExecResult);
+
+        // Dispatched but no exit code reported. Refused rather than assumed to be zero: guessing
+        // success here is exactly how a failed privileged step would pass unnoticed.
+        return payload?.ExitCode is { } guestExitCode
+            ? new ExecOutcome(true, guestExitCode, null, string.Empty)
+            : new ExecOutcome(false, 0, null, "wsb exec reported no guest exit code");
+    }
+
+    private static ExecutionTargetException NotDispatched(string id, ExecOutcome outcome)
+    {
+        var context = new Dictionary<string, string>
+        {
+            ["sandboxId"] = id,
+        };
+
+        if (outcome.HResult is { } hresult)
+        {
+            context[WsbHResult.ContextKey] = WsbHResult.Format(hresult);
+        }
+
+        return ExecutionTargetException.Create(
+            ExecutionTargetErrorCodes.TransportFailed,
+            $"The guest bootstrap command could not be dispatched: {outcome.Summary}",
+            userAction: "Retry the command. If it keeps failing, close the Sandbox and try again.",
+            context: context);
     }
 
     /// <inheritdoc/>
@@ -439,50 +568,5 @@ internal sealed class WindowsSandboxCli(IProcessRunner processRunner) : IWindows
         return string.IsNullOrEmpty(text)
             ? $"exit code {result.ExitCode}"
             : text;
-    }
-
-    /// <summary>
-    /// Locates <c>wsb.exe</c> on PATH without launching it.
-    /// </summary>
-    /// <remarks>
-    /// Relative PATH entries are skipped. A relative entry resolves against the current directory,
-    /// so honouring one would reintroduce exactly the hijack that using an absolute path prevents.
-    /// </remarks>
-    internal static string? ResolveExecutable()
-    {
-        var pathValue = Environment.GetEnvironmentVariable("PATH");
-        if (string.IsNullOrEmpty(pathValue))
-        {
-            return null;
-        }
-
-        foreach (var directory in pathValue.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        {
-            try
-            {
-                var trimmed = directory.Trim().Trim('"');
-                if (trimmed.Length == 0 || !Path.IsPathFullyQualified(trimmed))
-                {
-                    continue;
-                }
-
-                // Route even this through the one managed-path invariant rather than combining
-                // directly. The segment is a constant here, so the check can never fire -- but the
-                // value of a central rule is that no call site is exempt from it, and a future edit
-                // that made this segment dynamic would be validated automatically instead of
-                // silently becoming the one place that was not.
-                var candidate = Orchestration.TargetPathSafety.CombineInsideRoot(trimmed, ExecutableName);
-                if (File.Exists(candidate))
-                {
-                    return candidate;
-                }
-            }
-            catch (ArgumentException)
-            {
-                // A malformed PATH entry is not a reason to fail the probe.
-            }
-        }
-
-        return null;
     }
 }

@@ -5,6 +5,21 @@ using System.Text.Json.Serialization;
 
 namespace WinApp.Cli.ExecutionTargets.WindowsSandbox;
 
+/// <summary>Whether a guest already has an interactive session to run things in.</summary>
+internal enum GuestSessionAvailability
+{
+    /// <summary>An <c>ExistingLogin</c> command ran, so a client session is already established.</summary>
+    Ready,
+
+    /// <summary>
+    /// The guest reported <c>ERROR_NO_SUCH_LOGON_SESSION</c>: nobody has connected a client yet.
+    /// </summary>
+    NoLoginSession,
+
+    /// <summary>The probe could not answer, so nothing may be concluded from it.</summary>
+    Unknown,
+}
+
 /// <summary>
 /// Typed wrapper over the <c>wsb.exe</c> command line.
 /// </summary>
@@ -85,21 +100,37 @@ internal interface IWindowsSandboxCli
     Task ConnectAsync(string id, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Runs one fixed bootstrap command in the guest and returns its exit code.
+    /// Runs one fixed bootstrap command in the guest and returns the <em>guest</em> exit code.
     /// </summary>
     /// <remarks>
-    /// <c>wsb exec</c> takes the command as a single string and relays only an exit code, never the
-    /// guest's stdout or stderr. That is why it is used solely for fixed bootstrap operations: real
-    /// work needs argument fidelity and streaming, which only the authenticated channel provides.
-    /// The bootstrap writes its own output to the managed bootstrap folder so failures still surface
-    /// real guest diagnostics.
+    /// <c>wsb exec</c> takes the command as a single string and never relays the guest's stdout or
+    /// stderr. That is why it is used solely for fixed bootstrap operations: real work needs
+    /// argument fidelity and streaming, which only the authenticated channel provides.
+    /// <para>
+    /// The returned value is the guest process's own exit code, read from <c>--raw</c> output.
+    /// <c>wsb</c>'s exit code is <b>not</b> it: a guest command that fails leaves <c>wsb</c> exiting
+    /// 0, so returning that would report every failed privileged bootstrap step as a success.
+    /// </para>
     /// </remarks>
+    /// <exception cref="ExecutionTargetException">
+    /// The command could not be dispatched at all, or <c>wsb</c> reported no guest exit code.
+    /// </exception>
     Task<int> ExecuteAsync(
         string id,
         string command,
         string? workingDirectory,
         bool asSystem,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Asks, without changing anything, whether the guest has an interactive login session.
+    /// </summary>
+    /// <remarks>
+    /// The one cheap question that distinguishes a guest whose client is already attached from one
+    /// that has never had a session. It exists so a Sandbox winapp took over is not handed a second
+    /// client it does not need — see <c>WindowsSandboxBackend</c>.
+    /// </remarks>
+    Task<GuestSessionAvailability> ProbeInteractiveSessionAsync(string id, CancellationToken cancellationToken);
 
     /// <summary>
     /// Launches the fixed persistent guest-agent bootstrap command without waiting for it to exit.
@@ -143,6 +174,22 @@ internal sealed class WsbNetworkList
 }
 
 /// <summary>
+/// Payload of <c>wsb exec --raw</c>.
+/// </summary>
+/// <remarks>
+/// Measured on a live Sandbox: a dispatched command makes <c>wsb</c> itself exit 0 and print
+/// <c>{ "ExitCode": N }</c>, where <c>N</c> is the <em>guest</em> process's exit code. A command
+/// that could not be dispatched at all makes <c>wsb</c> exit with an HRESULT and write to standard
+/// error instead, printing no JSON. Those are different failures with different meanings, and
+/// reading only <c>wsb</c>'s own exit code reports every failed guest command as a success.
+/// </remarks>
+internal sealed class WsbExecResult
+{
+    /// <summary>The exit code of the process that ran inside the guest.</summary>
+    public int? ExitCode { get; init; }
+}
+
+/// <summary>
 /// Source-generated serializer context for <c>wsb --raw</c> payloads.
 /// </summary>
 /// <remarks>
@@ -151,6 +198,7 @@ internal sealed class WsbNetworkList
 /// </remarks>
 [JsonSerializable(typeof(WsbEnvironmentList))]
 [JsonSerializable(typeof(WsbNetworkList))]
+[JsonSerializable(typeof(WsbExecResult))]
 [JsonSourceGenerationOptions(PropertyNameCaseInsensitive = true)]
 internal partial class WindowsSandboxCliJsonContext : JsonSerializerContext
 {

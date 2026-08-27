@@ -34,6 +34,139 @@ public class WindowsSandboxCliClassificationTests
     }
 
     [TestMethod]
+    public async Task Execute_ReturnsTheGuestExitCodeNotWsbsOwn()
+    {
+        // Measured on a live Sandbox: a guest command that exits 7 leaves wsb itself exiting 0 and
+        // printing {"ExitCode":7}. Returning wsb's exit code reported every failed privileged
+        // bootstrap step as a success, which made their failure branches unreachable.
+        _runner.Result = new ProcessRunResult(0, """{"ExitCode":7}""", string.Empty);
+
+        var exitCode = await _cli.ExecuteAsync(
+            "sandbox-1", "cmd.exe /c exit 7", null, asSystem: true, TestContext.CancellationToken);
+
+        Assert.AreEqual(7, exitCode);
+    }
+
+    [TestMethod]
+    public async Task Execute_GuestSuccess_IsZero()
+    {
+        _runner.Result = new ProcessRunResult(0, """{"ExitCode":0}""", string.Empty);
+
+        Assert.AreEqual(
+            0,
+            await _cli.ExecuteAsync("sandbox-1", "cmd.exe /c exit 0", null, true, TestContext.CancellationToken));
+    }
+
+    [TestMethod]
+    public async Task Execute_ThatWasNeverDispatched_IsATransportFailureNotAnExitCode()
+    {
+        // wsb writes its own diagnostic to stderr and exits with an HRESULT when it could not launch
+        // the command at all. Reporting that as a guest exit code would let an infrastructure
+        // failure impersonate an application result.
+        _runner.Result = new ProcessRunResult(
+            unchecked((int)0x80070002),
+            string.Empty,
+            "Failed to start process in Windows Sandbox environment: The system cannot find the file specified. (0x80070002)");
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => _cli.ExecuteAsync("sandbox-1", @"C:\nope.exe", null, true, TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.TransportFailed, failure.Error.Code);
+        Assert.AreEqual("0x80070002", failure.Error.Context![WsbHResult.ContextKey]);
+    }
+
+    [TestMethod]
+    public async Task Execute_WithNoExitCodeInTheOutput_IsRefusedRatherThanAssumedSuccessful()
+    {
+        // Guessing zero here is precisely how a failed privileged step would pass unnoticed.
+        _runner.Result = new ProcessRunResult(0, "{}", string.Empty);
+
+        var failure = await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => _cli.ExecuteAsync("sandbox-1", "cmd.exe /c exit 0", null, true, TestContext.CancellationToken));
+
+        Assert.AreEqual(ExecutionTargetErrorCodes.TransportFailed, failure.Error.Code);
+    }
+
+    [TestMethod]
+    public async Task Execute_WithMalformedOutput_IsRefused()
+    {
+        _runner.Result = new ProcessRunResult(0, "not json at all", string.Empty);
+
+        await Assert.ThrowsExactlyAsync<ExecutionTargetException>(
+            () => _cli.ExecuteAsync("sandbox-1", "cmd.exe /c exit 0", null, true, TestContext.CancellationToken));
+    }
+
+    [TestMethod]
+    [DataRow(true, "System")]
+    [DataRow(false, "ExistingLogin")]
+    public async Task Execute_PassesTheRequestedRunAs(bool asSystem, string expected)
+    {
+        _runner.Result = new ProcessRunResult(0, """{"ExitCode":0}""", string.Empty);
+
+        await _cli.ExecuteAsync("sandbox-1", "cmd.exe /c exit 0", null, asSystem, TestContext.CancellationToken);
+
+        var arguments = _runner.Requests.Single().Arguments.ToList();
+        var index = arguments.IndexOf("--run-as");
+
+        Assert.IsGreaterThanOrEqualTo(0, index);
+        Assert.AreEqual(expected, arguments[index + 1]);
+    }
+
+    [TestMethod]
+    public async Task ProbeInteractiveSession_WhenAnExistingLoginCommandRuns_IsReady()
+    {
+        _runner.Result = new ProcessRunResult(0, """{"ExitCode":0}""", string.Empty);
+
+        Assert.AreEqual(
+            GuestSessionAvailability.Ready,
+            await _cli.ProbeInteractiveSessionAsync("sandbox-1", TestContext.CancellationToken));
+
+        var arguments = _runner.Requests.Single().Arguments.ToList();
+        CollectionAssert.Contains(arguments, "ExistingLogin", "The probe must ask as the interactive user.");
+    }
+
+    [TestMethod]
+    public async Task ProbeInteractiveSession_WithNoLogonSession_SaysSo()
+    {
+        // Measured: a Sandbox started by `wsb start` with no client reports exactly this until a
+        // client connects, and reports success immediately afterwards.
+        _runner.Result = new ProcessRunResult(
+            unchecked((int)0x80070520),
+            string.Empty,
+            "Failed to start process in Windows Sandbox environment: A specified logon session does not exist. (0x80070520)");
+
+        Assert.AreEqual(
+            GuestSessionAvailability.NoLoginSession,
+            await _cli.ProbeInteractiveSessionAsync("sandbox-1", TestContext.CancellationToken));
+    }
+
+    [TestMethod]
+    public async Task ProbeInteractiveSession_WithAnUnrelatedFailure_IsUnknownRatherThanNoSession()
+    {
+        // Concluding "no session" from an unrelated failure would make winapp connect a client the
+        // guest may already have.
+        _runner.Result = new ProcessRunResult(
+            unchecked((int)0x80070002),
+            string.Empty,
+            "Failed to start process in Windows Sandbox environment: The system cannot find the file specified. (0x80070002)");
+
+        Assert.AreEqual(
+            GuestSessionAvailability.Unknown,
+            await _cli.ProbeInteractiveSessionAsync("sandbox-1", TestContext.CancellationToken));
+    }
+
+    [TestMethod]
+    public async Task ProbeInteractiveSession_NeverThrows()
+    {
+        _runner.Result = new ProcessRunResult(1, string.Empty, "something unexpected");
+
+        // A probe exists to answer a question, not to fail a command.
+        Assert.AreEqual(
+            GuestSessionAvailability.Unknown,
+            await _cli.ProbeInteractiveSessionAsync("sandbox-1", TestContext.CancellationToken));
+    }
+
+    [TestMethod]
     public void UseExecutable_RefusesARelativePath()
     {
         // A relative path resolves against the current directory, which is exactly the hijack that

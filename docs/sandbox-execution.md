@@ -372,6 +372,15 @@ Real input and screen recording require the Sandbox's remote-session client to b
 not minimized. winapp keeps the window it owns off-screen and at the bottom of the window order,
 without activating it, so it never takes your foreground.
 
+winapp connects a client only when the guest does not already have an interactive session. If you
+already had the Sandbox open, that window keeps being the one you see: connecting again would start
+a **second** client rather than reuse yours, and the extra one outlives `wsb stop`.
+
+One consequence: if you close the Sandbox window, the guest session survives, so winapp will not
+connect a replacement on your behalf. Inspection keeps working; input and recording do not, and
+winapp reports that as `sandbox_input_not_ready` rather than reporting input it never delivered.
+Reconnect with `wsb connect` to restore both.
+
 Closing that window has a specific and initially surprising effect, established by measurement on
 Windows 11 ARM64:
 

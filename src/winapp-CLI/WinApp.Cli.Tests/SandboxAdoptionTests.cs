@@ -23,6 +23,60 @@ public class SandboxAdoptionTests
     private const string ManualInstanceId = "manually-started-sandbox";
 
     [TestMethod]
+    public async Task AdoptedInstance_ThatAlreadyHasAClient_IsNotGivenASecondOne()
+    {
+        // Regression, measured on a live Sandbox: `wsb connect` against an instance whose client is
+        // already attached starts a SECOND WindowsSandboxRemoteSession rather than reusing the
+        // first, and that extra client is still running after `wsb stop`. Taking over a Sandbox the
+        // user already has open is exactly the case that hits it.
+        using var harness = new AdoptionHarness();
+        harness.Cli.SetRunning(ManualInstanceId);
+        harness.Cli.Session = GuestSessionAvailability.Ready;
+
+        await harness.RunUntilAgentLaunchAsync(TestContext.CancellationToken);
+
+        Assert.IsTrue(
+            harness.Cli.Operations.Any(op => op.StartsWith("probe-session", StringComparison.Ordinal)),
+            "Whether to connect must be decided by asking the guest.");
+        Assert.IsFalse(
+            harness.Cli.Operations.Any(op => op.StartsWith("connect:", StringComparison.Ordinal)),
+            "A guest that already has an interactive session must not be handed another client.");
+    }
+
+    [TestMethod]
+    public async Task AdoptedInstance_WithNoLoginSession_IsConnectedExactlyOnce()
+    {
+        // A Sandbox started headless by `wsb start` has no session until a client attaches, which is
+        // what makes this the case that genuinely needs one.
+        using var harness = new AdoptionHarness();
+        harness.Cli.SetRunning(ManualInstanceId);
+        harness.Cli.Session = GuestSessionAvailability.NoLoginSession;
+
+        await harness.RunUntilAgentLaunchAsync(TestContext.CancellationToken);
+
+        Assert.AreEqual(
+            1,
+            harness.Cli.Operations.Count(op => op.StartsWith("connect:", StringComparison.Ordinal)),
+            "Exactly one client, for a guest that had none.");
+    }
+
+    [TestMethod]
+    public async Task AdoptedInstance_WhoseSessionCannotBeDetermined_IsConnected()
+    {
+        // Without a session nothing else works, so an unanswerable probe errs toward making the
+        // guest usable rather than toward leaving it unreachable.
+        using var harness = new AdoptionHarness();
+        harness.Cli.SetRunning(ManualInstanceId);
+        harness.Cli.Session = GuestSessionAvailability.Unknown;
+
+        await harness.RunUntilAgentLaunchAsync(TestContext.CancellationToken);
+
+        Assert.AreEqual(
+            1,
+            harness.Cli.Operations.Count(op => op.StartsWith("connect:", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
     public async Task AdoptedInstance_IsPreparedLikeAFreshGuest()
     {
         // A guest winapp did not start has none of winapp's setup in it, whatever else is running
@@ -344,6 +398,17 @@ public class SandboxAdoptionTests
 
         public Task<string> GetIpAddressAsync(string id, CancellationToken cancellationToken) =>
             Task.FromResult("172.27.0.2");
+
+        /// <summary>What the guest reports when asked whether it already has a login session.</summary>
+        public GuestSessionAvailability Session { get; set; } = GuestSessionAvailability.NoLoginSession;
+
+        public Task<GuestSessionAvailability> ProbeInteractiveSessionAsync(
+            string id,
+            CancellationToken cancellationToken)
+        {
+            Operations.Add($"probe-session:{id}");
+            return Task.FromResult(Session);
+        }
 
         public Task ShareFolderAsync(
             string id,
