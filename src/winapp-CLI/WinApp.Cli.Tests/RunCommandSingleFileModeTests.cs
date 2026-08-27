@@ -555,6 +555,75 @@ public class RunCommandSingleFileModeTests : BaseCommandTests
     }
 
     #endregion
+
+    #region Console apps and execution aliases
+
+    [TestMethod]
+    public async Task SingleFileMode_WithAlias_AddsAnExecutionAliasToTheGeneratedManifest()
+    {
+        // The generated manifest is rebuilt on every run, so "add one with winapp manifest add-alias" is
+        // advice a user cannot act on here — any alias they add is destroyed by the next run. Without
+        // this, --with-alias can never succeed for a file-based app.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--with-alias"]);
+
+        var root = LoadGeneratedManifest(outputDir).Root!;
+        XNamespace uap5 = "http://schemas.microsoft.com/appx/manifest/uap/windows10/5";
+        var alias = root.Descendants(uap5 + "ExecutionAlias").SingleOrDefault();
+        Assert.IsNotNull(alias, "--with-alias must produce a uap5:ExecutionAlias in the generated manifest");
+        Assert.AreEqual("counter.exe", alias.Attribute("Alias")!.Value,
+            "The alias is inferred from the manifest's own Executable");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_WithoutAlias_LeavesTheGeneratedManifestClean()
+    {
+        // An execution alias registers a global command on the user's PATH, so it is added only when the
+        // user asks to launch through one.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir);
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName, "--detach"]);
+
+        XNamespace uap5 = "http://schemas.microsoft.com/appx/manifest/uap/windows10/5";
+        Assert.AreEqual(0, LoadGeneratedManifest(outputDir).Root!.Descendants(uap5 + "ExecutionAlias").Count(),
+            "No alias should be registered unless --with-alias was requested");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_ConsoleApp_HintsAtAliasWhenLaunchedViaAumid()
+    {
+        // A packaged console app launched by AUMID writes to a console that does not exist, so the run
+        // looks like it did nothing. The hint names the flag that fixes it.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir, "counter.exe", ("OutputType", "Exe"));
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName]);
+
+        StringAssert.Contains(TestAnsiConsole.Output, "--with-alias",
+            "A console app launched via AUMID should point the user at --with-alias");
+    }
+
+    [TestMethod]
+    public async Task SingleFileMode_WindowedApp_DoesNotHintAtAlias()
+    {
+        // A WinExe shows a window, so the hint would be noise.
+        var (singleFile, outputDir) = CreateSingleFileApp();
+        SetOutcome(singleFile, outputDir, "counter.exe", ("OutputType", "WinExe"));
+        var command = GetRequiredService<RunCommand>();
+
+        await ParseAndInvokeWithCaptureAsync(command, [singleFile.FullName]);
+
+        Assert.IsFalse(TestAnsiConsole.Output.Contains("gives it no console", StringComparison.Ordinal),
+            "A windowed app should not be told about the console hint");
+    }
+
+    #endregion
 }
 
 

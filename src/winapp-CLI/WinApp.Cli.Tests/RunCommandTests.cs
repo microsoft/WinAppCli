@@ -517,6 +517,7 @@ public class RunCommandTests : BaseCommandTests
             GetRequiredService<IStatusService>(),
             GetRequiredService<IProjectRunService>(),
             GetRequiredService<IManifestTemplateService>(),
+            GetRequiredService<IManifestService>(),
             GetRequiredService<ILogger<RunCommand>>());
 
         // Act

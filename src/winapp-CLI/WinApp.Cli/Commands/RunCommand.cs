@@ -211,6 +211,7 @@ internal partial class RunCommand : Command, IShortDescription
         IStatusService statusService,
         IProjectRunService projectRunService,
         IManifestTemplateService manifestTemplateService,
+        IManifestService manifestService,
         ILogger<RunCommand> logger) : AsynchronousCommandLineAction
     {
         // Test seams for the execution-alias launch path. They isolate the two operating-system

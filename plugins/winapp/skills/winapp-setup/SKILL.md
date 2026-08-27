@@ -210,7 +210,7 @@ Describe the package with `#:property` directives in the file. All are optional:
 
 - **Bring your own manifest** with `--manifest`, `#:property WinAppManifestPath=…`, or a manifest next to the `.cs` named `<filename>.appxmanifest`. Only that per-file name is auto-detected — a shared `Package.appxmanifest` in the folder is ignored, since several `.cs` files can live together. Otherwise one is generated into the build output (with default assets) and refreshed each run.
 - **Packaged and unpackaged both work**, from the effective `WindowsPackageType` — same as project mode. `None` builds, installs the Windows App Runtime, and launches the `.exe` directly; identity options apply to packaged apps only.
-- **`--with-alias` needs an authored manifest.** The generated manifest declares no `uap5:ExecutionAlias`, so alias launch reports `No execution alias found`.
+- **Console apps need `--with-alias`** to show output — a packaged app launched by AUMID has no console. winapp adds the `uap5:ExecutionAlias` to the generated manifest when you pass the flag (it also puts the exe on PATH, so it is opt-in). An authored manifest must declare its own.
 - **Rejected options** (the file configures itself): `-f` ⇒ `#:property TargetFramework=…`; `--project` ⇒ not applicable. `--arch`/`-r` work as in project mode and default to the **machine architecture** — required for self-contained WinAppSDK apps, which fail as `AnyCPU`. Everything else works as usual.
 - Requires **.NET SDK 10.0.300+**.
 
@@ -266,6 +266,7 @@ For full debugging scenarios and IDE setup, see the [Debugging Guide](https://gi
 ## CLI reference
 
 Run `winapp <command> --help` for current command options, or `winapp --cli-schema` for the complete machine-readable command schema.
+
 
 
 

@@ -872,10 +872,18 @@ assets, and refreshed on every run.
 `--manifest`, `--output-appx-directory`, plus `-c/--configuration`, `--no-build`, `--no-restore`, and
 `-p/--property`.
 
-> [!NOTE]
-> `--with-alias` launches through a `uap5:ExecutionAlias`, which the generated manifest does not
-> declare — it reports `No execution alias found`. Author your own manifest with an alias (see below)
-> to use it.
+> [!TIP]
+> **A console app needs `--with-alias` to show its output.** A packaged app launched through AUMID has
+> no console, so a console-only file-based app runs correctly but prints nothing. `--with-alias` keeps
+> stdin/stdout in your terminal, and winapp adds the required `uap5:ExecutionAlias` to the generated
+> manifest for you — you still get package identity:
+>
+> ```bash
+> winapp run counter.cs --with-alias
+> ```
+>
+> The alias also registers `counter.exe` as a command on your PATH, so it is added only when you ask
+> for it. An authored manifest is used as-is; declare the alias there yourself.
 
 Two project-mode options do **not** apply, because a file-based app configures itself. They are
 rejected with a message naming the directive to use instead:

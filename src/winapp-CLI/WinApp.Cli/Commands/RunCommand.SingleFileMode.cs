@@ -161,7 +161,7 @@ internal partial class RunCommand
             FileInfo resolvedManifest;
             try
             {
-                resolvedManifest = await ResolveSingleFileManifestAsync(resolution, manifest, outputFolder, effectiveExecutable, isJson, cancellationToken);
+                resolvedManifest = await ResolveSingleFileManifestAsync(resolution, manifest, outputFolder, effectiveExecutable, withAlias, isJson, cancellationToken);
             }
             catch (ProjectRunException ex)
             {
@@ -169,6 +169,8 @@ internal partial class RunCommand
             }
 
             WarnOnSingleFileIdentityCollision(resolvedManifest, outputAppXDirectory ?? new DirectoryInfo(Path.Join(outputFolder.FullName, "AppX")), isJson);
+
+            HintAliasForConsoleApp(resolution, withAlias, noLaunch, detach, isJson);
 
             // A tier-3 manifest can be named <stem>.appxmanifest, which ManifestHelper.FindManifest does not
             // probe for, so the resolved manifest is always passed explicitly rather than left to
@@ -231,6 +233,7 @@ internal partial class RunCommand
             FileInfo? explicitManifest,
             DirectoryInfo outputFolder,
             string effectiveExecutable,
+            bool withAlias,
             bool isJson,
             CancellationToken cancellationToken)
         {
@@ -288,7 +291,74 @@ internal partial class RunCommand
                     $"Could not generate a manifest for '{resolution.SingleFile.Name}' in '{outputFolder.FullName}'.");
             }
 
-            return new FileInfo(Path.Join(outputFolder.FullName, manifestFileName));
+            var generatedManifest = new FileInfo(Path.Join(outputFolder.FullName, manifestFileName));
+
+            // --with-alias launches through a uap5:ExecutionAlias, which the template does not declare.
+            // For a generated manifest the usual advice ("run winapp manifest add-alias") is impossible to
+            // follow: this file is regenerated on every run, so any alias the user adds is destroyed by the
+            // next one. Add it here instead, reusing the same validated path that command uses.
+            if (withAlias)
+            {
+                await AddGeneratedManifestAliasAsync(generatedManifest, isJson, cancellationToken);
+            }
+
+            return generatedManifest;
+        }
+
+        /// <summary>
+        /// Tells the user how to see a console app's output when it is about to be launched through AUMID
+        /// activation, which gives it no console.
+        /// </summary>
+        /// <remarks>
+        /// A packaged console app launched by AUMID runs correctly but writes to a console that does not
+        /// exist, so the run looks like it did nothing — the worst kind of silent success, and the reason
+        /// a console-only file-based app otherwise seems not to work. <c>--with-alias</c> keeps stdin and
+        /// stdout in the current terminal; this points at it exactly when it is needed rather than leaving
+        /// the user to find it in the docs. Windowed apps (<c>WinExe</c>) show a window, so they are quiet.
+        /// </remarks>
+        private void HintAliasForConsoleApp(SingleFileRunResolution resolution, bool withAlias, bool noLaunch, bool detach, bool isJson)
+        {
+            if (withAlias || noLaunch || detach || isJson || !logger.IsEnabled(LogLevel.Information))
+            {
+                return;
+            }
+
+            if (!resolution.Properties.TryGetValue("OutputType", out var outputType) ||
+                !string.Equals(outputType?.Trim(), "Exe", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            ansiConsole.MarkupLineInterpolated(
+                $"{UiSymbols.Note} '{resolution.SingleFile.Name}' is a console app; AUMID activation gives it no console. Re-run with --with-alias to see its output in this terminal.");
+        }
+
+        /// <summary>
+        /// Adds an execution alias to the freshly generated manifest so <c>--with-alias</c> works for a
+        /// file-based app. The alias name is inferred from the manifest's own <c>Executable</c>, and the
+        /// shared service validates it against the unsafe-alias rules before writing.
+        /// </summary>
+        private async Task AddGeneratedManifestAliasAsync(FileInfo manifest, bool isJson, CancellationToken cancellationToken)
+        {
+            var result = await manifestService.AddExecutionAliasAsync(
+                new AddExecutionAliasOptions(manifest, AliasName: null, AppId: SingleFileManifestPlanner.ApplicationId),
+                cancellationToken);
+
+            if (result.Status is AddExecutionAliasStatus.Added or AddExecutionAliasStatus.AlreadyExists)
+            {
+                if (!isJson && logger.IsEnabled(LogLevel.Debug))
+                {
+                    ansiConsole.MarkupLineInterpolated($"{UiSymbols.Note} Added execution alias '{result.AliasName}' to the generated manifest.");
+                }
+
+                return;
+            }
+
+            // Non-fatal: the launch itself reports "No execution alias found" with actionable guidance, and
+            // failing the run here would block a user who could still launch via AUMID.
+            logger.LogWarning(
+                "{UISymbol} Could not add an execution alias to the generated manifest ({Status}). --with-alias may fail; author a manifest with a uap5:ExecutionAlias to control it.",
+                UiSymbols.Warning, result.Status);
         }
 
         /// <summary>
