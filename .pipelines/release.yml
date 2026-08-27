@@ -254,27 +254,20 @@ extends:
               filePath: '$(System.DefaultWorkingDirectory)/scripts/verify-release-assets.ps1'
               arguments: '-StagingPath "$(Agent.TempDirectory)\release-staging" -SkipZip'
 
-          - ${{ if not(startsWith(variables['Build.SourceBranch'], 'refs/heads/rel/v')) }}:
-            # Rehearsal-only gates. A real release must not fail because of these; the rehearsal
-            # exists precisely to fail on them.
-            - task: PowerShell@2
-              displayName: "[Rehearsal] Verify release notes were produced"
-              inputs:
-                pwsh: true
-                targetType: inline
-                errorActionPreference: stop
-                script: |
-                  $notes = "$(Build.ArtifactStagingDirectory)/release-notes/release-notes.md"
-                  if (-not (Test-Path $notes)) {
-                    throw "Release notes were not generated. Check GITHUB_TOKEN_2 and GH_MODELS_TOKEN."
-                  }
-                  if ([string]::IsNullOrWhiteSpace((Get-Content $notes -Raw))) {
-                    throw "Release notes are empty. The GitHub Models call likely failed."
-                  }
-                  Write-Host "Release notes generated."
-
+          # Rehearsal-only gates, restricted to `main` rather than "not a release branch".
+          #
+          # These hand production credentials to whatever is checked out, so the condition is a
+          # POSITIVE test like every other gate in this file: a branch that is neither `main` nor
+          # `rel/v*` compiles to neither a release nor a credentialed rehearsal, and just gets the
+          # build plus the asset preflight above.
+          - ${{ if eq(variables['Build.SourceBranch'], 'refs/heads/main') }}:
             - task: PowerShell@2
               displayName: "[Rehearsal] Check release credentials"
+              # Advisory, not a gate. The rehearsal's value is in the WinGet and MS Learn stages
+              # downstream of Build, and those are where releases have actually broken (#568, #685,
+              # #777). A dead Models token must not abort the run before they get to execute -
+              # read the PASS/WARN/FAIL summary in the log instead.
+              continueOnError: true
               env:
                 GH_TOKEN: $(GITHUB_TOKEN_2)
                 GH_MODELS_TOKEN: $(GH_MODELS_TOKEN)
@@ -369,6 +362,30 @@ extends:
               msixPath: $(Pipeline.Workspace)/msix-packages
               npmPath: $(Pipeline.Workspace)/npm-package
               nugetPath: $(Pipeline.Workspace)/nuget-packages
+
+          # The Build preflight cannot check these - the archives do not exist until the two
+          # ArchiveFiles steps above. Their names are hardcoded in the WinGet installer URLs
+          # further down and in the documented download links, and the upload glob below is
+          # winappcli-*.zip, so a renamed archive would upload happily under the wrong name and
+          # only 404 later. Assert them here, where they exist.
+          - task: PowerShell@2
+            displayName: Verify portable archive names
+            inputs:
+              targetType: 'inline'
+              errorActionPreference: 'stop'
+              script: |
+                foreach ($arch in 'x64', 'arm64') {
+                  $zip = "$(Pipeline.Workspace)/winappcli-$arch.zip"
+                  if (-not (Test-Path $zip)) {
+                    Write-Error "Missing portable archive 'winappcli-$arch.zip'. The WinGet manifest hardcodes its URL."
+                    exit 1
+                  }
+                  if ((Get-Item $zip).Length -le 0) {
+                    Write-Error "Portable archive 'winappcli-$arch.zip' is empty."
+                    exit 1
+                  }
+                  Write-Host "[ASSETS] ZIP: winappcli-$arch.zip"
+                }
 
           - ${{ if and(ne(parameters.GitHubReleaseAlreadyExists, 'true'), startsWith(variables['Build.SourceBranch'], 'refs/heads/rel/v')) }}:
             - task: GitHubRelease@1
@@ -529,7 +546,7 @@ extends:
                 mainpublisher: 'ESRPRELPACMAN'
                 domaintenantid: ${{ parameters.signingIdentity.tenantId }}
 
-    - ${{ if eq(parameters.DoEsrp, 'true') }}:
+    - ${{ if and(eq(parameters.DoEsrp, 'true'), startsWith(variables['Build.SourceBranch'], 'refs/heads/rel/v')) }}:
       - stage: Release_NuGet
         displayName: Publish the NuGet Release
         dependsOn: Release_GitHub
@@ -580,12 +597,15 @@ extends:
               # PAT lasts 90 days, regenerate as needed and re-run if it failes due to authentication
               WINGET_CREATE_GITHUB_TOKEN: $(GITHUB_TOKEN_2)
               GH_TOKEN: $(GITHUB_TOKEN_2)
-              # Set ONLY on a real release. The rehearsal generates the manifest and stops, so it
-              # still exercises wingetcreate, the installer downloads and the manifest schema -
-              # everything except the fork mutation and the PR. Absent variable = no submit, so
-              # this fails closed.
+              # Read through env rather than ADO macro expansion, so the value cannot be pasted
+              # into the script body as code. Validated below before use.
+              WINGET_PKGS_FORK: $(WingetPkgsFork)
+              # Always defined, so the script cannot inherit a WINGET_SUBMIT from the agent
+              # environment. Only 'true' publishes.
               ${{ if startsWith(variables['Build.SourceBranch'], 'refs/heads/rel/v') }}:
                 WINGET_SUBMIT: 'true'
+              ${{ else }}:
+                WINGET_SUBMIT: 'false'
             inputs:
               targetType: 'inline'
               errorActionPreference: 'stop'
@@ -615,28 +635,29 @@ extends:
                 Invoke-WebRequest https://aka.ms/wingetcreate/latest/msixbundle -OutFile $wingetCreateBundle
                 Add-AppxPackage $wingetCreateBundle
 
+                # Validate the fork value before it reaches a command line. Read from env, not ADO
+                # macro expansion, so a value containing ';' cannot become a statement separator.
+                $wingetFork = $env:WINGET_PKGS_FORK
+                if (-not $wingetFork -or $wingetFork -notmatch '^[\w.-]+/[\w.-]+$') {
+                  Write-Error "Invalid or missing WingetPkgsFork value: '$wingetFork'. Expected format: 'owner/repo'."
+                  exit 1
+                }
+
                 # WinGetCreate uses an existing fork of the microsoft/winget-pkgs repo to create the PR
                 # that updates the main repo.  This fork will be under the account attached to the token.
                 # We need to keep this fork up-to-date, otherwise the wingetcreate command will fail.
                 # See: https://github.com/microsoft/winget-create/issues/502
                 #
                 # Skipped in a rehearsal: syncing mutates the fork, and nothing is submitted anyway.
-                # The token's ability to reach the fork is still proven by the read below.
+                # Push access to the fork is asserted by check-release-credentials.ps1 in Build.
                 if ($env:WINGET_SUBMIT -eq 'true') {
                   Write-Host "Syncing winget-pkgs fork..."
-                  & "$tempDir\gh\bin\gh.exe" repo sync $(WingetPkgsFork) -b master
+                  & "$tempDir\gh\bin\gh.exe" repo sync $wingetFork -b master
                   if ($LASTEXITCODE -ne 0) {
                     Write-Error "Failed to sync winget-pkgs fork. Exit code: $LASTEXITCODE"
                     exit $LASTEXITCODE
                   }
                   Write-Host "Fork synced successfully."
-                } else {
-                  Write-Host "[REHEARSAL] Skipping fork sync. Verifying fork access instead..."
-                  & "$tempDir\gh\bin\gh.exe" repo view $(WingetPkgsFork) --json nameWithOwner,viewerPermission
-                  if ($LASTEXITCODE -ne 0) {
-                    Write-Error "Cannot read the winget-pkgs fork. The release would fail to sync it. Exit code: $LASTEXITCODE"
-                    exit $LASTEXITCODE
-                  }
                 }
                 
                 # Get the installer URLs from the GitHub release
@@ -647,7 +668,10 @@ extends:
                   # would 404 when wingetcreate downloads them to hash. Rehearse against the last
                   # PUBLISHED release instead - that still exercises the download, the hashing and
                   # the manifest schema, which is where submissions actually break (#568).
-                  $latest = & "$tempDir\gh\bin\gh.exe" api repos/microsoft/winappcli/releases/latest --jq .tag_name
+                  # /releases/latest excludes prereleases, and this pipeline publishes every
+                  # release with isPreRelease: true - so it would rehearse against an ever-staler
+                  # version, or 404 once no stable release remains. List instead.
+                  $latest = & "$tempDir\gh\bin\gh.exe" api "repos/microsoft/winappcli/releases?per_page=1" --jq '.[0].tag_name'
                   if ($LASTEXITCODE -ne 0 -or -not $latest) {
                     Write-Error "Could not resolve the latest published release to rehearse against."
                     exit 1
@@ -721,11 +745,12 @@ extends:
             env:
               GH_TOKEN: $(GITHUB_TOKEN_2)
               MSLEARN_DOCS_FORK: $(MSLearnDocsFork)
-              # Set ONLY on a real release. A rehearsal syncs nothing, pushes nothing and opens no
-              # PR - it still clones, runs the port and prune scripts, and commits locally, which is
-              # where doc porting has actually broken (#685, #777). Absent variable = no push.
+              # Always defined, so the script cannot inherit an MSLEARN_PUBLISH from the agent
+              # environment. Only 'true' pushes and opens a PR.
               ${{ if startsWith(variables['Build.SourceBranch'], 'refs/heads/rel/v') }}:
                 MSLEARN_PUBLISH: 'true'
+              ${{ else }}:
+                MSLEARN_PUBLISH: 'false'
             inputs:
               targetType: 'inline'
               pwsh: true
@@ -767,8 +792,9 @@ extends:
                 }
 
                 # Sync the fork with upstream. Skipped in a rehearsal: it mutates the fork, and
-                # nothing gets pushed anyway. Read access is verified instead, since that is what
-                # a broken token would show up as.
+                # nothing gets pushed anyway. Push access is asserted by
+                # check-release-credentials.ps1 in Build, which checks the permission rather than
+                # just reachability.
                 if ($env:MSLEARN_PUBLISH -eq 'true') {
                   Write-Host "Syncing docs repo fork..."
                   & $ghExe repo sync $docsFork -b main
@@ -777,13 +803,6 @@ extends:
                     exit $LASTEXITCODE
                   }
                   Write-Host "Fork synced successfully."
-                } else {
-                  Write-Host "[REHEARSAL] Skipping fork sync. Verifying fork access instead..."
-                  & $ghExe repo view $docsFork --json nameWithOwner,viewerPermission
-                  if ($LASTEXITCODE -ne 0) {
-                    Write-Error "Cannot read the docs fork. The release would fail to sync it. Exit code: $LASTEXITCODE"
-                    exit $LASTEXITCODE
-                  }
                 }
 
                 # Clone the fork

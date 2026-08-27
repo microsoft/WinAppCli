@@ -4,7 +4,6 @@
 |----------|------|---------|---------|
 | WinDevCLI - CI | [`ci.yml`](ci.yml) | `main`, `dev/**` | Prerelease build and tests on every push. |
 | WinDevCLI - Release | [`release.yml`](release.yml) | `rel/v*` **and** a weekly schedule on `main` | Ships a release from `rel/v*`; rehearses one every Monday from `main`. |
-| WinDevCLI - Release NuGet | [`release-nuget.yml`](release-nuget.yml) | After `release.yml`'s `Release_GitHub` stage on `rel/v*` | Pushes the signed `.nupkg` to nuget.org. Separate because it cannot run under CFSClean. |
 | WinDevCLI - Fuzz | [`fuzz.yml`](fuzz.yml) | Manual | Submits the OneFuzz job. |
 
 Shared step templates live in [`templates/`](templates):
@@ -51,7 +50,7 @@ Grep `refs/heads/rel/v` in `release.yml` to find all of them.
 
 ### What the rehearsal skips
 
-Exactly six things, each gated:
+Exactly seven things, each gated:
 
 | Action | Gate |
 |---|---|
@@ -59,15 +58,14 @@ Exactly six things, each gated:
 | GitHub release | compile-time `${{ if }}` |
 | Symbol publication | whole stage omitted |
 | npm publish (ESRP Release) | whole stage omitted |
-| WinGet fork sync + `--submit` | `WINGET_SUBMIT` env, set only on `rel/v*` |
-| MS Learn push + PR | `MSLEARN_PUBLISH` env, set only on `rel/v*` |
-
-nuget.org needs no gate: `release-nuget.yml` triggers only on `rel/v*`, so a rehearsal from `main`
-is invisible to it.
+| nuget.org push (`Release_NuGet`) | whole stage omitted |
+| WinGet fork sync + `--submit` | `WINGET_SUBMIT` env, `'false'` unless `rel/v*` |
+| MS Learn push + PR | `MSLEARN_PUBLISH` env, `'false'` unless `rel/v*` |
 
 Where a step is a shell script rather than a task, the gate is a **YAML-conditional environment
-variable** that the script branches on. The condition stays at compile time, and an absent
-variable means "do not publish" — so it fails closed.
+variable** that the script branches on. The condition stays at compile time, and the variable is
+always defined — explicitly `'false'` in a rehearsal — so the script cannot inherit a stray
+`WINGET_SUBMIT` from the agent environment. Only the literal `'true'` publishes.
 
 ### What the rehearsal still does
 

@@ -5,7 +5,7 @@
 
 .DESCRIPTION
     The renaming itself lives in .pipelines/templates/release-assets.yaml, which both the real
-    release and the weekly dry run run - so there is only one copy of that logic and it cannot
+    release and the weekly rehearsal run - so there is only one copy of that logic and it cannot
     drift. This script is the other half: it checks the *result*.
 
     The names matter because they are load-bearing. The WinGet manifest submission is handed a
@@ -13,17 +13,13 @@
     release notes hardcode them. A rename that silently stops matching produces versioned names,
     which breaks the WinGet submission (#568) and every documented download link.
 
-    Only the dry run runs this: it needs a repo checkout, and 1ES release jobs cannot check out.
+    Runs in the Build stage of release.yml on EVERY run - a real release as much as a rehearsal -
+    because Build is the only job with a checkout. The portable winappcli-<arch>.zip archives are
+    verified separately in Release_GitHub, where they are created.
 
 .PARAMETER StagingPath
-    Directory holding the renamed assets. Expects msix-packages\, npmpackage\, nuget-packages\
-    subdirectories and winappcli-<arch>.zip files, matching the dry run's staging layout.
-
-.PARAMETER ExpectedArchitectures
-    Architectures that must be present. Defaults to x64 and arm64.
-
-.PARAMETER SkipZip
-    Skip the winappcli-<arch>.zip checks.
+    Directory holding the renamed assets. Expects msix-packages\, npmpackage\ and nuget-packages\
+    subdirectories, matching the staging layout release.yml builds.
 
 .EXAMPLE
     .\scripts\verify-release-assets.ps1 -StagingPath .\artifacts\release-staging
@@ -31,15 +27,15 @@
 
 param(
     [Parameter(Mandatory = $true)]
-    [string]$StagingPath,
-
-    [string[]]$ExpectedArchitectures = @('x64', 'arm64'),
-
-    [switch]$SkipZip
+    [string]$StagingPath
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# The architectures the release ships. Not a parameter: the WinGet submission is handed a
+# fixed-length URL list built from exactly these, so they are a contract, not a preference.
+$ExpectedArchitectures = @('x64', 'arm64')
 
 if (-not (Test-Path $StagingPath)) {
     throw "Staging path '$StagingPath' does not exist."
@@ -93,17 +89,8 @@ foreach ($package in $nuget) {
 }
 
 # --- Portable zips ------------------------------------------------------------
-if (-not $SkipZip) {
-    foreach ($arch in $ExpectedArchitectures) {
-        $zip = Join-Path $StagingPath "winappcli-$arch.zip"
-        if (-not (Test-Path $zip)) {
-            $errors.Add("Missing portable archive 'winappcli-$arch.zip'. The WinGet manifest hardcodes its URL.")
-        }
-        elseif ((Get-Item $zip).Length -le 0) {
-            $errors.Add("Portable archive 'winappcli-$arch.zip' is empty.")
-        }
-    }
-}
+# Not checked here: the archives are created in Release_GitHub, after this runs. That job
+# verifies them inline, since it has no checkout and cannot call this script.
 
 if ($errors.Count -gt 0) {
     foreach ($e in $errors) {

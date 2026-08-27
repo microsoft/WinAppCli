@@ -2,9 +2,9 @@
 <#
     Pester tests for scripts/check-release-credentials.ps1.
 
-    The weekly dry run relies on this script to be *decisive*: a genuinely dead credential
-    has to fail the run, and an inconclusive result (the checker itself lacking permission)
-    must only warn. Getting that split wrong makes the whole dry run untrustworthy - either
+    The weekly rehearsal relies on this script to be *decisive*: a genuinely dead credential
+    has to be reported clearly, and an inconclusive result (the checker itself lacking permission)
+    must only warn. Getting that split wrong makes the whole rehearsal untrustworthy - either
     it cries wolf every week and gets ignored, or it stays green while a release is doomed.
 
     These tests must stay OFFLINE. build-cli.ps1 runs scripts/tests during CI *and during the

@@ -377,4 +377,4 @@ Write-Host "[RELEASENOTES] Release notes written to: $OutputPath" -ForegroundCol
 # Deliberately NOT echoed to stdout. These notes are built from PR titles and bodies and, when AI
 # summarization runs, from model output - all attacker-influenceable. Azure Pipelines interprets
 # any stdout line beginning with ##vso[...] as a logging command, so echoing them would let a PR
-# title set pipeline variables or fail tasks. Both release.yml and dryrun.yml read $OutputPath.
+# title set pipeline variables or fail tasks. release.yml reads $OutputPath instead.

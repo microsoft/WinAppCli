@@ -1,8 +1,8 @@
-# Agent setup shared by ci.yml, release.yml and dryrun.yml.
+# Agent setup shared by ci.yml and release.yml.
 #
 # ES policy changes land here more than anywhere else (feed sources, auth tasks, isolation
 # requirements). Keeping the setup in one template means such a change is a single edit
-# instead of the same edit repeated in every pipeline, which is what the weekly dry run is
+# instead of the same edit repeated in every pipeline, which is what the weekly rehearsal is
 # meant to catch early.
 
 parameters:

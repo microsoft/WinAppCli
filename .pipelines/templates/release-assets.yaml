@@ -1,9 +1,8 @@
 # Renames built packages to the unversioned asset names the GitHub release publishes.
 #
-# Shared by the real release (release.yml, Release_GitHub) and the weekly dry run (dryrun.yml)
-# so the two cannot drift. The release attaches assets under stable, version-free names because
-# the WinGet manifest URLs and the documented download links hardcode them; a rename miss has
-# broken a release before (#201, #568).
+# Shared by the Build stage preflight (a dry rename on a copy, verified by
+# scripts/verify-release-assets.ps1) and the real rename in Release_GitHub - both in release.yml.
+# One copy of the regexes means the weekly rehearsal exercises the same code a real release runs.
 #
 # The PowerShell is inline rather than a call to scripts/stage-release-assets.ps1 on purpose:
 # 1ES release jobs (templateContext.type: releaseJob) cannot check out the repo, so no script

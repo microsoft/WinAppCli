@@ -15,7 +15,7 @@
     Every check reports PASS, WARN, or FAIL. WARN means "could not determine" (usually a
     permission gap in the checker itself, not the credential); FAIL means the credential is
     definitively unusable and the next release would break. The exit code is non-zero only
-    when there is at least one FAIL, unless -TreatWarningsAsErrors is set.
+    when there is at least one FAIL.
 
 .PARAMETER GitHubToken
     The PAT used by the release for release-notes generation, WinGet submission and the
@@ -26,12 +26,6 @@
 
 .PARAMETER MSLearnDocsFork
     owner/repo of the windows-dev-docs-pr fork the docs PR is pushed to.
-
-.PARAMETER RepoOwner
-    Owner of the product repo. Default: microsoft.
-
-.PARAMETER RepoName
-    Product repo name. Default: winappcli.
 
 .PARAMETER AdoOrganizationUri
     Collection URI, e.g. https://dev.azure.com/microsoft/. Falls back to
@@ -60,20 +54,21 @@
     Warn when the PAT expires within this many days. Default: 21, so a warning shows up at
     least three weekly runs before the token actually dies.
 
-.PARAMETER TreatWarningsAsErrors
-    Exit non-zero on WARN as well as FAIL.
-
 .EXAMPLE
     $env:GH_TOKEN = 'ghp_...'
+    $env:GH_MODELS_TOKEN = 'ghp_...'
     .\scripts\check-release-credentials.ps1 -WingetPkgsFork me/winget-pkgs -MSLearnDocsFork me/windows-dev-docs-pr
+
+.EXAMPLE
+    # Offline: skips the GitHub Models probe, which would otherwise FAIL without a token.
+    $env:GH_TOKEN = 'ghp_...'
+    .\scripts\check-release-credentials.ps1 -WingetPkgsFork me/winget-pkgs -SkipModelsCheck
 #>
 
 param(
     [string]$GitHubToken = '',
     [string]$WingetPkgsFork = '',
     [string]$MSLearnDocsFork = '',
-    [string]$RepoOwner = 'microsoft',
-    [string]$RepoName = 'winappcli',
     [string]$AdoOrganizationUri = '',
     [string]$AdoProject = '',
     [string]$AdoAccessToken = '',
@@ -81,8 +76,7 @@ param(
     [string]$ModelsToken = '',
     [string]$ModelsModel = 'openai/gpt-4o-mini',
     [switch]$SkipModelsCheck,
-    [int]$MinimumTokenLifetimeDays = 21,
-    [switch]$TreatWarningsAsErrors
+    [int]$MinimumTokenLifetimeDays = 21
 )
 
 Set-StrictMode -Version Latest
@@ -240,19 +234,8 @@ else {
             Add-Result -Status 'WARN' -Check 'GitHub token expiry' -Detail 'No expiration header returned. The token may be non-expiring, which is worth reviewing.'
         }
 
-        $rate = Invoke-GitHubApi -Path '/rate_limit' -Token $GitHubToken
-        if ($rate.Ok) {
-            $core = $rate.Content.resources.core
-            if ($core.remaining -lt 100) {
-                Add-Result -Status 'WARN' -Check 'GitHub rate limit' -Detail "Only $($core.remaining)/$($core.limit) core requests remaining."
-            }
-            else {
-                Add-Result -Status 'PASS' -Check 'GitHub rate limit' -Detail "$($core.remaining)/$($core.limit) core requests remaining."
-            }
-        }
-        else {
-            Add-Result -Status 'WARN' -Check 'GitHub rate limit' -Detail "Could not read rate limit (status $($rate.StatusCode))."
-        }
+        # Rate limit is deliberately not checked: it is WARN-only and never actionable on a
+        # pipeline PAT, and a real exhaustion shows up as a failure in the checks above.
     }
 }
 
@@ -314,18 +297,8 @@ function Test-RepoAccess {
     }
 }
 
-if ($GitHubToken) {
-    Write-Host ''
-    Write-Host '=== GitHub repository access ===' -ForegroundColor Cyan
-
-    Test-RepoAccess -Repo "$RepoOwner/$RepoName" -Label 'Product repo access'
-}
-else {
-    Write-Host ''
-    Write-Host '=== GitHub repository access ===' -ForegroundColor Cyan
-}
-
-# Runs with or without a token: the format check below is token-independent.
+# Runs with or without a token: the format check is token-independent. The product repo itself is
+# not checked - the job checked it out minutes earlier, so a failure there is not reachable here.
 Test-RepoAccess -Repo $WingetPkgsFork -Label 'winget-pkgs fork push access' -RequirePush
 Test-RepoAccess -Repo $MSLearnDocsFork -Label 'MS Learn docs fork push access' -RequirePush
 
@@ -346,7 +319,7 @@ if ($SkipModelsCheck) {
 elseif (-not $ModelsToken) {
     # generate-release-notes.ps1 silently falls back to non-AI notes when this is missing, and
     # release.yml runs it with continueOnError, so nothing else would ever surface this.
-    Add-Result -Status 'FAIL' -Check 'GitHub Models token' -Detail 'No models token supplied. Release notes would silently fall back to a raw commit list.'
+    Add-Result -Status 'FAIL' -Check 'GitHub Models token' -Detail 'No models token supplied. Set GH_MODELS_TOKEN, or pass -SkipModelsCheck to run offline. Release notes would silently fall back to a raw commit list.'
 }
 else {
     # Smallest possible inference call: it is the only way to prove the token carries the
@@ -480,10 +453,6 @@ if ($failed -gt 0) {
         Write-Host "  - $($r.Check): $($r.Detail)" -ForegroundColor Red
     }
     throw "$failed release credential check(s) failed."
-}
-
-if ($TreatWarningsAsErrors -and $warned -gt 0) {
-    throw "$warned release credential check(s) warned and -TreatWarningsAsErrors is set."
 }
 
 Write-Host 'All release credential checks passed.' -ForegroundColor Green

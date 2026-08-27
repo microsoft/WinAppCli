@@ -7,8 +7,8 @@
     documented download links hardcode them.
 
     Note what is NOT tested here. The renaming itself lives in
-    .pipelines/templates/release-assets.yaml, which the real release and the dry run both run,
-    so there is exactly one copy and it cannot drift. It is validated by the weekly dry run
+    .pipelines/templates/release-assets.yaml, which the Build preflight and Release_GitHub both
+    run, so there is exactly one copy and it cannot drift. It is validated by the weekly rehearsal
     executing it against real build output and then running this verifier over the result -
     which is stronger evidence than a unit test over a second copy of the regexes would be.
 #>
@@ -20,8 +20,7 @@ BeforeAll {
         param(
             [string[]]$Msix = @('winappcli_x64.msix', 'winappcli_arm64.msix'),
             [string[]]$Npm = @('microsoft-winappcli.tgz'),
-            [string[]]$NuGet = @('BuildTools.WinApp.nupkg'),
-            [string[]]$Zips = @('winappcli-x64.zip', 'winappcli-arm64.zip')
+            [string[]]$NuGet = @('BuildTools.WinApp.nupkg')
         )
 
         $root = Join-Path ([System.IO.Path]::GetTempPath()) ("verify-" + [guid]::NewGuid().ToString('N'))
@@ -37,10 +36,6 @@ BeforeAll {
             foreach ($file in $layout[$sub]) {
                 Set-Content -Path (Join-Path $dir $file) -Value 'x'
             }
-        }
-
-        foreach ($zip in $Zips) {
-            Set-Content -Path (Join-Path $root $zip) -Value 'x'
         }
 
         return $root
@@ -110,29 +105,6 @@ Describe 'verify-release-assets.ps1' {
 
         { & $script:VerifyScript -StagingPath $script:root } |
             Should -Throw -ExpectedMessage '*verification failed*'
-    }
-
-    It 'fails when a portable zip is missing' {
-        $script:root = New-StagingFixture -Zips @('winappcli-x64.zip')
-
-        { & $script:VerifyScript -StagingPath $script:root } |
-            Should -Throw -ExpectedMessage '*verification failed*'
-    }
-
-    It 'fails when a portable zip is empty' {
-        $script:root = New-StagingFixture
-        Set-Content -Path (Join-Path $script:root 'winappcli-arm64.zip') -Value ''
-        # Set-Content writes a newline, so truncate explicitly.
-        [System.IO.File]::WriteAllBytes((Join-Path $script:root 'winappcli-arm64.zip'), @())
-
-        { & $script:VerifyScript -StagingPath $script:root } |
-            Should -Throw -ExpectedMessage '*verification failed*'
-    }
-
-    It 'can skip the zip checks' {
-        $script:root = New-StagingFixture -Zips @()
-
-        { & $script:VerifyScript -StagingPath $script:root -SkipZip } | Should -Not -Throw
     }
 
     It 'fails fast when the staging path does not exist' {
