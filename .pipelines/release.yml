@@ -147,13 +147,17 @@ extends:
                 Write-Host "##vso[task.setvariable variable=version;isOutput=true]$fullVersion"
           - task: PowerShell@2
             displayName: "Generate Release Notes"
-            # A real release tolerates a failure here and ships a raw commit list. The rehearsal
-            # does not: surfacing a dead GITHUB_TOKEN_2 / GH_MODELS_TOKEN early is the whole point.
-            ${{ if startsWith(variables['Build.SourceBranch'], 'refs/heads/rel/v') }}:
-              continueOnError: true
-            env:
-              GH_TOKEN: $(GITHUB_TOKEN_2)
-              GH_MODELS_TOKEN: $(GH_MODELS_TOKEN)
+            # Unconditional: generate-release-notes.ps1 catches its own API and model failures and
+            # falls back to a git-log changelog, so it exits 0 either way. Making this a "hard gate"
+            # on the rehearsal branch would be inert. A dead token is detected by
+            # check-release-credentials.ps1's Models probe instead, which is the only thing that can.
+            continueOnError: true
+            # Tokens only on the two branches that legitimately run this pipeline. An unrelated
+            # branch someone queues gets the build and the asset preflight and no credentials.
+            ${{ if or(startsWith(variables['Build.SourceBranch'], 'refs/heads/rel/v'), eq(variables['Build.SourceBranch'], 'refs/heads/main')) }}:
+              env:
+                GH_TOKEN: $(GITHUB_TOKEN_2)
+                GH_MODELS_TOKEN: $(GH_MODELS_TOKEN)
             inputs:
               pwsh: true
               filePath: '$(System.DefaultWorkingDirectory)/scripts/generate-release-notes.ps1'
@@ -252,7 +256,7 @@ extends:
               pwsh: true
               errorActionPreference: stop
               filePath: '$(System.DefaultWorkingDirectory)/scripts/verify-release-assets.ps1'
-              arguments: '-StagingPath "$(Agent.TempDirectory)\release-staging" -SkipZip'
+              arguments: '-StagingPath "$(Agent.TempDirectory)\release-staging"'
 
           # Rehearsal-only gates, restricted to `main` rather than "not a release branch".
           #
@@ -260,27 +264,6 @@ extends:
           # POSITIVE test like every other gate in this file: a branch that is neither `main` nor
           # `rel/v*` compiles to neither a release nor a credentialed rehearsal, and just gets the
           # build plus the asset preflight above.
-          - ${{ if eq(variables['Build.SourceBranch'], 'refs/heads/main') }}:
-            - task: PowerShell@2
-              displayName: "[Rehearsal] Check release credentials"
-              # Advisory, not a gate. The rehearsal's value is in the WinGet and MS Learn stages
-              # downstream of Build, and those are where releases have actually broken (#568, #685,
-              # #777). A dead Models token must not abort the run before they get to execute -
-              # read the PASS/WARN/FAIL summary in the log instead.
-              continueOnError: true
-              env:
-                GH_TOKEN: $(GITHUB_TOKEN_2)
-                GH_MODELS_TOKEN: $(GH_MODELS_TOKEN)
-                SYSTEM_ACCESSTOKEN: $(System.AccessToken)
-              inputs:
-                pwsh: true
-                errorActionPreference: stop
-                filePath: '$(System.DefaultWorkingDirectory)/scripts/check-release-credentials.ps1'
-                arguments: >-
-                  -WingetPkgsFork "$(WingetPkgsFork)"
-                  -MSLearnDocsFork "$(MSLearnDocsFork)"
-                  -ServiceConnections "github-service-connection","$(SigningServiceName)","$(SymbolPublishingServiceConnection)","NuGet-WinAppCLI"
-
           - task: 1ES.PublishPipelineArtifact@1
             displayName: Upload Artifact - Release Notes
             inputs:
@@ -576,6 +559,15 @@ extends:
 
     - stage: Release_WinGet
       displayName: Create WinGet Release
+      # Skipped outside the two branches that legitimately run this pipeline. Both this stage and
+      # Release_MSLearn hand GITHUB_TOKEN_2 to scripts read off the source branch, so an unrelated
+      # branch must not reach them - the WINGET_SUBMIT / MSLEARN_PUBLISH gates stop the publishing,
+      # not the token exposure. (Defense in depth only: the authoritative control is a Branch
+      # control check on the service connections, per .pipelines/README.md.)
+      condition: >-
+        and(succeeded(),
+            or(startsWith(variables['Build.SourceBranch'], 'refs/heads/rel/v'),
+               eq(variables['Build.SourceBranch'], 'refs/heads/main')))
       dependsOn: [Build, Release_GitHub]
       variables:
         version: $[ stageDependencies.Build.Build.outputs['SetMeta.version'] ]
@@ -721,6 +713,11 @@ extends:
 
     - stage: Release_MSLearn
       displayName: Update MS Learn Docs
+      # See Release_WinGet above - same reasoning, same gate.
+      condition: >-
+        and(succeeded(),
+            or(startsWith(variables['Build.SourceBranch'], 'refs/heads/rel/v'),
+               eq(variables['Build.SourceBranch'], 'refs/heads/main')))
       dependsOn: [Build, Release_GitHub]
       variables:
         version: $[ stageDependencies.Build.Build.outputs['SetMeta.version'] ]
@@ -923,3 +920,39 @@ extends:
                 }
 
                 Write-Host "PR created/updated successfully."
+
+    # Runs LAST and only on the rehearsal branch, so a dead credential turns the weekly run RED
+    # without preventing the WinGet and MS Learn rehearsals from executing first - those are where
+    # releases have actually broken (#568, #685, #777). Deliberately has no continueOnError: an
+    # invisible credential check is worse than none, because the whole point of the rehearsal is
+    # that someone notices.
+    - stage: Verify_Release_Credentials
+      displayName: Verify Release Credentials (rehearsal)
+      dependsOn: [Build, Release_GitHub, Release_WinGet, Release_MSLearn]
+      condition: >-
+        and(eq(variables['Build.SourceBranch'], 'refs/heads/main'),
+            in(dependencies.Build.result, 'Succeeded', 'SucceededWithIssues'))
+      jobs:
+      - job: verify_credentials
+        displayName: Credentials and Service Connections
+        pool:
+          name: Azure-Pipelines-1ESPT-ExDShared
+          image: windows-latest
+          os: windows
+          hostArchitecture: amd64
+        steps:
+          - checkout: self
+          - task: PowerShell@2
+            displayName: Check release credentials
+            env:
+              GH_TOKEN: $(GITHUB_TOKEN_2)
+              GH_MODELS_TOKEN: $(GH_MODELS_TOKEN)
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+            inputs:
+              pwsh: true
+              errorActionPreference: stop
+              filePath: '$(System.DefaultWorkingDirectory)/scripts/check-release-credentials.ps1'
+              arguments: >-
+                -WingetPkgsFork "$(WingetPkgsFork)"
+                -MSLearnDocsFork "$(MSLearnDocsFork)"
+                -ServiceConnections "github-service-connection","$(SigningServiceName)","$(SymbolPublishingServiceConnection)","NuGet-WinAppCLI"
