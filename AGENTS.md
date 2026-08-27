@@ -99,10 +99,13 @@ node cli.js help
 Failed to install Microsoft.Windows.SDK.BuildTools: The SSL connection could not be established
 ```
 
-**This is a known limitation, not a flaky test and not a transient outage.** Do not dismiss a
-failure on these grounds and do not re-run hoping it passes. `NugetService` falls back to
-`api.nuget.org` only when the feed environment variables are unset; point them at the internal
-feed instead — the same values `.pipelines/templates/build.yaml` uses in CI:
+**These failures are configuration, not an unfixable limitation.** Measured on a corp machine:
+setting the variables below took the unit suite from **69 failures to 7**. Do not accept a bulk
+NuGet failure as environmental until you have set them.
+
+`NugetService` falls back to `api.nuget.org` only when the feed environment variables are unset;
+point them at the internal feed instead — the same values `.pipelines/templates/build.yaml` uses
+in CI:
 
 ```powershell
 $env:WINAPP_NUGET_FLAT_CONTAINER = 'https://pkgs.dev.azure.com/microsoft/pde-oss/_packaging/pde-oss_Internal/nuget/v3/flat2'
@@ -127,6 +130,27 @@ Invoke-RestMethod "$env:WINAPP_NUGET_FLAT_CONTAINER/microsoft.windows.sdk.buildt
 More generally: if something fails locally but passes in CI, the difference is configuration,
 not luck. Check `.pipelines/templates/build.yaml` for the environment CI provides before
 concluding a failure is environmental.
+
+#### The remaining `dotnet add package` failures
+
+The variables above cover everything `NugetService` downloads. They do **not** cover the handful
+of end-to-end tests that shell out to `dotnet add package Microsoft.WindowsAppSDK`
+(`EndToEndTests.E2E_DotNetApp_PackageShouldIncludeRuntimeDependency` and
+`E2E_DotNetProject_InitDetectsCsprojAndAddsPackageReferences_ShouldSucceed`). Those go through the
+NuGet client, which reads `nuget.config` and ignores `WINAPP_NUGET_*`, so they fail with:
+
+```
+[ERROR] - Failed to add Microsoft.WindowsAppSDK package reference
+```
+
+if `nuget.org` is disabled and no internal feed is registered as a package source. `pde-oss_Internal`
+does carry `Microsoft.WindowsAppSDK`, so registering it as a source fixes these — that is exactly
+what CI does, by copying `.pipelines/release-nuget.config` over `%APPDATA%\NuGet\NuGet.Config`
+before the build. Registering it locally needs working Azure Artifacts credential-provider auth;
+`VSS_NUGET_ACCESSTOKEN` alone is not sufficient for the service index (it returns 401).
+
+Until that is set up, these ~7 failures are the *only* ones you should attribute to the corporate
+feed configuration.
 
 ## Update affected user-facing documentation
 
