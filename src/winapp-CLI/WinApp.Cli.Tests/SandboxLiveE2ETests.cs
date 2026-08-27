@@ -41,6 +41,14 @@ public class SandboxLiveE2ETests
 
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromMinutes(10);
 
+    /// <summary>Sandbox clients that were already running when this test started.</summary>
+    /// <remarks>
+    /// Cleanup closes only clients absent from this set. A shared machine can carry a client left
+    /// behind by an earlier Sandbox or belonging to somebody else, and closing one of those is the
+    /// same destructive act as stopping an unowned instance.
+    /// </remarks>
+    private HashSet<int> _clientsBeforeTest = [];
+
     public TestContext TestContext { get; set; } = null!;
 
     [TestInitialize]
@@ -58,6 +66,10 @@ public class SandboxLiveE2ETests
             Assert.Inconclusive(
                 $"Set {BinaryVariable} to the architecture-matched NativeAOT winapp.exe built for the guest.");
         }
+
+        // Taken before the test creates anything, so cleanup can tell the clients it caused from the
+        // ones that were already here.
+        _clientsBeforeTest = CurrentClientProcessIds();
     }
 
     /// <summary>
@@ -93,8 +105,9 @@ public class SandboxLiveE2ETests
         await SkipIfUnsupportedOrOccupiedAsync();
 
         var provider = new TargetStateDirectoryProvider();
-        var orchestrator = new ExecutionTargetOrchestrator(
-            CreateBackend(),
+        var coldBackend = CreateBackend(provider);
+        var coldOrchestrator = new ExecutionTargetOrchestrator(
+            coldBackend,
             new TargetMutationLock(provider),
             new TargetConnectionLock(provider));
 
@@ -104,9 +117,10 @@ public class SandboxLiveE2ETests
 
         try
         {
-            string? firstEpoch;
+            string firstEpoch;
+            HashSet<int> clientsAfterColdStart;
 
-            await using (var cold = await orchestrator.PrepareAsync(
+            await using (var cold = await coldOrchestrator.PrepareAsync(
                 PrepareTargetOptions.Mutating, timeout.Token))
             {
                 Assert.IsFalse(cold.Reused, "The first prepare on an empty machine is a cold start.");
@@ -130,13 +144,60 @@ public class SandboxLiveE2ETests
 
                 // The guest application's own exit code, distinct from an infrastructure failure.
                 Assert.AreEqual(7, result.ExitCode);
+
+                clientsAfterColdStart = CurrentClientProcessIds();
             }
 
-            await using var warm = await orchestrator.PrepareAsync(
+            var materialAfterColdStart = ReadBootstrapMaterial(provider);
+
+            // A second winapp process, modelled the way one actually arrives: its own backend and its
+            // own orchestrator over the same state root, with the first target already disposed. A
+            // shared backend would still be holding the connection material in memory, and that is
+            // precisely what must not be doing the work here — a separate process has only what the
+            // first command persisted, so reuse has to be re-established from disk or not at all.
+            var warmBackend = CreateBackend(provider);
+            var warmOrchestrator = new ExecutionTargetOrchestrator(
+                warmBackend,
+                new TargetMutationLock(provider),
+                new TargetConnectionLock(provider));
+
+            var warmClock = Stopwatch.StartNew();
+
+            await using var warm = await warmOrchestrator.PrepareAsync(
                 PrepareTargetOptions.Mutating, timeout.Token);
+
+            warmClock.Stop();
 
             Assert.IsTrue(warm.Reused, "The second prepare must reuse the instance rather than recreate it.");
             Assert.AreEqual(firstEpoch, warm.Epoch.Value, "Reuse must stay in the same generation.");
+            Assert.AreEqual(
+                coldBackend.DescribeForDiagnostics()["sandboxId"],
+                warmBackend.DescribeForDiagnostics()["sandboxId"],
+                "Reuse must attach to the very same instance rather than a replacement.");
+
+            // Reuse is one TCP connect to an agent that is already serving. The bound is deliberately
+            // generous: it is not a performance assertion, it is there to catch a silent fall-through
+            // to a full bootstrap, which re-stages the binary and waits on a heartbeat.
+            Assert.IsTrue(
+                warmClock.Elapsed < TimeSpan.FromSeconds(30),
+                $"Reuse should reconnect to the running agent rather than bootstrap it again, but took {warmClock.Elapsed}.");
+
+            // The deterministic half of that same claim, so a timing flake on slow hardware can never
+            // be "fixed" by loosening the bound above and silently deleting the only real check.
+            CollectionAssert.AreEquivalent(
+                materialAfterColdStart.ToArray(),
+                ReadBootstrapMaterial(provider).ToArray(),
+                "Reuse must reconnect with the material the cold start staged rather than write new material.");
+
+            CollectionAssert.AreEquivalent(
+                clientsAfterColdStart.ToArray(),
+                CurrentClientProcessIds().ToArray(),
+                "Reusing a Sandbox must not start a second interactive client.");
+
+            Assert.AreEqual(
+                foregroundBefore,
+                Windows.Win32.PInvoke.GetForegroundWindow(),
+                "Reusing the Sandbox must not change the host foreground window.");
         }
         finally
         {
@@ -688,18 +749,99 @@ public class SandboxLiveE2ETests
         }
     }
 
-    private static WindowsSandboxBackend CreateBackend()
+    /// <summary>
+    /// Builds a backend wired the way the CLI's own container wires one.
+    /// </summary>
+    /// <remarks>
+    /// The state store is not optional here, despite the constructor defaulting it to null. It is the
+    /// only thing that records <c>BootstrappedEpoch</c>, and that marker is the sole evidence a later
+    /// command uses to decide an instance is warm. A backend built without it can therefore finish a
+    /// bootstrap and still leave the next command no way to know one ever happened — which made warm
+    /// reuse unobservable rather than broken, a fixture defect that looks exactly like a product one.
+    /// <para>
+    /// No setup runner, deliberately: these tests must never enable a Windows feature or install a
+    /// package on a shared machine. With none, <c>ProbeSupportAsync</c> falls back to a read-only
+    /// <c>wsb.exe</c> availability check, which is all a live test is entitled to do here.
+    /// </para>
+    /// </remarks>
+    private static WindowsSandboxBackend CreateBackend(ITargetStateDirectoryProvider? directoryProvider = null)
     {
         var cli = CreateCli();
-        var provider = new TargetStateDirectoryProvider();
+        var provider = directoryProvider ?? new TargetStateDirectoryProvider();
+        var stateStore = new TargetStateStore(provider);
 
         return new WindowsSandboxBackend(
             cli,
-            new WindowsSandboxLifecycle(cli, new TargetStateStore(provider)),
+            new WindowsSandboxLifecycle(cli, stateStore),
             provider,
             new FixedHostBinaryProvider(
                 new FileInfo(Environment.GetEnvironmentVariable(BinaryVariable)!)),
-            new WindowsSandboxWindowController());
+            new WindowsSandboxWindowController(),
+            setup: null,
+            stateStore);
+    }
+
+    /// <summary>Process name of the Windows Sandbox interactive client.</summary>
+    internal const string RemoteSessionProcessName = "WindowsSandboxRemoteSession";
+
+    /// <summary>
+    /// PIDs of every Sandbox interactive client currently running on this host.
+    /// </summary>
+    /// <remarks>
+    /// Compared before and after an operation to prove it started no second client. Identities rather
+    /// than a count, so one client exiting while an unrelated one starts cannot cancel out and hide a
+    /// duplicate.
+    /// </remarks>
+    internal static HashSet<int> CurrentClientProcessIds()
+    {
+        var clients = new HashSet<int>();
+
+        foreach (var process in Process.GetProcessesByName(RemoteSessionProcessName))
+        {
+            using (process)
+            {
+                clients.Add(process.Id);
+            }
+        }
+
+        return clients;
+    }
+
+    /// <summary>
+    /// Contents of every bootstrap connection file currently staged for this target.
+    /// </summary>
+    /// <remarks>
+    /// A deterministic answer to "did this prepare bootstrap again?", which the elapsed-time bound
+    /// alone can only guess at. A full bootstrap writes fresh connection material — a new pre-shared
+    /// key and a new port — whereas a reconnect only reads it. Reuse keeps the epoch, and the epoch
+    /// is what names the folder, so the file a re-bootstrap would rewrite is exactly the one compared
+    /// here. Without this, every other assertion in the warm case (<c>Reused</c>, the epoch, the
+    /// instance ID, the client set) would also hold for a silent same-epoch agent repair, leaving a
+    /// wall-clock race as the only thing standing between the two.
+    /// </remarks>
+    private static Dictionary<string, string> ReadBootstrapMaterial(TargetStateDirectoryProvider provider)
+    {
+        var material = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var root = provider.GetTargetRoot(ExecutionTargetRef.WindowsSandboxDefault, create: false);
+
+        if (!root.Exists)
+        {
+            return material;
+        }
+
+        foreach (var file in root.EnumerateFiles(GuestBootstrapMaterial.FileName, SearchOption.AllDirectories))
+        {
+            try
+            {
+                material[file.FullName] = File.ReadAllText(file.FullName);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                material[file.FullName] = $"<unreadable: {ex.GetType().Name}>";
+            }
+        }
+
+        return material;
     }
 
     private sealed class FixedHostBinaryProvider(FileInfo binary) : IHostWinappBinaryProvider
@@ -738,26 +880,44 @@ public class SandboxLiveE2ETests
     }
 
     /// <summary>
-    /// Stops only the instance recorded as winapp's own, so the machine is left as it was found.
+    /// Stops only the instance recorded as winapp's own, and closes only the clients this test
+    /// caused, so the machine is left as it was found.
     /// </summary>
-    private static async Task StopOwnedSandboxAsync()
+    /// <remarks>
+    /// The client is closed separately and afterwards because it outlives the Sandbox it served:
+    /// <c>wsb stop</c> ends the instance and leaves the <c>WindowsSandboxRemoteSession</c> process
+    /// running, so a suite that stopped instances alone would leak one client per test.
+    /// </remarks>
+    private async Task StopOwnedSandboxAsync()
     {
         try
         {
             var state = new TargetStateStore(new TargetStateDirectoryProvider())
                 .Read(ExecutionTargetRef.WindowsSandboxDefault);
 
-            if (state?.InstanceId is not { Length: > 0 } instanceId)
+            if (state?.InstanceId is { Length: > 0 } instanceId)
             {
-                return;
+                await CreateCli().StopAsync(instanceId, CancellationToken.None);
             }
-
-            await CreateCli().StopAsync(instanceId, CancellationToken.None);
         }
         catch (Exception ex) when (ex is ExecutionTargetException or IOException or UnauthorizedAccessException)
         {
             // Cleanup failure must not mask the assertion that already ran.
             Trace.TraceWarning("Could not stop the Sandbox this test created: {0}", ex.Message);
+        }
+
+        foreach (var clientProcessId in CurrentClientProcessIds().Except(_clientsBeforeTest))
+        {
+            try
+            {
+                using var client = Process.GetProcessById(clientProcessId);
+                client.Kill(entireProcessTree: true);
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or SystemException)
+            {
+                // Already gone is the expected case once its Sandbox has stopped.
+                Trace.TraceWarning("Could not close a Sandbox client this test caused: {0}", ex.Message);
+            }
         }
     }
 

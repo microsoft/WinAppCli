@@ -43,6 +43,17 @@ public class SandboxLiveAdoptionTests
     /// <summary>The instance this test started, if any. Only this one is ever stopped.</summary>
     private string? _startedByThisTest;
 
+    /// <summary>
+    /// Sandbox clients that were already running when this test started.
+    /// </summary>
+    /// <remarks>
+    /// Cleanup closes only clients absent from this set, resolved from a fresh name-filtered
+    /// enumeration at the time of the kill. Holding a bare PID instead would be unsafe: a PID is
+    /// reusable, so a recorded client that exits could see its number handed to an unrelated process,
+    /// and closing that one is exactly the destructive act the rest of this fixture avoids.
+    /// </remarks>
+    private HashSet<int> _clientsBeforeTest = [];
+
     private string? _redirectedStateRoot;
 
     public TestContext TestContext { get; set; } = null!;
@@ -67,6 +78,10 @@ public class SandboxLiveAdoptionTests
                 $"Set {SandboxLiveE2ETests.BinaryVariable} to the architecture-matched NativeAOT winapp.exe "
                 + "built for the guest.");
         }
+
+        // Taken before this test creates anything, so cleanup can tell the clients it caused from the
+        // ones that were already here.
+        _clientsBeforeTest = SandboxLiveE2ETests.CurrentClientProcessIds();
     }
 
     [TestCleanup]
@@ -81,6 +96,24 @@ public class SandboxLiveAdoptionTests
             catch (Exception ex) when (ex is ExecutionTargetException or IOException)
             {
                 Trace.TraceWarning("Could not stop the Sandbox this test created: {0}", ex.Message);
+            }
+        }
+
+        // After the instance, because a client outlives the Sandbox it was attached to: stopping the
+        // instance leaves the process running, so it has to be closed explicitly or it accumulates.
+        // Every client that appeared during this test is one this test caused — the fixture refuses
+        // to run when an instance it does not own is up, and Windows permits only one at a time.
+        foreach (var clientProcessId in SandboxLiveE2ETests.CurrentClientProcessIds().Except(_clientsBeforeTest))
+        {
+            try
+            {
+                using var client = Process.GetProcessById(clientProcessId);
+                client.Kill(entireProcessTree: true);
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or SystemException)
+            {
+                // Already gone is the expected case once the Sandbox it served has stopped.
+                Trace.TraceWarning("Could not close a Sandbox client this test caused: {0}", ex.Message);
             }
         }
 
@@ -123,7 +156,26 @@ public class SandboxLiveAdoptionTests
             "The instance the test started must be listed under the ID it asked for.");
 
         await WaitUntilResolvableAsync(cli, manualId, timeout.Token);
+
+        // A Sandbox a user started has a client attached to it — opening one from the Start menu is
+        // what does that, and `wsb start` on its own deliberately does not. Without a client there is
+        // no interactive logon session, so seeding the guest as the logged-in user cannot work:
+        // `wsb exec --run-as ExistingLogin` fails with 0x80070520, "A specified logon session does
+        // not exist". Connecting here is what makes this fixture reproduce the situation it claims
+        // to, and it strengthens the test: adoption must now notice a session that already exists and
+        // attach no client of its own.
+        var clientsBeforeConnect = SandboxLiveE2ETests.CurrentClientProcessIds();
+        await cli.ConnectAsync(manualId, timeout.Token);
+
+        await WaitUntilInteractiveLoginWorksAsync(cli, manualId, timeout.Token);
         await LeaveWorkInTheGuestAsync(cli, manualId, timeout.Token);
+
+        Assert.AreNotEqual(
+            0,
+            SandboxLiveE2ETests.CurrentClientProcessIds().Except(clientsBeforeConnect).Count(),
+            "The client this test connected must be running, or the adoption assertion below proves nothing.");
+
+        var clientsBeforeAdoption = SandboxLiveE2ETests.CurrentClientProcessIds();
 
         // winapp gets its own state root, so this test never disturbs the machine's real one and
         // cannot accidentally inherit an ownership record for the instance it just started.
@@ -155,6 +207,14 @@ public class SandboxLiveAdoptionTests
             Assert.AreEqual(manualId, persisted!.InstanceId);
             Assert.AreEqual(nameof(SandboxInstanceOrigin.Adopted), persisted.InstanceOrigin);
         }
+
+        // The measured reason adoption stays conservative: `wsb connect` against an instance that
+        // already has a client starts a second WindowsSandboxRemoteSession, and that extra client
+        // outlives `wsb stop`. A guest winapp did not start must never be given one.
+        CollectionAssert.AreEquivalent(
+            clientsBeforeAdoption.ToArray(),
+            SandboxLiveE2ETests.CurrentClientProcessIds().ToArray(),
+            "Adopting a Sandbox whose client is already attached must not start a second one.");
 
         // The whole point: the guest still has what it had before winapp arrived.
         Assert.AreEqual(
@@ -263,6 +323,52 @@ public class SandboxLiveAdoptionTests
             if (DateTimeOffset.UtcNow >= deadline)
             {
                 Assert.Inconclusive("The Sandbox this test started never became reachable.");
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Waits until the guest can actually run a command as the logged-in user.
+    /// </summary>
+    /// <remarks>
+    /// A resolvable instance is not a usable one. <see cref="IWindowsSandboxCli.IsResolvableAsync"/>
+    /// only proves the guest has an address; the interactive logon session a connected client
+    /// establishes arrives later, and until it does every <c>ExistingLogin</c> command fails. The
+    /// cheapest honest question is therefore the thing the caller is about to do — run one trivial
+    /// command as that user — rather than any proxy for it.
+    /// </remarks>
+    private static async Task WaitUntilInteractiveLoginWorksAsync(
+        WindowsSandboxCli cli,
+        string instanceId,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(3);
+
+        while (true)
+        {
+            try
+            {
+                if (await cli.ExecuteAsync(
+                        instanceId,
+                        "cmd.exe /c exit 0",
+                        workingDirectory: null,
+                        asSystem: false,
+                        cancellationToken) == 0)
+                {
+                    return;
+                }
+            }
+            catch (ExecutionTargetException)
+            {
+                // No logon session yet, which is the ordinary state until the client finishes.
+            }
+
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                Assert.Inconclusive(
+                    "The client this test connected never established an interactive logon session.");
             }
 
             await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
