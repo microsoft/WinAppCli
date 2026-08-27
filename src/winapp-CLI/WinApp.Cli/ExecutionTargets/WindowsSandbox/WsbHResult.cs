@@ -32,6 +32,19 @@ internal static class WsbHResult
     /// </summary>
     internal const int AppSingleUse = unchecked((int)0x800401F6);
 
+    /// <summary>
+    /// <c>ERROR_NO_SUCH_LOGON_SESSION</c>. The guest has no interactive login session, so nothing
+    /// can be run as <c>ExistingLogin</c> until a client connects.
+    /// </summary>
+    /// <remarks>
+    /// Measured, not assumed: on a Sandbox started by <c>wsb start</c> with no client,
+    /// <c>wsb exec --run-as ExistingLogin</c> exits with this HRESULT and writes
+    /// "A specified logon session does not exist" to standard error. After <c>wsb connect</c> the
+    /// same command succeeds. That difference is the only cheap way to tell whether a guest already
+    /// has a usable interactive session.
+    /// </remarks>
+    internal const int NoSuchLogonSession = unchecked((int)0x80070520);
+
     /// <summary>Formats an HRESULT the way it is reported in context and in wsb's own output.</summary>
     internal static string Format(int hresult) =>
         "0x" + hresult.ToString("X8", CultureInfo.InvariantCulture);

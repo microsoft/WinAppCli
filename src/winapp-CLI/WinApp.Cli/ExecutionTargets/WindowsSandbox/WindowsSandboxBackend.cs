@@ -135,6 +135,13 @@ internal sealed class WindowsSandboxBackend(
     public ExecutionTargetRef Target => ExecutionTargetRef.WindowsSandboxDefault;
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// <b>Not read-only, despite the name.</b> The name comes from
+    /// <see cref="IExecutionTargetBackend"/>; for Windows Sandbox this is the point at which
+    /// <c>--sandbox</c>'s consent is spent, so it can enable a Windows feature behind a UAC prompt
+    /// and install the Sandbox client. Anything that only wants to know the host's state must call
+    /// <see cref="IWindowsSandboxSetup.InspectAsync"/> instead.
+    /// </remarks>
     public async Task<TargetSupportResult> ProbeSupportAsync(CancellationToken cancellationToken)
     {
         if (!OperatingSystem.IsWindows())
@@ -248,14 +255,25 @@ internal sealed class WindowsSandboxBackend(
             lease.InstanceId, bootstrap.HostResult, bootstrap.GuestResult, allowWrite: true, cancellationToken)
             .ConfigureAwait(false);
 
-        // Real input and Windows Graphics Capture need a connected client. Connecting is also what
-        // establishes the interactive user session the agent must run in, so it happens before the
-        // agent is launched rather than after.
+        // Real input and Windows Graphics Capture need a connected client, and connecting is also
+        // what establishes the interactive login session the agent must run in.
         //
-        // Only ever on a bootstrap. Calling this against an instance whose client is already up
-        // tears that client's session down and shows the user "the connection was lost, reconnect?",
-        // which is why the reuse path above must be tried first.
-        if (options.RequireInteractiveDesktop || !lease.IsWarm)
+        // Whether to connect is decided by asking the guest, not by how winapp obtained the
+        // instance. Measured on a live Sandbox: `wsb connect` against an instance whose client is
+        // already attached starts a *second* WindowsSandboxRemoteSession rather than reusing the
+        // first, and that extra client outlives `wsb stop`. Taking over a Sandbox somebody already
+        // has open is exactly the case that would hit it, so the cheap ExistingLogin probe below is
+        // what keeps a user's own visible client from being silently duplicated.
+        //
+        // A guest that already has a session is left alone even for a foreground command. If its
+        // client was closed, the session still answers but real input does not -- and the agent's
+        // own capability report is what settles that, failing with sandbox_input_not_ready and
+        // advising `wsb connect` rather than winapp guessing and stacking clients.
+        var session = await cli
+            .ProbeInteractiveSessionAsync(lease.InstanceId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (session is not GuestSessionAvailability.Ready)
         {
             _progress.Report("Connecting the Windows Sandbox window...");
             var windowSnapshot = windowController.Capture();

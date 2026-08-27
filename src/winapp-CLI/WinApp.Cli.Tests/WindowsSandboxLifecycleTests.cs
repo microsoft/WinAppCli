@@ -113,6 +113,10 @@ internal sealed class FakeWindowsSandboxCli : IWindowsSandboxCli
     public Task<string> GetIpAddressAsync(string id, CancellationToken cancellationToken) =>
         Task.FromResult("172.27.0.2");
 
+    public Task<GuestSessionAvailability> ProbeInteractiveSessionAsync(
+        string id,
+        CancellationToken cancellationToken) => Task.FromResult(GuestSessionAvailability.NoLoginSession);
+
     public Task ShareFolderAsync(
         string id,
         string hostPath,
@@ -258,10 +262,13 @@ public class WindowsSandboxLifecycleTests
         await _lifecycle.EnsureInstanceAsync(TestContext.CancellationTokenSource.Token);
 
         CollectionAssert.AreEqual(
-            new[] { "assigned-id" },
+            ExpectedAssignedIds,
             _cli.RequestedStartIds,
             "wsb start must be given the ID winapp assigned.");
     }
+
+    /// <summary>The single assigned ID the caller-ID test expects, hoisted for CA1861.</summary>
+    private static readonly string[] ExpectedAssignedIds = ["assigned-id"];
 
     [TestMethod]
     public async Task EnsureInstance_StartFailsAfterCreatingTheInstance_RecoversThatExactInstance()

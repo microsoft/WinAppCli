@@ -10,8 +10,25 @@ namespace WinApp.Cli.ExecutionTargets.WindowsSandbox;
 internal interface IWindowsSandboxSetup
 {
     /// <summary>
+    /// Reports what this host currently looks like, changing nothing.
+    /// </summary>
+    /// <remarks>
+    /// The read-only half of this interface, and the one any future discovery, status, or
+    /// diagnostics surface must use. It never enables a Windows feature, never starts a process,
+    /// and never waits.
+    /// </remarks>
+    Task<WindowsSandboxHostFacts> InspectAsync(CancellationToken cancellationToken);
+
+    /// <summary>
     /// Returns once <c>wsb.exe</c> answers, performing whatever setup is still outstanding.
     /// </summary>
+    /// <remarks>
+    /// <b>This mutates the machine.</b> It can enable a Windows optional feature behind a UAC
+    /// prompt and start the OS client installer, and it can block for minutes. It is the only
+    /// member here that does any of that, which is what makes "did winapp change my machine?"
+    /// answerable by looking at the call sites of one method. Calling it is an explicit act; a
+    /// caller that only wants to know the state calls <see cref="InspectAsync"/>.
+    /// </remarks>
     /// <exception cref="ExecutionTargetException">
     /// Setup needs something only Windows or the user can supply: elevation, a restart, or a
     /// working Store connection.
@@ -97,6 +114,10 @@ internal sealed class WindowsSandboxSetup(
     /// </remarks>
     internal Func<bool> SupportsSandboxCli { get; set; } =
         () => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 26100);
+
+    /// <inheritdoc/>
+    public Task<WindowsSandboxHostFacts> InspectAsync(CancellationToken cancellationToken) =>
+        probe.ProbeAsync(cancellationToken);
 
     /// <inheritdoc/>
     public async Task<WindowsSandboxHostFacts> EnsureReadyAsync(CancellationToken cancellationToken)

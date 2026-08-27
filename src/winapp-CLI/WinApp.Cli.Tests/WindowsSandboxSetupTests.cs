@@ -460,18 +460,21 @@ public class WindowsFeatureEnablerTests
         Assert.IsTrue(Path.IsPathFullyQualified(captured.FileName));
 
         CollectionAssert.AreEqual(
-            new[]
-            {
-                "/Online",
-                "/Enable-Feature",
-                "/FeatureName:Containers-DisposableClientVM",
-                "/All",
-                "/NoRestart",
-                "/Quiet",
-            },
+            ExpectedDismArguments,
             captured.ArgumentList.ToArray(),
             "Arguments are passed as a list so no value can ever be smuggled in as another argument.");
     }
+
+    /// <summary>The exact privileged invocation, pinned; hoisted for CA1861.</summary>
+    private static readonly string[] ExpectedDismArguments =
+    [
+        "/Online",
+        "/Enable-Feature",
+        "/FeatureName:Containers-DisposableClientVM",
+        "/All",
+        "/NoRestart",
+        "/Quiet",
+    ];
 
     [TestMethod]
     public async Task Invocation_AsksForElevationAndNeverRestarts()

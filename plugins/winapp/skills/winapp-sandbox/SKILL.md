@@ -166,10 +166,11 @@ Developer Mode, and adds an inbound firewall rule for the agent, so anything alr
 shares the session with what winapp deploys. Nothing existing is removed, and **winapp never stops a
 Sandbox** — use `wsb list`, `wsb connect --id <id>`, `wsb stop --id <id>`.
 
-**The Sandbox window must stay connected** for real input and screen recording. Closing it leaves
-inspection working while input and recording stop; winapp reports `sandbox_input_not_ready` rather
-than claiming input it did not deliver. `wsb connect` restores the same session and both
-capabilities.
+**The Sandbox window must stay connected** for real input and screen recording. winapp connects a
+client only when the guest has no interactive session yet — connecting one that already has a client
+would start a second window, not reuse yours. Closing the window leaves inspection working while
+input and recording stop; winapp reports `sandbox_input_not_ready` rather than claiming input it did
+not deliver. `wsb connect` restores the same session and both capabilities.
 
 ## Troubleshooting
 

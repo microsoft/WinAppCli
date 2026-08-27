@@ -111,7 +111,7 @@ Building a WinUI 3 UI and need to find the right control or a working sample?
 
 8. **Run `winapp --cli-schema` for the full CLI reference.** If you need exact option names, defaults, argument types, or details about any command, run `winapp --cli-schema` — it outputs the complete CLI structure as JSON. Use this whenever the information in this file isn't sufficient.
 
-9. **`--sandbox` never silently falls back to this machine.** A command that asked for the Sandbox either runs there or fails. Prerequisites are Windows 11 24H2+ on a supported edition, hardware virtualization, the Windows Sandbox optional feature, and a working `wsb.exe`; winapp does not enable Windows features or reboot, and missing prerequisites fail *before* the app is built. **winapp never adopts or stops a Sandbox it did not create** — if an unmanaged one is running it reports the ID and stops, and it never shuts one down on its own. Lifecycle stays with `wsb list`, `wsb connect --id <id>`, `wsb stop --id <id>`. The instance persists between commands and rebuilds, so later runs transfer only what changed. Consult the **winapp-sandbox skill** for the full workflow and error-code table.
+9. **`--sandbox` never silently falls back to this machine.** A command that asked for the Sandbox either runs there or fails. Prerequisites are Windows 11 24H2+ on a supported edition and hardware virtualization; **`--sandbox` is the user's consent for winapp to install what is missing**, so it enables the Windows Sandbox optional feature (UAC prompt) and installs the Store-delivered client itself, and Windows may show its own update UI and take focus while that runs. winapp never reboots. Missing prerequisites are handled *before* the app is built. **A Sandbox that is already running is taken over and prepared, not refused** — and **winapp never stops a Sandbox**, ever, including one it took over. Preparing a guest changes it (bootstrap shares, connected client, Developer Mode, an inbound firewall rule for the agent), so anything already running there shares that session. Ending a Sandbox stays with `wsb list`, `wsb connect --id <id>`, `wsb stop --id <id>`. The instance persists between commands and rebuilds, so later runs transfer only what changed. Consult the **winapp-sandbox skill** for the full workflow and error-code table.
 
 10. **`--sandbox` isolates the running app, not the build, and is one trust boundary.** Project evaluation, restore, and compilation still happen on the host, so it does **not** make an untrusted project safe to open. Everything inside the Sandbox shares one user account, desktop, registry, runtimes, and network. Also: UI targets must be explicit (`-a`/`--window`, discover with `winapp ui list-windows --sandbox`); guest PIDs and window handles are valid only within the Sandbox generation that produced them; the Sandbox window must stay connected for real input and screen recording; shared runtimes are provisioned into the guest from host caches and verified before every launch; and `--debug-output` is refused for *unpackaged* apps in the Sandbox.
 
@@ -457,7 +457,7 @@ winapp ui invoke --sandbox SubmitButton -a MyApp
 winapp ui screenshot --sandbox -a MyApp -o .\result.png
 winapp unregister --sandbox                # Remove just this app; the Sandbox keeps running
 ```
-The Sandbox persists between commands and rebuilds, so later runs transfer only what changed. winapp never stops it — that stays with `wsb stop --id <id>`.
+The Sandbox persists between commands and rebuilds, so later runs transfer only what changed. If one is already running, winapp uses it rather than asking the user to close it. winapp never stops a Sandbox — that stays with `wsb stop --id <id>`.
 
 ## Error diagnosis
 
@@ -473,8 +473,12 @@ When the user encounters an error, check these common causes:
 | "Certificate not trusted" | Dev cert not installed | Run `winapp cert install ./devcert.pfx` as admin |
 | "Build tools not found" | First run, tools not downloaded | winapp auto-downloads tools; ensure internet access |
 | Windows APIs fail at runtime | Debug identity not registered | Register debug identity after build and before launching: `winapp create-debug-identity <exe>` (or `npx winapp node add-electron-debug-identity` for Electron) — this is **mandatory** for any app using identity-requiring APIs |
-| `sandbox_unsupported` | Machine cannot run Windows Sandbox | Check the Windows edition, hardware virtualization, and that the Sandbox optional feature is installed. winapp will not enable it |
-| `sandbox_unmanaged_instance` | A Sandbox winapp did not create is running | Report the ID and stop. **Never stop it for the user** — Windows allows only one, and it may hold work that matters |
+| `sandbox_unsupported` | Machine cannot run Windows Sandbox at all | Check the Windows edition (11 24H2+) and that hardware virtualization is enabled in firmware |
+| `sandbox_setup_requires_elevation` | The UAC prompt for enabling the Sandbox feature was declined, or there was no session to show one in | Run the `dism.exe` command in the error from an elevated terminal, then retry |
+| `sandbox_setup_requires_restart` | The feature is enabled; Windows needs a restart | Restart, then run the command again. **Never restart the machine for the user** |
+| `sandbox_setup_incomplete` | Windows is still installing the Sandbox client | Wait, then run the command again — retrying resumes the installation rather than restarting it |
+| `sandbox_setup_failed` | Windows refused to enable the feature or start the client | Check edition, firmware virtualization, and whether policy allows optional features |
+| `sandbox_unmanaged_instance` | A running Sandbox could not be prepared, or more than one is running | Wait for it to finish starting and retry, or close the ones that are not needed. **Never stop one for the user** — it may hold work that matters |
 | `sandbox_input_not_ready` / `sandbox_no_interactive_session` | The Sandbox window is disconnected or minimized | Reconnect with `wsb connect --id <id>`; inspection still works, input and recording do not |
 | `sandbox_runtime_provision_failed` | A runtime the app needs is missing in the guest | The error names it. Publish self-contained, or install it via `winapp sandbox exec` |
 | Detached **unpackaged** Sandbox app vanished, no error reported | It was started by the guest agent and ended with it, usually because winapp repaired the agent automatically | Rerun `winapp run . --sandbox --detach`; run in the foreground when the app must outlive a long sequence |

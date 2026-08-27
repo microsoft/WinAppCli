@@ -232,7 +232,7 @@ public class SandboxLiveAdoptionTests
 
     /// <summary>Puts a file and a running process into the guest before winapp sees it.</summary>
     private static async Task LeaveWorkInTheGuestAsync(
-        IWindowsSandboxCli cli,
+        WindowsSandboxCli cli,
         string instanceId,
         CancellationToken cancellationToken)
     {
@@ -252,7 +252,7 @@ public class SandboxLiveAdoptionTests
     }
 
     private static async Task WaitUntilResolvableAsync(
-        IWindowsSandboxCli cli,
+        WindowsSandboxCli cli,
         string instanceId,
         CancellationToken cancellationToken)
     {

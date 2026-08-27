@@ -46,9 +46,9 @@ public class WindowsSandboxCliTests
     }
 
     [TestMethod]
-    public void ResolveExecutable_ReturnsAFullyQualifiedPath()
+    public void ResolveTrustedAlias_ReturnsAFullyQualifiedPath()
     {
-        var resolved = WindowsSandboxCli.ResolveExecutable();
+        var resolved = WindowsSandboxHostProbe.ResolveTrustedAlias();
 
         if (resolved is null)
         {
@@ -60,43 +60,107 @@ public class WindowsSandboxCliTests
         Assert.IsTrue(File.Exists(resolved));
     }
 
+    /// <summary>
+    /// A <c>wsb.exe</c> on PATH is never resolved, never bound, and never executed.
+    /// </summary>
+    /// <remarks>
+    /// Regression for a real hole. Resolution used to try PATH first and take the first absolute
+    /// entry containing a file named <c>wsb.exe</c>. PATH is an ordered list winapp does not
+    /// control, and its entries are routinely directories written by installers, build agents, or
+    /// other principals — so a planted binary there became the Sandbox control plane. Readiness
+    /// probing then made it worse by <em>running</em> that binary, before the user's project was
+    /// even built.
+    /// <para>
+    /// The decoy here is a real executable that would succeed if it were ever launched, so the
+    /// assertion is not merely "the path was not returned" but "nothing ran it".
+    /// </para>
+    /// </remarks>
     [TestMethod]
-    public void ResolveExecutable_IgnoresRelativePathEntriesSoTheCurrentDirectoryCannotWin()
+    public void ResolveTrustedAlias_NeverConsultsPath()
     {
-        // Regression: launching by bare name lets CreateProcess search the application and current
-        // directories before PATH, and a relative PATH entry resolves against the current directory
-        // too. Either route lets a wsb.exe dropped into a repository a developer happens to be
-        // sitting in take over Sandbox control.
         var decoyDirectory = new DirectoryInfo(TestPaths.TempRoot("wsb-decoy"));
         decoyDirectory.Create();
 
+        var decoy = TestPaths.Under(decoyDirectory.FullName, WindowsSandboxCli.ExecutableName);
         var originalPath = Environment.GetEnvironmentVariable("PATH");
-        var originalCurrent = Directory.GetCurrentDirectory();
 
         try
         {
-            File.WriteAllText(TestPaths.Under(decoyDirectory.FullName, WindowsSandboxCli.ExecutableName), "decoy");
-            Directory.SetCurrentDirectory(decoyDirectory.FullName);
+            File.WriteAllText(decoy, "decoy");
 
-            // A relative entry that would resolve to the decoy through the current directory.
-            Environment.SetEnvironmentVariable("PATH", ".");
+            // The decoy directory is first, and absolute, so the old resolver would have taken it.
+            Environment.SetEnvironmentVariable("PATH", $"{decoyDirectory.FullName};{originalPath}");
 
-            Assert.IsNull(
-                WindowsSandboxCli.ResolveExecutable(),
-                "A relative PATH entry must never resolve wsb.exe.");
+            var resolved = WindowsSandboxHostProbe.ResolveTrustedAlias();
+
+            Assert.AreNotEqual(
+                decoy,
+                resolved,
+                StringComparer.OrdinalIgnoreCase,
+                "A wsb.exe on PATH must never become the Sandbox control plane.");
+
+            if (resolved is not null)
+            {
+                Assert.IsFalse(
+                    resolved.StartsWith(decoyDirectory.FullName, StringComparison.OrdinalIgnoreCase),
+                    "Resolution must not come from any PATH entry.");
+                StringAssert.Contains(
+                    resolved,
+                    @"\Microsoft\WindowsApps\",
+                    StringComparison.OrdinalIgnoreCase,
+                    "Only the known WindowsApps alias may be used.");
+            }
         }
         finally
         {
-            Directory.SetCurrentDirectory(originalCurrent);
             Environment.SetEnvironmentVariable("PATH", originalPath);
             decoyDirectory.Delete(recursive: true);
+        }
+    }
+
+    /// <summary>An unregistered Sandbox package means the alias is not trusted, whatever it is.</summary>
+    [TestMethod]
+    public void ResolveTrustedAlias_WithoutTheSandboxPackage_ResolvesNothing()
+    {
+        Assert.IsNull(
+            WindowsSandboxHostProbe.ResolveTrustedAlias(isPackageRegistered: () => false),
+            "An alias whose package is not registered cannot be the Windows Sandbox client.");
+    }
+
+    /// <summary>
+    /// A PATH-stripped process still finds the real alias, which is why PATH was consulted at all.
+    /// </summary>
+    [TestMethod]
+    public void ResolveTrustedAlias_WithNoPathAtAll_StillFindsTheKnownAlias()
+    {
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+
+        try
+        {
+            Environment.SetEnvironmentVariable("PATH", string.Empty);
+
+            var resolved = WindowsSandboxHostProbe.ResolveTrustedAlias();
+
+            if (resolved is null)
+            {
+                Assert.Inconclusive("wsb.exe is not installed on this machine.");
+                return;
+            }
+
+            Assert.IsTrue(
+                File.Exists(resolved),
+                "A build agent or service with no PATH must still be able to use Windows Sandbox.");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath);
         }
     }
 
     [TestMethod]
     public async Task Commands_LaunchTheResolvedAbsolutePathNotABareName()
     {
-        if (WindowsSandboxCli.ResolveExecutable() is null)
+        if (WindowsSandboxHostProbe.ResolveTrustedAlias() is null)
         {
             Assert.Inconclusive("wsb.exe is not installed on this machine.");
             return;
@@ -119,7 +183,7 @@ public class WindowsSandboxCliTests
         // wsb's own diagnostic and means the command was never dispatched. Returning that exit code
         // as a guest result lets an infrastructure failure impersonate an application outcome --
         // reproduced by passing a nonexistent Sandbox ID, which yields an HRESULT-like code.
-        if (WindowsSandboxCli.ResolveExecutable() is null)
+        if (WindowsSandboxHostProbe.ResolveTrustedAlias() is null)
         {
             Assert.Inconclusive("wsb.exe is not installed on this machine.");
             return;
@@ -140,15 +204,16 @@ public class WindowsSandboxCliTests
     [TestMethod]
     public async Task ExecuteAsync_CleanDispatch_ReturnsTheGuestExitCode()
     {
-        if (WindowsSandboxCli.ResolveExecutable() is null)
+        if (WindowsSandboxHostProbe.ResolveTrustedAlias() is null)
         {
             Assert.Inconclusive("wsb.exe is not installed on this machine.");
             return;
         }
 
-        // No wsb diagnostic means the command really was dispatched, so its exit code is the
-        // guest's and must survive intact.
-        _runner.Result = new ProcessRunResult(42, string.Empty, string.Empty);
+        // The guest's exit code comes from wsb's --raw JSON, not from wsb's own exit code. Measured
+        // live: a guest command that exits 42 leaves wsb itself exiting 0, so reading wsb's code
+        // would report every failed guest command as a success.
+        _runner.Result = new ProcessRunResult(0, """{"ExitCode":42}""", string.Empty);
 
         var exitCode = await _cli.ExecuteAsync(
             "sandbox-1", "cmd /c exit 42", null, asSystem: false, TestContext.CancellationTokenSource.Token);
@@ -159,11 +224,13 @@ public class WindowsSandboxCliTests
     [TestMethod]
     public async Task ExecuteAsync_PassesRunAsAndPreservesArgumentsAsSeparateValues()
     {
-        if (WindowsSandboxCli.ResolveExecutable() is null)
+        if (WindowsSandboxHostProbe.ResolveTrustedAlias() is null)
         {
             Assert.Inconclusive("wsb.exe is not installed on this machine.");
             return;
         }
+
+        _runner.Result = new ProcessRunResult(0, """{"ExitCode":0}""", string.Empty);
 
         await _cli.ExecuteAsync("sandbox-1", "cmd /c exit 0", @"C:\Work", asSystem: true, TestContext.CancellationTokenSource.Token);
 
@@ -178,19 +245,25 @@ public class WindowsSandboxCliTests
     [TestMethod]
     public async Task ConnectAsync_StartsTheLongLivedInteractiveClientWithoutWaitingForExit()
     {
-        if (WindowsSandboxCli.ResolveExecutable() is null)
+        if (WindowsSandboxHostProbe.ResolveTrustedAlias() is null)
         {
             Assert.Inconclusive("wsb.exe is not installed on this machine.");
             return;
         }
 
         System.Diagnostics.ProcessStartInfo? captured = null;
-        _cli.ConnectLauncher = startInfo => captured = startInfo;
+        _cli.ConnectLauncher = startInfo =>
+        {
+            captured = startInfo;
+            return null;
+        };
 
         await _cli.ConnectAsync("sandbox-1", TestContext.CancellationTokenSource.Token);
 
         Assert.IsNotNull(captured);
-        Assert.IsTrue(captured.UseShellExecute);
+        Assert.IsTrue(
+            captured.UseShellExecute,
+            "ShellExecute is what stops this long-lived child inheriting the caller's captured stdout.");
         Assert.IsFalse(captured.CreateNoWindow);
         CollectionAssert.Contains(captured.ArgumentList.ToList(), "connect");
         CollectionAssert.Contains(captured.ArgumentList.ToList(), "sandbox-1");
@@ -199,7 +272,7 @@ public class WindowsSandboxCliTests
     [TestMethod]
     public async Task LaunchAgentAsync_KeepsAnAwaitedWsbOperationBehindTheHeartbeat()
     {
-        if (WindowsSandboxCli.ResolveExecutable() is null)
+        if (WindowsSandboxHostProbe.ResolveTrustedAlias() is null)
         {
             Assert.Inconclusive("wsb.exe is not installed on this machine.");
             return;
